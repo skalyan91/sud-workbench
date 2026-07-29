@@ -10,6 +10,17 @@ let DOCFORMAT="SUD";   // detected format of the live doc: SUD/mSUD are editable
 let MODELINFO={};      // qualified model id → its display label, from the backend registry
 let DOCLANG="en";      // item 21: default language English (never unset); drives the status pill, RTL, transliteration
 const RTL_LANGS=new Set(["ar","fa","he","ur","ps","syr","dv","ckb","sd","ug","yi","arc"]);
+/* Languages written WITHOUT word-separating spaces. Only these offer "Merge tokens": merging is the repair for
+   a word the TOKENISER split where no boundary exists, and that is a mistake only a segmenter can make. Where
+   words are space-delimited the tokeniser is not guessing where they end — a split there means the FILE has a
+   stray space, which UD represents with `goeswith` (non-destructive, both tokens kept) rather than by fusing
+   them. Offering a destructive merge in those languages invites the wrong repair for the wrong problem.
+   Korean is deliberately absent: it is written in Hangul but spaced. Kept as language codes rather than the
+   character-range test app/parse.py uses (_spaceless_script): that one judges each RUN of an arbitrary parsed
+   sentence and must cope with mixed script, whereas this decides whether a COMMAND exists, and a menu row that
+   appears and vanishes with the selection is worse than one whose availability the document settles. */
+const SPACELESS_LANGS=new Set(["zh","lzh","yue","wuu","nan","hak","gan","hsn","cdo","ja","th","lo","km","my","bo","dz"]);
+function isSpacelessLang(lang){ const b=((lang!=null?lang:DOCLANG)||"").toLowerCase().split(/[-_]/)[0]; return SPACELESS_LANGS.has(b); }
 const LANGNAMES={ar:"Arabic",de:"German",en:"English",es:"Spanish",fa:"Persian",fr:"French",he:"Hebrew",id:"Indonesian",it:"Italian",ja:"Japanese",ko:"Korean",la:"Latin",lzh:"Literary Chinese",nl:"Dutch",pt:"Portuguese",ru:"Russian",sa:"Sanskrit",ur:"Urdu",yue:"Cantonese",zh:"Chinese"};
 let _isoName=null;   // lazy code→reference-name map over the embedded ISO 639-3 table (window.ISO639_3 = [[code3, code1||"", name], …])
 // item 22: Glottolog name overrides (iso3 → Glottolog name) for the ~1160 codes where Glottolog differs from the ISO

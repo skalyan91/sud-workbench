@@ -380,7 +380,8 @@ function nodeTokenMenu(x,y,si,tokId){ const s=DOC[si]; if(!s)return; const rtl=s
   const rdRow=(typeof readingsMenuItem==="function")?readingsMenuItem(si,tokId,()=>nodeTokenMenu(x,y,si,tokId)):null;   // CJK heteronyms (js/lang/readings.js) — null unless this language has alternative readings AND this token actually has more than one
   if(rdRow){ items.unshift(null); items.unshift(rdRow); }
   if(selRange&&selRange.s===si&&selRange.to>selRange.from&&tokId>=selRange.from&&tokId<=selRange.to&&!rangeIsMWT(si,selRange.from,selRange.to)){
-    items.unshift(null); items.unshift([`Merge ${selRange.from}–${selRange.to} into one token`,"⌃⌘M",()=>mergeTokens(si,selRange.from,selRange.to)]);   // under Group, and deliberately: grouping keeps the tokens, merging destroys them, so the reversible one is offered first
+    items.unshift(null);
+    if(isSpacelessLang()) items.unshift([`Merge ${selRange.from}–${selRange.to} into one token`,"⌃⌘M",()=>mergeTokens(si,selRange.from,selRange.to)]);   // spaceless languages only (see SPACELESS_LANGS); under Group, and deliberately: grouping keeps the tokens, merging destroys them, so the reversible one is offered first
     items.unshift([`Group ${selRange.from}–${selRange.to} as MWT`,"⌘G",()=>addMWT(si,selRange.from,selRange.to)]); }
   const tok=s.tokens[tokId-1], lemma=tok&&((tok.lemma&&tok.lemma!=="_")?tok.lemma:tok.form);   // EITHER gloss tier can receive a dictionary sense: the lexical tier takes it whole (MISC Gloss), the morphemic one folds it in beside the grammatical abbreviations (MISC MGloss) — see applyWiktionaryDef, which writes whichever tiers are on
   if((GLOSS_ON||MORPH_ON) && lemma && DOCLANG!=="en"){   // English lemmas gain nothing from an English Wiktionary gloss of themselves — this is for glossing OTHER languages' words
@@ -1222,7 +1223,7 @@ function tokenMenu(x,y,si,idx,target){ const rng=(selRange&&selRange.s===si&&sel
   const rdRow=(typeof readingsMenuItem==="function")?readingsMenuItem(si,tokId,()=>tokenMenu(x,y,si,idx,target)):null;   // the same CJK heteronym flyout the diagram node menu carries (js/lang/readings.js)
   if(rdRow){ items.unshift(null); items.unshift(rdRow); }
   if(rng && !rangeIsMWT(si,rng.from,rng.to)){ items.unshift(null);
-    items.unshift([`Merge ${rng.from}–${rng.to} into one token`,"⌃⌘M",()=>mergeTokens(si,rng.from,rng.to)]);   // the same pair the diagram's node menu offers, in the same order — Group (keeps the tokens) above Merge (does not)
+    if(isSpacelessLang()) items.unshift([`Merge ${rng.from}–${rng.to} into one token`,"⌃⌘M",()=>mergeTokens(si,rng.from,rng.to)]);   // the same pair the diagram's node menu offers, in the same order — Group (keeps the tokens) above Merge (does not), and Merge only where a segmenter could have split the word
     items.unshift([`Group ${rng.from}–${rng.to} as MWT`,"⌘G",()=>addMWT(si,rng.from,rng.to)]); }
   const gc=target&&target.closest("td.w-deprel, td.w-upos");   // right-clicked a DepRel/UPOS cell → offer its guidelines page
   if(gc){ const sc=gc.querySelector("select,input"), val=sc?sc.value:""; if(val&&val!=="_"){ const rel=gc.classList.contains("w-deprel");
@@ -1269,7 +1270,16 @@ function flattenMWT(si,m){ const s=DOC[si], toks=s.tokens; if(!m)return; pushUnd
   toks.forEach(t=>{const h=parseInt(t.head,10); t._ht=(h>=1&&h<=toks.length)?toks[h-1]:0;});   // heads by identity
   const comps=toks.slice(from-1,to), compSet=new Set(comps);
   const head=comps.find(t=>t._ht===0||!compSet.has(t._ht)) || comps[0];   // head component = external attachment (or root)
-  const survivor={...head, form:m.form}; survivor._ht=head._ht;            // keep head's attributes, take the MWT surface form
+  /* The MWT's surface form — and everything DERIVED from a form with it. The spread carries the head
+     COMPONENT's ortho/translit caches, and bform() renders t.ortho in preference to t.form, so under a script
+     orthography the flattened token kept showing the component's glyph while its `form` said otherwise: the
+     right data under the wrong rendering. The MWT carries its own m.ortho/m.translit (renderings of m.form, and
+     for Sanskrit the sandhi-FUSED ones), so they transfer with it; where it has none, "" makes the fills
+     recompute. MISC Translit/LTranslit go, being the component's — annotateTranslitMisc rewrites them. */
+  const survivor={...head, form:m.form, ortho:m.ortho||"", translit:m.translit||"", translitLemma:""};
+  survivor._ht=head._ht; survivor._trMisc=false; survivor._trPick=false;
+  survivor.misc=setMiscKV(setMiscKV(survivor.misc,"Translit",""),"LTranslit","");
+  if(head.lemma===head.form) survivor.lemma=survivor.form;   // the same rule mergeTokens applies: a lemma that merely echoed the component's form said nothing, so it follows the new form; a real lemma is analysis and stays
   toks.forEach(t=>{ if(compSet.has(t._ht)) t._ht=survivor; });            // dependents of any removed component re-point to the survivor
   (s.mwt||[]).forEach(mm=>{ mm._toks=toks.slice(mm.from-1,mm.to); });
   toks.splice(from-1, to-from+1, survivor);

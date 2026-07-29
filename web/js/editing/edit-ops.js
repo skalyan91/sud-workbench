@@ -137,6 +137,7 @@ function deleteToken(si,idx){ const s=DOC[si]; if(s.tokens.length<=1)return toas
    them, so an enhanced arc into one of them still has somewhere to land. */
 function mergeTokens(si,from,to){ const s=DOC[si]; if(!s)return; const toks=s.tokens;
   if(!(to>from)||from<1||to>toks.length) return toast("Select two or more adjacent tokens to merge");
+  if(!isSpacelessLang()) return toast("Merging is for languages written without spaces — use a goeswith relation instead");   // guarded HERE too, not just on the menu rows: this is the one entry point every caller shares
   pushUndo();
   const oldIds=new Map(); toks.forEach((t,i)=>oldIds.set(t,i+1));
   toks.forEach(t=>{const h=parseInt(t.head,10); t._ht=(h>=1&&h<=toks.length)?toks[h-1]:0;});   // heads by identity
@@ -166,6 +167,7 @@ function mergeTokens(si,from,to){ const s=DOC[si]; if(!s)return; const toks=s.to
   if(show.translit&&typeof fillTranslit==="function") fillTranslit();
   toast(`${n} tokens merged into one — check its lemma and features`); }
 window.mergeTokensShortcut=function(){ if(sel.s<0) return;
+  if(!isSpacelessLang()) return toast("Merging is for languages written without spaces — use a goeswith relation instead");
   if(selRange&&selRange.s===sel.s&&selRange.to>selRange.from) mergeTokens(sel.s,selRange.from,selRange.to);
   else toast("Select two or more tokens (shift-click their id cells) to merge"); };
 function reorderToken(si,from,to){ const s=DOC[si],toks=s.tokens; if(from===to||from===to-1)return; pushUndo();
@@ -377,7 +379,7 @@ function menuState(){ const has=sel.s>=0&&sel.t>0, s=has?DOC[sel.s]:null;
   const inmwt=has&&!!mwtAtSel(s,sel.t);
   return {has, zone:has?UIZONE:"", rtl:!!(s&&sentRTL(s)),
           group:multi&&!formsMWT,          // Group: only a fresh multi-token selection that isn't already an MWT
-          merge:multi&&!formsMWT,          // Merge: the same selection Group applies to — the two are what you can do with several adjacent tokens, one keeping them and one not. A selection that already forms an MWT has Flatten instead, which is the same collapse with the range's own surface form
+          merge:multi&&!formsMWT&&isSpacelessLang(),   // Merge: Group's selection, narrowed to the languages a segmenter can mis-split (SPACELESS_LANGS in js/core/state.js) — elsewhere a wrongly split word is a stray space in the file, which `goeswith` annotates rather than destroys. A selection that already forms an MWT has Flatten instead, the same collapse with the range's own surface form
           ungroup:formsMWT, flatmwt:formsMWT,   // Ungroup / Flatten: only when the selection forms (or sits in) an MWT
           convmwt:has&&!multi&&!inmwt,      // Split: only a single, un-grouped token
           foreign:has&&selHasFeat("Foreign"), typo:has&&selHasFeat("Typo"),
