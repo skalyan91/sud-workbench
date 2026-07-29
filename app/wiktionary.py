@@ -16,6 +16,7 @@ UPOS filter (which is applied on read, not baked into the cached fetch)."""
 from __future__ import annotations
 
 import re
+from concurrent.futures import ThreadPoolExecutor
 from urllib.parse import quote
 
 _CACHE: dict[tuple[str, str], dict] = {}   # (word, lang) → {"candidates":[{"text","entry_upos","head_upos"}],"error"}
@@ -340,12 +341,22 @@ def _condense(text: str) -> list[dict]:
     if cached is not None:
         return cached
     stripped = re.sub(r"\s+", " ", _strip_parentheticals(text)).strip()
+    segs = [seg.strip() for seg in re.split(r"[;,]", stripped) if seg.strip()]
     out = []
-    for seg in re.split(r"[;,]", stripped):
-        seg = seg.strip()
-        if not seg:
-            continue
-        out.extend(_condense_segment(seg))
+    if len(segs) > 1:
+        # each segment is an independent SUD parse (parse.parse, a spaCy `nlp()` call) — safe to run
+        # concurrently on spaCy's shared, cached model (inference-only calls on one Language object
+        # are thread-safe; each produces its own Doc). A THREAD pool, not a process pool: unlike
+        # grew's conversion (app/convert.py), there is no separate backend process to isolate here,
+        # and a process pool would mean re-loading the whole spaCy model into every worker just to
+        # parse a handful of short clauses — pure overhead for what a lookup's definition prose
+        # usually splits into (a few senses, not thousands of sentences).
+        with ThreadPoolExecutor(max_workers=min(len(segs), 8)) as ex:
+            for res in ex.map(_condense_segment, segs):
+                out.extend(res)
+    else:
+        for seg in segs:
+            out.extend(_condense_segment(seg))
     if not out:
         out = [{"text": text, "upos": ""}]
     _CONDENSE_CACHE[text] = out

@@ -37,6 +37,7 @@ function renumberAfterDelete(i,delSid){ let target=delSid, expected=bumpSid(delS
 function insertAt(index){ if(hasBridge()){ try{ window.pywebview.api.open_insert_window(index, model?(MODELINFO[model]||model):""); return; }catch(e){} } openSheet(sheetInsert(index)); }   // item 23/24: Insert-text native window; sheet is the headless fallback
 function doInsert(index,text){ pushUndo(); const sid=autoInsertSid(index), tokens=buildTokens(text);
   DOC.splice(index,0,{sid,text:text.trim(),tokens}); cascadeSids(index); sel={s:index,t:1};
+  if(typeof invalidateColW==="function") invalidateColW();   // a new sentence shifts every following sentence's margin numbering (marginNumWidth) — simplest to rescan wholesale rather than reason about how far the shift reaches
   morphAfterReparse(DOC[index]);   // the new tokens carry no MSeg/MGloss — seed the morphemic tiers the same way every other sentence got them (no FEATS here, so MSeg seeds from the forms and MGloss stays empty), inside this same undo step
   refresh();
   // …and the toast says what actually ran. This branch is reached ONLY with no model or no bridge, so nothing was
@@ -53,13 +54,17 @@ function doInsert(index,text){ pushUndo(); const sid=autoInsertSid(index), token
 // applySentText. It used to be defined here as a local, model-free re-tokenisation that bridge.js then WRAPPED,
 // and the two copies drifted: the wrapper never re-seeded the morphemic tiers, so a re-parse left MSeg/MGloss
 // empty while re-typing the same text through commitSentText filled them.
-function moveSent(from,to){ if(to<0||to>DOC.length)return; pushUndo(); if(from<to)to--; const [m]=DOC.splice(from,1); DOC.splice(to,0,m); sel={s:DOC.indexOf(m),t:sel.t}; refresh(); }
+function moveSent(from,to){ if(to<0||to>DOC.length)return; pushUndo(); if(from<to)to--; const [m]=DOC.splice(from,1); DOC.splice(to,0,m); sel={s:DOC.indexOf(m),t:sel.t};
+  if(typeof invalidateColW==="function") invalidateColW();   // reordering shifts the margin numbering of everything between the old and new position
+  refresh(); }
 function delSent(i){ pushUndo(); const delSid=DOC[i]&&DOC[i].sid; DOC.splice(i,1);
   if(AUTONUM) renumberAfterDelete(i,delSid);   // keep the numbering continuous across the deletion
-  sel=DOC.length?{s:Math.min(i,DOC.length-1),t:1}:{s:-1,t:0}; refresh(); }
+  sel=DOC.length?{s:Math.min(i,DOC.length-1),t:1}:{s:-1,t:0};
+  if(typeof invalidateColW==="function") invalidateColW();   // every following sentence's margin numbering shifts down by one
+  refresh(); }
 
 /* token ops with id renumber + head fix-up */
-function insertToken(si,pos){ pushUndo(); const s=DOC[si], toks=s.tokens;
+function insertToken(si,pos){ pushUndo(si); if(typeof touchColW==="function") touchColW(si,si+1); const s=DOC[si], toks=s.tokens;
   const oldIds=new Map(); toks.forEach((t,i)=>oldIds.set(t,i+1));
   toks.forEach(t=>{const h=parseInt(t.head,10); if(!isNaN(h)&&h>=pos+1) t.head=String(h+1);});
   (s.mwt||[]).forEach(m=>{ m._toks=toks.slice(m.from-1,m.to); });   // component tokens by identity
@@ -113,7 +118,7 @@ function remapMWT(s,toks){ if(!s.mwt) return;
   s.mwt=s.mwt.map(m=>{ const ix=[...new Set(m._toks.map(x=>toks.indexOf(x)).filter(i=>i>=0))].sort((a,b)=>a-b); delete m._toks;
     if(ix.length<2) return null; m.from=ix[0]+1; m.to=ix[ix.length-1]+1; return m; }).filter(Boolean);
   if(!s.mwt.length) delete s.mwt; }
-function deleteToken(si,idx){ const s=DOC[si]; if(s.tokens.length<=1)return toast("Keep at least one token"); pushUndo();
+function deleteToken(si,idx){ const s=DOC[si]; if(s.tokens.length<=1)return toast("Keep at least one token"); pushUndo(si); if(typeof touchColW==="function") touchColW(si,si+1);
   const toks=s.tokens, del=idx+1;
   const oldIds=new Map(); toks.forEach((t,i)=>oldIds.set(t,i+1));
   (s.mwt||[]).forEach(m=>{ m._toks=toks.slice(m.from-1,m.to); });   // ranges by identity — this op alone used to skip the step every other structural edit here takes, so deleting a token before or inside a range left its endpoints pointing at the wrong tokens
@@ -138,7 +143,7 @@ function deleteToken(si,idx){ const s=DOC[si]; if(s.tokens.length<=1)return toas
 function mergeTokens(si,from,to){ const s=DOC[si]; if(!s)return; const toks=s.tokens;
   if(!(to>from)||from<1||to>toks.length) return toast("Select two or more adjacent tokens to merge");
   if(!isSpacelessLang()) return toast("Merging is for languages written without spaces — use a goeswith relation instead");   // guarded HERE too, not just on the menu rows: this is the one entry point every caller shares
-  pushUndo();
+  pushUndo(si); if(typeof touchColW==="function") touchColW(si,si+1);
   const oldIds=new Map(); toks.forEach((t,i)=>oldIds.set(t,i+1));
   toks.forEach(t=>{const h=parseInt(t.head,10); t._ht=(h>=1&&h<=toks.length)?toks[h-1]:0;});   // heads by identity
   const comps=toks.slice(from-1,to), compSet=new Set(comps);
@@ -170,7 +175,7 @@ window.mergeTokensShortcut=function(){ if(sel.s<0) return;
   if(!isSpacelessLang()) return toast("Merging is for languages written without spaces — use a goeswith relation instead");
   if(selRange&&selRange.s===sel.s&&selRange.to>selRange.from) mergeTokens(sel.s,selRange.from,selRange.to);
   else toast("Select two or more tokens (shift-click their id cells) to merge"); };
-function reorderToken(si,from,to){ const s=DOC[si],toks=s.tokens; if(from===to||from===to-1)return; pushUndo();
+function reorderToken(si,from,to){ const s=DOC[si],toks=s.tokens; if(from===to||from===to-1)return; pushUndo(si); if(typeof touchColW==="function") touchColW(si,si+1);
   const oldIds=new Map(); toks.forEach((t,i)=>oldIds.set(t,i+1));
   toks.forEach(t=>{const h=parseInt(t.head,10); t._ht=(h>=1&&h<=toks.length)?toks[h-1]:0;});
   (s.mwt||[]).forEach(mm=>{ mm._toks=toks.slice(mm.from-1,mm.to); });   // remember each MWT's component tokens by identity
@@ -180,7 +185,7 @@ function reorderToken(si,from,to){ const s=DOC[si],toks=s.tokens; if(from===to||
   remapTokenRefs(s,idMapAfter(oldIds,toks));   // a move drops nothing, so an empty node simply travels with the token it was anchored to
   sel={s:si,t:t2+1}; refresh(); toast("Reordered tokens"); }
 // move a contiguous block [gfrom..gto] (0-based) — an MWT and its component tokens — to drop index `to`
-function reorderTokenGroup(si,gfrom,gto,to){ const s=DOC[si],toks=s.tokens; if(to>=gfrom && to<=gto+1)return; pushUndo();
+function reorderTokenGroup(si,gfrom,gto,to){ const s=DOC[si],toks=s.tokens; if(to>=gfrom && to<=gto+1)return; pushUndo(si); if(typeof touchColW==="function") touchColW(si,si+1);
   const oldIds=new Map(); toks.forEach((t,i)=>oldIds.set(t,i+1));
   toks.forEach(t=>{const h=parseInt(t.head,10); t._ht=(h>=1&&h<=toks.length)?toks[h-1]:0;});   // heads by identity
   (s.mwt||[]).forEach(m=>{ m._toks=toks.slice(m.from-1,m.to); });                               // MWT ranges by identity
@@ -204,7 +209,7 @@ function moveTokenIndex(si,tokId,delta){ const s=DOC[si]; if(!s)return; const id
 function setAsRoot(si,tokId){ const s=DOC[si]; if(!s||tokId<1||tokId>s.tokens.length)return; const toks=s.tokens, xt=toks[tokId-1];
   if(parseInt(xt.head,10)===0 && depBase(xt.deprel)==="root")return toast("Already the root");
   const oldRoot=toks.findIndex(t=>parseInt(t.head,10)===0)+1;   // 1-based (0 = none)
-  pushUndo();
+  pushUndo(si); if(typeof touchColW==="function") touchColW(si,si+1);
   toks.forEach((t,i)=>{ const id=i+1; if(id===tokId)return; if(parseInt(t.head,10)===oldRoot){ t.head=String(tokId); syncSharedFeat(t,s); } });   // migrate the old root's dependents onto the new root
   if(oldRoot && oldRoot!==tokId){ const or=toks[oldRoot-1]; or.head=String(tokId); syncSharedFeat(or,s); if(depBase(or.deprel)==="root")or.deprel=withDepBase(or.deprel,"udep"); }   // the old root now hangs off the new one
   xt.head="0"; syncSharedFeat(xt,s); xt.deprel=withDepBase(xt.deprel,"root");
@@ -219,7 +224,7 @@ function stepHead(si,tokId,dir){ const s=DOC[si]; if(!s||tokId<1||tokId>s.tokens
   const h=parseInt(dep.head,10); let i=cands.indexOf(h), ni;
   if(i<0) ni=dir>0?0:cands.length-1;   // currently rootless/self → step in from the near end
   else { ni=i+dir; if(ni<0||ni>=cands.length)return toast(dir>0?"Already the last candidate head":"Already the first candidate head"); }
-  pushUndo(); dep.head=String(cands[ni]); afterHeadEdit(dep,s);   // Task B: no regenTok — same as setAsRoot above
+  pushUndo(si); if(typeof touchColW==="function") touchColW(si,si+1); dep.head=String(cands[ni]); afterHeadEdit(dep,s);   // Task B: no regenTok — same as setAsRoot above
   markDirty(); sel={s:si,t:tokId}; preserveScroll(renderDoc); pick(si,tokId,false); toast(`Head of token ${tokId} → ${cands[ni]}`); }
 // selection-driven wrappers for the keyboard shortcuts / Edit menu
 window.moveTokenLeft=()=>{ if(sel.s>=0&&sel.t>0)moveTokenSpatial(sel.s,sel.t,-1); };
@@ -248,7 +253,7 @@ function selHasFeat(name){ const s=DOC[sel.s]; if(!s)return false; const ids=sel
 function toggleMarkFeat(name,label){ if(sel.s<0||sel.t<=0) return toast("Select a token first");
   const s=DOC[sel.s], toks=selTokIds().map(id=>s.tokens[id-1]).filter(Boolean); if(!toks.length) return;
   const on=!toks.every(t=>hasFeat(t.feats,name,"Yes"));
-  pushUndo();
+  pushUndo(sel.s); if(typeof touchColW==="function") touchColW(sel.s,sel.s+1);
   toks.forEach(t=>{ const before=t.feats; t.feats=on?setFeat(t.feats,name,"Yes"):clearFeat(t.feats,name); featsSyncGloss(t,before); });   // featsSyncGloss is a no-op for these two (neither has a Leipzig abbreviation — see FEATS_GLOSS's item-5 note), but routing every FEATS write through it keeps the invariant in one place
   markDirty(); preserveScroll(renderDoc); syncMenu(true);
   toast(`${label} ${on?"marked":"cleared"} on ${toks.length===1?"1 token":toks.length+" tokens"}`); }
@@ -261,7 +266,7 @@ function toggleReported(){ if(typeof stextMarkReported==="function" && stextMark
   const s=DOC[sel.s], ids=selTokIds(), target=ids.length>1?rangeHead(s,ids[0],ids[ids.length-1]):sel.t;
   const t=s.tokens[target-1]; if(!t) return;
   const on=!isReported(t);
-  pushUndo(); t.misc=setMiscKV(t.misc,"Reported",on?"Yes":"");
+  pushUndo(sel.s); if(typeof touchColW==="function") touchColW(sel.s,sel.s+1); t.misc=setMiscKV(t.misc,"Reported",on?"Yes":"");
   markDirty(); preserveScroll(renderDoc); syncMenu(true);
   const sp=subtreeSpan(s,target);
   toast(on?`Reported speech: tokens ${sp.from}–${sp.to} (marked on token ${target})`:`Reported speech cleared from token ${target}`); }
@@ -304,7 +309,7 @@ function askCorrectForms(si,queue,anchorFor,undoRef){ const s=DOC[si]; if(!s||!q
     {rtl, title:`Correct form of “${bform(t)}”`, value:miscKV(t.misc,"CorrectForm"),
      hint:"Optional — leave blank for none.",
      ok:v=>{ const cur=miscKV(t.misc,"CorrectForm");
-       if(v!==cur){ t.misc=setMiscKV(t.misc,"CorrectForm",v); markDirty(); preserveScroll(renderDoc); }
+       if(v!==cur){ t.misc=setMiscKV(t.misc,"CorrectForm",v); if(typeof touchColW==="function") touchColW(si,si+1); markDirty(); preserveScroll(renderDoc); }
        askCorrectForms(si,queue,anchorFor,undoRef); },
      /* item 2 — ESCAPE CANCELS THE MARKING, not merely the prompt. Typo=Yes and its CorrectForm are one gesture:
         the box opens as part of marking, so backing out of the box means backing out of the mark. Leaving the
@@ -348,7 +353,8 @@ window.toggleWrap=toggleWrap;
    property of the sentence being read, and scrolling moves that without disturbing the token selection. */
 function setBound(si,key,on){ const s=DOC[si]; if(!s) return false;
   if(hasBound(s,key)===!!on) return false;
-  pushUndo(); s[key]=on?true:false; markDirty(); preserveScroll(renderDoc); syncMenu(); return true; }   // syncMenu: both rows are checkable and this is the only path that moves their state
+  pushUndo(si); if(typeof invalidateColW==="function") invalidateColW();   // a document/paragraph boundary shifts the margin numbering (marginNumWidth) of every following sentence
+  s[key]=on?true:false; markDirty(); preserveScroll(renderDoc); syncMenu(); return true; }   // syncMenu: both rows are checkable and this is the only path that moves their state
 function toggleBound(si,key){ const s=DOC[si]; if(!s) return toast("Select a sentence first");
   const on=!hasBound(s,key); setBound(si,key,on);
   if(on && typeof focusBoundId==="function") focusBoundId(si,key);   // creating a boundary opens its id for typing (js/core/document.js) — the marker and its optional name are one gesture. ONLY on creation: a removed boundary has no field left to focus, and setBound has just re-rendered without it
@@ -356,7 +362,7 @@ function toggleBound(si,key){ const s=DOC[si]; if(!s) return toast("Select a sen
 window.toggleDocBoundary=()=>{ const i=curBlock(); if(i>=0&&i<DOC.length) toggleBound(i,"newdoc"); else toast("Select a sentence first"); };
 window.toggleParBoundary=()=>{ const i=curBlock(); if(i>=0&&i<DOC.length) toggleBound(i,"newpar"); else toast("Select a sentence first"); };
 function toggleTokNewPar(si,tokId){ const s=DOC[si], t=s&&s.tokens[tokId-1]; if(!t) return;
-  const on=!isNewParTok(t); pushUndo(); t.misc=setMiscKV(t.misc,"NewPar",on?"Yes":""); markDirty(); preserveScroll(renderDoc); syncMenu();
+  const on=!isNewParTok(t); pushUndo(si); if(typeof touchColW==="function") touchColW(si,si+1); t.misc=setMiscKV(t.misc,"NewPar",on?"Yes":""); markDirty(); preserveScroll(renderDoc); syncMenu();
   toast(on?("Paragraph starts at token "+tokId):("Paragraph break cleared from token "+tokId)); }
 window.toggleTokenNewPar=()=>{ if(sel.s>=0&&sel.t>0) toggleTokNewPar(sel.s,sel.t); else toast("Select a token first"); };
 window.toggleTokNewPar=toggleTokNewPar;   // the block/token context menus call it with explicit coordinates

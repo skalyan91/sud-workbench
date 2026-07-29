@@ -57,7 +57,7 @@ function readingItems(si,tokId,list){ const t=DOC[si]&&DOC[si].tokens[tokId-1], 
 // flyout and the editable stored value are two routes to one correction, and this is what makes them agree.
 function applyReading(si,tokId,val){ const s=DOC[si], t=s&&s.tokens[tokId-1]; if(!t) return;
   if((t.translit||"")===val && t._trPick) return;   // already in effect and already the user's own → nothing to record, no undo entry
-  pushUndo();
+  pushUndo(si);
   t.translit=val;
   t._trMisc=true; t._trPick=true; t._trChk=1;
   markDirty(); preserveScroll(renderDoc);

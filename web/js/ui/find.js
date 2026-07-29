@@ -234,7 +234,7 @@ function highlightFind(){ clearFindHl(); const crits=compileCrits(); if(!crits.l
   FIND.hits.forEach((h,k)=>{ const b=document.querySelector(`.sblock[data-i="${h.si}"]`); if(!b) return;
     b.classList.add("findmatch"); if(k===FIND.cur) b.classList.add("findcur");
     markInEl(b.querySelector(".stext"),textRes); markInEl(b.querySelector(".strans"),trRes);
-    const sid=b.querySelector(".sid-in"); if(sid && sidRes.some(re=>reHit(re,sid.value||""))) sid.classList.add("findsidhit");
+    const sid=b.querySelector(".sid-in"); if(sid && sidRes.some(re=>reHit(re,sid.textContent||""))) sid.classList.add("findsidhit");   // .sid-in is a contenteditable span (js/core/document.js), not an <input> — textContent, not .value
     // A token match can't be drawn as a <mark>: the grid cells are <input>/<textarea> and the diagram is
     // SVG. Mark the whole TOKEN instead — its grid row and its diagram group each take .findtok.
     (h.toks||[]).forEach(id=>{ const tr=b.querySelector(`tr[data-s="${h.si}"][data-tok="${id}"]`); if(tr) tr.classList.add("findtok");
@@ -248,8 +248,9 @@ function updateFindUI(){ const c=document.getElementById("tbCount");
   if(c){ c.textContent=findCountText(); c.classList.toggle("finderr",!!FIND.err); }
   const inp=document.getElementById("tbSearch"); if(inp) inp.classList.toggle("findbad", !!FIND.err && !!(FIND.crits[0]||{}).q);
   updateFindPanel(); }
-function scrollToMatch(smooth){ const idx=FIND.matches[FIND.cur]; const b=document.querySelector(`.sblock[data-i="${idx}"]`);
-  if(b){ FIND._scrolled=idx; b.scrollIntoView({block:"center",behavior:smooth?"smooth":"auto"}); } }
+function scrollToMatch(smooth){ const idx=FIND.matches[FIND.cur];
+  const b=(typeof scrollToSentence==="function")?scrollToSentence(idx):document.querySelector(`.sblock[data-i="${idx}"]`);   // scrollToSentence (js/core/document.js) brings the match into the rendered window first if it isn't already there — a match can be anywhere in the document, not just near whatever's currently on screen
+  if(b){ FIND._scrolled=idx; b.scrollIntoView({block:"center",behavior:smooth?"smooth":"auto"}); highlightFind(); } }   // re-highlight: scrollToSentence may have re-rendered the window, which already re-ran highlightFind once — but a smooth scrollIntoView can itself trigger another window shift on the way, so make sure the mark lands on the block we actually end up at
 function runFind(){ scanFind();
   FIND.cur=FIND.matches.length?0:-1; updateFindUI(); highlightFind();
   if(FIND.cur>=0 && FIND.matches[FIND.cur]!==FIND._scrolled) scrollToMatch(false); }   // instant, only when the target block changes → no scroll wobble while typing
@@ -312,6 +313,7 @@ async function runReplaceAll(){ const p=planReplace();
       {okLabel:"Replace All"}))) return;
   const pre=snap();                                    // taken BEFORE the rewrite and committed ONCE, so the whole operation is a single undo entry
   plan.forEach(({o,after,sent})=>f.put(o,after,sent));
+  if(typeof invalidateColW==="function") invalidateColW();   // a bulk rewrite can touch any field across any number of sentences — full rescan rather than tracking every touched sentence individually
   commitSnap(pre); markDirty();
   preserveScroll(renderDoc);
   scanFind(); FIND.cur=FIND.matches.length?Math.min(Math.max(FIND.cur,0),FIND.matches.length-1):-1;   // the values changed under the criteria → re-scan rather than leave a stale count behind

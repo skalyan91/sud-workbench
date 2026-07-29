@@ -19,6 +19,31 @@ Everything here is a **classic script / plain stylesheet** — no build step, no
 Load order matters (cascade): **`mac-tokens.css` before `mac-chrome.css`**, and both before
 your app's own stylesheet so app rules can override.
 
+### Calibrated hairline/border values (light mode)
+
+`--hairline` covers most plain dividers in the app at once (`rgba(0,0,0,.9)`), but a few
+categories were measured against Figma/on request and split out into their own tokens instead of
+sharing it — keep these in sync if you retune the ramp:
+
+| Token | Value | Consumer |
+|---|---|---|
+| `--viewbar-border` | `rgb(230,230,230)` | the border below the options bar (`.viewbar`) |
+| `--sheet-border` | `rgba(0,0,0,.23)` | modal dialog (`.sheet`) border |
+| `--field-border` | `rgba(0,0,0,.08)` | text-input/textarea border |
+| `--grid-head-border` / `--grid-col-border` | `rgba(0,0,0,.05)` / `rgba(0,0,0,.10)` | the grid header's bottom rule / column-header divider |
+
+The page (`.docsheet`) and block (`.sblock`) carry **no border at all**, on request — a page reads
+as lifted paper via `--page-shadow` alone, and a block is set off from its neighbours by padding/
+whitespace, not a rule. (A `--page-border` token briefly existed here at `rgb(156,156,156)` and was
+removed outright rather than recoloured again — don't reintroduce it via `--hairline`.)
+
+Dark-mode counterparts live in `mac-tokens.css`'s `@media (prefers-color-scheme:dark)` block —
+several are independently measured against the dark ground (`rgb(30,30,30)`) rather than a blind
+alpha flip; see that block's own comments before changing one.
+
+Grid row corner rounding (`--grid-row-r`, `table.grid tbody td::before`) matches the grid frame's
+own radius (`--grid-r`): both `8px`.
+
 ```html
 <link rel="stylesheet" href="macos-kit/mac-tokens.css">
 <link rel="stylesheet" href="macos-kit/mac-chrome.css">
