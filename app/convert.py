@@ -11,6 +11,13 @@ grewpy is imported lazily: importing it eagerly spawns the OCaml ``grewpy_backen
 process, which may be absent.  All entry points raise :class:`ConversionUnavailable`
 (grewpy / backend / grammar missing) or :class:`ConversionError` (rewrite failed) so
 the caller can degrade gracefully.  Probe :func:`available` up front to disable UI.
+
+Every public conversion also takes an optional ``lang`` (the document's detected/declared
+language, e.g. frontend ``DOCLANG``): when a vendored language-specific grammar covers that
+(language, direction) pair, it is preferred over the universal one — see :data:`_LANG_GRAMMARS`.
+Most languages have no dedicated grammar for most directions, which is expected (the source
+project covers only where a generic rewrite isn't good enough); :func:`_convert` falls back to
+the universal grammar whenever the pair is absent from the table.
 """
 
 from __future__ import annotations
@@ -30,6 +37,41 @@ _GRAMMARS = {
     "sud_to_ud": ("SUD_to_UD.grs", "main"),
     "msud_to_sud": ("mSUD_to_SUD.grs", "mSUD_to_SUD_main"),
     "msud_to_ud": ("mSUD_to_UD.grs", "mSUD_to_UD_main"),
+}
+
+# (language, direction key) → (grammar file, grew strategy).  Filenames follow
+# "{lang}_{Direction}.grs", but the strategy names inside do NOT follow one convention (each
+# grammar author picked their own — grammars/README.md's "{lang}_{Direction}_main" rule is only
+# true for some of these), so they're enumerated by hand rather than derived, confirmed against
+# each file's own `strat` declaration. A (lang, key) absent here means the source project ships
+# no dedicated grammar for that pair — not every language covers every direction, and up-conversion
+# to mSUD is never covered (see sud_to_msud) — so _convert falls back to the universal grammar.
+_LANG_GRAMMARS = {
+    ("arh", "sud_to_ud"): ("arh_SUD_to_UD.grs", "arh_SUD_to_UD_main"),
+    ("arh", "msud_to_sud"): ("arh_mSUD_to_SUD.grs", "arh_mSUD_to_SUD_main"),
+    ("bej", "sud_to_ud"): ("bej_SUD_to_UD.grs", "bej_SUD_to_UD_main"),
+    ("bej", "msud_to_sud"): ("bej_mSUD_to_SUD.grs", "bej_mSUD_to_SUD_main"),
+    ("bej", "msud_to_ud"): ("bej_mSUD_to_UD.grs", "bej_mSUD_to_UD_main"),
+    ("br", "ud_to_sud"): ("br_UD_to_SUD.grs", "br_main"),
+    ("de", "ud_to_sud"): ("de_UD_to_SUD.grs", "de_main"),
+    ("fr", "ud_to_sud"): ("fr_UD_to_SUD.grs", "fr_main"),
+    ("fr", "sud_to_ud"): ("fr_SUD_to_UD.grs", "FR_main_UDplus"),
+    ("gya", "sud_to_ud"): ("gya_SUD_to_UD.grs", "gya_SUD_to_UD_main"),
+    ("gya", "msud_to_sud"): ("gya_mSUD_to_SUD.grs", "main"),
+    ("ha", "sud_to_ud"): ("ha_SUD_to_UD.grs", "ha_main"),
+    ("ht", "sud_to_ud"): ("ht_SUD_to_UD.grs", "ht_SUD_to_UD_main"),
+    ("pay", "sud_to_ud"): ("pay_SUD_to_UD.grs", "pay_SUD_to_UD_main"),
+    ("pay", "msud_to_sud"): ("pay_mSUD_to_SUD.grs", "pay_mSUD_to_SUD_main"),
+    ("pcm", "sud_to_ud"): ("pcm_SUD_to_UD.grs", "pcm_main"),
+    ("sab", "sud_to_ud"): ("sab_SUD_to_UD.grs", "sab_SUD_to_UD_main"),
+    ("say", "sud_to_ud"): ("say_SUD_to_UD.grs", "say_main"),
+    ("wo", "ud_to_sud"): ("wo_UD_to_SUD.grs", "wo_main"),
+    ("yrk", "sud_to_ud"): ("yrk_SUD_to_UD.grs", "yrk_SUD_to_UD_main"),
+    ("yrk", "msud_to_sud"): ("yrk_mSUD_to_SUD.grs", "yrk_mSUD_to_SUD_main"),
+    ("yrk", "msud_to_ud"): ("yrk_mSUD_to_UD.grs", "yrk_mSUD_to_UD_main"),
+    ("zh", "sud_to_ud"): ("zh_SUD_to_UD.grs", "zh_SUD_to_UD_main"),
+    ("zh", "msud_to_sud"): ("zh_mSUD_to_SUD.grs", "zh_mSUD_to_SUD_main"),
+    ("zh", "msud_to_ud"): ("zh_mSUD_to_UD.grs", "zh_mSUD_to_UD_main"),
 }
 
 
@@ -129,28 +171,28 @@ def _restore_meta(source: list[dict], converted: list[dict]) -> list[dict]:
     return converted
 
 
-def _convert(sentences: list[dict], key: str) -> list[dict]:
-    filename, strat = _GRAMMARS[key]
+def _convert(sentences: list[dict], key: str, lang: str | None = None) -> list[dict]:
+    filename, strat = (_LANG_GRAMMARS.get((lang, key)) if lang else None) or _GRAMMARS[key]
     text = io_conllu.serialize(sentences)
     converted = io_conllu.parse(_convert_conllu(text, filename, strat))
     return _restore_meta(sentences, converted)
 
 
 # ── public conversions ───────────────────────────────────────────────────────
-def ud_to_sud(sentences: list[dict]) -> list[dict]:
-    return _convert(sentences, "ud_to_sud")
+def ud_to_sud(sentences: list[dict], lang: str | None = None) -> list[dict]:
+    return _convert(sentences, "ud_to_sud", lang)
 
 
-def sud_to_ud(sentences: list[dict]) -> list[dict]:
-    return _convert(sentences, "sud_to_ud")
+def sud_to_ud(sentences: list[dict], lang: str | None = None) -> list[dict]:
+    return _convert(sentences, "sud_to_ud", lang)
 
 
-def msud_to_sud(sentences: list[dict]) -> list[dict]:
-    return _convert(sentences, "msud_to_sud")
+def msud_to_sud(sentences: list[dict], lang: str | None = None) -> list[dict]:
+    return _convert(sentences, "msud_to_sud", lang)
 
 
-def msud_to_ud(sentences: list[dict]) -> list[dict]:
-    return _convert(sentences, "msud_to_ud")
+def msud_to_ud(sentences: list[dict], lang: str | None = None) -> list[dict]:
+    return _convert(sentences, "msud_to_ud", lang)
 
 
 def sud_to_msud(sentences: list[dict]) -> list[dict]:
@@ -166,22 +208,22 @@ def sud_to_msud(sentences: list[dict]) -> list[dict]:
     raise ConversionUnavailable("SUD → mSUD is not an automatic conversion")
 
 
-def to_sud(sentences: list[dict], src_format: str) -> list[dict]:
+def to_sud(sentences: list[dict], src_format: str, lang: str | None = None) -> list[dict]:
     """Bring an imported document into the app's native SUD, from its detected format."""
     if src_format == "UD":
-        return ud_to_sud(sentences)
+        return ud_to_sud(sentences, lang)
     if src_format == "mSUD":
-        return msud_to_sud(sentences)
+        return msud_to_sud(sentences, lang)
     return sentences  # already SUD
 
 
-def to_ud(sentences: list[dict], src_format: str) -> list[dict]:
+def to_ud(sentences: list[dict], src_format: str, lang: str | None = None) -> list[dict]:
     """Export path: convert a live SUD/mSUD document to UD."""
     if src_format == "mSUD":
-        return msud_to_ud(sentences)
+        return msud_to_ud(sentences, lang)
     if src_format == "UD":
         return sentences
-    return sud_to_ud(sentences)
+    return sud_to_ud(sentences, lang)
 
 
 def available() -> dict:

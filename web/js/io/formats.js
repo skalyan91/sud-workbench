@@ -15,7 +15,7 @@ function fmtMenu(x,y){ showCtx(x,y,[
 async function doImportUD(){ if(!hasBridge())return toast("Import is available in the desktop app");
   if(!(await confirmDiscardUnsaved("Import a file and discard them?"))) return;
   showBusy("Importing UD…",true); let r;
-  try{ r=await window.pywebview.api.import_ud(); }catch(e){ return toast("Import failed: "+e); }finally{ hideBusy(); }
+  try{ r=await window.pywebview.api.import_ud(DOCLANG); }catch(e){ return toast("Import failed: "+e); }finally{ hideBusy(); }
   if(!r||r.cancelled) return;
   if(r.unavailable) return toast("UD import needs grew (grewpy + opam backend): "+r.error);
   if(r.error) return toast("Import failed: "+r.error);
@@ -143,7 +143,7 @@ async function doExportUD(){ if(!hasBridge())return toast("Export is available i
   const pick=await sheetChooseSaveLocation({title:"Export as UD",desc:"Choose a name and location for the converted file.",defaultName,saveLabel:"Export"});
   if(pick.action!=="save") return;
   showBusy("Exporting UD…",true); let r;
-  try{ r=await window.pywebview.api.export_ud_to(getDocJSON(),pick.folder,pick.filename); }catch(e){ return toast("Export failed: "+e); }finally{ hideBusy(); }
+  try{ r=await window.pywebview.api.export_ud_to(getDocJSON(),pick.folder,pick.filename,DOCLANG); }catch(e){ return toast("Export failed: "+e); }finally{ hideBusy(); }
   if(!r||r.cancelled) return;
   if(r.unavailable) return toast("UD export needs grew (grewpy + opam backend): "+r.error);
   if(r.error) return toast("Export failed: "+r.error);
@@ -180,7 +180,7 @@ async function convertTo(target){
   if(target==="SUD" && DOCFORMAT==="mSUD" && !docHasMorphAnnotation()){ setFormat("SUD"); return toast("Back to SUD"); }
   if(!hasBridge())return toast("Conversion is available in the desktop app");
   showBusy("Converting to "+target+"…",true); let r;
-  try{ r=await window.pywebview.api.convert_format(getDocJSON(),target); }catch(e){ return toast("Convert failed: "+e); }finally{ hideBusy(); }
+  try{ r=await window.pywebview.api.convert_format(getDocJSON(),target,DOCLANG); }catch(e){ return toast("Convert failed: "+e); }finally{ hideBusy(); }
   if(!r) return; if(r.unavailable) return toast(r.error);
   if(r.error) return toast("Convert failed: "+r.error);
   pushUndo(); DOC.length=0; normSents(r.sentences).forEach(s=>DOC.push(s));

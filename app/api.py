@@ -743,8 +743,10 @@ class Api:
         Import/Export UD and Convert actions instead of failing on click."""
         return convert.available()
 
-    def import_ud(self) -> dict:
-        """Native open → detect format → convert to the app's native SUD."""
+    def import_ud(self, lang: str | None = None) -> dict:
+        """Native open → detect format → convert to the app's native SUD.  ``lang`` (the
+        frontend's DOCLANG) picks a language-specific grammar over the universal one when
+        one is vendored for this (language, direction) pair — see app/convert.py."""
         result = self._modal_dialog(
             webview.FileDialog.OPEN, allow_multiple=False,
             file_types=("CoNLL U treebank (*.conllu;*.conll)", "All files (*.*)"),
@@ -758,7 +760,7 @@ class Api:
             return {"error": str(exc)}
         src = detect.detect_format(sentences)
         try:
-            sentences = convert.to_sud(sentences, src)
+            sentences = convert.to_sud(sentences, src, lang)
         except convert.ConversionUnavailable as exc:
             return {"error": str(exc), "unavailable": True}
         except convert.ConversionError as exc:
@@ -813,11 +815,13 @@ class Api:
         name = os.path.splitext(os.path.basename(self.path))[0] + "_UD" if self.path else "treebank_UD"
         return {"name": name}
 
-    def export_ud_to(self, sentences: list[dict], folder: str, filename: str) -> dict:
+    def export_ud_to(self, sentences: list[dict], folder: str, filename: str,
+                      lang: str | None = None) -> dict:
         """Convert the live document (SUD or mSUD) to UD and write it to folder/filename — no
-        native dialog; backs the in-page Export as UD sheet (the same Save-As sheet as elsewhere)."""
+        native dialog; backs the in-page Export as UD sheet (the same Save-As sheet as elsewhere).
+        ``lang`` picks a language-specific grammar over the universal one, see import_ud."""
         try:
-            ud = convert.to_ud(sentences, self.format)
+            ud = convert.to_ud(sentences, self.format, lang)
         except convert.ConversionUnavailable as exc:
             return {"error": str(exc), "unavailable": True}
         except convert.ConversionError as exc:
@@ -832,11 +836,12 @@ class Api:
             return {"error": str(exc)}
         return {"ok": True, "path": out, "name": os.path.basename(out)}
 
-    def convert_format(self, sentences: list[dict], target: str) -> dict:
-        """Convert the live document to an editable target format (SUD or mSUD)."""
+    def convert_format(self, sentences: list[dict], target: str, lang: str | None = None) -> dict:
+        """Convert the live document to an editable target format (SUD or mSUD).  ``lang``
+        picks a language-specific grammar over the universal one, see import_ud."""
         try:
             if target == "SUD":
-                out = convert.to_sud(sentences, self.format)
+                out = convert.to_sud(sentences, self.format, lang)
             elif target == "mSUD":
                 out = convert.sud_to_msud(sentences)
             else:
