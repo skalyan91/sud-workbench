@@ -18,7 +18,7 @@ const DNODE_Q=`.node[data-s="{s}"], .tok-group[data-s="{s}"], .bwtok[data-s="{s}
 async function setDiagramHead(si,depId,headId){ const s=DOC[si]; if(!s||depId<1||depId>s.tokens.length)return;
   const dep=s.tokens[depId-1], head=(headId>=1&&headId<=s.tokens.length)?s.tokens[headId-1]:null;
   if(head && await depIsError(head.upos,dep.upos,dep.deprel)){ toast(`Can't attach: “${dep.deprel}” isn't valid on ${head.upos||"?"}`); return; }   // error-level invalid → don't let the drag stick
-  pushUndo(); dep.head=String(headId); afterHeadEdit(dep,s);
+  pushUndo(si); dep.head=String(headId); afterHeadEdit(dep,s);
   // Task B: NO regenTok here — re-heading a token by drag is purely structural and must never trigger a
   // gloss/MGloss recompute (the one thing regenTok's regenSecondaries call does besides re-derive lemma/feats/
   // deps, none of which a head edit needs either). Every other head/deprel edit site dropped this same call —
@@ -127,7 +127,7 @@ async function attachAsRaisedSubj(si,tokId,edgeDepId){ const s=DOC[si]; if(!s||t
   const draggedHeadId=parseInt(dragged.head,10);
   const isModOfDraggedHead=draggedHeadId>=1&&parseInt(predicate.head,10)===draggedHeadId&&famOf(predicate.deprel)==="mod";
   const value=isModOfDraggedHead?"Instantiated":RAISE_TYPES[type];
-  pushUndo(); predicate.feats=setFeat(predicate.feats,"Subj",value); markDirty(); preserveScroll(renderDoc); pick(si,edgeDepId,false);
+  pushUndo(si); predicate.feats=setFeat(predicate.feats,"Subj",value); markDirty(); preserveScroll(renderDoc); pick(si,edgeDepId,false);
   toast(`Token ${edgeDepId} marked ${value}`); }
 // item 2: dragging a VERB/AUX predicate onto the caret just before its OWN current position (a drop the reorder
 // gesture would otherwise treat as a no-op — it's already there) toggles Subj=Generic: an arbitrary/understood
@@ -135,7 +135,7 @@ async function attachAsRaisedSubj(si,tokId,edgeDepId){ const s=DOC[si]; if(!s||t
 async function attachGenericSubj(si,tokId){ const s=DOC[si]; if(!s||tokId<1||tokId>s.tokens.length)return;
   const tok=s.tokens[tokId-1]; if(!tok||(tok.upos!=="VERB"&&tok.upos!=="AUX"))return;
   const next=getFeat(tok.feats,"Subj")==="Generic"?null:"Generic";   // drop again to clear (toggle) — a no-op reorder made reversible instead of dead
-  pushUndo(); tok.feats=next?setFeat(tok.feats,"Subj",next):clearFeat(tok.feats,"Subj"); markDirty(); preserveScroll(renderDoc); pick(si,tokId,false);
+  pushUndo(si); tok.feats=next?setFeat(tok.feats,"Subj",next):clearFeat(tok.feats,"Subj"); markDirty(); preserveScroll(renderDoc); pick(si,tokId,false);
   toast(next?`Token ${tokId} marked Generic`:`Token ${tokId}'s Generic subject cleared`); }
 // dropping a token (or its incoming edge) ONTO a conj edge: `depId` becomes a dependent of WHICHEVER of the
 // conj edge's two conjuncts sits on the SAME SIDE of it in linear order — the head conjunct if depId is
@@ -150,7 +150,7 @@ async function attachAsSharedConjunct(si,depId,conjDepId){ const s=DOC[si]; if(!
   const targetId=(conjHeadId>=1 && conjHeadId<=s.tokens.length && Math.abs(depId-conjHeadId)<Math.abs(depId-conjDepId)) ? conjHeadId : conjDepId;
   const dep=s.tokens[depId-1], head=s.tokens[targetId-1];
   if(head && await depIsError(head.upos,dep.upos,dep.deprel)){ toast(`Can't attach: “${dep.deprel}” isn't valid on ${head.upos||"?"}`); return; }
-  pushUndo(); dep.head=String(targetId); afterHeadEdit(dep,s);
+  pushUndo(si); dep.head=String(targetId); afterHeadEdit(dep,s);
   // regenTok's own parser pass rewrites FEATS from scratch (reparseTokenFields → PARSE_FIELDS includes "feats") — awaiting
   // it here (instead of the usual fire-and-forget regenTok) and stamping Shared=Yes AFTER means the parser's guess can
   // never race past this point and silently clobber the marker we're about to set.

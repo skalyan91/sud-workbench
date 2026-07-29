@@ -16,8 +16,10 @@ the caller can degrade gracefully.  Probe :func:`available` up front to disable 
 from __future__ import annotations
 
 import glob
+import itertools
 import os
 import shutil
+from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
 
 from . import io_conllu
@@ -96,21 +98,63 @@ def _load_grs(filename: str):
     return grs
 
 
-def _convert_conllu(conllu_text: str, filename: str, strat: str) -> str:
-    """Rewrite each sentence block of ``conllu_text`` under ``strat`` and rejoin."""
+def _convert_one(block: str, filename: str, strat: str) -> str:
+    """Rewrite ONE sentence block under ``strat``. The unit of work both the sequential path
+    and each pool worker call — same body either way, so there is exactly one place the actual
+    grew rewrite happens."""
     Graph, _ = _ensure_grew()
     grs = _load_grs(filename)
+    try:
+        graph = Graph(block)
+        results = grs.run(graph, strat=strat)
+    except Exception as exc:  # noqa: BLE001
+        raise ConversionError(f"grew rewrite failed: {exc}") from exc
+    if not results:
+        raise ConversionError("grew produced no graph for a sentence")
+    return results[0].to_conll()
+
+
+# ── parallel conversion ───────────────────────────────────────────────────────
+# grewpy talks to its OCaml backend over a socket to ONE subprocess it spawns on first use
+# (grewpy/network.py's module-level `init()`, run at import time) — there is no way to hand a
+# second, independent grew session to another THREAD in this same process; every thread would
+# share (and serialise through) that one backend connection. A separate PROCESS, on the other
+# hand, gets its own fresh Python interpreter and therefore its own `import grewpy` → its own
+# `grewpy_backend` subprocess — genuinely independent, no shared state to race on. That is why
+# this is a ProcessPoolExecutor and not a ThreadPoolExecutor: converting a 12,000-sentence
+# document one grew call at a time (the pre-parallel behaviour) paid for every sentence
+# serially even though each is a wholly independent rewrite of one graph.
+# Workers are started with the platform default (`spawn` on macOS) rather than `fork` — a forked
+# child would inherit the PARENT's already-open backend socket/subprocess handle, which is
+# exactly the kind of shared state a second grew session must not have; `spawn` gives each
+# worker a clean interpreter that lazily spins up its OWN backend the first time it actually
+# converts something, through the same `_ensure_grew`/`_load_grs` caches this module already
+# has — no new caching mechanism, just one instance of the existing one per worker.
+_POOL: ProcessPoolExecutor | None = None
+_POOL_WORKERS = min(os.cpu_count() or 4, 8)   # capped: each worker's OWN grewpy_backend is a whole OCaml process — no reason to spawn more than a handful
+_PARALLEL_MIN_BLOCKS = 8   # below this, dispatching to the pool (pickling the block, waiting on a worker, pickling the result back) costs more than just running it here — e.g. a single live re-parse's ud_to_sud([sentence]) call, the commonest caller of this module
+
+
+def _get_pool() -> ProcessPoolExecutor:
+    global _POOL
+    if _POOL is None:
+        _POOL = ProcessPoolExecutor(max_workers=_POOL_WORKERS)
+    return _POOL
+
+
+def _convert_conllu(conllu_text: str, filename: str, strat: str) -> str:
+    """Rewrite each sentence block of ``conllu_text`` under ``strat`` and rejoin."""
     blocks = [b for b in conllu_text.split("\n\n") if b.strip()]
-    out = []
-    for block in blocks:
-        try:
-            graph = Graph(block)
-            results = grs.run(graph, strat=strat)
-        except Exception as exc:  # noqa: BLE001
-            raise ConversionError(f"grew rewrite failed: {exc}") from exc
-        if not results:
-            raise ConversionError("grew produced no graph for a sentence")
-        out.append(results[0].to_conll())
+    if len(blocks) < _PARALLEL_MIN_BLOCKS:
+        out = [_convert_one(b, filename, strat) for b in blocks]
+    else:
+        pool = _get_pool()
+        # map (not submit-in-a-loop) keeps output order = input order, which the zip in
+        # _restore_meta below depends on; a worker's exception surfaces here on iteration,
+        # same fail-fast contract the sequential path has (still-running siblings are simply
+        # abandoned rather than awaited, since the whole conversion is about to be reported failed)
+        out = list(pool.map(_convert_one, blocks,
+                            itertools.repeat(filename), itertools.repeat(strat)))
     return "\n\n".join(b.rstrip("\n") for b in out) + "\n"
 
 

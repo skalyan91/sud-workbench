@@ -250,7 +250,7 @@ function deepVocabFor(rel){ const vocab=[...new Set([...(DEEP_BY_REL[rel]||[]),.
 // the deep-feature submenu for relation D on this token: "(none)" (the bare relation) + the admissible features + a free-text add.
 function deepSubItems(si,tokId,D,feats){ const s=DOC[si], dep=s&&s.tokens[tokId-1]; if(!dep) return [];
   const isThis=depBase(dep.deprel)===D, cur=isThis?depDeep(dep.deprel):null;   // a checkmark only when this row IS the token's current relation
-  const setDF=f=>{ closeCtx(); const nd=f?D+"@"+f:D; if(nd!==dep.deprel){ pushUndo(); dep.deprel=nd; afterDeprelEdit(dep,s); markDirty(); preserveScroll(renderDoc); } };   // Task B: no regenTok — a deep-feature/relation edit is structural and must never trigger a gloss/MGloss recompute
+  const setDF=f=>{ closeCtx(); const nd=f?D+"@"+f:D; if(nd!==dep.deprel){ pushUndo(si); dep.deprel=nd; afterDeprelEdit(dep,s); markDirty(); preserveScroll(renderDoc); } };   // Task B: no regenTok — a deep-feature/relation edit is structural and must never trigger a gloss/MGloss recompute
   const items=[{header:(deprelExpand(D)||D)+" · deep"}];   // no "(none)" row — clicking the relation itself (in the parent menu) is what clears the deep feature
   const allFeats0=[...new Set([...feats,...DEEP_UNIVERSAL])];   // scrap is always offered, on top of whatever taxonomy/file-usage feats already carries
   // standard (DEEP_OFFICIAL) features keep their taxonomy order; non-standard ones (corpus-specific, picked up
@@ -272,7 +272,7 @@ function relMenu(x,y,si,tokId){ const s=DOC[si]; if(!s)return; const dep=s.token
   DOC.forEach(s2=>s2.tokens.forEach(t=>{ const b=depBase(t.deprel), f=depDeep(t.deprel); if(f){ (dfMap[b]=dfMap[b]||[]); if(!dfMap[b].includes(f))dfMap[b].push(f); } }));
   const subFor=r=>()=>deepSubItems(si,tokId,r,dfMap[r]||[]);   // EVERY relation gets a right-click deep-feature submenu (its taxonomy ∪ file features, or just an add-field)
   const choose=d=>{ if(d==="root"&&rb!=="root"){ setAsRoot(si,tokId); return; }   // not yet root → the FULL re-attach (migrates the old root's dependents, demotes it to udep), not a naive head=0 flip
-    if(d!==dep.deprel){ pushUndo(); dep.deprel=d; afterDeprelEdit(dep,s); markDirty(); preserveScroll(renderDoc); } };   // left-click sets the BARE relation — so clicking the current relation drops its @feature (= "(none)"); a feature is set via the row's submenu. Task B: no regenTok — structural, must never trigger a gloss/MGloss recompute
+    if(d!==dep.deprel){ pushUndo(si); dep.deprel=d; afterDeprelEdit(dep,s); markDirty(); preserveScroll(renderDoc); } };   // left-click sets the BARE relation — so clicking the current relation drops its @feature (= "(none)"); a feature is set via the row's submenu. Task B: no regenTok — structural, must never trigger a gloss/MGloss recompute
   optionMenu(x,y,cands,deprelMenuGroups(cands),deprelExpand,depBase(dep.deprel),choose,guide,sentRTL(s),subFor); }   // deprelMenuGroups interleaves any user-added relation into its own family/Other — no separate "Custom" heading needed
 // right-click a POS tag → pick a POS (all shown, grouped by class)
 /* item 4 — the UD LEXICAL features: the ones that subcategorise the UPOS itself (a SUBTYPE of the tag) rather
@@ -304,7 +304,7 @@ function shortVDesc(s){ s=cleanVDesc(s); const m=s.split(/\s*[\/(,;]/)[0]; retur
 function posSubItems(si,tokId,U){ const s=DOC[si], t=s&&s.tokens[tokId-1]; if(!t) return null;
   const feats=subtypeFeatsFor(U); if(!feats.length) return null;
   const curOf=f=>t.upos===U?(getFeat(t.feats,f)||""):"";
-  const setSub=(f,v)=>{ closeCtx(); const before=t.feats; pushUndo();
+  const setSub=(f,v)=>{ closeCtx(); const before=t.feats; pushUndo(si);
     if(t.upos!==U){ t.upos=U; if(XPOS_MIRRORS_UPOS)t.xpos=U; clearSubjIfNotVA(t); }   // item 1: a tag change away from VERB/AUX drops any now-meaningless Subj
     feats.forEach(o=>{ if(o!==f) t.feats=clearFeat(t.feats,o); });   // one subtype at a time — picking PRON.Dem drops a stale PRON.Int rather than leaving the token claiming both
     t.feats=(f&&v)?setFeat(t.feats,f,v):t.feats;
@@ -323,7 +323,7 @@ function posMenu(x,y,si,tokId,opts){ opts=opts||{}; const s=DOC[si]; if(!s)retur
   if(opts.ext){
     const target=extPosTarget(si,tokId), t=s.tokens[target-1]; if(!t)return;
     const cur=extPosOf(t), sp=subtreeSpan(s,target);
-    const choose=P=>{ const nv=(P===cur)?"":P; const before=t.feats; pushUndo();   // re-picking the current tag clears ExtPos (toggle) — the menu's way to remove it
+    const choose=P=>{ const nv=(P===cur)?"":P; const before=t.feats; pushUndo(si);   // re-picking the current tag clears ExtPos (toggle) — the menu's way to remove it
       t.feats=nv?setFeat(t.feats,"ExtPos",nv):clearFeat(t.feats,"ExtPos");
       featsSyncGloss(t,before); markDirty(); preserveScroll(renderDoc); };   // items 3/10: feature edit only, re-renders at once, no reparse
     const guide=[`Open the guidelines for the “ExtPos” feature`,"↗",()=>openExternal(featGuideUrl("ExtPos"))];
@@ -335,7 +335,7 @@ function posMenu(x,y,si,tokId,opts){ opts=opts||{}; const s=DOC[si]; if(!s)retur
   const subFor=U=>()=>posSubItems(si,tokId,U);   // item 4: every tag gets a right-click submenu of its own dot-suffixed subtypes
   const choose=p=>{ const posChanged=p!==tok.upos, hadSub=UPOS_SUBTYPE_FEATS.some(f=>getFeat(tok.feats,f));
     if(!posChanged&&!hadSub) return;   // same tag, no subtype to drop → nothing to do
-    const before=tok.feats, oldUpos=tok.upos; pushUndo(); tok.upos=p; if(XPOS_MIRRORS_UPOS)tok.xpos=p; clearSubjIfNotVA(tok);   // item 1: a tag change away from VERB/AUX drops any now-meaningless Subj
+    const before=tok.feats, oldUpos=tok.upos; pushUndo(si); tok.upos=p; if(XPOS_MIRRORS_UPOS)tok.xpos=p; clearSubjIfNotVA(tok);   // item 1: a tag change away from VERB/AUX drops any now-meaningless Subj
     UPOS_SUBTYPE_FEATS.forEach(f=>tok.feats=clearFeat(tok.feats,f));   // item 6: selecting a PLAIN tag clears any dot-suffixed subtype
     featsSyncGloss(tok,before);
     if(posChanged) uposSyncGloss(tok,oldUpos);   // Task B: retarget the closed-class gloss prefix IN PLACE, immediately — never a wholesale MGloss rebuild (see uposSyncGloss's own note, js/io/bridge.js)
@@ -471,7 +471,7 @@ function applyWiktionaryDef(si,tokId,text,genderUd,genderAbbr){ const s=DOC[si],
   // about this token, so it settles the question either way rather than leaving a stale answer standing.
   const bare=isUninflectedForm(t.feats);   // read BEFORE anything below edits FEATS
   if(bare){ genderUd=""; genderAbbr=""; }
-  pushUndo(); const enc=glossEnc(text);
+  pushUndo(si); const enc=glossEnc(text);
   if(UPOS_LEIPZIG_ABBR[t.upos]){   // a closed-class UPOS that already carries its OWN standard Leipzig abbreviation (AUX/DET, prepended to MGloss by featsToGloss) — Wiktionary's lexical definition goes to the Gloss tier instead, unconditionally (like the MGloss write below, not gated on GLOSS_ON being toggled on), never into MGloss
     t.misc=setMiscKV(t.misc,"Gloss",enc.replace(/\s+/g,"-"));
     markDirty(); preserveScroll(renderDoc); return; }
@@ -558,7 +558,7 @@ document.getElementById("doc").addEventListener("contextmenu",e=>{
     // Both rows of a tie open the SAME menu, and "Edit surface form" stays coherent under a Sanskrit script
     // because editMWTInline (not this row) decides which element the field opens over — the IAST row when the
     // glyph is derived, the glyph itself otherwise. So the menu item edits whatever the left-click would.
-    showCtx(e.clientX,e.clientY,[["Edit surface form","⏎",()=>editMWTInline(si,from)],["Remove MWT","⌫",()=>{ const s=DOC[si]; if(s){ pushUndo(); s.mwt=(s.mwt||[]).filter(x=>x.from!==from); markDirty(); preserveScroll(renderDoc); } },true]]); return; }
+    showCtx(e.clientX,e.clientY,[["Edit surface form","⏎",()=>editMWTInline(si,from)],["Remove MWT","⌫",()=>{ const s=DOC[si]; if(s){ pushUndo(si); s.mwt=(s.mwt||[]).filter(x=>x.from!==from); markDirty(); preserveScroll(renderDoc); } },true]]); return; }
   // a goeswith continuation's own form field: it lives INSIDE the head's cell, so the generic resolver below would
   // hand back the head. Its right-click menu is the ordinary token menu, for the token it actually draws.
   const gwEl=e.target.closest("[data-gwtok]");
@@ -1137,7 +1137,7 @@ function editLemmaPrompt(si,tokId,clickXY,anchor){ const s=DOC[si], t=s&&s.token
   textPrompt(x,y,{rtl, title:`Lemma of “${bform(t)}”`, value:cur,
     hint:"Leave blank for none.",   // an empty lemma is "_" in CoNLL-U, not a blank column — see the commit below
     ok:v=>{ const next=v||"_"; if(next===(t.lemma||"_")) return;   // unchanged (including blank↔"_") ⇒ no undo step, no dirty flag, no refresh
-      pushUndo(); t.lemma=next; markDirty(); preserveScroll(renderDoc);
+      pushUndo(si); t.lemma=next; markDirty(); preserveScroll(renderDoc);
       if(typeof afterLemmaEdit==="function") afterLemmaEdit(si,tokId); }}); }   // guarded: afterLemmaEdit lives in js/io/bridge.js, which loads AFTER this module
 // selection-driven wrapper for the Edit-menu "Edit Lemma…" item / its ⌘L key-equivalent — same "no anchor,
 // no click point" call editLemmaPrompt already falls back to gracefully (centred popover), matching how
@@ -1183,7 +1183,7 @@ function editURL(i,anchor){ const s=DOC[i]; if(!s)return; closeURLPopup();
   pop.style.top=Math.min((r.bottom||0)+5, innerHeight-pop.offsetHeight-8)+"px";
   inp.focus(); inp.select();
   const done=save=>{ if(pop._done)return; pop._done=true;
-    if(save){ const nv=(inp.value||"").trim(); if(nv!==(s.url||"")){ pushUndo(); s.url=nv; markDirty(); preserveScroll(renderDoc); toast(nv?"URL set":"URL cleared"); } }
+    if(save){ const nv=(inp.value||"").trim(); if(nv!==(s.url||"")){ pushUndo(i); s.url=nv; markDirty(); preserveScroll(renderDoc); toast(nv?"URL set":"URL cleared"); } }
     closeURLPopup(); };
   inp.addEventListener("keydown",e=>{ e.stopPropagation(); if(e.key==="Enter"){ e.preventDefault(); done(true); } else if(e.key==="Escape"){ e.preventDefault(); done(false); } });
   inp.addEventListener("blur",()=>done(true)); }
@@ -1230,7 +1230,7 @@ function tokenMenu(x,y,si,idx,target){ const rng=(selRange&&selRange.s===si&&sel
     const url=rel?relGuideUrl(val):posGuideUrl(val);   // relGuideUrl can be null (e.g. unk) — no dedicated page, so omit the row
     if(url){ items.unshift(null); items.unshift([`Guidelines for “${esc(val)}” ${rel?"relation":"POS tag"}`,"↗",()=>openExternal(url)]); } } }
   showCtx(x,y,items); }
-function addMWT(si,from,to){ const s=DOC[si]; pushUndo(); s.mwt=(s.mwt||[]).filter(m=>!(m.from<=to&&m.to>=from));   // replace any overlapping range
+function addMWT(si,from,to){ const s=DOC[si]; pushUndo(si); s.mwt=(s.mwt||[]).filter(m=>!(m.from<=to&&m.to>=from));   // replace any overlapping range
   s.mwt.push({from,to,form:s.tokens.slice(from-1,to).map(t=>t.form).join("")}); s.mwt.sort((a,b)=>a.from-b.from);   // default surface = concatenation (editable in the range row)
   if(isSanskritLang()) sandhiMwtForms(si,[from]);   // item 8: Sanskrit → replace the naive concatenation with the sandhi-fused surface form
   selRange=null; preserveScroll(renderDoc); toast(`Multi-word token ${from}–${to} added — edit its surface form in the range row`); }
@@ -1238,7 +1238,7 @@ function addMWT(si,from,to){ const s=DOC[si]; pushUndo(); s.mwt=(s.mwt||[]).filt
 function groupMWTShortcut(){ if(sel.s<0) return;
   if(selRange && selRange.s===sel.s && selRange.to>selRange.from){ addMWT(sel.s,selRange.from,selRange.to); }
   else toast("Select two or more tokens (shift-click their id cells) to group"); }
-function ungroupMWTShortcut(){ const s=DOC[sel.s]; if(!s||!s.mwt||!s.mwt.length) return toast("No multi-word token to remove"); pushUndo();
+function ungroupMWTShortcut(){ const s=DOC[sel.s]; if(!s||!s.mwt||!s.mwt.length) return toast("No multi-word token to remove"); pushUndo(sel.s);
   const t=sel.t, cover=m=>selRange?(selRange.s===sel.s&&m.from<=selRange.to&&m.to>=selRange.from):(t>=m.from&&t<=m.to);
   const before=s.mwt.length; s.mwt=s.mwt.filter(m=>!cover(m));
   if(s.mwt.length<before){ preserveScroll(renderDoc); toast("Multi-word token removed"); } else toast("No multi-word token at the selection"); }
@@ -1247,7 +1247,7 @@ function ungroupMWTShortcut(){ const s=DOC[sel.s]; if(!s||!s.mwt||!s.mwt.length)
 // the original token stays as the head component (keeps its POS/deprel/head/feats); the extra
 // components are inserted after it as blank words hanging off it; the MWT's surface form = the
 // original form. Flatten (below) is the exact inverse.
-function convertTokenToMWT(si,idx,n){ const s=DOC[si], toks=s.tokens; const head=toks[idx]; if(!head)return; pushUndo();
+function convertTokenToMWT(si,idx,n){ const s=DOC[si], toks=s.tokens; const head=toks[idx]; if(!head)return; pushUndo(si);
   const oldIds=new Map(); toks.forEach((t,i)=>oldIds.set(t,i+1));
   toks.forEach(t=>{const h=parseInt(t.head,10); t._ht=(h>=1&&h<=toks.length)?toks[h-1]:0;});   // heads by identity, so the coming splice renumbers cleanly
   (s.mwt||[]).forEach(m=>{ m._toks=toks.slice(m.from-1,m.to); });                                // existing MWT ranges by identity
@@ -1264,7 +1264,7 @@ function convertTokenToMWT(si,idx,n){ const s=DOC[si], toks=s.tokens; const head
 
 // flatten a multi-word token back to a single token: its form = the MWT's surface form, its POS/deprel/
 // head/other attributes = those of the MWT's head component (the one whose head lies outside the range)
-function flattenMWT(si,m){ const s=DOC[si], toks=s.tokens; if(!m)return; pushUndo();
+function flattenMWT(si,m){ const s=DOC[si], toks=s.tokens; if(!m)return; pushUndo(si);
   const from=m.from, to=m.to;
   const oldIds=new Map(); toks.forEach((t,i)=>oldIds.set(t,i+1));
   toks.forEach(t=>{const h=parseInt(t.head,10); t._ht=(h>=1&&h<=toks.length)?toks[h-1]:0;});   // heads by identity
@@ -1393,7 +1393,7 @@ function extPosMenuAtSel(si,tokId){ const el=tokGroupOf(si,tokId)||document.quer
 function mwtTokenItems(si,tokId){ const m=mwtAtSel(DOC[si],tokId);
   if(m) return [
     ["Flatten MWT","⌥⌘F",()=>flattenMWT(si,m)],
-    ["Ungroup MWT","⇧⌘G",()=>{ const s=DOC[si]; pushUndo(); s.mwt=(s.mwt||[]).filter(x=>x!==m); if(!s.mwt.length)delete s.mwt; markDirty(); preserveScroll(renderDoc); toast("Multi-word token removed"); }],
+    ["Ungroup MWT","⇧⌘G",()=>{ const s=DOC[si]; pushUndo(si); s.mwt=(s.mwt||[]).filter(x=>x!==m); if(!s.mwt.length)delete s.mwt; markDirty(); preserveScroll(renderDoc); toast("Multi-word token removed"); }],
   ];
   return [["Split into MWT…","⌥⌘S",()=>openConvertMWT(si,tokId-1)]]; }
 window.convertTokenMWT=function(){ if(sel.s<0||sel.t<1)return toast("Select a token to convert");

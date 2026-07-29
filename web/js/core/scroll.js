@@ -24,6 +24,25 @@ function maybeShiftFocus(up){ const docEl=document.getElementById("doc"), vp=doc
   if(v/r.height>=0.5 || v/vp.height>=0.5) return;   // still ≥50% of itself OR ≥50% of the viewport → keep focus
   let best=null,bestV=0; blocks.forEach(b=>{ const bv=vis(b.getBoundingClientRect(),vp); if(bv>bestV){bestV=bv;best=b;} });
   if(best && +best.dataset.i!==cb) setCurBlock(+best.dataset.i); }
+/* ── VIEWPORT VIRTUALIZATION: SHIFT THE RENDERED WINDOW AS THE READER SCROLLS ──────────────────────────────────
+   renderDoc() (js/core/document.js) only builds `.sblock`s for [winLo,winHi) and stands in two spacer elements
+   for everything outside it — recentred on curBlock() every time an EDIT re-renders, but ordinary scrolling
+   never calls renderDoc() at all, so nothing would ever grow the window as the reader scrolls toward its edge.
+   This is the other half: once either edge of the rendered range gets within WIN_EDGE_PX of the viewport, shift
+   the window to recentre on whatever's now nearest the top (topVisibleBlock — same signal maybeShiftFocus
+   above already computes a version of) and re-render. Called from the SAME rAF-coalesced scroll callback below,
+   so it costs nothing extra per scroll tick beyond one bounding-rect check on the first/last rendered block. */
+const WIN_EDGE_PX=600;   // generous — a fast trackpad fling shouldn't outrun the rebuild and hit bare spacer
+function maybeShiftWindow(){
+  if(typeof winLo==="undefined"||!DOC.length) return;
+  const docEl=document.getElementById("doc"); if(!docEl) return;
+  const vp=docEl.getBoundingClientRect(), blocks=docEl.querySelectorAll(".sblock"); if(!blocks.length) return;
+  const nearTop=winLo>0 && blocks[0].getBoundingClientRect().top > vp.top-WIN_EDGE_PX;
+  const nearBot=winHi<DOC.length && blocks[blocks.length-1].getBoundingClientRect().bottom < vp.bottom+WIN_EDGE_PX;
+  if(!nearTop && !nearBot) return;
+  const anchor=topVisibleBlock(); if(anchor<0) return;
+  computeWindow(anchor); preserveScroll(renderDoc);
+}
 let rzT,_docW=0,_docH=0;   // re-render when the document viewport changes size — live window resizes AND the post-load titlebar/window reflow that would otherwise leave the first paint's alignment stale (a window "resize" event doesn't always fire for the reflow, so observe the element directly)
 function _reflow(){ clearTimeout(rzT); rzT=setTimeout(()=>{ const s=sel.s,t=sel.t; preserveScroll(renderDoc); if(s>=0&&s<DOC.length)pick(s,t,false); },140); }
 if(typeof ResizeObserver!=="undefined"){
@@ -55,7 +74,7 @@ let scrollRaf=false, lastST=null;
 // JS-driven block snapping: once scrolling settles, if the nearest block top is within a small threshold of the
 // viewport top, ease it to the top. Threshold-based (not a CSS scroll-snap) so you can still rest inside a block
 // taller than the viewport, and it never fights an active drag or its own smooth-scroll animation.
-let snapTimer=null, snapping=false, snapST=null; const SNAP_THRESH=120, SNAP_SPEED=6;   // snap when the scroll has slowed to ≤SNAP_SPEED px/tick; band within which a boundary is pulled to the top
+let snapTimer=null, snapping=false, snapST=null; const SNAP_THRESH=30, SNAP_SPEED=6;   // snap when the scroll has slowed to ≤SNAP_SPEED px/tick; band within which a boundary is pulled to the top — halved from 120→60→30 on request
 // item 1: live top inset a scroll target must clear = the overlaid titlebar + the options bar WHEN shown. These manual
 // scrollTo/scrollTop paths compute an absolute target, so #doc's scroll-padding-top never applies here — we subtract
 // both bars ourselves. .viewbar.hidden is display:none → its offsetHeight is 0, so a closed options bar contributes 0.
@@ -91,7 +110,7 @@ function saveScrollPos(now){ if(!hasBridge()) return; clearTimeout(scrollSaveTim
   if(now) flush(); else scrollSaveTimer=setTimeout(flush,400); }   // debounce while scrolling; flush immediately on close/switch/unload
 function restoreScrollPos(idx){ if(idx==null||idx<0) return;   // no saved anchor → leave at the top
   const apply=()=>{ const docEl=document.getElementById("doc"); if(!docEl) return;
-    const blk=docEl.querySelector(`.sblock[data-i="${idx}"]`); if(!blk) return;
+    const blk=(typeof scrollToSentence==="function")?scrollToSentence(idx):docEl.querySelector(`.sblock[data-i="${idx}"]`); if(!blk) return;   // scrollToSentence (js/core/document.js) re-centres the rendered window on idx first — the render this fires after may have windowed the DOM to start at sentence 0, nowhere near a saved position deep in a large file
     docEl.scrollTop+=blk.getBoundingClientRect().top-docEl.getBoundingClientRect().top-docTopInset()-(typeof stickyHeadH==="function"?stickyHeadH(blk):0); };   // item 1: align the saved block's top with just BELOW both overlaid bars (subtract the live titlebar + options-bar height), not under them — same technique as blockSnap, sticky boundary headings included (a restored position that puts the block under its own heading hides the very line the reader left off at)
   requestAnimationFrame(()=>requestAnimationFrame(apply)); setTimeout(apply,480); }   // re-apply after settleAlign's ~450ms re-layout lands
 addEventListener("beforeunload",()=>saveScrollPos(true));
@@ -101,5 +120,5 @@ document.getElementById("doc").addEventListener("scroll",()=>{ const st=document
   if(!snapping && v<=SNAP_SPEED) blockSnap();   // and snap right away once the scroll has decelerated to a crawl (blockSnap self-guards against its own smooth-scroll animation)
   saveScrollPos();   // remember the reading position for this file (debounced)
   if(scrollRaf)return; scrollRaf=true; requestAnimationFrame(()=>{scrollRaf=false;
-  const st2=document.getElementById("doc").scrollTop, up=lastST!=null&&st2<lastST-0.5; lastST=st2; maybeShiftFocus(up); }); });
+  const st2=document.getElementById("doc").scrollTop, up=lastST!=null&&st2<lastST-0.5; lastST=st2; maybeShiftFocus(up); maybeShiftWindow(); }); });
 

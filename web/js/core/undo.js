@@ -23,9 +23,21 @@ function restoreCaret(c){ if(!c) return false;
     if(tn) range.setStart(tn, tn.data.length); else { range.selectNodeContents(field); range.collapse(false); }
     range.collapse(true); const s=window.getSelection(); s.removeAllRanges(); s.addRange(range); field.focus(); }
   catch(_){ try{field.focus();}catch(__){} } return true; }
-function snap(){ return {doc:JSON.parse(JSON.stringify(DOC)), s:sel.s, t:sel.t, caret:captureCaret(), glossOn:GLOSS_ON, morphOn:MORPH_ON, stored:STORED_SCHEME}; }   // glossOn/morphOn → undo/redo restore the tier visibility (add-then-Undo removes the tier); stored → likewise the STORED transliteration scheme, whose change IS the doc-wide MISC Translit rewrite it triggers (see storedPick), so undoing that rewrite has to put the scheme back with it or the next annotation pass would just redo it
+function snap(){ return {doc:JSON.parse(JSON.stringify(DOC)), s:sel.s, t:sel.t, caret:captureCaret(), glossOn:GLOSS_ON, morphOn:MORPH_ON, stored:STORED_SCHEME}; }   // WHOLE-DOCUMENT snapshot — glossOn/morphOn → undo/redo restore the tier visibility (add-then-Undo removes the tier); stored → likewise the STORED transliteration scheme, whose change IS the doc-wide MISC Translit rewrite it triggers (see storedPick), so undoing that rewrite has to put the scheme back with it or the next annotation pass would just redo it.
+  // The fallback for anything that changes DOC's own length or order (insert/delete/move a SENTENCE — doInsert/
+  // delSent/moveSent in edit-ops.js — plus a whole-document conversion and Find & Replace's Replace All), where a
+  // single sentence's worth of undo doesn't cover what changed. Every other mutator (any edit WITHIN one sentence
+  // — a field, a token insert/delete/reorder, an MWT regroup, a boundary marker, …) calls snapSent() instead: at
+  // 20,000 sentences, JSON-cloning the WHOLE array on every keystroke — which this used to be the only option for
+  // — costs a few hundred ms of string allocation per edit, no matter how small the edit; cloning one sentence
+  // object is O(that sentence), independent of document size.
+function snapSent(si){ return {kind:"sent", si, doc:JSON.parse(JSON.stringify(DOC[si])), s:sel.s, t:sel.t, caret:captureCaret(), glossOn:GLOSS_ON, morphOn:MORPH_ON, stored:STORED_SCHEME}; }
 function commitSnap(pre){ if(!pre)return; UNDO.push(pre); if(UNDO.length>80)UNDO.shift(); REDO.length=0; updateUndoUI(); }   // push a snapshot taken BEFORE an operation that turned out to change something (the pattern for anything that can only tell afterwards whether it did)
-function pushUndo(){ UNDO.push(snap()); if(UNDO.length>80)UNDO.shift(); REDO.length=0; updateUndoUI(); }
+// si given (and a real sentence) → scope the snapshot to just that sentence (snapSent); omitted → the old
+// whole-document snap(), for a caller that changes DOC's length/order or otherwise touches more than one
+// sentence. Every edit-ops.js/grid.js mutator that only ever writes into ONE sentence passes its own si here.
+function pushUndo(si){ const x=(si!=null && DOC[si]!==undefined) ? snapSent(si) : snap();
+  UNDO.push(x); if(UNDO.length>80)UNDO.shift(); REDO.length=0; updateUndoUI(); }
 /* REVERT AN OPERATION BY ITS OWN SNAPSHOT — for a command the user CANCELS partway through.
    Restoring the document by hand (clearing back whatever was written) leaves two marks behind: the undo entry
    the command pushed, which now describes a change that never stood, and the DIRTY flag, which markDirty derives
@@ -37,15 +49,23 @@ function revertEdit(ref){ if(!ref) return false;
   UNDO.splice(i,1); applySnap(ref); updateUndoUI(); markDirty(); return true; }
 function applySnap(x){ GLOSS_ON=!!x.glossOn; MORPH_ON=!!x.morphOn; syncGlossUI();   // restore the glossing tiers before re-render
   if(x.stored!==undefined && x.stored!==STORED_SCHEME){ STORED_SCHEME=x.stored; if(typeof updateStoredPill==="function")updateStoredPill(); }   // …and the stored transliteration scheme (undefined on a snapshot taken before this was captured — leave it alone then)
-  preserveScroll(()=>{ DOC.length=0; x.doc.forEach(d=>DOC.push(d));
-    DOC.forEach(d=>(d.mwt||[]).forEach(m=>{ m._kept=1; }));   // the snapshot restored each MWT's surface form along with its components — that form is AUTHORITATIVE, not a value to re-derive. _kept tells the opportunistic sandhi re-fuse (see the ortho fill in translit-load.js) to leave it alone, so undoing a re-fuse lands on exactly the form the document had before the edit instead of immediately recomputing it — and marking the file dirty again on its way out. A later component edit clears the tag and re-fuses normally (sandhiMwtForms).
+  const keepMwt=d=>(d.mwt||[]).forEach(m=>{ m._kept=1; });   // the snapshot restored each MWT's surface form along with its components — that form is AUTHORITATIVE, not a value to re-derive. _kept tells the opportunistic sandhi re-fuse (see the ortho fill in translit-load.js) to leave it alone, so undoing a re-fuse lands on exactly the form the document had before the edit instead of immediately recomputing it — and marking the file dirty again on its way out. A later component edit clears the tag and re-fuses normally (sandhiMwtForms).
+  preserveScroll(()=>{
+    if(x.kind==="sent"){   // scoped snapshot — restore ONLY the one sentence it cloned, by reference-swap; DOC's own length/order (and every OTHER sentence) is untouched, so nothing about this needs invalidateColW()'s full rescan either (js/grid/grid.js's window-scoped scan already re-measures whatever sentence is on screen, this one included, on the very next render)
+      if(x.si>=0 && x.si<DOC.length){ DOC[x.si]=x.doc; keepMwt(DOC[x.si]); }
+    } else {   // whole-document snapshot — see snap()'s own note on when this is the one taken
+      if(typeof invalidateColW==="function") invalidateColW();   // replaces the WHOLE document below → the column-width cache can't be trusted to still describe it
+      DOC.length=0; x.doc.forEach(d=>DOC.push(d));
+      DOC.forEach(keepMwt);
+    }
     sel={s:x.s,t:x.t}; markDirty(); renderDoc(); if(sel.s>=0&&sel.s<DOC.length)pick(sel.s,sel.t,false); });   // keep the viewport steady across undo/redo
   if(x.caret) restoreCaret(x.caret); }   // …and put the FEATS/MISC pill caret back where it was (after the re-render + preserveScroll's own focus restore have run)
 function undo(){ if(!UNDO.length)return toast("Nothing to undo"); REDO.push(snap()); applySnap(UNDO.pop()); updateUndoUI(); }
 function redo(){ if(!REDO.length)return toast("Nothing to redo"); UNDO.push(snap()); applySnap(REDO.pop()); updateUndoUI(); }
 function updateUndoUI(){ const u=document.getElementById("btnUndo"),r=document.getElementById("btnRedo"); if(u)u.disabled=!UNDO.length; if(r)r.disabled=!REDO.length;
   const g=u&&u.closest(".tbgroup"); if(g) g.classList.toggle("both-disabled", !UNDO.length&&!REDO.length); }   // item 16: mute the Edit group's label when BOTH Undo and Redo are inert (live-toggled as history changes)
-function resetUndo(){ UNDO.length=0; REDO.length=0; pendingSnap=null; updateUndoUI(); }   // item 3: opening a NEW file drops the previous file's history so you can't undo across the open (and syncs the toolbar Undo/Redo enabled state)
+function resetUndo(){ UNDO.length=0; REDO.length=0; pendingSnap=null; updateUndoUI();
+  if(typeof invalidateColW==="function") invalidateColW(); }   // item 3: opening a NEW file drops the previous file's history so you can't undo across the open (and syncs the toolbar Undo/Redo enabled state) — and the previous file's column-width cache is equally meaningless against the one being opened (js/grid/grid.js)
 document.getElementById("btnUndo").onclick=undo; document.getElementById("btnRedo").onclick=redo; updateUndoUI();
 function deselectAll(){ sel={s:-1,t:0}; selRange=null; applySel(); document.querySelectorAll("#doc .sblock.sel-block").forEach(b=>b.classList.remove("sel-block")); syncMenu(); }
 document.getElementById("doc").addEventListener("click",e=>{ if(e.target===e.currentTarget||e.target.classList.contains("addsent")) deselectAll(); });   // click below the last block → clear the block selection

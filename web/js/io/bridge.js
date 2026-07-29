@@ -205,6 +205,7 @@ const isBlankDoc=()=>DOC.length===0||(DOC.length===1&&DOC[0].tokens.length<=1&&!
 async function doNew(){ if(!(await confirmDiscardUnsaved("Discard them and start a new document?"))) return; pushUndo();
   saveScrollPos(true);   // remember the outgoing file's reading position before we drop it
   DOC.length=0; DOCNAME="untitled.conllu"; DOCPATH=""; markDirty(false);   // a new document starts empty — zero sentences
+  if(typeof invalidateColW==="function") invalidateColW();   // drop the outgoing file's column-width cache rather than carry its widths into an empty document
   if(hasBridge())try{window.pywebview.api.new_document();}catch(e){}
   syncGlossTiersFromDoc(); detectXposMirrorsUpos(); syncDocFonts();   // item 1: an empty new document carries NO Gloss/MSeg/MGloss → glossing tiers reset to off, never inherited from the file just closed
   refreshTransLangs(); renderTransDrawer();   // item 13: reset enabled translation languages
@@ -573,10 +574,10 @@ async function applySentText(i,newText,opts){ const s=DOC[i]; if(!s)return; opts
   const cur=(s.text!=null?s.text:s.tokens.map(t=>t.form).join(" ")).replace(/\s+/g," ").trim();
   if(!parseText){ preserveScroll(renderDoc); return; }
   if(!force && parseText===cur){   // tokens unchanged — only the line breaks differ → update the display text, no re-parse
-    if(display!==s.text){ pushUndo(); s.text=display; markDirty(); }
+    if(display!==s.text){ pushUndo(i); s.text=display; markDirty(); }
     preserveScroll(renderDoc); return; }
   if(hasBridge()&&model){
-    const pre=snap();   // BEFORE anything is written, so both failure paths can leave the document exactly as they found it
+    const pre=snapSent(i);   // BEFORE anything is written, so both failure paths can leave the document exactly as they found it
     showBusy("Tokenising…"); let tk;
     try{ tk=await window.pywebview.api.tokenize(parseText,model); }catch(e){ hideBusy(); toast("Parse failed: "+e); preserveScroll(renderDoc); return; }   // nothing written yet → nothing to undo, nothing to restore
     s.text=display; s.tokens=tk.tokens.map(t=>({...t,head:String(t.head)})); s.mwt=tk.mwt||[]; if(!s.mwt.length)delete s.mwt; s.orthoLine=""; restoreMarks(s,marks);   // the tokeniser's tokens carry no hand-placed marks — put back the ones whose word survived the edit   // item 19: NEW tokens have no cached t.ortho; clear the stale running-line so fillOrtho re-fetches the SCRIPT
@@ -597,7 +598,7 @@ async function applySentText(i,newText,opts){ const s=DOC[i]; if(!s)return; opts
     if(isSanskritLang())autoGroupSanskritMWTs(i);   // Sanskrit: (re)group the parsed tokens into MWTs by Compound=Yes
     annotateTranslitMisc(i).then(ch=>{ if(ch)preserveScroll(renderDoc); }); return;
   }
-  pushUndo();
+  pushUndo(i);
   s.text=display; s.tokens=buildTokens(parseText); delete s.mwt; s.orthoLine=""; restoreMarks(s,marks);   // the whitespace path replaces tokens too, so it restores on the same terms   // no model (or no bridge to run one) → whitespace tokenisation with EMPTY annotations; item 19: clear running-line so fillOrtho re-scripts the new tokens
   morphAfterReparse(s);   // no FEATS to compose an MGloss from without a parse, but MSeg still seeds from the new forms
   markDirty(); preserveScroll(renderDoc); clearSelToBlock(i,scroll);   // item 9, as in the parsed branch above: a re-tokenise leaves nothing selected
@@ -1363,7 +1364,7 @@ function renderBlockTrans(i){ const s=DOC[i], rows=sentTranslations(s);
     let row=rows.find(r=>r.lang===code); if(!row){ row={lang:code,text:""}; rows.push(row); }
     const text=document.createElement("div"); text.className="tg-text"; text.setAttribute("contenteditable","plaintext-only"); text.setAttribute("role","textbox"); text.spellcheck=false; text.dir="auto"; text.setAttribute("aria-label",(langName(code)||code)+" translation");
     text.textContent=row.text||""; if(!row.text)text.dataset.empty="1";   // data-empty → CSS placeholder (unfocused looks like plain text)
-    let pre=null,orig=null; text.addEventListener("focus",()=>{ pre=snap(); orig=row.text||""; setCurBlock(i); });   // one undo per edit session; setCurBlock: clicking/tabbing into a translation field is arriving at its block (same as the running-sentence line — document.js's wireStext), and it has to happen here rather than rely on bubbling to .sblock's own click handler because .tgrid stops mousedown/click propagation outright (see box's own listeners above, added so a click inside the grid never falls through to token deselection)
+    let pre=null,orig=null; text.addEventListener("focus",()=>{ pre=snapSent(i); orig=row.text||""; setCurBlock(i); });   // one undo per edit session; setCurBlock: clicking/tabbing into a translation field is arriving at its block (same as the running-sentence line — document.js's wireStext), and it has to happen here rather than rely on bubbling to .sblock's own click handler because .tgrid stops mousedown/click propagation outright (see box's own listeners above, added so a click inside the grid never falls through to token deselection)
     text.addEventListener("blur",()=>{ if(pre&&(row.text||"")!==orig){ UNDO.push(pre); if(UNDO.length>80)UNDO.shift(); REDO.length=0; updateUndoUI(); } pre=null; });
     text.addEventListener("input",()=>{ row.text=text.textContent||""; if(row.text)delete text.dataset.empty; else text.dataset.empty="1"; markDirty(); });
     text.addEventListener("keydown",e=>{ e.stopPropagation(); if(e.key==="Enter"&&!e.shiftKey){ e.preventDefault(); text.blur(); } });   // Enter commits; Shift+Enter newline; keep keys off the doc nav handler

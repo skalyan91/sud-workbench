@@ -203,10 +203,15 @@ function meas(s,f){
 // re-renders — see orPick/loadOrthoSchemes). Every font string below is a cheap string concat off the cached
 // LIVE_TOKEN_STACK/LIVE_MONO_STACK, not a fresh DOM read.
 function refreshFontStacks(){
-  const d=document.getElementById("doc");
+  const d=document.getElementById("doc"), prevT=LIVE_TOKEN_STACK, prevM=LIVE_MONO_STACK;
   if(d){ const cs=getComputedStyle(d);
     const t=cs.getPropertyValue("--token-font").trim(), m=cs.getPropertyValue("--mono-font").trim();
     if(t) LIVE_TOKEN_STACK=t; if(m) LIVE_MONO_STACK=m; }   // empty (no #doc, or the property somehow unset) → keep whatever was last live, which starts as the static base
+  // a font-stack change is the ONE non-content thing that can change what meas() returns (js/grid/grid.js's
+  // computeColW/pillColW measure against GRID_F/HEAD_F, both built from LIVE_MONO_STACK/LIVE_TOKEN_STACK below)
+  // → the column-width cache's every cached measurement is now stale, so force a full rescan rather than trust
+  // the (now wrong) cached widths forward.
+  if((LIVE_TOKEN_STACK!==prevT||LIVE_MONO_STACK!==prevM) && typeof invalidateColW==="function") invalidateColW();
   WORD_F='15px '+LIVE_TOKEN_STACK; NODE_F='14px '+LIVE_TOKEN_STACK; WORD_F_BOLD='640 '+WORD_F; NODE_F_BOLD='640 '+NODE_F;
   POS_F='15px '+LIVE_TOKEN_STACK; GRID_F='462 13px '+LIVE_MONO_STACK; HEAD_F='640 9.5px '+LIVE_TOKEN_STACK;
   TRANS_F='italic 15px '+LIVE_TOKEN_STACK; TRANS_UP_F='15px '+LIVE_TOKEN_STACK; MWT_F=WORD_F;
@@ -733,8 +738,12 @@ function appendHangHTML(container,t,si,cls,oid){ const show=correctFormShown(t,s
     s.addEventListener("click",ev=>{ ev.stopPropagation(); pick(si,oid); }); container.appendChild(s); }); }
 function descent(f){_cv.font=f; const m=_cv.measureText("gjpqy"); return m.actualBoundingBoxDescent||3;}   // how far tokens hang below the baseline
 function xHeight(f){_cv.font=f; const m=_cv.measureText("x"); return m.actualBoundingBoxAscent||6;}   // the x-height of a (POS) glyph — subtracted from the inter-tier step to seat the MWT bracket (POS tags now render via c2sc small caps, whose visual height sits at x-height, not full cap height)
-// item 14: measure at the input's OWN computed font-size (driven by the --stext-fs CSS var) so the field width tracks the sentence-text size instead of a hardcoded px that could drift.
-function sizeSid(inp){ const fs=(inp.isConnected&&getComputedStyle(inp).fontSize)||'13.2px'; inp.style.width=Math.ceil(meas(inp.value||inp.placeholder||"s?",fs+" ui-monospace, monospace"))+16+"px"; }
+// sizeSid() — the JS width-measurement this comment described — is GONE: .sid-in is a contenteditable
+// span now (js/core/document.js's buildBlock), not an <input>, and a span with no explicit width simply
+// sizes to its own text as a flex item, same as .bm-id already does. That JS math (measuring at the
+// field's own computed font-size, +14 for its padding/border) was itself a correct fix for the WRONG
+// problem: the residual uneven padding a user kept seeing on long ids was WebKit's <input> internal
+// shadow DOM, invisible to any amount of outer-box arithmetic — removing the <input> removed the bug.
 const SVGNS="http://www.w3.org/2000/svg";
 function E(n,a){const e=document.createElementNS(SVGNS,n); for(const k in a) e.setAttribute(k,a[k]); return e;}
 function svgTip(el,text){ if(text){ const t=document.createElementNS(SVGNS,"title"); t.textContent=text; el.appendChild(t); } return el; }   // SVG hover tooltip = a <title> CHILD (the title ATTRIBUTE doesn't surface a tooltip on SVG)

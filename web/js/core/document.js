@@ -643,7 +643,7 @@ function stextMarkSel(apply){ const F=stextEditEl(); if(!F) return false;
     A.units[i].ids.forEach(id=>{ if(ids.indexOf(id)<0) ids.push(id); }); });
   const toks=ids.map(id=>s.tokens[id-1]).filter(Boolean);
   if(!toks.length){ toast("That selection covers no word of the sentence"); return true; }   // a drag across the space between two words, say
-  pushUndo();                                                                          // ONE entry, before the first write → undo restores the whole selection at once
+  pushUndo(si);                                                                        // ONE entry, before the first write → undo restores the whole selection at once
   const undoRef=UNDO[UNDO.length-1];   // …and a handle on it, so a follow-up the user CANCELS can take the whole command back out (see revertEdit)
   const r=apply(toks,s,ids,si)||{}, msg=(typeof r==="string")?r:r.msg;                 // apply may return a bare message, or {msg, then} when it has follow-up work that must wait for the re-render
   markDirty();
@@ -936,60 +936,53 @@ function alignInlineStart(el,b){ if(!el) return;
   el.style.marginInlineStart=((parseFloat(cs.marginInlineStart)||0)+d)+"px"; }
 
 /* document */
-function renderDoc(){
-  if(typeof refreshFontStacks==="function") refreshFontStacks();   // diagram-core.js: re-reads #doc's LIVE --token-font/--mono-font (a scheme-scoped override, e.g. Ranjana, may have changed it since the last render) into LIVE_TOKEN_STACK/LIVE_MONO_STACK and every measurement font string derived from them (WORD_F, GLOSS_F, …), ONCE per render rather than per meas() call. Must run before computeColW() (→ marginNumWidth) and before anything below that measures token width, or this render would still lay out against the PREVIOUS scheme's metrics. Guarded (as document.js already guards TOKEN_STACK-dependent reads elsewhere) for any harness that renders before diagram-core.js has loaded
-  msegFlagDoc();   // what an MWT grouping implies about its members — the MSeg tier's decorative continuation mark, and in Sanskrit a featureless non-final member's Compound=Yes. A dozen scattered operations move those ranges (grouping, ungrouping, splitting, flattening, inserting/deleting a token, an auto-regroup after a parse), so deriving it HERE, once, at the single point they all funnel through, is what keeps it from ever going stale; it's idempotent and cheap, and marks nothing dirty of its own accord — see msegFlagSent
-  computeColW();
-  const host=document.getElementById("doc"); host.textContent="";
-  host.lang=bcp47Tag();   // BCP-47 tag → inherits to every token/diagram/grid text so the browser picks locale-correct Cyrillic/Han glyphs (locl + system-font region); re-run on every language/script change
-  host.classList.toggle("ortho-script", TRANSLIT_SCHEME==="zhuyin");   // a non-Latin DISPLAYED transliteration (Zhuyin) in the row → drop the romanisation italics
-  host.classList.toggle("script-form", typeof iastFormEdit==="function"&&iastFormEdit());   // Sanskrit under a real script → every token FORM on screen is a derived rendering of the stored IAST, not an editable field, so it takes the pointing hand (app.css). The MWT/goeswith glyphs set the same cursor inline via formCursor(), being SVG text with their own click contract
-  host.classList.toggle("no-relcolour", !show.colour);   // "Relation colours" off → --tie-hue swaps --c-other for --ink, so POS tags/bracket ties go monochrome too, not just the deprel labels relColor() already gates
-  /* Item 3 — PAGED LAYOUT. In paged mode the blocks are grouped into .docsheet containers and a `# newdoc` ENDS one
-     and starts the next, which is what makes a document boundary read as a document boundary rather than as a
-     slightly bigger gap. Unpaged, `host` IS the container and every block is appended straight to it, exactly as
-     before. Nothing downstream had to change: every later pass selects `#doc .sblock` (a descendant selector), so
-     the extra level of nesting is invisible to the alignment/cap/selection passes below.
-     The first sheet is created HERE, above AVAILW, and not lazily in the loop — see item 9 immediately below. */
-  let sheet=host;
-  const newSheet=()=>{ if(!PAGED) return host; const d=document.createElement("div"); d.className="docsheet"; host.appendChild(d); return d; };
-  if(PAGED) sheet=newSheet();
-  /* Item: BOUNDARY SECTIONS. A `# newdoc`/`# newpar` heading is sticky (see .bmark in app.css), and a sticky box
-     pins only for as long as its CONTAINING BLOCK is on screen — so the run of sentences a heading dominates has
-     to be a real element, not merely an interval the renderer knows about. `docSec`/`parSec` are the two open
-     sections: a document boundary closes both and opens a document section, a paragraph boundary closes and
-     reopens the paragraph section INSIDE whichever document section is current (or in the sheet, for a file
-     whose paragraphs precede its first `# newdoc`), and every block is appended to the innermost open one. That
-     IS the dominance rule the headings need — a document heading reaches to the next document, a paragraph
-     heading to the next paragraph or document, whichever comes first.
-     Nothing downstream had to change, for the same reason paged mode's sheets cost nothing: every later pass
-     selects `#doc .sblock`, a DESCENDANT selector. */
-  const NUM=boundNumbers(), SNUM=sentNumbers();   // recomputed here, every render — see boundNumbers on why nothing is stored
-  // Item 9: the width a diagram row may use is the width of the box it will actually be laid out in — the SHEET in
-  // paged view, `#doc` unpaged. Measuring `#doc` in both left every diagram sized to the full window: at 1500px it
-  // decided a row fitted unwrapped when the 900px sheet had no room for it, and a wrapped row broke at the wrong
-  // column. An EMPTY sheet measures correctly (its width comes from max-width + auto margins, not its content), and
-  // renderDoc re-runs on every paged/unpaged switch (setPageMode → preserveScroll(renderDoc)), so the two modes
-  // can never disagree about it.
-  AVAILW=Math.max(240, sheet.clientWidth-52);
-  // Item 1: the cap must equal the VISIBLE viewport height for content — from just below the options bar (or the
-  // titlebar when the options bar is hidden) down to just above the status bar. Only the TOP is occluded: the doc
-  // scrolls UNDER the overlaid titlebar + options bar, which the doc's top padding (--tbH + --vbH) exactly clears.
-  // The status bar is NOT overlaid — it is an in-flow sibling BELOW the doc, so the doc's border-box bottom already
-  // coincides with the status-bar top (host.clientHeight already stops there). The doc's 44px bottom padding is only
-  // trailing scroll room, NOT an occluded band, so it must NOT be subtracted — doing so left the cap 44px too short
-  // (dead space below a tall block). Subtract ONLY the top inset: dh = clientHeight − paddingTop = the exact gap from
-  // the options-bar bottom to the status-bar top (= innerHeight − titlebarH − (options bar shown? optionsBarH : 0) −
-  // statusbarH). Recomputed every render, so showing/hiding the options bar (which changes --vbH → this top padding,
-  // and re-renders) re-tightens the cap.
-  const hcs=getComputedStyle(host), padTop=parseFloat(hcs.paddingTop||0);
-  const dh=Math.max(160, host.clientHeight-padTop), rs=document.documentElement.style; AVAILH=dh;   // caps are relative to the app's VISIBLE document viewport (options-bar bottom → status-bar top), not the browser and not the occluded top padding
-  // #doc isn't zoomed, so dh is REAL px; but .diagram/.gwrap live inside .sblock{zoom:var(--fs)}, which multiplies any max-height by FS. Divide the cap by FS so the VISUAL cap stays a fixed fraction of the viewport at every zoom level (recomputed here on every render → refreshed on each zoom, since setFS re-runs renderDoc). At FS=1 this is a no-op.
-  rs.setProperty("--cap-dia",Math.round(dh*0.6/FS)+"px"); rs.setProperty("--cap-grid",Math.round(dh*0.4/FS)+"px");
-  /* the --bm-stick engine probe was published here; the headings do not pin any more, so there is no inset to measure or hand to CSS. stickyTopFactor() survives below, unused but documented — it records what each engine counts into a sticky view rectangle, which is not obvious and was expensive to establish. */
-
-  DOC.forEach((s,i)=>{
-    if(PAGED && i>0 && hasNewdoc(s)) sheet=newSheet();   // a new document gets a sheet of its own (never for i=0, which would leave an empty first sheet)
+/* ── VIEWPORT VIRTUALIZATION ──────────────────────────────────────────────────────────────────────────────────
+   renderDoc() used to build a `.sblock` (full SVG diagram + grid table) for EVERY sentence, unconditionally, on
+   every open AND every single edit — at 20,000 sentences that's ~20,000 live DOM subtrees rebuilt from scratch
+   per keystroke (every edit-ops.js mutator ends in refresh()→renderDoc()). Windowed instead: only sentences in
+   [winLo,winHi) actually get a `.sblock`; two spacer elements stand in for the estimated height of everything
+   outside that range, sized from AVG_BLOCK_H (the average REAL — already-zoomed, i.e. directly comparable to a
+   plain sibling div's height — height of the blocks actually built, remeasured every render).
+   curBlock() is always inside the window (computeWindow clamps the anchor in, and renderDoc always calls it
+   WITH curBlock() — see below), so preserveScroll's own before/after anchor lookup (js/ui/wiring.js) never has
+   to fall back to a raw scrollTop restore. The window only shifts on a genuine reason to: an edit re-centres on
+   the sentence being edited (curBlock(), since renderDoc recomputes the window every call); scrolling near
+   either edge re-centres on whatever's now nearest the viewport top (js/core/scroll.js's maybeShiftWindow, using
+   the same topVisibleBlock() signal maybeShiftFocus already computes a version of).
+   Everything downstream that already worked off whatever's in the LIVE DOM rather than iterating DOC itself
+   needed NO change at all: js/core/scroll.js's block-position math (querySelectorAll(".sblock") already means
+   "whatever's rendered", never "every sentence"), the settle-alignment sweep at the end of this file, and
+   validateAll's DOM paint (js/editing/validation.js) were already windowed — just to "all 20,000" — and are now
+   windowed to whatever's actually built. The few places that assumed a `.sblock` always exists for ANY sentence
+   (restoreScrollPos, find's scrollToMatch, the Issues sheet's row click) now go through scrollToSentence below. */
+let winLo=0, winHi=0, AVG_BLOCK_H=220;   // AVG_BLOCK_H seeds the very first jump into an unmeasured region (e.g. restoring a saved scroll position deep in a large file before anything has been measured); self-corrects every render
+const WIN_BUFFER=15;   // sentences kept rendered above/below the anchor — generous overscan so ordinary scrolling and arrow-key navigation between adjacent blocks never has to wait on a rebuild
+function computeWindow(anchor){
+  if(!DOC.length){ winLo=0; winHi=0; return; }
+  if(anchor==null||anchor<0) anchor=winLo;   // no valid anchor (nothing selected/focused yet) → keep whatever range was already showing
+  anchor=Math.max(0,Math.min(anchor,DOC.length-1));
+  winLo=Math.max(0,anchor-WIN_BUFFER); winHi=Math.min(DOC.length,anchor+WIN_BUFFER+1);
+}
+// Bring sentence i into the rendered window — recentring + a synchronous re-render if it isn't already there —
+// and return its (now-existing) .sblock. The shared primitive every "jump to a sentence that might be anywhere
+// in the document, not just near whatever's currently on screen" caller needs.
+function scrollToSentence(i){
+  if(i==null||i<0||i>=DOC.length) return null;
+  const host=document.getElementById("doc"); if(!host) return null;
+  let b=host.querySelector(`.sblock[data-i="${i}"]`);
+  if(!b){ computeWindow(i); renderDoc(); b=host.querySelector(`.sblock[data-i="${i}"]`); }
+  return b;
+}
+/* the per-sentence body renderDoc()'s main loop used to run inline — pulled out so a future windowed/
+   incremental render (only the sentences near the viewport) can build ONE block without re-running the
+   once-per-render setup above it. ctx carries the few things that are per-render state rather than true
+   globals: NUM/SNUM (boundNumbers()/sentNumbers(), computed once per render) and sheet/newSheet (the PAGED
+   .docsheet a block gets appended into, which can change mid-loop when a `# newdoc` opens a new one — see
+   the reassignment below). Everything else this body reads (idW, show, PAGED, DOC itself, …) is already
+   true module-level state, unaffected by which sentence is being built. Zero behaviour change from the
+   original inline loop — same statements, same order, just addressed through ctx instead of a closure. */
+function buildBlock(i,ctx){ const s=DOC[i];
+    if(PAGED && i>0 && hasNewdoc(s)) ctx.sheet=ctx.newSheet();   // a new document gets a sheet of its own (never for i=0, which would leave an empty first sheet)
     /* THE HEADINGS BELONG TO THE BLOCK THEY OPEN, and are built here to be appended INSIDE it below. They spent a
        while as .bsec section wrappers around the run of blocks they named, which is what a sticky heading needs (a
        sticky box pins within its containing block, so the run had to BE a box). The pinning is gone — the
@@ -997,16 +990,30 @@ function renderDoc(){
        the sections existed, so the extra nesting went too: a boundary is a fact about ONE sentence, the sentence
        that starts the document or paragraph, and it now reads as part of that sentence's block again. */
     const heads=[];
-    if(hasNewdoc(s)) heads.push(boundHeading(s,"newdoc",NEWDOC_MARK,"document",NUM[i].newdoc));   // a `# newdoc` ALWAYS gets its heading; boundNumbers decides only whether a § goes in front of the title
-    if(hasNewpar(s)) heads.push(boundHeading(s,"newpar",NEWPAR_MARK,"paragraph",NUM[i].newpar));   // document first, paragraph under it — the order the two rows stack in
+    if(hasNewdoc(s)) heads.push(boundHeading(s,"newdoc",NEWDOC_MARK,"document",ctx.NUM[i].newdoc));   // a `# newdoc` ALWAYS gets its heading; boundNumbers decides only whether a § goes in front of the title
+    if(hasNewpar(s)) heads.push(boundHeading(s,"newpar",NEWPAR_MARK,"paragraph",ctx.NUM[i].newpar));   // document first, paragraph under it — the order the two rows stack in
     const b=document.createElement("div"); b.className="sblock"+(curBlock()===i?" sel-block":"")+(show.grids?"":" no-grid")+(hasNewpar(s)?" nd-par":"")+(hasNewdoc(s)?" nd-doc":""); b.dataset.i=i;   // curBlock(), not sel.s: the focused-block tint marks the sentence being READ, which scrolling moves on its own without disturbing the selection (see the CURBLOCK note in js/core/prefs.js)
     b.dir=sentRTL(s)?"rtl":"ltr";   // RTL sentence → mirror the whole block: number, controls, grid columns
     const head=document.createElement("div"); head.className="shead";
-    const num=document.createElement("span"); num.className="snum"; num.textContent=SNUM[i]; num.style.width=idW+"px";   // item 4: numbered within its paragraph / document / the file — see sentNumbers.   // match the grid ID column → diagram aligns with Form
-    const sid=document.createElement("input"); sid.className="sid-in mono"; sid.value=s.sid; sid.title="sent_id"; sid.setAttribute("aria-label","sent_id");
-    sizeSid(sid);
-    sid.addEventListener("input",()=>sizeSid(sid));
-    sid.addEventListener("change",()=>{ if(sid.value.trim()&&sid.value.trim()!==s.sid)pushUndo(); s.sid=sid.value.trim()||s.sid; sizeSid(sid);});
+    const num=document.createElement("span"); num.className="snum"; num.textContent=ctx.SNUM[i]; num.style.width=idW+"px";   // item 4: numbered within its paragraph / document / the file — see sentNumbers.   // match the grid ID column → diagram aligns with Form
+    // a plain contenteditable span, not an <input> — an <input>'s box model is only PART of what
+    // WebKit renders: it's a replaced element whose actual text sits in an internal user-agent
+    // shadow DOM (its own "text field content" div), which -webkit-appearance:none resets the
+    // outer chrome of but not always the inner one, and which was still showing uneven insets for
+    // a long value. A contenteditable span has no such hidden layer — what app.css says about its
+    // box IS the whole box — and it needs no JS width measurement at all (sizeSid, gone): a flex
+    // item with no explicit width simply sizes to its own text, exactly like .bm-id already does
+    // (js/core/document.js's boundHeading, the same contenteditable-id pattern this now mirrors).
+    const sid=document.createElement("span"); sid.className="sid-in mono"; sid.textContent=s.sid; sid.title="sent_id";
+    sid.setAttribute("contenteditable","plaintext-only"); sid.setAttribute("role","textbox"); sid.setAttribute("aria-label","sent_id"); sid.spellcheck=false;
+    sid.addEventListener("mousedown",e=>e.stopPropagation()); sid.addEventListener("click",e=>e.stopPropagation());   // the block's own click handler deselects on empty space; this field is not empty space (same reason .bm-id stops these two — js/core/document.js's boundHeading)
+    let sidOrig=s.sid;
+    sid.addEventListener("focus",()=>{ sidOrig=s.sid; });
+    sid.addEventListener("keydown",e=>{ e.stopPropagation();   // a contenteditable isn't INPUT/SELECT/TEXTAREA → keep the doc nav handler off it
+      if(e.key==="Enter"){ e.preventDefault(); sid.blur(); }
+      else if(e.key==="Escape"){ e.preventDefault(); sid.textContent=sidOrig; sid.blur(); } });
+    sid.addEventListener("blur",()=>{ const v=(sid.textContent||"").replace(/\s+/g," ").trim();
+      if(v&&v!==s.sid)pushUndo(i); s.sid=v||s.sid; sid.textContent=s.sid; });
     // editable sentence text (# text): commit on blur/Enter re-tokenises or re-parses the sentence (Item 4).
     // Item 3: under a SCRIPT orthography the top line shows the sentence in that script (read-only) and this
     // editable original moves DOWN into the transliteration slot (mirroring the per-token original-in-row rule).
@@ -1088,10 +1095,10 @@ function renderDoc(){
     urlBtn.addEventListener("keydown",e=>{ if(e.key==="Enter"||e.key===" "){ e.preventDefault(); editURL(i,urlBtn); } });
     head.appendChild(num); head.appendChild(txt); head.appendChild(urlBtn); head.appendChild(sid); head.appendChild(ctrl);   // item 6: number stays first (left margin); the URL link sits in flow just BEFORE the sentence ID
     head.addEventListener("contextmenu",e=>{ if(e.target===sid)return; e.preventDefault(); sentMenu(e.clientX,e.clientY,i); });
-    b.addEventListener("click",e=>{ if(e.target.closest(".sctrl")||e.target.closest("input")||e.target.closest("select")||e.target.closest(".gridbox"))return;
+    b.addEventListener("click",e=>{ if(e.target.closest(".sctrl")||e.target.closest("input")||e.target.closest("select")||e.target.closest(".gridbox")||e.target.closest(".sid-in"))return;   // .sid-in: a contenteditable span, not an <input> — its own mousedown/click stopPropagation already keeps events from reaching here (see buildBlock), but excluded here too for anything that reaches this handler by another path
       if(e.target.closest(".node,.tok-group,.arc,.edge-g,.oline,.brk,.bwtok,.bwbr,.mwt-form"))return;   // a token/bracket/MWT-tie handles its own selection
       pick(i,0,false); });   // clicked empty diagram space → deselect any node
-    b.addEventListener("contextmenu",e=>{ if(e.target.closest(".gridbox")||e.target.closest(".sctrl")||e.target.closest("input")||e.target.closest("select"))return;   // grid/controls have their own menus
+    b.addEventListener("contextmenu",e=>{ if(e.target.closest(".gridbox")||e.target.closest(".sctrl")||e.target.closest("input")||e.target.closest("select")||e.target.closest(".sid-in"))return;   // grid/controls have their own menus; .sid-in gets the browser's own contenteditable context menu, same as an <input> would have
       if(e.target.closest(".lbl,.orel,.tok-pos,.node-cat,.opos,.node,.tok-group,.oline,.bwtok"))return;   // labels + nodes handled at the doc level
       e.preventDefault(); sentMenu(e.clientX,e.clientY,i); });   // right-click anywhere else in the block → the block menu
     // (the boundary's own heading was built and appended to its section ABOVE this block — see the sectioning
@@ -1117,11 +1124,85 @@ function renderDoc(){
     if(TRANS_LANGS.size) b.appendChild(renderBlockTrans(i));   // item 13: a field per enabled translation language, just above the diagram
     if(show.graphs) b.appendChild(renderSentence(i));
     if(show.grids) b.appendChild(renderGrid(i));
-    sheet.appendChild(b);
-  });
-  const addWrap=document.createElement("div"); addWrap.className="addsent";
-  const addBtn=document.createElement("button"); addBtn.innerHTML='<span class="sfi" style="--m:var(--sf-add)"></span>Add sentence'; addBtn.onclick=()=>insertAt(DOC.length);
-  addWrap.appendChild(addBtn); sheet.appendChild(addWrap);   // inside the LAST sheet, so the button keeps the measure rather than straying into the page margin — and NOT inside a boundary section, which would hang the button off the last paragraph rather than off the page
+    ctx.sheet.appendChild(b);
+  return b; }
+
+function renderDoc(){
+  if(typeof refreshFontStacks==="function") refreshFontStacks();   // diagram-core.js: re-reads #doc's LIVE --token-font/--mono-font (a scheme-scoped override, e.g. Ranjana, may have changed it since the last render) into LIVE_TOKEN_STACK/LIVE_MONO_STACK and every measurement font string derived from them (WORD_F, GLOSS_F, …), ONCE per render rather than per meas() call. Must run before computeColW() (→ marginNumWidth) and before anything below that measures token width, or this render would still lay out against the PREVIOUS scheme's metrics. Guarded (as document.js already guards TOKEN_STACK-dependent reads elsewhere) for any harness that renders before diagram-core.js has loaded
+  msegFlagDoc();   // what an MWT grouping implies about its members — the MSeg tier's decorative continuation mark, and in Sanskrit a featureless non-final member's Compound=Yes. A dozen scattered operations move those ranges (grouping, ungrouping, splitting, flattening, inserting/deleting a token, an auto-regroup after a parse), so deriving it HERE, once, at the single point they all funnel through, is what keeps it from ever going stale; it's idempotent and cheap, and marks nothing dirty of its own accord — see msegFlagSent
+  computeWindow(curBlock());   // recentre the rendered window on whatever sentence the reader is on — see the virtualization note above buildBlock. MUST run before computeColW(): that scans the CURRENT window (js/grid/grid.js), so the window has to be known first
+  computeColW();
+  const host=document.getElementById("doc"); host.textContent="";
+  host.lang=bcp47Tag();   // BCP-47 tag → inherits to every token/diagram/grid text so the browser picks locale-correct Cyrillic/Han glyphs (locl + system-font region); re-run on every language/script change
+  host.classList.toggle("ortho-script", TRANSLIT_SCHEME==="zhuyin");   // a non-Latin DISPLAYED transliteration (Zhuyin) in the row → drop the romanisation italics
+  host.classList.toggle("script-form", typeof iastFormEdit==="function"&&iastFormEdit());   // Sanskrit under a real script → every token FORM on screen is a derived rendering of the stored IAST, not an editable field, so it takes the pointing hand (app.css). The MWT/goeswith glyphs set the same cursor inline via formCursor(), being SVG text with their own click contract
+  host.classList.toggle("no-relcolour", !show.colour);   // "Relation colours" off → --tie-hue swaps --c-other for --ink, so POS tags/bracket ties go monochrome too, not just the deprel labels relColor() already gates
+  /* Item 3 — PAGED LAYOUT. In paged mode the blocks are grouped into .docsheet containers and a `# newdoc` ENDS one
+     and starts the next, which is what makes a document boundary read as a document boundary rather than as a
+     slightly bigger gap. Unpaged, `host` IS the container and every block is appended straight to it, exactly as
+     before. Nothing downstream had to change: every later pass selects `#doc .sblock` (a descendant selector), so
+     the extra level of nesting is invisible to the alignment/cap/selection passes below.
+     The first sheet is created HERE, above AVAILW, and not lazily in the loop — see item 9 immediately below. */
+  let sheet=host;
+  const newSheet=()=>{ if(!PAGED) return host; const d=document.createElement("div"); d.className="docsheet"; host.appendChild(d); return d; };
+  if(PAGED) sheet=newSheet();
+  /* Item: BOUNDARY SECTIONS. A `# newdoc`/`# newpar` heading is sticky (see .bmark in app.css), and a sticky box
+     pins only for as long as its CONTAINING BLOCK is on screen — so the run of sentences a heading dominates has
+     to be a real element, not merely an interval the renderer knows about. `docSec`/`parSec` are the two open
+     sections: a document boundary closes both and opens a document section, a paragraph boundary closes and
+     reopens the paragraph section INSIDE whichever document section is current (or in the sheet, for a file
+     whose paragraphs precede its first `# newdoc`), and every block is appended to the innermost open one. That
+     IS the dominance rule the headings need — a document heading reaches to the next document, a paragraph
+     heading to the next paragraph or document, whichever comes first.
+     Nothing downstream had to change, for the same reason paged mode's sheets cost nothing: every later pass
+     selects `#doc .sblock`, a DESCENDANT selector. */
+  const NUM=boundNumbers(), SNUM=sentNumbers();   // recomputed here, every render — see boundNumbers on why nothing is stored
+  // Item 9: the width a diagram row may use is the width of the box it will actually be laid out in — the SHEET in
+  // paged view, `#doc` unpaged. Measuring `#doc` in both left every diagram sized to the full window: at 1500px it
+  // decided a row fitted unwrapped when the 900px sheet had no room for it, and a wrapped row broke at the wrong
+  // column. An EMPTY sheet measures correctly (its width comes from max-width + auto margins, not its content), and
+  // renderDoc re-runs on every paged/unpaged switch (setPageMode → preserveScroll(renderDoc)), so the two modes
+  // can never disagree about it.
+  AVAILW=Math.max(240, sheet.clientWidth-52);
+  // Item 1: the cap must equal the VISIBLE viewport height for content — from just below the options bar (or the
+  // titlebar when the options bar is hidden) down to just above the status bar. Only the TOP is occluded: the doc
+  // scrolls UNDER the overlaid titlebar + options bar, which the doc's top padding (--tbH + --vbH) exactly clears.
+  // The status bar is NOT overlaid — it is an in-flow sibling BELOW the doc, so the doc's border-box bottom already
+  // coincides with the status-bar top (host.clientHeight already stops there). The doc's 44px bottom padding is only
+  // trailing scroll room, NOT an occluded band, so it must NOT be subtracted — doing so left the cap 44px too short
+  // (dead space below a tall block). Subtract ONLY the top inset: dh = clientHeight − paddingTop = the exact gap from
+  // the options-bar bottom to the status-bar top (= innerHeight − titlebarH − (options bar shown? optionsBarH : 0) −
+  // statusbarH). Recomputed every render, so showing/hiding the options bar (which changes --vbH → this top padding,
+  // and re-renders) re-tightens the cap.
+  const hcs=getComputedStyle(host), padTop=parseFloat(hcs.paddingTop||0);
+  const dh=Math.max(160, host.clientHeight-padTop), rs=document.documentElement.style; AVAILH=dh;   // caps are relative to the app's VISIBLE document viewport (options-bar bottom → status-bar top), not the browser and not the occluded top padding
+  // #doc isn't zoomed, so dh is REAL px; but .diagram/.gwrap live inside .sblock{zoom:var(--fs)}, which multiplies any max-height by FS. Divide the cap by FS so the VISUAL cap stays a fixed fraction of the viewport at every zoom level (recomputed here on every render → refreshed on each zoom, since setFS re-runs renderDoc). At FS=1 this is a no-op.
+  rs.setProperty("--cap-dia",Math.round(dh*0.6/FS)+"px"); rs.setProperty("--cap-grid",Math.round(dh*0.4/FS)+"px");
+  /* the --bm-stick engine probe was published here; the headings do not pin any more, so there is no inset to measure or hand to CSS. stickyTopFactor() survives below, unused but documented — it records what each engine counts into a sticky view rectangle, which is not obvious and was expensive to establish. */
+
+  const ctx={sheet,NUM,SNUM,newSheet};
+  // top spacer FIRST — stands in for [0,winLo), sized below once the window's real blocks have been measured.
+  // Inserted ONLY when there's something above the window to stand in for (winLo>0): app.css's
+  // `.doc.paged > .docsheet:first-child{margin-top:14px}` (the gap that keeps the very first sheet's rounded
+  // corner clear of the toolbar) depends on the first REAL sheet actually being #doc's first child — an
+  // unconditional spacer here would sit in front of it and silently break that rule at the true top of the
+  // document, which is the one state (winLo===0) where the rule's effect is visible at all.
+  const topSpacer=document.createElement("div"); topSpacer.className="winspacer winspacer-before"; topSpacer.setAttribute("aria-hidden","true");
+  if(winLo>0) host.insertBefore(topSpacer,host.firstChild);
+  for(let i=winLo;i<winHi;i++) buildBlock(i,ctx);   // ONLY the windowed range — see the virtualization note above buildBlock
+  const _rendered=host.querySelectorAll(".sblock");
+  if(_rendered.length){ let _h=0; _rendered.forEach(b=>_h+=b.getBoundingClientRect().height); AVG_BLOCK_H=_h/_rendered.length; }   // remeasure every render — blocks vary a lot in height (a 3-token sentence vs. a wrapped Sanskrit verse with translations), so this is only ever an estimate (see the virtualization note above)
+  topSpacer.style.height=Math.round(winLo*AVG_BLOCK_H)+"px";
+  if(winHi===DOC.length){   // the window reaches the true end of the document → the reader can actually add a sentence after the last one
+    const addWrap=document.createElement("div"); addWrap.className="addsent";
+    const addBtn=document.createElement("button"); addBtn.innerHTML='<span class="sfi" style="--m:var(--sf-add)"></span>Add sentence'; addBtn.onclick=()=>insertAt(DOC.length);
+    addWrap.appendChild(addBtn); ctx.sheet.appendChild(addWrap);   // inside the LAST sheet (ctx.sheet, not the outer `sheet` — buildBlock may have reassigned it mid-loop on a `# newdoc`), so the button keeps the measure rather than straying into the page margin — and NOT inside a boundary section, which would hang the button off the last paragraph rather than off the page
+  }
+  // bottom spacer — stands in for [winHi,DOC.length); a plain sibling of the sheets (not appended inside the
+  // last one), so it never has to reproduce a partial sheet's page-margin chrome for content that isn't rendered
+  const bottomSpacer=document.createElement("div"); bottomSpacer.className="winspacer winspacer-after"; bottomSpacer.setAttribute("aria-hidden","true");
+  bottomSpacer.style.height=Math.round((DOC.length-winHi)*AVG_BLOCK_H)+"px";
+  host.appendChild(bottomSpacer);
   // …and the one block per sheet whose bottom hairline the sheet's own edge replaces. Marked here rather than
   // matched in CSS because a block now sits inside its boundary SECTION: `.docsheet > .sblock:last-child` no
   // longer names anything, and the obvious rewrite (`.sblock:last-child`) would fire on the last block of every
