@@ -1,0 +1,73 @@
+/*@module styles/fonts.css*/
+  /* ── CORE Noto faces, bundled (SIL Open Font License 1.1, https://openfontlicense.org). Vendored
+     under web/fonts/ from the Google Fonts OFL mirror (https://github.com/google/fonts).
+
+     Only these three ship: Noto Sans regular + italic and Noto Sans Mono, ~5 MB between them, covering
+     Latin/Greek/Cyrillic — which is what the interface itself renders in, so the app looks like itself
+     the moment it opens, with or without a network.
+
+     Every OTHER script's face is fetched the first time a document needs one, and only onto a machine
+     that can't already draw the script — see js/lang/fontload.js for the when and app/fonts.py for the
+     how. It is a big saving to make: the full set of 171 Noto Sans <Script> families ran to 44 MB, over
+     nine tenths of the app's whole download, to cover scripts most users never open. macOS already
+     draws many of them (Devanagari Sangam MN, Thonburi, Kailasa, …), so most users fetch nothing at all.
+
+     The CJK families were never vendored either (a further ~60 MB); CJK renders through the macOS
+     system fonts appended to the stacks (PingFang SC/TC/HK, Hiragino Sans / Hiragino Kaku Gothic ProN,
+     Apple SD Gothic Neo), which the lang attribute set in renderDoc steers to locale-correct Han glyphs
+     (zh-Hans / zh-Hant / ja / ko).
+
+     The font STACKS (TOKEN_STACK / MONO_STACK in diagram-core.js) still name every Noto Sans <Script>
+     family: a name with no face behind it simply falls through to the next candidate, and becomes live
+     the moment fontload.js injects the downloaded face under that same name. */
+  @font-face{font-family:"Noto Sans";font-style:italic;font-weight:100 900;font-display:swap;src:url("../fonts/notosans-italic.ttf") format("truetype-variations")}
+  @font-face{font-family:"Noto Sans";font-style:normal;font-weight:100 900;font-display:swap;src:url("../fonts/notosans.ttf") format("truetype-variations")}
+  @font-face{font-family:"Noto Sans Mono";font-style:normal;font-weight:100 900;font-display:swap;src:url("../fonts/notosansmono.ttf") format("truetype-variations")}
+
+  /* A FOURTH core face, bundled for a different reason than the three above: Nithya Ranjana DU
+     (github.com/EkType/Nithya-Ranjana, SIL OFL 1.1 — OFL.txt vendored verbatim reasoning applies here
+     too) draws the Ranjana script — a Newar Buddhist-manuscript script with real Sanskrit-writing
+     history but NO Unicode block of its own — by reusing plain Devanagari codepoints as its cmap
+     (checked with fontTools; aksharamukha's "Ranjana" transliteration target emits the SAME Devanagari
+     codepoints its Devanagari target does). That is exactly what breaks the on-demand model the other
+     171 Noto Sans <Script> families use: fontload.js/app/fonts.py fetch a NAMED family from the Google
+     Fonts CSS API on first use, and Nithya Ranjana isn't on Google Fonts (queried — 400 "Font family
+     not found"), so a shipped app could never fetch it at runtime. At ~350 KB it costs nothing like
+     the 44 MB the on-demand split was built to avoid, so it ships unconditionally instead — see
+     CORE_FONTS in packaging/make_bootstrap_app.sh + make_portable.sh, which must keep this file when
+     they strip web/fonts/ down to the core set. Selected only when the Sanskrit orthography scheme is
+     "Ranjana" — see mac-tokens.css's [data-scheme="Ranjana"] override and js/lang/translit.js's
+     syncSchemeAttr(), which is what sets that attribute; without it, Ranjana-scheme text would silently
+     render as plain Devanagari (same codepoints, wrong font) via the generic TOKEN_STACK/MONO_STACK. */
+  @font-face{font-family:"Nithya Ranjana";font-style:normal;font-weight:400;font-display:swap;src:url("../fonts/nithyaranjana.otf") format("opentype")}
+
+  /* Ranjana needs a SCHEME-scoped font override, not just a stack entry: Nithya Ranjana's cmap reuses
+     plain Devanagari codepoints (see the @font-face comment above), so every OTHER Devanagari-script
+     text on screen carries the exact same codepoints and must NOT pick up this face — the browser's
+     ordinary "first family in the stack with a glyph" matching has no way to tell "this text is meant
+     to display as Ranjana" from "this text is meant to display as Devanagari", because that's a choice
+     the user made (the Script pill), not something the codepoints themselves encode.
+
+     This does NOT live here as a CSS rule — a `[data-scheme="Ranjana"]{--token-font:"Nithya Ranjana",
+     var(--token-font)}` self-reference was the first thing tried, and it looked right (a MORE SPECIFIC
+     rule extending the :root value), but it's cyclic in practice: verified with a minimal repro under
+     headless Chrome (CDP) that this exact pattern — a custom property's own override declaration
+     containing var() of ITSELF — resolves to invalid-at-computed-value-time (font-family fell back to
+     the Times default) regardless of which element carries the override (#doc, <body>, even <html>
+     alongside :root's own declaration). Chrome does not do the "resolve var() against what this
+     element would have inherited had this declaration not existed" resolution a human reads into that
+     syntax; it flags the property cyclic outright. So the actual override lives in JS instead, in
+     js/lang/translit.js's syncSchemeAttr() (called from loadOrthoSchemes() and orPick(), the two
+     places ORTHO_SCHEME is assigned): it sets #doc.dataset.scheme to the live ORTHO_SCHEME — mirroring
+     the ORTHO_SCHEME==="Grantha"/"Javanese"/"Balinese"/"Kawi"/"ZanabazarSquare" → .stext-stacked class-on-render pattern
+     document.js already uses for stacked-diacritic line-height — AND, only for "Ranjana", sets an
+     INLINE --token-font on <html> (document.documentElement) built by string-concatenating "Nithya
+     Ranjana" onto TOKEN_STACK (the diagram-core.js JS constant with the SAME family list as this file's
+     --token-font, so it can't drift from it silently — any future edit to one is a visible diff against
+     the other, not a hidden divergence). An inline style always wins the cascade for that element/
+     property without needing a var() self-reference at all, so there is no cycle to trigger.
+     <html>, not #doc: the override has to reach every place token-font text can show a document form in
+     the picked script, and that isn't only the #doc diagram — the "Definitions of …"/"Readings of …"
+     flyout and the lemma-editor prompt title are popups appended straight to <body>, siblings of #doc
+     rather than descendants of it. <html> is the one ancestor common to both, and #doc still resolves
+     the identical inherited value it always did (see syncSchemeAttr() in js/lang/translit.js). */

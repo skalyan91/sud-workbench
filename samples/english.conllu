@@ -1,0 +1,105 @@
+# sent_id = s1
+# text = The conventions can vary.
+1	The	the	DET	DT	Definite=Def|PronType=Art	2	det	_	_
+2	conventions	convention	NOUN	NNS	Number=Plur	3	subj	_	_
+3	can	can	AUX	MD	VerbForm=Fin	0	root	_	_
+4	vary	vary	VERB	VB	VerbForm=Inf	3	comp:aux	_	_
+5	.	.	PUNCT	.	_	3	punct	_	_
+
+# sent_id = s2
+# text = I saw a man yesterday who was tall
+1	I	I	PRON	PRP	Case=Nom|Number=Sing|Person=1	2	subj	_	_
+2	saw	see	VERB	VBD	Tense=Past	0	root	_	_
+3	a	a	DET	DT	Definite=Ind|PronType=Art	4	det	_	_
+4	man	man	NOUN	NN	Number=Sing	2	comp:obj	_	_
+5	yesterday	yesterday	ADV	RB	_	2	mod	_	_
+6	who	who	PRON	WP	PronType=Rel	7	subj	_	_
+7	was	be	AUX	VBD	Mood=Ind|Number=Sing|Person=3|Tense=Past|VerbForm=Fin	4	mod@relcl	_	_
+8	tall	tall	ADJ	JJ	Degree=Pos	7	comp:pred	_	_
+
+# sent_id = s3
+# text = Fourscore and seven years ago, our fathers brought forth upon this continent a new nation, conceived in liberty, and dedicated to the pursuit of happiness.
+1	Fourscore	Fourscore	NUM	NNP	Number=Plur|NumType=Card	4	mod	_	_
+2	and	and	CCONJ	CC	_	3	cc	_	_
+3	seven	seven	NUM	CD	NumForm=Word|NumType=Card	1	conj	_	_
+4	years	year	NOUN	NNS	Number=Plur	5	comp:obj	_	_
+5	ago	ago	ADV	RB	_	9	mod	_	SpaceAfter=No
+6	,	,	PUNCT	,	_	5	punct	_	_
+7	our	our	PRON	PRP$	Case=Gen|Number=Plur|Person=1|Poss=Yes|PronType=Prs	8	det	_	_
+8	fathers	father	NOUN	NNS	Number=Plur	9	subj	_	_
+9	brought	bring	VERB	VBD	Mood=Ind|Number=Plur|Person=3|Tense=Past|VerbForm=Fin	0	root	_	_
+10	forth	forth	ADV	RB	_	9	mod	_	_
+11	upon	upon	ADP	IN	_	9	comp:obl	_	_
+12	this	this	DET	DT	Number=Sing|PronType=Dem	13	det	_	_
+13	continent	continent	NOUN	NN	Number=Sing	11	comp:obj	_	_
+14	a	a	DET	DT	Definite=Ind|PronType=Art	16	det	_	_
+15	new	new	ADJ	JJ	Degree=Pos	16	mod	_	_
+16	nation	nation	NOUN	NN	Number=Sing	9	comp:obj	_	_
+17	,	,	PUNCT	,	_	16	punct	_	_
+18	conceived	conceive	VERB	JJ	Tense=Past|VerbForm=Part|Voice=Pass	16	mod	_	_
+19	in	in	ADP	IN	_	18	comp:obl	_	_
+20	liberty	liberty	NOUN	NN	Number=Sing	19	comp:obj	_	_
+21	,	,	PUNCT	,	_	18	punct	_	_
+22	and	and	CCONJ	CC	_	23	cc	_	_
+23	dedicated	dedicated	ADJ	VBD	Degree=Pos	18	conj	_	_
+24	to	to	ADP	IN	Shared=No	23	comp:obl	_	_
+25	the	the	DET	DT	Definite=Def|PronType=Art	26	det	_	_
+26	pursuit	pursuit	NOUN	NN	Number=Sing	24	comp:obj	_	_
+27	of	of	ADP	IN	_	26	comp:obl	_	_
+28	happiness	happiness	NOUN	NN	Number=Sing	27	comp:obj	_	_
+29	.	.	PUNCT	.	_	9	punct	_	_
+
+# sent_id = s4
+# text = The old man and woman died.
+1	The	the	DET	DT	Definite=Def|PronType=Art	3	det	_	_
+2	old	old	ADJ	JJ	Degree=Pos|Shared=Yes	3	mod	_	_
+3	man	man	NOUN	NN	Number=Sing	6	subj	_	_
+4	and	and	CCONJ	CC	_	5	cc	_	_
+5	woman	woman	NOUN	NN	Number=Sing	3	conj:coord	_	_
+6	died	die	VERB	VBD	Mood=Ind|Number=Sing|Person=3|Tense=Past|VerbForm=Fin	0	root	_	SpaceAfter=No
+7	.	.	PUNCT	.	_	6	punct	_	_
+
+# sent_id = s5
+# text = He wants to go.
+1	He	he	PRON	PRP	Case=Nom|Gender=Masc|Number=Sing|Person=3|PronType=Prs	2	subj	_	_
+2	wants	want	VERB	VBZ	Mood=Ind|Number=Sing|Person=3|Tense=Pres|VerbForm=Fin	0	root	_	_
+3	to	to	PART	TO	_	2	comp:obl	_	_
+4	go	go	VERB	VB	Subj=SubjRaising|VerbForm=Inf	3	comp:obj	_	_
+5	.	.	PUNCT	.	_	2	punct	_	_
+
+# sent_id = s6
+# text = It has a certan je ne sais quoi.
+1	It	it	PRON	PRP	Case=Nom|Gender=Neut|Number=Sing|Person=3|PronType=Prs	2	subj	_	_
+2	has	have	VERB	VBZ	Mood=Ind|Number=Sing|Person=3|Tense=Pres|VerbForm=Fin	0	root	_	_
+3	a	a	DET	DT	Definite=Ind|PronType=Art	7	det	_	_
+4	certan	certan	ADJ	NN	Number=Sing|Typo=Yes	7	mod	_	CorrectForm=certain
+5	je	je	PRON	NN	Foreign=Yes|Number=Sing	7	subj	_	_
+6	ne	ne	ADV	VBZ	Foreign=Yes	7	mod	_	_
+7	sais	sais	VERB	NN	Foreign=Yes|VerbForm=Inf|ExtPos=NOUN	2	comp:obj	_	_
+8	quoi	quoi	NOUN	NN	Foreign=Yes|Number=Sing	7	comp:obj	_	_
+9	.	.	PUNCT	.	_	2	punct	_	_
+
+# sent_id = s7
+# text = He went "Wow, I never knew that!".
+1	He	he	PRON	PRP	Case=Nom|Gender=Masc|Number=Sing|Person=3|PronType=Prs	2	subj	_	_
+2	went	go	VERB	VBD	Mood=Ind|Number=Sing|Person=3|Tense=Past|VerbForm=Fin	0	root	_	_
+3	"	"	PUNCT	``	_	8	punct	_	SpaceAfter=No
+4	Wow	wow	INTJ	UH	_	8	discourse	_	SpaceAfter=No
+5	,	,	PUNCT	,	_	4	punct	_	_
+6	I	I	PRON	PRP	Case=Nom|Number=Sing|Person=1|PronType=Prs	8	subj	_	_
+7	never	never	ADV	RB	PronType=Neg	8	mod	_	_
+8	knew	know	VERB	VBD	Mood=Ind|Number=Sing|Person=1|Tense=Past|VerbForm=Fin	2	comp:obj	_	Reported=Yes
+9	that	that	SCONJ	IN	_	8	comp:obj	_	SpaceAfter=No
+10	!	!	PUNCT	.	_	8	punct	_	SpaceAfter=No
+11	"	"	PUNCT	''	_	8	punct	_	SpaceAfter=No
+12	.	.	PUNCT	.	_	2	punct	_	_
+
+# sent_id = s8
+# text = It's hard to understand.
+1-2	It's	_	_	_	_	_	_	_	_
+1	It	it	PRON	PRP	Case=Nom|Gender=Neut|Number=Sing|Person=3|PronType=Prs	2	subj@expl	_	_
+2	's	be	AUX	VBZ	Mood=Ind|Number=Sing|Person=3|Tense=Pres|VerbForm=Fin	0	root	_	_
+3	hard	hard	ADJ	JJ	Degree=Pos	2	comp:pred	_	_
+4	to	to	PART	TO	_	2	subj	_	_
+5	understand	understand	VERB	VB	Subj=Generic|VerbForm=Inf	4	comp:obj	_	SpaceAfter=No
+6	.	.	PUNCT	.	_	2	punct	_	_

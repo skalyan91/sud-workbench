@@ -1,0 +1,7 @@
+# sent_id = s4
+# text = ذهب الولد للمدرسة
+1	ذهب	_	VERB	VP-A-3MS--	Aspect=Perf|Gender=Masc|Number=Sing|Person=3|Voice=Act	0	root	_	_
+2	الولد	_	NOUN	N------S1D	Case=Nom|Definite=Def|Number=Sing	1	subj	_	_
+3-4	للمدرسة	_	_	_	_	_	_	_	_
+3	ل	_	ADP	P---------	AdpType=Prep	1	comp:obl	_	_
+4	لمدرسة	_	NOUN	N------S2D	Case=Gen|Definite=Cons|Number=Sing	3	comp:obj	_	_

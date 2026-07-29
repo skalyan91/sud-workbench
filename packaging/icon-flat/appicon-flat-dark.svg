@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 100 100">
+<defs>
+<linearGradient id="bg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#1C2732"/><stop offset="1" stop-color="#1C2732"/></linearGradient>
+<linearGradient id="tentGrad" gradientUnits="userSpaceOnUse" x1="15" y1="0" x2="135" y2="0"><stop offset="0" stop-color="#b88735"/><stop offset="0.30" stop-color="#b88735"/><stop offset="0.37" stop-color="#cd7468"/><stop offset="1" stop-color="#cd7468"/></linearGradient>
+<symbol id="halo" viewBox="-7 -19 164 164" preserveAspectRatio="xMidYMid meet">
+  <g fill="none" stroke="#1B140C" stroke-linecap="round" stroke-linejoin="round" stroke-width="35">
+    <path d="M 15 38.5 L 55 27.5"/><path d="M 55 27.5 L 135 38.5"/>
+    <path d="M 135 87.5 L 95 98.5"/>
+  </g>
+  <g fill="#1B140C"><circle cx="15" cy="63" r="17.5"/><circle cx="55" cy="3" r="17.5"/><circle cx="95" cy="123" r="17.5"/><circle cx="135" cy="63" r="17.5"/></g>
+</symbol>
+<symbol id="mkd" viewBox="-7 -19 164 164" preserveAspectRatio="xMidYMid meet">
+  <g fill="none" stroke-width="14" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M 15 38.5 L 55 27.5" stroke="url(#tentGrad)"/><path d="M 55 27.5 L 135 38.5" stroke="url(#tentGrad)"/>
+    <path d="M 135 87.5 L 95 98.5" stroke="#00756f"/>
+  </g>
+</symbol>
+<symbol id="nodes" viewBox="-7 -19 164 164" preserveAspectRatio="xMidYMid meet">
+  <g fill="#FFFFFF"><circle cx="15" cy="63" r="7"/><circle cx="55" cy="3" r="7"/><circle cx="95" cy="123" r="7"/><circle cx="135" cy="63" r="7"/></g>
+</symbol>
+</defs>
+<rect x="0" y="0" width="100" height="100" fill="url(#bg)"/>
+<g transform="matrix(1.24430 0 0 1.24430 -11.48241 -12.01952)">
+<use href="#halo" x="18.57" y="18.57" width="62.87" height="62.87" opacity="1"/>
+<use href="#mkd" x="18.57" y="18.57" width="62.87" height="62.87" opacity="1"/>
+<use href="#nodes" x="18.57" y="18.57" width="62.87" height="62.87" opacity="0.737"/>
+</g>
+</svg>

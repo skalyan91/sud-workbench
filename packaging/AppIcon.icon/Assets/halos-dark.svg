@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 100 100"><defs><symbol id="halo" viewBox="-7 -19 164 164" preserveAspectRatio="xMidYMid meet">
+  <g fill="none" stroke="#1B140C" stroke-linecap="round" stroke-linejoin="round" stroke-width="35">
+    <path d="M 15 38.5 L 55 27.5"/><path d="M 55 27.5 L 135 38.5"/>
+    <path d="M 135 87.5 L 95 98.5"/>
+  </g>
+  <g fill="#1B140C"><circle cx="15" cy="63" r="17.5"/><circle cx="55" cy="3" r="17.5"/><circle cx="95" cy="123" r="17.5"/><circle cx="135" cy="63" r="17.5"/></g>
+</symbol></defs>
+  <use href="#halo" x="18.57" y="18.57" width="62.87" height="62.87"/>
+</svg>

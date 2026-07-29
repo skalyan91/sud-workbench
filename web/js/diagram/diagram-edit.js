@@ -1,0 +1,399 @@
+//@module js/diagram-edit.js
+/* ── diagram editing: drag a node to reorder tokens; drag an edge/arc onto a node to set its head ──
+   Stemma + arcs only for now (other notations get their own patterns later). Tokens and edges already carry
+   data-s / data-tok / data-dep / data-head, so one delegated pointer handler on #doc covers every block. */
+let DDRAG=null, DSUPPRESS=false, DGHOST=null, DCARET=null;
+let DTAP=null;   // item 4: the last plain tap on a token FORM {si,tok,t} — a second one on the same token inside 450 ms is the double-click that opens the lemma editor (see the pointerup tap branch for why this isn't a native "dblclick" listener)
+/* THE ONE WAY IN to the lemma editor from a double-click gesture, so the two gestures that mean it can't
+   drift apart: the DTAP double-tap below (no field open — the taps land on the token itself), and a native
+   dblclick INSIDE the inline form editor once that field IS open (bindLemmaDblclick in
+   js/editing/context-menu.js — an open .nodeedit covers the very glyph DTAP would need to see the second
+   tap on, so without it the commonest double-click in the diagram reached nothing at all).
+   The pick() is what the editor anchors and titles itself from; reflow=false because editLemmaPrompt only
+   measures the token to place its popover and a re-render would move the very thing it just measured. */
+function openLemmaEditor(si,tokId,clickXY,anchor){ pick(si,tokId,false,false); editLemmaPrompt(si,tokId,clickXY,anchor); }   // `anchor`: the row the box should hang under, when the caller knows it (see bindLemmaDblclick) — DTAP, which fires on the form glyph, passes none and gets the form row
+const ddNode=el=>el&&el.closest?el.closest("#doc .node, #doc .tok-group, #doc .bwtok"):null;   // brackets draw each word as a .bwtok — draggable like a stemma node
+const ddEdge=el=>el&&el.closest?el.closest("#doc .edge-g, #doc .arc"):null;
+const DNODE_Q=`.node[data-s="{s}"], .tok-group[data-s="{s}"], .bwtok[data-s="{s}"]`;   // every drawn token in a sentence, across the draggable notations
+async function setDiagramHead(si,depId,headId){ const s=DOC[si]; if(!s||depId<1||depId>s.tokens.length)return;
+  const dep=s.tokens[depId-1], head=(headId>=1&&headId<=s.tokens.length)?s.tokens[headId-1]:null;
+  if(head && await depIsError(head.upos,dep.upos,dep.deprel)){ toast(`Can't attach: “${dep.deprel}” isn't valid on ${head.upos||"?"}`); return; }   // error-level invalid → don't let the drag stick
+  pushUndo(); dep.head=String(headId); afterHeadEdit(dep,s);
+  // Task B: NO regenTok here — re-heading a token by drag is purely structural and must never trigger a
+  // gloss/MGloss recompute (the one thing regenTok's regenSecondaries call does besides re-derive lemma/feats/
+  // deps, none of which a head edit needs either). Every other head/deprel edit site dropped this same call —
+  // see setAsRoot/stepHead (js/editing/edit-ops.js) and the deprel context-menu choosers (js/editing/context-menu.js).
+  markDirty(); preserveScroll(renderDoc); pick(si,depId,false); toast(`Head of token ${depId} → ${headId}`); }
+// is (headPOS ⟵deprel⟶ depPOS) an error-level violation? (only hard constraints — warnings are allowed)
+async function depIsError(headUpos,depUpos,deprel){ if(!hasBridge()||!deprel||depBase(deprel)==="root")return false;
+  try{ const r=await window.pywebview.api.valid_deprels(headUpos||"",depUpos||"",[deprel]); return !!(r&&r.deprels&&!r.deprels.includes(deprel)); }catch(e){ return false; } }
+// is `tokId` the DEPENDENT of a conj relation (conj / conj:and / conj:appos / …)? — gates dropping a token
+// onto that conj edge (see attachAsSharedConjunct/commitDrop below)
+function isConjDep(si,tokId){ const s=DOC[si], t=s&&s.tokens[tokId-1]; return !!(t && famOf(t.deprel)==="conj"); }
+// Subj (subject-raising) feature: dropping a token onto a subj/comp:obj/comp:obl/root edge marks it as notionally
+// raised to that argument slot WITHOUT rewiring its own structural head/deprel — purely a FEATS annotation plus a
+// dashed "subj" ghost edge to the derived target (subjRaiseTarget below), exactly like Shared=Yes leaves the real
+// tree alone and only adds a decorative edge. RAISE_TYPES maps the dropped edge's own (base) relation to the Subj
+// feature value used in the general case; NOT used (see attachAsRaisedSubj) when the embedded predicate being
+// dropped onto is itself a MODIFIER (mod family — mod/mod:relcl/mod:advcl/…) of the dragged argument's OWN head —
+// that configuration is a free adjunct with a coreferential-but-not-raised subject, i.e. "Instantiated", regardless
+// of which type the dragged argument's own deprel would otherwise imply. Per the SUD guidelines page
+// (Features/Subject.md) the canonical Instantiated example is exactly this: "Condamné à dix ans, il passe le reste
+// de sa vie en prison" — the participle "Condamné" is a mod(:advcl) of "passe", the very verb that governs "il" —
+// whereas all three typed examples (SubjRaising/ObjRaising/OblRaising) have the embedded predicate as a genuine
+// COMPLEMENT (comp family) of the matrix predicate. This is NOT about linear order — an earlier version of this
+// code picked the typed value only when the argument preceded the predicate, which was an unrelated (and wrong,
+// SVO-specific) heuristic; word order plays no role in the actual rule.
+// item 2: Generic is NOT one of these — it isn't reached by dragging an argument onto a predicate's edge at all
+// (there's no real argument to drag; the subject is understood/arbitrary, with nothing to point to). It's set by
+// a SEPARATE gesture entirely — dragging the predicate itself onto the caret just before it (see attachGenericSubj).
+const RAISE_TYPES={subj:"SubjRaising","comp:obj":"ObjRaising","comp:obl":"OblRaising"};
+// item 1: Subj lives on the embedded PREDICATE (e.g. "go" in "he wants to go"), not the raised argument — so a
+// valid drop target is a VERB/AUX token, full stop, regardless of ITS OWN deprel family (that family plays no
+// part in the raising itself; the crawl's `type` comes from the DRAGGED token's own deprel — see attachAsRaisedSubj).
+function isRaiseTargetDep(si,tokId){ const s=DOC[si], t=s&&s.tokens[tokId-1]; return !!(t && (t.upos==="VERB"||t.upos==="AUX")); }
+// The raising target for `tokId`, of the given `targetType` ("subj"/"comp:obj"/"comp:obl"): crawl UP tokId's own
+// (unchanged) head chain, skipping any non-VERB/AUX ancestor freely; the FIRST VERB/AUX ancestor is the stopping
+// point, and the target is THAT ancestor's own dependent whose base relation equals targetType. If the first
+// VERB/AUX ancestor has no such dependent, the crawl may cross ONE further VERB/AUX and try again there — but no
+// more than one VERB/AUX may ever be crossed without success, and an AUX specifically ends the crawl outright the
+// moment it's crossed without a match (both rules share the same one-crossing budget; the AUX case is called out
+// explicitly by spec but changes nothing beyond it). Returns the target's 1-based token id, or null if no
+// reachable target exists. These are the SAME constraints used both when the drag is first accepted
+// (attachAsRaisedSubj) and on every later render (so the dotted edge never has to be separately persisted — it's
+// re-derived identically every time).
+function subjRaiseTarget(tokens,tokId,targetType){
+  let cur=tokId, crossed=0, guard=0;
+  while(guard++<=tokens.length){
+    const tk=tokens[cur-1]; if(!tk) return null;
+    const hid=parseInt(tk.head,10); if(!(hid>=1&&hid<=tokens.length)) return null;
+    const anc=tokens[hid-1], isAux=anc.upos==="AUX", isVA=anc.upos==="VERB"||isAux;
+    if(isVA){
+      const di=tokens.findIndex((d,i)=>i+1!==tokId&&parseInt(d.head,10)===hid&&depBase(d.deprel)===targetType);
+      if(di>=0) return di+1;
+      if(crossed>=1) return null;   // this is already the one permitted crossing without a match — no further crossing allowed
+      if(isAux) return null;        // crossing an AUX at all ends the crawl outright, even on the first one
+      crossed++;
+    }
+    cur=hid;
+  }
+  return null;
+}
+// Subj FEATS values don't all name a type: SubjRaising/ObjRaising/OblRaising/Generic each imply exactly one
+// (subj/comp:obj/comp:obl/root), but "Instantiated" (a rightwards target) collapses all four into one value —
+// nothing else is persisted (see attachAsRaisedSubj's own comment), so re-deriving an Instantiated token's ghost
+// target means trying each type in turn and taking the first that resolves. In a well-formed tree at most one
+// should ever match at a given ancestor, so the fixed try-order (subj, then comp:obj, comp:obl, root) is only a
+// tie-break for the rare case more than one does.
+const SUBJ_TYPE_OF={SubjRaising:"subj",ObjRaising:"comp:obj",OblRaising:"comp:obl"};
+// Generic isn't in here — it has no real crawl target at all (see attachGenericSubj); subjRaiseTargetFor
+// correctly falls through to null for it, same as any other value it doesn't recognise.
+function subjRaiseTargetFor(tokens,tokId,subjVal){
+  const type=SUBJ_TYPE_OF[subjVal];
+  if(type) return subjRaiseTarget(tokens,tokId,type);
+  if(subjVal!=="Instantiated") return null;
+  for(const t of ["subj","comp:obj","comp:obl"]){ const r=subjRaiseTarget(tokens,tokId,t); if(r) return r; }
+  return null;
+}
+// rendering helper (stemma/tree/arcs/brackets, flat + wrapped): the Subj-raising ghost target for token i
+// (0-based), or null. Reads i's Subj FEATS value and re-derives the target the SAME way attachAsRaisedSubj did —
+// nothing about the ghost edge is separately persisted. Returns null for Generic — that ghost has no real target
+// at all (see hasGenericSubj / the synthetic ∅ node each renderer draws instead).
+function subjGhostTarget(t,i){ if(!show.extRel) return null; const val=getFeat(t[i].feats,"Subj"); if(!val) return null;
+  const tid=subjRaiseTargetFor(t,i+1,val); return (tid!=null)?tid-1:null; }
+// Subj=Generic: an arbitrary/understood subject with no real filler — token i (0-based) has one, or not.
+function hasGenericSubj(t,i){ return show.extRel && getFeat(t[i].feats,"Subj")==="Generic"; }
+// item 2 (redesign): the ∅ isn't a floating decoration — it's a virtual TOKEN, reserved as real space just
+// before its head in the SAME linear sequence real tokens occupy (so it participates in spacing exactly like a
+// real token would), just never editable/interactable/grid-visible. This is the width of that reserved band —
+// the ∅ glyph itself plus clearance — inserted immediately before token i's own slot when i has Subj=Generic.
+function genericSubjGapW(t,i,font){ return hasGenericSubj(t,i) ? (meas("∅",font||WORD_F)+10) : 0; }
+// dropping a token (`tokId`, the raised argument — e.g. "he") onto a VERB/AUX's edge (`edgeDepId`, the embedded
+// PREDICATE — e.g. "go"): the Subj FEATS is set on the PREDICATE, not on the dragged token, matching the corpus
+// convention (Subj marks the predicate whose subject is raised/shared). `type` is the DRAGGED token's own deprel
+// family (e.g. "subj") — that's what the crawl, run from the PREDICATE upward, searches the crossed VERB/AUX
+// ancestor's dependents for. The crawl must land back on EXACTLY the dragged token, or the drop is rejected
+// rather than silently accepted and then failing to redraw (a drop the crawl can't itself reach — e.g. more than
+// one VERB/AUX away — is invalid).
+async function attachAsRaisedSubj(si,tokId,edgeDepId){ const s=DOC[si]; if(!s||tokId<1||tokId>s.tokens.length)return;
+  const dragged=s.tokens[tokId-1], predicate=s.tokens[edgeDepId-1]; if(!dragged||!predicate)return;
+  if(predicate.upos!=="VERB"&&predicate.upos!=="AUX")return;   // item 1: Subj only ever lives on a VERB/AUX
+  const type=depBase(dragged.deprel); if(!RAISE_TYPES[type])return;
+  const foundId=subjRaiseTarget(s.tokens,edgeDepId,type);
+  if(foundId!==tokId){ toast(`This token isn't reachable as a ${type} from “${predicate.form}” (crosses more than one VERB/AUX, or lands elsewhere)`); return; }
+  // Instantiated vs typed: NOT linear order (see RAISE_TYPES' own comment) — it's whether the embedded predicate
+  // we just dropped onto (`predicate`) is itself a MODIFIER of the dragged argument's OWN head, i.e. a free adjunct
+  // (participial/etc.) attached to the same governor as `dragged`, rather than a genuine complement of it.
+  const draggedHeadId=parseInt(dragged.head,10);
+  const isModOfDraggedHead=draggedHeadId>=1&&parseInt(predicate.head,10)===draggedHeadId&&famOf(predicate.deprel)==="mod";
+  const value=isModOfDraggedHead?"Instantiated":RAISE_TYPES[type];
+  pushUndo(); predicate.feats=setFeat(predicate.feats,"Subj",value); markDirty(); preserveScroll(renderDoc); pick(si,edgeDepId,false);
+  toast(`Token ${edgeDepId} marked ${value}`); }
+// item 2: dragging a VERB/AUX predicate onto the caret just before its OWN current position (a drop the reorder
+// gesture would otherwise treat as a no-op — it's already there) toggles Subj=Generic: an arbitrary/understood
+// subject with no real filler to point to, rendered as a ghost ∅ node rather than a ghost edge to a real token.
+async function attachGenericSubj(si,tokId){ const s=DOC[si]; if(!s||tokId<1||tokId>s.tokens.length)return;
+  const tok=s.tokens[tokId-1]; if(!tok||(tok.upos!=="VERB"&&tok.upos!=="AUX"))return;
+  const next=getFeat(tok.feats,"Subj")==="Generic"?null:"Generic";   // drop again to clear (toggle) — a no-op reorder made reversible instead of dead
+  pushUndo(); tok.feats=next?setFeat(tok.feats,"Subj",next):clearFeat(tok.feats,"Subj"); markDirty(); preserveScroll(renderDoc); pick(si,tokId,false);
+  toast(next?`Token ${tokId} marked Generic`:`Token ${tokId}'s Generic subject cleared`); }
+// dropping a token (or its incoming edge) ONTO a conj edge: `depId` becomes a dependent of WHICHEVER of the
+// conj edge's two conjuncts sits on the SAME SIDE of it in linear order — the head conjunct if depId is
+// leftwards, the dependent conjunct (`conjDepId`, the later conjunct — the exact node the conj edge's own
+// arrowhead attaches to) if rightwards — so the new edge never has to cross the coordination it attaches to.
+// Marked Shared=Yes so it's understood to belong to the whole coordination, not just that one conjunct. Every
+// notation then draws the real edge normally (to whichever conjunct it's actually attached to) plus a dashed
+// "ghost" edge to every OTHER conjunct in the coordination (conjunctsOf/otherConjuncts).
+async function attachAsSharedConjunct(si,depId,conjDepId){ const s=DOC[si]; if(!s||depId<1||depId>s.tokens.length)return;
+  const conjDep=s.tokens[conjDepId-1]; if(!conjDep)return;
+  const conjHeadId=parseInt(conjDep.head,10);
+  const targetId=(conjHeadId>=1 && conjHeadId<=s.tokens.length && Math.abs(depId-conjHeadId)<Math.abs(depId-conjDepId)) ? conjHeadId : conjDepId;
+  const dep=s.tokens[depId-1], head=s.tokens[targetId-1];
+  if(head && await depIsError(head.upos,dep.upos,dep.deprel)){ toast(`Can't attach: “${dep.deprel}” isn't valid on ${head.upos||"?"}`); return; }
+  pushUndo(); dep.head=String(targetId); afterHeadEdit(dep,s);
+  // regenTok's own parser pass rewrites FEATS from scratch (reparseTokenFields → PARSE_FIELDS includes "feats") — awaiting
+  // it here (instead of the usual fire-and-forget regenTok) and stamping Shared=Yes AFTER means the parser's guess can
+  // never race past this point and silently clobber the marker we're about to set.
+  // Task B: {skipGloss:true} — this reattach is structural (a head edit), so even though the FEATS refresh above is
+  // still wanted, the recompute must never touch MGloss/Gloss at all; reparseTokenFields' own gloss-retargeting logic
+  // is skipped outright rather than merely made non-destructive (contrast the grid's UPOS path, which DOES want it).
+  if(hasBridge()&&model) await reparseTokenFields(si,[depId],{skipGloss:true});
+  dep.feats=setFeat(dep.feats,"Shared","Yes");
+  if(isSanskritLang()){ const m=(s.mwt||[]).find(x=>depId>=x.from&&depId<=x.to); if(m) sandhiMwtForms(si,[m.from]); }   // same MWT-refusion side effect regenTok itself would have applied
+  markDirty(); preserveScroll(renderDoc); pick(si,depId,false); toast(`Token ${depId} attached as a shared dependent of the coordination`); }
+(function(){ const docEl=document.getElementById("doc"); if(!docEl)return;
+  const draggable=()=>conv==="stemma"||conv==="tree"||conv==="arcs"||conv==="brackets";
+  let DLAST=null;   // last grabbed token, kept across a tap/cancel so a drag-lock ("double-tap to drag") gesture can be resurrected — see pointermove
+  // item 1 — marquee (drag-area) selection: a drag that STARTS on empty diagram space sweeps out a rectangle and
+  // selects every token whose box it touches, as the contiguous min–max range (token ids ARE reading order).
+  let MARQ=null;
+  const marqueeHits=(si,r)=>{ const blk=document.querySelector(`.sblock[data-i="${si}"]`); if(!blk) return null;
+    let mn=Infinity,mx=-Infinity;
+    blk.querySelectorAll('.tok-group[data-tok],.node[data-tok],.bwtok[data-tok]').forEach(g=>{ if(+g.getAttribute('data-s')!==si) return;
+      const b=g.getBoundingClientRect(); if(b.right<r.l||b.left>r.r||b.bottom<r.t||b.top>r.b) return;   // no overlap with the marquee
+      const id=+g.getAttribute('data-tok'); if(id<mn)mn=id; if(id>mx)mx=id; });
+    return mx<0?null:{min:mn,max:mx}; };
+  const updateMarquee=e=>{ const L=Math.min(MARQ.x0,e.clientX),T=Math.min(MARQ.y0,e.clientY),W=Math.abs(e.clientX-MARQ.x0),H=Math.abs(e.clientY-MARQ.y0);
+    MARQ.div.style.left=L+"px"; MARQ.div.style.top=T+"px"; MARQ.div.style.width=W+"px"; MARQ.div.style.height=H+"px";
+    const hits=marqueeHits(MARQ.si,{l:L,t:T,r:L+W,b:T+H}); MARQ.hits=hits;
+    if(hits){ setRange(MARQ.si,hits.min,hits.max); sel={s:MARQ.si,t:hits.max}; applySel(); }   // live range highlight WITHOUT a full re-render (applySel just toggles the .rng/.rangesel classes)
+    else { selRange=null; applySel(); } };
+  const endMarquee=()=>{ if(MARQ&&MARQ.div)MARQ.div.remove(); MARQ=null; };
+  docEl.addEventListener("pointerdown",e=>{ if(e.button!==0||!draggable())return;
+    // an inline editor (makeEditable's floating .nodeedit input, appended to <body> — never inside #doc, so
+    // clicking a DIFFERENT token always reaches here) is still focused from a PRIOR click: force its blur→
+    // commit NOW, before this click's own pick() below. Otherwise the two race: this pointerdown's pick(new
+    // token) would run first, then the old input's blur (fired as part of the SAME native click shifting focus)
+    // commits and re-asserts pick(OLD token) via its own after-callback — leaving sel stuck on the token you
+    // just clicked AWAY from ("focus keeps sticking to the first token"). Forcing the blur first makes this
+    // click's own pick() unambiguously the LAST word.
+    const activeEditor=document.activeElement, hadEditor=activeEditor&&activeEditor.classList&&activeEditor.classList.contains("nodeedit");
+    if(hadEditor) activeEditor.blur();   // finish()'s own commit path unconditionally calls preserveScroll(renderDoc) — a FULL #doc rebuild — so `e.target` (resolved by the browser against the OLD tree before this handler ran) may now be a detached node whose closest("#doc …") can never match (its ancestor chain no longer reaches #doc at all); re-resolve the click target fresh against the rebuilt DOM instead of trusting e.target
+    const target=hadEditor?document.elementFromPoint(e.clientX,e.clientY):e.target;
+    const edge=ddEdge(target), node=ddNode(target);
+    if(edge && edge.getAttribute("data-dep")!=null){   // drag an edge/arc/label → re-head its dependent
+      DDRAG={kind:"head",si:+edge.getAttribute("data-s"),dep:+edge.getAttribute("data-dep"),x0:e.clientX,y0:e.clientY,moved:false};
+      pick(DDRAG.si,DDRAG.dep,false,false);
+    } else if(node){                                    // drag a node onto another node → make that node its head
+      DDRAG={kind:"node",si:+node.getAttribute("data-s"),tok:+node.getAttribute("data-tok"),x0:e.clientX,y0:e.clientY,moved:false};
+      pick(DDRAG.si,DDRAG.tok,false,false);   // select the grabbed token up front (reflow=false → no re-render mid-gesture) so the drag works even from a fresh, unselected diagram
+    } else { const dia=target&&target.closest&&target.closest(".diagram"), blk=dia&&dia.closest(".sblock");   // empty diagram space → arm a marquee (committed on move, so a plain click still falls through to deselect)
+      if(dia&&blk) MARQ={si:+blk.dataset.i,x0:e.clientX,y0:e.clientY,moved:false};
+      return; }
+    DLAST={kind:DDRAG.kind,si:DDRAG.si,tok:DDRAG.tok,dep:DDRAG.dep,x0:e.clientX,y0:e.clientY,t:Date.now()}; });   // snapshot the grab so a drag-lock second tap (whose own pointerdown WebKit may swallow) can still start a drag from a bare pointermove.  NB: no setPointerCapture here — capturing on pointerdown would retarget the follow-up click to #doc (WebKit), so plain clicks would stop selecting.  Capture on first move instead.
+  docEl.addEventListener("pointermove",e=>{
+    if(MARQ){ if(!(e.buttons&1)){ endMarquee(); return; }   // button released outside → abandon
+      if(!MARQ.moved && Math.hypot(e.clientX-MARQ.x0,e.clientY-MARQ.y0)>4){ MARQ.moved=true; try{docEl.setPointerCapture(e.pointerId);}catch(_){}
+        MARQ.div=document.createElement("div"); MARQ.div.className="marquee"; document.body.appendChild(MARQ.div); }
+      if(MARQ.moved){ e.preventDefault(); updateMarquee(e); } return; }
+    // Drag-lock ("double-tap to drag"): the held second tap moves the pointer, but WebKit often delivers no fresh
+    // pointerdown for it (the first tap's pointerup already cleared DDRAG) — so resurrect the drag from the last grab
+    // while the primary button is held (e.buttons&1 rules out plain hover-after-tap).  Harmless when pointerdown did fire.
+    if(!DDRAG && (e.buttons&1) && draggable()){
+      if(DLAST && Date.now()-DLAST.t<1500){
+        DDRAG={kind:DLAST.kind,si:DLAST.si,tok:DLAST.tok,dep:DLAST.dep,x0:DLAST.x0,y0:DLAST.y0,moved:false}; }
+      else {   // FIRST-LOAD: WebKit swallows the very first pointerdown after a fresh load, so the grab's pointerdown never ran and DLAST is still null — reconstruct the grab from the node/edge under the pointer so the first double-tap-drag reorders too
+        const el=document.elementFromPoint(e.clientX,e.clientY), edge=ddEdge(el), node=ddNode(el);
+        if(edge && edge.getAttribute("data-dep")!=null){ DDRAG={kind:"head",si:+edge.getAttribute("data-s"),dep:+edge.getAttribute("data-dep"),x0:e.clientX,y0:e.clientY,moved:false}; pick(DDRAG.si,DDRAG.dep,false,false); }
+        else if(node){ DDRAG={kind:"node",si:+node.getAttribute("data-s"),tok:+node.getAttribute("data-tok"),x0:e.clientX,y0:e.clientY,moved:false}; pick(DDRAG.si,DDRAG.tok,false,false); }
+        if(DDRAG) DLAST={kind:DDRAG.kind,si:DDRAG.si,tok:DDRAG.tok,dep:DDRAG.dep,x0:e.clientX,y0:e.clientY,t:Date.now()}; } }
+    if(!DDRAG)return;
+    if(!DDRAG.moved && Math.hypot(e.clientX-DDRAG.x0,e.clientY-DDRAG.y0)>4){ DDRAG.moved=true; document.body.classList.add("dg-drag"); try{docEl.setPointerCapture(e.pointerId);}catch(_){} dragGhost(DDRAG,e); }
+    if(DDRAG.moved){ e.preventDefault(); DDRAG.lastX=e.clientX; DDRAG.lastY=e.clientY; moveGhost(e); document.querySelectorAll("#doc .dtarget").forEach(n=>n.classList.remove("dtarget"));   // remember the live drop point → a pointercancel can still commit there
+      const t=ddNode(document.elementFromPoint(e.clientX,e.clientY)), self=DDRAG.kind==="node"&&t&&+t.getAttribute("data-tok")===DDRAG.tok, overNode=t&&+t.getAttribute("data-s")===DDRAG.si&&!self;
+      if(overNode){ const tid=+t.getAttribute("data-tok");   // a stemma draws a token as an upper node + a baseline word group — highlight both, so the transliteration under the baseline is covered too
+        document.querySelectorAll(`#doc .node[data-s="${DDRAG.si}"][data-tok="${tid}"], #doc .tok-group[data-s="${DDRAG.si}"][data-tok="${tid}"], #doc .bwtok[data-s="${DDRAG.si}"][data-tok="${tid}"]`).forEach(n=>n.classList.add("dtarget")); }
+      let overEdge=false;   // not over a node — hovering a conj edge (attach as shared conjunct) OR a subj/comp:obj/comp:obl/root edge (Subj-raising)? → highlight it as a valid drop target
+      if(!overNode){ const fromId=DDRAG.kind==="head"?DDRAG.dep:DDRAG.tok, edgeEl=ddEdge(document.elementFromPoint(e.clientX,e.clientY));
+        if(edgeEl && edgeEl.getAttribute("data-dep")!=null && +edgeEl.getAttribute("data-s")===DDRAG.si){
+          const cd=+edgeEl.getAttribute("data-dep");
+          if(cd!==fromId && (isConjDep(DDRAG.si,cd)||isRaiseTargetDep(DDRAG.si,cd))){ overEdge=true; edgeEl.classList.add("dtarget"); } } }
+      if(DDRAG.kind==="node"){ if(overNode||overEdge) clearCaret();   // hovering another node/conj edge → it becomes the head (no drop caret)
+        else { const blk=document.querySelector(`.sblock[data-i="${DDRAG.si}"]`); if(blk)dropCaret(DDRAG.si,e.clientX,e.clientY,blk,DDRAG.tok); } } } });   // empty space → reorder: show where it would land
+  function endDrag(e){ document.body.classList.remove("dg-drag"); clearGhost(); clearCaret();
+    document.querySelectorAll("#doc .dtarget").forEach(n=>n.classList.remove("dtarget"));
+    try{docEl.releasePointerCapture(e.pointerId);}catch(_){} }
+  // Commit a finished node/edge drag at (clientX,clientY): drop onto a node → that node becomes the head; drop into
+  // empty space → reorder to that x. Shared by pointerup AND pointercancel: with macOS "double-tap to drag" (drag-
+  // lock) enabled, WebKit reclaims the gesture and fires pointercancel INSTEAD OF the committing pointerup, so the
+  // reorder must still land from the cancel path (the caret already showed where) — otherwise the drop silently no-ops.
+  function commitDrop(d,clientX,clientY){
+    DLAST=null;   // this grab is spent — don't let a later stray pointermove resurrect it
+    DSUPPRESS=true; setTimeout(()=>DSUPPRESS=false,0);   // swallow the click that follows a drag
+    const el=document.elementFromPoint(clientX,clientY), tgt=ddNode(el), onNode=tgt&&+tgt.getAttribute("data-s")===d.si;
+    const fromId=d.kind==="head"?d.dep:d.tok;
+    if(onNode){ const toId=+tgt.getAttribute("data-tok"); if(toId!==fromId) setDiagramHead(d.si,fromId,toId); return; }   // edge/node dropped onto a node → that node becomes the head
+    const edge=ddEdge(el);   // not onto a node — a conj edge dropped onto? → attach as a SHARED dependent of its later conjunct (item: drag onto a conj edge). A subj/comp:obj/comp:obl/root edge → Subj-raising instead.
+    if(edge && edge.getAttribute("data-dep")!=null && +edge.getAttribute("data-s")===d.si){
+      const edgeDepId=+edge.getAttribute("data-dep");
+      if(edgeDepId!==fromId){
+        if(isConjDep(d.si,edgeDepId)){ attachAsSharedConjunct(d.si,fromId,edgeDepId); return; }
+        if(isRaiseTargetDep(d.si,edgeDepId)){ attachAsRaisedSubj(d.si,fromId,edgeDepId); return; } } }
+    if(d.kind==="head") return;   // an edge drag that misses both a node and a valid attach target → no-op
+    const blk=el&&el.closest&&el.closest(`.sblock[data-i="${d.si}"]`); if(blk) reorderByX(d.si,d.tok,clientX,clientY,blk); }   // node into empty space → reorder to that x
+  docEl.addEventListener("pointerup",e=>{ if(!DDRAG)return; const d=DDRAG; DDRAG=null; endDrag(e);
+    if(!d.moved){   // a plain tap (no drag) → the token is already selected (pick() ran on pointerdown/pointermove WITH SCROLLING SUPPRESSED, so a real drag-in-progress can't be yanked around mid-gesture by an unwanted scroll) — now that the gesture is over and confirmed to be just a tap, scroll the grid row into view (the thing pick()'s own scroll=true path would already have done, had it been safe to allow at pointerdown)
+      scrollNearest(document.querySelector(`#doc tr[data-s="${d.si}"][data-tok="${d.kind==="head"?d.dep:d.tok}"]`));
+      if(d.kind==="node"){ DSUPPRESS=true; setTimeout(()=>DSUPPRESS=false,0);   // e.target here is the actual element tapped (no pointer capture happened — that only kicks in once a drag starts moving), which may be a .tr-edit/.gl-edit NESTED inside the node's group, not the node/form itself — route to the right editor, not always the form
+        const trEl=e.target.closest(".tr-edit"), glEl=e.target.closest(".gl-edit"), gwEl=e.target.closest("[data-gwtok]");
+        /* item 4 — DOUBLE-CLICKING A TOKEN OPENS ITS LEMMA EDITOR. Detected here, from the taps this
+           handler already sees, rather than from a native "dblclick" event: the first tap opens the form
+           editor, and committing that on the second tap's pointerdown rebuilds the whole of #doc, so the
+           element the browser would have to report a dblclick ON is detached before the second click
+           completes and the event either never fires or fires on a node that resolves to no token.
+           Bound to the token's FORM/node only — a second tap on the transliteration row or a gloss tier
+           keeps meaning "edit that row", which is what those rows already do on a single tap.
+           This path only ever sees the second tap when it lands on the token but OUTSIDE the field the
+           first tap opened (the field is small and centred on the glyph, so that means its margins). A
+           second tap ON the field is a plain native dblclick inside an input, and is handled there —
+           see openLemmaEditor above and bindLemmaDblclick in js/editing/context-menu.js. */
+        const tapTok=gwEl?+gwEl.getAttribute("data-gwtok"):d.tok, now=Date.now();
+        if(!trEl && !glEl && DTAP && DTAP.si===d.si && DTAP.tok===tapTok && now-DTAP.t<450){
+          DTAP=null; openLemmaEditor(d.si,tapTok,{x:e.clientX,y:e.clientY}); return; }   // the first tap's form editor is already closed — the pointerdown above blurs (and commits) it
+        DTAP=(trEl||glEl)?null:{si:d.si,tok:tapTok,t:now};
+        if(gwEl){ pick(d.si,tapTok,false,false); editNodeInline(d.si,tapTok,{x:e.clientX,y:e.clientY}); }   // a goeswith CONTINUATION's own form field, drawn inside the head's group — so d.tok (the group's data-tok) names the head, not the part actually tapped. Same shape as the .tr-edit/.gl-edit routing above: the group owns the drag, the tapped element decides which editor opens. The shared rows (translit/gloss/POS) carry no data-gwtok and so still edit the head, which is where the guideline puts every annotation anyway
+        else if(trEl) editTransInline(d.si,d.tok,{x:e.clientX,y:e.clientY});
+        else if(glEl) editTier(d.si,d.tok,glEl.dataset.tier||"gloss",{x:e.clientX,y:e.clientY});
+        else editNodeInline(d.si,d.tok,{x:e.clientX,y:e.clientY}); }
+      return; }
+    commitDrop(d,e.clientX,e.clientY); },true);
+  docEl.addEventListener("pointerup",e=>{ if(!MARQ)return; const m=MARQ; endMarquee();   // item 1: finalise a marquee (its own listener so it never contends with the node/edge drag pointerup above)
+    try{docEl.releasePointerCapture(e.pointerId);}catch(_){}
+    if(m.moved){ DSUPPRESS=true; setTimeout(()=>DSUPPRESS=false,0);   // swallow the click that would otherwise deselect
+      if(m.hits){ setRange(m.si,m.hits.min,m.hits.max); sel={s:m.si,t:m.hits.max}; UIZONE="diagram"; applyZone(); syncMenu(true); preserveScroll(renderDoc); }
+      else { selRange=null; pick(m.si,0,false,false); } } },true);
+  docEl.addEventListener("pointercancel",e=>{ if(MARQ){ endMarquee(); return; }
+    if(!DDRAG)return; const d=DDRAG; DDRAG=null; endDrag(e);
+    // A gesture the browser reclaimed. If it was a real drag (moved), still commit its drop at the last live point —
+    // WebKit's drag-lock double-tap sends pointercancel in place of pointerup, and losing the reorder here is exactly
+    // the "caret shows but the drop does nothing" bug. A cancelled plain tap (not moved) is dropped cleanly as before.
+    if(d.moved) commitDrop(d, d.lastX!=null?d.lastX:e.clientX, d.lastY!=null?d.lastY:e.clientY); });
+  // stemma/arcs/tree: nearest insertion slot, minus the slot just AFTER the dragged token (redundant with the one
+  // just before it). Returns {to} (the reorder target index), {cx} (caret x) and {lTop,lBot} (the cursor's row band,
+  // used to size the caret) — all derived from the SAME chosen slot, so the caret and the reorder stay in sync.
+  function reorderGap(si,clientX,clientY,blk,dragTok){
+    // WRAPPED stemma/hierarchy (projWrapped): the reorder targets are the baseline word groups in the scrollable
+    // .wp-toks strip — NOT the tree .node points above (which sit at varied depths and span the whole, unwrapped
+    // width, and would win the id-dedup because they come first in the DOM). Aim at that strip and treat it
+    // line-aware, exactly like wrapped arcs.
+    const wrapProj = !!blk.querySelector(".wrapproj");
+    const lineAware = conv==="arcs" || wrapProj;
+    const q = wrapProj ? `.wp-toks .tok-group[data-s="${si}"]` : DNODE_Q.replace(/\{s\}/g,si);
+    const seen={}, nodes=[]; blk.querySelectorAll(q).forEach(nd=>{ const id=+nd.getAttribute("data-tok"); if(seen[id])return; seen[id]=1; const r=nd.getBoundingClientRect(); nodes.push({id,cx:r.left+r.width/2,cy:r.top+r.height/2,left:r.left,right:r.right,top:r.top,bot:r.bottom}); });
+    const N=nodes.length; if(!N)return null; const rtl=blk.dir==="rtl";
+    // LINE-AWARE for WRAPPED views (arcs + projected stemma/hierarchy): the tokens spread over several rows, so a
+    // plain x-sort scrambles reading order. Pick the row nearest the cursor (token boxes never overlap between rows →
+    // cluster by centre-y), find the gap WITHIN it, and count whole rows above as reading-order-before. A single-row
+    // view (flat stemma/tree, flat arcs) → line=all nodes, above=0 → identical to the old global left-to-right sort.
+    let line, above=0;
+    if(lineAware){ line=nodes.filter(nd=>clientY>=nd.top && clientY<=nd.bot);
+      if(!line.length){ let nd=nodes[0]; nodes.forEach(g=>{ if(Math.abs(g.cy-clientY)<Math.abs(nd.cy-clientY))nd=g; }); line=nodes.filter(g=>g.cy>=nd.top && g.cy<=nd.bot); if(!line.length)line=[nd]; } }
+    else line=nodes;
+    const lTop=Math.min(...line.map(g=>g.top)), lBot=Math.max(...line.map(g=>g.bot));
+    if(lineAware) above=nodes.filter(g=>g.cy<lTop).length;   // whole rows above the cursor's row → all earlier in reading order
+    const row=line.slice().sort((a,b)=>a.cx-b.cx), m=row.length;
+    const k=row.findIndex(nd=>nd.id===dragTok), skip=k<0?-1:(rtl?k:k+1);   // reading-after slot index (redundant with the one before)
+    const gx=g=> g===0?row[0].left-5 : g===m?row[m-1].right+5 : (row[g-1].right+row[g].left)/2;
+    let bg=-1,bd=Infinity; for(let g=0;g<=m;g++){ if(g===skip)continue; const d=Math.abs(gx(g)-clientX); if(d<bd){bd=d; bg=g;} }
+    if(bg<0)return null;
+    // reorder target index = number of tokens before the gap in reading order. Token ids ARE contiguous reading order,
+    // so read it straight off the token flanking the gap (LTR: the one to the reading-left = row[bg-1]; RTL: reading-left = row[bg]).
+    // This is immune to the dragged token's node being present or absent in the DOM query — the old above+bg count went
+    // one short (token landed one slot early) whenever the dragged node was missing from a wrapped row above the cursor.
+    const to = rtl ? (bg===m?0:row[bg].id) : (bg===0?0:row[bg-1].id);
+    return {cx:gx(bg), to, lTop, lBot}; }
+  // brackets: nearest gap BETWEEN two adjacent glyphs (bracket or token), inside the outermost brackets, minus the
+  // gap just after the dragged token
+  function bracketDropSlot(si,clientX,clientY,blk,dragTok){
+    let all=[], brs=[], toks=[]; const seen={};
+    blk.querySelectorAll(`.brk[data-s="${si}"], .bwbr[data-s="${si}"], .tok-group[data-s="${si}"], .bwtok[data-s="${si}"]`).forEach(el=>{
+      const r=el.getBoundingClientRect(), br=el.classList.contains("brk")||el.classList.contains("bwbr"), id=br?null:+el.getAttribute("data-tok");
+      if(!br){ if(seen[id])return; seen[id]=1; }
+      const g={cx:(r.left+r.right)/2,cy:(r.top+r.bottom)/2,left:r.left,right:r.right,top:r.top,bot:r.bottom,br,close:br&&/[\])}⟩>]/.test((el.textContent||"").trim()),tok:id}; all.push(g); if(br)brs.push(g); else toks.push(g); });
+    if(all.length<2||!brs.length||!toks.length)return null;
+    // LINE = the token ROW nearest the cursor. A token box spans deprel→form→POS (tall) and never overlaps between
+    // rows, so the tokens — not the small, high bracket glyphs — define a row's vertical band. The caret x, the caret
+    // height AND the before-count are all decided against THIS band, so they can never disagree across wrapped rows.
+    let line=toks.filter(g=>clientY>=g.top && clientY<=g.bot);
+    if(!line.length){ let nd=toks[0]; toks.forEach(g=>{ if(Math.abs(g.cy-clientY)<Math.abs(nd.cy-clientY))nd=g; }); line=toks.filter(g=>g.cy>=nd.top && g.cy<=nd.bot); if(!line.length)line=[nd]; }
+    const lTop=Math.min(...line.map(g=>g.top)), lBot=Math.max(...line.map(g=>g.bot)), onLine=g=>g.cy>=lTop&&g.cy<=lBot;   // a glyph is on this row if its centre sits in the token band
+    let glyphs=all.filter(onLine); if(glyphs.length<2)glyphs=all.slice();
+    glyphs.sort((a,b)=>a.cx-b.cx);
+    const rtl=blk.dir==="rtl", k=glyphs.findIndex(g=>g.tok===dragTok), skip=new Set();   // gaps that must NOT accept the caret: the one just after the dragged token, PLUS the one after each closing bracket that immediately follows it (dropping there is the same reading position as after the token)
+    if(k>=0){ if(rtl){ skip.add(k-1); if(glyphs[k-1]&&glyphs[k-1].close) skip.add(k-2); if(glyphs[k+1]&&glyphs[k+1].br&&!glyphs[k+1].close) skip.add(k); }
+              else { skip.add(k); if(glyphs[k+1]&&glyphs[k+1].close) skip.add(k+1); if(glyphs[k-1]&&glyphs[k-1].br&&!glyphs[k-1].close) skip.add(k-1); } }   // bar: the gap just after the dragged token, the gap after the ONE closing bracket immediately following it, AND the gap after an open bracket immediately PRECEDING it — all the same reading position as the token's own slot
+    let cx=null,bd=Infinity;
+    for(let i=0;i<glyphs.length-1;i++){ if(skip.has(i))continue; const g=(glyphs[i].right+glyphs[i+1].left)/2, d=Math.abs(g-clientX); if(d<bd){bd=d; cx=g;} }   // gap = between the glyphs' facing EDGES (a long word's centre is far from its edge)
+    if(cx==null)return null;
+    // tokens BEFORE the drop in reading order = the reorder target index: whole rows above, then, within this row,
+    // those on the reading-before side of the caret. Reading order = surface order = token-id order (DOM order too).
+    // tokens before the caret in reading order = the reorder target index. Read it from token IDS (contiguous reading
+    // order), not by counting DOM token nodes: the reading-latest token still before the caret has id = that count, and
+    // whole rows above are covered by (min id on this row − 1). Immune to a dragged/absent node shifting it by one.
+    const lineTk=toks.filter(onLine), beforeSide=lineTk.filter(g=> rtl?g.cx>cx:g.cx<cx);
+    let before = beforeSide.length ? Math.max(...beforeSide.map(g=>g.tok)) : (lineTk.length ? Math.min(...lineTk.map(g=>g.tok))-1 : 0);
+    const lineBrs=brs.filter(onLine), pool=lineBrs.length?lineBrs:brs;
+    let ref=pool[0],rbd=Infinity; pool.forEach(b=>{ const d=Math.abs(b.cx-cx); if(d<rbd){rbd=d; ref=b;} });   // hug the nearest bracket on this row → the caret takes just its height
+    return {cx, top:ref.top, bot:ref.bot, before}; }
+  // item 2: dropping a token onto the caret JUST BEFORE its own current position is otherwise a dead no-op (the
+  // reorder would leave it exactly where it already is) — repurposed as the Generic-subject toggle gesture for a
+  // VERB/AUX predicate (attachGenericSubj checks the UPOS itself; any other token still just no-ops, as before).
+  function reorderByX(si,tok,clientX,clientY,blk){
+    if(conv==="brackets"){ const slot=bracketDropSlot(si,clientX,clientY,blk,tok); if(!slot||slot.top==null)return;
+      if(slot.before===tok-1){ attachGenericSubj(si,tok); return; }
+      reorderToken(si, tok-1, slot.before); return; }   // slot.before = tokens before the drop in reading order (line-aware) = the reorder target index
+    const r=reorderGap(si,clientX,clientY,blk,tok); if(!r)return;
+    if(r.to===tok-1){ attachGenericSubj(si,tok); return; }
+    reorderToken(si, tok-1, r.to); }
+  // a floating clone of the dragged word that follows the cursor, plus a caret at the prospective drop slot
+  function dragGhost(d,e){ let txt, rel=null; if(d.kind==="head"){ const dep=DOC[d.si]&&DOC[d.si].tokens[d.dep-1]; txt=(dep&&dep.deprel)||"dep"; rel=dep&&dep.deprel; }   // dragging a relation → show its label
+      else { const src=DOC[d.si]&&DOC[d.si].tokens[d.tok-1]; txt=(src&&src.form)||"•"; }
+    const g=document.createElement("div"); g.className="dg-ghost"+(d.kind==="head"?" dg-ghost-rel":""); g.textContent=txt;
+    if(rel!=null) g.style.color=relColor(rel);   // same colour as the relation's diagram label
+    document.body.appendChild(g); DGHOST=g; moveGhost(e); }
+  function moveGhost(e){ if(DGHOST){ DGHOST.style.left=e.clientX+"px"; DGHOST.style.top=e.clientY+"px"; } }
+  function clearGhost(){ if(DGHOST){ DGHOST.remove(); DGHOST=null; } }
+  function clearCaret(){ if(DCARET){ DCARET.remove(); DCARET=null; } }
+  function dropCaret(si,clientX,clientY,blk,dragTok){
+    let cx,top,bot;
+    if(conv==="brackets"){ const slot=bracketDropSlot(si,clientX,clientY,blk,dragTok); if(!slot||slot.top==null){ clearCaret(); return; } cx=slot.cx; top=slot.top; bot=slot.bot; }
+    else { const wrapProj=!!blk.querySelector(".wrapproj"), lineAware=conv==="arcs"||wrapProj;
+      const gap=reorderGap(si,clientX,clientY,blk,dragTok); if(!gap){ clearCaret(); return; } cx=gap.cx;
+      // vertical extent = the token row ONLY (word glyphs → POS tags), never the arcs/tree above or the tall hit rect.
+      // For WRAPPED views (arcs + projected stemma/hierarchy), constrain to the SINGLE row nearest the cursor
+      // (gap.lTop/lBot) — matching the unwrapped one-row case — so the caret hugs the visible token row only.
+      const inRow=el=>{ if(!lineAware)return true; const r=el.getBoundingClientRect(), c=(r.top+r.bottom)/2; return c>=gap.lTop && c<=gap.lBot; };
+      const words=[...blk.querySelectorAll(".diagram .tok-word, .diagram .baseword")].filter(inRow);
+      if(words.length){ const lows=[...blk.querySelectorAll(".diagram .tok-pos, .diagram .translit")].filter(inRow);
+        top=Math.min(...words.map(w=>w.getBoundingClientRect().top));
+        bot=Math.max(...(lows.length?lows:words).map(e=>e.getBoundingClientRect().bottom));
+        if(wrapProj){ const labs=[...blk.querySelectorAll(".wp-toks .lbl")].filter(inRow);   // wrapped stemma/hierarchy: the deprel labels sit ABOVE the tokens in this row — reach the caret up to them (measured live, so it stays right as the renderer tunes the label spacing) so it connects to the labelled row instead of stubbing at the word
+          if(labs.length) top=Math.min(top, ...labs.map(l=>l.getBoundingClientRect().top)); } }
+      else { const seen={}, rs=[]; blk.querySelectorAll(DNODE_Q.replace(/\{s\}/g,si)).forEach(nd=>{ const id=+nd.getAttribute("data-tok"); if(seen[id])return; seen[id]=1; rs.push(nd.getBoundingClientRect()); });
+        if(!rs.length){ clearCaret(); return; } top=Math.min(...rs.map(r=>r.top)); bot=Math.max(...rs.map(r=>r.bottom)); }
+      if(clientY < top-8 || clientY > bot+8){ clearCaret(); return; } }   // only show while the cursor is in the token row
+    if(!DCARET){ DCARET=document.createElement("div"); DCARET.className="dg-caret"; document.body.appendChild(DCARET); }
+    DCARET.style.left=cx+"px"; DCARET.style.top=top+"px"; DCARET.style.height=Math.max(12,bot-top)+"px"; }
+  docEl.addEventListener("click",e=>{ if(DSUPPRESS){ e.stopPropagation(); e.preventDefault(); DSUPPRESS=false; } },true);
+})();
+

@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 100 100"><defs><symbol id="nodes" viewBox="-7 -19 164 164" preserveAspectRatio="xMidYMid meet">
+  <g fill="#FFFFFF"><circle cx="15" cy="63" r="7"/><circle cx="55" cy="3" r="7"/><circle cx="95" cy="123" r="7"/><circle cx="135" cy="63" r="7"/></g>
+</symbol></defs>
+  <use href="#nodes" x="18.57" y="18.57" width="62.87" height="62.87"/>
+</svg>

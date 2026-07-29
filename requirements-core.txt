@@ -1,0 +1,44 @@
+# SUD Workbench — CORE runtime dependencies (the light, portable set).
+#
+# This EXCLUDES the heavy, optional stacks that app/extras.py installs on demand into the
+# user extras dir (~/Library/Application Support/SUD Workbench/site-packages):
+#   · stanza + spacy-stanza  → torch/transformers  (UD parsing tier)
+#   · janome/pykakasi/cutlet/fugashi/unidic-lite    (Japanese-romaji tier)
+#   · camel-tools                                    (Arabic tier, installed with the ar_sud_* model)
+# Everything here is thinc/CNN or pure-Python — no PyTorch. Used by packaging/make_portable.sh.
+
+# ── native shell ────────────────────────────────────────────────────────────
+pywebview==6.2.1
+conllu>=6.0
+
+# ── parsing (SUD spaCy only — thinc/CNN, no torch) ──────────────────────────
+spacy==3.8.14         # was 3.8.7 — the en_sud_ewt wheel below requires >=3.8.14,<3.9, and pip refuses to resolve the two together
+click>=8.0
+# The English SUD parser ships WITH the app (11 MB), unlike every other model in
+# app/models_registry.py — those stay on-demand downloads through the Model Manager. It is here
+# because the app itself needs it, not just the user: app/wiktionary.py SUD-parses each Wiktionary
+# definition to condense it down to a glossable phrase (the definition PROSE is English whatever
+# the headword's language), and without a parser that whole feature falls back to dumping the raw
+# definition text. Pinned to the release asset rather than a bare name — these packages are
+# published as GitHub Release assets, not on PyPI (see models_registry.SUD_REPO). Bump the two
+# versions together when a new release lands.
+en_sud_ewt @ https://github.com/SunflowerAI/sud-spacy-parsers/releases/download/v0.1.0/en_sud_ewt-0.1.0-py3-none-any.whl
+
+# ── UD ↔ SUD ↔ mSUD conversion (python client; OCaml backend is an external opam prereq) ──
+grewpy>=0.7
+
+# ── transliteration (torch-free engines) ────────────────────────────────────
+wiktra @ git+https://github.com/twardoch/wiktra2
+
+# ── Wiktionary DEFINITION lookup (diagram right-click → "Definitions of …" → MGloss pre-fill) ──
+requests
+beautifulsoup4
+pypinyin
+aksharamukha
+ToJyutping
+opencc-python-reimplemented
+hangul-romanize
+uroman
+
+# ── automatic language identification ───────────────────────────────────────
+fasttext-wheel==0.9.2

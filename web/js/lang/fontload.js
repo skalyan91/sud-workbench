@@ -1,0 +1,116 @@
+//@module js/lang/fontload.js
+/* ON-DEMAND SCRIPT FONTS.
+
+   The bundle carries only the core Noto Sans faces (regular, italic, mono) — Latin/Greek/Cyrillic and
+   the interface itself. Every other script's face is fetched the first time a document needs it, which
+   took ~44 MB out of the app: 92% of its download.
+
+   Two questions decide whether anything is fetched at all, in this order:
+     1. WHICH SCRIPTS does the open document actually use? Read off the text itself with Unicode
+        property escapes (\p{Script=…}), not off the language code — a language tag can be absent,
+        wrong, or say nothing about the script a particular file is written in, whereas the characters
+        can't lie. So this also covers a file whose language was never set.
+     2. IS ONE ALREADY THERE? Only fetch when the machine can't render the script as it stands. macOS
+        ships fonts for a good many (Devanagari Sangam MN, Thonburi, Kailasa, PingFang, Hiragino …),
+        and a user may have installed Noto themselves. The test is a TOFU PROBE: draw a character from
+        the document, draw a codepoint that is unassigned in Unicode and so has no glyph anywhere, and
+        compare the ink. Identical ⇒ the first one drew the missing-glyph box too ⇒ nothing covers it.
+        Asking document.fonts.check() instead would answer a different question — whether a face by
+        that NAME is loaded — and would send us fetching Noto Devanagari onto a Mac that already draws
+        Devanagari perfectly well.
+
+   What comes back is a data: URI, injected as an @font-face under the same family name the font stacks
+   already list (TOKEN_STACK/MONO_STACK in diagram-core.js), so nothing else in the app has to know.
+   A failure is not worth interrupting anyone over: the stacks end in system-ui and the text still
+   renders, so we say so once per script and move on. */
+
+const FONT_TRIED=new Set();    // families asked about this session — success, failure or already-covered alike
+const FONT_LOADED=new Set();   // families whose @font-face is now injected
+// Scripts the CORE faces already cover, plus the ones with no Noto Sans family of their own.
+const FONT_CORE_SCRIPTS=new Set(["Latin","Greek","Cyrillic","Common","Inherited","Unknown","Braille"]);
+// Unicode script name → the family name the font stacks use, where squashing the name doesn't give it.
+// (Everything else derives: "Canadian_Aboriginal" → "Noto Sans Canadianaboriginal", matching the
+// vendored faces; the Google Fonts side wants the spaced form, "Noto Sans Canadian Aboriginal".)
+const FONT_NAME_FIX={Nko:"NKo"};
+// CJK has no Noto Sans family in the stacks at all — the system faces (PingFang, Hiragino, Apple SD
+// Gothic Neo) cover it, steered to the right regional glyphs by the lang attribute renderDoc sets.
+const FONT_SKIP_SCRIPTS=new Set(["Han","Hiragana","Katakana","Hangul","Bopomofo"]);
+
+function fontStackName(script){ const s=script.replace(/_/g,"");
+  const n=FONT_NAME_FIX[s]||(s.charAt(0).toUpperCase()+s.slice(1).toLowerCase());
+  return "Noto Sans "+n; }
+function fontRemoteName(script){ return "Noto Sans "+script.replace(/_/g," "); }
+
+// The scripts we can fetch a face for: every Noto Sans <Script> family the font stacks name, under its
+// CANONICAL Unicode script name — the only spelling \p{Script=…} accepts (Old_Italic, not the squashed
+// Olditalic the family name uses). Derived once from the vendored font set; the 11 that resolve to no
+// script value are style variants of one already here (Lao Looped, Syriac Eastern, N'Ko Unjoined …) or
+// families that aren't a script at all (SignWriting, Mayan Numerals), and are left out deliberately.
+const FONT_SCRIPTS=[
+  "Adlam","Anatolian_Hieroglyphs","Arabic","Armenian","Avestan","Balinese","Bamum","Bassa_Vah","Batak","Bengali","Bhaiksuki","Brahmi","Buginese","Buhid","Canadian_Aboriginal","Carian","Caucasian_Albanian","Chakma","Cham","Cherokee","Chorasmian","Coptic","Cuneiform","Cypriot","Cypro_Minoan","Deseret","Devanagari","Duployan","Egyptian_Hieroglyphs","Elbasan","Elymaic","Ethiopic","Georgian","Glagolitic","Gothic","Grantha","Gujarati","Gunjala_Gondi","Gurmukhi","Hanifi_Rohingya","Hanunoo","Hatran","Hebrew","Imperial_Aramaic","Inscriptional_Pahlavi","Inscriptional_Parthian","Javanese","Kaithi","Kannada","Kawi","Kayah_Li","Kharoshthi","Khmer","Khojki","Khudawadi","Lao","Lepcha","Limbu","Linear_A","Linear_B","Lisu","Lycian","Lydian","Mahajani","Malayalam","Mandaic","Manichaean","Marchen","Masaram_Gondi","Medefaidrin","Meetei_Mayek","Miao","Modi","Mongolian","Mro","Multani","Myanmar","Nabataean","Nag_Mundari","Nandinagari","New_Tai_Lue","Newa","Nko","Nushu","Ogham","Ol_Chiki","Old_Hungarian","Old_Italic","Old_North_Arabian","Old_Permic","Old_Persian","Old_Sogdian","Old_South_Arabian","Old_Turkic","Oriya","Osage","Osmanya","Pahawh_Hmong","Palmyrene","Pau_Cin_Hau","Phags_Pa","Phoenician","Psalter_Pahlavi","Rejang","Runic","Samaritan","Saurashtra","Sharada","Shavian","Siddham","Sinhala","Sogdian","Sora_Sompeng","Soyombo","Sundanese","Sunuwar","Syloti_Nagri","Syriac","Tagalog","Tagbanwa","Tai_Le","Tai_Tham","Tai_Viet","Takri","Tamil","Tangsa","Telugu","Thaana","Thai","Tifinagh","Tirhuta","Ugaritic","Vai","Vithkuqi","Wancho","Warang_Citi","Yi","Zanabazar_Square"];
+let _fontRes=null;
+function fontScriptRes(){ return _fontRes||(_fontRes=FONT_SCRIPTS.map(n=>{
+  try{ return [n,new RegExp("\\p{Script="+n+"}","u")]; }catch(_){ return null; } }).filter(Boolean)); }
+
+// Which Unicode scripts does the open document use? → Map of script name → a sample character of it.
+// One pass over the forms (and their lemmas/orthographies/transliterations), memoised per CHARACTER —
+// a document runs to thousands of characters but only a few hundred distinct ones, and each distinct
+// one costs a walk down the script list until it matches.
+function docScripts(){ const out=new Map(), seen=new Set(), RES=fontScriptRes(); let n=0;
+  const SCRIPT_RE=/[^\p{Script=Common}\p{Script=Inherited}\s]/gu;
+  for(const s of DOC){ for(const t of (s.tokens||[])){
+      const txt=(t.form||"")+(t.lemma||"")+(t.ortho||"")+(t.translit||"");   // ortho too: picking a script orthography is exactly a case where glyphs the file never contained come on screen
+      let m; SCRIPT_RE.lastIndex=0;
+      while((m=SCRIPT_RE.exec(txt))){ const ch=m[0]; if(seen.has(ch)) continue; seen.add(ch);
+        for(const [name,re] of RES){ if(re.test(ch)){ if(!out.has(name)) out.set(name,ch); break; } } }
+      if(++n>4000) return out; } }
+  return out; }
+
+// TOFU PROBE — does anything on this machine draw `ch`? Compares its ink against a codepoint that is
+// unassigned in Unicode (U+10FFFF, a permanent noncharacter), which every font stack draws as the
+// missing-glyph box. Canvas, not the DOM: no layout, no reflow, and it works before the row is drawn.
+const _fcv=document.createElement("canvas");
+function fontCovers(ch){ const cx=_fcv.getContext("2d",{willReadFrequently:true});
+  const W=_fcv.width=48, H=_fcv.height=48, font='32px '+(typeof TOKEN_STACK==="string"?TOKEN_STACK:"sans-serif");
+  const ink=s=>{ cx.clearRect(0,0,W,H); cx.font=font; cx.fillStyle="#000"; cx.textBaseline="middle"; cx.fillText(s,4,H/2);
+    return cx.getImageData(0,0,W,H).data.join(""); };
+  const tofu=ink("\u{10FFFF}"), got=ink(ch);
+  return got!==tofu && /[^0]/.test(got.replace(/0+/g,"0")); }   // different from tofu AND not blank
+
+// Fetch and register one script's face. Idempotent, and safe to call whenever the document changes.
+async function ensureScriptFont(script,sample){
+  const family=fontStackName(script);
+  if(FONT_TRIED.has(family)) return; FONT_TRIED.add(family);
+  if(fontCovers(sample)) return;                    // already renders — nothing to download (the common case on macOS)
+  if(!hasBridge()){ toast("No font for "+script+" — the desktop app downloads one automatically"); return; }
+  let r; try{ r=await window.pywebview.api.font_face(fontRemoteName(script)); }catch(e){ r={error:String(e)}; }
+  if(!r||r.error){ FONT_TRIED.delete(family);   // a FAILURE is not remembered: the usual reason is no connection at that moment, and the next document load should try again rather than make the user relaunch after reconnecting. A success or an already-covered script stays remembered — neither can change under us.
+    toast("No font available for "+script+" — showing it in the system fallback"); return; }
+  const st=document.createElement("style"); st.dataset.font=family;
+  st.textContent='@font-face{font-family:"'+family+'";font-style:normal;font-weight:100 900;font-display:swap;src:url("'+r.uri+'")}';
+  document.head.appendChild(st); FONT_LOADED.add(family);
+  try{ await document.fonts.ready; }catch(_){ }
+  preserveScroll(renderDoc);   // the metrics change under it — re-measure with the face actually present
+  if(!r.cached) toast("Downloaded "+family+" ("+Math.round(r.bytes/1024)+" KB)"); }
+
+// Called after anything that can change what the document is written in — an open, an append, a
+// conversion, a language change. Serial, not parallel: a document mixing scripts should not fire five
+// downloads at once, and each one re-renders when it lands.
+let _fontRun=null;
+function syncDocFonts(){ if(_fontRun) return _fontRun;
+  _fontRun=(async()=>{ try{
+    for(const [script,ch] of docScripts()){
+      if(FONT_CORE_SCRIPTS.has(script)||FONT_SKIP_SCRIPTS.has(script)) continue;
+      await ensureScriptFont(script,ch); }
+    // Settle pass: even when every script was already "covered" (no download → ensureScriptFont never
+    // re-renders), freshly injected ortho glyphs can still re-resolve through the font stack after the first
+    // paint. Waiting on fonts.ready and re-laying out once is what keeps stemma/arc seam marks and folded
+    // punctuation on the new ink edge after a Devanagari→Grantha switch — wrapped brackets already self-correct
+    // because their satellites hang off the DOM box. Skip when there's nothing scripted on screen (no DOC, or
+    // Script is Original/None), so ordinary Latin loads don't pay an extra render.
+    try{ await document.fonts.ready; }catch(_){}
+    if(DOC.length && typeof ORTHO_SCHEME==="string" && ORTHO_SCHEME && ORTHO_SCHEME!=="none"
+       && typeof preserveScroll==="function" && typeof renderDoc==="function"){
+      preserveScroll(renderDoc); }
+  } finally { _fontRun=null; } })();
+  return _fontRun; }

@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 100 100"><defs><symbol id="proj" viewBox="-7 3.5 164 164" preserveAspectRatio="xMidYMid meet">
+  <g fill="#FFFFFF">
+    <rect x="11.5" y="75.25" width="7" height="65.5" rx="3.5"/>
+    <rect x="51.5" y="42.5" width="7" height="98.25" rx="3.5"/>
+    <rect x="91.5" y="120.25" width="7" height="20.5" rx="3.5"/>
+    <rect x="131.5" y="87.5" width="7" height="53.25" rx="3.5"/>
+  </g>
+</symbol></defs>
+  <circle cx="0" cy="0" r="0.5" fill="none"/><circle cx="50" cy="0" r="0.5" fill="none"/><circle cx="100" cy="0" r="0.5" fill="none"/><circle cx="0" cy="50" r="0.5" fill="none"/><circle cx="100" cy="50" r="0.5" fill="none"/><circle cx="0" cy="100" r="0.5" fill="none"/><circle cx="50" cy="100" r="0.5" fill="none"/><circle cx="100" cy="100" r="0.5" fill="none"/>
+  <use href="#proj" x="18.57" y="18.57" width="62.87" height="62.87"/>
+</svg>

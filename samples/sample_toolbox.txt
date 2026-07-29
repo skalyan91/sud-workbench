@@ -1,0 +1,29 @@
+\_sh v3.0  400  Text
+
+\ref 001
+\tx Mtoto analala.
+\mb m- toto a- na- lal -a
+\ge NC1- child SM- PRS- sleep -FV
+\ps NPRE NOUN SM TAM VERB FV
+\ft The child is sleeping.
+
+\ref 002
+\tx Watoto wanacheza.
+\mb wa- toto wa- na- chez -a
+\ge NC2- child SM- PRS- play -FV
+\ps NPRE NOUN SM TAM VERB FV
+\ft The children are playing.
+
+\ref 003
+\tx Nilisoma kitabu.
+\mb ni- li- som -a ki- tabu
+\ge 1SG- PST- read -FV NC7- book
+\ps SM TAM VERB FV NPRE NOUN
+\ft I read a book.
+
+\ref 004
+\tx Anakula ugali.
+\mb a- na- kul -a ugali
+\ge SM- PRS- eat -FV ugali
+\ps SM TAM VERB FV NOUN
+\ft She is eating ugali.

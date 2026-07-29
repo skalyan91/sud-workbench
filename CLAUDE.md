@@ -1,0 +1,350 @@
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
+## What this is
+
+A native-feeling macOS desktop app for viewing and editing dependency treebanks in CoNLL-U,
+speaking **SUD** relation set (plus **UD** import/export and **mSUD**). All-Python
+**pywebview** shell (`app/`) wrapping a framework-free SVG + CSS frontend (`web/`) — **no build
+step, no bundler, no npm**. `README.md` has the user-facing feature list; this file covers how to
+work on it.
+
+**This directory is not a git repository.** There is no `git diff`/`git log` to consult — the Stop
+hook detects changes by file mtime, and you should not assume version control when reasoning about
+"what changed".
+
+## Commands
+
+```sh
+# Run (Python 3.12 — spaCy/stanza/torch wheels are unreliable on 3.14)
+.venv/bin/python -m app                        # or: … -m app samples/english.conllu
+SUD_DEBUG=1 .venv/bin/python -m app            # opens the WebKit inspector
+
+# Fresh environment
+python3.12 -m venv .venv && .venv/bin/pip install -r requirements.txt
+
+# Build the shipping bundle (also run automatically — see "Automatic rebuild" below)
+packaging/make_bootstrap_app.sh                # → dist/SUD Workbench.app
+```
+
+**Launching the GUI: always detach it.** A pywebview app started as a Claude Code managed
+background job gets SIGKILLed when the harness reaps the job — the window vanishes with no crash
+log, which looks exactly like an app crash and has been misdiagnosed as one before. Use:
+
+```sh
+.venv/bin/python -c "import os,sys; os.setsid(); os.execv(sys.executable,[sys.executable,'-m','app','samples/english.conllu'])" &
+```
+
+### Verification (there is no test suite)
+
+Three checks stand in for one; run all three after non-trivial edits.
+
+1. **Byte-stable round-trip** — the hard I/O requirement: open → save with no edits must be
+   byte-identical.
+   ```sh
+   for f in samples/*.conllu; do
+     .venv/bin/python -c "from app import io_conllu
+   o=open('$f',encoding='utf-8').read()
+   print('$f','STABLE' if io_conllu.serialize(io_conllu.parse(o))==o else 'DIFF')"
+   done
+   ```
+2. **Headless render smoke test** — `node --check` on the JS only validates *syntax*; it does not
+   catch the failure mode this frontend is prone to (a temporal-dead-zone / `ReferenceError` at load
+   that blanks the whole app — see "Frontend" below). Open `web/index.html` in headless Chrome over
+   CDP, collect `Runtime.exceptionThrown` + console errors, assert `#doc .sblock` count, and cycle
+   `conv` through stemma/arcs/tree/brackets/outline. With no bridge the page renders
+   `web/js/dev-fixture.js`'s sentences, so every renderer is exercised. Healthy run = one block per
+   fixture sentence in every notation (count them in the fixture rather than hard-coding the number —
+   it was 5, is 8, and will move again), 0 runtime errors. **The first top-level throw aborts the script and masks later
+   ones** — fix, re-run, repeat until clean; capture `.stackTrace.callFrames` to pinpoint the file.
+3. **Real boot** — `timeout 8 .venv/bin/python -m app samples/english.conllu` should exit 124
+   (i.e. it was still running), with every `web/js/**` module served HTTP 200.
+
+### Automatic rebuild
+
+`.claude/settings.json` wires a **Stop hook** (`.claude/hooks/rebuild-on-stop.sh`) that, once per
+turn, kicks off `packaging/make_bootstrap_app.sh` in a detached background process whenever anything
+under `app/`, `web/`, `packaging/` or `grammars/` is newer than `.claude/.last-build-stamp`. Output
+goes to `.claude/last-build.log`; an in-flight build holds `.claude/.build.lock`. Don't run a build
+in the foreground just to check your work — read the log.
+
+The build is detached with **`os.setsid()`** (the hook re-executes itself with `--run-build` under a
+new session), not `nohup`/`disown` — none of which start a session, so the build stayed in the
+session's process group and was SIGKILLed with it when the harness reaped the turn. That is the same
+reaping the "Launching the GUI" note above describes, and it failed **silently**: the log kept the
+`rebuilding…` line the hook writes itself, no `build exited N` line ever landed, the lock was absent
+(the child died before writing it), and `dist/` went stale for days while every turn still reported a
+build had started. **Read the log for `build exited`, not just for the kickoff line** — and if you
+ever see a kickoff with no exit line, suspect the detach before suspecting the build.
+
+## Architecture
+
+### The two halves and the document model
+
+The **frontend owns the live document**; Python handles everything that touches the filesystem,
+models, or the OS. A document is a plain list of *sentence dicts* — the same JSON-friendly shape on
+both sides of the bridge, marshalled verbatim:
+
+```
+{sid, text, comments, translations, tokens[], mwt[], empties[], translit_scheme, stored, url, …}
+  tokens[]  → {id, form, lemma, upos, xpos, feats, head (string), deprel, deps, misc, translit, …}
+  mwt[]     → {from, to, form, _cols}       empties[] → {after, id, _cols}
+```
+
+`app/io_conllu.py` converts to/from `.conllu` **by hand** — every token line keeps its ten raw
+columns as strings and every comment is preserved verbatim, because the `conllu` library
+renormalises FEATS/DEPS/MISC and would break byte-stability. The normalisation policy (the only
+permitted differences on save) is documented at the top of that module; don't widen it.
+
+Layered annotation rides in existing CoNLL-U slots rather than new columns: glosses in MISC
+(`Gloss`/`MSeg`/`MGloss`), transliteration in MISC `Translit`, deep relations in the `deprel`'s `@`
+suffix, doc-level scheme choices in `# key = value` comments (`_META_KEYS`).
+
+### Frontend (`web/`) — ordered classic scripts, one global scope
+
+`web/index.html` is a ~190-line skeleton that loads the `iso639-3.js` data table,
+`macos-kit/toast.js`, and **26 app modules as ordered classic `<script>` tags** (not ES modules),
+plus the dev-only fixture. They share ONE page-global scope, so every top-level `let`/`const`/
+`function` is visible across files with no `import`/`export` and no `window.*` threading.
+
+Modules live in `web/js/`: **core/** (state, prefs, document, undo, scroll, init), **diagram/**
+(diagram-core, -render, -wrap, -edit), **grid/** (grid, columns), **editing/** (edit-ops,
+context-menu, validation), **io/** (bridge, formats, models), **lang/** (translit, translit-load,
+readings, fontload),
+**ui/** (sheets, wiring, find, colours). The `<script>` load order in `index.html` interleaves the
+folders and is **not** derivable from the folder names — read it before moving anything.
+
+**The one real hazard:** classic scripts do not hoist function declarations across files, so *eager
+top-level code (an IIFE, a boot `requestAnimationFrame`, a bare call) must never forward-reference a
+function defined in a later-loaded module* — it throws `ReferenceError` at load and blanks the app.
+Put cross-module boot work in `js/core/init.js` (loads last, after every module is defined), and
+guard eager forward calls with `if(typeof fn==="function")fn()`.
+
+`web/macos-kit/` is a deliberately **self-contained, reusable** macOS-chrome kit (Liquid-Glass
+tokens, title bar/pills/menus/sheet CSS, toast) with its own README — keep app-specific rules out
+of it; app overrides belong in `web/styles/app.css`, which loads after it.
+
+`web/js/dev-fixture.js` seeds a sample `DOC` only when there's no bridge (browser design mode).
+`packaging/make_*.sh` delete both the file and its `<script>` tag from the bundle, so the shipped
+app carries no sample sentences. `samples/` is likewise repo-only — nothing at runtime reads it.
+
+### Native shell (`app/__main__.py`, `app/api.py`) — pywebview threading invariants
+
+`__main__.py` is the pywebview bootstrap: the window, the application menu, and a lot of direct
+AppKit/PyObjC work for the native feel (unified transparent title bar with the traffic lights placed
+in-content, a transparent drag view above the WKWebView, real SF Symbols rendered natively and
+pushed to CSS `--sf-*` masks, accent/fullscreen/focus observers, Dock icon). Menu actions call the
+frontend's bridge-aware JS helpers so toolbar and menu share one code path.
+
+`api.py` is `window.pywebview.api`: open/save/save-as/rename, parse/tokenize/sentencize, validate,
+format detection + conversion, model list/download/remove, extras install, transliteration,
+Wiktionary lookup, prefs and recent files (persisted in `~/Library/Application Support/SUD
+Workbench/state.json`).
+
+**Two hard-won invariants — violating either produces an intermittent, hard-to-diagnose hang:**
+
+- pywebview dispatches every JS→Python call on its **own new thread** (calls are *not* serialised),
+  and each native file dialog shares one `_file_name` + semaphore per window. So all
+  `create_file_dialog` callers go through `Api._modal_dialog`, which serialises them behind
+  `_dialog_lock`.
+- `_dialog_lock` is **bridge-thread-only**. More generally: any pywebview `create_*_dialog` or
+  `evaluate_js` reached from a main-thread AppKit callback must **not** be called directly — it does
+  `callAfter(...) + semaphore.acquire()`, so parking the main thread deadlocks the very run loop that
+  would service it. Use an inline `runModal()` (as the unsaved-close confirmation does) or a
+  short-lived daemon thread (as Open Recent does).
+
+### Formats and conversion (`app/detect.py`, `app/convert.py`, `grammars/`)
+
+Format is **detected** from the relation inventory, per sentence then per document: UD / SUD / mSUD.
+SUD and mSUD are editable; UD is import/export only. Conversion runs grew (via `grewpy`) over the
+`.grs` grammars vendored verbatim from surfacesyntacticud/tools under `grammars/` — see
+`grammars/README.md` for the direction → strategy-name table (strategies are *not* uniformly
+`main`). There is no universal SUD→mSUD grammar.
+
+grew's OCaml backend is an **optional external prerequisite**: `app/convert.py` picks up
+`vendor/grew/bin/grewpy_backend` if bundled (built by `tools/bundle_grew.sh`), else `~/.opam/*/bin`.
+Without it the app still runs and edits SUD/mSUD — only UD import/export and conversion are
+disabled, surfaced as a toast. Keep new features degrading that way rather than hard-failing.
+
+### Parsing, models, and on-demand extras
+
+`app/parse.py` runs two engines in-process: **SUD spaCy** packages (`en_sud_ewt`, …) and **Stanza
+UD** via `spacy-stanza`, post-converted UD → SUD with grew and with multi-word tokens reconstructed
+(`_reconstruct_mwt`). Model ids are engine-qualified — `sud:<package>` / `stanza:<lang>#<package>`.
+No model → whitespace tokenisation. `app/parse_sud.py` is only a back-compat shim.
+
+**MWT ranges come from three places, in this order of trust.** Stanza *has* a multi-word-token
+layer (`Token.words` / `Word.parent`, the expanded words carrying `start_char = None` because they
+aren't substrings of the text), so its ranges are read straight off the pipeline. A spaCy model
+whose tokeniser is a **custom callable** can publish its own via the `doc.user_data["mwt_ranges"]`
+= `[(first, last, surface), …]` convention (+ `["source_text"]`), which `_mwt_from_doc` honours —
+`ar_sud_padt`'s CAMeL clitic tokeniser is the first, and `scripts/ar_tokenizer.py` in the
+**SUD-spaCy** repo is where it's written, so a change there needs the wheel repackaged. Only when
+nothing is published does `_reconstruct_mwt` **infer** ranges from spacing + the tagger's PUNCT
+labels. That fallback is sound for spaCy's *rule-based* tokeniser and only there: it concatenates
+component surfaces to build the range form, which is exact because a `Tokenizer` cannot emit a
+non-substring token (`retokenize().split()` raises E117), whereas a custom tokeniser builds its Doc
+from a word list and is under no such constraint. Absent key = infer; `[]` = a positive "no MWTs".
+
+That E117 guarantee is about the range **form**, not about whether the run is an MWT at all, and in
+a **spaceless script it is not** — there the segmenter's output *is* the word layer, so a run of
+tokens with no space between them is a phrase. `_spaceless_script` therefore vetoes any inferred
+range whose letters are all CJK/kana/Thai/Lao/Khmer/Myanmar/Tibetan, **per run** rather than per
+document, so `我用 Python 编程` still treats its Latin run normally. This replaced a `len(chunks) < 2`
+test that meant to do the same job but tested the *whole input* while the rule it guarded ran *per
+chunk*: one space anywhere disarmed it and every CJK chunk was swallowed whole (`zh_sud_gsd_simp_trad`
+and `lzh_sud_kyoto` reach the fallback — stock spaCy tokenisers publish nothing; the Stanza zh/ja
+pipelines have no `mwt` processor and were never affected). Dropping the chunk test also let the
+genuine single-chunk case through — a bare `don't` is one orthographic word, and an MWT.
+
+`app/models_registry.py` lists/downloads models: SUD wheels from GitHub Release assets on
+`SUD_REPO` (`SunflowerAI/sud-spacy-parsers`, overridable via `$SUD_MODELS_REPO`) pip-installed into
+the running venv, and Stanza models into `~/Library/Application Support/SUD Workbench/
+stanza_resources`.
+
+**One model is not a download: `en_sud_ewt`.** It is pinned in `requirements-core.txt` (and
+`requirements.txt`), so every environment that can run the app already has it — the app itself
+depends on it, since `app/wiktionary.py` parses English definition prose no matter what language the
+document is in. `models_registry.BUNDLED_SUD` names it; such a model still lists as installed but
+can't be removed (`remove()` refuses, and the Model Manager row shows a "Bundled" pill in place of
+its Remove button). Adding another bundled model means editing both requirements files AND that set.
+
+`app/extras.py` is the reason `requirements-core.txt` exists alongside `requirements.txt`: the
+portable bundle ships only the torch-free CORE set, and the heavy tiers (`stanza` ≈1.1 GB,
+`japanese` ≈0.45 GB, `arabic` ≈0.3 GB) are pip-installed **on demand at runtime** into
+`~/Library/Application Support/SUD Workbench/site-packages`, which is added to `sys.path` at
+startup. Every heavy import therefore sits behind a lazy `try: import` in `translit`/`parse` — a
+missing tier must surface as an offer to install, never an exception.
+
+### Language services
+
+- `app/translit.py` — Latin transliteration routed per language: wiktra by default, dedicated
+  backends for the context-dependent scripts (Arabic/Persian DIN 31635, Hebrew ISO 259, pypinyin,
+  ToJyutping, Janome+pykakasi, hangul-romanize), uroman as fallback. Failures yield `""`, never
+  raise; results are cached. Korean runs Hanja through the **vendored Unihan `kHangul` table**
+  (`app/data/hanja_hangul.tsv`) into their Sino-Korean Hangul reading first — hangul-romanize maps
+  syllables only, so mixed-script text would otherwise keep bare 漢字 — with 두음법칙 applied
+  positionally rather than stored (`_dueum`). The `hanja` PyPI package was rejected: its metadata
+  pins `pyyaml==6.0.1` and hard-requires pytest/coveralls, and its table is single-valued.
+  `readings()` is the same engines asked for the CJK *alternatives* —
+  ordered candidates in the scheme on display, `readings[0]` being what the app already shows, `[]`
+  when the engine offers only one. It backs the token context menu's readings flyout, whose pick is
+  authoritative (marked `_trPick`, so no later auto-fill pass overwrites it).
+  `ambiguous()` names the languages whose romanisation is non-deterministic (those readings languages
+  plus the unvocalised abjads). For those, the frontend makes the **Stored** transliteration
+  click-editable on the transliteration row (`editStoredTransInline` in `js/lang/translit-load.js`), and
+  `derive_scheme()` re-renders every Displayed scheme FROM that correction — by matching the stored
+  string against the enumerated candidate readings and re-joining the matching one through the target
+  engine, never by parsing a romanisation. It returns `""` where no derivation is honest (a
+  character-keyed scheme such as General Chinese), and the row then falls back to romanising the form.
+  A correction reopened from a file is recovered by comparison (`adoptStoredPicks`), since CoNLL-U has
+  no "corrected by hand" flag.
+- `app/langid.py` — fastText `lid.176`, model **vendored** at `app/data/lid.176.ftz` so detection is
+  fully offline. Drives the document language on open.
+- `app/sud_rules.py` — parses the vendored grew validator patterns
+  (`grammars/validator/modules/relations.json`) once and evaluates the handful of error-level
+  relation↔POS constraints directly, rather than invoking grew per candidate.
+- `app/toolbox_import.py` (+ vendored `app/_toolbox_vendor.py`) — SIL Toolbox/FLEx interlinear →
+  raw CoNLL-U, dependencies left unset.
+- `app/wiktionary.py` — MediaWiki REST *definition* endpoint (not HTML scraping), for the
+  right-click "Definitions of …" → MGloss pre-fill. Definition prose becomes gloss units through
+  `_condense`, a real SUD parse of the English (which is why `en_sud_ewt` is a hard dependency):
+  split at semicolons/commas, then keep the clause head plus its subj/comp/mod/udep/conj members and
+  **delete any `mod` subtree that is not both one arc from the head and immediately beside it** —
+  "directly modifies" means one `mod` arc, "immediately adjacent" means the phrase's span covers the
+  slot just before or just after the head in the definition's own word order, and the phrase goes
+  whole so no complement is left stranded. A **coordination starts a candidate of its own** (`conj`
+  and `conj:coord` only — `conj:appos` is a second designation of one referent and `conj:dicto` is a
+  disfluency, so neither cuts); `flat` deliberately does **not**, and that must stay so.
+  Three shared rules live here and are reused verbatim by `app/apte.py`, so a picked Sanskrit sense
+  reads like a picked English one: that condensation, `_decap` (a sense is lowercased at its LEADING
+  capital only — mid-string capitals are proper names or Leipzig small-caps runs — and not at all for
+  a PROPN token), and `_pos_matches` (a PROPN token also takes NOUN entries, since dictionaries file
+  a name as a noun; deliberately not symmetric).
+- `app/apte.py` — the SAME flyout for Sanskrit, from Apte's dictionary instead of Wiktionary.
+  Headwords are indexed in **SLP1**, so the IAST this app stores is converted straight to SLP1 via
+  aksharamukha (no Devanagari round-trip) and then *folded*, every homorganic nasal to anusvāra, on
+  both the query and the index — the two Apte editions spell those differently (`aNga`/`aMga`) and
+  a lemma may be written either way. `Api.definition_lookup` picks the source by language;
+  `wiktionary_lookup` survives as a back-compat alias. Two paths, in order:
+  - **`app/data/apte1957.tsv.xz` (1.8 MB), vendored, and what wins** — Apte's *revised and enlarged*
+    1957 edition (CDSL code **AP**), preprocessed by `tools/build_apte_index.py` from the canonical
+    18.5 MB source text `v02/ap/ap.txt` of `github.com/sanskrit-lexicon/csl-orig`, **CC BY-SA 4.0**
+    (attribution rides in the file's own first line). Offline, and 77.5 k entries / 168 k senses.
+    That source text marks structurally what the REST API below only renders as typography:
+    citations are `<ls>` elements, word class and gender are `<lex>`, senses are `∙²` markers, a
+    verb's class is `€n`, Sanskrit is `{#…#}`, and a compound is a record of its own rather than
+    being nested inside its base entry. An entry-level column is written out, because `_local` needs
+    it to prefer a main entry over a compound sub-entry that merely shares its headword (300 keys
+    do); the column count is a contract between the script and that loader. **Upstream's own `<e>`
+    level does not decide it** — upstream marks a compound `<e>2` only where the base entry also
+    prints a `━Comp.` list, so `janman`, which prints none, filed all 35 of its compounds as `<e>1`
+    sub-records and the build script's L-number merge poured them into `janman` itself. The script's
+    `is_variant` decides sectionhood from the two headwords instead.
+    Rebuild the file with the script; don't hand-edit it — the build IS byte-reproducible (verified),
+    so a rebuild from the same `ap.txt` is a no-op.
+  - **the live C-SALT REST API** (`api.c-salt.uni-koeln.de/dicts/ap90/restful`) — Apte's *first*
+    1890 edition (**AP90**), the only Apte that API serves, reached ONLY when the vendored file is
+    absent or unreadable, so a trimmed bundle still answers. Its TEI carries Apte's typography
+    rather than structured fields, which is what the fallback parser reads.
+  Measured over the 116 lemmas of `samples/brihat_jataka.conllu`, the switch takes citation residue
+  from 7.0 % of glosses to 0.5 %, empty lemmas from 28 to 25, noun lemmas answered with a gender
+  from 49/54 to 53/56, and the sweep from 226 s of network to 4.7 s of nothing.
+  **Monier-Williams was evaluated and rejected** — C-SALT serves it too (`/dicts/mw/restful`) and
+  CDSL has its source text, but one MW lookup downloads the base entry with every compound inside it
+  (deva 690 kB, `mah` 1.77 MB), only 61 of those 116 lemmas hit its headword index, `mahat` is a bare
+  cross-reference stub, glosses run about twice as long, proper names come out as `S3iva` rather than
+  `Śiva`, and there is no per-entry URL for the flyout's "Open …" row. The measurements are in that
+  module's docstring — read them before reopening the question.
+
+- `app/sa_csl.py` (+ vendored `app/_sa_csl_vendor.py`) — Sanskrit **CSL notation → token forms, with
+  the character offsets kept**, which is what lets the running-sentence alignment work on a Sanskrit
+  `# text`. That text is sandhied with the coalescences *marked* rather than undone
+  (`vartm" â-punar-janmanām`, `hor" êty`), so no component form is a substring of it and the
+  frontend's literal match (stage 1) cannot settle a single Sanskrit sentence. The vendored file is
+  `scripts/sa_tokenizer.py` from the **SUD-spaCy** repo (MIT, same owner) minus its spaCy class —
+  upstream's own `desandhi_csl`, the routine that built the model's training data, so the two cannot
+  drift. Two properties make the alignment exact rather than a guess: `desandhi_csl` **preserves the
+  token count**, so rewriting each element's text leaves every offset valid; and upstream's corpus
+  transform hyphen-joins the members of ONE MWT range while re-segmenting every *external*-sandhi
+  boundary into separate space-joined tokens, so **a hyphen-joined word run IS one MWT range** and
+  the unit↔chunk correspondence is 1-to-1 and positional. The result is then VERIFIED against the
+  file's own component forms before any span is emitted (`_MIN_UNIT`/`_MIN_MEAN`) — below threshold
+  the unit gets a hole and the sentence may be refused entirely, because a decoration on the wrong
+  span is a lie about the annotation. Needs no model, no spaCy and no network; `parse._tokenizer_spans`
+  routes Sanskrit here too, so the sandhi-*splitting* tokeniser (whose `doc.text != text` otherwise
+  forces an honest `[]`) now reports real spans into the original string.
+  **A tokeniser may also PUBLISH its own offsets** — `doc._.src_text` (the string it was handed) +
+  `doc._.src_spans` (one half-open range per token), the same shape as the
+  `doc.user_data["mwt_ranges"]` convention, registered by `sa_sud_vedic_ufal_csl` from its
+  re-released 0.1.0 wheel. `parse._published_spans` honours them for any model and prefers them to
+  `token.idx`, **gated on `src_text` being the string we passed**: `# text` escapes its line breaks
+  as the two characters `\n` and `bridge.js` restores real newlines on load, so feeding the escaped
+  form would glue `\n` onto the next word and shift that token and every span after it. That gate is
+  what turns the trap into a fall-through instead of a silently wrong decoration.
+Optional dependencies are always isolated behind a single module façade in `app/`, as those last
+five do — follow that when adding another.
+
+## Packaging (`packaging/`)
+
+- **`make_bootstrap_app.sh`** — the canonical build (and what the Stop hook runs). Ships the app
+  *source* plus a launcher; on first launch it builds a per-user venv from the user's **own**
+  Python 3.12, because a Python linked against the current macOS SDK is what gets the native Tahoe
+  chrome. CORE deps only.
+- **`make_portable.sh`** — self-contained bundle with a relocatable standalone CPython 3.12 + CORE
+  deps (~300–450 MB). No external venv needed, but the older SDK costs some native chrome.
+- **`make_app.sh`** — thin launcher bundle that runs this project's `.venv`; dev convenience only.
+- **`build_icons.sh`** — regenerates `AppIcon.icns` + `app/data/appicon.png` from
+  `packaging/AppIcon.icon` (Icon Composer). Icon Composer exports full-bleed; the script applies the
+  824-in-1024 macOS grid.
+
+## Code conventions
+
+Both halves are written with **dense trailing/inline comments that record the *reason* for a
+non-obvious line** — a rejected alternative, an OS quirk, a measurement, a guideline citation.
+Several of those comments are the only surviving record of a subtle bug's diagnosis. Match that
+density when editing, preserve existing rationale comments when moving code, and prefer extending
+one to re-deriving it.
+
+`pyrightconfig.json` points type checking at `.venv`.

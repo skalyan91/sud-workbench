@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 100 100"><defs><linearGradient id="tentGrad" gradientUnits="userSpaceOnUse" x1="15" y1="0" x2="135" y2="0"><stop offset="0" stop-color="#b88735"/><stop offset="0.30" stop-color="#b88735"/><stop offset="0.37" stop-color="#cd7468"/><stop offset="1" stop-color="#cd7468"/></linearGradient><symbol id="mkd" viewBox="-7 3.5 164 164" preserveAspectRatio="xMidYMid meet">
+  <g fill="none" stroke-width="7" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M 15 47.25 L 55 33.75" stroke="url(#tentGrad)"/><path d="M 55 33.75 L 135 47.25" stroke="url(#tentGrad)"/>
+    <path d="M 135 78.75 L 95 92.25" stroke="#00a79e"/>
+  </g>
+</symbol></defs>
+  <circle cx="0" cy="0" r="0.5" fill="#1B140C"/><circle cx="50" cy="0" r="0.5" fill="#1B140C"/><circle cx="100" cy="0" r="0.5" fill="#1B140C"/><circle cx="0" cy="50" r="0.5" fill="#1B140C"/><circle cx="100" cy="50" r="0.5" fill="#1B140C"/><circle cx="0" cy="100" r="0.5" fill="#1B140C"/><circle cx="50" cy="100" r="0.5" fill="#1B140C"/><circle cx="100" cy="100" r="0.5" fill="#1B140C"/>
+  <use href="#mkd" x="18.57" y="18.57" width="62.87" height="62.87"/>
+</svg>

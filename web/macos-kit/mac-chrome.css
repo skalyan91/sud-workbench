@@ -1,0 +1,438 @@
+/*@module macos-kit/mac-chrome.css*/
+  .diagram,.gwrap,.text-conv{overscroll-behavior:none}   /* each inner scroller is isolated AND has no overscroll bounce of its own; its wheel never chains to the block */
+  body{margin:0; font-family:-apple-system,BlinkMacSystemFont,"SF Pro Text",system-ui,sans-serif; font-size:13px; color:var(--text);
+    background:var(--win-bg); -webkit-font-smoothing:antialiased}
+  .mono{font-family:ui-monospace,"SF Mono","Menlo",monospace}
+  /* the app fills the real native window; the fake window chrome (rounded card,
+     shadow, wallpaper, traffic-light dots) only appears in browser "mockup" mode */
+  .window{width:100%; height:100vh; display:flex; flex-direction:column; background:var(--win-bg); overflow:hidden; position:relative}   /* fix 3: positioned ancestor for the absolutely-overlaid titlebar */
+  .lights{display:none}
+  html.mockup body{padding:24px; display:flex; align-items:center; justify-content:center;
+    background:radial-gradient(120% 120% at 18% 0%,var(--wallpaper-1),transparent 60%),radial-gradient(120% 120% at 100% 100%,var(--wallpaper-2),transparent 55%),var(--wallpaper-3)}
+  html.mockup .window{width:min(1240px,100%); height:min(820px,calc(100vh - 48px)); border-radius:12px;
+    box-shadow:var(--shadow); border:.5px solid var(--hairline-strong)}
+  html.mockup .lights{display:flex; gap:8px; width:60px; flex:none}
+
+  /* unified macOS title bar: the toolbar IS the title bar (content fills up under it), so reserve room
+     at the left for the OS traffic lights. In browser "mockup" mode the fake lights are a flex item, so
+     the inset is dropped there. */
+  /* min-height = twice the traffic-lights' centre-y (measured natively), so centred toolbar items line up
+     vertically with the lights; padding-left clears the lights. Both vars are injected by the Python shell.
+     THE BAR IS SIZED BY THE LIGHTS, which is why "make the title bar taller" is done by LOWERING THE LIGHTS and
+     not by setting a height here: the two are one number. The native shell now drops the OS-placed buttons by
+     _LIGHT_DROP (app/__main__.py) and publishes the centre it measured AFTER the drop, so the real window and this
+     browser fallback agree; 26px (⇒ a 52px bar) is macOS 26's own unified-toolbar figure and what Preview shows. */
+  .titlebar{min-height:calc(var(--lights-cy,26px)*2); position:absolute; top:0; left:0; right:0; z-index:30; display:flex; align-items:center; gap:8px; padding:0 4px 0 var(--lights-right,82px); background:transparent;   /* fix 3: the bar OVERLAYS the document (absolute, out of flow) so the doc scrolls UNDERNEATH it and the blur below shows the content through; height tracks the native traffic-light centre → ~44px. The tint and the blur have MOVED to ::before/::after — see the scroll-edge block below — so the element itself paints nothing */
+    border-bottom:.5px solid transparent; flex-wrap:nowrap; white-space:nowrap; --tb-tint:var(--tb-merged-tint,var(--toolbar-bg))}   /* the border stays in the box at zero alpha rather than being dropped: --tbH is MEASURED from this element and handed to the options bar and the document's top padding, so removing .5px of height would move both. --tb-tint now feeds ONLY the options-bar-OPEN merged layer below (the closed-state stack no longer paints any tint — see its own comment) — --tb-merged-tint is the light-mode-calibrated alpha (mac-tokens.css), falling back to the plain --toolbar-bg token for dark mode / if unset. */
+  /* macOS 26 SCROLL EDGE — PROGRESSIVE BLUR (options bar CLOSED).
+     `backdrop-filter` cannot vary its radius by y, so a Preview-like ramp is faked by STACKING layers of
+     increasing fixed blur, each revealed only in a shorter band via mask-image (Quinn Keaveney's technique:
+     https://codepen.io/QuiteQuinn/pen/jOBxGjr — mask a backdrop-filter; progressive = several such layers).
+     Four empty <i> children of `.tb-blur` (first child of `.titlebar`, pointer-events:none, z-index:-1) —
+     deliberately NOT the earlier six-slice experiment that borrowed `.spring`/`.tbright` ::before/::after and
+     made the buttons feel laggy/stripy in WKWebView. These layers never host controls.
+     TINT MOVED TO THE PARENT, AS A REAL LINEAR GRADIENT (4th pass): every earlier version painted the SAME full-
+     strength `--tb-tint` on all four `i` layers, masked by the same per-layer gradient as their blur — so the
+     visible tint at any point was whatever Porter-Duff "over" compositing of however many same-alpha layers
+     happened to still be unmasked there, which is NOT a linear function of position (stacking N same-alpha
+     layers asymptotically approaches full opacity, it doesn't step evenly), and the user correctly called this
+     out as not reading as a straight ramp. Fixed by decoupling the two effects entirely: `.tb-blur` itself (the
+     parent, unmasked, no backdrop-filter of its own) now paints ONE literal `linear-gradient(to bottom,
+     var(--tb-tint), transparent)` — CSS interpolates a gradient's alpha linearly between stops by construction,
+     so this alone is a genuinely linear tint ramp, full strength at the titlebar's top edge fading straight to
+     zero at the box's own bottom. The four `i` children keep ONLY `backdrop-filter:blur()` + their mask now (no
+     `background`) — they blur whatever is behind them, which includes this gradient (backdrop-filter samples
+     everything painted earlier in the box, and the parent's own background paints before its children), but a
+     few px of blur radius doesn't perceptibly distort a gradient that varies smoothly over tens of pixels, so
+     this composes cleanly rather than fighting the gradient.
+     PLATEAU THEN ROLL-OFF (5th pass): the two-stop linear ramp above read as ramping across the WHOLE bar —
+     the user wants full strength held CONSTANT across the titlebar's own top half, only rolling off through
+     the bottom half (and the overshoot tail below it), matching how Preview's own toolbar edge reads: the
+     bulk of the bar is uniformly frosted, only the last stretch tapers. The box is 130% of the titlebar's own
+     height, so "half the titlebar" is 50/130 ≈ 38.46% of THIS box's own height — every gradient/mask below
+     holds fully opaque from 0% to 38.46%, then fades through the remainder. The tint gradient is a plain
+     THREE-stop `var(--tb-tint) 0%, var(--tb-tint) 38.46%, transparent 100%` — still linear in the roll-off
+     itself, just held flat first.
+     BLUR RADII AND FADE STOPS ARE EVENLY SPACED (was an organic/curved progression): radii are a plain n ×
+     1.3px for n=1..4 (1.3/2.6/3.9/5.2 — 5.2 kept as the already-twice-tuned strongest value, see the blur-
+     amount history below). Each layer's mask now carries the SAME 38.46% plateau, then fades out at a point
+     obtained by taking the earlier pass's evenly-spaced 25/50/75/100% end-points and rescaling them into the
+     REMAINING 38.46%–100% span (end = 38.46 + old_end × 0.6154): 53.85% / 69.23% / 84.62% / 100% for n=1..4.
+     The strongest (n=4) layer is still the one that reaches all the way to the box's own bottom edge; the
+     weakest (n=1) is still first to drop out once the roll-off begins — so blur and tint still increase
+     together, in lockstep, moving toward the titlebar's top, exactly as before, just with a flat plateau
+     inserted ahead of the same relative cascade.
+     HEIGHT 130%, NOT 100% (measured, not guessed): a `.doc` padding-top of exactly `--tbH` (app.css) means there
+     is NO literal DOM gap between the titlebar's own bottom edge and where the document's content starts —
+     confirmed via CDP `getBoundingClientRect()` on `.titlebar` vs `#doc`'s computed `padding-top`, both landing
+     on the same number to the pixel. An earlier `height:100%` pass showed a real "stops short of the edge" —
+     not a DOM gap, but every layer's mask reaching zero ~10% short of the box's own bottom, which at 100%-tall
+     WAS the bar's visible edge, so the last few px of the bar showed flat, un-tinted backdrop. 130% pushes the
+     box (and therefore its now-100%-of-itself fade-to-zero point) a controlled amount past the bar's own visible
+     boundary and into the document's own overlay region — a soft, continuous tail-off onto real content, not a
+     hard seam. Height stays LESS than the old 180% guess specifically so the overhang stays shallow enough not
+     to visibly haze the first line of real scrolled text. */
+  .titlebar > .tb-blur{position:absolute; left:0; right:0; top:0; height:130%; pointer-events:none; z-index:-1; overflow:hidden;
+    background:linear-gradient(to bottom, var(--tb-ramp-tint,var(--tb-tint)) 0%, var(--tb-ramp-tint,var(--tb-tint)) 38.46%, transparent 100%)}
+  .titlebar > .tb-blur > i{position:absolute; inset:0; display:block;
+    -webkit-backdrop-filter:saturate(180%) blur(var(--tb-b)); backdrop-filter:saturate(180%) blur(var(--tb-b));
+    -webkit-mask-image:var(--tb-m); mask-image:var(--tb-m)}
+  .titlebar > .tb-blur > i:nth-child(1){--tb-b:0.25px; --tb-m:linear-gradient(to bottom,#000 0%,#000 38.46%,transparent 53.85%)}
+  .titlebar > .tb-blur > i:nth-child(2){--tb-b:0.5px; --tb-m:linear-gradient(to bottom,#000 0%,#000 38.46%,transparent 69.23%)}
+  .titlebar > .tb-blur > i:nth-child(3){--tb-b:0.75px; --tb-m:linear-gradient(to bottom,#000 0%,#000 38.46%,transparent 84.62%)}
+  .titlebar > .tb-blur > i:nth-child(4){--tb-b:1px; --tb-m:linear-gradient(to bottom,#000 0%,#000 38.46%,transparent 100%)}
+  /* BLUR AMOUNT: the 1/2.5/5/8px shipped radii read too strong live, cut in successive passes (~35%, then
+     two further ~15% cuts, then an explicit "max blur = 0.5px" ceiling) down to 0.125/0.25/0.375/0.5 —
+     see the file's own edit history for the intermediate numbers. Most recently raised back up on request
+     ("increase the max blur to 1px"): the strongest layer is now exactly 1px, and the other three simply
+     DOUBLE alongside it (0.25/0.5/0.75/1 — still a clean even n×0.25 progression), not re-derived from any
+     ratio. */
+  /* Options bar OPEN: progressive stack OFF — the titlebar must be ONE flat surface matching `.viewbar`
+     (same tint + blur, single layer). Pseudo-element does that; `.tb-blur` is hidden so it can't stack.
+     BOTH states carry a tint (background:var(--tb-tint)) — a scroll-edge with no tint at all previously read
+     as just a smear of whatever's underneath, not the frosted-glass wash a real macOS toolbar edge has. The
+     two states still differ in SHAPE (a 4-layer progressive ramp vs one flat surface), not in whether tint is
+     present. blur(0.625px) here: kept at the same 5/8 ratio to the progressive stack's own strongest layer
+     throughout every pass (most recently 1px × 5/8 = 0.625px) — moved in lockstep with that layer's radius
+     each time so the two merged-state surfaces (this rule and `.viewbar`) always stay byte-identical. */
+  .titlebar::after{content:none; position:absolute; left:0; right:0; top:0; bottom:0; pointer-events:none; z-index:-1}
+  .window:has(.viewbar:not(.hidden)) .titlebar{border-bottom-width:0}   /* border REMOVED (not just transparent): ::after stops at the padding box, so a transparent .5px border left a hairline of raw document between the two bars */
+  .window:has(.viewbar:not(.hidden)) .titlebar > .tb-blur{display:none}
+  .window:has(.viewbar:not(.hidden)) .titlebar::after{content:"";
+    -webkit-mask-image:none; mask-image:none; backdrop-filter:saturate(180%) blur(0.625px); -webkit-backdrop-filter:saturate(180%) blur(0.625px); background:var(--tb-tint)}   /* ONE layer at the same recipe as .viewbar — not two stacked flats (that compounds alpha/blur and read more opaque than the bar below). background:var(--tb-tint) is the same token .viewbar uses (both now read --tb-merged-tint, mac-tokens.css), so the two surfaces paint byte-identical fills.
+     SEAM CHECK (asked for explicitly — two independently-composited backdrop-filter regions meeting at a shared
+     border CAN show a seam even at identical values): verified via CDP `Page.captureScreenshot`, a 4-12×-scaled
+     crop straddling the exact titlebar/viewbar border (getBoundingClientRect on both), then sampling pixel RGB
+     down a column in an empty gutter (no text/pill under it) across that row with PIL. Result: a smooth
+     250→251 step (a 1/255 change, imperceptible) with NO discontinuity AT the geometric border row itself — the
+     one visible edge in the crop was a nearby pill's rounded corner, unrelated to the bar seam. So once the two
+     layers' tint+blur recipe genuinely matches (this was already true before this change too — both read
+     --toolbar-bg identically — so the earlier concern was theoretical, not an observed regression), no further
+     seam-hiding trick (shared wrapper backdrop-filter, 1px overlap) was needed; the border-bottom removal two
+     rules up is what was actually preventing a seam (a stray hairline of raw, unblurred document showing
+     through a transparent border), not the independent-compositing question this comment is about.
+     RE-CHECKED after the blur-amount cut (5px→3.25px, two rules below, restated in `.viewbar`) since the user
+     reported a seam again in this same session even though the prior pass's pixel check (above) had already
+     cleared this exact rule pair: still byte-identical recipe on both sides (blur cut in lockstep in both
+     places), and a fresh CDP pixel-sample straddling the border again showed a smooth ramp with no discontinuity
+     at the border row, in both themes. The closed-state `.tb-blur` height/tint work in item 2 above is NOT a
+     candidate explanation for this seam either, despite landing in the same session — that stack is
+     `display:none` whenever `.viewbar` is showing (two rules up), so it never composites at the same time as
+     this merged surface at all.
+     CAVEAT worth recording rather than glossing over: this check, like the prior pass's, runs against
+     file://web/index.html in headless CHROMIUM (the CDP harness), not the shipping app's WKWebView — the two
+     engines can composite stacked `backdrop-filter` regions differently, so a seam that is a genuine WebKit-
+     specific compositing artefact would not necessarily reproduce here even with an identical recipe. If the
+     user still sees a seam in the real app after this build, that is the more likely remaining explanation (a
+     rendering-engine difference in how two adjacent independently-composited backdrop-filter layers blend at
+     their shared edge) rather than a CSS mismatch — and the fix at that point is the architectural one floated
+     alongside this item (merging `.titlebar`/`.viewbar` into one compositing pass so there is structurally only
+     one region), not another round of recipe-matching. */
+  html.mockup .titlebar{padding:6px 12px}
+  .lights i{width:12px; height:12px; border-radius:50%; display:block; border:.5px solid rgba(0,0,0,.14)}
+  .lights .r{background:#ff5f57} .lights .y{background:#febc2e} .lights .g{background:#28c840}
+  .tgroup{display:flex; align-items:center; gap:6px}
+  .spring{flex:1 1 auto; min-width:24px; align-self:stretch}   /* flexible gap between the filename block and the controls — an AppKit overlay makes it (and the other gaps) drag the window */
+  .tlabel{font-size:11px; color:var(--muted)}
+  /* macOS 26 "Tahoe" proxy-title / filename block (left): a CoNLL-U file glyph beside a two-line stack
+     (filename + "language · translit · scheme"), like a native document proxy icon. */
+  .tbfile{display:flex; flex-direction:row; align-items:center; gap:7px; min-width:0; max-width:360px; padding:3px 9px; border-radius:8px; line-height:1.16; cursor:default; -webkit-user-select:none; user-select:none; overflow:hidden}   /* item 6: overflow:hidden clips the parked proxy glyph so it SLIDES in from the left (no opacity fade needed to hide it at rest) */
+  /* no hover affordance on the title/proxy block (Preview-style) — right-click opens the folder-path menu */
+  .tbficon{width:19px; height:19px; flex:none; background-color:var(--muted); margin-right:-26px; overflow:hidden; transform:translateX(-30px)}   /* item 6: filetype proxy glyph SLIDES in from the LEFT (no fade). Width is FIXED at 19px (item 5). At rest it's parked translateX(-30px) — fully LEFT of the .tbfile content box, so .tbfile's overflow:hidden CLIPS it (it's hidden by position, NOT by opacity). margin-right:-26px (= 19px glyph + 7px .tbfile gap) collapses its layout space so the filename sits flush LEFT; on hover margin-right → 0 slides the TITLE right to make room while the glyph slides IN. The transition lives on the higher-specificity `.titlebar .sfi.tbficon` rule below (the shared `.titlebar .sfi` graying transition would otherwise override a plain `.tbficon` transition, since this element carries the .sfi class) */
+  .tbficon.img{height:20px; width:20px; margin-right:-27px; background:none; object-fit:contain}   /* real native macOS .conllu icon (full colour) injected by the shell — same fixed-width/negative-margin collapse (20px glyph + 7px gap = -27px) */
+  /* item 5: own the reveal/collapse transition at a specificity that beats the shared `.titlebar .sfi` graying transition. Reveal props glide over .4s (ease-in-out); the graying `filter` keeps its own quick .18s. transition-delay:0 here so hover-OUT collapses promptly (the hover-IN dwell delay lives on the :hover rules below). */
+  .titlebar .sfi.tbficon{transition:margin-right .4s cubic-bezier(.4,0,.2,1), transform .4s cubic-bezier(.4,0,.2,1), opacity .18s ease, filter .18s ease; transition-delay:0s}   /* item 6: the SLIDE (transform) + the title's shift (margin-right) glide over .4s; opacity is only for the dirty/inactive dim, not the reveal */
+  /* item 1: the reveal fires ONLY from the filename or the icon — NEVER the "Sentence X of Y" subtitle line, nor the empty space to its right/below (the old whole-`.tbfile:hover` trigger wrongly caught all of it, since the two-line block is far taller/wider than the top row). `.tbfname` carries a left inset (padding-inline-start, cancelled by a matching negative margin so the text doesn't move) whose HOVER BOX bridges the icon↔filename gap — a cursor resting in that gap stays on the filename and can't oscillate (collapse→re-reveal). `.tbficon:hover` sustains the reveal once the icon has slid in. */
+  .tbfile:has(.tbfname:hover) .tbficon,.tbfile:has(.tbficon:hover) .tbficon{margin-right:0; transform:translateX(0); transition-duration:.55s; transition-delay:.35s}   /* item 6: hover SLIDES the icon IN (transform → 0) while margin-right → 0 slides the TITLE right to make room — both animated, no fade; reverses on hover-out. The reveal runs a gentle .55s AFTER a .35s hover-IN dwell (a cursor merely passing doesn't trigger it); hover-OUT falls back to the base .4s with no delay, so the COLLAPSE animates too */
+  .tbfile:has(.tbfname:hover) .tbficon.img,.tbfile:has(.tbficon:hover) .tbficon.img{margin-right:0; transform:translateX(0); transition-duration:.55s; transition-delay:.35s}
+  .tbfile.is-dirty:has(.tbfname:hover) .tbficon,.tbfile.is-dirty:has(.tbficon:hover) .tbficon{opacity:.5}   /* native proxy-icon convention: dim the file icon while there are unsaved changes (only while revealed) */
+  .tbftext{display:flex; flex-direction:column; justify-content:center; min-width:0; gap:1px}
+  .tbfname{font-size:15px; font-weight:700; color:var(--label-primary); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; padding-inline-start:11px; margin-inline-start:-11px}   /* macOS 26 Window Title — SF Pro Bold 15px (title-only bar). item 1: the left inset (padding, cancelled by the negative margin so the glyphs don't move) extends the filename's HOVER BOX leftward over the icon↔filename flex gap, so hovering that gap sustains the reveal instead of oscillating. overflow:hidden clips the TEXT, not the padding's hit area. */
+  .tbfile:has(.tbfmeta:not(:empty)) .tbfname{font-size:13px}   /* Preview: with a subtitle line, the title shrinks to 13px Bold */
+  .tbfmeta{font-size:11px; color:var(--muted); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; letter-spacing:.01em}   /* subtitle — SF Pro Medium 11px (~#999), "Sentence X of Y" + "– Edited" when dirty */
+  .tbfmeta:empty{display:none}
+  /* item 13: an empty document has no "Sentence N of N" subtitle, so the filename block is a single line —
+     vertically centre it with the traffic lights. In Icon-and-Text mode the bar is top-anchored (align-items:
+     flex-start), which left the lone title stuck at the top; align-self:center recentres it there. In the other
+     modes the bar already centres its items, so this is a no-op. Restores to the two-line stack the instant
+     sentences (a non-empty .tbfmeta) exist. */
+  .titlebar .tbfile:has(.tbfmeta:empty){align-self:center}
+  /* item 4: keep the WINDOW TITLE's vertical centre pinned to the traffic lights in EVERY toolbar-display mode.
+     In Icon-and-Text the bar switches to align-items:flex-start (so the taller pill+label group grows the bar
+     DOWNWARD while the pills stay put), which top-anchored the shorter title block and shifted it UP. Give the
+     title block the SAME 36px box the pills occupy and centre its contents within it (it's already a row with
+     align-items:center): with the group's top pad placing that 36px box exactly where the Icon-Only pill sits,
+     the title's centre lands back on lights-cy — identical to the pills and to the other modes. The :has(:empty)
+     arm re-pins the single-line (no-subtitle) case too, overriding the mode-agnostic align-self:center above
+     (which would otherwise sink the lone title in the taller bar). */
+  .titlebar.tb-labels .tbfile,
+  .titlebar.tb-labels .tbfile:has(.tbfmeta:empty){align-self:flex-start; min-height:36px}
+  .tbright{display:flex; align-items:center; gap:5px; flex:none}   /* fix 11: tight default gap WITHIN a theme… */
+  .tbright > .tbgroup.tbg-wide{margin:0 4px}   /* fix 1: SYMMETRIC wider gap around each group that starts a new theme (Preview-style toolbar grouping) — equal on the left and the right, each == the .tbpill 4px inner padding (was an asymmetric margin-left:11px, more space on the left than on the right) */
+  /* macOS 26 "Tahoe" Liquid Glass toolbar: related actions grouped into translucent, fully-rounded
+     (capsule) pills; icon buttons are large + round and press with a gentle scale. Tokens in both themes. */
+  /* macOS 26 compact unified toolbar (Apple UI Kit): 36×24 capsule icon buttons, transparent at rest,
+     the glass material + --lg-button-shadow live on the pill group. */
+  .tbpill{display:inline-flex; align-items:center; gap:4px;   /* item 1: HALVED (was 8). The gap IS the separator's air — 8 gave the hairline 3.5px either side, which read as two loosely associated buttons rather than one group */ padding:4px;   /* centred in the bar by align-items, with no offset of its own. (It briefly carried +2px of padding, which made it taller rather than moving it, and then top:-2px, which moved it up; both reverted.) The pill takes its height from its contents (38px around a 28px button, 36 around a 24px label). BRIEFLY 5px, and then a fixed 36px border-box, in an attempt to make every pill exactly equal — reverted: the pills were already right, and equalising them cost the 4px breathing space around the taller controls. If you are tempted again, note that the inequality is the CONTENTS' (28px vs 24px), not the padding's. */ border-radius:var(--r-control); position:relative; isolation:isolate;   /* fix 2: slightly greater gap between buttons within a pill, so grouped glyphs + separators aren't cramped. item 1: 4px → 8px — the gap is the SEPARATOR'S breathing room, and at 4px the 1px hairline had only 1.5px of air either side, which read as cramped on the two-segment #pagePill. Raised on the SHARED rule (and on .tbzoom/.tbmodel, which restate it) rather than special-cased there, since every separator-bearing pill had the same 1.5px. #notationPill keeps 4px — it draws NO separators (Finder's segmented control has none), so it was never the pill to copy a separator spacing from */
+    background:var(--pill-bg); border:.5px solid transparent;   /* NOT var(--pill-border) (0.5px OPAQUE white in light mode) — that literal border was a crisp, fully-opaque white ring around every titlebar pill, visibly stronger than the glass edge it was meant to simulate; kept `.5px solid` (not `border:none`) only so the box model doesn't shift by half a pixel when a theme needs one. --pill-border stays untouched for .tbsearch/.findbar/select.sel, which DO want a real hairline edge — this override is .tbpill-specific. The edge now comes entirely from the inset box-shadow layers below, same mechanism dark-mode pills already use (mac-tokens.css's `.titlebar .tbpill` dark override) — per the macOS 26 Liquid Glass spec, an at-rest button/pill is "flat fill, no gradient/sheen, keep only a thin rim/edge highlight via inset box-shadow". */
+    box-shadow:var(--lg-button-shadow), inset 0 1px 0 var(--glass-rim), inset 1px 0 0 var(--glass-rim-lo), inset -1px 0 0 var(--glass-rim-lo), inset 0 -1px 0 var(--glass-rim-lo);   /* rim width HISTORY: .7px shipped → doubled to 1.4px (light only) → now set to an exact 1px, and this time in BOTH modes — the dark-mode override (mac-tokens.css's `.titlebar .tbpill`) is set to the SAME 1px below, so light and dark finally share one literal width instead of light diverging from dark's .7px. `.titlebar.tb-textonly .pilllabel`'s own rim (below) is still untouched/out of scope (never part of this thread — only the icon-mode pill has been discussed). REVERTED off the SVG feDropShadow linear-light experiment (was `filter:var(--lg-shadow-filter)`, url(#lgShadow)/url(#lgShadowDark) in index.html) back to plain box-shadow sRGB compositing: live-tested side by side, the linear-light drop read visibly too faint at the LG kit's own 12%-opacity value despite matching its numbers exactly, so gamma-encoded sRGB is the one being kept now. Same pattern as .titlebar.tb-textonly .pilllabel's box-shadow below (search --lg-button-shadow) — both the icon pills and the Text-Only capsule now source their drop shadow the same way. The SVG <filter> defs for #lgShadow/#lgShadowDark were deleted from index.html as dead code; the other feDropShadow filters there (menu/dialog/pill-shadow/edit/drawer/toast) are untouched, unaffected by this pill-specific call.
+       THE ALL-AROUND DARK INSET (`inset 0 0 0 .5px rgba(0,0,0,.08)`) THAT USED TO SIT HERE IS GONE. It was added
+       back when --pill-bg was still a ~50%-translucent white (so the pill's own fill barely showed against
+       whatever sat behind it) as a light-mode substitute for the deleted opaque white border, on the theory that a
+       dark hairline was "the thing that actually shows an edge against light glass". Once --pill-bg became the
+       OPAQUE #f7f7f7 (mac-tokens.css) that theory stopped applying — a dark ring around a light, opaque, near-white
+       chip doesn't read as a glass contact-shadow, it reads as a dirty/muddy outline competing with the white
+       glass-rim highlight one layer above it. Removed outright; the rim is carried ENTIRELY by --glass-rim (top,
+       bright) / --glass-rim-lo (sides+bottom, dimmer) below, same mechanism dark-mode pills already use (see the
+       `.titlebar .tbpill` dark override, mac-tokens.css, which never carried this dark layer at all — it only ever
+       restated the rim insets, so nothing there needed to change). Verified via CDP screenshot: with the dark inset
+       gone the rim on an opaque #f7f7f7 pill reads as a clean white highlight, brightest on top, present but subtle
+       on the sides/bottom — no competing dark line. */
+    -webkit-backdrop-filter:blur(6px) saturate(150%); backdrop-filter:blur(6px) saturate(150%)}
+  .tbtn{display:inline-flex; align-items:center; justify-content:center; gap:5px; height:28px; padding:0 10px;   /* reverted the earlier +1px/side experiment (was 11px) — 10px matches macOS 26's own button metrics */ border-radius:var(--r-control); border:none;
+    background:transparent; color:var(--text); font-size:12.5px; font-weight:510; cursor:pointer; white-space:nowrap; transition:background .12s,box-shadow .12s; text-decoration:none}
+  .tbtn.icon{width:28px; min-width:28px; height:28px; padding:0; border-radius:var(--r-control)}   /* STANDARD toolbar: 28px button inside a 4px-padded pill → ~36px pill */
+  .tbtn:hover{background:var(--tbtn-hover)}
+  .tbtn:active{background:var(--tbtn-press)}   /* item 11: press feedback is the background tint only — no scale animation (the transform on click was removed here and from the .tbtn transition above) */
+  .tbtn:disabled{cursor:default; pointer-events:none}   /* dimmed Undo/Redo/Save when there is nothing to do */
+  .tbtn:disabled > .sfi,.tbtn:disabled > .tblabel{opacity:.35}   /* fix 2: dim only the glyph/label — NOT the whole button — so an adjacent separator drawn on the button's ::before is NOT swallowed by the opacity group (at first launch Undo+Redo are both disabled, which used to fade their shared separator to ~.035 → invisible) */
+  /* Mail-style hairline dividers between adjacent buttons inside a pill group (theme-aware, vertically inset) */
+  .tbpill > .tbtn{position:relative}
+  .tbpill > .tbtn + .tbtn::before,.tbmodel > .tbtn::before{content:""; position:absolute; left:-2.5px; top:5px; bottom:5px; width:1px; background:var(--sep-line); pointer-events:none; z-index:1; transition:background .12s}   /* 1px × 18px faint hairline (≈#d9d9d9 light) between grouped buttons, theme-aware; fix 2: centred in the gap with more breathing room. item 3: the divider sits in the inter-button gap (x=0..G). At left:-2px the 1px line landed at x=2..3 → 2px of space on its LEFT but only 1px on its RIGHT (the reported left-heavy asymmetry). Centring is left:−(G+1)/2 (space left of the line = G−X, right of it = X−1), so the 4px gap took −2.5px; item 1's 8px gap takes −4.5px → the line at x=3.5..4.5, an equal 3.5px either side */
+  #notationPill{gap:4px}   /* fix 12: inter-button separation EQUALS the pill's 4px inner padding. item 1: this stays 4px while the shared .tbpill gap goes to 8px — that widening is the SEPARATOR's air, and this pill has no separators (rule below), so its icons would only drift apart for nothing */
+  #notationPill > .tbtn + .tbtn::before{content:none}   /* Finder's view segmented control has NO separators between its icons */
+  /* fix 12: hovering a grouped button dissolves the separators touching it (its own leading edge + the
+     following sibling's leading edge), just like a native AppKit toolbar. */
+  .tbpill > .tbtn:hover::before,.tbpill > .tbtn:hover + .tbtn::before,.tbmodel > .tbtn:hover::before,.tbmodel > .tbtn:hover + .tbtn::before,
+  .tbpill > .tbtn.active::before,.tbpill > .tbtn.active + .tbtn::before,.tbmodel > .tbtn.active::before,.tbmodel > .tbtn.active + .tbtn::before{background:transparent}   /* …and a DURABLY SELECTED button dissolves them the same way (paged vs unpaged, and any other toggle pair). A selection fill already bounds the button on both sides; a hairline left standing beside it reads as a second, competing edge. Hover was only ever half the rule — the selected case is the one that is on screen permanently. */
+  /* inactive (unfocused) window (Preview behaviour): the BAR stays light — the CONTENTS gray out.
+     WKWebView has no :window-inactive, so the native shell toggles .win-inactive via __setWindowActive(). */
+  .titlebar .tbtn,.titlebar .tbfname,.titlebar .tbficon,.titlebar .sfi,.titlebar .tbpill{transition:color .18s ease, background-color .18s ease, opacity .18s ease, filter .18s ease}
+  /* NOTE: .titlebar.win-inactive used to override --tb-tint to --toolbar-inactive-bg here (and .viewbar
+     restated the same swap below, via :has()) — REMOVED on request: "the titlebar should have the same
+     tint and blur when the window is unfocused as when the window is focused". --tb-tint (and therefore
+     both the merged/options-open fill and, via --tb-ramp-tint/--tb-merged-tint which never depended on
+     this override anyway, the closed-state ramp) now stays at its focused value regardless of window
+     focus. Blur was never focus-dependent to begin with (no win-inactive override existed for any
+     `blur()` value), so only the tint side needed removing. Pills/icons still dim on unfocused — that's
+     --pill-inactive-bg/.tbficon's grayscale below, a DIFFERENT concern (individual controls, not the bar
+     surface itself) the user did not ask to change. */
+  .titlebar.win-inactive .tbpill{background:var(--pill-inactive-bg); box-shadow:none; border-color:transparent}   /* fix 10: unfocused pills become a GRAY filled capsule (light: light-gray; dark: the former toolbar tint) while the bar itself stays near-white/dark. item 3 (shadow pass, superseded): this used to need a `filter:none` companion because LIGHT mode's shadow mechanism was `filter:var(--lg-shadow-filter)` on the base `.tbpill` rule (an SVG feDropShadow), which `box-shadow:none` alone couldn't cancel. Now that the base rule paints its drop shadow via plain `box-shadow:var(--lg-button-shadow),…` (see that rule's comment — reverted off the SVG filter, sRGB compositing read correctly where linear-light didn't), `box-shadow:none` here is sufficient on its own: this selector (0,3,0) still beats the base `.tbpill` box-shadow (0,1,0) regardless of source order, so the shadow shows ONLY while focused in light mode, same behaviour as before. */
+  .titlebar.win-inactive .tbtn{color:var(--muted)}                          /* icon ink → gray (masks use currentColor) */
+  .titlebar.win-inactive .tbtn .sfi{background-color:var(--muted)}          /* incl. the active/selected notation glyph */
+  .titlebar.win-inactive .tbfname,.titlebar.win-inactive #modelSel{color:var(--muted)}   /* title + model name → gray */
+  .titlebar.win-inactive .tbpill > .tbtn + .tbtn::before,.titlebar.win-inactive .tbmodel > .tbtn::before{background:var(--muted); opacity:.35}   /* separators (incl. the zoom stepper's, which are now the generic .tbpill > .tbtn + .tbtn dividers) → gray */
+  .titlebar.win-inactive .tbficon{filter:grayscale(1); opacity:.55}         /* file proxy icon → desaturated gray */
+  .tbmodel > .tbtn::before{left:-4.5px}   /* fix 5 / item 3: centre the 1px divider in the model pill's gap like every other pill. item 1: 8px gap → left:−4.5px (x=3.5..4.5, equal 3.5px either side); this restates the shared rule's inset because the selector above pairs it with a DIFFERENT first element (a <select>, not a .tbtn) */
+  .tbmodel #modelSel:hover ~ .tbtn::before{background:transparent}   /* fix 5: hovering the model dropdown ALSO dissolves the divider (the button-side dissolve is handled by the shared .tbmodel > .tbtn:hover::before rule) */
+  /* titlebar display modes (right-click the bar → Icon and Text / Icon Only / Text Only). Default = Icon Only. */
+  .tbgroup{display:flex; flex-direction:column; align-items:center}   /* pill on top, one group label beneath */
+  .tblabel{display:none; font-weight:510; color:var(--text); line-height:1; white-space:nowrap}   /* per-button label (Text Only) */
+  .pilllabel{display:none; margin-top:4px; font-size:10.5px; font-weight:500; color:var(--text-2); text-align:center; white-space:nowrap; -webkit-user-select:none; user-select:none}   /* ONE label per pill group (Icon and Text) — item 5: margin-top was tightened 3px→2px; item 3 nudges it back up to 4px so the Icon-and-Text label gains a touch more space on top and sits slightly lower under the pill (compensating for the reduced bottom space), matching the earlier approved screenshot. Text Only overrides this to 0 below. */
+  /* Icon and Text = classic macOS toolbar: icons stay in the pill, a single group label sits BELOW the whole pill. */
+  .titlebar.tb-labels .pilllabel{display:block; opacity:.66}   /* item 5: the group label reads a touch semitransparent (lighter than the button glyphs), like a native macOS toolbar label */
+  /* item 16: when EVERY button in a group is disabled (the Edit pill when there's nothing to Undo AND nothing to
+     Redo), the whole group is inert — so mute its label to match, in both Icon-and-Text and Text-Only modes. The
+     class is toggled live from updateUndoUI as history changes (an edit re-enables Undo → the label un-mutes). */
+  .titlebar.tb-labels .tbgroup.both-disabled .pilllabel,
+  .titlebar.tb-textonly .tbgroup.both-disabled .pilllabel{color:var(--muted); opacity:.5}
+  /* fix 15a: the pills keep the SAME vertical position (top band, ~4px in from the top like the centred icon-only
+     row) and the bar GROWS DOWNWARD to fit the label row — so switch from centre to top alignment + a matching top pad. */
+  .titlebar.tb-labels{align-items:flex-start; padding-top:calc(var(--lights-cy,26px) - 18px); padding-bottom:5px}   /* item 5: less space below the group-label row (was 9px) so the label sits closer under the pill */   /* fix 6/7: pin the pills to EXACTLY the top inset they have in Icon Only. In Icon Only the ~36px pill is centred in the min-height (lights-cy*2) bar → inset = (lights-cy*2 − 36)/2 = lights-cy − 18. Deriving the top pad from that (not a hardcoded 4px, which was too small whenever the native lights-cy > 22 and so shifted the icons UP) keeps the icon row's top identical and grows the bar DOWNWARD for the label row */
+  /* Text Only (fix 9): each PILL collapses to ONE small text label = the group's NAME (the same label used in
+     Icon and Text), laid out in a single horizontal row. Clicking a multi-option group's label opens a menu of
+     that pill's options (at this same small font); a single-button group's label acts directly. The Options
+     label is deliberately NOT accented here — it uses the default button foreground colour like every label. */
+  .titlebar.tb-textonly .tbpill{display:none}   /* hide the real pills; the group label becomes the control */
+  .titlebar.tb-textonly .tbgroup{flex-direction:row; align-items:center}
+  .titlebar.tb-textonly .pilllabel{display:inline-flex; align-items:center; margin-top:0; height:22px; padding:0 9px; font-size:11px; font-weight:510; color:var(--text); border-radius:999px; cursor:default;
+    background:var(--pill-bg); border:.5px solid var(--pill-border);
+    box-shadow:var(--lg-button-shadow), inset 0 .7px 0 var(--glass-rim), inset .7px 0 0 var(--glass-rim-lo), inset -.7px 0 0 var(--glass-rim-lo), inset 0 -.7px 0 var(--glass-rim-lo)}   /* item 4: restore the pill/button shadow the Text-Only labels lost — same glass fill + specular-edge + soft drop shadow as the icon-mode pills */
+  .titlebar.tb-textonly .pilllabel:hover{background:var(--tb-hover-ov)}
+  .titlebar.tb-textonly .pilllabel:active{background:var(--tbtn-press)}
+  /* the Text-Only group menus reuse the .fpmenu popup, shrunk to the small Text-Only type size */
+  .tbgroupmenu .fpitem{font-size:11px; height:22px}
+  .tbgroupmenu .fpsep{height:.5px; background:var(--hairline-strong); margin:4px 8px}
+  /* item 4: both titlebar menus (the right-click "Icon and Text / Icon Only / Text Only" context menu AND
+     the Text-Only group dropdown) share .tbmodemenu. The base .fpitem's 0 12px padding is too wide for these
+     compact titlebar popups — tighten to 0 8px here only, leaving the folder-picker + other .fpmenu rows at 12px.
+     Rows already carry a leading .fpcheck/icon, so 8px keeps them snug without cramping.
+     item 1: these rows only ever hold a leading .fpcheck + a text label (no icon), so the base 8px flex gap read
+     as an over-wide gutter to the right of the tick — halve it to 4px to pull the label snug against the tick. */
+  .tbmodemenu .fpitem{padding:0 8px; gap:4px}
+  /* item 3(2)/4: both titlebar popups otherwise inherit the shared .fpmenu min-width:190px (folder-picker width),
+     which leaves them wider than their longest label. Size them to their CONTENT instead. Uses .fpmenu.tbmodemenu
+     (specificity 0,0,2) so it beats the plain .fpmenu min-width regardless of source order. */
+  .fpmenu.tbmodemenu{min-width:0; width:max-content}
+  /* item 3(1): the right-click "Icon and Text / Icon Only / Text Only" context menu (.tbmodemenu WITHOUT
+     .tbgroupmenu) read too small — bump to a native macOS-menu 13.5px and raise the row to 26px so the larger
+     text isn't cramped. The Text-Only group dropdown (.tbgroupmenu) keeps its smaller 11px/22px. */
+  .tbmodemenu:not(.tbgroupmenu) .fpitem{font-size:14px; font-weight:500; height:26px}
+  /* the titlebar's own right-click menu reuses the folder-menu popup styling (.fpmenu/.fpitem) */
+  /* item 1: the checkmark column read too wide — a centred tick in a 14px box (the width .fpmenu .fpcheck below
+     actually won on source order) left dead space each side. Narrow the column to 11px so the tick hugs the left
+     edge and the label. Written as .fpmenu.tbmodemenu (0,0,3) so it beats the equal-specificity .fpmenu .fpcheck
+     regardless of order. Row height and the tb-nochk gutter-collapse are untouched — this trims only horizontal space. */
+  .fpmenu.tbmodemenu .fpcheck{width:11px; flex:none; text-align:center; opacity:.9}
+  /* item 4: a Text-Only group menu with NO checked row (e.g. Edit's Undo/Redo, Zoom) shouldn't reserve the
+     leading checkmark column — collapse the gutter so its rows aren't pushed right by dead margin. The class is
+     added in openTbGroupMenu when none of its items is checked; menus WITH a checked row keep the column. */
+  .tbmodemenu.tb-nochk .fpcheck{display:none}
+  /* the base .fpitem:hover fills blue (var(--accent)) with white text/icon — right for the folder picker, but the
+     titlebar's own popups (Icon/Text/Text-Only mode menu + the Text-Only group dropdowns) sit alongside the .ctx
+     context menus, which deliberately use a neutral gray hover with UNCHANGED text colour (native macOS menu
+     convention — see the .ctx button:hover comment). Match that here so titlebar hover reads consistently. */
+  .tbmodemenu .fpitem:hover{background:var(--fill-secondary,#e6e6e6); color:var(--text)}
+  .tbmodemenu .fpitem:hover .sfi{background-color:currentColor}
+  /* selected notation segment: a neutral raised capsule like a macOS segmented control's selected segment
+     (Apple HIG "Segmented controls"), NOT the app accent. The glyph keeps its normal ink colour. */
+  .tbtn.active,.tbtn.active:hover{background:var(--seg-sel); box-shadow:none; border-radius:var(--r-control)}   /* Finder-style: flat light-gray rounded selection fill, no accent */
+  .titlebar .tbtn:hover{background:var(--tb-hover-ov)}   /* shared neutral hover overlay over the pill (focused + unfocused, light + dark) */
+  .titlebar .tbtn.active:not(#btnOptions):hover{background:linear-gradient(var(--tb-hover-ov),var(--tb-hover-ov)),var(--seg-sel)}   /* selected-button hover = the SAME overlay layered over the selection fill */
+  /* item 14: a hovered UNSELECTED button in a FOCUSED window in LIGHT mode reads as exactly rgb(236,236,236)
+     (sRGB). The shared --tb-hover-ov overlay is translucent over the translucent pill, so it can't land an exact
+     opaque shade — set the fill directly instead. Scoped to light + focused + non-active so dark mode, the
+     unfocused-window hover, and the selected-segment hover are all left as they are. */
+  @media (prefers-color-scheme:light){
+    .titlebar:not(.win-inactive) .tbtn:not(.active):hover{background:rgb(236,236,236)}
+  }
+  .tbtn.active .sfi{background-color:var(--text)}   /* selected icon ink stays normal */
+  /* fix 14: the options-bar toggle (grouped with the notation/zoom View theme). Default = UNSELECTED; SELECTED
+     paints the app blue and turns its glyph WHITE while the window is focused (overrides the neutral seg-sel above). */
+  #btnOptions.active{background:var(--accent-blue); box-shadow:none}
+  .titlebar:not(.win-inactive) #btnOptions.active .sfi{background-color:#fff}   /* white glyph only while focused */
+  #btnOptions.active:hover{background:color-mix(in srgb, var(--accent-blue), black 8%)}   /* selected + hover = the system accent, darkened ~8% (derived from --accent-blue) */
+  .titlebar.win-inactive #btnOptions.active{background:rgb(217,217,217)}        /* light unfocused selected */
+  /* dark-mode options-toggle overrides — a SEPARATE dark block AFTER the light rules so equal-specificity
+     selectors resolve to the dark value in dark mode (a dark rule inside the earlier @media block would lose). */
+  @media (prefers-color-scheme:dark){
+    #btnOptions.active:hover{background:color-mix(in srgb, var(--accent-blue), white 15%)}   /* dark: the system accent, lightened ~15% (derived from --accent-blue) */
+    .titlebar.win-inactive #btnOptions.active{background:rgb(79,79,79)}         /* dark unfocused selected */
+    /* dark titlebars never shadow (user preference, repeated): drop the --lg-button-shadow layer from the
+       Text-Only pill-label capsule (item 4 above added it back to match the icon pills' drop shadow, but that
+       drop shadow is exactly what dark mode must not show — same call as .titlebar .tbpill's filter:none in
+       mac-tokens.css's dark block). Same selector/specificity as the item-4 rule (0,3,0), placed AFTER it in
+       source so it wins the tie regardless of load order; only the rim/edge specular insets remain. */
+    .titlebar.tb-textonly .pilllabel{box-shadow:inset 0 .7px 0 var(--glass-rim), inset .7px 0 0 var(--glass-rim-lo), inset -.7px 0 0 var(--glass-rim-lo), inset 0 -.7px 0 var(--glass-rim-lo)}
+  }
+  /* fix 14 follow-up: the Options toggle IS its pill — THE ONE DELIBERATE EXCEPTION to "every titlebar button is 28px". A SELECTED toggle fills its WHOLE pill:
+     zero the single-button pill's inner padding and grow the button to the full 36×36 capsule, so the accent
+     fill reaches the pill's own edges with no floating margin around it. The pill's outside size and position
+     are unchanged (36 = 28 + 4 + 4) — only the boundary between "button" and "pill padding" moves, and that
+     boundary is exactly what a selected fill must not stop at. (This was briefly reverted to a uniform 28×28
+     "so every titlebar button matches"; that trades the toggle's whole reason for existing — a fill that reads
+     as the pill being on — for a uniformity nobody was asking for. Don't re-do it.)
+     Text Only keeps its compact pill: there is no icon button there to grow. */
+  .titlebar:not(.tb-textonly) .tbpill:has(> #btnOptions){padding:0}
+  .titlebar:not(.tb-textonly) #btnOptions.tbtn.icon{width:36px; height:36px}
+  /* model chevron button: icon + a small disclosure chevron opening the model menu */
+  .tbtn.model{width:auto; padding:0 9px; gap:3px; border-radius:999px}
+  .tbtn.model .chev{width:9px; height:6px; opacity:.5; flex:none}
+  /* zoom stepper (a pill: − 100% +) moved into the titlebar */
+  .tbzoom{gap:4px; padding:4px}   /* HALVED with the shared .tbpill gap (8 → 4) — this pill RESTATES the value rather than inheriting it, which is why halving .tbpill alone left the zoom and model pills wide. If you change one of the three, change all three. */   /* fix 12: gap matched every other pill; room around the − ⃒ actual-size ⃒ + separators. item 1: follows the shared .tbpill gap up to 8px (redundant, like .tbmodel's — .tbzoom is always also a .tbpill — but restated so this pill's spacing stays legible beside its other overrides); it carries TWO separators, so it was the most cramped of the lot */
+  .tbzoom .tbtn.icon{width:30px; height:28px}
+  .tbzoom .tbtn.icon .sfi{width:22px; height:22px}   /* − / actual-size / + magnifier glyphs, prominent like Preview */
+  /* fix 8: the three zoom buttons (−, actual-size, +) now use the SHARED .tbpill > .tbtn + .tbtn hairline
+     dividers + hover-dissolve — no bespoke rules needed since the "100%" readout was replaced by a real button. */
+  .fpmenu .fpcheck{width:14px; flex:none; text-align:center; opacity:.9; font-size:12px}
+  /* Finder-style search: a recessed rounded capsule with a leading magnifier glyph */
+  /* Apple Mail-style search: a full-height (34px, = the icon buttons) rounded capsule with a soft glassy
+     translucent fill, a faint top highlight, a hairline edge and a leading magnifier — a touch more raised
+     and glassy than Finder's deep inset, sitting comfortably in the toolbar. */
+  .tbsearch{display:inline-flex; align-items:center; gap:8px; height:34px; padding:0 15px 0 11px; border-radius:999px; border:.5px solid var(--pill-border); position:relative; isolation:isolate;   /* = icon-button height; tighter left inset before the loupe */
+    background:var(--search-bg); box-shadow:var(--pill-shadow), var(--search-inset), inset 0 .7px 0 var(--glass-rim), inset .7px 0 0 var(--glass-rim-lo), inset -.7px 0 0 var(--glass-rim-lo), inset 0 -.7px 0 var(--glass-rim-lo);
+    -webkit-backdrop-filter:blur(6px) saturate(150%); backdrop-filter:blur(6px) saturate(150%);
+    color:var(--muted); min-width:160px; max-width:240px; margin-right:0}   /* flush into the window's rounded corner (titlebar right padding provides the concentric inset) */
+  .tbsearch:focus-within{border-color:var(--accent); box-shadow:0 0 0 3px var(--accent-weak)}
+  /* Liquid Glass overlays for the pills + search capsule (pure CSS, GPU-friendly, Safari-native).
+     ::before = diagonal sheen gradient; ::after = specular hotspot with a slow ambient drift + hover brighten.
+     Both sit at z-index:-1 inside each element's own stacking context → above the glass fill, below the icons/text. */
+  /* .tbpill USED to share this sheen+hotspot with .tbsearch — removed (5th pass): a diagonal gradient sheen and
+     a drifting radial hotspot is exactly what the Liquid Glass spec's OWN "flat fill, no gradient/sheen, keep
+     only a thin rim/edge highlight" rule (quoted in .tbpill's own box-shadow comment, and in the macos-26-design
+     skill) says a pill should NOT have — the opaque `#f7f7f7` base fill made the pill's BACKGROUND flat and
+     opaque, but these two pseudo-elements kept painting a translucent gradient on top of it regardless, which
+     is what read as "the pill has a gradient fill". `.tbsearch` (the Finder-style search capsule, a different
+     component with a different at-rest treatment) keeps the sheen/hotspot unchanged. */
+  .tbsearch::before,.tbsearch::after{content:""; position:absolute; inset:0; border-radius:inherit; pointer-events:none; z-index:-1}
+  .tbsearch::before{background:linear-gradient(147deg, var(--glass-sheen) 0%, transparent 44%)}   /* soft diagonal sheen across the top edge */
+  .tbsearch::after{background:radial-gradient(58% 130% at 20% -12%, var(--glass-hotspot), transparent 62%); opacity:.6;
+    transition:opacity .3s ease; animation:glassDrift 11s ease-in-out infinite}   /* specular hotspot */
+  .tbsearch:hover::after,.tbsearch:focus-within::after{opacity:1}   /* hover/focus catches more light */
+  @keyframes glassDrift{0%,100%{transform:translateX(-3%)} 50%{transform:translateX(5%)}}   /* very slow ambient shimmer (compositor-only transform); killed by the global reduced-motion rule below */
+  .tbsearch svg{width:17px; height:17px; flex:none; opacity:.6}   /* bigger loupe (Mail-style) */
+  .tbsearch input{border:none; background:transparent; outline:none; color:var(--text); font:inherit; font-size:14px; width:100%; min-width:0}
+  .tbsearch input::placeholder{color:var(--muted)}
+  .tbsearch input::-webkit-search-cancel-button{-webkit-appearance:none; appearance:none}
+  .tbcount{font-size:11px; color:var(--muted); font-variant-numeric:tabular-nums; white-space:nowrap; flex:none}
+  /* floating pop-up Find overlay (⌘F) — a native macOS find bar that drops in at the top-right */
+  /* pop-up Find: nests in the top-right corner just BELOW the options bar (openFind sets `top` to the
+     content top so it clears the titlebar + options bar); where the old toolbar search used to sit. */
+  .findbar{position:fixed; top:96px; right:14px; z-index:500; display:none; align-items:center; gap:8px;
+    height:36px; padding:0 8px 0 12px; border-radius:10px; border:.5px solid var(--pill-border);
+    background:var(--menu-bg); box-shadow:var(--menu-shadow); -webkit-backdrop-filter:blur(24px) saturate(180%); backdrop-filter:blur(24px) saturate(180%)}
+  .findbar.show{display:flex}
+  .findbar svg{width:16px; height:16px; flex:none; opacity:.6; color:var(--muted)}
+  .findbar input{border:none; background:transparent; outline:none; color:var(--text); font:inherit; font-size:13.5px; width:200px; min-width:0}
+  .findbar input::placeholder{color:var(--muted)}
+  .findbar input::-webkit-search-cancel-button{-webkit-appearance:none; appearance:none}
+  .findbar .tbcount{margin:0 2px}
+  .findnav,.findclose{display:grid; place-items:center; width:26px; height:26px; border:none; border-radius:6px; background:transparent; color:var(--text); cursor:pointer; flex:none}
+  .findnav svg{width:12px; height:8px; opacity:.75}
+  .findnav:hover,.findclose:hover{background:var(--tbtn-hover)}
+  .findclose{font-size:13px; color:var(--muted); opacity:.8}
+  .sep{width:1px; height:22px; background:var(--hairline); margin:0 2px}
+  /* proxy-icon folder-path popup (right-click the filename): ancestor folders, nearest at the top */
+  .fpmenu{position:fixed; z-index:10000; min-width:190px; padding:5px; border-radius:var(--r-menu,13px); background:var(--lg-glass-fill,rgba(245,245,245,.67));
+    box-shadow:var(--lg-menu-shadow,0 0 2px rgba(0,0,0,.1),0 0 25px rgba(0,0,0,.16)); -webkit-backdrop-filter:blur(24px) saturate(180%); backdrop-filter:blur(24px) saturate(180%)}
+  .fpitem{display:flex; align-items:center; gap:8px; width:100%; height:24px; padding:0 12px; border:none; border-radius:6px; background:transparent;
+    color:var(--label-primary,var(--text)); font:inherit; font-weight:510; font-size:13px; line-height:16px; text-align:left; cursor:default; white-space:nowrap}   /* matches .ctx button's Figma-verified row weight/line-height — a plain font:inherit left this at the ambient 400, reading thinner than the rest of the menu system */
+  .fpitem:hover{background:var(--accent); color:#fff}
+  .fpitem.cur{font-weight:700}   /* the Where popup's current-folder row — bolded in place of a leading checkmark column, so marking "current" costs no extra x-padding (the titlebar proxy menu's own rows have none at all) */
+  .fpitem .sfi{width:15px; height:15px; flex:none; opacity:.9}
+  .fpitem:hover .sfi{background-color:#fff}
+  .fpitem .fpimg{width:16px; height:16px; flex:none; object-fit:contain}   /* native NSWorkspace folder icon */
+  /* native-feeling macOS popup button: rounded field, system font, a trailing double-chevron and a diffuse lift shadow */
+  select.sel{appearance:none; -webkit-appearance:none; height:30px; border-radius:8px; border:.5px solid var(--pill-border); cursor:pointer;
+    background-color:var(--field-bg); color:var(--text); font:inherit; font-size:13px; font-weight:500; padding:0 28px 0 11px;
+    box-shadow:var(--pill-shadow), inset 0 .7px 0 var(--glass-rim);
+    background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='11' height='16' viewBox='0 0 11 16'><path d='M2.2 6.2l3.3-3 3.3 3M2.2 9.8l3.3 3 3.3-3' fill='none' stroke='%238a8a8e' stroke-width='1.4' stroke-linecap='round' stroke-linejoin='round'/></svg>");
+    background-repeat:no-repeat; background-position:right 8px center}
+  select.sel:hover{background-color:color-mix(in srgb,var(--text) 4%,var(--field-bg))}
+  select.sel:focus{outline:none; border-color:var(--accent); box-shadow:0 0 0 3px var(--accent-weak)}
+  /* the titlebar model popup is a full-height capsule matching the round icon buttons (34px, fully-rounded) */
+  /* model group = ONE capsule pill: the popup and the box (Manage) button are flush transparent segments
+     (each 34px = the round icon buttons), the pill provides the material; a hairline separator sits between
+     them (see .tbmodel > .tbtn). The segment outer corners are half-capsule to nest in the pill. */
+  .tbmodel{gap:4px}   /* fix 5: MORE room on each side of the divider. item 1: kept in step with the shared .tbpill gap (8px). Redundant — .tbmodel is always ALSO a .tbpill — but stated, as it was at 4px, so this pill's spacing is legible where its other overrides are; it must never be left behind at the old value, which would silently un-centre the divider the rule below insets by −4.5px */
+  .tbmodel #modelSel{height:28px; border:none; box-shadow:none; background-color:transparent; border-radius:14px; padding:0 26px 0 12px; font-size:12.5px; background-position:right 8px center}   /* fix 4/11: fully-rounded on BOTH ends so its hover/selection fill is a capsule, not squared on the separator side */
+  .tbmodel #modelSel:hover{background-color:var(--tbtn-hover)}
+  .tbmodel #modelSel:focus{outline:none; border:none; box-shadow:none}
+  .tbmodel .tbtn.icon{border-radius:14px; width:36px}   /* fix 4/11: fully-rounded on BOTH ends (capsule hover fill, not squared on the separator side); widened so its cube glyph clears the divider */
+
+  .body{flex:1; display:flex; flex-direction:column; min-height:0; background:var(--content-bg); position:relative}
+  .findbar button{border:none; background:transparent; color:var(--muted); border-radius:5px; width:22px; height:22px; cursor:pointer; display:grid; place-items:center; font-size:14px; line-height:1}
+  .findbar button:hover{background:var(--row-hover); color:var(--text)}
+  .sblock.findcur{box-shadow:inset 3px 0 0 var(--warn)}
+  mark.findhit{background:color-mix(in srgb,var(--warn) 42%,transparent); color:inherit; border-radius:2px; padding:0}   /* no padding → marked text is the same width as unmarked */
+  .sblock.findcur mark.findhit{background:var(--warn); color:#fff}
+  .sid-in.findsidhit{background:color-mix(in srgb,var(--warn) 32%,transparent)!important}
+
+  .viewbar{position:absolute; left:0; right:0; top:var(--tbH,44px); z-index:20; display:flex; align-items:center; gap:10px; padding:6px 16px; background:var(--tb-merged-tint,var(--toolbar-bg,rgba(246,246,248,.80))); -webkit-backdrop-filter:saturate(180%) blur(0.625px); backdrop-filter:saturate(180%) blur(0.625px); border-bottom:.5px solid var(--viewbar-border,var(--hairline)); flex-wrap:wrap}   /* fix 3: the options bar OVERLAYS the document too — pinned directly below the titlebar (top = the JS-measured --tbH) so the doc scrolls UNDER it and is blurred through; its drawer popovers stay above the document */   /* item 7: 20px → 5px, so this bar reads as the SAME material as the title bar directly above it (measured 50.8px of edge smear vs the title bar's 12.27px — see "THE OPTIONS BAR IS NOT EXEMPT" in the scroll-edge block up top, which is where the claim that it could keep 20px is refuted). One layer at 5px lands on the title bar's ::before+::after stack at 1.5+5; saturate(180%) untouched, as there */   /* background NOW MATCHES `.titlebar::after`'s merged-state fill byte-for-byte (both read --tb-merged-tint, mac-tokens.css) rather than each independently reading --toolbar-bg — the two bars must merge into what reads as ONE surface with no seam at the shared border, so an identical recipe on both sides of that border is the baseline requirement (see the win-inactive override right below for the unfocused-window case, which the titlebar's own --tb-tint switches to the same way). */   /* Tracks `.titlebar::after`'s own blur 1:1 across every pass this session (currently 0.625px, the 5/8 ratio to the progressive stack's 1px strongest layer) so the two merged-state surfaces stay byte-identical (see that rule's comment for the derivation). */
+  /* .viewbar's own win-inactive background swap (mirroring .titlebar.win-inactive's old --tb-tint
+     override) removed for the same reason — see that rule's own note above. .viewbar now keeps its
+     focused background:var(--tb-merged-tint,…) regardless of window focus, staying byte-identical to
+     .titlebar::after in both focus states rather than just in the focused one. */
+  .viewbar.hidden{display:none}   /* fix 5: toolbar Options button toggles the whole options bar */
+  .viewbar .lbl{font-size:11px; color:var(--muted); font-weight:600; letter-spacing:.3px; text-transform:uppercase}
+  .viewbar .vsep{width:1px; height:20px; background:var(--sep-line); flex:none; align-self:center; margin:0 4px}   /* faint 1px×20px hairline (≈#d9d9d9 light) delimiting toolbar groups, theme-aware — like the titlebar pill separators */
+  .toggles{display:inline-flex; border:.5px solid var(--hairline-strong); border-radius:8px; overflow:hidden}
+  .toggles button{border:none; background:var(--field-bg); color:var(--muted); font:inherit; font-size:12px; padding:5px 11px; cursor:pointer}
+  .toggles button+button{border-left:.5px solid var(--hairline)}
+  .toggles button.on{background:var(--accent); color:#fff}
+  .toggles button.disabled{opacity:.38; cursor:not-allowed}
+  .chk{display:inline-flex; align-items:center; gap:6px; font-size:13px; color:var(--text-2); cursor:pointer; white-space:nowrap; user-select:none}   /* native macOS 13px checkbox labels */
+  .chk.chk-off{opacity:.45; cursor:not-allowed} .chk.chk-off input{cursor:not-allowed}   /* a disabled toggle (e.g. Lexical gloss under mSUD) */
+  .tier-rm{margin-inline-start:4px; color:var(--muted); font-size:11px; line-height:1; cursor:pointer; text-decoration:none; padding:0 2px; border-radius:3px}   /* ✕ removes a glossing tier (clears its MISC data) */
+  .tier-rm:hover{color:var(--bad); background:var(--block-sel)}
+  .chk input{margin:0; cursor:pointer; accent-color:var(--accent); width:14px; height:14px}

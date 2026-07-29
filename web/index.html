@@ -1,0 +1,339 @@
+<meta charset="utf-8">
+
+<link rel="stylesheet" href="styles/fonts.css">
+<link rel="stylesheet" href="macos-kit/mac-tokens.css">
+<link rel="stylesheet" href="macos-kit/mac-chrome.css">
+<link rel="stylesheet" href="styles/app.css">
+
+<div class="window" role="application" aria-label="SUD Workbench">
+  <div class="titlebar">
+    <!-- Progressive scroll-edge blur (options bar CLOSED). Empty sibling layers behind the controls —
+         NOT painted onto .spring/.tbright (that was the laggy/stripy six-slice experiment). See mac-chrome.css. -->
+    <div class="tb-blur" aria-hidden="true"><i></i><i></i><i></i><i></i></div>
+    <div class="lights"><i class="r"></i><i class="y"></i><i class="g"></i></div>
+    <!-- macOS proxy-title block: filename on top, "language · translit · scheme" below; right-click = folder path menu -->
+    <div class="tbfile" id="tbFile" title="">
+      <span class="sfi tbficon" id="tbFileGlyph" style="--m:var(--sf-doc)"></span>
+      <img class="tbficon img" id="tbFileIcon" alt="" hidden>
+      <div class="tbftext">
+        <div class="tbfname" id="tbFileName">untitled.conllu</div>
+        <div class="tbfmeta" id="tbFileMeta"></div>
+      </div>
+    </div>
+    <span class="spring"></span>
+    <div class="tbright">
+      <div class="tbgroup tbg-wide">
+        <div class="tbpill">
+          <button class="tbtn icon" id="btnUndo" title="Undo (⌘Z)"><span class="sfi" style="--m:var(--sf-undo)"></span><span class="tblabel">Undo</span></button>
+          <button class="tbtn icon" id="btnRedo" title="Redo (⇧⌘Z)"><span class="sfi" style="--m:var(--sf-redo)"></span><span class="tblabel">Redo</span></button>
+        </div>
+        <span class="pilllabel">Edit</span>
+      </div>
+      <div class="tbgroup">
+        <div class="tbpill">
+          <button class="tbtn icon" id="btnParse" title="Insert text (⌘T)"><span class="sfi" style="--m:var(--sf-addtext)"></span><span class="tblabel">Insert Text</span></button>
+        </div>
+        <span class="pilllabel">Insert Text</span>
+      </div>
+      <div class="tbgroup tbg-wide">
+        <div class="tbpill" id="notationPill" role="group" aria-label="Diagram notation">
+          <button class="tbtn icon" data-notation="stemma" title="Stemma"><span class="sfi" style="--m:var(--sf-nstemma)"></span><span class="tblabel">Stemma</span></button>
+          <button class="tbtn icon" data-notation="tree" title="Hierarchy"><span class="sfi" style="--m:var(--sf-ntree)"></span><span class="tblabel">Hierarchy</span></button>
+          <button class="tbtn icon" data-notation="arcs" title="Arcs"><span class="sfi" style="--m:var(--sf-narcs)"></span><span class="tblabel">Arcs</span></button>
+          <button class="tbtn icon" data-notation="brackets" title="Brackets"><span class="sfi" style="--m:var(--sf-nbrackets)"></span><span class="tblabel">Brackets</span></button>
+          <button class="tbtn icon" data-notation="outline" title="Outline"><span class="sfi" style="--m:var(--sf-noutline)"></span><span class="tblabel">Outline</span></button>
+        </div>
+        <span class="pilllabel">View</span>
+      </div>
+      <div class="tbgroup">
+        <div class="tbpill">
+          <button class="tbtn icon" id="btnOptions" title="Show the options bar" aria-pressed="false"><span class="sfi" style="--m:var(--sf-options)"></span><span class="tblabel">Options</span></button>
+        </div>
+        <span class="pilllabel">Options</span>
+      </div>
+      <!-- item 3: page-like layout — Paged caps the document to a fixed measure on a wide screen and lays it on
+           sheets (a `# newdoc` ends one and starts the next); Unpaged uses the full window width. -->
+      <div class="tbgroup tbg-wide">
+        <div class="tbpill" id="pagePill" role="group" aria-label="Page layout">
+          <button class="tbtn icon" data-paged="1" title="Paged (⌃⌘P)"><span class="sfi" style="--m:var(--sf-paged)"></span><span class="tblabel">Paged</span></button>
+          <button class="tbtn icon" data-paged="0" title="Unpaged (⌃⌘P)"><span class="sfi" style="--m:var(--sf-unpaged)"></span><span class="tblabel">Unpaged</span></button>
+        </div>
+        <span class="pilllabel">Layout</span>
+      </div>
+      <div class="tbgroup">
+        <div class="tbpill tbzoom" title="Font size">
+          <button class="tbtn icon" id="fsDown" aria-label="Zoom out" title="Zoom out (⌘−)"><span class="sfi" style="--m:var(--sf-zoomout)"></span></button>
+          <button class="tbtn icon" id="fsReset" aria-label="Display at actual size" title="Actual size (⌘0)"><span class="sfi" style="--m:var(--sf-actualsize)"></span><span class="tblabel">Actual Size</span></button>
+          <button class="tbtn icon" id="fsUp" aria-label="Zoom in" title="Zoom in (⌘+)"><span class="sfi" style="--m:var(--sf-zoomin)"></span></button>
+        </div>
+        <span class="pilllabel">Zoom</span>
+      </div>
+      <div class="tbgroup tbg-wide">
+        <div class="tbpill tbmodel">
+          <select class="sel" id="modelSel" title="Parser model — empty = manual annotation, whitespace tokeniser">
+            <option value="">None (manual)</option></select>
+          <button class="tbtn icon" id="btnModels" title="Manage parser models… (⇧⌘M)"><span class="sfi" style="--m:var(--sf-cube)"></span><span class="tblabel">Manage</span></button>
+        </div>
+        <span class="pilllabel">Model</span>
+      </div>
+      <div class="tbgroup tbg-wide">
+        <div class="tbpill">
+          <button class="tbtn icon" id="btnGuide" title="Help" aria-label="Help"><span class="sfi" style="--m:var(--sf-help)"></span><span class="tblabel">Help</span></button>
+        </div>
+        <span class="pilllabel">Help</span>
+      </div>
+    </div>
+  </div>
+  <!-- floating pop-up find UI (⌘F / View ▸ Find). Hidden until openFind(); reuses #tbSearch / #tbCount.
+       The disclosure (#findMore) grows a panel under the bar for per-field criteria and replace — see
+       the "why a bar and not a sheet" note at the top of js/ui/find.js. Collapsed, this is the same
+       one-row bar it has always been. -->
+  <div class="findbar" id="findBar" role="search">
+    <div class="findrow">
+      <button class="findmore" id="findMore" title="Show the field and replace options" aria-label="Show the field and replace options" aria-expanded="false"><svg viewBox="0 0 8 12" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 1.5L7 6l-4.5 4.5"/></svg></button>
+      <svg class="findloupe" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><circle cx="7" cy="7" r="4.2"/><path d="m10.2 10.2 3 3"/></svg>
+      <button class="findfield" id="findField0" type="button" title="Field to search"><span class="findfname">Anywhere</span><svg class="findfchev" viewBox="0 0 10 7" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M1 1l4 4 4-4"/></svg></button>
+      <input id="tbSearch" type="search" placeholder="Find in document" spellcheck="false" aria-label="Find in document">
+      <button class="findopt" id="findCase" type="button" title="Match case" aria-label="Match case" aria-pressed="false">Aa</button>
+      <button class="findopt" id="findRegex" type="button" title="Search by regular expression" aria-label="Search by regular expression" aria-pressed="false">.*</button>
+      <span class="tbcount" id="tbCount"></span>
+      <button class="findnav" id="findPrev" title="Previous match (⇧⏎)" aria-label="Previous match"><svg viewBox="0 0 12 8" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M1.5 5.5L6 1l4.5 4.5"/></svg></button>
+      <button class="findnav" id="findNext" title="Next match (⏎)" aria-label="Next match"><svg viewBox="0 0 12 8" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M1.5 2.5L6 7l4.5-4.5"/></svg></button>
+      <button class="findclose" id="findClose" title="Close (Esc)" aria-label="Close find">✕</button>
+    </div>
+    <div class="findpanel" id="findPanel" hidden>
+      <div class="findcrits" id="findCrits"></div>
+      <button class="findaddf" id="findAddField" type="button">+ Add a field</button>
+      <div class="findhr"></div>
+      <div class="findcrit findreplrow">
+        <span class="findlab">Replace in</span>
+        <button class="findfield" id="findReplField" type="button" disabled><span class="findfname">—</span><svg class="findfchev" viewBox="0 0 10 7" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M1 1l4 4 4-4"/></svg></button>
+        <input class="findterm" id="findRepl" type="text" placeholder="Replacement" spellcheck="false" autocorrect="off" autocapitalize="off" autocomplete="off" aria-label="Replacement">
+      </div>
+      <div class="findfoot">
+        <span class="findstat" id="findStat"></span>
+        <button class="findgo" id="findReplAll" type="button" disabled>Replace All…</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="body">
+    <div class="viewbar hidden">
+      <!-- Notation is chosen from the titlebar pill (#notationPill); this hidden select is the state holder
+           the pill drives (set value + dispatch change) so all existing convSel logic keeps working. -->
+      <select id="convSel" hidden>
+        <option value="stemma">Stemma</option>
+        <option value="tree">Hierarchy</option>
+        <option value="arcs">Arcs</option>
+        <option value="brackets">Brackets</option>
+        <option value="outline">Outline</option>
+      </select>
+      <div class="drawers" id="toggles">
+        <div class="drawer">
+          <button class="drawer-btn" data-drawer>Show/Hide <svg viewBox="0 0 10 7" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M1 1l4 4 4-4"/></svg></button>
+          <div class="drawer-pop">
+            <div class="drawer-group-h">Annotations</div>
+            <label class="chk"><input type="checkbox" data-t="colour" checked>Relation colours</label>
+            <label class="chk"><input type="checkbox" data-t="labels" checked>Relation labels</label>
+            <label class="chk"><input type="checkbox" data-t="pos" checked>Part-of-speech tags</label>
+            <label class="chk"><input type="checkbox" data-t="arrows">Semantic arrows</label>
+            <label class="chk" title="Dashed ghost edges for Shared=Yes coordination and Subj-raising"><input type="checkbox" data-t="extRel" checked>Extended relations</label>
+            <div class="drawer-group-h stemma-only">Stemma</div>
+            <label class="chk stemma-only" id="catNodesLabel"><input type="checkbox" id="catNodesChk">Category nodes</label>
+            <label class="chk stemma-only" id="projLinesLabel"><input type="checkbox" id="projLinesChk" checked>Projection lines</label>
+            <div class="drawer-group-h gloss-vis" id="glossVisHead">Glosses</div>
+            <label class="chk gloss-vis" id="glossVisLabel"><input type="checkbox" data-vis="gloss" checked>Lexical gloss</label>
+            <label class="chk gloss-vis" id="morphVisLabel"><input type="checkbox" data-vis="morph" checked>Morphemic gloss</label>
+          </div>
+        </div>
+        <div class="drawer">
+          <button class="drawer-btn" data-drawer>Glossing <svg viewBox="0 0 10 7" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M1 1l4 4 4-4"/></svg></button>
+          <div class="drawer-pop">
+            <label class="chk"><input type="checkbox" data-t2="gloss">Lexical gloss</label>
+            <label class="chk"><input type="checkbox" data-t2="morph">Morphemic gloss</label>
+            <div class="drawer-sep"></div>
+            <!-- item 13: opens the gloss↔FEATS mapping editor sheet (sheetGlossMap) -->
+            <button class="gm-editbtn" id="glossMapBtn" type="button">Edit mappings…</button>
+          </div>
+        </div>
+        <div class="drawer" id="transDrawer">
+          <button class="drawer-btn" data-drawer>Translations <svg viewBox="0 0 10 7" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M1 1l4 4 4-4"/></svg></button>
+          <div class="drawer-pop" id="transPop"></div>
+        </div>
+        <!-- item 17: Colours drawer — customise the 5 dependency-relation category colours (--c-*) for light AND dark. Pop built by initColourDrawer(). -->
+        <div class="drawer" id="colourDrawer">
+          <button class="drawer-btn" data-drawer><span id="colourDrawerLabel">Colours</span> <svg viewBox="0 0 10 7" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M1 1l4 4 4-4"/></svg></button>
+          <div class="drawer-pop" id="colourPop"></div>
+        </div>
+        <!-- Merge punctuation (⌘.) and Wrap long lines (⌃⌘L) are View-menu items only now; toggleMergePunct/toggleWrap still drive show.mergePunct/show.wrap. -->
+      </div>
+      <span class="spring" style="flex:1"></span>
+      <span class="vsep" aria-hidden="true"></span>
+      <label class="chk" id="autonumChk" title="Continue sentence-ID numbering when sentences are inserted or deleted"><input type="checkbox" checked>Auto-number</label>
+      <label class="chk" id="gridsChk" title="Show all annotation grids (⌃⌘G)"><input type="checkbox" data-t="grids" checked>Show grids</label>
+    </div>
+
+    <div class="doc" id="doc"></div>
+
+    <!-- LINEAR-LIGHT DROP SHADOWS. CSS `box-shadow` composites in gamma-encoded sRGB; Figma and CoreGraphics
+         composite in linear light, which is why the same numbers (0 8 40 / black 12 %) read tighter and harder in
+         a browser than in the mock. An SVG filter is the one surface in CSS whose compositing space is
+         addressable — `color-interpolation-filters` defaults to linearRGB and is stated here explicitly on every
+         filter below (not left to the default) — so several genuine drop shadows in the app are drawn through one
+         of these instead of `box-shadow`, applied via CSS `filter:url(#…)`.
+         NOT (any longer) drawn this way: the titlebar pill shadow (`.tbpill`, mac-chrome.css) — it shipped as
+         `#lgShadow`/`#lgShadowDark` filters here too, on the same linear-light-is-more-correct theory, but a live
+         side-by-side found the linear-light version too faint at the LG kit's documented 12 %-opacity value where
+         plain sRGB box-shadow read correctly. Reverted to `box-shadow:var(--lg-button-shadow)` (see that token's
+         COMPOSITING HISTORY comment in mac-tokens.css) and the two now-unused filters deleted from here — if you
+         go looking for `#lgShadow`, it no longer exists; don't recreate it without a fresh side-by-side.
+         stdDeviation = the CSS blur radius ÷ 2, which is the relationship between a CSS shadow's blur length and a
+         Gaussian's sigma — every filter below was derived from its box-shadow twin by that one rule, offset and
+         flood-opacity carried over unchanged.
+         The filter REGION is opened to 500 % about the box (200 % margin on every side) on every one of these —
+         MEASURED, not guessed, after a real bug: the button/pill shadow first shipped here at only a 200 %/50 %-
+         margin region (the SVG default is tighter still, -10 %/+120 %), and at LOW opacity (12 %) the clip was
+         invisible. Darkening that same shadow to 30 % opacity for the "not dark enough" fix made the clip visible
+         for the first time — the fade visibly STOPPED partway through and jumped straight to nothing, a hard
+         "shelf" a few px past the pill, which read as a second, separate shadow edge stacked under the real one
+         ("the shadow looks doubled"). It was never two shadows or two rules; it was one shadow cut off before it
+         finished fading. A feDropShadow needs roughly (offset + 3–4×stdDeviation) of clear region past the shape
+         to fade out cleanly — for THIS shadow (dy 10, stdDeviation 14) that is ~66px, which is *more* than the
+         ~36px tall single-icon pill this paints on even at a 100 % margin, so 100 % (the previous 200 %-width
+         figure) was never enough; 200 % margin (~72–80px on the smallest hosts here) clears every filter defined
+         below with room to spare, including the largest, the dialog shadow's ~62px requirement. Confirmed by
+         re-measuring the same vertical black|white edge profile this file's other measurements use: the fade now
+         reaches flat within the region on every filter, no shelf, at every opacity used below.
+         NOT converted: (1) three kinds of INSET box-shadow — rim/edge specular highlights (a filter cannot express
+         an inset), focus rings (0 0 0 Npx, a hard-edged glow that is not a "cast shadow"), and the grid's
+         bottom-rule/dropzone hairlines (border substitutes, not shadows) — all stay `box-shadow`, unconverted, on
+         purpose; (2) a `0 0 0 Npx` SPREAD-only layer bundled inside an otherwise-real shadow token (the pill/menu
+         shadow's trailing hairline) — feDropShadow has no spread parameter, spread is a hard-edged offset-outline
+         effect a Gaussian blur cannot fake, so that one component STAYS box-shadow alongside the filter that
+         carries the token's real blur layers (search `-hairline` below); (3) `.dg-ghost` (the diagram drag-ghost
+         badge) and `.oreportbox` (the reported-speech subtree backdrop) — left as box-shadow deliberately: a drag
+         ghost's position updates every pointermove and a reported-speech box can appear many times over in one
+         diagram render, and `filter:url(#…)` opens a new stacking context per element, which is a real compositing
+         cost `box-shadow` doesn't carry — untested against either of those hot paths, so not worth the risk for a
+         barely-visible shadow; (4) the browser-mockup window card's shadow (`--shadow`, `html.mockup .window`) —
+         its box-shadow uses a NEGATIVE spread ("0 22px 60px -12px"), which feDropShadow has no way to express at
+         all (spread shrinks the shadow's source shape before blurring; a drop-shadow filter blurs the shape
+         as-is), and mockup mode is a browser dev-preview only — the shipped native app has a real AppKit window
+         shadow and never renders this element, so there is no user-facing payoff for solving the spread problem. -->
+    <svg width="0" height="0" aria-hidden="true" focusable="false" style="position:absolute;pointer-events:none">
+      <!-- --lg-menu-shadow (context/status-bar menus, popovers, drawers): "0 0 2px black 10%, 0 0 25px black 16%".
+           No dark override exists on the source token (it is the Apple LG-kit exact value in both appearances), so
+           ONE filter serves both themes, same as the token itself does. -->
+      <filter id="lgMenuShadow" x="-200%" y="-200%" width="500%" height="500%" color-interpolation-filters="linearRGB">
+        <feDropShadow dx="0" dy="0" stdDeviation="1" flood-color="#000" flood-opacity="0.1" result="a"/>
+        <feDropShadow in="a" dx="0" dy="0" stdDeviation="12.5" flood-color="#000" flood-opacity="0.16"/>
+      </filter>
+      <!-- --lg-dialog-shadow (alerts/sheets, .sheet): "0 0 0.5px black 20%, 0 17px 22.5px black 50%". Also no dark
+           override on the source token. -->
+      <filter id="lgDialogShadow" x="-200%" y="-200%" width="500%" height="500%" color-interpolation-filters="linearRGB">
+        <feDropShadow dx="0" dy="0" stdDeviation="0.25" flood-color="#000" flood-opacity="0.2" result="a"/>
+        <feDropShadow in="a" dx="0" dy="17" stdDeviation="11.25" flood-color="#000" flood-opacity="0.5"/>
+      </filter>
+      <!-- --menu-shadow (.findbar's own halo, distinct token from --lg-menu-shadow above): light "0 8px 28px black
+           20%", dark "0 8px 28px black 55%" — only the blur/offset layer; the token's trailing "0 0 0 .5px" hairline
+           has no blur to convert and stays a companion box-shadow (--menu-hairline, mac-tokens.css). -->
+      <filter id="menuShadow" x="-200%" y="-200%" width="500%" height="500%" color-interpolation-filters="linearRGB">
+        <feDropShadow dx="0" dy="8" stdDeviation="14" flood-color="#000" flood-opacity="0.20"/>
+      </filter>
+      <filter id="menuShadowDark" x="-200%" y="-200%" width="500%" height="500%" color-interpolation-filters="linearRGB">
+        <feDropShadow dx="0" dy="8" stdDeviation="14" flood-color="#000" flood-opacity="0.55"/>
+      </filter>
+      <!-- --pill-shadow (toolbar search field + native popup-button/select.sel): light "0 6px 16px black 9%, 0 2px
+           5px black 5%", dark "0 6px 18px black 44%, 0 2px 6px black 30%" — again only the two blur layers; the
+           token's trailing "0 0 0 .5px" hairline stays a companion box-shadow (--pill-hairline). -->
+      <filter id="pillShadow" x="-200%" y="-200%" width="500%" height="500%" color-interpolation-filters="linearRGB">
+        <feDropShadow dx="0" dy="6" stdDeviation="8" flood-color="#000" flood-opacity="0.09" result="a"/>
+        <feDropShadow in="a" dx="0" dy="2" stdDeviation="2.5" flood-color="#000" flood-opacity="0.05"/>
+      </filter>
+      <filter id="pillShadowDark" x="-200%" y="-200%" width="500%" height="500%" color-interpolation-filters="linearRGB">
+        <feDropShadow dx="0" dy="6" stdDeviation="9" flood-color="#000" flood-opacity="0.44" result="a"/>
+        <feDropShadow in="a" dx="0" dy="2" stdDeviation="3" flood-color="#000" flood-opacity="0.30"/>
+      </filter>
+      <!-- --edit-shadow (a grid cell's pop-out editing overlay, .cin.editing/.csel.editing): light "0 3px 12px
+           black 18%", dark "0 3px 14px black 50%". Only one cell can be mid-edit at a time, so this is cheap. -->
+      <filter id="editShadow" x="-200%" y="-200%" width="500%" height="500%" color-interpolation-filters="linearRGB">
+        <feDropShadow dx="0" dy="3" stdDeviation="6" flood-color="#000" flood-opacity="0.18"/>
+      </filter>
+      <filter id="editShadowDark" x="-200%" y="-200%" width="500%" height="500%" color-interpolation-filters="linearRGB">
+        <feDropShadow dx="0" dy="3" stdDeviation="7" flood-color="#000" flood-opacity="0.5"/>
+      </filter>
+      <!-- .drawer-btn's own small drop ("0 .5px 1.5px black 10%", theme-invariant — no dark override existed on
+           the literal either). -->
+      <filter id="drawerBtnShadow" x="-200%" y="-200%" width="500%" height="500%" color-interpolation-filters="linearRGB">
+        <feDropShadow dx="0" dy="0.5" stdDeviation="0.75" flood-color="#000" flood-opacity="0.10"/>
+      </filter>
+      <!-- .toast ("0 10px 30px black 35%") — the toast chip is the same near-black translucent fill in both
+           themes, so one filter covers both. -->
+      <filter id="toastShadow" x="-200%" y="-200%" width="500%" height="500%" color-interpolation-filters="linearRGB">
+        <feDropShadow dx="0" dy="10" stdDeviation="15" flood-color="#000" flood-opacity="0.35"/>
+      </filter>
+    </svg>
+    <div class="statusbar">
+      <span class="pill" id="valPill" title="Click to list the document's issues"><span class="dotmark" id="valDot"></span><span id="valText">valid</span></span>
+      <!-- item 4: documents / paragraphs, shown ONLY when the file actually carries the boundaries (renderDoc hides
+           them otherwise). A file with no `# newdoc` has exactly one document by definition, and "1 document" on
+           every plain treebank would be a count of nothing. Placed BEFORE the sentence count, largest unit first. -->
+      <span class="pill" id="docCountPill" hidden><b id="docCount">0</b> <span id="docCountLbl">documents</span></span>
+      <span class="pill" id="parCountPill" hidden><b id="parCount">0</b> <span id="parCountLbl">paragraphs</span></span>
+      <span class="pill"><b id="sentCount">0</b> sentences</span>
+      <span class="pill"><b id="tokCount">0</b> tokens</span>
+      <span class="pill busyind" id="statusBusy" hidden><span class="spin"></span><span class="prog"><i></i></span><span id="busyText"></span></span>
+      <span class="spring" style="flex:1"></span>
+      <!-- The four status-bar controls below all open a menu on click (format conversion, language picker,
+           script picker, transliteration picker), so they share ONE outline treatment (.fmtpill, despite the
+           name — kept rather than renamed so the single shared rule in app.css is an unambiguous grep target)
+           and one disclosure chevron (.pillchev, the app's own hand-drawn SF-style chevron.down — see
+           .drawer-btn's identical SVG in app.css for why this isn't a "▾"/"⌄" text glyph). Each wraps its
+           dynamic label in its own inner span so the JS that rewrites the text on every state change can
+           target the label alone and leave the trailing chevron svg untouched. -->
+      <button class="pill mono fmtpill" id="fmtPill" title="Document format — click to convert, import UD, or export UD"><span id="fmtPillLabel">Format: SUD</span><svg class="pillchev" viewBox="0 0 10 7" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M1 1l4 4 4-4"/></svg></button>
+      <span class="pill fmtpill" id="tokInfo"><span id="tokInfoLabel">tokeniser: whitespace</span><svg class="pillchev" viewBox="0 0 10 7" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M1 1l4 4 4-4"/></svg></span>
+      <span class="pill fmtpill" id="orthoPill" hidden title="Script — re-render the token glyphs in a writing system"><span id="orthoPillLabel"></span><svg class="pillchev" viewBox="0 0 10 7" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M1 1l4 4 4-4"/></svg></span>
+      <!-- ONE transliteration pill: its menu carries Displayed and Stored as two columns of radio buttons. They were two pills with two near-identical menus, which put the same scheme list on screen twice and gave no way to see the two choices against each other. -->
+      <span class="pill fmtpill" id="translitPill" hidden title="Transliteration — displayed row and stored Misc value"><span id="translitPillLabel"></span><svg class="pillchev" viewBox="0 0 10 7" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M1 1l4 4 4-4"/></svg></span>
+      <span class="pill">UTF‑8 · LF</span>
+    </div>
+  </div>
+  <div class="scrim" id="scrim"><div id="scrimHost"></div></div>
+  <div class="scrim confirmscrim" id="confirmScrim"><div id="confirmHost"></div></div>
+</div>
+
+<div class="ctx" id="ctx"></div>
+<div class="toast" id="toast"></div>
+
+<script src="iso639-3.js"></script>
+<script src="macos-kit/toast.js"></script>
+<script src="js/core/state.js"></script>
+<script src="js/lang/translit.js"></script>
+<script src="js/core/prefs.js"></script>
+<script src="js/diagram/diagram-core.js"></script>
+<script src="js/diagram/diagram-render.js"></script>
+<script src="js/diagram/diagram-wrap.js"></script>
+<script src="js/grid/grid.js"></script>
+<script src="js/core/document.js"></script>
+<script src="js/editing/validation.js"></script>
+<script src="js/editing/edit-ops.js"></script>
+<script src="js/editing/context-menu.js"></script>
+<script src="js/ui/sheets.js"></script>
+<script src="js/ui/wiring.js"></script>
+<script src="js/ui/colours.js"></script>
+<script src="js/ui/find.js"></script>
+<script src="js/core/undo.js"></script>
+<script src="js/grid/columns.js"></script>
+<script src="js/core/scroll.js"></script>
+<script src="js/io/bridge.js"></script>
+<script src="js/io/formats.js"></script>
+<script src="js/io/models.js"></script>
+<script src="js/diagram/diagram-edit.js"></script>
+<script src="js/lang/translit-load.js"></script>
+<script src="js/lang/readings.js"></script>
+<script src="js/lang/fontload.js"></script>
+<!-- browser design mode only: seeds DOC so the renderers have something to draw with no bridge.
+     packaging/make_*.sh delete the file AND strip this pair of lines from the bundled index.html. -->
+<script src="js/dev-fixture.js"></script>
+<script src="js/core/init.js"></script>

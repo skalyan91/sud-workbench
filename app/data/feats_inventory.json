@@ -1,0 +1,397 @@
+{
+  "categories": [
+    "Lexical features",
+    "Nominal",
+    "Verbal",
+    "Other",
+    "SUD-specific"
+  ],
+  "features": {
+    "PronType": {
+      "layer": "UD",
+      "category": "Lexical features",
+      "values": {
+        "Art": "article",
+        "Dem": "demonstrative",
+        "Emp": "emphatic",
+        "Exc": "exclamative",
+        "Ind": "indefinite",
+        "Int": "interrogative",
+        "Neg": "negative",
+        "Prs": "personal / possessive personal",
+        "Rcp": "reciprocal",
+        "Rel": "relative",
+        "Tot": "total / collective"
+      }
+    },
+    "NumType": {
+      "layer": "UD",
+      "category": "Lexical features",
+      "values": {
+        "Card": "cardinal",
+        "Dist": "distributive",
+        "Frac": "fraction",
+        "Mult": "multiplicative",
+        "Ord": "ordinal",
+        "Range": "range of values",
+        "Sets": "collective / sets"
+      }
+    },
+    "Poss": {
+      "layer": "UD",
+      "category": "Lexical features",
+      "values": {
+        "Yes": "possessive"
+      }
+    },
+    "Gender": {
+      "layer": "UD",
+      "category": "Nominal",
+      "values": {
+        "Com": "common (non-neuter)",
+        "Fem": "feminine",
+        "Masc": "masculine",
+        "Neut": "neuter"
+      }
+    },
+    "Animacy": {
+      "layer": "UD",
+      "category": "Nominal",
+      "values": {
+        "Anim": "animate",
+        "Hum": "human",
+        "Inan": "inanimate",
+        "Nhum": "non-human (animate)"
+      }
+    },
+    "NounClass": {
+      "layer": "UD",
+      "category": "Nominal",
+      "values": {
+        "Bantu1": "Bantu class 1 (singular: persons)",
+        "Bantu2": "Bantu class 2 (plural: persons)",
+        "Bantu3": "Bantu class 3 (singular: plants, thin objects)",
+        "Bantu4": "Bantu class 4 (plural: plants, thin objects)",
+        "Bantu5": "Bantu class 5 (singular: fruits, round/paired objects)",
+        "Bantu6": "Bantu class 6 (plural: fruits, round/paired objects)",
+        "Bantu7": "Bantu class 7 (singular: things, diminutives)",
+        "Bantu8": "Bantu class 8 (plural: things, diminutives)",
+        "Bantu9": "Bantu class 9 (singular: animals, things)",
+        "Bantu10": "Bantu class 10 (plural: animals, things)",
+        "Bantu11": "Bantu class 11 (long thin objects, abstracts)",
+        "Bantu12": "Bantu class 12 (singular: small things, diminutives)",
+        "Bantu13": "Bantu class 13 (plural/mass: small amount)",
+        "Bantu14": "Bantu class 14 (plural: diminutives)",
+        "Bantu15": "Bantu class 15 (verbal nouns, infinitives)",
+        "Bantu16": "Bantu class 16 (definite location, close)",
+        "Bantu17": "Bantu class 17 (indefinite location, direction)",
+        "Bantu18": "Bantu class 18 (definite location, inside)",
+        "Bantu19": "Bantu class 19 (little bit of, pejorative plural)",
+        "Bantu20": "Bantu class 20 (singular: augmentatives)",
+        "Bantu21": "Bantu class 21 (singular: augmentatives, derogatives)",
+        "Bantu22": "Bantu class 22 (plural: augmentatives)",
+        "Bantu23": "Bantu class 23 (location with place names)",
+        "Wol1": "Wolof class 1 (singular human)",
+        "Wol2": "Wolof class 2 (plural human)",
+        "Wol3": "Wolof class 3 (singular)",
+        "Wol4": "Wolof class 4 (singular)",
+        "Wol5": "Wolof class 5 (singular)",
+        "Wol6": "Wolof class 6 (singular)",
+        "Wol7": "Wolof class 7 (singular)",
+        "Wol8": "Wolof class 8 (plural non-human)",
+        "Wol9": "Wolof class 9 (singular)",
+        "Wol10": "Wolof class 10 (singular)",
+        "Wol11": "Wolof class 11 (location)",
+        "Wol12": "Wolof class 12 (manner)"
+      }
+    },
+    "Number": {
+      "layer": "UD",
+      "category": "Nominal",
+      "values": {
+        "Coll": "collective / mass / singulare tantum",
+        "Count": "count plural (with numerals)",
+        "Dual": "dual",
+        "Grpa": "greater paucal",
+        "Grpl": "greater plural",
+        "Inv": "inverse number",
+        "Pauc": "paucal",
+        "Plur": "plural",
+        "Ptan": "plurale tantum",
+        "Sing": "singular",
+        "Tri": "trial"
+      }
+    },
+    "Case": {
+      "layer": "UD",
+      "category": "Nominal",
+      "values": {
+        "Abs": "absolutive",
+        "Acc": "accusative / oblique",
+        "Erg": "ergative",
+        "Nom": "nominative / direct",
+        "Abe": "abessive / caritive / privative",
+        "Ben": "benefactive / destinative",
+        "Cau": "causative / motivative / purposive",
+        "Cmp": "comparative",
+        "Cns": "considerative",
+        "Com": "comitative / associative",
+        "Dat": "dative",
+        "Dis": "distributive",
+        "Equ": "equative",
+        "Gen": "genitive",
+        "Ins": "instrumental / instructive",
+        "Par": "partitive",
+        "Tem": "temporal",
+        "Tra": "translative / factive",
+        "Voc": "vocative",
+        "Abl": "ablative / adelative",
+        "Add": "additive",
+        "Ade": "adessive",
+        "All": "allative / adlative",
+        "Del": "delative / superelative",
+        "Ela": "elative / inelative",
+        "Ess": "essive / prolative",
+        "Ill": "illative / inlative",
+        "Ine": "inessive",
+        "Lat": "lative / directional allative",
+        "Loc": "locative",
+        "Per": "perlative",
+        "Sbe": "subelative",
+        "Sbl": "sublative",
+        "Spl": "superlative (local)",
+        "Sub": "subessive",
+        "Sup": "superessive",
+        "Ter": "terminative / terminal allative"
+      }
+    },
+    "Definite": {
+      "layer": "UD",
+      "category": "Nominal",
+      "values": {
+        "Com": "complex (improper annexation, Arabic)",
+        "Cons": "construct state / reduced definiteness",
+        "Def": "definite",
+        "Ind": "indefinite",
+        "Spec": "specific indefinite"
+      }
+    },
+    "VerbForm": {
+      "layer": "UD",
+      "category": "Verbal",
+      "values": {
+        "Conv": "converb / transgressive / adverbial participle",
+        "Fin": "finite",
+        "Gdv": "gerundive",
+        "Ger": "gerund",
+        "Inf": "infinitive",
+        "Part": "participle / verbal adjective",
+        "Sup": "supine",
+        "Vnoun": "verbal noun / masdar"
+      }
+    },
+    "Mood": {
+      "layer": "UD",
+      "category": "Verbal",
+      "values": {
+        "Adm": "admirative",
+        "Cnd": "conditional",
+        "Des": "desiderative",
+        "Imp": "imperative",
+        "Ind": "indicative",
+        "Int": "interrogative",
+        "Irr": "irrealis",
+        "Jus": "jussive",
+        "Nec": "necessitative",
+        "Opt": "optative",
+        "Pot": "potential",
+        "Prp": "purposive",
+        "Qot": "quotative",
+        "Sub": "subjunctive / conjunctive"
+      }
+    },
+    "Tense": {
+      "layer": "UD",
+      "category": "Verbal",
+      "values": {
+        "Fut": "future",
+        "Imp": "imperfect",
+        "Past": "past",
+        "Pqp": "pluperfect",
+        "Pres": "present"
+      }
+    },
+    "Aspect": {
+      "layer": "UD",
+      "category": "Verbal",
+      "values": {
+        "Hab": "habitual",
+        "Imp": "imperfect",
+        "Iter": "iterative / frequentative",
+        "Perf": "perfect",
+        "Prog": "progressive",
+        "Prosp": "prospective"
+      }
+    },
+    "Voice": {
+      "layer": "UD",
+      "category": "Verbal",
+      "values": {
+        "Act": "active",
+        "Antip": "antipassive",
+        "Bfoc": "beneficiary-focus",
+        "Cau": "causative",
+        "Dir": "direct",
+        "Inv": "inverse",
+        "Lfoc": "location-focus",
+        "Mid": "middle",
+        "Pass": "passive",
+        "Rcp": "reciprocal"
+      }
+    },
+    "Reflex": {
+      "layer": "UD",
+      "category": "Other",
+      "values": {
+        "Yes": "reflexive"
+      }
+    },
+    "Abbr": {
+      "layer": "UD",
+      "category": "Other",
+      "values": {
+        "Yes": "it is an abbreviation"
+      }
+    },
+    "Evident": {
+      "layer": "UD",
+      "category": "Other",
+      "values": {
+        "Fh": "firsthand",
+        "Nfh": "non-firsthand"
+      }
+    },
+    "Typo": {
+      "layer": "SUD",
+      "category": "Other",
+      "values": {
+        "Yes": "the token contains a typographic error (SUD also expects a companion CorrectForm feature)"
+      }
+    },
+    "Deixis": {
+      "layer": "UD",
+      "category": "Other",
+      "values": {
+        "Abv": "above the reference point",
+        "Bel": "below the reference point",
+        "Even": "at the same level as the reference point",
+        "Med": "medial (neither close nor far)",
+        "Nvis": "remote, not visible",
+        "Prox": "proximate (close to reference point)",
+        "Remt": "remote (far from reference point)"
+      }
+    },
+    "Polarity": {
+      "layer": "UD",
+      "category": "Other",
+      "values": {
+        "Neg": "negative",
+        "Pos": "positive / affirmative"
+      }
+    },
+    "Foreign": {
+      "layer": "SUD",
+      "category": "Other",
+      "values": {
+        "Yes": "foreign word"
+      }
+    },
+    "DeixisRef": {
+      "layer": "UD",
+      "category": "Other",
+      "values": {
+        "1": "deixis relative to the first person (speaker)",
+        "2": "deixis relative to the second person (hearer)"
+      }
+    },
+    "Person": {
+      "layer": "UD",
+      "category": "Other",
+      "values": {
+        "0": "zero (impersonal)",
+        "1": "first person",
+        "2": "second person",
+        "3": "third person",
+        "4": "fourth person / obviative"
+      }
+    },
+    "ExtPos": {
+      "layer": "SUD",
+      "category": "Other",
+      "values": {
+        "ADJ": "adjective-like expression",
+        "ADP": "adposition-like expression",
+        "ADV": "adverb-like expression",
+        "AUX": "auxiliary-like expression",
+        "CCONJ": "coordinating-conjunction-like expression",
+        "DET": "determiner-like expression",
+        "INTJ": "interjection-like expression",
+        "PRON": "pronoun-like expression",
+        "PROPN": "proper-noun-like expression",
+        "SCONJ": "subordinator-like expression"
+      }
+    },
+    "Degree": {
+      "layer": "UD",
+      "category": "Other",
+      "values": {
+        "Abs": "absolute superlative / elative",
+        "Aug": "augmentative",
+        "Cmp": "comparative",
+        "Dim": "diminutive",
+        "Equ": "equative",
+        "Pos": "positive / first degree",
+        "Sup": "superlative"
+      }
+    },
+    "Polite": {
+      "layer": "UD",
+      "category": "Other",
+      "values": {
+        "Elev": "referent-elevating",
+        "Form": "formal register",
+        "Humb": "speaker-humbling",
+        "Infm": "informal register"
+      }
+    },
+    "Clusivity": {
+      "layer": "UD",
+      "category": "Other",
+      "values": {
+        "Ex": "exclusive (we = I + they, excluding addressee)",
+        "In": "inclusive (we = I + you)"
+      }
+    },
+    "Shared": {
+      "layer": "SUD",
+      "category": "SUD-specific",
+      "values": {
+        "Yes": "the dependent attaches to the coordination head and is shared across the conjuncts",
+        "No": "the dependent belongs to an individual conjunct only"
+      }
+    },
+    "Subject": {
+      "layer": "SUD",
+      "category": "SUD-specific",
+      "values": {
+        "SubjRaising": "subject-control raising (controller is the subject of the governor)",
+        "ObjRaising": "object-control raising (controller is the object of the governor)",
+        "OblRaising": "oblique-control raising (controller is an oblique of the governor)",
+        "Generic": "generic / non-specific unexpressed subject",
+        "Instantiated": "instantiated / specific unexpressed subject",
+        "NoRaising": "unspecified (deprecated; covers Generic or Instantiated)"
+      }
+    }
+  },
+  "sud_notes": "SUD (Surface-Syntactic UD) reuses the UD morphological FEATS inventory almost unchanged: Aspect, Case, Definite, Degree, Gender, Mood, Number, NumType, Person, Polarity, Poss, Reflex, Tense, VerbForm and Voice are all shared with UD, and the SUD guidelines explicitly defer to the UD feature documentation for their definitions. SUD does not rename or drop any UD feature. FIVE features have their own dedicated SUD guideline page and are therefore marked layer=SUD in this file: ExtPos, Foreign, Shared, Subject and Typo. Three of them overlap with UD (ExtPos, Foreign, Typo exist in the UD universal inventory too) but SUD documents them explicitly, so the SUD page is treated as authoritative here; their permitted value sets do not differ from UD: Foreign=Yes only, Typo=Yes only (SUD additionally expects a companion CorrectForm feature on the same token), and ExtPos is not given an enumerated value list on its SUD page (SUD, like UD, uses UPOS tags as the ExtPos value indicating the functional part of speech of an idiom/title/multiword unit, so the UPOS-tag value set from UD is retained). ExtPos, Foreign and Typo keep their UD leaf category 'Other' (a sensible fit: they are token-level/other features rather than nominal or verbal inflection). Two features are genuinely new to SUD and have no UD counterpart, placed in the added 'SUD-specific' category: (1) Shared (Yes = the dependent attaches to the coordination head and is shared across conjuncts; No = it belongs to a single conjunct); and (2) Subject, used on control/raising constructions to record how the subject of a controlled infinitive is instantiated, enumerated at https://guidelines.surfacesyntacticud.org/docs/general_guideline/Features/Subject/ with values SubjRaising, ObjRaising, OblRaising, Generic, Instantiated and NoRaising (NoRaising is deprecated and subsumes Generic/Instantiated); Subject replaces the deprecated @x deep-edge feature of earlier SUD versions. Category grouping follows UD's own index at https://universaldependencies.org/u/feat/: the top-level headings are 'Lexical features' and 'Inflectional features', where the inflectional block is sub-split into 'Nominal', 'Verbal' and 'Other'. Those sub-headings are used verbatim as the category values here (a feature's category is its leaf heading); UD notes these labels are approximate categories only."
+}

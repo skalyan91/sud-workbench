@@ -1,0 +1,50 @@
+# sent_id = s1
+# text = The conventions can vary.
+1	The	the	DET	DT	Definite=Def|PronType=Art	2	det	_	_
+2	conventions	convention	NOUN	NNS	Number=Plur	3	subj	_	_
+3	can	can	AUX	MD	VerbForm=Fin	0	root	_	_
+4	vary	vary	VERB	VB	VerbForm=Inf	3	comp:aux	_	_
+5	.	.	PUNCT	.	_	3	punct	_	_
+
+# sent_id = s2
+# text = I saw a man yesterday who was tall
+1	I	I	PRON	PRP	Case=Nom|Number=Sing|Person=1	2	subj	_	_
+2	saw	see	VERB	VBD	Tense=Past	0	root	_	_
+3	a	a	DET	DT	Definite=Ind|PronType=Art	4	det	_	_
+4	man	man	NOUN	NN	Number=Sing	2	comp:obj	_	_
+5	yesterday	yesterday	ADV	RB	_	2	mod	_	_
+6	who	who	PRON	WP	PronType=Rel	7	subj	_	_
+7	was	be	AUX	VBD	Tense=Past	4	mod@relcl	_	_
+8	tall	tall	ADJ	JJ	Degree=Pos	7	comp:pred	_	_
+
+# sent_id = s3
+# text = Fourscore and seven years ago, our fathers brought forth upon this continent a new nation, conceived in liberty, and dedicated to the pursuit of happiness.
+1	Fourscore	_	NUM	NNP	Number=Plur	4	mod	_	_
+2	and	_	CCONJ	CC	_	3	cc	_	_
+3	seven	_	NUM	CD	NumForm=Word|NumType=Card	1	conj	_	_
+4	years	_	NOUN	NNS	Number=Plur	5	comp:obj	_	_
+5	ago	_	ADV	RB	_	8	mod	_	SpaceAfter=No
+6	,	_	PUNCT	,	_	5	punct	_	_
+7	fathers	_	NOUN	NNS	Number=Plur	8	subj	_	_
+8	brought	_	VERB	VBD	Mood=Ind|Number=Plur|Person=3|Tense=Past|VerbForm=Fin	0	root	_	_
+9	forth	_	ADV	RB	_	8	mod	_	_
+10	upon	_	ADP	IN	_	8	comp:obl	_	_
+11	this	_	DET	DT	Number=Sing|PronType=Dem	12	det	_	_
+12	continent	_	NOUN	NN	Number=Sing	10	comp:obj	_	_
+13	a	_	DET	DT	Definite=Ind|PronType=Art	16	det	_	_
+14	new	_	ADJ	JJ	Degree=Pos	16	mod	_	_
+15	our	_	PRON	PRP$	Case=Gen|Number=Plur|Person=1|Poss=Yes|PronType=Prs	7	mod	_	_
+16	nation	_	NOUN	NN	Number=Sing	8	comp:obj	_	SpaceAfter=No
+17	,	_	PUNCT	,	_	18	punct	_	_
+18	conceived	_	VERB	JJ	Tense=Past|VerbForm=Part|Voice=Pass	16	mod	_	_
+19	in	_	ADP	IN	_	18	comp:obl	_	_
+20	liberty	_	NOUN	NN	Number=Sing	19	comp:obj	_	SpaceAfter=No
+21	,	_	PUNCT	,	_	23	punct	_	_
+22	and	_	CCONJ	CC	_	23	cc	_	_
+23	dedicated	_	ADJ	VBD	Degree=Pos	18	conj	_	_
+24	to	_	ADP	IN	Shared=No	23	comp:obl	_	_
+25	the	_	DET	DT	Definite=Def|PronType=Art	26	det	_	_
+26	pursuit	_	NOUN	NN	Number=Sing	24	comp:obj	_	_
+27	of	_	ADP	IN	_	26	comp:obl	_	_
+28	happiness	_	NOUN	NN	Number=Sing	27	comp:obj	_	SpaceAfter=No
+29	.	_	PUNCT	.	_	8	punct	_	_

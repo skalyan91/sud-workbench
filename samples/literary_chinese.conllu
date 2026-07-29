@@ -1,0 +1,10 @@
+# sent_id = s1
+# text = 知命者不怨天。
+# translit_scheme = mc
+1	知	知	VERB	v,動詞,行為,動作	_	3	mod	_	Translit=trje|LTranslit=trje
+2	命	命	NOUN	n,名詞,可搬,伝達	_	1	comp:obj	_	Translit=mjængH|LTranslit=mjængH
+3	者	者	PART	p,助詞,提示,*	_	5	subj	_	Translit=tsyæX|LTranslit=tsyæX
+4	不	不	ADV	v,副詞,否定,無界	Polarity=Neg	5	mod	_	Translit=pjuw|LTranslit=pjuw
+5	怨	怨	VERB	v,動詞,行為,態度	_	0	root	_	Translit=ʔjwonH|LTranslit=ʔjwonH
+6	天	天	NOUN	n,名詞,制度,場	Case=Loc	5	comp:obj	_	Translit=then|LTranslit=then
+7	。	。	PUNCT	s,記号,句点,*	_	5	punct	_	Translit=.|LTranslit=.

@@ -1,0 +1,23 @@
+# Python environment / build output
+.venv/
+__pycache__/
+*.pyc
+build/
+dist/
+*.egg-info/
+
+# macOS
+.DS_Store
+
+# The grew OCaml backend: a compiled, architecture-specific binary that
+# tools/bundle_grew.sh reproduces, and which app/convert.py treats as an
+# optional prerequisite (falling back to ~/.opam, and degrading to
+# "SUD/mSUD editing only" when it is absent). Not source.
+vendor/
+
+# Stop-hook build bookkeeping — transient, per-machine (see CLAUDE.md
+# "Automatic rebuild"). The hook itself and settings.json ARE tracked.
+.claude/last-build.log
+.claude/build-manual.log
+.claude/.last-build-stamp
+.claude/.build.lock
