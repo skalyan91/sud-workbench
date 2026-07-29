@@ -94,7 +94,7 @@ def _decap(text: str, upos: str) -> str:
     return text[0].lower() + text[1:]
 
 
-def _pos_matches(entry_upos: str, head_upos: str, wanted: str) -> bool:
+def _pos_matches(entry_upos: str | None, head_upos: str, wanted: str) -> bool:
     """Whether a candidate applies to a token tagged ``wanted``, at BOTH levels Wiktionary offers:
     the dictionary entry's own part-of-speech heading, and — since a condensed subtree can end up
     headed by a different word class than the whole entry — that subtree's re-parsed head.
@@ -106,6 +106,8 @@ def _pos_matches(entry_upos: str, head_upos: str, wanted: str) -> bool:
     if not wanted:
         return True
     ok = {wanted, "NOUN"} if wanted == "PROPN" else {wanted}
+    if entry_upos is None:
+        return not head_upos or head_upos in ok   # the entry declares NO part of speech, so there is no entry-level claim to test — only the re-parsed head can speak. Distinct from "" on purpose: "" is a heading that exists and did not map, which is still evidence the entry is something else. See _definitions_glosses.
     return entry_upos in ok and (not head_upos or head_upos in ok)
 
 
@@ -412,6 +414,56 @@ def _sanskrit_root_glosses(search_form: str) -> list[str]:
     return []
 
 
+# en.wiktionary language sections whose senses live under a "Definitions" heading rather than under
+# part-of-speech headings, keyed by the language code this app uses → that section's own h2 text.
+# ONE Chinese section covers Mandarin, Cantonese, Hokkien and the rest, which do not share a
+# part-of-speech split, so the wiki files their senses under a shared "Definitions" heading instead.
+# The /page/definition/ endpoint keys entries off POS headings, so it emits no entry for these pages
+# AT ALL — 在 comes back as {"ja": …, "other": …} where "other" is Old Korean, and the Chinese
+# section is simply absent. Not a language-code mismatch: there is no "zh" key to find.
+_DEFS_SECTION_LANGS = {"zh": "Chinese", "lzh": "Chinese", "yue": "Chinese", "cmn": "Chinese",
+                       "nan": "Chinese", "hak": "Chinese", "wuu": "Chinese", "gan": "Chinese",
+                       "hsn": "Chinese", "cdo": "Chinese", "zh-hans": "Chinese", "zh-hant": "Chinese"}
+
+
+def _definitions_glosses(search_form: str, language: str) -> list[str]:
+    """The senses under every "Definitions" heading inside ``language``'s own section, in document
+    order — the Chinese path the /page/definition/ endpoint cannot serve (see _DEFS_SECTION_LANGS).
+
+    Each <li> holds the gloss as its own text plus <a> links, and hangs its USAGE EXAMPLES off a
+    nested <dl> and its CITATIONS off a nested <ul> — so stripping those containers leaves exactly
+    the gloss, and stripping them is what keeps "to be at; to be in" from arriving with a Confucius
+    quotation welded to it. Decomposing in place is safe: _fetch_html parses a fresh soup per call.
+
+    Carries NO part of speech, because the section states none. The caller marks these candidates
+    entry_upos=None, which _pos_matches reads as "no entry-level claim" rather than as a mismatch."""
+    soup = _fetch_html(search_form)
+    if soup is None:
+        return []
+    out: list[str] = []
+    in_lang = False
+    for sec in soup.find_all("section"):
+        h = sec.find(["h2", "h3", "h4", "h5", "h6"])
+        if not h:
+            continue
+        text = h.get_text(strip=True)
+        if h.name == "h2":
+            in_lang = (text == language)
+            continue
+        if not in_lang or text != "Definitions":
+            continue
+        ol = sec.find("ol")
+        if not ol:
+            continue
+        for li in ol.find_all("li", recursive=False):
+            for junk in li.find_all(["dl", "ul", "ol", "table", "style"]):
+                junk.decompose()   # examples, citations, nested sense lists — everything but the gloss itself
+            gloss = re.sub(r"\s+", " ", li.get_text(" ", strip=True)).strip()
+            if gloss:
+                out.append(gloss)
+    return out
+
+
 def _noun_genders(search_form: str, language: str) -> list[str | None]:
     """Wiktionary's own gender abbreviation ("m"/"f"/"n"/…, or None if ungendered/unmarked) for
     each "Noun" heading under ``language``, IN DOCUMENT ORDER — one entry per Noun heading found
@@ -486,6 +538,17 @@ def _fetch(word: str, lang: str) -> dict:
                             candidates.append({"text": sub["text"], "entry_upos": entry_upos, "head_upos": sub["upos"], "gender": gender})
     except Exception as exc:  # noqa: BLE001 — offline, timeout, no such page, a schema change, …
         error = str(exc)
+    defs_heading = _DEFS_SECTION_LANGS.get(lang)
+    if defs_heading and error is None:   # Chinese and its varieties: the endpoint above returns nothing for them at all — harvest the "Definitions" sections from the page HTML instead
+        section_glosses = _definitions_glosses(search_form, defs_heading)
+        if section_glosses:
+            lang_heading = lang_heading or defs_heading
+        for gloss in section_glosses:
+            text = _clean(gloss)
+            if not text:
+                continue
+            for sub in _condense(text):   # merged rather than gated on `not candidates`: a page CAN carry both a POS-headed section and a Definitions block, and lookup() already dedupes by gloss text
+                candidates.append({"text": sub["text"], "entry_upos": None, "head_upos": sub["upos"], "gender": None})
     if lang == "sa" and error is None:   # the "Root" heading never comes through the call above (see _sanskrit_root_glosses) — fetch it separately
         root_glosses = _sanskrit_root_glosses(search_form)
         if root_glosses:
