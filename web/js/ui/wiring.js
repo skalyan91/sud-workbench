@@ -101,7 +101,7 @@ function openTbMenu(x,y){ closeTbMenu(); _tbPass(true);   // item 3: make the na
     const t=document.createElement("span"); t.textContent=label; it.appendChild(t);
     it.onclick=()=>{ closeTbMenu(); setTbMode(mode); };
     m.appendChild(it); });
-  document.body.appendChild(m);
+  document.body.appendChild(m); localiseAccel(m);   // Windows: this popup is built fresh on every open, so the boot sweep never saw it (no accelerators today; the sweep is here so a row that grows one is localised for free)
   const mw=m.offsetWidth, mh=m.offsetHeight;
   m.style.left=Math.max(6,Math.min(x,innerWidth-mw-8))+"px"; m.style.top=Math.max(6,Math.min(y,innerHeight-mh-8))+"px";   /* item 3: open AT the cursor (only clamped to the viewport) — the drag overlay is click-through while the menu is open, so a row under the titlebar is still clickable */
   setTimeout(()=>document.addEventListener("mousedown",_tbOutside,true),0);
@@ -139,7 +139,7 @@ function openTbGroupMenu(items,x,y){ closeTbMenu(); _tbPass(true);   // item 3: 
     const t=document.createElement("span"); t.textContent=it.label; b.appendChild(t);
     if(it.disabled){ b.disabled=true; b.style.opacity=".4"; } else b.onclick=()=>{ closeTbMenu(); it.action(); };
     m.appendChild(b); });
-  document.body.appendChild(m);
+  document.body.appendChild(m); localiseAccel(m);   // Windows: _tbGroupItems falls back to a button's `title=` for its label ("Zoom out (⌘−)") — already swept at boot, but a row's own tooltip is built here, so sweep the finished menu too
   const mw=m.offsetWidth, mh=m.offsetHeight;
   m.style.left=Math.max(6,Math.min(x,innerWidth-mw-8))+"px"; m.style.top=Math.max(6,Math.min(y,innerHeight-mh-8))+"px";   /* item 3: open at the label anchor (only clamped to the viewport) — the drag overlay is click-through while the menu is open, so rows under the titlebar stay clickable */
   setTimeout(()=>document.addEventListener("mousedown",_tbOutside,true),0);

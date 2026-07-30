@@ -1,7 +1,8 @@
 //@module js/sheets.js
 /* sheets */
 const scrim=document.getElementById("scrim"),scrimHost=document.getElementById("scrimHost");
-function openSheet(node){scrimHost.innerHTML=""; scrimHost.appendChild(node); scrim.classList.add("show"); const f=node.querySelector("textarea,input"); if(f)setTimeout(()=>f.focus(),30);}
+function openSheet(node){scrimHost.innerHTML=""; scrimHost.appendChild(node); localiseAccel(node);   // Windows: rewrite this sheet's accelerator glyphs (the Help sheet's whole .kbd column, any `title=`) — sheets are built fresh on every open, so the boot sweep in js/core/init.js can never have seen them
+  scrim.classList.add("show"); const f=node.querySelector("textarea,input"); if(f)setTimeout(()=>f.focus(),30);}
 function closeSheet(){scrim.classList.remove("show");}
 scrim.addEventListener("click",e=>{if(e.target===scrim)closeSheet();});
 document.addEventListener("keydown",e=>{ if(e.key==="Escape" && scrim.classList.contains("show") && !confirmScrim.classList.contains("show")){ e.preventDefault(); e.stopPropagation(); closeSheet(); } },true);   // Escape dismisses the open dialog/sheet (capture phase so it wins over field-level handlers inside the sheet) — skipped while a confirm alert is stacked on top; ITS OWN handler (below) owns Escape then
@@ -53,7 +54,8 @@ function askConfirm(message,opts){ opts=opts||{};
     act.querySelector("[data-cancel]").onclick=()=>closeConfirmSheet(false);
     act.querySelector("[data-ok]").onclick=()=>closeConfirmSheet(true);
     if(opts.saveLabel) act.querySelector("[data-save]").onclick=()=>closeConfirmSheet("save");
-    confirmHost.innerHTML=""; confirmHost.appendChild(s); confirmScrim.classList.add("show");
+    confirmHost.innerHTML=""; confirmHost.appendChild(s); localiseAccel(s);   // a confirm alert stacks on its OWN host, never through openSheet — so it needs the accelerator sweep of its own (a message may quote a shortcut)
+    confirmScrim.classList.add("show");
     stackActionsIfTight(act);   // side-by-side unless a label won't fit — see below
     setTimeout(()=>act.querySelector(opts.saveLabel?"[data-save]":opts.danger?"[data-cancel]":"[data-ok]").focus(),30); }); }   // default focus lands on Save when there is one — it is the safe answer AND the one macOS arms; else Cancel for a destructive action (never arm the risky button by default), OK otherwise
 // General-purpose "Save As" sheet — filename + a "Where" folder picker — replacing the native SAVE panel
@@ -354,7 +356,7 @@ function sheetInsert(index){
   act.insertBefore(errEl,act.firstChild);
   act.querySelector("[data-x]").onclick=closeSheet;
   act.querySelector("[data-go]").onclick=submit;
-  s.addEventListener("keydown",e=>{ if((e.metaKey||e.ctrlKey)&&e.key==="Enter"){ e.preventDefault(); submit(); } });   // ⌘Enter submits from ANY field — plain Enter still inserts a newline (every field is multi-sentence)
+  s.addEventListener("keydown",e=>{ if(cmdKey(e)&&e.key==="Enter"){ e.preventDefault(); submit(); } });   // ⌘Enter (Ctrl+Enter on Windows) submits from ANY field — plain Enter still inserts a newline (every field is multi-sentence). cmdKey rather than the portable `metaKey||ctrlKey` idiom this replaced: on macOS that also fired on ⌃Enter, which is not a submit chord there, and every other shortcut in the app now goes through cmdKey (js/core/platform.js).
   syncMain();
   setTimeout(()=>ta.focus(),40);   // openSheet focuses the first `textarea,input` in the sheet, which here is the enable CHECKBOX; land on the text instead (40 > its own 30ms)
   return s;
@@ -537,12 +539,15 @@ function sheetHelp(){
 }
 /* item 23/25: the Help dialog is a SEPARATE NATIVE WINDOW in the desktop app. The frontend builds the
    self-contained page (it owns the shortcut list + SUD vocabulary) and hands it to the bridge, which loads
-   it via create_window(html=…). Shortcuts and tag names use the proportional UI font — never monospace (item 25). */
-const HELP_WIN_CSS=`
+   it via create_window(html=…). Shortcuts and tag names use the proportional UI font — never monospace (item 25).
+   A FUNCTION, not a const string: the page it styles loads no kit stylesheet of its own, so the UI font has to
+   be baked in as a resolved family list (uiFont(), js/core/platform.js) rather than left as var(--ui-font) —
+   and resolving it must happen when Help is opened, not at this module's load time (see uiFont's own note). */
+function helpWinCSS(){ return `
   :root{--bg:#fbfbfd;--fg:#1d1d1f;--muted:#68686e;--accent:#0a84ff;--line:rgba(0,0,0,.12);--hover:rgba(0,0,0,.05);--head:rgba(0,0,0,.6);--bad:#e0393e;--field-bg:#fff}
   @media(prefers-color-scheme:dark){:root{--bg:rgb(30,30,30);--fg:#e7e7ea;--muted:#9a9aa1;--accent:#3a9bff;--line:rgba(255,255,255,.13);--hover:rgba(255,255,255,.06);--head:rgba(255,255,255,.62);--bad:#ff6b6f;--field-bg:rgba(255,255,255,.06)}}
   *{box-sizing:border-box} html,body{margin:0}
-  body{background:var(--bg);color:var(--fg);font:14px/1.45 -apple-system,BlinkMacSystemFont,"SF Pro Text","Helvetica Neue",Arial,sans-serif;-webkit-font-smoothing:antialiased;padding:18px 20px 22px}
+  body{background:var(--bg);color:var(--fg);font:14px/1.45 ${uiFont()};-webkit-font-smoothing:antialiased;padding:18px 20px 22px}
   h4{margin:16px 0 4px;font-size:13px;font-weight:700;color:var(--head)} h4.first{margin-top:0}
   h5.catsub{margin:9px 0 2px;font-size:11px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:var(--muted)}   /* item 10: subcategory heading — mirrors the context-menu group headers (DEPREL_CATS / UPOS_CATS) */
   .kbgrid{columns:2;column-gap:22px}   /* item 11: shortcuts flow COLUMN-MAJOR (down column 1, then column 2), matching the .catcols categories */
@@ -561,9 +566,11 @@ const HELP_WIN_CSS=`
   .taglink-noguide{cursor:default}   /* no guidelines page (e.g. unk) → plain <span>, not a dead link */
   .helplinks{display:flex;gap:18px;flex-wrap:wrap;margin-top:3px}
   a.helplink{font-size:13px;color:var(--accent);text-decoration:none} a.helplink:hover{text-decoration:underline}
-  @media(max-width:520px){.kbgrid{columns:1}.catcols{columns:1}}`;
+  @media(max-width:520px){.kbgrid{columns:1}.catcols{columns:1}}`; }
 function buildHelpHTML(){ const g=s=>esc(s);
-  const kb=HELP_SHORTCUTS.map(([a,k])=>`<div class="kbrow"><span class="kbact">${g(a)}</span><span class="kbd">${g(k)}</span></div>`).join("");
+  // accel() at BUILD time, not localiseAccel() after the fact: this markup is handed to a separate native
+  // window that loads none of this app's scripts, so nothing over there could ever sweep it.
+  const kb=HELP_SHORTCUTS.map(([a,k])=>`<div class="kbrow"><span class="kbact">${g(a)}</span><span class="kbd">${g(accel(k))}</span></div>`).join("");
   const grid=(pairs,urlFn,noun)=>pairs.map(([tag,gloss])=>{ const url=urlFn(tag);   // null → no dedicated guidelines page (e.g. unk): plain span, not a dead link
     return url?`<a class="taglink" href="${g(url)}" title="Open the guidelines for the “${g(tag)}” ${g(noun)}" onclick="return _ext(this.href)"><span class="tagname">${g(tag)}</span><span class="taggloss">${g(gloss||"")}</span></a>`
       :`<span class="taglink taglink-noguide" title="No dedicated guidelines page for “${g(tag)}”"><span class="tagname">${g(tag)}</span><span class="taggloss">${g(gloss||"")}</span></span>`; }).join("");
@@ -574,7 +581,7 @@ function buildHelpHTML(){ const g=s=>esc(s);
   const rel=subgrid(helpGroups(SETTINGS.deprel,deprelMenuGroups(SETTINGS.deprel),deprelExpand),relGuideUrl,"relation");
   const deep=grid(DEEP_OFFICIAL.map(f=>[f,DEEP_INFO[f]||f]),deepGuideUrl,"feature");
   const links=[["SUD homepage","https://surfacesyntacticud.github.io/"],["SUD guidelines","https://guidelines.surfacesyntacticud.org"],["UD guidelines","https://universaldependencies.org/guidelines.html"]].map(([l,u])=>`<a class="helplink" href="${g(u)}" onclick="return _ext(this.href)">${g(l)}</a>`).join("");
-  return `<!DOCTYPE html><html><head><meta charset="utf-8"><style>${HELP_WIN_CSS}</style></head><body>`+
+  return `<!DOCTYPE html><html><head><meta charset="utf-8"><style>${helpWinCSS()}</style></head><body>`+
     `<h4 class="first">Essential shortcuts</h4><div class="kbgrid">${kb}</div>`+
     `<h4>Parts of speech (UPOS)</h4>${pos}`+
     `<h4>Syntactic relations (SUD)</h4><div id="relCols">${rel}</div>`+

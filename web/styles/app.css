@@ -1,48 +1,12 @@
 /*@module styles/app.css*/
-  .drawers{display:inline-flex; align-items:center; gap:12px}   /* Show/Hide · Merge punctuation · Line wrapping — spaced like the dropdown↔drawer gap in the view bar */
-  .drawer{position:relative}
-  /* native macOS 26 popup buttons + popovers — SHARED by every drawer (Show/Hide, and the new Glossing /
-     Translations drawers inherit this automatically since they reuse .drawer-btn / .drawer-pop). */
-  .drawer-btn{display:inline-flex; align-items:center; gap:6px; height:26px; padding:0 8px 0 11px; border-radius:7px; border:.5px solid var(--pill-border);
-    background:var(--pill-bg,rgba(255,255,255,.30)); color:var(--text); font:inherit; font-size:13px; font-weight:500; cursor:pointer;
-    box-shadow:0 .5px 1.5px rgba(0,0,0,.10), inset 0 .5px 0 var(--pill-highlight,rgba(255,255,255,.85)); transition:background .12s, box-shadow .12s, border-color .12s}   /* native macOS 26 pull-down button — light translucent control, subtle rim + hairline, disclosure chevron; lighter than the heavier titlebar-pill halo */
-  .drawer-btn:hover{background:color-mix(in srgb,var(--text) 8%,var(--pill-bg,var(--field-bg)))}
-  .drawer-btn svg{width:9px; height:6px; opacity:.55; transition:transform .18s}
-  .drawer.open .drawer-btn{border-color:var(--accent); background:var(--accent-weak); box-shadow:0 0 0 3px var(--accent-weak)}
-  .drawer.open .drawer-btn svg{transform:rotate(180deg)}
-  .drawer-pop{position:absolute; top:calc(100% + 6px); left:0; z-index:200; width:max-content; min-width:0; background:var(--menu-bg,rgba(250,250,252,.92));
-    border:.5px solid var(--pill-border); border-radius:var(--r-menu,13px); box-shadow:var(--lg-menu-shadow,0 0 2px rgba(0,0,0,.1),0 0 25px rgba(0,0,0,.16)); padding:10px 12px; display:none; flex-direction:column; gap:10px;
-    -webkit-backdrop-filter:blur(24px) saturate(180%); backdrop-filter:blur(24px) saturate(180%)}
-    /* fix 6: the pop is a child of the .viewbar, which itself carries a backdrop-filter → a NESTED backdrop-filter
-       is defeated (nothing blurs), so it read see-through; a near-opaque --menu-bg fill + a raised z-index over
-       the document make it a proper opaque-glass menu whose items are selectable. */
-  .drawer.open .drawer-pop{display:flex}
-  /* A drawer pop is a FORM GROUP, not a menu (see the Form-Row note on .gmrow below for the source geometry):
-     its toggles are rows with a leading accessory and a label, tiled contiguously and inset from the group edge.
-     Two departures from the kit's Row, both deliberate:
-     · HEIGHT 24, not 42. The kit's 42px row belongs to a 620-wide Form Group in a 660px settings pane; these pops
-       are ~200px wide and hang off a 44px toolbar, and at 42px the Show/Hide drawer alone would stand 500px tall —
-       over half the window. 24 is the height the kit gives a compact row's own control, and it happens to preserve
-       this drawer's existing rhythm EXACTLY: five 16px labels spaced by the pop's 10px gap occupy 5×16 + 4×10 =
-       120px, and five tiled 24px rows occupy 5×24 = 120px. So the pop does not change size; its rows just become
-       rows — a real hit box, a hover fill, and no gap standing between them.
-     · The checkbox stays LEADING. That is not a deviation the kit forbids: its own Row 2302:6754 puts a 24px
-       CONTROL in the Leading Accessories slot with only a text accessory trailing, so a control on the reading-start
-       side is a shape the Form component already draws.
-     The 10px inset is the kit's, and it is added over a cancelling -10px margin so the LABEL does not move: the
-     text still starts 12px from the pop's edge (pop padding 12 − 10 + 10), while the hover fill now bleeds out to
-     2px short of it, the same "row wider than its text inset" trick .ctx button uses. Child (>) selector, not
-     descendant: the Colours drawer's footer holds a .chk of its own inside .relcol-foot, and that one is laid out
-     by the footer, not by the pop. */
-  .drawer-pop > label.chk{height:24px; box-sizing:border-box; padding-inline:10px; margin-inline:-10px; border-radius:6px}
-  .drawer-pop > label.chk:hover{background:var(--block-sel)}
-  .drawer-pop > label.chk + label.chk{margin-top:-10px}   /* cancels the pop's own 10px gap between CONSECUTIVE toggles so they tile like a Form Group's rows; a heading or separator between two of them keeps its gap */
-  .drawer-group-h{font-size:9.5px; font-weight:700; letter-spacing:.05em; text-transform:uppercase; color:var(--muted); margin:6px 2px 1px; padding-top:5px; border-top:.5px solid var(--hairline)}   /* item 3: subtle group heading + separator in the drawer */
-  .drawer-pop .drawer-group-h:first-child{margin-top:0; padding-top:0; border-top:none}
-  .drawer-sep{border:none; border-top:.5px solid var(--hairline); margin:3px 1px; width:100%}
-  /* item 13: "Edit mappings…" action inside the Glossing pop (NOT a .drawer-btn, so the pop's toggle handler ignores it) */
-  .gm-editbtn{height:26px; padding:0 10px; border-radius:7px; border:.5px solid var(--pill-border); background:var(--pill-bg,var(--field-bg)); color:var(--text); font:inherit; font-size:12px; font-weight:600; cursor:pointer; text-align:left; white-space:nowrap}
-  .gm-editbtn:hover{background:color-mix(in srgb,var(--text) 8%,var(--pill-bg,var(--field-bg)))}
+  /* WHAT IS *NOT* IN THIS FILE ANY MORE. The window CHROME — drawer pull-downs + their pops, the
+     status bar, the context menu / autocomplete / flyout family, the modal scrim + dialog sheets +
+     toast, and the status-bar pull-down pill — moved to `macos-kit/mac-chrome.css`, which is where
+     the kit's README always claimed `.sheet`/`.scrim` lived. They are chrome by the one test that
+     decides it: the Fluent kit has to RESTYLE them, so a platform kit must own them; what renders
+     the TREEBANK (.sblock, the five diagram notations, table.grid, .gmgrid, the relation colours)
+     is platform-neutral and stays here, shared by both kits. index.html loads exactly one kit ahead
+     of this file, so a rule here still wins a tie against its kit counterpart. */
   /* item 13: gloss↔FEATS mapping-editor grid inside the sheet.
      THE FORM ROW — Figma "Form" frame (file lECo5A8n2No81Jp7ymUbGp, node 2302:6358, Examples canvas). A Form Group
      is 620 wide and holds its Rows at x=10, width 600 → a 10px inset inside the group; the Rows tile CONTIGUOUSLY
@@ -70,7 +34,7 @@
   .gmrow:hover{background:var(--block-sel)}   /* the row is now a real box, so it can show it is one */
   .gmrow + .gmrow::after{content:""; position:absolute; inset-inline:10px; top:-.5px; height:1px; background:var(--label-quinary,rgba(0,0,0,.05)); pointer-events:none}   /* the Row's 1px Labels/Quinary stroke, inset by the Group's own 10px (see the note above). Drawn on the LATER sibling at its top edge, so the list never ends on a trailing rule — the kit's stroke is `outside`, which puts one line in the seam BETWEEN two rows and none past the last */
   .sheet .gmrow input.gm-abbr{width:120px; flex:none}   /* .sheet-SCOPED on purpose: unscoped, `.gmrow input.gm-abbr` (0,2,1) merely TIES with `.sheet input[type=text]{width:100%}` further down this file, and the later rule won — the abbreviation field took the row's whole 626px, shoving the Feature=Value field and the remove button clean off the sheet's right edge. Pre-dates the Form-Row work; found by measuring the trailing accessory's flush against the row edge and getting −76px. */
-  .gmrow input.gm-feat{flex:1; min-width:0; font-family:ui-monospace,monospace}
+  .sheet .gmrow input.gm-feat{flex:1; min-width:0; font-family:var(--ui-mono)}   /* .sheet-SCOPED for the SAME reason .gm-abbr above is, and found the same way: unscoped, `.gmrow input.gm-feat` (0,2,1) TIES with `.sheet textarea,.sheet input[type=text]{font:inherit}` — and `font:inherit` is a shorthand, so it resets font-family. While that rule sat LATER in this file the tie went to it and this field silently rendered in the UI face, not the mono one, despite the declaration right here; moving the sheet block into the platform kit (which loads BEFORE app.css) would have flipped the same tie the other way by pure file order. Scoping settles it on specificity instead, so the field is monospace in either arrangement — which is what a `Case=Erg` string wants, and what the placeholder assumes. */
   /* …and the two row controls are shared with the Insert sheet's parallel-text fields (.ins-rm / .ins-add):
      "remove this row" and "add another row" are the same gestures in the same kind of dialog, so they are the
      same button rather than a second pair drawn to look like these. */
@@ -230,7 +194,7 @@
     --casing:var(--occlude)}   /* arc/leader casing (--block-occlude) = the OKLCH midpoint between the focused-block background and the plain (unfocused) background — a notch less tinted than the full focused bg. Unfocused blocks keep --block-occlude at content-bg (midpoint of content-bg with itself). */   /* focused block → the text halo IS the focused background colour (= --occlude, the opaque equivalent of content-bg + the block-sel tint), not a lifted version, so casing blends with the focused background */
   .shead{display:flex; align-items:baseline; gap:8px; margin-bottom:2px; position:relative; z-index:3; --stext-fs:13px}   /* Item 16 (fix): raise the WHOLE header (z-index:3) above the transliteration/original (.strans, z-index:1) and translations (.tgrid, z-index:1). The earlier fix lifted only the inner .stext (z-index:2), which wins ONLY while .shead is not its own stacking context; the moment .shead forms one (a transform/filter/opacity on the header, or the flex container being treated as a context), .stext's z-index is TRAPPED inside .shead and the header — z-index:auto — sinks under .strans, so the block-initial sentence paints UNDERNEATH its transliteration. Putting z-index:3 on the already-positioned .shead itself makes the sentence sit above reliably, whether .stext's z-index is hoisted or trapped. */   /* item 10 (rev): BASELINE-align the row so the sentence NUMBER and ID sit on the FIRST line of .stext (align-items:center floated them to the vertical middle of a wrapped sentence). The control icons/URL are pinned to the first line independently via align-self:flex-start + a one-line box + translateY, so they're unaffected by this and stay centred on the ID's optical line. */   /* item 14: --stext-fs is the SINGLE source of truth for the sentence-text size; .snum and the .sid-in input reference it so the sentence NUMBER and sentence ID always match .stext (and follow it if the document font is bumped) */
   .snum{font-size:var(--stext-fs); color:var(--muted); font-weight:700; font-variant-numeric:tabular-nums; min-width:15px; text-align:end; flex:none}   /* end → right in LTR, left in RTL */   /* item 14: same size as the sentence text (.stext) */
-  .sid-in{min-width:26px; flex:none; text-align:right; margin:0; font-family:ui-monospace,monospace; font-size:var(--stext-fs); font-weight:600; color:var(--accent); background:transparent;   /* item 14: sentence ID same size as the sentence text (.stext) */   /* a contenteditable SPAN, not an <input> (see buildBlock, js/core/document.js) — no width/appearance reset needed: a flex item with no explicit width sizes to its own text on its own, and there is no native form-control chrome to strip because there is no form control. text-align:right only bites when min-width holds the box open past a short id's own content */
+  .sid-in{min-width:26px; flex:none; text-align:right; margin:0; font-family:var(--ui-mono); font-size:var(--stext-fs); font-weight:600; color:var(--accent); background:transparent;   /* item 14: sentence ID same size as the sentence text (.stext) */   /* a contenteditable SPAN, not an <input> (see buildBlock, js/core/document.js) — no width/appearance reset needed: a flex item with no explicit width sizes to its own text on its own, and there is no native form-control chrome to strip because there is no form control. text-align:right only bites when min-width holds the box open past a short id's own content */
     border:1px solid transparent; border-radius:5px; padding:3px 6px; outline:none}
   .sid-in:hover{border-color:var(--field-border)} .sid-in:focus{border-color:var(--accent); background:var(--field-bg)}
   .stext{flex:1; min-width:0; position:relative; z-index:2; font-size:var(--stext-fs); font-weight:462;   /* weight curve @13px = --stext-fs, see the :root comment */ line-height:1.4; color:var(--text-2); white-space:pre-wrap; overflow-wrap:anywhere; border-radius:3px; padding:1px 3px; margin:-1px -1px}   /* item 12: pre-wrap preserves the user's typed line breaks (Shift+Enter) in the sentence display */   /* Item 16: the block-initial sentence line paints ABOVE its transliteration/original (.strans, z-index:1) and translation (.tgrid, z-index:1) rows, so a casing halo or tight spacing that overlaps never lets a lower row cover the sentence */   /* item 5: pin line-height so a Han/CJK line box (whose font `normal` metric is taller) can't inflate the .shead row and shift the centre-aligned control icons — icon position stays script-independent */
@@ -1247,140 +1211,7 @@
     background:transparent; color:var(--muted); border-radius:9px; cursor:pointer; font:inherit; font-size:12.5px; font-weight:480}   /* weight curve @12.5px = round(400*15/12.5), matching .addtok's own weight-curve treatment at its size */
   .addsent button:hover{color:var(--text); border-color:var(--accent)}
 
-  .statusbar{flex:none; display:flex; align-items:center; gap:14px; padding:0 18px 3px; height:32px; background:var(--statusbar-bg);   /* slight extra bottom padding nudges the content up toward the true centre */
-    -webkit-backdrop-filter:blur(12px); backdrop-filter:blur(12px); border-top:.5px solid var(--viewbar-border); font-size:11px; color:var(--muted)}   /* the SAME hairline the options bar's own bottom border uses (on request) — was --hairline; --viewbar-border is rgb(230,230,230) in light, and still --hairline's own value in dark (see mac-tokens.css), so this matches .viewbar in both appearances rather than just light */
-  .statusbar .pill{display:inline-flex; align-items:center; gap:5px} .statusbar .pill b{color:var(--text-2); font-weight:600}
-  .statusbar .pill[hidden]{display:none}   /* item 20: a hidden pill takes ZERO space (the class display rule otherwise beat [hidden]) → no stray gap between language and encoding */
-  /* busy indicator: a spinner while a parser runs, a progress bar during document conversions */
-  .busyind{gap:6px; color:var(--accent)} .statusbar .busyind[hidden]{display:none}
-  .busyind .spin{width:11px; height:11px; border:1.6px solid var(--hairline-strong); border-top-color:var(--accent); border-radius:50%; animation:busyspin .7s linear infinite; flex:none}
-  @keyframes busyspin{to{transform:rotate(360deg)}}
-  .busyind .prog{position:relative; width:60px; height:4px; border-radius:2px; background:var(--hairline); overflow:hidden; flex:none; display:none}
-  .busyind .prog i{position:absolute; top:0; left:-38%; height:100%; width:38%; border-radius:2px; background:var(--accent); animation:busyslide 1.1s cubic-bezier(.5,0,.5,1) infinite}
-  @keyframes busyslide{0%{left:-38%}100%{left:100%}}
-  .busyind.bar .spin{display:none} .busyind.bar .prog{display:block}
-  @media (prefers-reduced-motion:reduce){ .busyind .spin{animation:none} .busyind .prog i{animation:none; left:0; width:100%; opacity:.55} }
-  .dotmark{width:7px;height:7px;border-radius:50%; position:relative; top:1px} .dot-good{background:var(--good)} .dot-bad{background:var(--bad)}   /* nudge down to the text's optical centre */
 
-  /* Menu type/colour/geometry below is pulled directly from Apple's macOS 26 "Liquid Glass" Figma kit (Menus/Context
-     Menu, node 685:22358 — see get_design_context / get_variable_defs on that node): Menu/Font Size 13, item row
-     24px tall with NO extra per-item horizontal padding (all inset comes from the container's own 12px), the
-     hover/selected fill is a NEUTRAL vibrant-gray (Fills-Vibrant/Secondary #e6e6e6 ≈ this app's existing
-     --fill-secondary) widened 7px past the row on each side — not the blue accent — and the section header is
-     Bold 10px in NORMAL case (no uppercase), inset 18px. Dark-mode figures aren't independently verified against
-     Figma (the file only exposed the light-mode variable resolution) — derived from this app's existing
-     light→dark token pairs, flagged inline where that's the case.
-     Fill: Figma's own layer stack composites a #262626 layer via mix-blend-mode:color-dodge against whatever's
-     BEHIND the menu, under the translucent --lg-glass-fill tint. TWO attempts at reproducing that in CSS both
-     failed, verified by screenshot pixel-sampling rather than just checking the declared properties:
-     (1) background-blend-mode — blends an element's OWN stacked backgrounds against EACH OTHER, not the page
-     behind it; composited to a flat, noticeably darker gray regardless of backdrop (rgb(184,184,184) instead of
-     the intended light glass).
-     (2) a negative-z-index ::before with mix-blend-mode:color-dodge, hoping it would blend against .ctx's own
-     backdrop-filter-blurred backdrop — tested by injecting a solid black vs. solid white rectangle behind the
-     menu before opening it and sampling the same pixel in both screenshots: IDENTICAL result both times
-     (rgb(177,177,177)), proving no actual blending against the backdrop occurred — backdrop-filter's blur isn't
-     exposed as a blend source for sibling/descendant mix-blend-mode in this WebKit/Chromium rendering, at least
-     not via this structure. True backdrop-adaptive vibrancy doesn't appear achievable with plain CSS blend modes
-     here; back to the plain, verified-correct translucent fill. */
-  .ctx{position:fixed; z-index:60; min-width:224px; background:var(--lg-glass-fill,rgba(245,245,245,.67)); border:.5px solid var(--hairline-strong); border-radius:var(--r-menu,13px);
-    box-shadow:var(--lg-menu-shadow,0 0 2px rgba(0,0,0,.1),0 0 25px rgba(0,0,0,.16)); padding:5px 12px; display:none; -webkit-backdrop-filter:blur(24px) saturate(180%); backdrop-filter:blur(24px) saturate(180%)}
-  .ctx.show{display:block}
-  .ctx.defctx{min-width:0}   /* Wiktionary "Definitions of …" flyout: shrink to its widest row instead of the shared 224px floor — most senses are much narrower than that */
-  .ctx button{position:relative; display:flex; width:calc(100% + 14px); margin:0 -7px; align-items:baseline; justify-content:space-between; gap:16px; background:transparent; border:none; -webkit-user-select:none; user-select:none;   /* a right-click (to open a relation's deep-feature submenu) must never start a text selection */
-    color:var(--label-primary,var(--text)); font:inherit; font-weight:510; font-size:13px; line-height:16px; padding:4px 7px; border-radius:6px; cursor:pointer; text-align:left; white-space:nowrap}   /* 24px row: 16 line + 2×4 pad. The row's own box is widened 7px past the container's 12px inset on each side (Figma's Submenu "BG" layer: inset -7px) so the hover fill reaches 5px from the menu edge, while its OWN 7px padding pulls the TEXT back in to the container's 12px inset — net text position unchanged from a plain 12px inset, only the hover hit/fill area is wider */
-  .ctx button:hover{background:var(--fill-secondary,#e6e6e6)}   /* native macOS context-menu hover is a neutral vibrant gray, NOT the blue accent — text colour is unchanged on hover (Figma's "Clean Up By" example row keeps the same dark label over the gray fill) */
-  .ctx button.danger{color:var(--bad)} .ctx button.danger:hover{background:var(--fill-secondary,#e6e6e6)}
-  .ctx .kbd{font-size:13px; font-weight:510; color:var(--menu-shortcut); direction:ltr; unicode-bidi:isolate}   /* Figma macOS 26 kit, pulled live from the file: 13px/510 (SAME size/weight as the row label, not smaller), Labels-Vibrant/Tertiary — an explicit dim color rather than an opacity fraction of the row's own ink, so it reads the same neutral gray even on a .danger (red) row, matching native macOS. Keep ⌘/arrow shortcuts in LTR order even under an RTL menu */
-  .ctx hr{border:none; border-top:.5px solid var(--hairline); margin:5px 2px}   /* ~11px separator */
-  .ctx hr.note-rule{margin:2px 2px 3px}   /* item 1: the rule under a menu hint — its bottom gap (to the rows) matches the guidelines link's own bottom gap (to the menu edge), so the hint and the link are spaced symmetrically */
-  .ctx .mlbl{direction:ltr; unicode-bidi:isolate}   /* labels are English → keep them (and any trailing period/ellipsis) LTR, so punctuation stays on the reading-end even in an RTL menu */
-  .ctx .expand{font-size:11px; opacity:.55; font-style:normal; white-space:nowrap; direction:ltr; unicode-bidi:isolate}   /* abbreviation's expansion, right-aligned */
-  .ctx .rightgrp{display:flex; align-items:baseline; align-self:center; gap:7px; flex:none; direction:ltr}   /* the row's right-hand content (expansion + submenu arrow) kept together against the reading-end. align-self:center is the actual fix for the chevron-only "Definitions of …" row: .rightgrp is ITSELF a flex item of `.ctx button` (align-items:baseline), and when it contains nothing but the chevron (no .expand/.kbd text), IT has no real text baseline either — so the OUTER baseline-alignment synthesises .rightgrp's own baseline from its box's BOTTOM edge (there's no descender space below that, unlike a real glyph baseline), landing the whole box, chevron included, visibly higher than the row's true vertical centre. Centring .rightgrp itself against the row (rather than trying to fake it a baseline) is what actually moves the chevron down to where it belongs; align-items:baseline stays on its OWN inner flex context for the rarer row that combines a real .expand text with a trailing .subarr side by side */
-  .ctx .subarr{display:inline-block; width:12px; height:12px; flex:none; align-self:center; background-color:currentColor;
-    -webkit-mask:var(--sf-chevronright) no-repeat center/contain; mask:var(--sf-chevronright) no-repeat center/contain}   /* SF chevron.right marks a row that has a flyout submenu (e.g. Wiktionary "Definitions of …"). Figma macOS 26 kit, pulled live from the file: the chevron is FULL primary ink (currentColor, no dimming) and a 12px box — unlike the trailing shortcut/expansion text, it is NOT a dimmed secondary element, so no hover brightening either (it's already at full strength). align-self:center: .rightgrp aligns its children to the TEXT baseline (align-items:baseline, so it lines up with .expand's real glyph baseline) — but this empty masked box carries no text of its own, so flexbox synthesises its baseline from its margin-box's BOTTOM edge, sitting it visibly low against the row label. Centering it vertically within the row (matching how a real NSMenu submenu arrow sits) fixes that without disturbing .expand's genuine baseline alignment */
-  .ctx button:hover .expand{opacity:.85}
-  .ctx .hdr{font-size:10px; line-height:10px; font-weight:700; color:var(--menu-hdr,#727272); padding:5px 0 4px 6px; text-align:start; pointer-events:none; user-select:none}   /* section header ~19px tall (10 line + 5 + 4), 18px total inset (container's 12 + this 6) — Figma: Bold 10px, Menu/Inset-Top/Bottom/Left-Header 5/4/18, NORMAL case (no text-transform/letter-spacing — the earlier all-caps treatment wasn't in the reference) */
-  .ctx .note{font-size:11px; line-height:14px; font-style:italic; font-weight:510; color:var(--muted); padding:5px 0 6px; text-align:start; pointer-events:none; user-select:none; white-space:normal}   /* item 1: more bottom padding (was 2px) so the hint isn't cramped against its rule */   /* a plain instructional hint pinned above the menu's groups (e.g. the deprel menu's "right-click for deep features") — unlike .hdr this isn't a category label, so no uppercase/letter-spacing/deep inset — aligned with the ROWS' 12px (the container's own inset), not the header's deeper 18px. font-weight matches .ctx button's 510 — the variable italic face defaulted to 400 and read noticeably thinner than every other row */
-  .ctx button.opt{padding-inline-start:25px}   /* gutter only on option rows (POS/deprel) → prose items like "Guidelines" stay flush at the reading edge; 12px base inset + checkmark gutter (the row's own edge sits at the same 5px-from-menu position before and after the Figma-matched geometry change above, so this override is unaffected) */
-  .ctx .ck{position:absolute; inset-inline-start:12px; top:50%; transform:translateY(-50%); font-size:10.5px; opacity:.9}   /* on the reading-start side, aligned with the section-heading text (also at 12px) — flips under RTL */
-  .ctx button:hover .ck{opacity:1}
-  .ctx .twocolwrap{display:flex; gap:0; align-items:stretch}
-  .ctx .mcol{min-width:196px}
-  .ctx .mcol:first-child{padding-inline-end:12px}                                            /* matches the container's 12px horizontal inset (the row-text inset), not the 5px vertical outer padding this used to (wrongly) mirror — that left the first column's rule-side gutter noticeably tighter than every other edge inset in the menu */
-  .ctx .mcol + .mcol{border-inline-start:.5px solid var(--hairline); padding-inline-start:12px}   /* vertical rule between the two columns (flips under RTL); same 12px on both sides of the rule for symmetry */
-  .ctx .catgrp{break-inside:avoid}
-  .ctx.defctx .hdr{padding-inline-start:0}   /* LOGICAL, so it lands on the reading-start side of an RTL menu (the base `.ctx .hdr` shorthand's own 6px is physical padding-left; that one is app-wide and not this rule's to relitigate). The gender heading's usual +6px (18px total) is sized to sit LEFT of the 25px checkmark-gutter on .opt rows (POS/deprel picks) — but the "Definitions of …" rows are plain (12px inset, no gutter), so that extra 6px instead pushed the heading to the RIGHT of the definitions below it. Zero it here so the heading aligns with the plain rows' 12px */
-  .ctx .ctxinput{padding:4px 0}   /* horizontal inset now comes from the container's own 12px (matching the row text inset) — was 12px here too, doubling to 24px once the container itself carries the Figma-matched 12px */
-  .ctx .ctxinput .cin{width:100%; border:.5px solid var(--field-border); background:var(--field-bg); color:var(--text); border-radius:6px; padding:5px 8px}
-  /* grid "Deep" cell autocomplete — a floating, WIDE dropdown (sized to the longest option, never clipped by the cell), styled like the context menu */
-  .acmenu{position:fixed; z-index:70; display:none; max-height:280px; overflow-y:auto; background:var(--lg-glass-fill,rgba(245,245,245,.67)); border:.5px solid var(--hairline-strong); border-radius:var(--r-menu,13px);
-    box-shadow:var(--lg-menu-shadow,0 0 2px rgba(0,0,0,.1),0 0 25px rgba(0,0,0,.16)); padding:5px; -webkit-backdrop-filter:blur(24px) saturate(180%); backdrop-filter:blur(24px) saturate(180%)}
-  .acmenu.show{display:block}
-  .acmenu .acrow{display:block; width:100%; background:transparent; border:none; color:var(--label-primary,var(--text)); font:inherit; font-size:13px; font-weight:510; line-height:16px; padding:4px 12px; border-radius:6px; cursor:pointer; text-align:start; white-space:nowrap}   /* Figma macOS 26 kit: 13px/510, matching every other menu row (.ctx button/.lmrow/.trrow/.tdrow) — was 12.5px/inherited-400 */
-  .acmenu .acrow:hover,.acmenu .acrow.hi{background:var(--accent); color:#fff}
-  .acmenu .ac-grouph{font-size:9.5px; font-weight:700; letter-spacing:.05em; text-transform:uppercase; color:var(--muted); padding:6px 12px 2px; pointer-events:none; user-select:none}   /* item 12: non-selectable FEATS category heading — small uppercase muted section label, mirrors .mgroup-h / .drawer-group-h */
-  .acmenu .ac-grouph:first-child{padding-top:2px}
-  .acmenu .ac-grouph ~ .acrow{padding-left:20px}   /* item 14: every row in a GROUPED menu (FEATS key names, MGloss abbreviations) sits under a heading — indent it so it reads as subordinate. The `~` sibling combinator only ever matches once at least one .ac-grouph exists among the rows' preceding siblings, so acShowCustom's flat, headingless menus (no .ac-grouph at all) are untouched */
-  .acmenu .acrow.has-exp{display:flex; justify-content:space-between; align-items:baseline; gap:14px}   /* item 12: value row carrying a right-aligned gloss */
-  .acmenu .acrow .aclbl{white-space:nowrap}
-  .acmenu .acrow .acexp{font-size:11px; opacity:.55; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; min-width:0; direction:ltr; unicode-bidi:isolate}   /* item 12: value gloss — right-aligned & dimmed, like .ctx .expand */
-  .acmenu .acrow:hover .acexp,.acmenu .acrow.hi .acexp{opacity:.85; color:#fff}
-  .ctx .ctxinput .cin:focus{border-color:var(--accent)}
-  .ctx-sub{z-index:61; max-height:min(420px,70vh); overflow-y:auto; overflow-x:hidden}   /* a flyout (e.g. many Wiktionary "Definitions of …" senses) scrolls instead of running off the bottom of the screen; JS additionally caps this to the parent .ctx menu's own rendered height (openSub's render()) */
-  /* item 1 — a flyout with a footer link is a flex column: the rows scroll in .ctx-sub-scroll, while the link
-     ("Guidelines for …" in the POS-subtype flyout, "Open …" in the definitions one) sits in a FIXED footer
-     (.ctx-sub-footer) that never scrolls. The link itself is a plain .ctx button (its .ctx-footlink class is
-     just a marker), so it looks exactly like the parent menu's guidelines row.  This replaced a .ctx-sticky
-     rule — a position:sticky full-bleed bar that still rode WITHIN the scrolling list; both callers wanted a
-     footer below it, so that rule had no users left and is gone. */
-  .ctx-sub.ctx-sub-foot{display:flex; flex-direction:column; overflow:hidden; padding-inline:0}   /* the 12px inset moves onto .ctx-sub-scroll/.ctx-sub-footer themselves below — each needs its OWN padding zone so the base .ctx button rule's -7px bleed (calibrated against exactly a 12px parent inset) lands safely inside it instead of overflowing a zero-padding wrapper and getting clipped by that wrapper's own overflow-x:hidden. Do NOT widen the bleed itself to compensate (a ±12px margin was tried here and reached the flyout's true edge, flush — losing the 5px-short-of-the-edge margin every OTHER context menu's hover fill keeps); matching the padding is enough, the existing ±7px trick already does the rest. */
-  .ctx-sub.ctx-sub-foot>.ctx-sub-scroll{flex:1 1 auto; min-height:0; overflow-y:auto; overflow-x:hidden; padding-inline:12px}
-  .ctx-sub.ctx-sub-foot>.ctx-sub-footer{flex:none; padding-inline:12px}   /* the "Open on Wiktionary" link pinned to the flyout's own bottom edge instead of scrolling away with the (often many) senses above it. */
-  .ctx-sub.defctx .hdr{position:sticky; top:-5px; z-index:1; margin:0 -12px; padding-top:9px; padding-inline-start:12px; background:var(--lg-glass-fill,rgba(245,245,245,.67)); -webkit-backdrop-filter:blur(24px) saturate(180%); backdrop-filter:blur(24px) saturate(180%)}   /* the gender headings ("Masculine"/"Feminine"/…) grouping Wiktionary senses stay pinned to the flyout's top edge while their own group's senses scroll past underneath, like the sticky Wiktionary-link footer above. Scoped to .defctx (the definitions flyout) — the unrelated deep-feature submenu's single header doesn't need this. top/margin mirror the footer's bottom/margin trick to reach the container's true top edge; padding-inline-start (LOGICAL — under RTL a physical padding-left left the heading standing 12px further out than the senses it groups, since .ctx .hdr's own text-align:start had already moved its text to the other side) restores the 12px text inset that the -12px margin (needed for a full-bleed sticky background) would otherwise cancel, since .ctx.defctx .hdr already zeroes the base rule's own left padding in favour of the (now-cancelled) container inset; padding-top compensates the same way for the container's own 5px top inset */
-  /* The definitions flyout is the ONE context menu whose rows are PROSE — an Apte or Wiktionary sense runs to a
-     clause, not a label — and `.ctx.defctx{min-width:0}` above lets it shrink-to-fit, which for a long sense meant
-     grow-to-fit instead: measured at 1481px on a 1400px window before this cap. So cap it at a reading measure and
-     let the sense WRAP, which is a deliberate exception for .defctx alone — every other context menu (POS, deprel,
-     relation, block, deep features) keeps `.ctx button`'s white-space:nowrap and its 24px single-line rows.
-     WHY 320px: 45 characters is the low end of Bringhurst's 45–75-character satisfactory measure for a single
-     column, taken at the low end because these are short sense fragments in a floating panel rather than running
-     prose, and because a menu wider than the ~250–280px the app's other menus sit at stops reading as a menu.
-     45 × 6.17px (the average advance English prose gets in this face, measured off a canvas at the row's own
-     computed `510 13px SF Pro Text`) ≈ 278px of text; + the container's 2×12px inset + the 18px a `.opt` row's
-     checkmark gutter adds on top of the base row padding = 320px. openSub's sticky-.hdr min-width floor is clamped
-     against this same computed max-width so a header can never demand a floor ABOVE the ceiling (min-width beats
-     max-width in CSS, so the two would silently fight and the cap would lose).
-     THE LIVE CEILING IS NOW THE PARENT MENU'S OWN WIDTH, set inline by openSub (which is the only place it can be
-     known — CSS can't measure another element), and this 320px stays as the fallback for a parent that measures 0.
-     A flyout can therefore never be wider than the menu it flew out of, which reads as one panel hinged off
-     another rather than a wide slab hanging off a narrow menu; the parent (min-width:224px above) is in practice
-     224–290px, i.e. NARROWER than this measure, so senses wrap sooner than they used to, never later. */
-  .ctx-sub.defctx{max-width:320px; font-family:var(--token-font)}   /* dictionary senses (Wiktionary/Apte "Definitions of …") and CJK heteronym readings (js/lang/readings.js) can carry the document's OWN script — Devanagari citations inside an Apte sense, a reading in the currently-picked Displayed script — so this flyout needs the same Noto token stack #doc renders in, not the inherited system-UI stack every other .ctx menu (Insert/Delete/Guidelines…) intentionally keeps. --token-font resolves correctly here even though this flyout is appended to <body>, not #doc: the custom property's BASE value is declared at :root (mac-tokens.css) so it already cascades everywhere, and the one thing that used to diverge from that base — the Ranjana scheme's inline override — now lives on <html> instead of #doc (see js/lang/translit.js's syncSchemeAttr) specifically so a body-level popup like this one inherits it too */
-  .ctx-sub.defctx button{white-space:normal}   /* the row grows to as many 16px lines as the sense needs (`.ctx button` sets no height, only line-height + padding, so nothing has to be unpicked for it to get taller) */
-  .ctx-sub.defctx .mlbl{min-width:0; overflow-wrap:break-word}   /* THE HANGING INDENT: .mlbl is a flex ITEM of the row, so every one of its lines starts at its own content edge — which already sits past the `.ctx button.opt` 25px checkmark gutter (the readings flyout is .defctx too and its rows DO pass opt:true) and mirrors under RTL, since that gutter is the logical padding-inline-start. Nothing has to be indented by hand; the wrap just has to happen INSIDE the label box rather than on the row. min-width:0 lets that box shrink below its max-content width; overflow-wrap catches a pathological unbroken string, which .ctx-sub's own overflow-x:hidden would otherwise clip */
-  .ctx-sub.defctx[dir="rtl"] .mlbl{text-align:right}   /* …and under an RTL menu every line has to flush to the READING start (the right) for the indent to actually mirror. text-align, not direction: `.ctx .mlbl` forces direction:ltr so an English sense keeps its own character order and its trailing period stays at the end of the run — but that also makes CSS `start` mean "left", which would leave the last, short line ragged on the reading side and detached from the first line's edge */
-  .ctx-sub.defctx .ck{top:4px; transform:none; line-height:16px}   /* the tick is positioned against the row, and `top:50%` centres it in a row that is now as tall as the sense is long — pin it to the FIRST line instead (4px = the row's own top padding; the 16px line-height centres the 10.5px glyph in that first line box). Only bites if a CHECKED row ever wraps — the readings flyout's rows are single readings today — but the two rules have to agree or the tick drifts down the gutter */
-  .ctx-sub.defctx.ctx-sub-foot .hdr{top:0}   /* …EXCEPT once the flyout carries a fixed footer, when the scrollport is .ctx-sub-scroll rather than the flyout itself: the wrapper has no block padding of its own, so the -5px above (which mirrors the flyout's 5px top inset) would instead let 5px of the sense underneath show through above a pinned heading. */
-  /* …and EXCEPT for the flyout's transient STATUS messages ("Loading…", "Nothing found", "Couldn't load",
-     "<source> lookup failed"), which openSub renders as a lone `{header:…}` — the only .hdr in the flyout, with
-     nothing above or below it. Every part of the sticky treatment above is calibrated for a gender GROUPING
-     heading sitting on top of a scrolling list, and each part is wrong for a standalone message:
-       · padding-top:9px compensates the container's own 5px inset so the pinned background reaches the flyout's
-         true top edge — but with nothing to pin against, it is just 5px of extra space ABOVE the text against
-         the 4px below it, and the message sat visibly low in its own pill (measured: 13.5px above the glyph
-         box, 9px below, in a 34px-tall flyout);
-       · margin:0 -12px full-bleeds a background that is the SAME fill as the flyout it sits in, so it paints
-         nothing — while re-running backdrop-filter over an already-blurred backdrop, and under-counting toward
-         the shrink-to-fit width (the very interaction openSub's canvas-measured min-width floor works around);
-       · position:sticky has nothing to scroll past.
-     So a header that is its group's only row, in a group that is the flyout's only child — exactly the shape
-     openSub renders a status message as — becomes an ORDINARY ROW instead: the 16px line-height and 4px block
-     padding of `.ctx button` give it the same 24px box, its half-leading centres the 10px text in that box, and
-     the flyout ends up symmetric (5px above, 5px below). A gender heading is unaffected: its group also holds
-     the senses it groups, so neither :only-child matches. */
-  .ctx-sub.defctx .catgrp:only-child > .hdr:only-child{position:static; margin:0; padding-block:4px; padding-inline:0; line-height:16px;
-    background:none; -webkit-backdrop-filter:none; backdrop-filter:none}
 
   /* status-bar language picker: a searchable list of every ISO 639-3 language (opens when no parser model is selected).
      The outline/hover/cursor treatment itself is .fmtpill, shared with the Format/Script/Transliteration pills below
@@ -1451,77 +1282,10 @@
   .marquee{position:fixed; z-index:60; pointer-events:none; background:var(--accent-weak); border:1px solid var(--accent); border-radius:2px}   /* item 1: the drag-area (marquee) selection rectangle */
   .countpop .cp-hint{margin-top:7px; font-size:10.5px; color:var(--muted); line-height:1.35}   /* "Component tokens" (nbsp-joined) sets the min-content width and fills line 1; "(2 or more)." wraps to line 2 */
 
-  .sheet.savesm{width:min(390px,90vw)}   /* the kit's own "Save-Small" width (see the dialog-widths comment above) — a filename + location sheet is exactly that shape, unlike the plain confirm alert (.sm, 300px) */
-  .sheet .whererow{display:flex; gap:8px; align-items:center}
-  .sheet .wherebtn{flex:1 1 auto; min-width:0; height:36px; display:flex; align-items:center; gap:8px; border-radius:8px;
-    border:.5px solid var(--hairline-strong); background:var(--field-bg); color:var(--text); padding:0 10px; font:inherit; font-size:13px; cursor:pointer; text-align:left}   /* a real pulldown button (not a native <select>, which can't carry a leading icon) — taller than a plain text field so the native folder icon (see .fpimg) has comfortable room */
-  .sheet .wherebtn:hover{background:var(--block-sel)}
-  .sheet .wherebtn .fpimg{width:18px; height:18px; flex:none; object-fit:contain}
-  .sheet .wherebtn .wherename{flex:1 1 auto; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
-  .sheet .wherebtn .wherechev{flex:none; font-size:11px; opacity:.45}
-  .sheet .wherebrowse{flex:none; width:36px; height:36px; border-radius:8px; border:.5px solid var(--hairline-strong); background:var(--field-bg);
-    color:var(--text); cursor:pointer; display:flex; align-items:center; justify-content:center; font-size:15px; padding:0}   /* the "…" browse button — a real native NSOpenPanel(FOLDER) for anything not already in the Where list; the compact dropdown mirrors the native Save panel's own "recent locations" pulldown */
-  .sheet .wherebrowse:hover{background:var(--block-sel)}
-
-  .toast{position:fixed; left:50%; bottom:44px; transform:translateX(-50%) translateY(10px); background:rgba(30,30,32,.92); color:#fff;
-    padding:9px 15px; border-radius:9px; font-size:12.5px; box-shadow:0 10px 30px rgba(0,0,0,.35); opacity:0; pointer-events:none;
-    transition:opacity .2s,transform .2s; z-index:70; -webkit-backdrop-filter:blur(10px); backdrop-filter:blur(10px); max-width:80%}
-  .toast.show{opacity:1; transform:translateX(-50%) translateY(0)}
-  .scrim{position:absolute; inset:0; background:rgba(0,0,0,.12); display:none; align-items:center; justify-content:center; z-index:50}   /* modal scrim: a subtle, macOS-appropriate dim (not a heavy blackout) that INHIBITS the window behind — it captures pointer events (inset-0 layer above the content) so nothing behind is interactive while a dialog is open, and stays light enough to read as "modal" rather than a harsh curtain. Click-outside still dismisses. */
-  @media (prefers-color-scheme:dark){ .scrim{background:rgba(0,0,0,.28)} }   /* faint dark-mode equivalent */
-  .scrim.show{display:flex}
-  .confirmscrim{z-index:90}   /* a confirm/alert (askConfirm) stacks ABOVE an already-open sheet (e.g. "Remove model?" from within the Manage Models sheet) — its own scrim/host pair, never sharing #scrimHost so it can't blow away the sheet underneath */
-  /* item 11: EVERY dialog — alert and content sheet alike — sits in the exact centre of the WINDOW, both axes.
-     The scrim can deliver that as-is: it is position:absolute inset:0 inside .window, and .window (mac-chrome.css)
-     is position:relative and 100vh with the titlebar ABSOLUTE inside it and the status bar down in .body — so both
-     pieces of chrome are INSIDE the scrim's containing block and the scrim box IS the window box. Centring in the
-     scrim is centring in the window, chrome included, which is what a modal wants: it interrupts the app, not the
-     document pane.
-     The centring is on the SCRIM and the cap is on the SHEET, and the two go together — that pairing is what makes
-     centring safe. A flex item taller than its container overflows BOTH ways when centred, and the top overflow is
-     unreachable: nothing above the scrim scrolls. So no sheet may ever be taller than the window, whatever its
-     content: max-height + the .content scroller (overflow:auto, set below) turn a 200-row Manage Models list into a
-     scrolling panel instead of a box hanging off both edges. Measured: a 200-paragraph .lg sheet lands at
-     top 16 / bottom 984 in a 1000px window with its content scrolling, dx = dy = 0.
-     100vh rather than the old calc(100% - 92px): that percentage did still bite (measured 908px in a 1000px window)
-     but only because it landed on the SCRIM's height rather than on the shrink-to-fit #scrimHost it is nominally a
-     percentage of — right by accident. 100vh is the window by definition, .window being exactly 100vh, and the
-     92px it dropped was a top-and-bottom allowance for a sheet HUNG FROM THE TOP, which a centred box doesn't need.
-     margin-top:46px goes for the same reason: it cleared the titlebar when the sheet hung from the top, and left in
-     it would push every dialog 23px below centre.
-     Both halves are set on the ORIGINAL declarations (align-items on .scrim above, margin-top/max-height on .sheet
-     below) rather than as overrides here: .sheet's own rule comes LATER in this file, so an override at this point
-     would lose to it at equal specificity. */
-  /* macOS 26 (Tahoe) dialog/alert panel: 26px radius, LG dialog shadow. Background differs by KIND, checked
-     directly against real screenshots: a small plain ALERT (.sm — "Remove this model?", "Save changes?") is
-     TRANSLUCENT glass (--lg-glass-fill over backdrop-blur, like a menu/popover); a larger content SHEET
-     (.md/.lg/.savesm — Settings, Save As, Manage Models, a filename+location prompt) is OPAQUE white/panel,
-     no blur. Default below is the opaque sheet; .sheet.sm overrides back to glass. Shared tokens
-     (--r-dialog / --lg-dialog-shadow / … ) are owned by the titlebar agent; referenced here with spec-value
-     fallbacks so the panel is correct before that :root block lands. */
-  /* Dialog widths on Apple's UI-kit scale (kit: Alert 260 · Save-Small 390 · Save-Large 800).
-     .sm = small confirm/alert (translucent, pill buttons) · .md = standard sheet (Settings, Add Text) ·
-     .lg = large sheet (Manage Models) · .savesm = filename+location sheet (Save As, Rename, Export). Content
-     sheets are opaque with rounded-rect buttons — see the .tbtn rules below. */
-  /* 260px is the macOS 26 kit's own alert width — every Alert instance in it measures 260 wide (side-by-side
-     260×154, stacked 260×218, and both window-modal variants), against the 390 the Save-Small dialog uses.
-     A plain confirm is deliberately narrow: it holds one short question, and a wider box invites a longer one. */
-  .sheet.sm{width:min(260px,90vw); background:var(--lg-glass-fill,rgba(245,245,245,.67)); -webkit-backdrop-filter:blur(30px) saturate(1.8); backdrop-filter:blur(30px) saturate(1.8)}
-  .sheet.md{width:min(460px,90vw)} .sheet.lg{width:min(680px,90vw)}
-  .sheet.aboutsm{width:min(300px,90vw)}   /* same small width as .sm, but NOT an alert — About is a separate-window content dialog, so it stays opaque with the rectangular button (unlike .sm's translucent/pill treatment) */   /* vw, not %: the centred #scrimHost is shrink-to-fit, so a %-width sheet collapses to its content and the px caps never engage — vw resolves the width against the window */
-  .sheet{margin-top:0; width:min(460px,90vw); background:var(--panel-bg,#ffffff);
-    border-radius:var(--r-dialog,26px); box-shadow:var(--lg-dialog-shadow, 0 0 0.5px rgba(0,0,0,.2), 0 17px 22.5px rgba(0,0,0,.5));
-    border:.5px solid var(--sheet-border); overflow:hidden; animation:drop .22s cubic-bezier(.2,.8,.2,1); max-height:calc(100vh - 32px); display:flex; flex-direction:column}   /* item 11: margin-top:0 + a vh cap, both required BY the centring — see the block above .scrim */
-  @keyframes drop{from{transform:translateY(-14px); opacity:0}to{transform:none; opacity:1}}
-  .sheet header{padding:20px 16px 0} .sheet h3{margin:0; font-size:13px; line-height:16px; font-weight:700; color:var(--label-primary,rgba(0,0,0,.85))}   /* title: SF Pro Bold 13/16 */
-  .sheet p{margin:6px 0 0; color:var(--label-primary,rgba(0,0,0,.85)); font-size:11px; line-height:14px; font-weight:400}   /* body: SF Pro Regular 11/14 */
-  .sheet .content{padding:14px 16px; display:flex; flex-direction:column; gap:12px; overflow:auto; overscroll-behavior:none}   /* no rubber-band bounce/scroll-chaining, matching every other scroller in the app (.diagram/.gwrap/.text-conv/.wp-toks) */
-  .sheet textarea,.sheet input[type=text]{width:100%; border-radius:8px; border:.5px solid var(--field-border); background:var(--field-bg);
-    color:var(--text); padding:9px 12px; font:inherit; font-size:13px; outline:none}
-  .sheet textarea{resize:vertical; min-height:60px; font-family:ui-monospace,monospace}
-  .sheet textarea:focus,.sheet input:focus{border-color:var(--accent); box-shadow:0 0 0 3px var(--accent-weak)}
-  .sheet label.fld{display:flex; flex-direction:column; gap:5px; font-size:12px; color:var(--muted); font-weight:600}
-  .sheet .actions{display:flex; justify-content:flex-end; gap:8px; padding:16px}   /* 16 gap below the content, sides/bottom 16 */
+  /* The Insert-text sheet and the stacked-alert reorder stay HERE, not in the kits: the sheet CHROME
+     (.sheet/.scrim/.toast and the dialog widths) moved to macos-kit/win11-kit, but these describe the
+     Insert dialog's own CONTENT plus one button-order rule — app behaviour, not platform chrome.
+     app.css loads after the kits, so they layer onto whichever .sheet base is in play. */
   /* ── the Insert-text sheet (sheetInsert in js/ui/sheets.js) ───────────────────────────────────────────
      ITS FIELDS ARE THE POINT, so it is the one dialog that takes a HEIGHT and not just a max-height: a flex
      child can share out only space that EXISTS, and a shrink-to-fit box has none — with max-height alone
@@ -1560,46 +1324,6 @@
   .insnote:empty{display:none}   /* an empty note must not still spend the block's 6px gap */
   .sheet .actions .inserr{margin-inline-end:auto; text-align:start; color:var(--accent-red,#ff383c); font-size:11.5px; line-height:1.35}   /* margin-auto on the leading side pushes the buttons back to the trailing edge the row's justify-content puts them at */
   .sheet .tbtn .kbd{margin-inline-start:7px; font-weight:510; opacity:.72; direction:ltr; unicode-bidi:isolate}   /* the shortcut glyph on a default button (Insert's ⌘↩), in this app's own menu convention (see .ctx .kbd): the SAME size and weight as the label it trails, dimmed rather than shrunk, and held in LTR order so ⌘↩ never reverses under an RTL system language */
-  /* ONLY PILL BUTTONS STRETCH. What decides it is the button's SHAPE, not which dialog it happens to sit in:
-     a fully-rounded CAPSULE button (--r-control) fills its share of the actions row — one spans the whole row,
-     two take half each, three take equal thirds — while a rounded-RECTANGLE button keeps its natural,
-     label-sized width and the row's justify-content:flex-end above keeps the group right-aligned.
-     Stretching is an ALERT behaviour, and the capsule is the alert's button: macOS's own vertically-stacked
-     alert makes every button a full-width row, so equal horizontal shares are the side-by-side reading of the
-     same rule, and they keep a destructive button from being the widest thing in the box just because
-     "Close Without Saving" is a long label. A content sheet's buttons are rectangles, and macOS sizes those to
-     their labels — stretching them turned Save As's Cancel/Save into two half-dialog slabs.
-     Shape and stretch therefore ride on ONE declaration: `--pill-flex` is set beside the capsule radius that
-     MAKES a button a pill (.sheet.sm .tbtn below), so the two cannot drift apart — whatever surface adopts the
-     pill treatment gets the stretch with it, and nothing that stays rectangular can pick it up by accident.
-     `1 1 0` (basis 0, not auto) is what makes the pill shares EQUAL rather than proportional to the labels;
-     `.tbtn`'s own 76px min-width survives as a floor and is never reached (the alert is 260px wide →
-     (260 − 2×16 − 8)/2 = 110px a button). The `0 1 auto` default is a rectangle at its label width: free to
-     shrink if the row is tight, never to grow.
-     One consequence worth naming, and now restored: the leading destructive button in the untitled-document
-     prompt (a .savesm SHEET) carries an inline `margin-inline-end:auto` to push it away from the trailing pair.
-     While every button grew there was no positive free space for an auto margin to absorb, so it resolved to 0
-     and Delete·Cancel·Save came out as equal thirds; with rectangles at their label widths the free space is
-     back, the auto margin resolves again, and Delete sits at the leading edge with Cancel·Save at the trailing
-     one, as macOS draws it. Order, default/cancel/destructive roles and every handler are untouched — this is
-     layout only. */
-  .sheet .actions > .tbtn{flex:var(--pill-flex,0 1 auto)}
-  /* macOS 26 (Tahoe) dialog buttons: 30px tall, SF Pro Medium(510) 13/16, comfortably padded (px ~14, not cramped).
-     Primary → accent-blue/white · secondary/cancel → fill-secondary/label-primary · destructive → destructive-fill/accent-red.
-     Shape differs by dialog kind (checked against Figma): a SHEET/dialog (.md/.lg/.savesm — Settings, Save As, Manage
-     Models, …) gets a rounded RECTANGLE; only a small ALERT (.sm — a plain confirm like "Remove this model?") keeps
-     the fully-rounded capsule (--r-control). Default to the rectangle; .sm overrides back to the capsule below. */
-  .sheet .tbtn{height:30px; min-width:76px; width:auto; padding:0 15px; border-radius:8px; border:none;
-    background:var(--fill-secondary,#e6e6e6); color:var(--label-primary,rgba(0,0,0,.85)); font-size:13px; line-height:16px; font-weight:510; box-shadow:none; transition:filter .12s}
-  /* Alert metrics from the macOS 26 kit's Alert component (node 682:3933), which the content sheets do NOT
-     share — hence the .sm scoping: its buttons are 32px (the instances override the base button's 28) against
-     the 30px a content dialog uses, and its title sits 10px above the description, not 6. */
-  .sheet.sm .tbtn{--pill-flex:1 1 0; border-radius:var(--r-control,999px); height:32px}   /* THE pill treatment — capsule radius and the stretch it licenses (see the --pill-flex note above) declared together, so a surface can never take one without the other */
-  .sheet.sm p{margin-top:10px}
-  /* the kit's Alert/Stacked (260×218) — chosen by stackActionsIfTight when a label won't fit side by side.
-     column-reverse puts the DEFAULT (last in DOM) on top and Cancel at the bottom, as macOS stacks them. */
-  .sheet.sm .actions.stacked{flex-direction:column-reverse; align-items:stretch}
-  .sheet.sm .actions.stacked .tbtn{width:100%; flex:0 0 auto; min-width:0}   /* min-width:0 releases the 76px floor — a full-width button is never the thing that overflows */
   /* THE THREE-BUTTON SAVE ALERT reorders when it stacks. Side by side the DOM order IS the macOS order —
      [Don't Save] [Cancel] [Save], the destructive one leading and the default rightmost — and column-reverse
      turns that into Save / Cancel / Don't Save, which is not how macOS stacks it: Cancel goes to the BOTTOM,
@@ -1608,17 +1332,10 @@
      declaration instead of a second DOM order for the same three buttons. Scoped to the stacked variant, so the
      side-by-side row is untouched. */
   .sheet.sm .actions.stacked > [data-cancel]{order:-1}
-  .sheet .tbtn:hover{filter:brightness(.96); transform:none}
-  .sheet .tbtn:active{filter:brightness(.92); transform:none}
-  .sheet .tbtn.primary{background:var(--accent-blue,#0088ff); color:#fff}
-  .sheet .tbtn.primary:hover{filter:brightness(1.06)}
-  .sheet .tbtn.destructive{background:var(--destructive-fill,rgba(255,56,60,.23)); color:var(--accent-red,#ff383c)}
-  .sheet .tbtn.destructive:hover{filter:brightness(.97)}
-  .sheet .tbtn::before,.sheet .tbtn::after{content:none}   /* no Liquid-Glass sheen/hotspot layers on dialog buttons */
   .issuelist{display:flex; flex-direction:column; gap:2px}
   .issuerow{display:flex; gap:10px; align-items:baseline; width:100%; text-align:start; padding:7px 9px; border:none; background:transparent; border-radius:7px; cursor:pointer; font:inherit; color:var(--text)}
   .issuerow:hover{background:var(--block-sel)}
-  .issuerow .issloc{color:var(--muted); font-family:ui-monospace,"SF Mono",monospace; font-size:11px; flex:0 0 auto; min-width:0; max-width:33.333%; overflow-wrap:break-word}   /* shrink to fit the id, but never past a third of the row; long ids break (preferring the <wbr> after punctuation) */
+  .issuerow .issloc{color:var(--muted); font-family:var(--ui-mono); font-size:11px; flex:0 0 auto; min-width:0; max-width:33.333%; overflow-wrap:break-word}   /* shrink to fit the id, but never past a third of the row; long ids break (preferring the <wbr> after punctuation) */
   .issuerow .issmsg{color:var(--text); font-size:12.5px; line-height:1.35}   /* a non-breaking space before the last word (in JS) → no single-word last line, without re-balancing the other lines */
   #valPill{cursor:pointer; border-radius:5px; padding:2px 5px; margin:0 -5px}
   #valPill:hover{background:var(--block-sel)}
@@ -1630,7 +1347,7 @@
   .helpdlg .kbrow{display:flex; align-items:baseline; justify-content:space-between; gap:12px; padding:3px 5px; border-radius:6px; break-inside:avoid; -webkit-column-break-inside:avoid}
   .helpdlg .kbrow:hover{background:var(--block-sel)}
   .helpdlg .kbact{font-size:12px; color:var(--text); min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
-  .helpdlg .kbd{font-family:ui-monospace,"SF Mono",monospace; font-size:11px; color:var(--muted); flex:0 0 auto; direction:ltr; unicode-bidi:isolate}   /* keep ⌘/arrow order LTR under RTL UI */
+  .helpdlg .kbd{font-family:var(--ui-mono); font-size:11px; color:var(--muted); flex:0 0 auto; direction:ltr; unicode-bidi:isolate}   /* keep ⌘/arrow order LTR under RTL UI */
   .helpdlg .taggrid{display:grid; grid-template-columns:repeat(auto-fill,minmax(158px,1fr)); gap:1px 12px}
   .helpdlg .catcols{columns:2; column-gap:22px}   /* item 7: category subsections flow column-major (down column 1, then column 2) */
   .helpdlg .catblock{break-inside:avoid; -webkit-column-break-inside:avoid}
@@ -1638,7 +1355,7 @@
   .helpdlg .catblock+.catblock{margin-top:8px}
   .helpdlg .taglink{display:flex; align-items:baseline; justify-content:space-between; gap:7px; padding:3px 6px; border-radius:6px; text-decoration:none; color:var(--text); cursor:pointer}   /* item 10: space-between → the gloss is pushed to the right edge, like the .ctx .expand column in the context menus */
   .helpdlg a.taglink:hover{background:var(--block-sel)}
-  .helpdlg .taglink .tagname{font-family:ui-monospace,"SF Mono",monospace; font-size:11.5px; font-weight:600; color:var(--accent-blue,#0088ff); flex:0 0 auto}
+  .helpdlg .taglink .tagname{font-family:var(--ui-mono); font-size:11.5px; font-weight:600; color:var(--accent-blue,#0088ff); flex:0 0 auto}
   .helpdlg .taglink .taggloss{font-size:11px; color:var(--muted); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; min-width:0; text-align:end; direction:ltr; unicode-bidi:isolate}   /* item 10: right-aligned expansion, matching .ctx .expand (11px, nowrap, LTR) */
   .helpdlg .taglink-noguide{cursor:default}   /* no guidelines page (e.g. unk) → plain <span>, not a dead link */
   .helpdlg .taglink-noguide .tagname{color:var(--text)}
@@ -1649,7 +1366,7 @@
   /* About dialog (window.openAbout / sheetAbout) */
   .aboutdlg{gap:5px}
   .aboutdlg .aboutorg{font-size:12px; color:var(--text); font-weight:600}
-  .aboutdlg .aboutver{font-size:11px; color:var(--muted); font-family:ui-monospace,"SF Mono",monospace}
+  .aboutdlg .aboutver{font-size:11px; color:var(--muted); font-family:var(--ui-mono)}
   @media (prefers-reduced-motion:reduce){*{animation:none!important; transition:none!important}}
   .sfi{display:inline-block; width:1em; height:1em; background-color:currentColor; flex:none; vertical-align:-0.12em;
     -webkit-mask:var(--m) no-repeat center/contain; mask:var(--m) no-repeat center/contain}
@@ -1660,39 +1377,11 @@
   .sctrl .sfi.lg{width:15px; height:15px}   /* move up/down are landscape arrows whose ink is shorter than it is wide; a hair-larger box brings their height up to match the rest */
   .sctrl .sfi.exp{position:relative; top:-1.5px}   /* export glyph's mass sits low; nudge it up to match the others */
   .addtok .sfi,.addsent .sfi{width:13px; height:13px}
-  /* cube icon for the toolbar Manage-Models button, matching the menu's cube.box */
-  :root{ --sf-cube:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 2.5 20 7 20 17 12 21.5 4 17 4 7Z'/%3E%3Cpath d='M4 7 12 11.5 20 7'/%3E%3Cpath d='M12 2.5 12 21.5'/%3E%3Cpath d='M8 9.4 16 9.4'/%3E%3C/svg%3E") }
-  /* items 3 + 7: the page-layout pill's two glyphs. In the app these are REAL SF Symbols — the same
-     rectangle.portrait.center.inset.filled / rectangle.portrait.inset.filled pair the View ▸ Paged Layout menu item
-     wears, rendered natively and pushed onto these two variables by app/__main__.py (see the "Layout pill" block
-     there for why it overrides the variable instead of going through __setSfSymbol, and for the candidates that
-     were tried and rejected). One SF family, one rounded frame, one "inset filled" content region: all that differs
-     between them is how much of that frame the region takes, which is exactly what the pill chooses. The frame is
-     PORTRAIT because what paged mode lays out is a page, and a page is portrait.
-     What follows is the browser-design-mode fallback (no bridge → nothing overrides these), and it is TRACED from
-     the real symbols rather than invented: every number is measured off the rendered 136×156 symbol canvas (frame
-     ink 16–120 × 12–144 on an 8-unit stroke, corner radius 9 on the stroke centreline; the full fill 31–104 ×
-     27–130, the centred one 50×79 on the same centre) and then scaled by 24/156 into the standard 24 viewBox.
-     The stroke is 1.5 — the width every hand-drawn glyph in this app uses, --sf-cube above included — rather than
-     the 1.23 the trace would give, so the fallback carries the same weight as its neighbours. */
-  :root{ --sf-paged:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none'%3E%3Crect x='4.62' y='2.46' width='14.77' height='19.08' rx='1.4' stroke='black' stroke-width='1.5'/%3E%3Crect x='8.15' y='6' width='7.69' height='12.15' rx='.6' fill='black'/%3E%3C/svg%3E");
-         --sf-unpaged:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none'%3E%3Crect x='4.62' y='2.46' width='14.77' height='19.08' rx='1.4' stroke='black' stroke-width='1.5'/%3E%3Crect x='6.38' y='4.15' width='11.23' height='15.85' rx='.6' fill='black'/%3E%3C/svg%3E") }
-  /* no #pagePill size exception, unlike #notationPill: these are SF-Symbol masks with the same ~0.84 ink-to-box
-     ratio as the Add-Text and Manage glyphs, so the shared .tbtn.icon box lands their ink at the same optical
-     size as every other titlebar symbol — which is the whole point of using the real symbols here. */
-  /* format pill (click → convert / import / export menu) — ALSO the shared outline for the three other
-     status-bar pull-down pills (#tokInfo Language, #orthoPill Script, #translitPill Transliteration): one
-     border/padding/radius/hover rule so the four status-bar menu triggers read as one family and can't
-     drift apart. .disabled is translitPill's Sanskrit-with-no-script state (item 6 there: shown but inert). */
-  .fmtpill{border:.5px solid var(--hairline-strong); background:transparent; cursor:pointer; font:inherit; color:inherit; padding:1px 8px; border-radius:6px; line-height:1.7}
-  .fmtpill:hover{background:rgba(127,127,127,.14)}
-  .fmtpill.disabled{opacity:.5; cursor:default}
-  .fmtpill.disabled:hover{background:none}
-  /* the disclosure chevron on all four: the SAME hand-drawn SF-style chevron.down every other pull-down in
-     the app draws (.drawer-btn's 9×6 SVG at .55 opacity, verbatim — see the long rationale on #findBar
-     .findfchev above for why this replaced a "▾"/"⌄" text glyph: a text glyph's ink box doesn't match its
-     em box, so it neither sizes nor centres the way a real disclosure mark should). */
-  .pillchev{width:9px; height:6px; flex:none; opacity:.55; margin-inline-start:auto}   /* pushes to the pill's trailing edge when the pill is wider than its content (sizePill()'s reserved min-width) rather than hugging the label text */
+  /* no #pagePill size exception, unlike #notationPill: the Layout pill's two masks (--sf-paged/--sf-unpaged, which now
+     live in each chrome kit — macos-kit/mac-tokens.css and win11-kit/fluent-tokens.css — since a pill glyph is chrome,
+     not treebank) carry the same ~0.84 ink-to-box ratio as the Add-Text and Manage glyphs, so the shared .tbtn.icon box
+     lands their ink at the same optical size as every other titlebar symbol — which is the whole point of using the
+     real symbols here. */
   /* Manage Models sheet */
   .modelrow{display:flex; align-items:center; justify-content:space-between; gap:12px; padding:8px 2px; border-bottom:.5px solid var(--hairline)}
   .modelrow .mi{display:flex; flex-direction:column; gap:2px; min-width:0}
@@ -1718,7 +1407,7 @@
   #doc .diagram, #doc svg.tree{ user-select:none; -webkit-user-select:none }
   body.dg-drag, body.dg-drag *{ cursor:grabbing !important }
   .dg-ghost{ position:fixed; z-index:9999; pointer-events:none; transform:translate(-50%,16px); padding:6px 9px; border-radius:6px;
-    background:var(--content-bg); color:var(--text); font:600 14px -apple-system,system-ui,sans-serif; white-space:nowrap;
+    background:var(--content-bg); color:var(--text); font:600 14px var(--ui-font); white-space:nowrap;
     box-shadow:0 3px 10px rgba(0,0,0,.28); border:.5px solid var(--hairline); opacity:.95 }
   .dg-ghost.dg-ghost-rel{ font-weight:545;   /* weight curve @11px = --label-size, matching .lbl — not a flat 600 */ font-size:var(--label-size,11px); line-height:1; font-family:var(--token-font); padding:6px 8px }   /* matches the diagram relation label (.lbl — colour set inline per relation) — was left on the base .dg-ghost's monospace stack, which never matched .lbl's var(--token-font) */
   .dg-caret{ position:fixed; z-index:9998; pointer-events:none; width:2px; border-radius:1px; background:var(--accent); box-shadow:0 0 0 1px color-mix(in srgb,var(--accent) 35%,transparent) }
@@ -1796,7 +1485,7 @@
   .findfsep{height:1px; margin:4px 6px; background:var(--hairline)}
   /* .* and Aa — sticky option toggles, pressed state carried by aria-pressed (not a class) */
   #findBar .findopt{display:grid; place-items:center; width:26px; height:22px; flex:none; padding:0; border:none; border-radius:5px; background:transparent;
-    color:var(--muted); font:600 12.5px/1 ui-monospace,SFMono-Regular,Menlo,monospace; cursor:pointer}   /* monospace: at the UI font's proportional widths a bold ".*" collapses to an illegible speck — the mono face gives both glyphs a full advance and puts the asterisk on the same optical line as "Aa" beside it */
+    color:var(--muted); font:600 12.5px/1 var(--ui-mono); cursor:pointer}   /* monospace: at the UI font's proportional widths a bold ".*" collapses to an illegible speck — the mono face gives both glyphs a full advance and puts the asterisk on the same optical line as "Aa" beside it */
   #findBar .findopt:hover{background:var(--tbtn-hover); color:var(--text)}
   #findBar .findopt[aria-pressed="true"]{background:var(--accent); color:#fff}
   #findBar input.findbad{color:var(--bad)}   /* the bar's own term is the one that won't compile */

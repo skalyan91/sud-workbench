@@ -1,0 +1,642 @@
+/*@module win11-kit/fluent-chrome.css*/
+  /* WINDOWS 11 "FLUENT" CHROME — the exact counterpart of macos-kit/mac-chrome.css.
+     It dresses the SAME DOM: index.html is written once and neither kit may ask for a markup change.
+     So this file covers every selector mac-chrome.css defines, and nothing else — if a hook appears
+     in one kit and not the other, one of the two skins has an unstyled control.
+
+     WHAT DISAPPEARS on this side, and why each one is a deletion rather than a translation:
+       · `.lights` — the traffic lights. Windows has no window buttons at the LEADING edge at all;
+         min/max/close live at the trailing edge and are `.capbtn` below. Set to display:none rather
+         than left unstyled, because index.html still emits the three `<i>` elements.
+       · `.tb-blur` — the four-layer masked scroll-edge ramp. A Windows title bar meets the content
+         under it on a hard 1px line; there is no taper to translate. Also display:none, same reason.
+       · The Liquid-Glass pill gradients (`--glass-sheen` / `--glass-hotspot` on `::before`/`::after`,
+         the specular rim insets). Fluent's control depth is an EDGE, not a highlight — see
+         `.fluent-stroke` below. The pseudo-elements are given `content:none` so they are not
+         composited at all, on top of their tokens already resolving to `transparent`.
+       · `filter:url(#lgMenuShadow)` and friends — the SVG filters index.html defines exist to make
+         CoreGraphics-style LINEAR-LIGHT shadow compositing available to CSS, because that is what
+         macOS and Figma do. Fluent shadows are plain sRGB, so this file references none of those
+         filters and uses `box-shadow` throughout. The filters are still in index.html (the macOS
+         kit needs them); they are simply never named here.
+
+     Load order: fluent-tokens.css, then this, then styles/app.css. app.css therefore wins any tie,
+     which is deliberate — it is the app's own layer over whichever kit is underneath. */
+
+  /* ── Base ─────────────────────────────────────────────────────────────────────────────────────── */
+  .diagram,.gwrap,.text-conv{overscroll-behavior:none}   /* each inner scroller is isolated AND has no overscroll bounce of its own; its wheel never chains to the block */
+  body{margin:0; font-family:var(--ui-font); font-size:var(--fs-body); color:var(--text);
+    background:var(--win-bg); -webkit-font-smoothing:antialiased}   /* 14px Body, not macOS's 13 — the Fluent UI ramp's body size (TextBlock_themeresources.xaml: BodyTextBlockFontSize 14) */
+  .mono{font-family:var(--ui-mono)}
+  .window{width:100%; height:100vh; display:flex; flex-direction:column; background:var(--win-bg); overflow:hidden; position:relative}   /* positioned ancestor for the absolutely-overlaid titlebar */
+  .body{flex:1; display:flex; flex-direction:column; min-height:0; background:var(--content-bg); position:relative}
+  .spring{flex:1 1 auto; min-width:24px; align-self:stretch}
+  .tgroup{display:flex; align-items:center; gap:6px}
+  .tlabel{font-size:var(--fs-caption); color:var(--muted)}
+  .sep{width:1px; height:22px; background:var(--hairline); margin:0 2px}
+  .lights{display:none}                 /* see the header note */
+  .titlebar > .tb-blur{display:none}    /* see the header note */
+  .titlebar::after{content:none}
+
+  /* Browser-mockup mode (html.mockup) draws a fake desktop + window card when there is no native
+     window. Windows 11 window corners are 8px (the shell's own rounding), not macOS's 12. */
+  html.mockup body{padding:24px; display:flex; align-items:center; justify-content:center;
+    background:radial-gradient(120% 120% at 18% 0%,var(--wallpaper-1),transparent 60%),radial-gradient(120% 120% at 100% 100%,var(--wallpaper-2),transparent 55%),var(--wallpaper-3)}
+  html.mockup .window{width:min(1240px,100%); height:min(820px,calc(100vh - 48px)); border-radius:8px; box-shadow:var(--shadow); border:1px solid var(--hairline-strong)}
+
+  /* ── Title bar ────────────────────────────────────────────────────────────────────────────────
+     32px is TitleBarCompactHeight (TitleBar_themeresources.xaml) and is the FLOOR here, not the
+     fixed height: this bar also carries a menu bar and a toolbar, which is exactly the case WinUI's
+     own TitleBarExpandedHeight (48) exists for, and the bar is allowed to grow to whatever its
+     content needs between those two numbers. The 16px leading inset is TitleBarLeftPaddingWidth (2)
+     + TitleBarLeftHeaderPaddingWidth (14); the icon is TitleBarIconMaxWidth/Height (16), and the
+     16px after it is TitleBarIconMargin.
+     No translucency: a Windows title bar is the same Mica sheet as the window, so it is painted with
+     the flat --toolbar-bg and separated from the content by a 1px divider rather than by a blur. */
+  .titlebar{position:absolute; top:0; left:0; right:0; z-index:30; display:flex; align-items:center; gap:8px;
+    min-height:32px; padding:2px 8px 2px 16px; background:var(--toolbar-bg);
+    border-bottom:1px solid var(--hairline); flex-wrap:nowrap; white-space:nowrap}
+  .titlebar:has(.capbtns){padding-inline-end:calc(46px*3)}   /* reserve the three caption buttons' strip so nothing in the bar can slide under them. :has, because the buttons are injected by the shell and may be absent (browser preview) — a hard 138px reserve would then leave a bald patch */
+  html.mockup .titlebar{padding-inline-start:12px}
+
+  /* THE INACTIVE WINDOW. Windows does not retint the bar; it fades the bar's CONTENTS.
+     TitleBar_themeresources.xaml: TitleBarDeactivatedOpacity 0.5 and TitleBarDeactivatedForegroundBrush
+     → TextFillColorTertiary. Both are used: text drops to the tertiary ink, non-text (the file icon,
+     the SF-mask glyphs) drops to half opacity. `.win-inactive` is the same hook macOS uses, set by
+     the shell's focus observer, so nothing on the JS side has to know which skin is loaded. */
+  .titlebar.win-inactive .tbfname,.titlebar.win-inactive .tbfmeta,.titlebar.win-inactive .tbtn,
+  .titlebar.win-inactive .menubar-item,.titlebar.win-inactive #modelSel{color:var(--label-tertiary)}
+  .titlebar.win-inactive .sfi,.titlebar.win-inactive .tbficon{opacity:.5}
+  .titlebar.win-inactive .tbficon.img{opacity:.5; filter:grayscale(1)}
+  .titlebar.win-inactive .capbtn{color:var(--label-tertiary)}
+  .titlebar .tbtn,.titlebar .tbfname,.titlebar .tbficon,.titlebar .sfi,.titlebar .menubar-item{
+    transition:color var(--dur-fast) linear, background-color var(--dur-fast) linear, opacity var(--dur-fast) linear}
+
+  /* ── Caption buttons ──────────────────────────────────────────────────────────────────────────
+     SIZE IS A JUDGEMENT CALL AND SHOULD BE READ AS ONE. WinUI's own `WindowCaptionButton` template
+     is 40×28 (that is the in-app title-bar control); the Windows 11 SHELL's caption buttons are
+     widely measured at 46×32 and Microsoft publishes no resource for them — they are drawn by DWM,
+     not by XAML, and there is nothing in the MIT repo to cite. 46×32 is chosen because this bar is
+     the window's real title bar rather than a control inside a page, so it should match the shell.
+     If that ever needs revisiting, the two candidate numbers are the whole of the argument.
+     CLOSE-BUTTON RED: hover #E81123, pressed #F1707A. ⚠️ DO NOT "fix" these to #C42B1C. #C42B1C is
+     `SystemFillColorCritical` (verified in Common_themeresources_any.xaml, Light dictionary) — the
+     ERROR SEMANTIC, the colour of a validation message. It is not a caption colour, it has never
+     been one, and it is a shade that looks close enough to invite exactly that substitution. */
+  .titlebar .capbtns{position:absolute; top:0; right:0; height:32px; display:flex; z-index:1}
+  .capbtn{width:46px; height:32px; flex:none; display:grid; place-items:center; border:none; padding:0;
+    background:transparent; color:var(--label-primary); cursor:default; border-radius:0;
+    -webkit-app-region:no-drag; transition:background-color var(--dur-fast) linear}
+  .capbtn:hover{background:var(--subtle-hover)}
+  .capbtn:active{background:var(--subtle-press)}   /* the press RECEDES — see the elevation note on .fluent-stroke */
+  .capbtn.close:hover{background:#e81123; color:#fff}
+  .capbtn.close:active{background:#f1707a; color:#fff}
+  .capbtn svg{width:10px; height:10px}   /* the shell's caption glyphs are 10px in a 46×32 box; Segoe Fluent Icons is not assumed to be installed, so the JS side draws them as inline SVG */
+
+  /* ── Menu bar ─────────────────────────────────────────────────────────────────────────────────
+     Lives in the title-bar strip, which is where Windows 11 puts an app's menus when the app owns
+     its title bar. Appearance only — another module builds and drives the items. 28px tall with the
+     4px ControlCornerRadius and a SubtleFill hover, i.e. the same resting-transparent vocabulary a
+     toolbar button uses; an OPEN menu keeps the hover fill so the button reads as the flyout's
+     anchor while the flyout is up. */
+  .menubar{display:flex; align-items:center; gap:2px; flex:none}
+  /* TWO CLASS NAMES, ONE APPEARANCE. `.menubar-item` is this kit's own name; `.mbtn` is what
+     js/ui/menubar.js actually emits. Both are listed rather than one being picked, because the kit
+     and the module are written independently and a kit that only dresses the name it invented would
+     leave the real bar as a row of default <button> chrome — which is exactly how this was found. */
+  .menubar-item,.menubar .mbtn{display:inline-flex; align-items:center; height:28px; padding:0 10px; border:none;
+    border-radius:var(--r-control); background:transparent; color:var(--label-primary);
+    font:inherit; font-size:var(--fs-body); line-height:var(--lh-body); cursor:default; white-space:nowrap;
+    -webkit-user-select:none; user-select:none; transition:background-color var(--dur-fast) linear}
+  .menubar-item:hover,.menubar .mbtn:hover{background:var(--subtle-hover)}
+  .menubar-item:active,.menubar .mbtn:active{background:var(--subtle-press); color:var(--label-secondary)}
+  .menubar-item.open,.menubar-item[aria-expanded="true"],.menubar .mbtn.open{background:var(--subtle-hover)}
+  .menubar .mbtn u{text-decoration:none}   /* the mnemonic letter. Windows shows the underline only once Alt has been pressed, and menubar.js signals that by putting `.alt` on the bar — until then the <u> is a marker, not a decoration. */
+  .menubar.alt .mbtn u{text-decoration:underline; text-underline-offset:2px}
+
+  /* The menu-bar flyouts are `.fpmenu.mbmenu`, so they inherit the whole menu recipe above; these
+     are only the row internals that a menu-bar item has and a popup-button item does not. */
+  .fpmenu.mbmenu{min-width:200px}
+  .fpitem .fplabel{flex:1 1 auto; min-width:0; overflow:hidden; text-overflow:ellipsis}
+  .fpitem .fpkbd{flex:none; margin-inline-start:24px; color:var(--menu-shortcut); font-size:var(--fs-body);
+    direction:ltr; unicode-bidi:isolate}   /* MenuFlyoutItemKeyboardAcceleratorTextForeground → TextFillColorSecondaryBrush, at the row's own size. 24px gap = MenuFlyoutItemChevronMargin, the same trailing gutter a submenu chevron gets. */
+  .fpitem .fpchev{flex:none; margin-inline-start:24px; color:var(--label-secondary)}
+  .fpitem.fpsub{justify-content:space-between}
+  .fpitem[disabled],.fpitem.disabled{color:var(--label-tertiary); pointer-events:none}   /* MenuFlyoutItemForegroundDisabled → TextFillColorDisabledBrush */
+
+  /* ── The proxy-title block (file icon + name + meta) ─────────────────────────────────────────── */
+  .tbfile{display:flex; flex-direction:row; align-items:center; gap:8px; min-width:0; max-width:360px;
+    padding:2px 6px; border-radius:var(--r-control); line-height:1.2; cursor:default;
+    -webkit-user-select:none; user-select:none; overflow:hidden}
+  .tbficon{width:16px; height:16px; flex:none; background-color:var(--label-secondary)}   /* TitleBarIconMaxWidth/Height = 16. NOTE the macOS kit slides this icon out from under the filename on hover; that is a macOS proxy-icon idiom (the Finder proxy icon appears when you reach for it) and has no Windows counterpart, so the icon is simply always visible here. */
+  .tbficon.img{width:16px; height:16px; background:none; object-fit:contain}
+  .tbftext{display:flex; flex-direction:row; align-items:baseline; min-width:0; gap:8px}   /* Windows sets a title and its SUBTITLE side by side on one line (TitleBar's Title/Subtitle slots), where macOS stacks a proxy title over its metadata */
+  .tbfname{font-size:var(--fs-caption); line-height:var(--lh-caption); font-weight:var(--fw-normal); color:var(--label-primary);
+    overflow:hidden; text-overflow:ellipsis; white-space:nowrap}   /* Caption 12/16 Regular — TitleBar.xaml sets its title with `Style="{StaticResource CaptionTextBlockStyle}"`, and CaptionTextBlockStyle overrides the base style's SemiBold back to Normal. A Windows title is NOT bold. */
+  .tbfile:has(.tbfmeta:not(:empty)) .tbfname{font-size:var(--fs-caption)}   /* …and it does not shrink when a subtitle appears, unlike the macOS block */
+  .tbfmeta{font-size:var(--fs-caption); line-height:var(--lh-caption); color:var(--label-secondary);
+    overflow:hidden; text-overflow:ellipsis; white-space:nowrap}   /* TitleBarSubtitleForegroundBrush → TextFillColorSecondaryBrush */
+  .tbfmeta:empty{display:none}
+
+  /* …but NEITHER IS SHOWN, and the two rules above are kept only so the block is styled correctly if
+     it is ever re-enabled. On macOS the proxy-title block IS the window's title — the real NSWindow
+     title is hidden (`setTitleVisibility_(HIDDEN)`) and this block replaces it, subtitle included.
+     Windows keeps its own title bar and puts the filename there already, so repeating it in-content
+     is a second copy of the same string; and it has to share the strip with the menu bar, which left
+     it squeezed to "e… S…" — two ellipses that say nothing. The document ICON stays: a 16px icon at
+     the leading edge of the title bar is the Windows convention (TitleBarIconMaxWidth = 16), and it
+     is also the click target for the folder-path menu, which has no other home here.
+     "Sentence X of Y" is not lost — the status bar carries the sentence count already. */
+  html[data-platform="win"] .tbftext{display:none}
+  html[data-platform="win"] .tbfile{max-width:none; flex:none}   /* icon only: nothing left to ellipsise, so stop reserving 360px of the strip the menu bar needs */
+
+  /* ── Toolbar ──────────────────────────────────────────────────────────────────────────────────
+     A Fluent CommandBar is a row of AppBarButtons: TRANSPARENT AT REST, SubtleFill on hover. So the
+     macOS "pill" — a translucent glass capsule grouping two or three buttons — becomes nothing at
+     all: `.tbpill` keeps only its layout job. The grouping that the pill used to carry visually is
+     carried by the 1px separators between groups instead. */
+  .tbright{display:flex; align-items:center; gap:2px; flex:none}
+  .tbright > .tbgroup.tbg-wide{margin:0 2px}
+  .tbgroup{display:flex; flex-direction:column; align-items:center}
+  .tbpill{display:inline-flex; align-items:center; gap:0; padding:0; border:none; background:transparent;
+    box-shadow:none; border-radius:0; position:relative}
+  .tbpill::before,.tbpill::after{content:none}   /* the Liquid-Glass sheen + hotspot layers — see the header note */
+  .tbtn{display:inline-flex; align-items:center; justify-content:center; gap:6px; height:28px; padding:0 10px;
+    border-radius:var(--r-control); border:none; background:transparent; color:var(--label-primary);
+    font:inherit; font-size:var(--fs-body); font-weight:var(--fw-normal); cursor:default; white-space:nowrap;
+    text-decoration:none; transition:background-color var(--dur-fast) linear}
+  .tbtn.icon{width:32px; min-width:32px; height:28px; padding:0}
+  .tbtn:hover{background:var(--subtle-hover)}
+  .tbtn:active{background:var(--subtle-press); color:var(--label-secondary)}   /* PRESSED SINKS: the fill goes LIGHTER than hover and the text drops a level. That is Fluent's elevation 2 → 1, and it is the opposite of the usual "pressed = darker" reflex — SubtleFillColorTertiary really is a lower alpha than SubtleFillColorSecondary in both dictionaries. */
+  .tbtn:disabled{cursor:default; pointer-events:none}
+  .tbtn:disabled > .sfi,.tbtn:disabled > .tblabel{opacity:.36}   /* TextFillColorDisabled is black 36 % / white 36 % — near enough identical in both themes, so one opacity serves */
+  .tbtn.active,.tbtn.active:hover{background:var(--accent-weak); color:var(--accent); box-shadow:none}
+  .tbtn.active .sfi{background-color:var(--accent)}
+  #btnOptions.active{background:var(--accent-weak); color:var(--accent)}
+  #btnOptions.active .sfi{background-color:var(--accent)}
+  #btnOptions.active:hover{background:color-mix(in srgb,var(--accent) 22%,transparent)}
+  .titlebar:not(.tb-textonly) #btnOptions.tbtn.icon{width:32px; height:28px}   /* the macOS kit gives this one button a bigger 36×36 box; a Fluent command bar has one button size */
+  /* the 1px rule between adjacent buttons inside a group */
+  .tbpill > .tbtn + .tbtn::before,.tbmodel > .tbtn::before{content:""; position:absolute; left:-.5px; top:6px; bottom:6px;
+    width:1px; background:var(--sep-line); pointer-events:none; z-index:1}
+  #notationPill > .tbtn + .tbtn::before{content:none}   /* a segmented picker's members are adjacent by design; a rule between them would read as a division */
+  .tbpill > .tbtn:hover::before,.tbpill > .tbtn:hover + .tbtn::before,.tbmodel > .tbtn:hover::before,
+  .tbmodel > .tbtn:hover + .tbtn::before,.tbpill > .tbtn.active::before,.tbpill > .tbtn.active + .tbtn::before,
+  .tbmodel > .tbtn.active::before,.tbmodel > .tbtn.active + .tbtn::before{background:transparent}
+  .titlebar.win-inactive .tbpill > .tbtn + .tbtn::before,.titlebar.win-inactive .tbmodel > .tbtn::before{opacity:.5}
+  .tbzoom{gap:0; padding:0}
+  .tbzoom .tbtn.icon{width:32px; height:28px}
+  .tbzoom .tbtn.icon .sfi{width:16px; height:16px}
+  /* MODEL MANAGER + HELP: 20px, not the 24px `.tbtn.icon .sfi` gives every other icon button.
+     Not because their BOX was wrong — measured, all eight 24px buttons share one box — but because
+     ink fills it differently. `brain_circuit` and `question_circle` are full-bleed round glyphs that
+     reach all four edges of a 24 viewBox, where `arrow_undo`/`text_add`/`options` are open shapes
+     using ~70 % of theirs. At one box size the round pair therefore reads a size larger than its
+     neighbours. Same reason `app.css` already scopes `#notationPill` to 20px, and the value is
+     borrowed from it so the toolbar has two icon sizes rather than three. */
+  #btnModels .sfi,#btnGuide .sfi{width:20px; height:20px}
+  .tbtn.model{width:auto; padding:0 10px; gap:4px; border-radius:var(--r-control)}
+  .tbtn.model .chev{width:9px; height:6px; opacity:.6; flex:none}
+  .tblabel{display:none; font-weight:var(--fw-normal); color:var(--label-primary); line-height:1; white-space:nowrap}
+  .pilllabel{display:none; margin-top:2px; font-size:var(--fs-caption); line-height:var(--lh-caption);
+    font-weight:var(--fw-normal); color:var(--label-secondary); text-align:center; white-space:nowrap;
+    -webkit-user-select:none; user-select:none}
+  .titlebar.tb-labels .pilllabel{display:block}
+  .titlebar.tb-labels{align-items:flex-start; padding-block:4px 4px}
+  .titlebar.tb-labels .tbgroup.both-disabled .pilllabel,
+  .titlebar.tb-textonly .tbgroup.both-disabled .pilllabel{color:var(--label-tertiary)}
+  .titlebar.tb-textonly .tbpill{display:none}
+  .titlebar.tb-textonly .tbgroup{flex-direction:row; align-items:center}
+  .titlebar.tb-textonly .pilllabel{display:inline-flex; align-items:center; margin-top:0; height:28px; padding:0 10px;
+    font-size:var(--fs-body); color:var(--label-primary); border-radius:var(--r-control); cursor:default;
+    background:transparent; border:none; box-shadow:none}   /* Text Only mode: the label IS the button, and a Fluent command-bar button is transparent at rest */
+  .titlebar.tb-textonly .pilllabel:hover{background:var(--subtle-hover)}
+  .titlebar.tb-textonly .pilllabel:active{background:var(--subtle-press); color:var(--label-secondary)}
+  .titlebar.tb-labels .tbfile,.titlebar.tb-labels .tbfile:has(.tbfmeta:empty){align-self:center}
+
+  /* ── THE ASYMMETRIC CONTROL STROKE ────────────────────────────────────────────────────────────
+     The signature Windows 11 detail, and the thing a "Fluent-looking" stylesheet most often gets
+     wrong. A filled control's border is not one colour: it is ControlElevationBorderBrush, a 3px
+     ramp from ControlStrokeColorSecondary to ControlStrokeColorDefault, with the strong end at the
+     BOTTOM in light (it reads as a shadow the control sits on) and at the TOP in dark (it reads as
+     a highlight catching light from above). Everything about which end is which lives in
+     --ctrl-stroke-grad (fluent-tokens.css) — read that token's comment before touching this.
+     The CSS mechanism is a two-layer background with different clip boxes: the fill is clipped to
+     the padding box, the gradient to the border box, and the border itself is transparent so the
+     gradient shows through exactly where a border would be. `background-origin:border-box` is
+     required or the fill layer is offset by the border width. */
+  .drawer-btn,.gm-editbtn,.sheet .tbtn,.sheet .wherebtn,.sheet .wherebrowse,select.sel,.fmtpill:not(.disabled){
+    border:1px solid transparent; border-radius:var(--r-control);
+    background-image:linear-gradient(var(--_fill,var(--fill-secondary)),var(--_fill,var(--fill-secondary))),var(--ctrl-stroke-grad);
+    background-origin:border-box; background-clip:padding-box,border-box;
+    transition:background-color var(--dur-fast) linear, filter var(--dur-fast) linear}
+  /* PRESSED SINKS (elevation 2 → 1): the gradient collapses to a FLAT weak stroke — the control
+     stops standing off the page — and the label drops to secondary. Both halves together, because a
+     press that only changes the fill reads as a hover that got darker. */
+  .drawer-btn:active,.gm-editbtn:active,.sheet .tbtn:active,.sheet .wherebtn:active,
+  .sheet .wherebrowse:active,.fmtpill:not(.disabled):active{
+    background-image:linear-gradient(var(--_fill,var(--fill-secondary)),var(--_fill,var(--fill-secondary))),
+      linear-gradient(var(--ctrl-stroke-weak),var(--ctrl-stroke-weak));
+    color:var(--label-secondary); filter:none}
+
+  /* ── Focus ring ───────────────────────────────────────────────────────────────────────────────
+     FocusStrokeColorOuter / FocusStrokeColorInner, which invert between themes (near-black outer +
+     white inner in light; white outer + near-black inner in dark) so the ring reads against both the
+     control and the page. ⚠️ The THICKNESSES — 2px outer, 1px inner — are convention, not a citable
+     spec: WinUI draws this ring in each control's own template as a pair of `Rectangle`s rather than
+     as a shared theme resource, so there is no single number to quote. The inner ring is drawn first
+     (tight against the control), the outer around it. */
+  :focus-visible{outline:none}
+  .tbtn:focus-visible,.menubar-item:focus-visible,.capbtn:focus-visible,.drawer-btn:focus-visible,
+  .gm-editbtn:focus-visible,.fmtpill:focus-visible,.fpitem:focus-visible,.ctx button:focus-visible,
+  .sheet .tbtn:focus-visible,.findnav:focus-visible,.findclose:focus-visible,.toggles button:focus-visible{
+    box-shadow:0 0 0 1px var(--focus-inner), 0 0 0 3px var(--focus-outer)}
+
+  /* ── Text fields ──────────────────────────────────────────────────────────────────────────────
+     A Fluent TextBox is a filled box whose BOTTOM edge is heavier than its other three
+     (ControlStrongStrokeColorDefault), and on focus that bottom edge becomes a 2px accent line. The
+     step is HARD — the accent line replaces the strong line outright; it does not fade in and it is
+     not a gradient. The other three edges stay put, and the fill goes solid
+     (ControlFillColorInputActive) at the same moment. */
+  .sheet textarea,.sheet input[type=text],.ctx .ctxinput .cin,.tbsearch,.findbar input{
+    border-radius:var(--r-control); border:1px solid var(--field-border); border-bottom:1px solid var(--strong-stroke);
+    background:var(--field-bg); color:var(--text); font:inherit; font-size:var(--fs-body); outline:none;
+    transition:border-color var(--dur-fast) linear, background-color var(--dur-fast) linear}
+  .sheet textarea:focus,.sheet input:focus,.ctx .ctxinput .cin:focus,.tbsearch:focus-within{
+    background:var(--edit-bg); border-bottom:2px solid var(--accent); box-shadow:none;
+    padding-bottom:calc(var(--_fieldpb,9px) - 1px)}   /* the extra border pixel is taken out of the padding so the field does not grow by 1px and shove the layout on focus */
+  .sheet textarea,.sheet input[type=text]{width:100%; padding:9px 12px; --_fieldpb:9px}
+  .sheet textarea{resize:vertical; min-height:60px; font-family:var(--ui-mono)}
+  .sheet label.fld{display:flex; flex-direction:column; gap:5px; font-size:var(--fs-caption); line-height:var(--lh-caption); color:var(--label-secondary); font-weight:var(--fw-semibold)}
+  .ctx .ctxinput .cin{width:100%; padding:5px 8px; --_fieldpb:5px}
+
+  /* ── Native popup button (the model picker) ───────────────────────────────────────────────────
+     A Fluent ComboBox is a filled control with the same asymmetric stroke (applied above) and a
+     single chevron.down, not macOS's up/down pair. */
+  select.sel{appearance:none; -webkit-appearance:none; height:32px; cursor:default; --_fill:var(--field-bg);
+    color:var(--text); font:inherit; font-size:var(--fs-body); font-weight:var(--fw-normal); padding:0 30px 0 11px;
+    box-shadow:none;
+    background-image:linear-gradient(var(--field-bg),var(--field-bg)),var(--ctrl-stroke-grad),
+      url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'><path d='M2.5 4.5L6 8l3.5-3.5' fill='none' stroke='%23666' stroke-width='1.1' stroke-linecap='round' stroke-linejoin='round'/></svg>");
+    background-clip:padding-box,border-box,padding-box; background-repeat:no-repeat,no-repeat,no-repeat;
+    background-position:0 0,0 0,right 10px center; background-size:auto,auto,12px 12px}
+  select.sel:hover{--_fill:var(--subtle-hover)}
+  select.sel:focus{outline:none; box-shadow:0 0 0 1px var(--focus-inner), 0 0 0 3px var(--focus-outer)}
+  .tbmodel{gap:2px}
+  .tbmodel #modelSel{height:28px; border-color:transparent; background-image:none; background-color:transparent;
+    padding:0 28px 0 10px; font-size:var(--fs-body);
+    background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'><path d='M2.5 4.5L6 8l3.5-3.5' fill='none' stroke='%23666' stroke-width='1.1' stroke-linecap='round' stroke-linejoin='round'/></svg>");
+    background-repeat:no-repeat; background-position:right 8px center; background-clip:border-box}   /* inside the toolbar the picker is transparent at rest like every other command-bar item, so it loses the stroke entirely rather than keeping a ghost of it */
+  .tbmodel #modelSel:hover{background-color:var(--subtle-hover)}
+  .tbmodel #modelSel:focus{outline:none; box-shadow:0 0 0 1px var(--focus-inner), 0 0 0 3px var(--focus-outer)}
+  .tbmodel .tbtn.icon{border-radius:var(--r-control); width:32px}
+
+  /* ── Search capsule + find bar ────────────────────────────────────────────────────────────────
+     No capsule: a Fluent AutoSuggestBox is a 4px-cornered text field. The glass sheen/hotspot
+     pseudo-elements are switched off outright. */
+  .tbsearch{display:inline-flex; align-items:center; gap:8px; height:32px; padding:0 11px; position:relative;
+    color:var(--label-secondary); min-width:160px; max-width:240px; --_fieldpb:0px}
+  .tbsearch::before,.tbsearch::after{content:none}
+  .tbsearch svg{width:16px; height:16px; flex:none; opacity:.7}
+  .tbsearch input{border:none; background:transparent; outline:none; color:var(--text); font:inherit; font-size:var(--fs-body); width:100%; min-width:0}
+  .tbsearch input::placeholder,.findbar input::placeholder{color:var(--label-secondary)}
+  .tbsearch input::-webkit-search-cancel-button,.findbar input::-webkit-search-cancel-button{-webkit-appearance:none; appearance:none}
+  .tbcount{font-size:var(--fs-caption); color:var(--label-secondary); font-variant-numeric:tabular-nums; white-space:nowrap; flex:none}
+  .findbar{position:fixed; top:96px; right:14px; z-index:500; display:none; align-items:center; gap:8px; height:40px;
+    padding:0 8px 0 12px; border-radius:var(--r-menu); border:1px solid var(--flyout-border);
+    background:var(--menu-bg); box-shadow:var(--lg-menu-shadow);
+    -webkit-backdrop-filter:blur(30px) saturate(1.25); backdrop-filter:blur(30px) saturate(1.25)}
+  .findbar.show{display:flex}
+  .findbar svg{width:16px; height:16px; flex:none; opacity:.7; color:var(--label-secondary)}
+  .findbar input{border:none; border-bottom:none; background:transparent; outline:none; color:var(--text); font:inherit; font-size:var(--fs-body); width:200px; min-width:0}
+  .findbar .tbcount{margin:0 2px}
+  .findnav,.findclose{display:grid; place-items:center; width:28px; height:28px; border:none; border-radius:var(--r-control);
+    background:transparent; color:var(--label-primary); cursor:default; flex:none; transition:background-color var(--dur-fast) linear}
+  .findnav svg{width:12px; height:8px; opacity:.8}
+  .findnav:hover,.findclose:hover{background:var(--subtle-hover)}
+  .findnav:active,.findclose:active{background:var(--subtle-press)}
+  .findclose{font-size:13px; color:var(--label-secondary)}
+  .findbar button{border:none; background:transparent; color:var(--label-secondary); border-radius:var(--r-control);
+    width:24px; height:24px; cursor:default; display:grid; place-items:center; font-size:14px; line-height:1}
+  .findbar button:hover{background:var(--subtle-hover); color:var(--label-primary)}
+  .sblock.findcur{box-shadow:inset 3px 0 0 var(--warn)}
+  mark.findhit{background:color-mix(in srgb,var(--warn) 42%,transparent); color:inherit; border-radius:2px; padding:0}
+  .sblock.findcur mark.findhit{background:var(--warn); color:var(--win-bg)}
+  .sid-in.findsidhit{background:color-mix(in srgb,var(--warn) 32%,transparent)!important}
+
+  /* ── MENUS ────────────────────────────────────────────────────────────────────────────────────
+     Every number here is MenuFlyout_themeresources.xaml, and together they make the one shape that
+     says "Windows menu" more than any colour does — a rounded backplate INSET FROM THE MENU'S OWN
+     EDGES rather than a full-bleed highlight bar:
+       MenuFlyoutPresenterThemePadding  0,2,0,2   → the flyout's own padding is 2px top/bottom only
+       MenuFlyoutPresenterBorderThemeThickness 1  → 1px, SurfaceStrokeColorFlyout
+       OverlayCornerRadius              8         → the flyout
+       MenuFlyoutItemMargin             4,2,4,2   → THE INSET: each row is 4px in from each side
+       ControlCornerRadius              4         → the row's backplate
+       MenuFlyoutThemeMinHeight         32
+       MenuFlyoutItemThemePadding       11,8,11,9 → note the asymmetry: 8 above, 9 below
+       MenuFlyoutSeparatorThemePadding  -4,1,-4,1 → the separator CANCELS the 4px inset, so a rule
+                                                    runs the menu's full width while every row stops
+                                                    short of it. Reproduced with negative margins.
+     Item states are SubtleFill, not the accent: MenuFlyoutItemBackgroundPointerOver →
+     SubtleFillColorSecondaryBrush and …Pressed → SubtleFillColorTertiaryBrush. PRESSED IS LIGHTER
+     THAN HOVER, here as everywhere else in Fluent. The foreground does NOT change on hover
+     (MenuFlyoutItemForegroundPointerOver is TextFillColorPrimaryBrush, same as at rest) — a Windows
+     menu row never inverts to white-on-accent the way a macOS one does, which is why the `.fpitem`
+     and `.acmenu` rules below are retargeted rather than merely retinted.
+     Backdrop: in-app Acrylic — blur 30 (AcrylicBrush.h sc_blurRadius), saturate 1.25 (approx, see
+     the token), over the tint in --menu-bg. */
+  .fpmenu,.ctx,.acmenu,.drawer-pop{
+    background:var(--menu-bg); border:1px solid var(--flyout-border); border-radius:var(--r-menu);
+    box-shadow:var(--lg-menu-shadow); padding:2px;
+    -webkit-backdrop-filter:blur(30px) saturate(1.25); backdrop-filter:blur(30px) saturate(1.25)}
+  .fpmenu{position:fixed; z-index:10000; min-width:190px}
+  .ctx{position:fixed; z-index:60; min-width:224px; display:none}
+  .ctx.show{display:block}
+  .ctx.defctx{min-width:0}
+  .acmenu{position:fixed; z-index:70; display:none; max-height:280px; overflow-y:auto}
+  .acmenu.show{display:block}
+  /* the shared ROW: 4px side inset, 4px radius, 32 min-height, 11/8/11/9 padding */
+  .fpitem,.ctx button,.acmenu .acrow{
+    display:flex; align-items:center; gap:8px; width:auto; min-height:32px; box-sizing:border-box;
+    margin:2px 4px; padding:8px 11px 9px; border:none; border-radius:var(--r-control);
+    background:transparent; color:var(--label-primary); font:inherit; font-weight:var(--fw-normal);
+    font-size:var(--fs-body); line-height:var(--lh-body); text-align:start; cursor:default; white-space:nowrap;
+    transition:background-color var(--dur-fast) linear}
+  .fpitem:hover,.ctx button:hover,.acmenu .acrow:hover,.acmenu .acrow.hi{background:var(--subtle-hover); color:var(--label-primary)}
+  .fpitem:active,.ctx button:active,.acmenu .acrow:active{background:var(--subtle-press); color:var(--label-secondary)}
+  .fpitem:hover .sfi{background-color:currentColor}
+  .fpitem.cur{font-weight:var(--fw-semibold)}   /* SEMIBOLD, never bold: Segoe UI Variable's UI ramp is Regular + SemiBold only, and emphasis is a weight step */
+  .fpitem .sfi,.ctx button .sfi{width:16px; height:16px; flex:none}
+  .fpitem .fpimg{width:16px; height:16px; flex:none; object-fit:contain}
+  .fpmenu .fpcheck,.fpmenu.tbmodemenu .fpcheck{width:28px; flex:none; text-align:start; opacity:1}   /* THE ICON COLUMN is 28px wide in a Windows menu — a checkmark, a glyph and a blank all reserve the same gutter so every label in the menu starts on one line */
+  .tbmodemenu.tb-nochk .fpcheck{display:none}
+  .fpmenu.tbmodemenu{min-width:0; width:max-content}
+  .tbmodemenu .fpitem{padding:8px 11px 9px; gap:8px}
+  .tbmodemenu:not(.tbgroupmenu) .fpitem{font-size:var(--fs-body); font-weight:var(--fw-normal)}
+  .tbgroupmenu .fpitem{font-size:var(--fs-body); min-height:32px}
+  .tbgroupmenu .fpsep,.ctx hr{border:none; border-top:1px solid var(--hairline); height:0;
+    margin:1px -2px}   /* MenuFlyoutSeparatorThemePadding -4,1,-4,1: the negative sides cancel the item inset so the rule spans the menu while the rows do not. Here the menu's own padding is 2px, so -2px is what reaches its edge. */
+  .ctx hr.note-rule{margin:1px -2px 3px}
+  /* the context menu's own extras */
+  .ctx button{position:relative; justify-content:space-between; gap:16px; -webkit-user-select:none; user-select:none}
+  .ctx button.danger{color:var(--bad)}
+  .ctx button.danger:hover{background:var(--subtle-hover)}
+  .ctx .kbd{font-size:var(--fs-body); font-weight:var(--fw-normal); color:var(--menu-shortcut); direction:ltr; unicode-bidi:isolate}   /* MenuFlyoutItemKeyboardAcceleratorTextForeground → TextFillColorSecondaryBrush, at the row's own size */
+  .ctx .mlbl{direction:ltr; unicode-bidi:isolate}
+  .ctx .expand{font-size:var(--fs-caption); color:var(--label-secondary); font-style:normal; white-space:nowrap; direction:ltr; unicode-bidi:isolate}
+  .ctx button:hover .expand{color:var(--label-secondary)}
+  .ctx .rightgrp{display:flex; align-items:center; align-self:center; gap:8px; flex:none; direction:ltr}
+  .ctx .subarr{display:inline-block; width:12px; height:12px; flex:none; align-self:center; background-color:currentColor;
+    -webkit-mask:var(--sf-chevronright) no-repeat center/contain; mask:var(--sf-chevronright) no-repeat center/contain}
+  .ctx .hdr{font-size:var(--fs-caption); line-height:var(--lh-caption); font-weight:var(--fw-semibold); color:var(--menu-hdr);
+    padding:6px 15px 4px; text-align:start; pointer-events:none; user-select:none}   /* 15 = the row's 11px padding + the 4px inset, so a header sits on the same optical line as the labels below it */
+  .ctx .note{font-size:var(--fs-caption); line-height:var(--lh-caption); font-weight:var(--fw-normal); font-style:normal;
+    color:var(--label-secondary); padding:4px 15px 6px; text-align:start; pointer-events:none; user-select:none; white-space:normal}   /* NOT italic: Segoe UI Variable's UI ramp has no italic, and Microsoft's own rule is that emphasis is a weight step */
+  .ctx button.opt{padding-inline-start:39px}   /* the 28px icon column + the row's 11px padding */
+  .ctx .ck{position:absolute; inset-inline-start:15px; top:50%; transform:translateY(-50%); font-size:12px; opacity:1}
+  .ctx button:hover .ck{opacity:1}
+  .ctx .twocolwrap{display:flex; gap:0; align-items:stretch}
+  .ctx .mcol{min-width:196px}
+  .ctx .mcol:first-child{padding-inline-end:8px}
+  .ctx .mcol + .mcol{border-inline-start:1px solid var(--hairline); padding-inline-start:8px}
+  .ctx .catgrp{break-inside:avoid}
+  .ctx.defctx .hdr{padding-inline-start:15px}
+  .ctx .ctxinput{padding:4px 6px}
+  /* the flyout (submenu) */
+  .ctx-sub{z-index:61; max-height:min(420px,70vh); overflow-y:auto; overflow-x:hidden}
+  .ctx-sub.ctx-sub-foot{display:flex; flex-direction:column; overflow:hidden; padding-inline:0}
+  .ctx-sub.ctx-sub-foot>.ctx-sub-scroll{flex:1 1 auto; min-height:0; overflow-y:auto; overflow-x:hidden; padding-inline:0}
+  .ctx-sub.ctx-sub-foot>.ctx-sub-footer{flex:none; padding-inline:0}
+  .ctx-sub.defctx{max-width:320px; font-family:var(--token-font)}
+  .ctx-sub.defctx button{white-space:normal}
+  .ctx-sub.defctx .mlbl{min-width:0; overflow-wrap:break-word}
+  .ctx-sub.defctx[dir="rtl"] .mlbl{text-align:right}
+  .ctx-sub.defctx .ck{top:8px; transform:none; line-height:var(--lh-body)}
+  .ctx-sub.defctx .hdr{position:sticky; top:-2px; z-index:1; background:var(--menu-bg);
+    -webkit-backdrop-filter:blur(30px) saturate(1.25); backdrop-filter:blur(30px) saturate(1.25)}
+  .ctx-sub.defctx.ctx-sub-foot .hdr{top:0}
+  .ctx-sub.defctx .catgrp:only-child > .hdr:only-child{position:static; padding-block:8px 9px; line-height:var(--lh-body);
+    background:none; -webkit-backdrop-filter:none; backdrop-filter:none}
+  /* the autocomplete dropdown's own extras */
+  .acmenu .acrow{display:block; padding:8px 11px 9px}
+  .acmenu .ac-grouph{font-size:var(--fs-caption); line-height:var(--lh-caption); font-weight:var(--fw-semibold);
+    letter-spacing:normal; text-transform:none; color:var(--menu-hdr); padding:6px 15px 2px; pointer-events:none; user-select:none}   /* a Windows group header is Body Strong in NORMAL case — no uppercase, no letterspacing */
+  .acmenu .ac-grouph:first-child{padding-top:4px}
+  .acmenu .ac-grouph ~ .acrow{padding-inline-start:23px}
+  .acmenu .acrow.has-exp{display:flex; justify-content:space-between; align-items:baseline; gap:14px}
+  .acmenu .acrow .aclbl{white-space:nowrap}
+  .acmenu .acrow .acexp{font-size:var(--fs-caption); color:var(--label-secondary); white-space:nowrap; overflow:hidden;
+    text-overflow:ellipsis; min-width:0; direction:ltr; unicode-bidi:isolate}
+  .acmenu .acrow:hover .acexp,.acmenu .acrow.hi .acexp{color:var(--label-secondary)}
+
+  /* ── Options bar + its toggles ────────────────────────────────────────────────────────────────
+     Flat, opaque, and separated by a 1px rule: no blur, because this bar sits over page content and
+     an in-app Acrylic strip there would blur the document as it scrolls under — which is a macOS
+     scroll-edge idea, not a Fluent one. */
+  .viewbar{position:absolute; left:0; right:0; top:var(--tbH,32px); z-index:20; display:flex; align-items:center; gap:10px;
+    padding:6px 16px; background:var(--toolbar-bg); border-bottom:1px solid var(--hairline); flex-wrap:wrap}
+  /* 6px vertical, matching the macOS bar. Cut to 4px once (32px control + 4 + 4 + 1px border = a 41px
+     bar rather than 45px) and put back: the taller bar is the wanted look. */
+  .viewbar.hidden{display:none}
+  .viewbar .lbl{font-size:var(--fs-caption); color:var(--label-secondary); font-weight:var(--fw-semibold); letter-spacing:normal; text-transform:none}
+  .viewbar .vsep{width:1px; height:20px; background:var(--sep-line); flex:none; align-self:center; margin:0 4px}
+  .toggles{display:inline-flex; border:1px solid var(--hairline-strong); border-radius:var(--r-control); overflow:hidden}
+  .toggles button{border:none; background:var(--field-bg); color:var(--label-secondary); font:inherit; font-size:var(--fs-body); padding:4px 11px; cursor:default}
+  .toggles button+button{border-left:1px solid var(--hairline)}
+  .toggles button.on{background:var(--accent); color:var(--on-accent)}   /* --on-accent, not a hard-coded #fff: WinUI's TextOnAccentFillColorPrimary is #FFFFFF in light and #000000 in dark, so the text on an accent fill flips with the theme */
+  .toggles button.disabled{opacity:.36; cursor:not-allowed}
+  .chk{display:inline-flex; align-items:center; gap:8px; font-size:var(--fs-body); color:var(--label-primary); cursor:default; white-space:nowrap; user-select:none}
+  /* A `.viewbar .chk{min-height:32px}` rule briefly lived here, to stop the 17px checkboxes floating
+     in the middle of the 32px control row. Reverted on request: the airier bar reads better than the
+     tightened one, and the space around a short control is not the same thing as slack. Don't
+     re-tighten it without asking. */
+  .chk.chk-off{opacity:.36; cursor:not-allowed}
+  .chk.chk-off input{cursor:not-allowed}
+  .chk input{margin:0; cursor:default; accent-color:var(--accent); width:16px; height:16px}   /* a Fluent CheckBox is 20px with a 16px box; the native control is used as-is and only tinted */
+  .tier-rm{margin-inline-start:4px; color:var(--label-secondary); font-size:var(--fs-caption); line-height:1; cursor:default;
+    text-decoration:none; padding:0 2px; border-radius:2px}
+  .tier-rm:hover{color:var(--bad); background:var(--subtle-hover)}
+
+  /* ── Drawers (a pull-down button + its flyout) ────────────────────────────────────────────────
+     A Fluent DropDownButton: filled control, asymmetric stroke (applied in the block above), chevron
+     that does NOT rotate — Windows leaves the glyph alone and shows the flyout instead. */
+  .drawers{display:inline-flex; align-items:center; gap:8px}
+  .drawer{position:relative}
+  .drawer-btn{display:inline-flex; align-items:center; gap:8px; height:32px; padding:0 11px;
+    color:var(--label-primary); font:inherit; font-size:var(--fs-body); font-weight:var(--fw-normal); cursor:default; box-shadow:none}
+  .drawer-btn:hover{--_fill:color-mix(in srgb,var(--subtle-hover),var(--fill-secondary))}
+  .drawer-btn svg{width:9px; height:6px; opacity:.7}
+  .drawer.open .drawer-btn{--_fill:var(--subtle-press); color:var(--label-secondary)}   /* an open drop-down reads as PRESSED (elevation 1), not as accented */
+  .drawer.open .drawer-btn svg{transform:none}
+  .drawer-pop{position:absolute; top:calc(100% + 4px); left:0; z-index:200; width:max-content; min-width:0;
+    padding:2px; display:none; flex-direction:column; gap:0}
+  .drawer.open .drawer-pop{display:flex}
+  .drawer-pop > label.chk{min-height:32px; box-sizing:border-box; margin:2px 4px; padding:0 11px; border-radius:var(--r-control)}   /* the same 4px-inset backplate every Windows menu row has */
+  .drawer-pop > label.chk:hover{background:var(--subtle-hover)}
+  .drawer-pop > label.chk + label.chk{margin-top:0}
+  /* CONTENT THAT IS NOT A MENU ROW. The 2px surface padding above is deliberately tight because a
+     menu row supplies its own inset — `margin:2px 4px` on the backplate, then 11px inside it — so a
+     row's text lands well clear of the border. Anything that is NOT a row has none of that, and was
+     rendering 3px from the edge: measured on the Colours popover, whose body is a `.relcol-grid`, not
+     a `.chk` list, and which read as pressed against all three sides. Excluding the row/header/
+     separator classes rather than adding a wrapper class keeps this working for the other popovers
+     that hold bespoke content, without any of them having to opt in. */
+  .drawer-pop > :not(label.chk):not(.drawer-group-h):not(.drawer-sep):not(.gm-editbtn){
+    padding:6px 9px; box-sizing:border-box}
+  .drawer-pop > .drawer-group-h + :not(label.chk):not(.drawer-sep){padding-top:2px}   /* a heading already spaces the block below it; don't pay twice */
+  .drawer-group-h{font-size:var(--fs-caption); line-height:var(--lh-caption); font-weight:var(--fw-semibold);
+    letter-spacing:normal; text-transform:none; color:var(--menu-hdr); margin:2px 4px 0; padding:6px 11px 2px; border-top:none}
+  .drawer-pop .drawer-group-h:first-child{padding-top:4px}
+  .drawer-sep{border:none; border-top:1px solid var(--hairline); margin:1px -2px; width:auto}
+  .gm-editbtn{height:32px; padding:0 11px; color:var(--label-primary); font:inherit; font-size:var(--fs-body);
+    font-weight:var(--fw-normal); cursor:default; text-align:left; white-space:nowrap; margin:4px}
+  .gm-editbtn:hover{--_fill:color-mix(in srgb,var(--subtle-hover),var(--fill-secondary))}
+
+  /* ── Status bar ───────────────────────────────────────────────────────────────────────────────
+     Flat and opaque (SolidBackgroundFillColorSecondary), with a 1px divider. No backdrop blur: it
+     sits on the window's own ground, and there is nothing behind it to sample. */
+  .statusbar{flex:none; display:flex; align-items:center; gap:14px; padding:0 16px; height:32px;
+    background:var(--statusbar-bg); border-top:1px solid var(--hairline);
+    font-size:var(--fs-caption); line-height:var(--lh-caption); color:var(--label-secondary)}
+  .statusbar .pill{display:inline-flex; align-items:center; gap:5px}
+  .statusbar .pill b{color:var(--label-primary); font-weight:var(--fw-semibold)}
+  .statusbar .pill[hidden]{display:none}
+  .busyind{gap:6px; color:var(--accent)}
+  .statusbar .busyind[hidden]{display:none}
+  .busyind .spin{width:12px; height:12px; border:1.5px solid var(--hairline-strong); border-top-color:var(--accent);
+    border-radius:50%; animation:busyspin .7s linear infinite; flex:none}
+  @keyframes busyspin{to{transform:rotate(360deg)}}
+  .busyind .prog{position:relative; width:60px; height:3px; border-radius:1.5px; background:var(--hairline-strong); overflow:hidden; flex:none; display:none}   /* a Fluent indeterminate ProgressBar is 3px, not 4 */
+  .busyind .prog i{position:absolute; top:0; left:-38%; height:100%; width:38%; border-radius:1.5px; background:var(--accent);
+    animation:busyslide 1.1s cubic-bezier(.5,0,.5,1) infinite}
+  @keyframes busyslide{0%{left:-38%}100%{left:100%}}
+  .busyind.bar .spin{display:none}
+  .busyind.bar .prog{display:block}
+  .dotmark{width:8px; height:8px; border-radius:50%; position:relative; top:1px}
+  .dot-good{background:var(--good)}
+  .dot-bad{background:var(--bad)}
+  /* the status-bar pull-down pills. Transparent at rest like every other subtle control; the
+     asymmetric stroke (applied in the block above) is what makes them read as pressable. */
+  .fmtpill{cursor:default; font:inherit; color:inherit; padding:1px 8px; line-height:1.7; --_fill:transparent}   /* NB no `background:transparent` here — the shorthand would reset the background-IMAGE the asymmetric-stroke rule above installs, wiping the border gradient. The fill is switched with --_fill instead, which is the only channel that rule leaves open. */
+  .fmtpill:hover{--_fill:var(--subtle-hover)}
+  .fmtpill.disabled{opacity:.36; cursor:default; border:1px solid var(--ctrl-stroke-weak); border-radius:var(--r-control); background:none}   /* excluded from the stroke rule by its own :not(.disabled), so this one states its flat border outright */
+  .fmtpill.disabled:hover{background:none}
+  .pillchev{width:9px; height:6px; flex:none; opacity:.7; margin-inline-start:auto}
+
+  /* ── Modal layer ──────────────────────────────────────────────────────────────────────────────
+     SmokeFillColorDefault is #4D000000 — black at 30 %, and THEME-INVARIANT in the source (the same
+     value in both dictionaries), which is why there is no dark override for the scrim below.
+     Noticeably heavier than the macOS scrim's 12 %: a Windows ContentDialog dims its window hard. */
+  .scrim{position:absolute; inset:0; background:rgba(0,0,0,0.3020); display:none; align-items:center; justify-content:center; z-index:50}
+  .scrim.show{display:flex}
+  .confirmscrim{z-index:90}
+  .sheet{margin-top:0; width:min(460px,90vw); background:var(--panel-bg);
+    border-radius:var(--r-dialog); box-shadow:var(--lg-dialog-shadow); border:1px solid var(--sheet-border);
+    overflow:hidden; animation:drop var(--dur-slow) var(--ease-in); max-height:calc(100vh - 32px);
+    display:flex; flex-direction:column}
+  @keyframes drop{from{transform:scale(.97); opacity:0}to{transform:none; opacity:1}}   /* a ContentDialog scales up into place; it does not drop from above the way a macOS sheet does */
+  .sheet.sm{width:min(320px,90vw); background:var(--panel-bg); -webkit-backdrop-filter:none; backdrop-filter:none}   /* an alert is NOT translucent on Windows — a ContentDialog is opaque whatever its size, unlike the macOS alert's glass */
+  .sheet.md{width:min(460px,90vw)}
+  .sheet.lg{width:min(680px,90vw)}
+  .sheet.aboutsm{width:min(320px,90vw)}
+  .sheet.savesm{width:min(420px,90vw)}
+  .sheet header{padding:24px 24px 0}   /* ContentDialog's own 24px inset */
+  .sheet h3{margin:0; font-size:var(--fs-subtitle); line-height:var(--lh-subtitle); font-weight:var(--fw-semibold); color:var(--label-primary)}   /* Subtitle 20/28 SemiBold — a ContentDialog title, where the macOS sheet uses a 13px bold */
+  .sheet p{margin:8px 0 0; color:var(--label-primary); font-size:var(--fs-body); line-height:var(--lh-body); font-weight:var(--fw-normal)}
+  .sheet .content{padding:12px 24px 24px; display:flex; flex-direction:column; gap:12px; overflow:auto; overscroll-behavior:none}
+  .sheet .actions{display:flex; justify-content:stretch; gap:8px; padding:24px; background:var(--statusbar-bg); border-top:1px solid var(--hairline)}   /* a ContentDialog's command area is a SEPARATE band with its own ground and a rule above it, not a transparent strip under the content */
+  .sheet .actions > .tbtn{flex:var(--pill-flex,1 1 0)}   /* Windows dialog buttons SHARE THE ROW EQUALLY whatever the dialog's size — a ContentDialog's Primary/Secondary/Close buttons are a stretched grid, so unlike macOS there is no rectangle-vs-capsule distinction to make here */
+  .sheet .tbtn{height:32px; min-width:0; width:auto; padding:0 12px; --_fill:var(--fill-secondary);
+    color:var(--label-primary); font-size:var(--fs-body); line-height:var(--lh-body); font-weight:var(--fw-normal); box-shadow:none}
+  .sheet.sm .tbtn{--pill-flex:1 1 0; height:32px}
+  .sheet.sm p{margin-top:8px}
+  .sheet.sm .actions.stacked{flex-direction:column-reverse; align-items:stretch}
+  .sheet.sm .actions.stacked .tbtn{width:100%; flex:0 0 auto; min-width:0}
+  .sheet .tbtn:hover{--_fill:color-mix(in srgb,var(--subtle-hover),var(--fill-secondary)); filter:none; transform:none}
+  .sheet .tbtn.primary{--_fill:var(--accent); color:var(--on-accent)}
+  .sheet .tbtn.primary:hover{--_fill:color-mix(in srgb,var(--accent) 90%,transparent); filter:none}
+  .sheet .tbtn.primary:active{--_fill:color-mix(in srgb,var(--accent) 80%,transparent); color:color-mix(in srgb,var(--on-accent) 70%,transparent)}   /* AccentFillColorSecondary/Tertiary are literally the accent brush at Opacity 0.9 / 0.8 in the source, and TextOnAccentFillColorSecondary is the on-accent ink at 50 % — a pressed accent button fades rather than darkens */
+  .sheet .tbtn.destructive{--_fill:var(--destructive-fill); color:var(--bad)}
+  .sheet .tbtn.destructive:hover{--_fill:color-mix(in srgb,var(--subtle-hover),var(--destructive-fill)); filter:none}
+  .sheet .tbtn::before,.sheet .tbtn::after{content:none}
+  .sheet .whererow{display:flex; gap:8px; align-items:center}
+  .sheet .wherebtn{flex:1 1 auto; min-width:0; height:32px; display:flex; align-items:center; gap:8px;
+    --_fill:var(--field-bg); color:var(--label-primary); padding:0 11px; font:inherit; font-size:var(--fs-body); cursor:default; text-align:left}
+  .sheet .wherebtn:hover{--_fill:color-mix(in srgb,var(--subtle-hover),var(--field-bg))}
+  .sheet .wherebtn .fpimg{width:16px; height:16px; flex:none; object-fit:contain}
+  .sheet .wherebtn .wherename{flex:1 1 auto; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
+  .sheet .wherebtn .wherechev{flex:none; font-size:var(--fs-caption); color:var(--label-secondary)}
+  .sheet .wherebrowse{flex:none; width:32px; height:32px; --_fill:var(--field-bg); color:var(--label-primary);
+    cursor:default; display:flex; align-items:center; justify-content:center; font-size:15px; padding:0}
+  .sheet .wherebrowse:hover{--_fill:color-mix(in srgb,var(--subtle-hover),var(--field-bg))}
+
+  /* ── Toast ────────────────────────────────────────────────────────────────────────────────────
+     Modelled on a Windows InfoBar rather than on the macOS dark capsule: a light-on-light (or
+     dark-on-dark) card with the flyout stroke and the flyout shadow, not an inverted chip. */
+  .toast{position:fixed; left:50%; bottom:44px; transform:translateX(-50%) translateY(8px);
+    background:var(--menu-bg); color:var(--label-primary); border:1px solid var(--flyout-border);
+    padding:10px 16px; border-radius:var(--r-menu); font-size:var(--fs-body); line-height:var(--lh-body);
+    box-shadow:var(--lg-menu-shadow); opacity:0; pointer-events:none;
+    transition:opacity var(--dur-normal) var(--ease-in),transform var(--dur-normal) var(--ease-in); z-index:70;
+    -webkit-backdrop-filter:blur(30px) saturate(1.25); backdrop-filter:blur(30px) saturate(1.25); max-width:80%}
+  .toast.show{opacity:1; transform:translateX(-50%) translateY(0)}
+
+  /* ── Scrollbars ───────────────────────────────────────────────────────────────────────────────
+     The Fluent scrollbar rests as a 2px rail inside an 8px hit target and EXPANDS to the full 12px
+     with a track when the pointer enters the SCROLLING AREA (not the scrollbar itself). Numbers from
+     ScrollBar_themeresources.xaml: ScrollBarSize 12, ScrollBarVerticalThumbMinWidth 8,
+     ScrollBarThumbStrokeThickness 6 (an 8px thumb minus a 6px transparent stroke = the 2px rail),
+     ScrollBarExpandBeginTime 00:00:00.40 and ScrollBarExpandDuration 00:00:00.167.
+     ⚠️ `::-webkit-scrollbar` HAS NO CONTAINER-HOVER SELECTOR — there is no way to write "this
+     scrollbar, while its scroller is hovered". The expansion is therefore driven from a rule on the
+     SCROLLING CONTAINER (`:hover > ::-webkit-scrollbar-thumb`), which is legal because the
+     pseudo-element is addressed as a descendant of the hovered element. The 400ms delay and the
+     167ms ramp ride on the thumb's own `transition`, since a pseudo-element cannot be animated by a
+     keyframe triggered on its host.
+     The `[data-platform="win"]` prefix on the .doc rules is not decoration: styles/app.css already
+     styles `.doc::-webkit-scrollbar` at (0,1,1) and loads AFTER this file, so an unqualified rule
+     here would lose the tie. The attribute selector buys the specificity to win it honestly. */
+  ::-webkit-scrollbar{width:8px; height:8px; background:transparent}
+  ::-webkit-scrollbar-track{background:transparent}
+  ::-webkit-scrollbar-thumb{background:var(--strong-stroke); border-radius:8px;
+    border:3px solid transparent; background-clip:content-box;
+    transition:border-width var(--dur-normal) var(--ease-in) 400ms, background-color var(--dur-fast) linear}
+  :hover::-webkit-scrollbar{width:12px; height:12px}
+  :hover::-webkit-scrollbar-track{background:var(--menu-bg)}
+  :hover::-webkit-scrollbar-thumb{border-width:4px; transition-delay:400ms,0s}
+  ::-webkit-scrollbar-thumb:hover{background:var(--label-secondary); background-clip:content-box}
+  ::-webkit-scrollbar-corner{background:transparent}
+  /* --sbw IS THE ONE WIDTH, and it has to be redeclared here. styles/app.css sets `:root{--sbw:11px}`
+     for the macOS classic scrollbar and then spends it in three places — `.doc`'s own
+     padding-inline-start, this scrollbar's width, and `.doc.paged`'s inline padding — so that the
+     measure stays optically centred against a scrollbar that eats real content-box width. Overriding
+     only the SCROLLBAR here would have left the other two consumers reserving 11px of gutter for an
+     8px bar, i.e. the paged measure sitting ~3px off-centre on Windows for no visible reason.
+     `html[data-platform="win"]` is (0,1,1) against `:root`'s (0,1,0), so this wins on specificity and
+     not on file order — app.css still loads last. 8px is the RESTING width: the hover expansion to
+     12px deliberately does not move it, because the extra 4px is the conveyor growing over the
+     content the way Windows draws it, not a wider gutter to reserve. */
+  html[data-platform="win"]{--sbw:8px}
+  html[data-platform="win"] .doc::-webkit-scrollbar{width:var(--sbw); background:transparent}
+  html[data-platform="win"] .doc::-webkit-scrollbar-track{background:transparent; margin-top:calc(var(--tbH,32px) + var(--vbH,0px))}
+  html[data-platform="win"] .doc::-webkit-scrollbar-thumb{background:var(--strong-stroke); border-radius:8px;
+    border:3px solid transparent; background-clip:content-box;
+    transition:border-width var(--dur-normal) var(--ease-in) 400ms, background-color var(--dur-fast) linear}
+  html[data-platform="win"] .doc:hover::-webkit-scrollbar{width:12px}
+  html[data-platform="win"] .doc:hover::-webkit-scrollbar-track{background:var(--menu-bg); margin-top:calc(var(--tbH,32px) + var(--vbH,0px))}
+  html[data-platform="win"] .doc:hover::-webkit-scrollbar-thumb{border-width:4px; transition-delay:400ms,0s}
+  html[data-platform="win"] .doc::-webkit-scrollbar-thumb:hover{background:var(--label-secondary); background-clip:content-box}
+
+  /* ── Reduced motion ───────────────────────────────────────────────────────────────────────────
+     Same behaviour the macOS kit and app.css already implement, restated here because this file
+     introduces animations of its own (the dialog's scale-in, the scrollbar expansion). The busy
+     spinner/bar rule is a copy of app.css's, kept so the two skins behave identically when the
+     preference is set. */
+  @media (prefers-reduced-motion:reduce){
+    .sheet{animation:none}
+    .toast{transition:opacity var(--dur-fast) linear}
+    ::-webkit-scrollbar-thumb,html[data-platform="win"] .doc::-webkit-scrollbar-thumb{transition:none}
+    .busyind .spin{animation:none}
+    .busyind .prog i{animation:none; left:0; width:100%; opacity:.55}
+  }

@@ -70,12 +70,21 @@ function updateFileBlock(){
   if(DIRTY) meta=meta?meta+" – Edited":"Edited";   // native titlebar convention: mark unsaved changes with a trailing "– Edited"
   if(metaEl) metaEl.textContent=meta;
 }
+/* PATH SHAPE — the one thing in this file that is not the same on both platforms. The frontend never sees a
+   filesystem, only the path strings the backend hands it, so the backend is also what tells it how to take
+   them apart: `window.__pathInfo = {sep, rootName}` — the path separator, and the display name of the volume
+   the chain bottoms out at ("Macintosh HD" on macOS; "This PC"/the drive on Windows). The native shell
+   injects it after load; ABSENT (browser design mode, or a shell that predates the injection) it defaults to
+   the macOS pair, so nothing about macOS behaviour depends on the injection happening. */
+function pathInfo(){ const p=(typeof window!=="undefined"&&window.__pathInfo)||{};
+  return { sep:p.sep||"/", rootName:p.rootName||"Macintosh HD" }; }
 // ancestor folders of the open file's directory, nearest first (classic macOS proxy-icon path popup)
 function folderChain(path){ if(!path) return [];
-  const parts=String(path).split("/"); parts.pop();   // drop the filename → its containing directory
+  const {sep,rootName}=pathInfo();
+  const parts=String(path).split(sep); parts.pop();   // drop the filename → its containing directory
   const chain=[];
-  for(let i=parts.length; i>0; i--){ const full=parts.slice(0,i).join("/")||"/"; const nm=parts[i-1]||"/"; chain.push({name:nm||"/", path:full}); }
-  chain.push({name:"Macintosh HD", path:"/"});
+  for(let i=parts.length; i>0; i--){ const full=parts.slice(0,i).join(sep)||sep; const nm=parts[i-1]||sep; chain.push({name:nm||sep, path:full}); }
+  chain.push({name:rootName, path:sep});   // the volume itself closes the chain. Its `path` is the bare separator — "/" on macOS (unchanged), and on Windows the value the shell's reveal handler should read as "the drive/volume root", since a Windows path has no such spelling of its own
   return chain;
 }
 let _fpMenu=null;
@@ -97,7 +106,7 @@ function openFolderMenu(){ closeFolderMenu();
     const t=document.createElement("span"); t.textContent=f.name; it.appendChild(t);
     it.addEventListener("click",()=>{ closeFolderMenu(); if(hasBridge())try{window.pywebview.api.reveal_in_finder(f.path);}catch(e){} });
     m.appendChild(it); });
-  document.body.appendChild(m);
+  document.body.appendChild(m); localiseAccel(m);   // built fresh per open → the boot sweep can't have seen it (a folder NAME is never rewritten: the sweep only touches `title=` and the .kbd/.fpkbd/.ctxkbd shortcut spans)
   // native macOS proxy-icon placement: the menu sits right ON the title, leading (file) item anchored over the filename
   const r=anchor.getBoundingClientRect(), mw=m.offsetWidth, mh=m.offsetHeight;
   const left=Math.max(6,Math.min(r.left, innerWidth-mw-8));

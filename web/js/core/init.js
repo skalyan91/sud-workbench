@@ -1,5 +1,11 @@
 //@module js/init.js
 /* init */
+/* One sweep over the STATIC chrome (index.html's ~11 accelerator `title=` tooltips), rewriting the macOS
+   glyphs to Windows spelling. Here rather than at the ~200 call sites: see localiseAccel in
+   js/core/platform.js. A no-op on macOS, and idempotent — every surface built LATER (context menus, the
+   titlebar popups, sheets, the proxy-path menu) re-runs it on its own subtree as it is built, because a
+   sweep run once at boot cannot reach DOM that does not exist yet. */
+localiseAccel();
 document.getElementById("convSel").value=notation;
 setFormat(DOCFORMAT);
 setLang(modelLang(model));
@@ -49,3 +55,10 @@ function bootBridge(){
    — so there is nothing for it to keep up to date.) */
 if(hasBridge()) bootBridge();
 else window.addEventListener("pywebviewready",bootBridge);
+/* The Windows menu bar. BOTH calls are deliberate, and it is not the same pattern as bootBridge above:
+   the bar is drawn from the menu table Python serves (Api.menu_spec), so the eager call gives it its
+   shape immediately — which is all browser design mode will ever get — and the `pywebviewready` one
+   re-runs it once there is a bridge to fetch the real table from. Idempotent, and an immediate no-op
+   on macOS, where a real NSMenu owns this. */
+bootMenubar();
+window.addEventListener("pywebviewready",bootMenubar);

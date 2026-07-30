@@ -28,6 +28,15 @@ for d in app web grammars; do
 done
 find "$RES/appsrc" -name '__pycache__' -type d -prune -exec rm -rf {} + 2>/dev/null || true
 
+# The OTHER platform's chrome kit is not shipped. index.html picks exactly one kit at load from
+# <html data-platform>, so win11-kit/ can never be reached in a macOS bundle. Dropped for size only
+# (~140 KB) — its Fluent UI System Icons are MIT and would travel fine. The WINDOWS build excludes
+# macos-kit/ for a stronger reason: 12 of mac-tokens.css's --sf-* masks are real SF Symbols rendered
+# to base64 PNG, which Apple licenses for apps on Apple platforms, not for redistribution inside a
+# Windows application. See packaging/windows/make_win_app.py.
+rm -rf "$RES/appsrc/web/win11-kit"
+[ ! -e "$RES/appsrc/web/win11-kit" ]   # fail the build if it survived
+
 # Drop the browser design-mode fixture: the file itself, plus its <script> tag and the HTML comment
 # above it, so the bundled index.html doesn't 404 on a script that is no longer there. Source tree
 # untouched; only the built bundle loses them. (In the app the fixture is inert anyway — bootBridge()

@@ -81,7 +81,8 @@ function sheetToolboxMap(info){
     row.className="tbrow";
     row.style.cssText="display:flex; align-items:center; gap:8px; padding:8px 10px; min-height:42px; box-sizing:border-box";   // the kit's Form Row, the same shape the Toolbox window's own rows now take (10px inset, 42 tall, tiling contiguously). Supersedes "item 14: tighter rows" and the 8px inset that existed only to make a zebra stripe read as a table row — the stripe is gone (see .tbrow's divider in app.css)
     const nm=document.createElement("span");
-    nm.style.cssText="font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:14px; font-weight:700; min-width:52px; color:var(--text)";
+    nm.style.cssText="font-family:var(--ui-mono); font-size:14px; font-weight:700; min-width:52px; color:var(--text)";   // the kit's mono token (macos-kit/mac-tokens.css, redeclared by the Fluent kit) — a hard-coded SF Mono stack here would keep the Apple face on Windows, where the rest of the row is Segoe
+
     nm.textContent=marker; row.appendChild(nm);
     const smp=document.createElement("span");
     smp.style.cssText="flex:1 1 auto; min-width:0; font-size:13px; color:var(--muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis";

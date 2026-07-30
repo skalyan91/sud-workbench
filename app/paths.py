@@ -1,10 +1,33 @@
-"""Application data locations (models, caches) under macOS Application Support."""
+"""Application data locations (models, caches) in the OS's own per-user application-data folder.
+
+ONE constant decides all of them.  ``APP_DATA`` is the only place a platform is named; everything
+else in the app — :data:`STANZA_DIR`/:data:`CACHE_DIR`/:data:`EXTRAS_DIR` here, ``_STATE_FILE`` in
+``app/api.py``, ``FONT_DIR`` in ``app/fonts.py``, ``crash.log`` in ``app/__main__.py`` — derives
+from it, so porting to another OS is this branch and nothing else.
+"""
 
 from __future__ import annotations
 
 import os
+import sys
 
-APP_DATA = os.path.expanduser("~/Library/Application Support/SUD Workbench")
+
+def _app_data() -> str:
+    """The per-user application-support directory, by platform convention.
+
+    Windows: %LOCALAPPDATA% (not %APPDATA%) — everything we keep here is a machine-local CACHE of
+    downloadable things (Stanza models, pip'd extras tiers, release listings, fonts) plus a small
+    UI state file.  %APPDATA% roams with the user profile on a domain-joined machine, and roaming a
+    1 GB torch install across the network is exactly what LOCALAPPDATA exists to prevent.  The
+    env var is read rather than hard-coded, then fallen back to the standard path, because a
+    non-standard profile location is normal on managed machines."""
+    if sys.platform == "win32":
+        base = os.environ.get("LOCALAPPDATA") or os.path.expanduser(r"~\AppData\Local")
+        return os.path.join(base, "SUD Workbench")
+    return os.path.expanduser("~/Library/Application Support/SUD Workbench")
+
+
+APP_DATA = _app_data()
 STANZA_DIR = os.path.join(APP_DATA, "stanza_resources")   # stanza model_dir
 CACHE_DIR = os.path.join(APP_DATA, "cache")               # e.g. cached release listings
 EXTRAS_DIR = os.path.join(APP_DATA, "site-packages")      # on-demand heavy deps (torch/Stanza/JP/Arabic), added to sys.path at startup

@@ -1,5 +1,14 @@
 /*@module macos-kit/mac-tokens.css*/
   :root{
+    /* THE UI FONT — the chrome's own typeface, and a different thing entirely from the --token-font
+       below, which sets the treebank's own text. Kept as a token (rather than the literal stack this
+       used to be, in seven places) purely so the Fluent kit can redeclare it: the two kits share every
+       consumer, and a hard-coded -apple-system silently degrades to Arial on Windows.
+       `system-ui` deliberately trails the explicit names rather than leading them — it resolves to
+       whatever the OS nominates, which is right on neither platform when the app is being previewed in
+       the OTHER platform's skin from a desktop browser. */
+    --ui-font:-apple-system,BlinkMacSystemFont,"SF Pro Text",system-ui,sans-serif;
+    --ui-mono:ui-monospace,"SF Mono","Menlo",monospace;
     /* Noto stacks: the browser picks the first listed family that has each glyph. --token-font = the
        Noto Sans core (Latin/Cyrillic/Greek) then every Noto Sans script family; --mono-font = Noto Sans
        Mono then those same proportional families (no mono CJK/Arabic/Indic is bundled, so such scripts
@@ -68,7 +77,7 @@
     --sf-warn:url("data:image/svg+xml;charset=utf-8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.9' stroke-linecap='round' stroke-linejoin='round'><path d='M12 3.6 22 20.4H2Z'/><path d='M12 9.6v4.6'/><path d='M12 17.4h.01'/></svg>");   /* SF exclamationmark.triangle → the running sentence's tokenisation-mismatch badge. Drawn as a mask like every other --sf-*, NOT as a text glyph: ⚠ U+26A0 carries an emoji presentation default, so it would render as a colour emoji in some contexts and as tofu wherever the pruned CORE_FONTS lack it — the same trap U+231C fell into for reported speech. A mask takes currentColor and is always present */
     --sf-undo:url("data:image/svg+xml;charset=utf-8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'><path d='M9 5L5 9l4 4'/><path d='M5 9h8a5 5 0 0 1 0 10h-2.5'/></svg>");
     --sf-redo:url("data:image/svg+xml;charset=utf-8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'><path d='M15 5l4 4-4 4'/><path d='M19 9h-8a5 5 0 0 0 0 10h2.5'/></svg>");
-    --sf-cube:url("data:image/svg+xml;charset=utf-8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'><path d='M12 3.2l8 4.4v8.8L12 20.8l-8-4.4V7.6z'/><path d='M4.2 7.6L12 12l7.8-4.4'/><path d='M12 3.2v17.6'/><path d='M8.4 9.6h7.2'/></svg>");   /* SF shippingbox: box + packing tape over the top and down the front */
+    --sf-cube:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 2.5 20 7 20 17 12 21.5 4 17 4 7Z'/%3E%3Cpath d='M4 7 12 11.5 20 7'/%3E%3Cpath d='M12 2.5 12 21.5'/%3E%3Cpath d='M8 9.4 16 9.4'/%3E%3C/svg%3E");   /* cube icon for the toolbar Manage-Models button, matching the menu's cube.box — SF shippingbox: box + packing tape over the top and down the front. Moved here from styles/app.css, which loaded after both kits and so overrode this line on BOTH platforms (leaving the Fluent kit's cube dead code); the ARTWORK kept is app.css's, since that is the drawing macOS has actually been rendering, not this kit's own slightly earlier trace of the same glyph. */
     --sf-gear:url("data:image/svg+xml;charset=utf-8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'><circle cx='12' cy='12' r='3.1'/><path d='M12 3.6v2.3M12 18.1v2.3M20.4 12h-2.3M5.9 12H3.6M18 6l-1.6 1.6M7.6 16.4L6 18M18 18l-1.6-1.6M7.6 7.6L6 6'/></svg>");
     --sf-guide:url("data:image/svg+xml;charset=utf-8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'><path d='M12 6.5C10 5.2 7.2 4.8 4 5.4v11.2c3.2-.6 6-.2 8 1.1 2-1.3 4.8-1.7 8-1.1V5.4c-3.2-.6-6-.2-8 1.1z'/><path d='M12 6.5v11.2'/></svg>");   /* SF book (open): matches File ▸ SUD Guidelines */
     --sf-help:url("data:image/svg+xml;charset=utf-8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'><circle cx='12' cy='12' r='8'/><path d='M9.4 9.4a2.7 2.7 0 0 1 5.1 1.1c0 1.7-2.55 2.1-2.55 3.6'/><path d='M12 16.4h.01'/></svg>");   /* SF questionmark.circle: question mark inside a circle → in-app Help. r=8 (was 9) so its enclosed ink matches the zoom magnifier's weight; stroke stays 1.7 */
@@ -87,6 +96,26 @@
     --sf-narcs:url("data:image/svg+xml;charset=utf-8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'><path d='M22 17a10 10 0 0 0-20 0'/><path d='M6 17a6 6 0 0 1 12 0'/><path d='M10 17a2 2 0 0 1 4 0'/></svg>");
     --sf-nbrackets:url("data:image/svg+xml;charset=utf-8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'><path d='M16 3h3a1 1 0 0 1 1 1v16a1 1 0 0 1-1 1h-3'/><path d='M8 21H5a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h3'/></svg>");
     --sf-noutline:url("data:image/svg+xml;charset=utf-8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'><path d='M8 5h13'/><path d='M13 12h8'/><path d='M13 19h8'/><path d='M3 10a2 2 0 0 0 2 2h3'/><path d='M3 5v12a2 2 0 0 0 2 2h3'/></svg>");
+    /* ── the page-layout pill (items 3 + 7) ──
+       Moved here from styles/app.css, the only file that used to declare this pair: a pill glyph is chrome, and
+       app.css loads after both kits, so its copy won on Windows too and the Fluent kit could not have a pair of
+       its own at all. In the app these are REAL SF Symbols — the same
+       rectangle.portrait.center.inset.filled / rectangle.portrait.inset.filled pair the View ▸ Paged Layout menu item
+       wears, rendered natively and pushed onto these two variables by app/mac/shell.py (see the "Layout pill" block
+       there for why it overrides the variable instead of going through __setSfSymbol, and for the candidates that
+       were tried and rejected). One SF family, one rounded frame, one "inset filled" content region: all that differs
+       between them is how much of that frame the region takes, which is exactly what the pill chooses. The frame is
+       PORTRAIT because what paged mode lays out is a page, and a page is portrait.
+       That native override is an INLINE style on documentElement, so it still wins over these two declarations exactly
+       as it used to win over the two in app.css — one level up, unchanged by the move.
+       What follows is the browser-design-mode fallback (no bridge → nothing overrides these), and it is TRACED from
+       the real symbols rather than invented: every number is measured off the rendered 136×156 symbol canvas (frame
+       ink 16–120 × 12–144 on an 8-unit stroke, corner radius 9 on the stroke centreline; the full fill 31–104 ×
+       27–130, the centred one 50×79 on the same centre) and then scaled by 24/156 into the standard 24 viewBox.
+       The stroke is 1.5 — the width every hand-drawn glyph in this app uses, --sf-cube above included — rather than
+       the 1.23 the trace would give, so the fallback carries the same weight as its neighbours. */
+    --sf-paged:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none'%3E%3Crect x='4.62' y='2.46' width='14.77' height='19.08' rx='1.4' stroke='black' stroke-width='1.5'/%3E%3Crect x='8.15' y='6' width='7.69' height='12.15' rx='.6' fill='black'/%3E%3C/svg%3E");
+    --sf-unpaged:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none'%3E%3Crect x='4.62' y='2.46' width='14.77' height='19.08' rx='1.4' stroke='black' stroke-width='1.5'/%3E%3Crect x='6.38' y='4.15' width='11.23' height='15.85' rx='.6' fill='black'/%3E%3C/svg%3E");
     color-scheme:light dark;
     --wallpaper-1:#dfe6f0; --wallpaper-2:#c8d3e4; --wallpaper-3:#eef1f6;
     --win-bg:#ffffff; --toolbar-bg:rgba(255,255,255,.72); --content-bg:#ffffff; --panel-bg:#ffffff; --toolbar-inactive-bg:rgba(255,255,255,.72);   /* fix 4+6: BOTH bars a pure-WHITE tint, translucent (high-but-not-full opacity) over the blur so the document shows through as it scrolls under; focused == unfocused, and the titlebar == the options bar */

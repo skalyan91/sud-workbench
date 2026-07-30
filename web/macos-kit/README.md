@@ -2,8 +2,12 @@
 
 A small, self-contained set of front-end modules that give a [pywebview](https://pywebview.flowmark.dev/)
 app the **native macOS look** — a unified Liquid-Glass title bar with traffic lights, grouped
-toolbar pills, popup menus, dialog sheets, and SF-Symbol icon masks. Extracted from SUD
-Workbench so the same chrome can dress other pywebview apps.
+toolbar pills, popup menus, context menus, a status bar, dialog sheets, and SF-Symbol icon masks.
+Extracted from SUD Workbench so the same chrome can dress other pywebview apps.
+
+It has a sibling: `../win11-kit/` dresses the same DOM in Windows 11 Fluent. The two declare the
+**same token names** and cover the **same selectors**, so the app stylesheet needs no platform
+branching — `index.html` loads exactly one of them.
 
 Everything here is a **classic script / plain stylesheet** — no build step, no bundler, no
 `import`/`export`. Drop the files in and reference them from your `index.html`.
@@ -12,9 +16,13 @@ Everything here is a **classic script / plain stylesheet** — no build step, no
 
 | File | What it provides |
 |---|---|
-| `mac-tokens.css` | CSS custom properties: the macOS 26 "Tahoe" Liquid-Glass token set (light + dark), the SF-Symbol icon-mask system (`--sf-*` masks recoloured via `currentColor`), accent/hairline/radius tokens, and the notation-glyph masks. |
-| `mac-chrome.css` | The chrome itself: the window card, traffic lights, unified title bar / toolbar, grouped translucent pills + hairline dividers, the three titlebar display modes (Icon Only / Icon and Text / Text Only), the `.fpmenu` popup-menu styling, the Finder-style search capsule, and the dialog-sheet shell. |
-| `toast.js` | `toast(msg)` — a transient bottom-of-window status message. Needs a `<div class="toast" id="toast"></div>` in the body. |
+| `mac-tokens.css` | CSS custom properties: the UI font stacks (`--ui-font` / `--ui-mono`), the macOS 26 "Tahoe" Liquid-Glass token set (light + dark), the SF-Symbol icon-mask system (`--sf-*` masks recoloured via `currentColor`), accent/hairline/radius tokens, and the notation-glyph masks. |
+| `mac-chrome.css` | The chrome itself, in two halves. **Window and toolbar:** the window card, traffic lights, unified title bar, grouped translucent pills + hairline dividers, the three titlebar display modes (Icon Only / Icon and Text / Text Only), the `.fpmenu` popup menu, the Finder-style search capsule and find bar, the options bar and its checkbox rows. **Everything else that is chrome** (below the banner near the end of the file, moved here from the app's own stylesheet): the drawer pull-down + popover, the status bar with its count pills and busy indicator, the `.ctx` context menu / `.acmenu` autocomplete / `.ctx-sub` flyout family, the `.scrim` + `.sheet` dialog shell and its buttons, the `.toast`, and the `.fmtpill` status-bar pull-down. |
+| `toast.js` | *(no longer here — this app moved it to `../js/ui/toast.js`, since it is script rather than chrome and both platform kits share it.)* `toast(msg)` shows a transient bottom-of-window status message and needs a `<div class="toast" id="toast"></div>` in the body; `mac-chrome.css` still styles that element. |
+
+**What is deliberately NOT here:** anything that draws the *document*. In SUD Workbench that is
+`styles/app.css` — the sentence blocks, the five diagram notations, the annotation grid, the
+relation colours. The dividing test is simply whether the Fluent kit would have to restyle it.
 
 Load order matters (cascade): **`mac-tokens.css` before `mac-chrome.css`**, and both before
 your app's own stylesheet so app rules can override.
@@ -49,9 +57,12 @@ own radius (`--grid-r`): both `8px`.
 <link rel="stylesheet" href="macos-kit/mac-chrome.css">
 <link rel="stylesheet" href="styles/app.css">
 ...
-<script src="macos-kit/toast.js"></script>
 <script src="js/…"></script>   <!-- your app modules -->
 ```
+
+In SUD Workbench that pair is chosen at runtime instead: an inline `<head>` script stamps
+`<html data-platform="mac|win">` and `document.write`s either this kit or `win11-kit`'s, at its own
+position in the source so the kit always lands ahead of `app.css`. See `web/index.html`.
 
 ## Required DOM hooks
 
@@ -80,6 +91,15 @@ The chrome CSS styles these structures — reproduce the class/id names:
 - **Popup menus:** build a `<div class="fpmenu">` with `.fpitem` rows (optional `.fpcheck` tick
   column); the kit styles it, your app positions and fills it.
 - **Toast:** `<div class="toast" id="toast">`.
+- **Context menu:** `<div class="ctx" id="ctx">` filled with `<button>` rows (`.kbd` shortcut,
+  `.hdr` section header, `<hr>` separator, `.ck` tick, `.subarr` submenu chevron); a flyout is the
+  same box plus `.ctx-sub`.
+- **Dialog:** `<div class="scrim" id="scrim"><div id="scrimHost"></div></div>` (plus the
+  `confirmScrim`/`confirmHost` pair), holding a `.sheet` with `header` / `.content` / `.actions`.
+- **Status bar:** `<div class="statusbar">` of `.pill` spans; a pill that opens a menu adds
+  `.fmtpill` and ends with a `.pillchev` SVG.
+- **Drawer:** `<div class="drawer">` with a `.drawer-btn` and a `.drawer-pop`; `.open` on the
+  wrapper reveals the pop.
 
 ## The Python companion layer (native side)
 
@@ -103,9 +123,9 @@ A few chrome behaviours stayed in the app modules because they're wired to app-s
 selectors/builders rather than being drop-in generic. They're small and easy to adapt:
 
 - **Dialog-sheet shell** — `openSheet` / `closeSheet` / `askConfirm` (a styled `window.confirm`
-  replacement) in `../js/sheets.js`, styled by `mac-chrome.css`'s `.sheet` / `.scrim` rules.
+  replacement) in `../js/ui/sheets.js`, styled by `mac-chrome.css`'s `.sheet` / `.scrim` rules.
   Needs `#scrim`/`#scrimHost` and `#confirmScrim`/`#confirmHost` host elements.
-- **SF-Symbol setter** — `window.__setSfSymbol` / `applySfSymbol` in `../js/bridge.js` (its
+- **SF-Symbol setter** — `window.__setSfSymbol` / `applySfSymbol` in `../js/io/bridge.js` (its
   which→selector map is app-specific).
 - **Shared autocomplete dropdown** (`_acMenu`, `acShow*`) and the `.fpmenu` popup positioners in
-  `../js/grid.js` / `../js/context-menu.js`.
+  `../js/grid/grid.js` / `../js/editing/context-menu.js`.

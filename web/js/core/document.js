@@ -636,7 +636,7 @@ function stextCaretAtPoint(el,x,y){ if(!document.caretRangeFromPoint) return fal
 function stextMarkSel(apply){ const F=stextEditEl(); if(!F) return false;
   const {el,si}=F, s=DOC[si], raw=el.dataset.orig||"";
   const off=stextSelOffsets(el); if(!off||off.b<=off.a) return false;   // a bare caret is not a selection: leave the key to whatever else claims it
-  if((el.textContent||"")!==raw){ toast("Press ⏎ to commit the sentence text first — this marks tokens, and the line has uncommitted edits"); return true; }
+  if((el.textContent||"")!==raw){ toast(accel("Press ⏎ to commit the sentence text first — this marks tokens, and the line has uncommitted edits")); return true; }   // accel(): a TOAST is neither a title= nor a .kbd, so the localiseAccel sweep can't reach it
   const A=stextSpans(s,si,raw);   // the line is showing `raw` (it is focused, so it was painted in EDITING state) → align against raw, not against the daṇḍa display
   if(!A){ toast("This sentence's words are not aligned to its text — no token can be identified from a selection here"); return true; }
   const ids=[]; A.spans.forEach((sp,i)=>{ if(!sp||sp[0]>=off.b||sp[1]<=off.a) return;   // half-open overlap: touching at all takes the whole unit
@@ -1288,7 +1288,7 @@ function buildBlock(i,ctx){ const s=DOC[i];
            contenteditable claims a fair number of ⌘-combinations as editing commands) took them out with it.
            Foreign was the only one that always had a second route. All three now do, and all three go through the
            same stextMark* pair the menu route uses, so there is one behaviour however the key arrives. */
-        const cmd=(e.metaKey||e.ctrlKey)&&!e.altKey;
+        const cmd=cmdKey(e);   // ⌘ on macOS, Ctrl on Windows (js/core/platform.js) — the `&&!e.altKey` this replaced lives inside cmdKey now, keeping Ctrl+Alt chords off these three
         if(cmd&&!e.shiftKey&&(e.key==="i"||e.key==="I")){ e.preventDefault();   // ⌘I → Foreign
           if(!stextMarkForeign()) toast("Select the words in the sentence line to mark them Foreign"); return; }   // claimed the key but found no selection → say why rather than silently marking whichever token happens to be selected in the diagram
         if(cmd&&!e.shiftKey&&e.key==="/"){ e.preventDefault();                 // ⌘/ → Typo (and its correct-form prompt)
@@ -1328,16 +1328,16 @@ function buildBlock(i,ctx){ const s=DOC[i];
       if(g==="url") return;   // item 16: the URL control renders separately, BEFORE the number (below)
       const extra="";   // item 8: Lucide vector glyphs share one 24-box → uniform size/stroke, no per-icon PNG nudges
       const btn=document.createElement("a"); btn.className="lnk"+(d?" del":"");   // block controls are links, not buttons
-      btn.setAttribute("role","button"); btn.tabIndex=0; btn.innerHTML=`<span class="sfi${extra}" style="--m:var(--sf-${g})"></span>`; btn.title=ti+(kbd?` (${kbd})`:"");
+      btn.setAttribute("role","button"); btn.tabIndex=0; btn.innerHTML=`<span class="sfi${extra}" style="--m:var(--sf-${g})"></span>`; btn.title=accel(ti+(kbd?` (${kbd})`:""));   // accel() here, not the localiseAccel sweep: a block control's tooltip is rebuilt for every sentence on every render, and the sweep runs on subtrees that are built once (a no-op on macOS)
       btn.addEventListener("click",e=>{e.preventDefault(); fn();});
       btn.addEventListener("keydown",e=>{ if(e.key==="Enter"||e.key===" "){ e.preventDefault(); fn(); } });
       ctrl.appendChild(btn);});
     // item 16 (corrected): the URL link control sits ABSOLUTELY in the left margin, to the LEFT of the number — so the
     // number keeps its original flow position (aligned with the diagram) and does not shift. Muted at rest, blue when set.
     const urlBtn=document.createElement("a"); urlBtn.className="url-ctl"+(s.url?" url-set":""); urlBtn.setAttribute("role","button"); urlBtn.tabIndex=0;
-    urlBtn.innerHTML='<span class="sfi" style="--m:var(--sf-url)"></span>'; urlBtn.title=s.url?("URL: "+s.url+"  (⌘-click to open · click to edit)"):"Set a source URL for this sentence";
+    urlBtn.innerHTML='<span class="sfi" style="--m:var(--sf-url)"></span>'; urlBtn.title=s.url?accel("URL: "+s.url+"  (⌘-click to open · click to edit)"):"Set a source URL for this sentence";   // accel() at the call site, not the localiseAccel sweep: this title is rebuilt on every render, and sweeping the whole document after each one to catch one tooltip would be absurd (a no-op on macOS)
     urlBtn.addEventListener("click",e=>{ e.preventDefault(); e.stopPropagation();
-      if(e.metaKey && s.url){ openExternal(s.url); return; }   // item 8(c): ⌘-click opens the source URL externally, through the same bridge-routed openExternal (js/io/bridge.js) as the guideline links — window.open is inert in a WKWebView; no URL set → fall through to the editor
+      if(cmdKey(e) && s.url){ openExternal(s.url); return; }   // item 8(c): ⌘-click (Ctrl-click on Windows) opens the source URL externally, through the same bridge-routed openExternal (js/io/bridge.js) as the guideline links — window.open is inert in a WKWebView; no URL set → fall through to the editor
       editURL(i,urlBtn); });
     urlBtn.addEventListener("keydown",e=>{ if(e.key==="Enter"||e.key===" "){ e.preventDefault(); editURL(i,urlBtn); } });
     head.appendChild(num); head.appendChild(txt); head.appendChild(urlBtn); head.appendChild(sid); head.appendChild(ctrl);   // item 6: number stays first (left margin); the URL link sits in flow just BEFORE the sentence ID

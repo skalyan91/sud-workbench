@@ -4,15 +4,22 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-A native-feeling macOS desktop app for viewing and editing dependency treebanks in CoNLL-U,
-speaking **SUD** relation set (plus **UD** import/export and **mSUD**). All-Python
+A native-feeling desktop app for viewing and editing dependency treebanks in CoNLL-U, speaking
+**SUD** relation set (plus **UD** import/export and **mSUD**). All-Python
 **pywebview** shell (`app/`) wrapping a framework-free SVG + CSS frontend (`web/`) — **no build
 step, no bundler, no npm**. `README.md` has the user-facing feature list; this file covers how to
 work on it.
 
-**This directory is not a git repository.** There is no `git diff`/`git log` to consult — the Stop
-hook detects changes by file mtime, and you should not assume version control when reasoning about
-"what changed".
+**Two platforms, one document renderer.** macOS is tuned against the macOS 26 "Tahoe" Figma kit and
+the HIG; Windows against the official Windows UI Kit and — far more usefully — the **MIT-licensed
+WinUI 3 theme resources** (`microsoft/microsoft-ui-xaml`), which state as machine-readable XAML what
+Apple only writes in prose. Values in `web/win11-kit/` are *derived from those files*, not
+eyeballed: if you change one, cite the dictionary it came from. Anything Microsoft does not publish
+(ThemeShadow's blur/offset/alpha, Mica's recipe, the shell caption-button size, the focus-ring
+thicknesses) is marked `APPROX` in place — don't quietly promote a guess to a fact.
+
+The macOS build is the one that has actually run. **Everything Windows-specific is written to spec
+and untested** — see "Windows: what has never executed" below.
 
 ## Commands
 
@@ -49,7 +56,7 @@ Three checks stand in for one; run all three after non-trivial edits.
    print('$f','STABLE' if io_conllu.serialize(io_conllu.parse(o))==o else 'DIFF')"
    done
    ```
-2. **Headless render smoke test** — `node --check` on the JS only validates *syntax*; it does not
+2. **Headless render smoke test — RUN IT IN BOTH SKINS.** `node --check` on the JS only validates *syntax*; it does not
    catch the failure mode this frontend is prone to (a temporal-dead-zone / `ReferenceError` at load
    that blanks the whole app — see "Frontend" below). Open `web/index.html` in headless Chrome over
    CDP, collect `Runtime.exceptionThrown` + console errors, assert `#doc .sblock` count, and cycle
@@ -58,6 +65,14 @@ Three checks stand in for one; run all three after non-trivial edits.
    fixture sentence in every notation (count them in the fixture rather than hard-coding the number —
    it was 5, is 8, and will move again), 0 runtime errors. **The first top-level throw aborts the script and masks later
    ones** — fix, re-run, repeat until clean; capture `.stackTrace.callFrames` to pinpoint the file.
+
+   Do the whole thing **twice — bare and with `?platform=win`** — since the two load different
+   stylesheets and different boot paths, and a Fluent-only regression is invisible from the macOS
+   run. Assert the *right* kit loaded (read `document.styleSheets`), not merely that something did.
+   Watch for **CSS 404s specifically**: several diagram metrics (`--arc-row`, `--arc-node-r`,
+   `--arc-shoulder`, `--arrow`) are read with `parseFloat` and **no `||` fallback**, so a kit that
+   fails to load doesn't blank the app — it silently fills the SVG with `NaN` geometry. Those four
+   tokens are required of any kit, not optional.
 3. **Real boot** — `timeout 8 .venv/bin/python -m app samples/english.conllu` should exit 124
    (i.e. it was still running), with every `web/js/**` module served HTTP 200.
 
@@ -121,9 +136,34 @@ function defined in a later-loaded module* — it throws `ReferenceError` at loa
 Put cross-module boot work in `js/core/init.js` (loads last, after every module is defined), and
 guard eager forward calls with `if(typeof fn==="function")fn()`.
 
-`web/macos-kit/` is a deliberately **self-contained, reusable** macOS-chrome kit (Liquid-Glass
-tokens, title bar/pills/menus/sheet CSS, toast) with its own README — keep app-specific rules out
-of it; app overrides belong in `web/styles/app.css`, which loads after it.
+**Two chrome kits, one loaded.** `web/macos-kit/` (Liquid-Glass) and `web/win11-kit/` (Fluent) are
+self-contained, reusable, and **share 150 token names** — that identity is the whole
+design: `app.css` consumes tokens and needs no platform branching. Each has its own README. Keep
+app-specific rules out of both; app overrides belong in `web/styles/app.css`, which loads after.
+
+The choice is made by an **inline blocking `<script>` in `<head>`**, above the `app.css` link. It
+stamps `<html data-platform>` from `?platform=` (design mode) or the UA, then `document.write`s that
+kit's two `<link>`s. `document.write` and not `head.appendChild` **on purpose**: it inserts at the
+script's own source position, so the kit stays ahead of `app.css` in the cascade however the file is
+later reordered. Python gets no vote — it can only inject after load, far too late for a stylesheet.
+
+`js/core/platform.js` loads **first** and reads that decision back off `data-platform`, so look and
+behaviour cannot disagree. It owns `PLATFORM`/`IS_WIN`, `accel()` (macOS glyphs → `Ctrl+Shift+Z`),
+`localiseAccel()` (one idempotent DOM sweep over `title=` and `.kbd` — new tooltips are localised
+for free, so **don't** rewrite accelerators at call sites), `cmdKey`/`cmdAltKey`/`cmdOptKey`, and
+`uiFont()`/`uiMono()` for the two consumers that need a resolved stack rather than a `var()`.
+
+⚠️ **Modifier arithmetic.** macOS has five ⌘-families (⌘, ⇧⌘, ⌃⌘, ⌥⌘, ⌥⇧⌘); Windows has four. One
+pair *must* collapse, and ⌃⌘/⌥⌘ do. Where that would make two live commands equal, the fix is a
+per-item `win_accel` in `app/menu_spec.py` — **not** a change to `accel()`'s generic mapping. Three
+exist (Move Token/Sentence → `Ctrl+Shift+arrow`, Toggle Grids → `Ctrl+Alt+Shift+G`). `menu_spec` has
+an audit that reports unresolved clashes; run it after adding any shortcut.
+
+**Which file does a chrome rule go in?** If the Fluent kit would need to restyle it, it is chrome
+and belongs in the kits (title bar, pills, `.ctx`, `.sheet`/`.scrim`/`.toast`, `.statusbar`,
+drawers). If it draws the treebank, it is shared and stays in `app.css` (`.sblock`, the five
+notations, `table.grid`, relation colours). Moving a block between the two can **flip a specificity
+tie** — that is not hypothetical, it already bit `.gmrow input.gm-feat` once.
 
 `web/js/dev-fixture.js` seeds a sample `DOC` only when there's no bridge (browser design mode).
 `packaging/make_*.sh` delete both the file and its `<script>` tag from the bundle, so the shipped
@@ -131,16 +171,32 @@ app carries no sample sentences. `samples/` is likewise repo-only — nothing at
 
 ### Native shell (`app/__main__.py`, `app/api.py`) — pywebview threading invariants
 
-`__main__.py` is the pywebview bootstrap: the window, the application menu, and a lot of direct
-AppKit/PyObjC work for the native feel (unified transparent title bar with the traffic lights placed
-in-content, a transparent drag view above the WKWebView, real SF Symbols rendered natively and
-pushed to CSS `--sf-*` masks, accent/fullscreen/focus observers, Dock icon). Menu actions call the
-frontend's bridge-aware JS helpers so toolbar and menu share one code path.
+`__main__.py` is the **platform-neutral** pywebview bootstrap (~386 lines): the window, crash
+tracing, the close veto, and a `sys.platform` dispatch to `app/mac/` or `app/win/`. Menu actions call
+the frontend's bridge-aware JS helpers so toolbar and menu share one code path.
+
+`app/mac/shell.py` holds the AppKit/PyObjC work for the native feel — unified transparent title bar
+with the traffic lights placed in-content, a transparent drag view above the WKWebView, real SF
+Symbols rendered natively and pushed to CSS `--sf-*` masks, accent/fullscreen/focus observers, Dock
+icon. `app/win/` is `dwm.py` (DWM attributes by `ctypes`, no pywin32) + `shell.py` (registry accent/
+theme watcher, 2 s poll). **No PyObjC module may be imported when `sys.platform == "win32"`** —
+there is a check for this; keep it passing.
+
+`app/menu_spec.py` is the **single source of truth** for the ~78-item menu: titles, JS calls,
+accelerators, SF Symbol *and* Fluent icon names, and the visibility/checkable flags. `build_menu()`
+and macOS's `_wire_menu` read it; `Api.menu_spec()` serves the same table as JSON to
+`web/js/ui/menubar.js`, which draws the in-window bar Windows needs (macOS uses the real `NSMenu`,
+so that module is inert there). Add a command **once**, in the spec.
+
+⚠️ Windows needs **no** analogue of the macOS drag view: setting WebView2's
+`IsNonClientRegionSupportEnabled` enables the standard `app-region: drag`, which brings Snap
+Layouts, the right-click system menu and double-click-to-maximise with it. pywebview does not set
+that property itself — `app/win/` does.
 
 `api.py` is `window.pywebview.api`: open/save/save-as/rename, parse/tokenize/sentencize, validate,
 format detection + conversion, model list/download/remove, extras install, transliteration,
-Wiktionary lookup, prefs and recent files (persisted in `~/Library/Application Support/SUD
-Workbench/state.json`).
+Wiktionary lookup, prefs and recent files (persisted in `state.json` under `paths.APP_DATA` —
+`~/Library/Application Support/SUD Workbench` on macOS, `%LOCALAPPDATA%\SUD Workbench` on Windows).
 
 **Two hard-won invariants — violating either produces an intermittent, hard-to-diagnose hang:**
 
@@ -209,8 +265,7 @@ genuine single-chunk case through — a bare `don't` is one orthographic word, a
 
 `app/models_registry.py` lists/downloads models: SUD wheels from GitHub Release assets on
 `SUD_REPO` (`SunflowerAI/sud-spacy-parsers`, overridable via `$SUD_MODELS_REPO`) pip-installed into
-the running venv, and Stanza models into `~/Library/Application Support/SUD Workbench/
-stanza_resources`.
+the running venv, and Stanza models into `paths.STANZA_DIR`.
 
 **One model is not a download: `en_sud_ewt`.** It is pinned in `requirements-core.txt` (and
 `requirements.txt`), so every environment that can run the app already has it — the app itself
@@ -222,7 +277,7 @@ its Remove button). Adding another bundled model means editing both requirements
 `app/extras.py` is the reason `requirements-core.txt` exists alongside `requirements.txt`: the
 portable bundle ships only the torch-free CORE set, and the heavy tiers (`stanza` ≈1.1 GB,
 `japanese` ≈0.45 GB, `arabic` ≈0.3 GB) are pip-installed **on demand at runtime** into
-`~/Library/Application Support/SUD Workbench/site-packages`, which is added to `sys.path` at
+`paths.EXTRAS_DIR`, which is added to `sys.path` at
 startup. Every heavy import therefore sits behind a lazy `try: import` in `translit`/`parse` — a
 missing tier must surface as an offer to install, never an exception.
 
@@ -346,7 +401,50 @@ five do — follow that when adding another.
 - **`make_app.sh`** — thin launcher bundle that runs this project's `.venv`; dev convenience only.
 - **`build_icons.sh`** — regenerates `AppIcon.icns` + `app/data/appicon.png` from
   `packaging/AppIcon.icon` (Icon Composer). Icon Composer exports full-bleed; the script applies the
-  824-in-1024 macOS grid.
+  824-in-1024 macOS grid. Also drives `build_flat_icon.py`, whose flat masters feed **both** the
+  Windows `.ico` and any future non-Apple platform.
+- **`packaging/windows/make_win_app.py`** — the Windows counterpart to `make_bootstrap_app.sh`, same
+  architecture (ship source + launcher, per-user venv from the user's own Python 3.12 on first
+  launch, CORE deps only, heavy tiers on demand). Written in **Python, not PowerShell**, so it can be
+  read and `--dry-run`'d from macOS — which is the only way it can be exercised at all here.
+  `find_py.ps1`/`find_git.ps1`/`setup_venv.ps1`/`bootstrap.ps1` are the first-launch scripts;
+  `sud-workbench.iss` is the Inno Setup installer (per-user, unsigned).
+
+⚠️ **Each bundle ships only its own chrome kit**, and both builds fail if the other survives. For
+macOS dropping `win11-kit/` is a size decision. For Windows dropping `macos-kit/` is a **licensing**
+one: 12 of `mac-tokens.css`'s `--sf-*` masks are real SF Symbols rendered to base64 PNG, and Apple
+licenses those for apps on *Apple* platforms. The Fluent kit supplies all 40 from MIT sources, so
+nothing is lost. See `THIRD-PARTY-NOTICES.md`.
+
+⚠️ **`wiktra` is a `git+` requirement and it is in `requirements-core.txt`** — so a first launch on
+a machine without git fails inside pip. macOS almost always has git; Windows never does out of the
+box, which is why `find_git.ps1` exists. It derives the need by *parsing* the requirements files, so
+rewriting those URLs as archive URLs would switch the check off by itself.
+
+## Windows: what has never executed
+
+The Windows track was written from Microsoft's own MIT-licensed sources and **no part of it has run
+on Windows**. Treat every item below as unverified, and say so rather than implying otherwise:
+
+- **`app/win/` entirely** — DWM attributes, and whether Mica survives WebView2 at all (pywebview
+  already asks DWM for it, so a failure there is WebView2 painting over it, not a missing call;
+  Microsoft closed the equivalent Tauri report "not planned"). Mica is built to **degrade to an
+  opaque themed background**, the same posture the codebase takes toward the grew backend — keep it
+  that way. Also `IsNonClientRegionSupportEnabled`, `window.native.Handle.ToInt32()`, caption
+  buttons, the registry accent (ABGR→RGB) and theme reads, `%LOCALAPPDATA%` resolution,
+  `DETACHED_PROCESS`, `explorer /select,`.
+- **The menubar against real keystrokes** — it renders and dismisses correctly headless, but Alt
+  focus, mnemonics under a real IME, and the accelerator dispatcher have never met Windows.
+- **All PowerShell** — no `pwsh` here, so not even a syntax check. `launcher.c` has never been
+  compiled (no mingw-w64/zig on this machine; `brew install zig` switches the build from the VBS
+  launcher to a real `.exe`). `iscc` has never run.
+- **Fonts** — `system-ui` on Windows 11 probably resolves to plain Segoe UI, *not* Segoe UI Variable
+  (Mozilla bug 1732404 is WONTFIX on exactly this), which is why the stack names the Variable faces
+  explicitly. Unconfirmed in WebView2.
+
+Two things genuinely **cannot** be reproduced in the web layer and should not be attempted there:
+**Mica and background Acrylic**, which sample the desktop behind the window while `backdrop-filter`
+only ever sees page content. They are the native layer's job.
 
 ## Code conventions
 

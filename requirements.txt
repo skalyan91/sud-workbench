@@ -4,6 +4,11 @@
 # ── native shell ────────────────────────────────────────────────────────────
 pywebview==6.2.1      # native macOS window, menu, dialogs, js_api bridge, http_server
                       #   pulls pyobjc-core / -Cocoa / -Quartz / -WebKit (12.2.x, known-good)
+pythonnet; sys_platform == "win32"   # the Windows half of that: WinForms + WebView2 through the CLR
+                      #   bridge. Already implied by pywebview's own metadata; stated here for the
+                      #   same reason as in requirements-core.txt (which is what the shipping
+                      #   bundles install from) — keep the two files in step. No effect on macOS:
+                      #   pip evaluates the marker and skips the line entirely.
 conllu>=6.0           # available for reference; I/O here is hand-rolled for byte-stable round-trips
 
 # ── parsing (SUD spaCy + Stanza UD) ─────────────────────────────────────────
