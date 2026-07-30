@@ -36,21 +36,23 @@ addEventListener("keydown",e=>{
   // focus, arrow/Tab/Enter navigation here must stay out of it, full stop.
   const ae0=document.activeElement;
   const inField=ae0&&(/INPUT|SELECT|TEXTAREA/.test(ae0.tagName)||ae0.isContentEditable);
-  if((e.metaKey||e.ctrlKey)&&e.altKey&&e.key==="ArrowUp"){ e.preventDefault(); insertAboveSel(); return; }   // ⌥⌘↑ insert above (token when a token is selected, else the sentence)
-  if((e.metaKey||e.ctrlKey)&&e.altKey&&e.key==="ArrowDown"){ e.preventDefault(); insertBelowSel(); return; }   // ⌥⌘↓ insert below
-  if((e.metaKey||e.ctrlKey)&&e.altKey&&(e.key==="ArrowLeft"||e.key==="ArrowRight")){ e.preventDefault();   // ⌥⌘←/→ insert a token before/after (reading-order, RTL-aware)
+  // The ⌥⌘ family goes through cmdOptKey (js/core/platform.js) — Ctrl+Alt on Windows. Read that function's
+  // note before adding a ⌃⌘ arrow handler here: the two families share one Windows chord.
+  if(cmdOptKey(e)&&e.key==="ArrowUp"){ e.preventDefault(); insertAboveSel(); return; }   // ⌥⌘↑ insert above (token when a token is selected, else the sentence)
+  if(cmdOptKey(e)&&e.key==="ArrowDown"){ e.preventDefault(); insertBelowSel(); return; }   // ⌥⌘↓ insert below
+  if(cmdOptKey(e)&&(e.key==="ArrowLeft"||e.key==="ArrowRight")){ e.preventDefault();   // ⌥⌘←/→ insert a token before/after (reading-order, RTL-aware)
     if(sel.s<0||sel.t<=0)return; const after=(e.key==="ArrowRight")!==sentRTL(DOC[sel.s]); insertToken(sel.s, after?sel.t:sel.t-1); return; }
-  if((e.metaKey||e.ctrlKey)&&(e.key==="Backspace"||e.key==="Delete")){ if(inField)return; e.preventDefault(); deleteSel(); return; }   // ⌘⌫ delete (token when a token is selected, else the sentence)
+  if(cmdKey(e)&&(e.key==="Backspace"||e.key==="Delete")){ if(inField)return; e.preventDefault(); deleteSel(); return; }   // ⌘⌫ delete (token when a token is selected, else the sentence)
   // items 2/3 — ⌘/ marks the selection Typo=Yes (strikethrough), ⌘I marks it Foreign=Yes (italics);
   // both toggle. ⇧⌘I opens "Import UD…". The native menu items carry the same key-equivalents and usually
   // intercept first — this is the in-page fallback (and covers a run with no native menu wired), guarded against typing in a field.
-  if((e.metaKey||e.ctrlKey)&&!e.altKey&&e.shiftKey&&(e.key==="\""||e.key==="'")){   // item 7 — ⇧⌘' (the key legend is the apostrophe; ⇧ makes e.key a double quote on most layouts, so accept both)
+  if(cmdKey(e)&&e.shiftKey&&(e.key==="\""||e.key==="'")){   // item 7 — ⇧⌘' (the key legend is the apostrophe; ⇧ makes e.key a double quote on most layouts, so accept both)
     const ae0=document.activeElement; if(inField||(ae0&&ae0.isContentEditable)) return;
     e.preventDefault(); toggleReported(); return; }
-  if((e.metaKey||e.ctrlKey)&&!e.altKey&&e.shiftKey&&(e.code==="KeyI"||e.key==="i"||e.key==="I")){   // ⇧⌘I → Import UD… (e.key is "I" once Shift is down, so accept the code and both cases)
+  if(cmdKey(e)&&e.shiftKey&&(e.code==="KeyI"||e.key==="i"||e.key==="I")){   // ⇧⌘I → Import UD… (e.key is "I" once Shift is down, so accept the code and both cases)
     const ae=document.activeElement; if(inField||(ae&&ae.isContentEditable)) return;
     e.preventDefault(); doImportUD(); return; }
-  if((e.metaKey||e.ctrlKey)&&!e.altKey&&!e.shiftKey&&(e.key==="i"||e.key==="/")){   // ⌘I → Foreign, ⌘/ → Typo
+  if(cmdKey(e)&&!e.shiftKey&&(e.key==="i"||e.key==="/")){   // ⌘I → Foreign, ⌘/ → Typo
     const ae=document.activeElement; if(inField||(ae&&ae.isContentEditable)) return;
     e.preventDefault(); (e.key==="/"?toggleTypo:toggleForeign)(); return; }
   if(e.key==="Enter" && !inField && sel.t>0){ e.preventDefault(); revealTok(sel.s,sel.t); editNodeInline(sel.s, sel.t); return; }   // Enter on a selected token → edit it inline (falls back to the grid cell). Reveal FIRST: makeEditable measures the element on open and hides the field while it's scrolled out of its own .diagram (elClippedOut), so opening over an off-screen token would put up an invisible editor
@@ -120,7 +122,7 @@ addEventListener("keydown",e=>{
 // View-menu items carry the same key-equivalents and usually intercept first; this handler is the in-page
 // fallback (and covers the case where the native menu hasn't been wired). Guarded against typing in a field.
 addEventListener("keydown",e=>{
-  if(!(e.metaKey||e.ctrlKey)||e.altKey) return;
+  if(!cmdKey(e)) return;   // ⌘1–⌘5 / Ctrl+1–Ctrl+5 (cmdKey already excludes the Alt-bearing chords)
   const name={"1":"stemma","2":"tree","3":"arcs","4":"brackets","5":"outline"}[e.key];
   if(!name) return;
   const ae=document.activeElement;

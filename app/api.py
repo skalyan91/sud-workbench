@@ -18,11 +18,27 @@ from typing import Any
 
 import webview
 
-from . import convert, detect, io_conllu, itrans, model, models_registry, parse, toolbox_import
+from . import convert, detect, io_conllu, itrans, menu_spec, model, models_registry, parse, toolbox_import
 from .paths import APP_DATA
 
 _STATE_FILE = os.path.join(APP_DATA, "state.json")   # small persisted app state (recent files, …)
 _MAX_RECENT = 10
+
+IS_MAC = sys.platform == "darwin"
+IS_WIN = sys.platform == "win32"
+
+# The UI font stack for the CHILD windows (Help / About / Models / Gloss Mappings / Insert /
+# Toolbox). Those windows are generated HTML with no stylesheet of their own — they never load
+# web/macos-kit or web/win11-kit — so the stack has to be chosen here, in Python, from the platform
+# the process is running on rather than from a CSS media query. `system-ui` alone was rejected: it
+# resolves to the right face on both, but the explicit fallbacks are what keep an older WebView2 /
+# WKWebView from dropping to Times.
+UI_FONT_STACK = ('"Segoe UI Variable Text","Segoe UI",system-ui,"Segoe UI Emoji",sans-serif'
+                 if IS_WIN else
+                 '-apple-system,BlinkMacSystemFont,"SF Pro Text","Helvetica Neue",Arial,sans-serif')
+MONO_FONT_STACK = ('ui-monospace,"Cascadia Mono","Cascadia Code",Consolas,monospace'
+                   if IS_WIN else
+                   'ui-monospace,SFMono-Regular,Menlo,monospace')
 
 
 def _esc(s: str) -> str:
@@ -408,9 +424,22 @@ class Api:
         return {"ok": True}
 
     # ── conditional Edit-menu items ──────────────────────────────────────────
+    def menu_spec(self) -> dict:
+        """The menu table as JSON, for the Windows in-window menu bar (web/js/ui/menubar.js).
+
+        The SAME table app/__main__.py's build_menu turns into an NSMenu and app/mac/shell.py wires
+        with key equivalents — so a row added in app/menu_spec.py appears on both platforms with one
+        edit, and a row that exists on only one of them is not expressible."""
+        return {"menus": menu_spec.as_json(), "platform": sys.platform}
+
     def sync_menu(self, state: dict) -> dict:
         """Frontend reports the selection state (token selected? which pane? RTL? group/ungroup available?);
-        show only the relevant items, flip the head-stepping icons under RTL."""
+        show only the relevant items, flip the head-stepping icons under RTL.
+
+        macOS only in effect: ``self._menu`` is the title → NSMenuItem map app/mac/shell.py's menu
+        wiring fills in, so on Windows there is nothing here to drive and the call returns early —
+        the in-window menu bar applies the very same state itself, from the very same table (see
+        ``menu_spec.visibility``), because the state never has to cross the bridge to reach it."""
         if not self._menu:
             return {"ok": False}
         st = dict(state or {})
@@ -422,31 +451,14 @@ class Api:
         return {"ok": True}
 
     def _apply_menu(self, st: dict):
+        """Push one selection-state report onto the live NSMenuItems.
+
+        The RULES are no longer written here — ``menu_spec.visibility`` resolves them, and
+        ``menu_spec.CHECK_KEYS`` names the checkmarks, so the Windows menu bar applies the identical
+        predicates rather than a hand-copied restatement of them.  What stays is the AppKit half."""
         m = self._menu or {}
-        has, zone = bool(st.get("has")), st.get("zone") or ""
-        rtl, group, ungroup = bool(st.get("rtl")), bool(st.get("group")), bool(st.get("ungroup"))
-        diagram, grid = has and zone == "diagram", has and zone == "grid"
-        convmwt, flatmwt, wrap_ok = bool(st.get("convmwt")), bool(st.get("flatmwt")), bool(st.get("wrapOK"))
-        merge = bool(st.get("merge"))   # a fresh multi-token selection that is not already an MWT — the same state Group needs
-        block_only = bool(st.get("blockOnly"))
-        vis = {
-            "Group as Multi-word Token": group, "Merge Tokens": merge, "Ungroup Multi-word Token": ungroup,
-            "Split into Multi-word Token": convmwt, "Flatten Multi-word Token": flatmwt,
-            "Move Token Left": diagram, "Move Token Right": diagram,
-            "Move Token Up": grid, "Move Token Down": grid,
-            "Insert Token Left": diagram, "Insert Token Right": diagram,
-            "Insert Token Above": grid, "Insert Token Below": grid,
-            "Select Previous Head": has, "Select Next Head": has,
-            "Set as Root": has, "Edit Lemma": has,
-            "Mark as Foreign": has, "Mark as Typo": has,   # items 2/3: marker FEATS act on the selected token (or range)
-            "Mark as Reported Speech": has,   # item 7: Reported=Yes lands on the head of the selection
-            "Paragraph Starts at Token": has,   # item 2: MISC NewPar=Yes is token-scoped (the two sentence-level boundary rows beside it are always shown)
-            "Insert Sentence Before": block_only, "Insert Sentence After": block_only,
-            "Move Sentence Up": block_only, "Move Sentence Down": block_only, "Delete Sentence": block_only,
-            "__sep_tokens__": has or group or ungroup,
-            "Wrap Long Lines": wrap_ok,   # View-menu item: available in every graphical notation
-        }
-        for title, show in vis.items():
+        rtl = bool(st.get("rtl"))
+        for title, show in menu_spec.visibility(st).items():
             it = m.get(title)
             if it is not None:
                 try:
@@ -457,29 +469,26 @@ class Api:
         # FEATS (set on every selected token → checked). Purely cosmetic; the action itself flips either way.
         # items 2/3 join the same loop: the two sentence-level boundary rows and the mid-sentence one report
         # whether the sentence/token already carries the marker, and "Paged Layout" reports the current layout.
-        for title, key in (("Mark as Foreign", "foreign"), ("Mark as Typo", "typo"), ("Mark as Reported Speech", "reported"),
-                           ("Document Boundary", "newdoc"), ("Paragraph Boundary", "newpar"),
-                           ("Paragraph Starts at Token", "tokNewpar"), ("Paged Layout", "paged")):
+        for title, key in menu_spec.CHECK_KEYS.items():
             it = m.get(title)
             if it is not None:
                 try:
                     it.setState_(1 if st.get(key) else 0)
                 except Exception:  # noqa: BLE001
                     pass
-        # head-stepping icons point toward the earlier/later token — flip them under RTL
+        # head-stepping icons point toward the earlier/later token — flip them under RTL. Which glyph
+        # mirrors, and to what, is the table's `sf_rtl` field — so the Windows menu bar can mirror the
+        # same two rows without a second list of exceptions.
         try:
             import AppKit
-            def sym(name):
-                return AppKit.NSImage.imageWithSystemSymbolName_accessibilityDescription_(name, None)
-            prev, nxt = m.get("Select Previous Head"), m.get("Select Next Head")
-            if prev is not None:
-                img = sym("chevron.right.2" if rtl else "chevron.left.2")
+            for spec in menu_spec.MIRRORED:
+                it = m.get(spec["spec_title"])
+                if it is None:
+                    continue
+                img = AppKit.NSImage.imageWithSystemSymbolName_accessibilityDescription_(
+                    spec["sf_rtl"] if rtl else spec["sf"], None)
                 if img is not None:
-                    prev.setImage_(img)
-            if nxt is not None:
-                img = sym("chevron.left.2" if rtl else "chevron.right.2")
-                if img is not None:
-                    nxt.setImage_(img)
+                    it.setImage_(img)
         except Exception:  # noqa: BLE001
             pass
 
@@ -492,16 +501,82 @@ class Api:
         return {"ok": True}
 
     def reveal_in_finder(self, path: str) -> dict:
-        """Reveal a folder or file in Finder — backs the titlebar proxy-icon folder-path menu.
-        A directory opens in place; a file is revealed (selected) in its containing folder."""
+        """Reveal a folder or file in the system file manager — backs the titlebar proxy-icon
+        folder-path menu.  A directory opens in place; a file is revealed (selected) in its
+        containing folder.
+
+        Kept under its macOS name even on Windows: the frontend calls it from one place and
+        renaming the bridge method would only mean two names for one operation.  The user-facing
+        wording is the frontend's business, and it says "Reveal in File Explorer" there via the
+        same platform switch that picks the kit stylesheet."""
         if not path:
             return {"error": "no path"}
         try:
             import subprocess
-            if os.path.isdir(path):
+            if IS_WIN:
+                # The chain's LAST row is the volume/drive container, and folderChain() gives it the
+                # bare SEPARATOR as its path — "/" on macOS, where that really is the volume root,
+                # and therefore "\" on Windows, where it is not a path at all.  Windows has no
+                # spelling for "the root of all drives" as a filesystem path; Explorer reaches it as
+                # a shell namespace folder, so a bare separator is routed to that moniker rather
+                # than handed to `/select,`, which would silently open Documents instead.
+                if path.strip() in ("/", "\\", "This PC"):
+                    subprocess.run(["explorer.exe", "shell:MyComputerFolder"], check=False)
+                elif re.fullmatch(r"[A-Za-z]:", path.strip()):
+                    # "C:" is the row above the topmost folder in the chain, and to Win32 it means
+                    # "the CURRENT directory on drive C", not its root — so it is completed to "C:\"
+                    # before Explorer sees it.
+                    subprocess.run(["explorer.exe", path.strip() + "\\"], check=False)
+                elif os.path.isdir(path):
+                    subprocess.run(["explorer.exe", os.path.normpath(path)], check=False)
+                else:
+                    # /select, takes the FILE and opens its folder with it highlighted — the exact
+                    # counterpart of `open -R`. No space after the comma: explorer parses this as one
+                    # argument and a space makes it open Documents instead, silently.
+                    subprocess.run(["explorer.exe", "/select," + os.path.normpath(path)], check=False)
+            elif os.path.isdir(path):
                 subprocess.run(["open", path], check=False)
             else:
                 subprocess.run(["open", "-R", path], check=False)
+            return {"ok": True}
+        except Exception as exc:  # noqa: BLE001
+            return {"error": str(exc)}
+
+    def path_info(self) -> dict:
+        """What the frontend needs to render a filesystem path it never parses itself.
+
+        ``folderChain()`` in js/io/bridge.js used to split on "/" and hard-code "Macintosh HD"; it
+        now reads these two values instead.
+
+        ``rootName`` is the row ABOVE the topmost folder in the chain.  On macOS "/" is a volume and
+        "Macintosh HD" is its name.  On Windows the topmost *folder* is the drive root (``C:\\``),
+        which the split already yields as a chain entry of its own — so the row above it is the
+        container of all drives, which Explorer calls **This PC**.  Naming a drive here instead was
+        rejected: this is injected once at startup, and the letter belongs to whichever document is
+        open, so "C:\\" would be a lie for a file on D:."""
+        return {"sep": "\\" if IS_WIN else "/",
+                "rootName": "This PC" if IS_WIN else "Macintosh HD"}
+
+    # ── window controls (Windows draws its own caption buttons in the web layer) ──
+    def caption(self, what: str) -> dict:
+        """minimize / maximize (a toggle: maximise ↔ restore) / close, for the ``.capbtn`` buttons
+        the Fluent title bar draws.  macOS needs none of this — the traffic lights are real AppKit
+        buttons placed in-content — so the method simply reports unsupported there rather than
+        pretending, which keeps the web layer's `if (IS_WIN)` the single place the decision lives."""
+        if not IS_WIN:
+            return {"ok": False, "error": "caption buttons are Windows-only"}
+        from .win import dwm
+        return {"ok": bool(dwm.caption_action(self.window, str(what or "")))}
+
+    def new_window(self) -> dict:
+        """Spawn a second app process (a fresh, empty document).  The callable is handed over by
+        app/__main__.py at startup — the same pattern as _recent_menu_refresh — so api.py carries no
+        shell code.  The macOS menu calls that function directly; the Windows menu bar comes here."""
+        cb = getattr(self, "_new_window", None)
+        if cb is None:
+            return {"error": "unavailable"}
+        try:
+            cb()
             return {"ok": True}
         except Exception as exc:  # noqa: BLE001
             return {"error": str(exc)}
@@ -1050,7 +1125,7 @@ class Api:
         """Open the Help window.  The frontend builds the self-contained HTML (it owns the
         shortcut list + SUD vocabulary), so it is loaded verbatim via ``html=``."""
         page = html or ("<!DOCTYPE html><meta charset='utf-8'>"
-                        "<body style='font:13px -apple-system,sans-serif;padding:24px'>"
+                        f"<body style='font:13px {UI_FONT_STACK};padding:24px'>"
                         "<h2>Help</h2><p>Help content is unavailable.</p></body>")
         # item 11: opened NARROWER (600, was 720) for a more compact window.  Content stays above
         # the help CSS's 520px single-column breakpoint, so the two-column shortcut grid survives
@@ -1285,7 +1360,7 @@ class Api:
     *{box-sizing:border-box}
     html,body{margin:0;height:100%;overscroll-behavior:none}   /* no rubber-band/swipe-back bounce, matching the main window's every scroller */
     body{background:var(--bg);color:var(--fg);
-         font:14px/1.45 -apple-system,BlinkMacSystemFont,"SF Pro Text","Helvetica Neue",Arial,sans-serif;
+         font:14px/1.45 """ + UI_FONT_STACK + """;
          -webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
     h1,h2,h3,h4{margin:0}
     /* one SHARED bottom-action-button style across every dialog window (item 24): same 30px height + 13px font.
@@ -1803,7 +1878,7 @@ class Api:
        label with a caption. The sample is still the row's secondary text, so it takes Labels/Secondary; it keeps
        13px rather than the Subtitle's 11, because it is prose the user has to read to choose a mapping, not a
        caption glossing the line above it. */
-    .mk{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:14px;font-weight:700;min-width:54px;color:var(--fg)}
+    .mk{font-family:""" + MONO_FONT_STACK + """;font-size:14px;font-weight:700;min-width:54px;color:var(--fg)}
     .smp{flex:1 1 auto;min-width:0;font-size:13px;color:var(--label-secondary,rgba(0,0,0,.5));white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
     /* dropdowns: NO box-shadow, in any state (item 28) */
     select{appearance:none;-webkit-appearance:none;flex:0 0 auto;height:30px;font-family:inherit;font-size:14px;

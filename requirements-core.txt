@@ -9,6 +9,18 @@
 
 # ── native shell ────────────────────────────────────────────────────────────
 pywebview==6.2.1
+# pywebview's Windows backend is WinForms + WebView2, reached through pythonnet's CLR bridge — the
+# counterpart of the pyobjc-* packages it pulls on macOS. pywebview 6.2.1 already declares
+# `pythonnet; sys_platform == "win32"` itself, so this line changes no resolution; it is here to
+# make the Windows shipping track's one non-obvious runtime prerequisite VISIBLE in the file the
+# installers actually install from, rather than something a reader has to go read pywebview's
+# metadata to discover. Same environment marker, so a macOS install is untouched — pip evaluates
+# sys_platform at install time and never even fetches it.
+#   pythonnet publishes ONE wheel covering cp310–cp314 on win32 + win_amd64, and NO win_arm64
+#   wheel. An ARM64 Windows machine therefore has to run the x64 Python under emulation, which is
+#   why packaging/windows/sud-workbench.iss says ArchitecturesAllowed=x64compatible rather than
+#   naming arm64 as well.
+pythonnet; sys_platform == "win32"
 conllu>=6.0
 
 # ── parsing (SUD spaCy only — thinc/CNN, no torch) ──────────────────────────

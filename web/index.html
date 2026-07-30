@@ -1,8 +1,27 @@
 <meta charset="utf-8">
 
 <link rel="stylesheet" href="styles/fonts.css">
-<link rel="stylesheet" href="macos-kit/mac-tokens.css">
-<link rel="stylesheet" href="macos-kit/mac-chrome.css">
+<script>
+/* PLATFORM DECISION + KIT SELECTION. Inline, in <head>, and ABOVE the app stylesheet — all three
+   deliberately. It has to run before first paint (a kit swapped in afterwards is a visible flash),
+   and its <link>s have to land AHEAD of app.css in the cascade, since app.css overrides the kit.
+   `document.write` rather than head.appendChild for exactly that second reason: it inserts at this
+   script's own position in the source, so the kit stays ahead of app.css however this file is
+   later reordered. There is no build step to resolve this at package time.
+   Detection order: an explicit ?platform= — browser design mode, and the ONLY way the Windows skin
+   can be reviewed from a Mac — then the real user agent. Python gets no vote: it can inject only
+   after load, which is far too late to choose a stylesheet. js/core/platform.js reads the result
+   back off <html data-platform> so look and behaviour cannot disagree. */
+(function(){
+  var q=/[?&]platform=(mac|win)\b/.exec(location.search);
+  var ua=(navigator.userAgentData&&navigator.userAgentData.platform)||navigator.platform||"";
+  var p=q?q[1]:(/win/i.test(ua)?"win":"mac");
+  document.documentElement.dataset.platform=p;
+  var kit=p==="win"?["win11-kit/fluent-tokens.css","win11-kit/fluent-chrome.css"]
+                   :["macos-kit/mac-tokens.css","macos-kit/mac-chrome.css"];
+  for(var i=0;i<kit.length;i++) document.write('<link rel="stylesheet" href="'+kit[i]+'">');
+})();
+</script>
 <link rel="stylesheet" href="styles/app.css">
 
 <div class="window" role="application" aria-label="SUD Workbench">
@@ -307,7 +326,10 @@
 <div class="toast" id="toast"></div>
 
 <script src="iso639-3.js"></script>
-<script src="macos-kit/toast.js"></script>
+<!-- platform.js FIRST: PLATFORM/IS_WIN/accel/cmdKey are read by almost every module below, and a
+     classic script cannot forward-reference a later file. It reads the <head> script's decision. -->
+<script src="js/core/platform.js"></script>
+<script src="js/ui/toast.js"></script>
 <script src="js/core/state.js"></script>
 <script src="js/lang/translit.js"></script>
 <script src="js/core/prefs.js"></script>
@@ -333,6 +355,9 @@
 <script src="js/lang/translit-load.js"></script>
 <script src="js/lang/readings.js"></script>
 <script src="js/lang/fontload.js"></script>
+<!-- Windows only: the in-window menu bar, since there is no NSMenu off macOS. Inert on macOS (every
+     entry point returns on !IS_WIN). No eager top-level code, so its position here is free. -->
+<script src="js/ui/menubar.js"></script>
 <!-- browser design mode only: seeds DOC so the renderers have something to draw with no bridge.
      packaging/make_*.sh delete the file AND strip this pair of lines from the bundled index.html. -->
 <script src="js/dev-fixture.js"></script>

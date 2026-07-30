@@ -84,3 +84,8 @@ for pair in "$PROJECT/app/data/appicon.png:appicon-256.png" \
   [ -f "$s" ] || continue
   sips -z 256 256 "$s" --out "$o" >/dev/null && echo "wrote $o"
 done
+
+# 7) Windows .ico, packed from the LIGHT flat master built in step 3 — so it tracks the same Icon
+#    Composer export as everything above and can't drift. Light only: a Win32 .ico has no
+#    appearance variants, the shell reads one icon. Consumed by packaging/windows/make_win_app.py.
+python3 "$HERE/build_flat_icon.py" ico

@@ -19,19 +19,129 @@ mark-geometry edit flows straight through:
 
 Writes packaging/icon-flat/appicon-flat.svg + appicon-flat-1024.png.
 Requires: rsvg-convert, magick (both already used by build_icons.sh's toolchain).
+
+A third mode, `build_flat_icon.py ico`, packages the already-built LIGHT flat master into a
+multi-resolution Windows .ico (see build_ico() below). It regenerates nothing else — run it after
+the light/dark passes, or on its own when only the Windows icon needs rebuilding.
 """
-import json, os, re, subprocess, sys, tempfile
+import json, os, re, shutil, struct, subprocess, sys, tempfile
 
 HERE   = os.path.dirname(os.path.abspath(__file__))
 ICON   = os.path.join(HERE, "AppIcon.icon")
 ASSETS = os.path.join(ICON, "Assets")
-APP = (sys.argv[1] if len(sys.argv) > 1 else "light").lower()   # "light" (default) or "dark" appearance
+APP = (sys.argv[1] if len(sys.argv) > 1 else "light").lower()   # "light", "dark", or "ico"
 _SFX = "-dark" if APP == "dark" else ""
 GLASS  = os.path.join(HERE, "icon-flat", f"appicon{_SFX}-1024.png")
 OUT_SVG = os.path.join(HERE, "icon-flat", f"appicon-flat{_SFX}.svg")
 OUT_PNG = os.path.join(HERE, "icon-flat", f"appicon-flat{_SFX}-1024.png")
 
 def sh(*a): return subprocess.check_output(a, text=True).strip()
+
+# ── Windows .ico ────────────────────────────────────────────────────────────────
+# Built from the LIGHT flat master only. Windows has no light/dark app-icon switching for a Win32
+# .ico (the shell reads one icon and tints nothing), so a dark variant would have no consumer.
+#
+# NOT built with Pillow. Pillow is NOT a dependency of this project — it is absent from
+# requirements-core.txt and requirements.txt, and `pip show pillow` in the dev venv reports
+# "Required-by:" empty; the only mentions anywhere in the dependency graph are optional extras
+# (transformers[vision], networkx[doc]) that pip never installs. It happens to be present in one
+# developer's venv, which is exactly the kind of accident a build script must not depend on.
+# ImageMagick is used instead: build_icons.sh already hard-requires `magick`, so this adds no
+# prerequisite at all.
+#
+# SIZES. The Windows shell's canonical bases are 16 (title bar, tree views, small icons), 32
+# (taskbar, Alt-Tab), 48 (Explorer "large icons", the default desktop size) and 256 (the "extra
+# large"/jumbo view and what Start scales from). The rest are those bases at the display scale
+# factors Windows 10/11 actually use — 125 % (16→20, 32→40), 150 % (16→24, 32→48), 200 % (32→64,
+# 48→96) — plus 128 for the half-scale jumbo. Shipping them means the shell never has to resample:
+# an icon Windows scales itself is the difference between crisp and mushy at 125 %, which is the
+# most common non-100 % setting on laptops.
+ICO_SIZES = (16, 20, 24, 32, 40, 48, 64, 96, 128, 256)
+ICO_PNG_FROM = 256      # entries at or above this size are stored PNG-compressed, below it as DIB
+PNG_MAGIC = b"\x89PNG\r\n\x1a\n"
+
+def _ico_entries(blob):
+    """Parse an .ico into [(width, height, bitcount, payload)] — also the self-check on our output."""
+    if len(blob) < 6 or struct.unpack("<HH", blob[0:4]) != (0, 1):
+        raise SystemExit("not an .ico (bad ICONDIR)")
+    n = struct.unpack("<H", blob[4:6])[0]
+    out = []
+    for i in range(n):
+        w, h, _cc, _rv, _pl, bc, size, off = struct.unpack("<BBBBHHII", blob[6 + 16 * i: 22 + 16 * i])
+        if off + size > len(blob):
+            raise SystemExit(f"ico entry {i} runs past end of file")
+        out.append((w or 256, h or 256, bc, blob[off:off + size]))
+    return out
+
+def _ico_pack(entries):
+    """(width, height, bitcount, payload) … → an .ico container. Offsets are computed here, so the
+    caller cannot get them wrong; every payload is stored verbatim."""
+    head = struct.pack("<HHH", 0, 1, len(entries))
+    off = len(head) + 16 * len(entries)
+    dirblob, data = b"", b""
+    for w, h, bc, payload in entries:
+        dirblob += struct.pack("<BBBBHHII", w % 256, h % 256, 0, 0, 1, bc, len(payload), off)
+        off += len(payload)                                  # 0 in the width/height byte means 256
+        data += payload
+    return head + dirblob + data
+
+def build_ico():
+    src = os.path.join(HERE, "icon-flat", "appicon-flat-1024.png")
+    out = os.path.join(HERE, "icon-flat", "appicon-flat.ico")
+    if not os.path.exists(src):
+        sys.exit(f"missing flat master: {src} (run this script with no arguments first)")
+
+    small = [s for s in ICO_SIZES if s < ICO_PNG_FROM]
+    big   = [s for s in ICO_SIZES if s >= ICO_PNG_FROM]
+    tmpdir = tempfile.mkdtemp()
+    try:
+        # (a) the sub-256 sizes through ImageMagick's own ICO encoder, which writes them as 32-bit
+        #     BGRA DIBs with the AND mask Windows expects. Lanczos because the mark is thin-lined
+        #     and IM's default box-ish reduction turns the 16 px rendering to porridge.
+        tmp_ico = os.path.join(tmpdir, "small.ico")
+        sh("magick", src, "-filter", "Lanczos",
+           "-define", "icon:auto-resize=" + ",".join(str(s) for s in sorted(small, reverse=True)),
+           tmp_ico)
+        entries = _ico_entries(open(tmp_ico, "rb").read())
+
+        # (b) 256 as PNG rather than DIB. A 256×256 32-bit DIB is 256 KB of raw pixels; the same
+        #     image as PNG is around a tenth of that, and Vista and later read PNG-compressed
+        #     entries natively. Storing the LARGE entry as PNG and the small ones as DIB is what
+        #     Windows' own icons do — the small sizes stay DIB because that is the shape every
+        #     shell component, however old, has always understood.
+        for s in big:
+            png = os.path.join(tmpdir, f"{s}.png")
+            sh("magick", src, "-filter", "Lanczos", "-resize", f"{s}x{s}", "png32:" + png)
+            entries.append((s, s, 32, open(png, "rb").read()))
+    finally:
+        shutil.rmtree(tmpdir, ignore_errors=True)
+
+    entries.sort(key=lambda e: -e[0])                        # largest first, the usual convention
+    blob = _ico_pack(entries)
+    with open(out, "wb") as f:
+        f.write(blob)
+
+    # Verify what we just wrote by re-parsing it: every offset/length in bounds, every payload's
+    # magic matching the kind its directory entry implies. Cheap, and the only check available on a
+    # machine that cannot open the file in Explorer.
+    got = _ico_entries(open(out, "rb").read())
+    if [e[0] for e in got] != sorted(ICO_SIZES, reverse=True):
+        sys.exit(f"ico: wrote sizes {[e[0] for e in got]}, expected {sorted(ICO_SIZES, reverse=True)}")
+    for w, h, bc, payload in got:
+        is_png = payload[:8] == PNG_MAGIC
+        if is_png != (w >= ICO_PNG_FROM):
+            sys.exit(f"ico: {w}px entry is {'PNG' if is_png else 'DIB'} but should not be")
+        if not is_png and struct.unpack("<I", payload[:4])[0] != 40:
+            sys.exit(f"ico: {w}px DIB entry has no BITMAPINFOHEADER")
+    print(f"wrote {out}")
+    for w, h, bc, payload in got:
+        kind = "PNG" if payload[:8] == PNG_MAGIC else "DIB"
+        print(f"  {w:>3}×{h:<3} {bc}bpp  {kind}  {len(payload):>7} B")
+    print(f"  total {len(blob) / 1024:.1f} kB")
+
+if APP == "ico":
+    build_ico()
+    sys.exit(0)
 
 if not os.path.exists(GLASS):
     sys.exit(f"missing glass export: {GLASS} (run the Icon Composer export first)")

@@ -44,6 +44,37 @@ Both declare OFL 1.1 in their own `name` tables (IDs 13/14). The OFL permits bun
 redistribution with software; it forbids selling the fonts on their own, and it requires that any
 **modified** version be renamed. Neither font is modified here.
 
+## Chrome kits — `web/macos-kit/`, `web/win11-kit/`
+
+The app ships two chrome kits and loads exactly one, chosen at page load from `<html
+data-platform>`. Their icon sets are unrelated in provenance.
+
+| Component | Where | Upstream | Licence |
+|---|---|---|---|
+| Fluent UI System Icons | `win11-kit/fluent-tokens.css` — 38 of 40 `--sf-*` masks | [microsoft/fluentui-system-icons](https://github.com/microsoft/fluentui-system-icons) @ `a9e7f2d7bd8a` | MIT |
+| WinUI 3 theme resources | `win11-kit/*.css` — colours, radii, metrics, timings | [microsoft/microsoft-ui-xaml](https://github.com/microsoft/microsoft-ui-xaml) | MIT |
+| Lucide | `macos-kit/mac-tokens.css` and `win11-kit/fluent-tokens.css` — the hand-drawn `--sf-*` masks | [lucide-icons/lucide](https://github.com/lucide-icons/lucide) | ISC |
+| SF Symbols | `macos-kit/mac-tokens.css` — 12 `--sf-*` masks, base64 PNG | Apple | see below |
+
+- Fluent UI System Icons and the WinUI theme resources are both Copyright (c) Microsoft
+  Corporation, MIT. From `microsoft-ui-xaml` **no code is copied — values only**, read out of
+  `Common_themeresources_any.xaml`, `CornerRadius_themeresources.xaml`,
+  `MenuFlyout_themeresources.xaml`, `ScrollBar_themeresources.xaml`,
+  `TextBlock_themeresources.xaml`, `TitleBar/TitleBar_themeresources.xaml` and
+  `Materials/Acrylic/AcrylicBrush.{h,_themeresources.xaml}`.
+- Lucide glyphs are inlined as SVG path data, each named in a trailing comment at its own token.
+  `--sf-narcs` and `--sf-nbrackets` are Lucide in **both** kits: they draw a notation, not an OS
+  affordance, so Fluent has no counterpart to swap in.
+
+**SF Symbols are Apple's, and are macOS-only on purpose.** Twelve masks in `mac-tokens.css` are
+real SF Symbols rendered to base64 PNG, and on macOS the native shell replaces several of them with
+symbols it renders at runtime. Apple licenses SF Symbols for use in apps **on Apple platforms**;
+reproducing the artwork inside a Windows application is not covered. So `packaging/windows/
+make_win_app.py` **excludes `web/macos-kit/` from the Windows payload** and fails the build if it
+survives — the Fluent kit supplies all 40 masks from MIT-licensed sources, so nothing is lost.
+`packaging/make_bootstrap_app.sh` drops `web/win11-kit/` from the macOS bundle symmetrically,
+though that one is for size alone: MIT would have travelled fine.
+
 ## Data — `app/data/`
 
 | Component | File | Upstream | Licence |
