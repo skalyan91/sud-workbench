@@ -87,7 +87,13 @@
      document correctly passing under the bars the bar ran up behind them too, ending above the content it
      scrolls. `margin-top` on the track piece is the one lever that insets a track without moving the scroller,
      and it needs the scrollbar to be author-styled to apply at all — hence the width/thumb rules, which restate
-     the overlay look rather than changing it. Keep the inset in step with the padding above. */
+     the overlay look rather than changing it. Keep the inset in step with the padding above. ALWAYS VISIBLE, not
+     auto-hiding, ON REQUEST: WebKit ties the two together at the engine level — ANY ::-webkit-scrollbar-* rule
+     (needed for the inset above) switches the scrollbar from the free native auto-hiding overlay to this classic
+     always-visible one, and there is no CSS-only way to keep both (a hand-rolled opacity fade was tried and
+     reverted; a clip-path notch over just the scrollbar's corner was considered and rejected — it would also
+     clip real document content sitting in that same top-right corner, not just the scrollbar). Given the choice
+     between the two, the inset (this) is what was asked for. */
   .doc::-webkit-scrollbar{width:11px; background:transparent}
   .doc::-webkit-scrollbar-track{background:transparent; margin-top:calc(var(--tbH,44px) + var(--vbH,0px))}
   .doc::-webkit-scrollbar-thumb{background:color-mix(in srgb,var(--text) 28%,transparent); border-radius:6px; border:3px solid transparent; background-clip:content-box}
@@ -896,7 +902,8 @@
      was blue text on blue. Every other view accents the text against the plain page and reads correctly, which
      is why this change stops here. --accent, not --row-sel: that token stays the old low-alpha wash for anything
      else that wants one. */
-  .oselrow{position:absolute; z-index:0; background:var(--accent); background:oklch(from var(--accent) calc(l * .827) calc(c * .915) h); border-radius:6px; pointer-events:none; display:none}   /* selected row — default, full subtree width */
+  .oselrow{position:absolute; z-index:0; background:rgb(0,100,225); border-radius:6px; pointer-events:none; display:none}   /* selected row — default, full subtree width; light: the SAME measured rgb(0,100,225) as the grid's own selected row (see its note beside table.grid tbody tr.sel) */
+  @media (prefers-color-scheme:dark){ .oselrow{background:var(--accent); background:oklch(from var(--accent) calc(l * .827) calc(c * .915) h)} }   /* dark keeps the derived-darkening formula, unchanged */
   .ohovbox{position:absolute; z-index:0; background:var(--row-hover); border-radius:6px; pointer-events:none; display:none}                                 /* hover — same span as a row selection */
   .oreportbox{position:absolute; z-index:0; border:.5px solid color-mix(in srgb,var(--text) 18%,transparent); border-radius:7px; background:color-mix(in srgb,var(--content-bg) 55%,transparent); box-shadow:0 1px 4px rgba(0,0,0,.12),0 0 0 .5px rgba(0,0,0,.02); pointer-events:none}   /* item 7: a reported-speech subtree sits in a subtly drop-shadowed box (behind the rows, so it never shifts their horizontal alignment) */
   .orel{font-family:var(--token-font); font-size:11px; font-weight:545;   /* weight curve @11px, matching .lbl/.bwrel — was a flat 600 */ color:var(--dia-muted); margin-inline-end:9px; letter-spacing:.0248em;   /* tracking curve @11px, matching .lbl/.bwrel — was a flat .02em */ unicode-bidi:isolate}
@@ -1073,15 +1080,19 @@
      rewrites that property, and used to have to rewrite --row-sel's alpha separately to match).
      LAST of the four states: the focused row outranks the range wash, hover and stripe alike. */
   /* NOT the accent itself — macOS fills a selected row with a DARKENED accent (its own
-     `selectedContentBackgroundColor`: for the #007AFF system blue, #0059D1). DERIVED rather than hardcoded, so a
-     custom system accent carries through: in OKLCh the measured pair is L ×.827, C ×.915, hue held, which
-     reproduces rgb(0,91,208) from #007AFF — two units off the sampled rgb(0,89,209), i.e. under any perceptual
-     threshold — and darkens any other accent by the same perceptual step rather than a per-hue guess.
-     The plain `background:var(--accent)` above it is a real fallback, not a duplicate: relative colour syntax
-     that an engine cannot parse drops THAT DECLARATION ONLY and leaves this one standing. It has to be written
-     as a literal here rather than behind a custom property for that to hold — an unparsable value inside a
-     var() is invalid at computed-value time instead, which discards the fallback too and paints nothing. */
-  table.grid tbody tr.sel td::before{background:var(--accent); background:oklch(from var(--accent) calc(l * .827) calc(c * .915) h)}
+     `selectedContentBackgroundColor`: for the #007AFF system blue, #0059D1). Light is now a literal MEASURED
+     target, rgb(0,100,225), on request — stated as the colour it must BE rather than as a formula, since the
+     formula's own derived rgb(0,91,208) (see below) wasn't quite it. Dark KEEPS the derived approach — DERIVED
+     rather than hardcoded, so a custom system accent carries through: in OKLCh the measured pair is L ×.827,
+     C ×.915, hue held, which reproduces rgb(0,91,208) from #007AFF — two units off the sampled rgb(0,89,209),
+     i.e. under any perceptual threshold — and darkens any other accent by the same perceptual step rather than
+     a per-hue guess. That's also why dark is a TWO-declaration pair (`background:var(--accent)` first, a real
+     fallback, not a duplicate): relative colour syntax that an engine cannot parse drops THAT DECLARATION ONLY
+     and leaves this one standing. It has to be written as a literal there rather than behind a custom property
+     for that to hold — an unparsable value inside a var() is invalid at computed-value time instead, which
+     discards the fallback too and paints nothing. */
+  table.grid tbody tr.sel td::before{background:rgb(0,100,225)}   /* light: MEASURED target, on request — was the OKLCH-darkened #007AFF (rgb(0,91,208)); stated as the colour it must BE rather than re-tuning the darken-curve's constants for one theme. Dark keeps the old generic formula (below) since darkening it further isn't what was asked */
+  @media (prefers-color-scheme:dark){ table.grid tbody tr.sel td::before{background:var(--accent); background:oklch(from var(--accent) calc(l * .827) calc(c * .915) h)} }
   /* …which forces INVERSE INK. The cells carry muted greys (--text-2 / --muted) that fail outright on a
      saturated fill, and unlike the old wash there is no background showing through to keep them legible.
      Scoped to where the full accent ACTUALLY paints: with focus in the diagram the row falls back to the dim
