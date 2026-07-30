@@ -22,15 +22,63 @@ function bracketsWrapped(si){
   // exactly as in the flat view. A token whose display-parent isn't its real head is an INTERRUPTER (it sits, in
   // surface order, inside a constituent it doesn't belong to): it stays in place, bracketed, and is tied to its
   // head by a cross-line arc — exactly as the flat bracket view does.
-  const tlo=Array(n),thi=Array(n),disc=Array(n),fin=Array(n); let _dt=0;
-  (function dfs(i){tlo[i]=i;thi[i]=i;disc[i]=_dt++; children[i].forEach(c=>{dfs(c); tlo[i]=Math.min(tlo[i],tlo[c]); thi[i]=Math.max(thi[i],thi[c]);}); fin[i]=_dt++;})(root);
-  const isRealDesc=(anc,x)=>disc[anc]<=disc[x]&&disc[x]<=fin[anc];   // x is anc's descendant (or anc itself) in the REAL head tree, via Euler-tour discovery/finish times — independent of tlo/thi's SURFACE-ORDER span, which a non-projective parse can make numerically overlap even where there's no real ancestor/descendant relationship (see below)
+  const disc=Array(n),fin=Array(n); let _dt=0;
+  (function dfs(i){disc[i]=_dt++; children[i].forEach(c=>dfs(c)); fin[i]=_dt++;})(root);
+  const isRealDesc=(anc,x)=>disc[anc]<=disc[x]&&disc[x]<=fin[anc];   // x is anc's descendant (or anc itself) in the REAL head tree, via Euler-tour discovery/finish times — UNCONDITIONAL (every real child folds in), independent of the interrupt-aware tlo/thi computed below
+  // UNCONDITIONAL full subtree spans (every real child folds in) — used ONLY to find, per constituent, which OTHER
+  // tokens sit inside its numeric span (case b below). NOT what brackets nest from (see the corrected tlo/thi
+  // further down): folding everything in unconditionally is exactly what let mūrtitve's span reach out to bhṛtaḥ.
+  const rtlo=Array(n),rthi=Array(n);
+  (function rdfs(i){rtlo[i]=i;rthi[i]=i; children[i].forEach(c=>{rdfs(c); rtlo[i]=Math.min(rtlo[i],rtlo[c]); rthi[i]=Math.max(rthi[i],rthi[c]); });})(root);
+  // INTERRUPTER, the SAME two complementary shapes diagram-wrap.js's flat brackets() computes (see its own comment
+  // for the full derivation — kept in sync here so the two renderers can't disagree about which token gets the arc):
+  //  (b) THE ORDINARY CASE — an UNRELATED token p (no ancestor/descendant relation to C either way) sits inside
+  //      constituent C's numeric span: flag p itself (e.g. "yesterday" parked inside "man"'s NP span in the
+  //      fixture's "I saw a man yesterday who was tall" → arc yesterday→saw).
+  //  (a) BRIHAT_JATAKA S1'S SHAPE — mūrtitve's real subtree spans PAST its own head parikalpitaḥ, out to bhṛtaḥ.
+  //      The OLD dparent algorithm tested this the (b)-only way — "is p the smallest constituent some OTHER span
+  //      numerically contains?" — which let dparent[mūrtitve]=parikalpitaḥ (its real head, matches — no flag),
+  //      dparent[parikalpitaḥ]=vartmā (its real head, since a REAL descendant can never be its own display-parent —
+  //      matches, no flag) and ALSO dparent[bhṛtaḥ]=mūrtitve (its real head too, because mūrtitve's UNCONDITIONAL
+  //      span still reached out to bhṛtaḥ) — so isInt() was false for all four tokens and dchildren ended up
+  //      identical to the REAL (non-projective) tree: rendering it walked mūrtitve's dchild bhṛtaḥ (and bhṛtaḥ's
+  //      own child śaśa) BEFORE mūrtitve's own parent parikalpitaḥ, since flatInto/render sort members by `lo[c]`
+  //      and bhṛtaḥ's subtree's lo is smaller than parikalpitaḥ's own position — confirmed with a CDP dump of the
+  //      rendered .bwtok data-tok sequence: 1,3,4,2,… instead of 1,2,3,4. (a) catches exactly this: for dependent
+  //      d, if one of ITS HEAD'S OWN ANCESTORS sits between them in surface order, flag d (not the ancestor), tied
+  //      to its real head — matching ātmā/iti/vidām (vidām, not iti) and śrutau/yaḥ/anekadā (anekadā, not yaḥ)
+  //      elsewhere in the same sentence, while leaving (b)'s "yesterday" example alone (yesterday is man's
+  //      unrelated SIBLING, not man's ancestor, so (a) declines to flag "was" and (b) flags yesterday as it always did).
+  const interrupt=new Set();
+  for(let C=0;C<n;C++) for(let p=rtlo[C]+1;p<rthi[C];p++)
+    if(!isRealDesc(C,p)&&!isRealDesc(p,C)) interrupt.add(p);                 // (b) unrelated interloper
+  for(let d=0;d<n;d++){ if(d===root)continue; const h=head[d]-1; if(h<0||h>=n||h===d)continue;
+    const a=Math.min(h,d), b=Math.max(h,d);
+    for(let p=a+1;p<b;p++) if(isRealDesc(p,h)){ interrupt.add(d); break; } } // (a) an ancestor of h crosses d's own arc
+  // corrected spans: fold a child's span into its parent's only when that child is NOT an interrupter — an
+  // interrupter's own span is still computed (for ITS OWN bracket) but stops at whatever it can honestly claim,
+  // instead of reaching past whatever real token sits, non-projectively, between it and ITS head.
+  const tlo=Array(n),thi=Array(n);
+  (function dfs2(i){tlo[i]=i;thi[i]=i; children[i].forEach(c=>{dfs2(c); if(interrupt.has(c))return; tlo[i]=Math.min(tlo[i],tlo[c]); thi[i]=Math.max(thi[i],thi[c]); });})(root);
   const dparent=Array(n).fill(-1);
-  for(let p=0;p<n;p++){ if(p===root)continue; let best=-1,bs=Infinity;
-    for(let C=0;C<n;C++){ if(C===p||isRealDesc(p,C))continue;   // a REAL descendant of p can never be p's display-parent, even when non-projectivity makes its span numerically contain p — picking one would invert the relationship into a 2-cycle (p→C→p), silently dropping BOTH (and everything under them) from dchildren's root-rooted walk since neither is ever reachable. Concretely: token A's real head is token B, but B's own linear position sits INSIDE A's (non-projective) subtree span — without this exclusion, A's smallest-enclosing search picks B (correct), but B's search also picks A back (same tied span size), orphaning the pair.
-      if(tlo[C]<=p&&p<=thi[C]){ const sp=thi[C]-tlo[C]; if(sp<bs){bs=sp;best=C;} } } dparent[p]=best>=0?best:root; }
+  for(let p=0;p<n;p++){ if(p===root)continue;
+    if(!interrupt.has(p)){ dparent[p]=head[p]-1; continue; }   // the ordinary case: nest under the real head, same as the flat view
+    // an interrupter can't nest under its own real head (that's what "interrupter" means here) — search EVERY
+    // constituent (not just p's own real ancestors: case (b)'s interrupters, like "yesterday", attach to an
+    // unrelated SIBLING subtree — "man"'s — that sits nowhere on their own head chain at all) for the SMALLEST
+    // (corrected) span that contains p, excluding p's own real descendants (picking one would 2-cycle: p→C→p). This
+    // is the same search the ORIGINAL dparent algorithm ran, just over the corrected tlo/thi instead of the
+    // unconditional one — an earlier version of this fix walked UP p's real head chain only, which finds
+    // brihat_jataka s1's vartmā correctly (it happens to sit on bhṛtaḥ's own ancestor chain) but put "yesterday" at
+    // the SENTENCE ROOT instead of nested inside "man"'s bracket where the flat view (and the pre-fix dparent
+    // search) both put it — confirmed by a CDP dump showing "yesterday" rendered LAST, after the whole relative
+    // clause, instead of in its natural position between "man" and "who".
+    let best=-1,bs=Infinity;
+    for(let C=0;C<n;C++){ if(C===p||isRealDesc(p,C))continue;
+      if(tlo[C]<=p&&p<=thi[C]){ const sp=thi[C]-tlo[C]; if(sp<bs){bs=sp;best=C;} } }
+    dparent[p]=best>=0?best:root; }
   const dchildren=Array.from({length:n},()=>[]); for(let p=0;p<n;p++) if(p!==root) dchildren[dparent[p]].push(p);
-  const isInt=p=>p!==root && dparent[p]!==head[p]-1;   // displayed under a constituent that isn't its head → interrupter
+  const isInt=p=>interrupt.has(p);   // now the directly-verified per-arc set, not re-derived from dparent vs head
   const lo=Array(n); (function dfs(i){lo[i]=i; dchildren[i].forEach(c=>{dfs(c); lo[i]=Math.min(lo[i],lo[c]);});})(root);
   const mwtComp=new Set(); (D.mwt||[]).forEach(m=>{mwtComp.add(m.from-1); mwtComp.add(m.to-1);});
   const BRK='700 15px '+LIVE_TOKEN_STACK, G=6, brW=meas("[",BRK)+6, IND=brW;   // brW: width for fit maths (a bracket plus the gap to what follows). IND: the per-level indent unit — SAME currency as brW/flatW (bracket + G), not the bare glyph. It used to be meas("[",BRK) alone: the bracket glyph with NO trailing gap, which under-priced every level of nesting by G against flatW's own accounting (flatW prices an opened level at brW, and prices every child-to-child step at +G — see below), so `indent`/`cind` (built purely by summing IND) and flatW stopped being apples-to-apples in the `indent+flatW(i)<=AV` fit checks. No longer rounded, and no longer +2 for margins .bwbr does not have; the line() below prints a real (invisible) bracket per level regardless of what IND measures, so THIS number's own job is only to keep the fit maths honest, not the per-level pixels — the one place pixels needed a real fix (a leadhead line dropping straight into content with no bracket of its own to supply the usual bracket→word gap) is patched separately, in line()'s own trailing space (see `bare` below)
@@ -946,16 +994,54 @@ function brackets(si){
   const AH=parseFloat(css("--arrow"))||5.5;   // interrupter-arc arrowheads, same CSS var every other view's arrowheads track
   const rep=reportOffsets(D);   // item 6/11: reported-speech UPWARD step — the form, its deprel label above, its below-stack, its brackets AND its interrupter-arc endpoints all lift together, so the reported constituent floats off the line as one unit
   const {children,head,root}=structure(sent);
-  // full subtree spans
-  const lo=Array(n),hi=Array(n),size=Array(n),seen=Array(n).fill(false);
-  (function dfs(i){seen[i]=true; lo[i]=i;hi[i]=i;size[i]=1;
-    children[i].slice().sort((a,b)=>a-b).forEach(c=>{ if(seen[c])return; dfs(c); lo[i]=Math.min(lo[i],lo[c]); hi[i]=Math.max(hi[i],hi[c]); size[i]+=size[c]; });})(root);
-  for(let i=0;i<n;i++) if(!seen[i]){lo[i]=i;hi[i]=i;size[i]=1;}
   const isAnc=(C,p)=>{ let x=p,g=0; while(x>=0&&g++<=n){ if(x===C)return true; const hp=head[x]-1; if(hp<0||hp===x)break; x=hp; } return false; };
-  // a token sitting inside a constituent it does not belong to interrupts it → leave it in place, don't
-  // bracket it, and draw an arc from it to its head (e.g. "yesterday" inside "man"'s constituent → saw→yesterday)
+  // UNCONDITIONAL full subtree spans (every real child folds in, regardless) — used ONLY to find, per constituent,
+  // which OTHER tokens sit inside its numeric span. NOT the spans brackets are drawn from (see the corrected lo/hi
+  // below): folding everything in unconditionally is exactly what let mūrtitve's span reach out to bhṛtaḥ in the
+  // first place (see the interrupt-detection comment right below).
+  const rlo=Array(n),rhi=Array(n),seen=Array(n).fill(false);
+  (function rdfs(i){seen[i]=true; rlo[i]=i;rhi[i]=i;
+    children[i].slice().sort((a,b)=>a-b).forEach(c=>{ if(seen[c])return; rdfs(c); rlo[i]=Math.min(rlo[i],rlo[c]); rhi[i]=Math.max(rhi[i],rhi[c]); });})(root);
+  for(let i=0;i<n;i++) if(!seen[i]){rlo[i]=i;rhi[i]=i;}
+  // INTERRUPTER, two complementary shapes — a token sitting inside a constituent it does not belong to interrupts
+  // it: it stays in place, bracketed, and is tied to its real head by a cross arc instead of nesting normally.
+  //  (b) THE ORDINARY CASE — an UNRELATED token p (no ancestor/descendant relation to C either way) sits inside
+  //      constituent C's numeric span: flag p itself (e.g. "yesterday" parked inside "man"'s NP span in the
+  //      fixture's "I saw a man yesterday who was tall" → arc yesterday→saw; see diagram-core.js's subtreeMembers
+  //      for the same example cited as the canonical small-scale non-projective test, brihat_jataka s1 being the
+  //      "widely non-projective" large one).
+  //  (a) BRIHAT_JATAKA S1'S SHAPE — testing (b) alone against C=mūrtitve mis-fires: mūrtitve's REAL subtree
+  //      {mūrtitve, bhṛtaḥ, śaśa} reaches PAST mūrtitve's own head parikalpitaḥ in surface order (mūrtitve 1st,
+  //      parikalpitaḥ 2nd, śaśa/bhṛtaḥ 3rd/4th). parikalpitaḥ sits inside mūrtitve's span, but it's mūrtitve's own
+  //      ANCESTOR — not "unrelated" — so (b)'s own `!isAnc(p,C)` guard correctly refuses to flag it (flagging an
+  //      ancestor as if it needed a cross-arc BACK to its own head, e.g. parikalpitaḥ→vartmā, is nonsensical: it's
+  //      an ordinary, correctly-nested token relative to ITS OWN parent). But nothing then looked the OTHER way to
+  //      find the token that actually can't nest — bhṛtaḥ, whose own arc to mūrtitve is what's crossed by
+  //      parikalpitaḥ sitting in between — so neither token was flagged, and mūrtitve's/parikalpitaḥ's brackets
+  //      were left to literally cross (confirmed via a CDP dump of the rendered .brk/.arc elements from an earlier,
+  //      (b)-only version of this fix: rendered order was open(mūrtitve) open(parikalpitaḥ) … close(mūrtitve)
+  //      close(parikalpitaḥ) instead of one nesting inside the other, and the arc ran parikalpitaḥ→vartmā). (a)
+  //      catches exactly this: for dependent d, if one of ITS HEAD'S OWN ANCESTORS sits between them in surface
+  //      order, flag d (not the ancestor), tied to its real head — matching the two other instances of this exact
+  //      shape elsewhere in the same sentence: ātmā/iti/vidām (vidām, not iti, gets the arc) and śrutau/yaḥ/anekadā
+  //      (anekadā, not yaḥ) — while leaving (b)'s "yesterday" example alone: "was" (→man)'s own arc is ALSO
+  //      crossed by an intervening token (yesterday), but yesterday is man's unrelated SIBLING, not man's ancestor,
+  //      so (a)'s `isAnc(p,h)` test correctly declines to flag "was", leaving (b) to flag yesterday as it always did.
   const interrupt=new Set();
-  for(let C=0;C<n;C++) for(let p=lo[C]+1;p<hi[C];p++) if(!isAnc(C,p)) interrupt.add(p);
+  for(let C=0;C<n;C++) for(let p=rlo[C]+1;p<rhi[C];p++)
+    if(!isAnc(C,p)&&!isAnc(p,C)) interrupt.add(p);                          // (b) unrelated interloper
+  for(let d=0;d<n;d++){ if(d===root)continue; const h=head[d]-1; if(h<0||h>=n||h===d)continue;
+    const a=Math.min(h,d), b=Math.max(h,d);
+    for(let p=a+1;p<b;p++) if(isAnc(p,h)){ interrupt.add(d); break; } }      // (a) an ancestor of h crosses d's own arc
+  // CORRECTED subtree spans — what brackets are actually drawn from: fold a child's span into its parent's only
+  // when that child is NOT an interrupter. An interrupter's own span is still computed (it gets its OWN bracket,
+  // over whatever non-interrupting descendants it has) but does NOT fold into its real head's span — folding it in
+  // unconditionally (see rlo/rhi above) is exactly what dragged mūrtitve's bracket rightward to swallow parikalpitaḥ.
+  const lo=Array(n),hi=Array(n),size=Array(n); seen.fill(false);
+  (function dfs(i){seen[i]=true; lo[i]=i;hi[i]=i;size[i]=1;
+    children[i].slice().sort((a,b)=>a-b).forEach(c=>{ if(seen[c])return; dfs(c); if(interrupt.has(c))return;
+      lo[i]=Math.min(lo[i],lo[c]); hi[i]=Math.max(hi[i],hi[c]); size[i]+=size[c]; });})(root);
+  for(let i=0;i<n;i++) if(!seen[i]){lo[i]=i;hi[i]=i;size[i]=1;}
   const opens=Array.from({length:n},()=>[]), closes=Array.from({length:n},()=>[]);
   const addBr=(a,b,col,sz,owner)=>{opens[a].push({sz,col,owner}); closes[b].push({sz,col,owner});};
   for(let i=0;i<n;i++){ if(i===root)continue; addBr(lo[i],hi[i],relColor(t[i].deprel),hi[i]-lo[i],i); }   // every dependent subtree — interrupters bracketed too
