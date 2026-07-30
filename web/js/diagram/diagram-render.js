@@ -90,6 +90,7 @@ function stemma(si,{proj,catNodes}){
     const y1=ny(depth[i])-A, y2=ny(depth[h-1])+B, midY=(y1+y2)/2;
     edges.push({d:i,h:h-1,rel:t[i].deprel,y1,y2,midY,band:Math.round(midY/12),w:show.labels?meas(t[i].deprel,POS_F)+SPW:0});}
   if(show.labels){ spreadForLabels(c,edges); }   // widen node gaps until labels fit (in natural order)
+  ensureNodeGaps(c,lw);   // …then re-guarantee each node's OWN below-stack width — spreading for edge labels alone can leave that narrower than stemmaLayout reserved (see ensureNodeGaps' own note)
   edges.sort((p,q)=>catRank(p.rel)-catRank(q.rel));         // subj in front, then comp, mod, other
   // Shared=Yes: a coordination-shared dependent draws its REAL edge normally (straight to whichever conjunct
   // it's actually attached to, like any other edge) PLUS a dashed "ghost" edge — same deprel/label/direction —

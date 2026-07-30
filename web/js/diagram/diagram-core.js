@@ -180,15 +180,27 @@ let GLOSS_F=weightCurve(13.2)+' 13.2px '+LIVE_TOKEN_STACK, MSEG_F='italic 15px '
 function tierFont(tier,tk){ return tier==="mseg"?(isForeign(tk)?MSEG_UP_F:MSEG_F):(tier==="mgloss"?MGLOSS_F:GLOSS_F); }   // the MSeg tier is the only italic one, so it's the only one a Foreign=Yes token flips upright (see frnUp)
 // widest below-token gloss row for a token, in its real font (0 when no gloss tier is on). An empty tier draws "…"
 // (gl-empty) so it contributes that narrow placeholder width — a real gloss dominates. Folded into every slot-width max.
-function glossSlotW(t){ let w=0; belowTiers().forEach(tier=>{ w=Math.max(w,meas(tierText(t,tier)||"…",tierFont(tier,t))); }); return w; }
-function meas(s,f){
+function glossSlotW(t){ let w=0; belowTiers().forEach(tier=>{ const dtxt=tierText(t,tier)||"…"; w=Math.max(w,tier==="mseg"?meas(dtxt,tierFont(tier,t)):measGloss(dtxt,tierFont(tier,t))); }); return w; }
+function _measOne(s,f,extraCss){
   // Mirror CSS letter-spacing for sizes that carry the tracking curve (.node-lbl/.baseword at 14px → .0055em,
   // etc.). Canvas measureText ignored it; SVG getComputedTextLength honours style.letterSpacing. Sizes at the
   // 15px reference (WORD_F/POS_F/…) keep 0 — trackCurve(15)===0 — so this is a no-op for those.
-  const px=parseFloat(f)||TOK_REF_SIZE, track=trackCurve(px);
-  _mtxt.style.cssText="white-space:pre;font:"+f+(track?(";letter-spacing:"+track+"em"):"");   // white-space FIRST so the font shorthand can't reset it; pairs with the xml:space attribute set above — see that note for why a bare " " otherwise measures 0
+  const pxm=f.match(/(\d+(?:\.\d+)?)px/), px=pxm?parseFloat(pxm[1]):TOK_REF_SIZE, track=trackCurve(px);   // the font SIZE, not just parseFloat(f)'s naive "first leading number in the whole shorthand" — that read the WEIGHT off GLOSS_F/MGLOSS_F ("455 13.2px …", a font-weight number ahead of the size) as if it were the size, feeding trackCurve(455) instead of trackCurve(13.2): a wildly wrong negative letter-spacing (~-0.27em) that compressed every MGloss/Gloss measurement to roughly half its actual rendered width — layout (stemmaLayout's lw, glossSlotW) reserved half the space these tiers actually need, and adjacent tokens' MGloss text visibly overlapped. MSEG_F/MSEG_UP_F/WORD_F-class strings never hit this: "italic 15px …" has no leading digit (parseFloat → NaN → the SAME 15px fallback the size actually is), and a bare "15px …" parses correctly by luck alone — only a WEIGHT-prefixed shorthand exposed the bug
+  _mtxt.style.cssText="white-space:pre;font:"+f+(track?(";letter-spacing:"+track+"em"):"")+(extraCss||"");   // white-space FIRST so the font shorthand can't reset it; pairs with the xml:space attribute set above — see that note for why a bare " " otherwise measures 0
   _mtxt.textContent=s||"";
   try{ return _mtxt.getComputedTextLength(); }catch(_){ return 0; } }
+function meas(s,f){ return _measOne(s,f); }
+// Gloss/MGloss-aware measurement: setGlossText wraps every Leipzig abbreviation run (glossAbbrSegments) in its own
+// .glabbr tspan, which turns on font-feature-settings "c2sc"/"onum" (small caps from capitals + old-style figures)
+// — a plain meas() call measures the whole string at the tier's ordinary (non-c2sc) advance widths, which the font's
+// actual small-caps glyphs need not match. That drift is invisible for a plain word ("possess") but MGloss text is
+// almost always MOSTLY an abbreviation run ("PST.PTCP-GEN.SG.M"), so glossSlotW/stemmaLayout's reserved slot and a
+// seam mark's "half this text's own width" placement both measured the wrong number — the mark hung off wherever
+// the UN-small-capped width said the text ended, not where the small-capped glyphs actually end. Split exactly as
+// setGlossText does and sum each segment's OWN width, measured with the SAME feature-settings its own tspan gets.
+function measGloss(s,f){ const segs=glossAbbrSegments(s);
+  if(segs.length===1&&!segs[0][1]) return _measOne(s,f);   // no abbreviation run at all → identical to meas()
+  return segs.reduce((w,[t,abbr])=>w+_measOne(t,f,abbr?";font-feature-settings:'c2sc' 1,'onum' 1":""),0); }
 // Re-reads #doc's LIVE --token-font/--mono-font (getComputedStyle resolves the var() to a plain string canvas CAN
 // use — confirmed empirically; a canvas `font` string handed a literal `var(--token-font)` token is a DIFFERENT,
 // silent failure: the browser rejects the whole assignment and `.font` reverts to its default, exactly the
@@ -298,7 +310,7 @@ function htmlSeamMark(host,tk,row){ if(!host) return;
 // ONLY the middle marks move. A post/pre mark stays flush against the row it hangs off, ragged edge and all: it
 // belongs to ONE token, as that word's own suffix/prefix, and hanging it out at a column shared with the other
 // rows reads as a boundary standing apart from the word rather than as part of it.
-const SEAM_ROW_SEL={form:".tok-word,.baseword,.node-lbl,.bwform,.oform", translit:".translit,.otrans", mseg:'.gloss[data-tier="mseg"]'};
+const SEAM_ROW_SEL={form:".tok-word,.baseword,.node-lbl,.bwform,.oform", translit:".translit,.otrans", mseg:'.gloss[data-tier="mseg"]', mgloss:'.gloss[data-tier="mgloss"]'};
 // …and, in the BRACKETS notations ONLY, a bracket glyph counts as the far wall of the gap too. "Squarely between
 // the two tokens" is the right centre wherever the gap really is empty — every other notation puts nothing between
 // two words but whitespace. Brackets do: the seam between two tokens of one word almost always has a "]" and/or a
@@ -971,8 +983,8 @@ function hasTr(toks){ return trLayer() && toks.some(x=>trTxt(x)); }   // the tra
 function belowStack(g,x,y0,tk,boxes,trRow){ let y=y0;   // trRow: reserve the transliteration row even for a token that has none (so POS stays aligned across the sentence)
   const showTr = trRow!=null ? trRow : (trLayer() && !!trTxt(tk));
   if(showTr){ y+=18+descent(POS_F); const rt=trTxt(tk); if(rt){ const e=E("text",{class:"translit"+frnUp(tk),x:x,y:y,"text-anchor":"middle"}); e.textContent=rt; if(trRowEdit())e.classList.add("tr-edit"); g.appendChild(e); boxes&&boxes.push({x,y:y-4,hx:meas(rt,trFont(tk))/2,hy:7}); svgSeamMark(g,tk,x,y,meas(rt,trFont(tk))/2,trFont(tk),boxes,null,"translit"); } }   // Item 8: the translit row gains the SAME descender-matched top gap the POS row carries (+descent(POS_F), the label-font descender) so the row above's descenders don't crowd it; .tr-edit → click-to-edit the romanisation, or the STORED transliteration behind it (see trRowEdit). The romanisation is a WORD-LIKE row, so it carries the seam mark too — a word broken across tokens reads as broken on every row that spells it out
-  belowTiers().forEach(tier=>{ y+=18+descent(POS_F); const txt=tierText(tk,tier); const e=E("text",{class:"gloss gl-edit"+frnUp(tk),x:x,y:y,"text-anchor":"middle","data-tier":tier,tabindex:"0"}); setGlossText(e,tier,txt||"…"); if(!txt)e.classList.add("gl-empty"); g.appendChild(e); boxes&&boxes.push({x,y:y-4,hx:meas(txt||"…",trFont(tk))/2,hy:7});
-    if(tier==="mseg"&&txt) svgSeamMark(g,tk,x,y,meas(txt,tierFont(tier,tk))/2,tierFont(tier,tk),boxes,null,"mseg"); });   // Item 8: each gloss / morphemic-gloss tier gains the SAME +descent(POS_F) top gap as the POS row, so all sub-token tiers share the descender-based breathing room; BELOW the transliteration and ABOVE the POS row; double-click or Enter to edit → MISC. Only the SEGMENTATION tier takes a seam mark (and only once it has text to hang it off) — the gloss tiers state a meaning, not a piece of the word
+  belowTiers().forEach(tier=>{ y+=18+descent(POS_F); const txt=tierText(tk,tier), dtxt=txt||"…"; const e=E("text",{class:"gloss gl-edit"+frnUp(tk),x:x,y:y,"text-anchor":"middle","data-tier":tier,tabindex:"0"}); setGlossText(e,tier,dtxt); if(!txt)e.classList.add("gl-empty"); g.appendChild(e); boxes&&boxes.push({x,y:y-4,hx:meas(dtxt,trFont(tk))/2,hy:7});
+    if(tier==="mseg"||tier==="mgloss") svgSeamMark(g,tk,x,y,(tier==="mgloss"?measGloss(dtxt,tierFont(tier,tk)):meas(dtxt,tierFont(tier,tk)))/2,tierFont(tier,tk),boxes,null,tier); });   // Item 8: each gloss / morphemic-gloss tier gains the SAME +descent(POS_F) top gap as the POS row, so all sub-token tiers share the descender-based breathing room; BELOW the transliteration and ABOVE the POS row; double-click or Enter to edit → MISC. The SEGMENTATION tier (mseg) and the MORPHEMIC GLOSS tier (mgloss) both take a seam mark — a mark drawn regardless of whether THIS tier happens to be annotated for this token (measured off the "…" placeholder's own width when it isn't), because the seam it decorates is a fact about the SEGMENTATION, not about this tier's own annotation coverage. Gating on `txt` used to silently drop the mark wherever MGloss was sparser than MSeg (a common, unremarkable state for hand-glossed data) — the row still shows a "…" cell there, so a boundary that MSeg draws cleanly would vanish from MGloss for that one seam while surviving on the very next one, reading as the mark randomly relocating/centring rather than a coverage gap. Both are PER-MORPHEME rows that a word-break genuinely interrupts; the lexical GLOSS tier (a single whole-word meaning, on request unchanged) does not
   if(show.pos && tk.upos){ y+=18+descent(POS_F); const pd=posDisp(tk); const e=E("text",{class:"tok-pos",x:x,y:y,"text-anchor":"middle"}); e.textContent=pd; svgTip(e,posTitle(tk.upos)); g.appendChild(e); boxes&&boxes.push({x,y,hx:meas(pd,POS_F)/2,hy:6}); }   // POS hover tooltip (Item 2). Item 1: +descent(POS_F) extra top gap on the POS step — the label font's (POS_F) descender depth, mirroring how the above-token rows fold in descent(WORD_F) — so the POS row isn't crowded by the descenders of the row above it. Every below-reserve that feeds a row height (stackH / belowH / stackBot / --undpad) folds in the SAME descent(POS_F), so POS stays aligned across renderers and nothing clips.
   return y;
 }
@@ -1225,4 +1237,17 @@ function spreadForLabels(x,edges){ const live=edges.filter(e=>e.w); if(!live.len
           moved=true; } } });
     if(!moved) break; }
   const mn=Math.min(...x); if(mn<2) for(let k=0;k<n;k++) x[k]+=(2-mn); }   // keep the leftmost node non-negative
+// spreadForLabels only clears EDGE-LABEL width (`e.w`) between siblings sharing a head — a subtree shift made purely
+// for that can still leave two SURFACE-ADJACENT nodes closer together than their own below-stack content (word/POS/
+// translit/gloss rows, sized by stemmaLayout's `lw`) needs, since a label like "mod" is usually far narrower than a
+// phrasal MGloss. That showed up as one token's MGloss text overlapping its neighbour's (brihat_jataka s1's
+// śaśa/bhṛtaḥ, ~41px of overlap) even though stemmaLayout's OWN c[]/lw[] had reserved a clean gap before spreading
+// moved things. Call this AFTER spreadForLabels: a single left-to-right sweep in SURFACE order (by final x, not
+// original index — a non-projective spread can reorder them) that pushes each node only as far as its predecessor's
+// and its own half-width require, cascading the push through every later node. Purely additive (only ever widens a
+// gap), so it can't re-open an edge-label collision spreadForLabels just closed — that pass only ever guaranteed a
+// MINIMUM clearance, and widening further is always safe.
+function ensureNodeGaps(x,lw){ const gap=meas(" ",WORD_F)+8, order=x.map((_,i)=>i).sort((a,b)=>x[a]-x[b]);
+  for(let k=1;k<order.length;k++){ const a=order[k-1],b=order[k], need=lw[a]/2+lw[b]/2+gap, have=x[b]-x[a];
+    if(have<need-0.5){ const dx=need-have; for(let m=k;m<order.length;m++) x[order[m]]+=dx; } } }
 
