@@ -31,7 +31,9 @@ function snap(){ return {doc:JSON.parse(JSON.stringify(DOC)), s:sel.s, t:sel.t, 
   // 20,000 sentences, JSON-cloning the WHOLE array on every keystroke — which this used to be the only option for
   // — costs a few hundred ms of string allocation per edit, no matter how small the edit; cloning one sentence
   // object is O(that sentence), independent of document size.
-function snapSent(si){ return {kind:"sent", si, doc:JSON.parse(JSON.stringify(DOC[si])), s:sel.s, t:sel.t, caret:captureCaret(), glossOn:GLOSS_ON, morphOn:MORPH_ON, stored:STORED_SCHEME}; }
+function snapSent(si){
+  if(typeof invalidateDiaSentence==="function") invalidateDiaSentence(si);   // js/core/document.js's notation-switch diagram cache: THE per-sentence "about to change" signal, chosen over touchColW(si,si+1) (js/grid/grid.js) because every caller that has one — pushUndo(si), and grid.js's own pendingSnap=snapSent(si) armed on a cell's focus — reaches THIS function first, whereas touchColW is only called from a subset of them (see the cache's own note in document.js for the specific gap this closes: a drag-to-reparent calls pushUndo(si) but not touchColW, because a stale COLUMN WIDTH afterwards is cosmetic slop and a stale DIAGRAM is not)
+  return {kind:"sent", si, doc:JSON.parse(JSON.stringify(DOC[si])), s:sel.s, t:sel.t, caret:captureCaret(), glossOn:GLOSS_ON, morphOn:MORPH_ON, stored:STORED_SCHEME}; }
 function commitSnap(pre){ if(!pre)return; UNDO.push(pre); if(UNDO.length>80)UNDO.shift(); REDO.length=0; updateUndoUI(); }   // push a snapshot taken BEFORE an operation that turned out to change something (the pattern for anything that can only tell afterwards whether it did)
 // si given (and a real sentence) → scope the snapshot to just that sentence (snapSent); omitted → the old
 // whole-document snap(), for a caller that changes DOC's length/order or otherwise touches more than one
@@ -52,9 +54,11 @@ function applySnap(x){ GLOSS_ON=!!x.glossOn; MORPH_ON=!!x.morphOn; syncGlossUI()
   const keepMwt=d=>(d.mwt||[]).forEach(m=>{ m._kept=1; });   // the snapshot restored each MWT's surface form along with its components — that form is AUTHORITATIVE, not a value to re-derive. _kept tells the opportunistic sandhi re-fuse (see the ortho fill in translit-load.js) to leave it alone, so undoing a re-fuse lands on exactly the form the document had before the edit instead of immediately recomputing it — and marking the file dirty again on its way out. A later component edit clears the tag and re-fuses normally (sandhiMwtForms).
   preserveScroll(()=>{
     if(x.kind==="sent"){   // scoped snapshot — restore ONLY the one sentence it cloned, by reference-swap; DOC's own length/order (and every OTHER sentence) is untouched, so nothing about this needs invalidateColW()'s full rescan either (js/grid/grid.js's window-scoped scan already re-measures whatever sentence is on screen, this one included, on the very next render)
+      if(typeof invalidateDiaSentence==="function") invalidateDiaSentence(x.si);   // the reference swap below replaces DOC[x.si] wholesale — snapSent(si) already dropped the cache entry that stood at the moment of the ORIGINAL edit, but redo (or a second undo past it) reaches this swap with no snapSent of its own, so it must invalidate itself
       if(x.si>=0 && x.si<DOC.length){ DOC[x.si]=x.doc; keepMwt(DOC[x.si]); }
     } else {   // whole-document snapshot — see snap()'s own note on when this is the one taken
       if(typeof invalidateColW==="function") invalidateColW();   // replaces the WHOLE document below → the column-width cache can't be trusted to still describe it
+      if(typeof invalidateDiaCache==="function") invalidateDiaCache();   // same reasoning, for the notation-switch diagram cache (js/core/document.js) — every si below is about to name a possibly different sentence
       DOC.length=0; x.doc.forEach(d=>DOC.push(d));
       DOC.forEach(keepMwt);
     }
@@ -65,7 +69,8 @@ function redo(){ if(!REDO.length)return toast("Nothing to redo"); UNDO.push(snap
 function updateUndoUI(){ const u=document.getElementById("btnUndo"),r=document.getElementById("btnRedo"); if(u)u.disabled=!UNDO.length; if(r)r.disabled=!REDO.length;
   const g=u&&u.closest(".tbgroup"); if(g) g.classList.toggle("both-disabled", !UNDO.length&&!REDO.length); }   // item 16: mute the Edit group's label when BOTH Undo and Redo are inert (live-toggled as history changes)
 function resetUndo(){ UNDO.length=0; REDO.length=0; pendingSnap=null; updateUndoUI();
-  if(typeof invalidateColW==="function") invalidateColW(); }   // item 3: opening a NEW file drops the previous file's history so you can't undo across the open (and syncs the toolbar Undo/Redo enabled state) — and the previous file's column-width cache is equally meaningless against the one being opened (js/grid/grid.js)
+  if(typeof invalidateColW==="function") invalidateColW();   // item 3: opening a NEW file drops the previous file's history so you can't undo across the open (and syncs the toolbar Undo/Redo enabled state) — and the previous file's column-width cache is equally meaningless against the one being opened (js/grid/grid.js)
+  if(typeof invalidateDiaCache==="function") invalidateDiaCache(); }   // …and every si in it now names a sentence from whatever's being opened, not what was on screen a moment ago
 document.getElementById("btnUndo").onclick=undo; document.getElementById("btnRedo").onclick=redo; updateUndoUI();
 function deselectAll(){ sel={s:-1,t:0}; selRange=null; applySel(); document.querySelectorAll("#doc .sblock.sel-block").forEach(b=>b.classList.remove("sel-block")); syncMenu(); }
 document.getElementById("doc").addEventListener("click",e=>{ if(e.target===e.currentTarget||e.target.classList.contains("addsent")) deselectAll(); });   // click below the last block → clear the block selection

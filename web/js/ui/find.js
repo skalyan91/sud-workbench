@@ -314,6 +314,7 @@ async function runReplaceAll(){ const p=planReplace();
   const pre=snap();                                    // taken BEFORE the rewrite and committed ONCE, so the whole operation is a single undo entry
   plan.forEach(({o,after,sent})=>f.put(o,after,sent));
   if(typeof invalidateColW==="function") invalidateColW();   // a bulk rewrite can touch any field across any number of sentences — full rescan rather than tracking every touched sentence individually
+  if(typeof invalidateDiaCache==="function") invalidateDiaCache();   // same reasoning for the notation-switch diagram cache (js/core/document.js) — Replace All is exactly the "any of an arbitrary set of sentences" case pruneDiaCache's per-si tracking isn't built for
   commitSnap(pre); markDirty();
   preserveScroll(renderDoc);
   scanFind(); FIND.cur=FIND.matches.length?Math.min(Math.max(FIND.cur,0),FIND.matches.length-1):-1;   // the values changed under the criteria → re-scan rather than leave a stale count behind

@@ -38,6 +38,7 @@ function insertAt(index){ if(hasBridge()){ try{ window.pywebview.api.open_insert
 function doInsert(index,text){ pushUndo(); const sid=autoInsertSid(index), tokens=buildTokens(text);
   DOC.splice(index,0,{sid,text:text.trim(),tokens}); cascadeSids(index); sel={s:index,t:1};
   if(typeof invalidateColW==="function") invalidateColW();   // a new sentence shifts every following sentence's margin numbering (marginNumWidth) — simplest to rescan wholesale rather than reason about how far the shift reaches
+  if(typeof invalidateDiaCache==="function") invalidateDiaCache();   // …and shifts every following sentence's INDEX — js/core/document.js's notation-switch cache is keyed on si, and a splice makes every si past `index` name a different sentence than whatever was cached under it
   morphAfterReparse(DOC[index]);   // the new tokens carry no MSeg/MGloss — seed the morphemic tiers the same way every other sentence got them (no FEATS here, so MSeg seeds from the forms and MGloss stays empty), inside this same undo step
   refresh();
   // …and the toast says what actually ran. This branch is reached ONLY with no model or no bridge, so nothing was
@@ -56,11 +57,13 @@ function doInsert(index,text){ pushUndo(); const sid=autoInsertSid(index), token
 // empty while re-typing the same text through commitSentText filled them.
 function moveSent(from,to){ if(to<0||to>DOC.length)return; pushUndo(); if(from<to)to--; const [m]=DOC.splice(from,1); DOC.splice(to,0,m); sel={s:DOC.indexOf(m),t:sel.t};
   if(typeof invalidateColW==="function") invalidateColW();   // reordering shifts the margin numbering of everything between the old and new position
+  if(typeof invalidateDiaCache==="function") invalidateDiaCache();   // …and every si between the old and new position now names a different sentence — see doInsert's own note on why this cache can't tolerate that the way colW does
   refresh(); }
 function delSent(i){ pushUndo(); const delSid=DOC[i]&&DOC[i].sid; DOC.splice(i,1);
   if(AUTONUM) renumberAfterDelete(i,delSid);   // keep the numbering continuous across the deletion
   sel=DOC.length?{s:Math.min(i,DOC.length-1),t:1}:{s:-1,t:0};
   if(typeof invalidateColW==="function") invalidateColW();   // every following sentence's margin numbering shifts down by one
+  if(typeof invalidateDiaCache==="function") invalidateDiaCache();   // …and every following si now names the sentence that used to sit one further along — see doInsert's own note
   refresh(); }
 
 /* token ops with id renumber + head fix-up */
@@ -353,7 +356,7 @@ window.toggleWrap=toggleWrap;
    property of the sentence being read, and scrolling moves that without disturbing the token selection. */
 function setBound(si,key,on){ const s=DOC[si]; if(!s) return false;
   if(hasBound(s,key)===!!on) return false;
-  pushUndo(si); if(typeof invalidateColW==="function") invalidateColW();   // a document/paragraph boundary shifts the margin numbering (marginNumWidth) of every following sentence
+  pushUndo(si); if(typeof invalidateColW==="function") invalidateColW();   // a document/paragraph boundary shifts the margin numbering (marginNumWidth) of every following sentence — but NOT its si (setBound flags DOC[si] in place, unlike insert/delete/move above): the diagram cache doesn't need a matching wholesale clear here, since renderSentence never reads hasNewdoc/hasNewpar (the heading they gate is built by buildBlock itself, outside the cached node) and pushUndo(si) just above already dropped si's own entry
   s[key]=on?true:false; markDirty(); preserveScroll(renderDoc); syncMenu(); return true; }   // syncMenu: both rows are checkable and this is the only path that moves their state
 function toggleBound(si,key){ const s=DOC[si]; if(!s) return toast("Select a sentence first");
   const on=!hasBound(s,key); setBound(si,key,on);

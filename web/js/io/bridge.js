@@ -206,6 +206,7 @@ async function doNew(){ if(!(await confirmDiscardUnsaved("Discard them and start
   saveScrollPos(true);   // remember the outgoing file's reading position before we drop it
   DOC.length=0; DOCNAME="untitled.conllu"; DOCPATH=""; markDirty(false);   // a new document starts empty — zero sentences
   if(typeof invalidateColW==="function") invalidateColW();   // drop the outgoing file's column-width cache rather than carry its widths into an empty document
+  if(typeof invalidateDiaCache==="function") invalidateDiaCache();   // …and the outgoing file's cached diagrams (js/core/document.js) — every si is about to name a sentence of the NEW (empty) document instead
   if(hasBridge())try{window.pywebview.api.new_document();}catch(e){}
   syncGlossTiersFromDoc(); detectXposMirrorsUpos(); syncDocFonts();   // item 1: an empty new document carries NO Gloss/MSeg/MGloss → glossing tiers reset to off, never inherited from the file just closed
   refreshTransLangs(); renderTransDrawer();   // item 13: reset enabled translation languages
