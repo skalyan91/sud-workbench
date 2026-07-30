@@ -34,7 +34,7 @@ function cascadeSids(from){ if(!AUTONUM) return; for(let i=from;i<DOC.length-1;i
 function renumberAfterDelete(i,delSid){ let target=delSid, expected=bumpSid(delSid);
   for(let j=i; j<DOC.length && expected!=null; j++){ if(DOC[j].sid!==expected) break;
     DOC[j].sid=target; target=expected; expected=bumpSid(expected); } }
-function insertAt(index){ if(hasBridge()){ try{ window.pywebview.api.open_insert_window(index, model?(MODELINFO[model]||model):""); return; }catch(e){} } openSheet(sheetInsert(index)); }   // item 23/24: Insert-text native window; sheet is the headless fallback
+function insertAt(index){ openSheet(sheetInsert(index)); }   // items 23/24: the "Insert text" dialog, inserting BEFORE block `index` — the same sheet the toolbar's + and ⌘T open (addTextSheet), which was a native child window until the two paths were merged. It reads insertCtx() (js/io/bridge.js) itself: whether to offer a language picker, and which translation languages a parallel text may be written in
 function doInsert(index,text){ pushUndo(); const sid=autoInsertSid(index), tokens=buildTokens(text);
   DOC.splice(index,0,{sid,text:text.trim(),tokens}); cascadeSids(index); sel={s:index,t:1};
   if(typeof invalidateColW==="function") invalidateColW();   // a new sentence shifts every following sentence's margin numbering (marginNumWidth) — simplest to rescan wholesale rather than reason about how far the shift reaches
@@ -243,6 +243,106 @@ window.insertTokenBelow=()=>{ if(sel.s>=0&&sel.t>0)insertToken(sel.s,sel.t); };
 window.setTokenAsRoot=()=>{ if(sel.s>=0&&sel.t>0)setAsRoot(sel.s,sel.t); };
 window.selectPrevHead=()=>{ if(sel.s>=0&&sel.t>0)stepHead(sel.s,sel.t,-1); };
 window.selectNextHead=()=>{ if(sel.s>=0&&sel.t>0)stepHead(sel.s,sel.t,1); };
+/* ── MSeg AND MGloss ARE ONE SEQUENCE READ IN TWO ROWS ────────────────────────────────────────────────────────
+   Both fields are hyphen-delimited and positional: MSeg holds the form's morph segments, MGloss the gloss of
+   each of them, and the two are drawn one above the other with a mark per shared boundary (belowStack /
+   svgSeamMark in js/diagram/diagram-core.js), so slot k of one names slot k of the other. The Leipzig ATTACHMENT
+   marks the prefill writes are that same fact seen from the other side: "walk-ed" glossed "-walk.PST" IS two
+   slots whose first one — the stem's — is empty, and an EMPTY SLOT is already how this data spells "this
+   segment isn't glossed" (the row draws it as the "…" placeholder). So a new slot needs nothing invented for it.
+   WHEN THE SEGMENTATION MOVES UNDER A GLOSS THAT IS ALREADY THERE, the gloss has to move with it or the two rows
+   stop describing the same morphemes. A LEMMA EDIT is the commonest way in: MSeg is derived from the form
+   against the LEMMA (msegSegment/msegRefill in js/io/bridge.js), so correcting a lemma can add a boundary
+   ("walked" → "walk-ed") or take one away, while MGloss — which the lemma says nothing about — stays exactly as
+   the prefill or the annotator left it, one slot out of step from then on.
+   THIS RE-SLOTS, IT DOES NOT RE-DERIVE. No gloss text is invented and none is thrown away: the slots on either
+   side of the change keep their own glosses untouched, and whatever stood in the stretch that changed is carried
+   across as one unit (dot-joined, the same separator that already joins several categories within one morpheme's
+   gloss). Re-deriving from FEATS instead would silently discard a hand-written lexical gloss, which is precisely
+   the material FEATS cannot reconstruct.
+   WHERE THE SURVIVING GLOSS LANDS when one slot becomes several: in the SHORTEST new piece — a gloss written for
+   a word that is now cut into stem + affix is nearly always the affix's, the stem's own lexical meaning living in
+   the Gloss tier — which reproduces the prefill's own convention exactly ("walked"/"walk" → "-walk.PST",
+   "unhappy"/"happy" → "NEG…-"). Where the shortest length is SHARED, the longest piece takes it instead: equal
+   flanking pieces is the signature of a circumfix (ge-gang-en), and there the prefill's answer is the middle
+   stem slot with an attachment mark on each side ("-M-"), which is what that rule picks.
+   Returns true iff it wrote something, so the caller can markDirty() for a real change and stay silent for a
+   no-op — and it is a no-op whenever MGloss is already in step with the new segmentation, which is also what
+   makes a second call for the same edit harmless rather than a second, destructive re-slot. */
+function mglossReslot(t,prevSeg,nextSeg){
+  if(!t) return false;
+  const mg=tierText(t,"mgloss"); if(!mg) return false;   // nothing glossed yet → nothing to keep in step (the prefill writes both rows together, from one segmentation — see morphPrefillSent)
+  const A=String(prevSeg||"").split("-"), B=String(nextSeg||"").split("-");
+  if(A.length===B.length) return false;                  // the same number of segments before and after → whatever moved inside them, no slot did
+  let G=mg.split("-");
+  if(G.length===B.length) return false;                  // already in step with the NEW segmentation
+  // Bring the gloss into step with the OLD segmentation first, so the alignment below is a straight positional
+  // one. A gloss with FEWER slots than the segmentation it was written against simply hasn't glossed the last
+  // morphemes; one with MORE has slots the segmentation never had, and they fold into the last real one rather
+  // than being dropped (nothing here throws gloss text away).
+  while(G.length<A.length) G.push("");
+  if(G.length>A.length) G=G.slice(0,A.length-1).concat([G.slice(A.length-1).filter(Boolean).join(".")]);
+  let p=0; while(p<A.length&&p<B.length&&A[p]===B[p]) p++;                                            // leading slots the change didn't touch
+  let s=0; while(s<A.length-p&&s<B.length-p&&A[A.length-1-s]===B[B.length-1-s]) s++;                   // …and trailing ones (never overlapping the head above)
+  const mid=G.slice(p,A.length-s).filter(Boolean).join("."), room=B.length-p-s, out=G.slice(0,p);
+  if(room<=0){   // the changed stretch lost every slot it had → its gloss joins the nearest surviving neighbour rather than vanishing
+    if(mid){ if(out.length) out[out.length-1]=[out[out.length-1],mid].filter(Boolean).join(".");
+      else if(A.length-s<G.length) G[A.length-s]=[mid,G[A.length-s]].filter(Boolean).join("."); } }
+  else { const len=k=>Array.from(B[p+k]||"").length;   // CODE POINTS, matching msegSegment's own measure of a piece
+    let min=Infinity,minCount=0,pick=0,max=-1,maxAt=0;
+    for(let k=0;k<room;k++){ const L=len(k);
+      if(L<min){ min=L; minCount=1; pick=k; } else if(L===min) minCount++;
+      if(L>max){ max=L; maxAt=k; } }
+    if(minCount>1) pick=maxAt;   // a shared shortest ⇒ the circumfix shape — see the note above
+    for(let k=0;k<room;k++) out.push(k===pick?mid:""); }
+  for(let k=A.length-s;k<G.length;k++) out.push(G[k]);
+  const next=out.some(Boolean)?glossEnc(out.join("-")):"";   // all-empty ⇒ write nothing at all: a bare run of hyphens is that nothing dressed up as a gloss (the same judgement mglossMarks makes)
+  if(next===mg) return false;
+  const wasPrefill=(mg===(t._mglossPre||""));
+  t.misc=setMiscKV(t.misc,"MGloss",next);
+  if(wasPrefill) t._mglossPre=next;   // re-slotting an UNTOUCHED prefill leaves it an untouched prefill: morphEdited() (js/io/bridge.js) reads "differs from _mglossPre" as "the annotator has been here", and this move wasn't theirs
+  return true; }
+/* A HYPHEN TYPED BY HAND INTO MSeg cuts one morpheme in two, and where the gloss for that morpheme was already
+   written as a lexical part plus a grammatical one, the cut is exactly the boundary between them: "walked"
+   glossed "walk.PST", cut to "walk-ed", is "walk-PST". This is a NARROWER rule than mglossReslot above and runs
+   INSTEAD of it, at the one site where a person types the segmentation directly (the diagram's MSeg field, see
+   editTier in js/editing/context-menu.js) — mglossReslot's own answer for a 1→2 cut is the prefill's convention,
+   the whole gloss in the shortest piece and the other left empty ("-walk.PST"), which is right when the machine
+   re-derives a segmentation and wrong when a person has just said where the boundary goes.
+   THREE CONDITIONS, all required, because each one is what makes the split a reading of the data rather than a
+   guess at it:
+    · the new MSeg holds EXACTLY ONE hyphen, both pieces non-empty, and the old one held none — so this edit IS
+      the typed hyphen. Two or more cuts have no two-part gloss to match them and fall to mglossReslot.
+    · MGloss is a single slot (no hyphen of its own) and non-empty — there is one gloss to divide.
+    · its dot-separated units divide CLEANLY into one contiguous grammatical run and one contiguous lexical run,
+      both non-empty. "walk.PST" and "NEG.happy" do; "walk" alone doesn't (nothing grammatical to split off), and
+      an interleaved "PST.walk.3SG" doesn't either — a gloss whose two kinds alternate is not a two-morpheme
+      gloss, and there is no honest way to say which units belong to which side.
+   The two runs keep their ORDER, which is what maps them onto the segments: a gloss is written in morph order, so
+   the run that comes first glosses the piece that comes first. Length is deliberately NOT consulted as a second
+   signal ("the stem is the longer piece"), because it says nothing at all where the two morphemes are the same
+   length — one Han character each, say — and would only ever contradict the order in data that is already wrong.
+   Returns true iff it wrote a new MGloss. */
+function mglossSplitTypedHyphen(t,prevSeg,nextSeg){
+  if(!t) return false;
+  const A=String(prevSeg||""), B=String(nextSeg||"");
+  if(A.includes("-")) return false;                     // the hyphen isn't new — this edit changed something else
+  const pieces=B.split("-");
+  if(pieces.length!==2||!pieces[0]||!pieces[1]) return false;   // exactly one hyphen, and it cuts rather than dangles
+  const mg=tierText(t,"mgloss"); if(!mg||mg.includes("-")) return false;
+  const units=mg.split(".").filter(Boolean); if(units.length<2) return false;
+  // grammatical = the unit is ENTIRELY a Leipzig abbreviation run, by the same test the small-caps rendering uses
+  // (glossAbbrSegments, js/core/prefs.js) — one classifier for "is this an abbreviation", never a second table.
+  const gram=units.map(u=>{ const segs=glossAbbrSegments(u); return segs.length===1&&segs[0][1]; });
+  const first=gram[0]; let cut=0; while(cut<gram.length&&gram[cut]===first) cut++;
+  if(cut===gram.length) return false;                   // all one kind → nothing to divide
+  for(let k=cut;k<gram.length;k++) if(gram[k]===first) return false;   // …and the second run must be the whole rest: an alternating gloss is not cleanly separable
+  const next=glossEnc(units.slice(0,cut).join(".")+"-"+units.slice(cut).join("."));
+  if(next===mg) return false;
+  const wasPrefill=(mg===(t._mglossPre||""));
+  t.misc=setMiscKV(t.misc,"MGloss",next);
+  if(wasPrefill) t._mglossPre=next;   // as in mglossReslot: dividing an untouched prefill along its own seam leaves it an untouched prefill
+  return true; }
 // items 2/3 — the token ids the marker commands act on: a multi-token range if one is selected, else the single
 // selected token. (Same "range if there is one, else the token" rule ⌘G and the MWT menu items already follow.)
 function selTokIds(){ if(sel.s<0||sel.t<=0) return [];

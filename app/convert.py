@@ -48,32 +48,35 @@ _GRAMMARS = {
 # each file's own `strat` declaration. A (lang, key) absent here means the source project ships
 # no dedicated grammar for that pair — not every language covers every direction, and up-conversion
 # to mSUD is never covered (see sud_to_msud) — so _convert falls back to the universal grammar.
+#
+# THE mSUD DIRECTIONS ARE DELIBERATELY NOT LISTED HERE, and the vendored language-specific
+# mSUD grammars (arh/bej/gya/pay/yrk/zh, all still on disk) are therefore never loaded: mSUD → SUD
+# and mSUD → UD always run the universal grammar, whatever the document's language. The reason is
+# that a "/m" fusion is where the language-specific grammars disagree with the universal one about
+# the SPELLING of the merged word rather than about its syntax — `zh_`/`gya_` pass grew an explicit
+# "_" separator when they concatenate the pieces' Translit and Tone and `pay_` a " " for MGloss, so
+# one fused word came out of the converter spelled as several (`Translit=wèn_tí`, `Tone=4_2`) while
+# its FORM and LEMMA, which take no separator, came out fused. The universal grammar passes no
+# separator (grew's default is the empty string — measured, not assumed), so every field agrees.
+# Keep it this way rather than editing the vendored grammars, which are verbatim upstream copies a
+# re-vendor would silently revert. The non-mSUD language-specific entries below are untouched.
 _LANG_GRAMMARS = {
     ("arh", "sud_to_ud"): ("arh_SUD_to_UD.grs", "arh_SUD_to_UD_main"),
-    ("arh", "msud_to_sud"): ("arh_mSUD_to_SUD.grs", "arh_mSUD_to_SUD_main"),
     ("bej", "sud_to_ud"): ("bej_SUD_to_UD.grs", "bej_SUD_to_UD_main"),
-    ("bej", "msud_to_sud"): ("bej_mSUD_to_SUD.grs", "bej_mSUD_to_SUD_main"),
-    ("bej", "msud_to_ud"): ("bej_mSUD_to_UD.grs", "bej_mSUD_to_UD_main"),
     ("br", "ud_to_sud"): ("br_UD_to_SUD.grs", "br_main"),
     ("de", "ud_to_sud"): ("de_UD_to_SUD.grs", "de_main"),
     ("fr", "ud_to_sud"): ("fr_UD_to_SUD.grs", "fr_main"),
     ("fr", "sud_to_ud"): ("fr_SUD_to_UD.grs", "FR_main_UDplus"),
     ("gya", "sud_to_ud"): ("gya_SUD_to_UD.grs", "gya_SUD_to_UD_main"),
-    ("gya", "msud_to_sud"): ("gya_mSUD_to_SUD.grs", "main"),
     ("ha", "sud_to_ud"): ("ha_SUD_to_UD.grs", "ha_main"),
     ("ht", "sud_to_ud"): ("ht_SUD_to_UD.grs", "ht_SUD_to_UD_main"),
     ("pay", "sud_to_ud"): ("pay_SUD_to_UD.grs", "pay_SUD_to_UD_main"),
-    ("pay", "msud_to_sud"): ("pay_mSUD_to_SUD.grs", "pay_mSUD_to_SUD_main"),
     ("pcm", "sud_to_ud"): ("pcm_SUD_to_UD.grs", "pcm_main"),
     ("sab", "sud_to_ud"): ("sab_SUD_to_UD.grs", "sab_SUD_to_UD_main"),
     ("say", "sud_to_ud"): ("say_SUD_to_UD.grs", "say_main"),
     ("wo", "ud_to_sud"): ("wo_UD_to_SUD.grs", "wo_main"),
     ("yrk", "sud_to_ud"): ("yrk_SUD_to_UD.grs", "yrk_SUD_to_UD_main"),
-    ("yrk", "msud_to_sud"): ("yrk_mSUD_to_SUD.grs", "yrk_mSUD_to_SUD_main"),
-    ("yrk", "msud_to_ud"): ("yrk_mSUD_to_UD.grs", "yrk_mSUD_to_UD_main"),
     ("zh", "sud_to_ud"): ("zh_SUD_to_UD.grs", "zh_SUD_to_UD_main"),
-    ("zh", "msud_to_sud"): ("zh_mSUD_to_SUD.grs", "zh_mSUD_to_SUD_main"),
-    ("zh", "msud_to_ud"): ("zh_mSUD_to_UD.grs", "zh_mSUD_to_UD_main"),
 }
 
 

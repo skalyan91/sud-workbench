@@ -211,7 +211,17 @@ function morphSeams(s){ const seams=new Set();
 //       right → the EARLIER one.
 //  3. A DIRECT LINK between the two themselves — one is the head of the other — decides by what the two tokens ARE:
 //     · one OPEN class against one CLOSED class → the CLOSED-class token, that being the bound member of the pair.
-//     · both CLOSED → the HEAD.
+//     · both CLOSED → THE SEMANTICALLY DEPENDENT ONE, which is the one test in these four rules that asks what the
+//       relation MEANS rather than what the two tokens are. Two closed-class words are alike in class, so class has
+//       nothing left to say and nounhood cannot apply (neither is a noun); what remains is which of the two leans on
+//       the other. arrowDir (js/diagram/diagram-core.js) is that judgement, already made once for the "Semantic
+//       arrows" option, and it is reused rather than restated: subj/comp leave the arrow at the syntactic HEAD (an
+//       auxiliary leans on its lexical verb, an adposition on its object) → the HEAD takes the seam; mod/det/clf
+//       leave it at the syntactic DEPENDENT → the DEPENDENT takes it. Any other relation says nothing either way and
+//       falls to rule 4, centred — the same treatment a symmetric relation gets between two alike OPEN words below,
+//       and for the same reason. THIS REPLACES a flat "both closed → the HEAD", which named the head even under a
+//       coordination or a punct and even where the dependent is the bound member (a determiner beside its noun-less
+//       pronoun, a classifier beside its numeral).
 //     · both OPEN → the one that is NOT a noun, where exactly one of them is NOUN/PROPN: the OTHER takes it, and
 //       the relation is not consulted at all. Where the two are ALIKE in nounhood — both nouns, or neither — the
 //       relation is all there is to go on, and the branch reads as ONE rule rather than two:
@@ -231,9 +241,11 @@ function morphSeams(s){ const seams=new Set();
 //     can't tell apart, a symmetric relation between two nouns. (Not two tokens under a common head: that is a
 //     rule-2 tie, and the tie-break there always names an owner.)
 // This supersedes the older three-test order (morph group, then a dominance gate, then word class, then
-// arrowDir's semantic dependence). arrowDir is no longer consulted at all: "which of the two leans on the other"
-// answered a different question from "which of the two does this boundary belong to", and the new rules answer
-// the second one directly.
+// arrowDir's semantic dependence). "Which of the two leans on the other" answered a different question from
+// "which of the two does this boundary belong to", and these rules answer the second one directly — so arrowDir
+// is consulted at exactly ONE point now, rule 3's both-closed branch, where the two tokens are alike in class and
+// in (non-)nounhood and semantic dependence is the only thing left that can tell them apart. It is not a partial
+// return of the old order: it decides that one branch, below rules 1 and 2 and after word class, never above them.
 // RULE 0 — `goeswith` OUTRANKS ALL FOUR, RULE 1 INCLUDED: a seam INSIDE a `goeswith` word carries NO MARK, and no
 // rule below is consulted for it. Rule 1 calls itself inviolable, and against every other relation it is; this is
 // the one exception above it, and it is an exception of a different kind. Rules 1–4 answer "WHICH of these two
@@ -322,7 +334,8 @@ function seamOwner(s,k){ const ta=s.tokens[k-1], tb=s.tokens[k]; if(!ta||!tb) re
   const wa=wordClass(ta), wb=wordClass(tb), hd=(hb===k)?k:k+1;   // hd = whichever of the two heads the other (a HEAD-cycle between them resolves to k; the tree is malformed either way)
   if(wa==="closed"&&wb==="open") return k;     // one open against one closed → the closed one, that being the bound member of the pair
   if(wa==="open"&&wb==="closed") return k+1;
-  if(wa==="closed"&&wb==="closed") return hd;  // both closed → the head
+  if(wa==="closed"&&wb==="closed"){ const dp=(hd===k)?k+1:k, d=arrowDir(s.tokens[dp-1].deprel);   // both closed → SEMANTIC dependence decides (see the rule-3 note above). The relation of the pair is the DEPENDENT's own deprel, as in the both-open branch below
+    return d==="dep"?hd:(d==="head"?dp:0); }   // arrowDir("dep") = the arrow leaves the syntactic HEAD, i.e. the head is the semantically dependent end (subj/comp) → the head takes the seam; arrowDir("head") = the syntactic DEPENDENT is (mod/det/clf) → the dependent takes it; null (the relation says nothing either way) → rule 4, centred   /* calling into js/diagram/diagram-core.js, which loads AFTER this file, is safe HERE and only here: seamOwner runs at render time, long after every module is defined — it is EAGER top-level code that may not forward-reference (see CLAUDE.md) */
   if(wa==="open"&&wb==="open"){
     const na=UPOS_NOUNY.has(ta.upos), nb=UPOS_NOUNY.has(tb.upos), dp=(hd===k)?k+1:k;   // dp = the DEPENDENT of the pair
     if(na!==nb) return na?k+1:k;               // exactly one noun → the OTHER, non-noun token, whatever the relation says

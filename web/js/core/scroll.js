@@ -58,12 +58,44 @@ function scrollableUnder(target){ if(!target||!target.closest) return null;
   const sc=target.closest(".gwrap,.diagram,.text-conv");
   if(sc && !sc.classList.contains("wrapproj") && sc.scrollHeight>sc.clientHeight+1) return sc;
   return null; }
+/* …and one thing the wheel handler must ALSO know: is the inner scroller's own block actually on screen? A block that
+   is only partly in view must not let its diagram/grid eat the wheel — the reader's gesture belongs to the PAGE until
+   the block they're pointing at has been pulled into view. Two measurement decisions here, both load-bearing:
+   • the port is the USABLE one, not #doc's raw client rect: the document scrolls UNDER the translucent titlebar and
+     options bar (the same inset #doc's own scroll-padding-top encodes), so a block's top sitting behind the toolbar is
+     NOT "in view". docTopInset() below is the live figure and already reports 0 while the full-screen chrome is
+     collapsed, so this inherits that fix rather than re-deriving it; sticky boundary headings occlude the same way and
+     are charged the same way blockSnap()/restoreScrollPos() charge them.
+   • "fully in view" is min(block height, port height) of overlap, NOT "top ≥ portTop AND bottom ≤ portBottom". A block
+     with both panes open is routinely TALLER than the port (--cap-dia is 60vh and --cap-grid 40vh — 100vh before the
+     header, text and translation rows are counted), so the strict two-edge test would be unsatisfiable for the common
+     case and would leave every inner scroller permanently dead. The test is therefore "as fully visible as this block
+     CAN be": either the block fits inside the port, or the port fits inside the block — and in that second case there
+     is nothing left to bring into view, so the page-scroll intent doesn't apply and the inner scroller is the right
+     owner. vis() (top of this file) already computes exactly that overlap. The 1px tolerance is the same fractional-
+     layout slack the atTop/atBot tests take: a block that IS flush must not be disqualified by device-pixel rounding. */
+function blockFullyInView(sc){ const blk=sc.closest?sc.closest(".sblock"):null; if(!blk) return true;   // not inside a block (nothing the page could bring into view) → don't gate
+  const docEl=document.getElementById("doc"); if(!docEl) return true;
+  const vp=docEl.getBoundingClientRect();
+  const port={top:vp.top+docTopInset()+(typeof stickyHeadH==="function"?stickyHeadH(blk):0), bottom:vp.bottom};
+  const r=blk.getBoundingClientRect();
+  return vis(r,port)>=Math.min(r.height,port.bottom-port.top)-1; }
 let wheelIdle=null, wheelMode=null;   // per-gesture decision: null=undecided, "chain"=drive the page, "native"=leave to the browser
 document.getElementById("doc").addEventListener("wheel",e=>{ const docEl=document.getElementById("doc");
   clearTimeout(wheelIdle); wheelIdle=setTimeout(()=>{wheelMode=null;},120);   // a pause ends the gesture; the owner is re-decided next time
   if(wheelMode===null){   // decide ONCE, at the gesture's first event
     const sc=scrollableUnder(e.target);
     if(!sc) wheelMode="native";
+    // A VERTICAL gesture over a block that isn't fully on screen drives the page, whatever the inner scroller's own
+    // position: the block scrolls into view first, and only then (the 120ms pause below re-decides the owner) can its
+    // diagram/grid be scrolled. This QUALIFIES item 5 below — that note was about not tying the decision to the
+    // block's position relative to the TOOLBAR, and it still holds for a block that's on screen; a block that is half
+    // off screen is a different case, where "the pointer happens to rest on a diagram" would otherwise silently steal
+    // a plain page scroll. Gated on the gesture being vertical-dominant (|dY|>|dX|, not dY≠0 — a trackpad fling is
+    // never axis-pure) because the chain branch can only drive docEl.scrollTop by e.deltaY: a horizontal delta has
+    // nowhere to chain TO, so gating it would merely deaden a wide diagram's horizontal pan and buy nothing. A wide
+    // diagram therefore still pans sideways even while its block is half off screen.
+    else if(Math.abs(e.deltaY)>Math.abs(e.deltaX) && !blockFullyInView(sc)) wheelMode="chain";
     else { const atTop=sc.scrollTop<=0, atBot=sc.scrollTop+sc.clientHeight>=sc.scrollHeight-1;
       // item 5: chain to the page ONLY once the inner scroller is ALREADY at its bound in this direction — NO dependency on
       // where the block sits relative to the toolbar. The inner scroller (a wide diagram's horizontal scroll, or a wrapped

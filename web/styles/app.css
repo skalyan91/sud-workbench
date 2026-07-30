@@ -71,10 +71,14 @@
   .gmrow + .gmrow::after{content:""; position:absolute; inset-inline:10px; top:-.5px; height:1px; background:var(--label-quinary,rgba(0,0,0,.05)); pointer-events:none}   /* the Row's 1px Labels/Quinary stroke, inset by the Group's own 10px (see the note above). Drawn on the LATER sibling at its top edge, so the list never ends on a trailing rule — the kit's stroke is `outside`, which puts one line in the seam BETWEEN two rows and none past the last */
   .sheet .gmrow input.gm-abbr{width:120px; flex:none}   /* .sheet-SCOPED on purpose: unscoped, `.gmrow input.gm-abbr` (0,2,1) merely TIES with `.sheet input[type=text]{width:100%}` further down this file, and the later rule won — the abbreviation field took the row's whole 626px, shoving the Feature=Value field and the remove button clean off the sheet's right edge. Pre-dates the Form-Row work; found by measuring the trailing accessory's flush against the row edge and getting −76px. */
   .gmrow input.gm-feat{flex:1; min-width:0; font-family:ui-monospace,monospace}
-  .gm-rm{width:26px; height:26px; flex:none; margin-inline-start:8px; border:none; background:transparent; color:var(--muted); font-size:12px; cursor:pointer; border-radius:6px; display:grid; place-items:center}   /* the row's Right Accessory: flush to the trailing edge, 8 + the row's 8px gap = the kit's 16px gutter */
-  .gm-rm:hover{background:var(--destructive-fill,rgba(255,56,60,.18)); color:var(--accent-red,#ff383c)}
-  .gm-add{align-self:flex-start; height:28px; padding:0 12px; border-radius:7px; border:.5px dashed var(--pill-border); background:transparent; color:var(--accent-blue,#0088ff); font:inherit; font-size:12px; font-weight:600; cursor:pointer}
-  .gm-add:hover{background:var(--accent-weak)}
+  /* …and the two row controls are shared with the Insert sheet's parallel-text fields (.ins-rm / .ins-add):
+     "remove this row" and "add another row" are the same gestures in the same kind of dialog, so they are the
+     same button rather than a second pair drawn to look like these. */
+  .gm-rm,.ins-rm{width:26px; height:26px; flex:none; margin-inline-start:8px; border:none; background:transparent; color:var(--muted); font-size:12px; cursor:pointer; border-radius:6px; display:grid; place-items:center}   /* the row's Right Accessory: flush to the trailing edge, 8 + the row's 8px gap = the kit's 16px gutter */
+  .gm-rm:hover,.ins-rm:hover{background:var(--destructive-fill,rgba(255,56,60,.18)); color:var(--accent-red,#ff383c)}
+  .gm-add,.ins-add{align-self:flex-start; height:28px; padding:0 12px; border-radius:7px; border:.5px dashed var(--pill-border); background:transparent; color:var(--accent-blue,#0088ff); font:inherit; font-size:12px; font-weight:600; cursor:pointer}
+  .gm-add:hover,.ins-add:not(:disabled):hover{background:var(--accent-weak)}
+  .ins-add:disabled{opacity:.5; cursor:default}   /* the empty-document case only, and only until the registry answers — with no language to write a parallel text in at all, the button is removed rather than disabled (see sheetInsert) */
   .fontctl{display:inline-flex; align-items:stretch; gap:0; height:27px; border:.5px solid var(--hairline-strong); border-radius:7px; overflow:hidden; background:var(--field-bg)}
   .fontctl #fsVal,.fontctl #fsUp{border-left:.5px solid var(--hairline-strong)}   /* inner dividers (ID selectors beat .fsbtn{border:none}) */
   .fsbtn{border:none; background:transparent; color:var(--text); font:inherit; font-size:13px; font-weight:600; width:27px; height:100%; cursor:pointer; display:grid; place-items:center}
@@ -94,7 +98,19 @@
      reverted; a clip-path notch over just the scrollbar's corner was considered and rejected — it would also
      clip real document content sitting in that same top-right corner, not just the scrollbar). Given the choice
      between the two, the inset (this) is what was asked for. */
-  .doc::-webkit-scrollbar{width:11px; background:transparent}
+  /* …AND IT MUST NOT COST THE DOCUMENT ANY WIDTH. The trade above buys the inset at the price of a CLASSIC
+     scrollbar, and a classic scrollbar is part of the scroller's box: WebKit takes its 11px out of #doc's CONTENT
+     box, so `.docsheet{margin:0 auto}` centred the page in (window − 11px) — the page sat 5.5px left of the
+     window's true centre and its right margin was 11px narrower than its left. Reclaimed by matching that 11px
+     with an equal inline-START padding, so the centring box is symmetric again and the page lands on the window's
+     real centre with the bar floating over the right margin beside it. A negative margin on #doc was the other
+     candidate and is wrong: #doc is a flex item, so widening it past the flex line pushes the bar itself off the
+     window edge. `scrollbar-gutter:stable both-edges` expresses exactly this natively but is only honoured on
+     newer WebKit, and this has to hold on whatever WKWebView the packaged app gets. --sbw is the ONE width: keep
+     the ::-webkit-scrollbar rule below reading from it too, or the two halves drift and the page decentres. */
+  :root{--sbw:11px}
+  .doc{padding-inline-start:var(--sbw)}
+  .doc::-webkit-scrollbar{width:var(--sbw); background:transparent}
   .doc::-webkit-scrollbar-track{background:transparent; margin-top:calc(var(--tbH,44px) + var(--vbH,0px))}
   .doc::-webkit-scrollbar-thumb{background:color-mix(in srgb,var(--text) 28%,transparent); border-radius:6px; border:3px solid transparent; background-clip:content-box}
   .doc::-webkit-scrollbar-thumb:hover{background:color-mix(in srgb,var(--text) 44%,transparent); background-clip:content-box}
@@ -129,7 +145,7 @@
      gutters, i.e. a 1140px sheet — which only corroborates 1200, being 5 % off it.
      px and not ch, despite a measure being the kind of thing that should track the font: Jupyter states its cap in
      px, and a ch equivalent would agree with it at exactly one sentence-font size and drift at every other. */
-  .doc.paged{--page-measure:1200px; background:var(--page-ground); padding-inline:16px}
+  .doc.paged{--page-measure:1200px; background:var(--page-ground); padding-inline:16px; padding-inline-start:calc(16px + var(--sbw))}   /* the inline-START gutter carries the scrollbar's own width ON TOP of the 16px, for the reason the .doc rule above gives: the classic scrollbar is taken out of the CONTENT box at the END side, so matching it at the START is what keeps `.docsheet{margin:0 auto}` centred on the window rather than 5.5px left of it. This override is why the plain `.doc` rule above is not enough on its own — `.doc.paged` is the more specific selector AND comes later, so its own `padding-inline` shorthand was resetting the start side back to 16px */
   /* The page ground IS the toolbar's colour, taken from the kit's own --toolbar-solid rather than tinted by eye,
      so the bar and the ground behind the sheets cannot drift apart when either toolbar token is retuned.
      --toolbar-solid is the FLATTENED bar (see mac-tokens.css): --toolbar-bg is translucent, so putting that value
@@ -902,7 +918,7 @@
      was blue text on blue. Every other view accents the text against the plain page and reads correctly, which
      is why this change stops here. --accent, not --row-sel: that token stays the old low-alpha wash for anything
      else that wants one. */
-  .oselrow{position:absolute; z-index:0; background:rgb(0,100,225); border-radius:6px; pointer-events:none; display:none}   /* selected row — default, full subtree width; light: the SAME measured rgb(0,100,225) as the grid's own selected row (see its note beside table.grid tbody tr.sel) */
+  .oselrow{position:absolute; z-index:0; background:var(--accent); background:oklch(from var(--accent) calc(l * .827) calc(c * .915) h); border-radius:6px; pointer-events:none; display:none}   /* selected row — default, full subtree width; the SAME derivation as the grid's own selected row, and derived for the same reason (see the note beside table.grid tbody tr:is(.sel,.mwtsel)): this used to be the literal rgb(0,100,225) sampled from the system blue, which stayed blue under any other system accent while the row it mirrors followed it. Two declarations, fallback first, for the reason documented there */
   @media (prefers-color-scheme:dark){ .oselrow{background:var(--accent); background:oklch(from var(--accent) calc(l * .827) calc(c * .915) h)} }   /* dark keeps the derived-darkening formula, unchanged */
   .ohovbox{position:absolute; z-index:0; background:var(--row-hover); border-radius:6px; pointer-events:none; display:none}                                 /* hover — same span as a row selection */
   .oreportbox{position:absolute; z-index:0; border:.5px solid color-mix(in srgb,var(--text) 18%,transparent); border-radius:7px; background:color-mix(in srgb,var(--content-bg) 55%,transparent); box-shadow:0 1px 4px rgba(0,0,0,.12),0 0 0 .5px rgba(0,0,0,.02); pointer-events:none}   /* item 7: a reported-speech subtree sits in a subtly drop-shadowed box (behind the rows, so it never shifts their horizontal alignment) */
@@ -992,7 +1008,7 @@
   table.grid td.col-id{padding:0 6px; font-variant-numeric:tabular-nums; color:var(--muted); text-align:end; cursor:grab}   /* right in LTR, left in RTL */
   table.grid th.col-id{padding:4px 6px; text-align:end}   /* ID heading: right in LTR, left in RTL (opposite the other headings) */
   table.grid td.col-id:active{cursor:grabbing}
-  table.grid tbody tr.mwt-row td{background:var(--grid-mwt-bg); color:var(--text-2); font-style:italic; padding:0}   /* padding 0 like normal cells → the surface form aligns in the Form column */
+  table.grid tbody tr.mwt-row td{color:var(--text-2); font-style:italic; padding:0}   /* padding 0 like normal cells → the surface form aligns in the Form column */
   table.grid tbody tr.mwt-row td input{color:var(--text-2)}
   .mwtform{position:relative; z-index:2; width:auto; font-style:normal}   /* the MWT surface form may break out of the Form column instead of truncating; upright (synthetic italic slants shaped Arabic past the box) */
   table.grid tbody tr.mwt-row td.rocell{padding:0 8px; overflow:visible; text-overflow:clip}   /* MWT transliteration aligns with the column but may break out (never truncated) */
@@ -1059,6 +1075,23 @@
      whichever one is last, and the transliteration column is only sometimes present. */
   table.grid tbody td:last-child{padding-inline-end:var(--grid-row-pad)}
   table.grid tbody tr.striperow td::before{background:var(--row-stripe)}   /* zebra stripe — declared before hover/sel so those win on the same row */
+  /* The MWT range row is a ROW OF THIS LIST like any other, so its ground paints on the SAME ::before band the
+     stripe and the selection use — inset by --grid-row-pad at both ends and rounded by --grid-row-r — instead of
+     the full-bleed, square-cornered `background` it carried on the <td> itself. That background predated the band
+     (the rows were full-bleed then too), and once they became pills it was the one row still running edge to edge,
+     which read as a rule across the table rather than as a row of it. On the band it also stops fighting the other
+     states: it is a plain earlier declaration now, so a selection or a range wash simply overpaints it, where a
+     <td> background sat in a different layer entirely and had to be worked around (see the deleted-hover note
+     below, which is the scar from exactly that). The BRACKET moves with it — drawGridTie in js/grid/grid.js now
+     centres the spine on this band's inline-start edge rather than on the grid frame. */
+  table.grid tbody tr.mwt-row td::before{background:var(--grid-mwt-bg)}
+  /* …but the group's rows keep a SQUARE inline-start edge — range row and components alike, which is what
+     .mwtgrp names. The bracket runs the full height of the group flush against that edge (drawGridTie), and a
+     rounded corner curves the band's fill away from it at the first and last row only: the bracket would meet
+     solid fill down the middle of the group and open a crescent-shaped gap at each end, reading as a bracket
+     that doesn't quite reach the rows it brackets. Square there, still rounded at the inline END, where nothing
+     abuts. Logical corners throughout, so RTL mirrors with the bracket. */
+  table.grid tbody tr.mwtgrp td:first-child::before{border-start-start-radius:0; border-end-start-radius:0}
   /* the Toolbox import field-mapping rows: a LIST, so it takes the Form-Row hairline the models/gloss lists take
      (see .gmrow) rather than the stripe it used to carry. Layout is inline-styled in js/io/formats.js; only the
      divider needs a rule, because a pseudo-element cannot be set from style.cssText. */
@@ -1080,37 +1113,47 @@
      rewrites that property, and used to have to rewrite --row-sel's alpha separately to match).
      LAST of the four states: the focused row outranks the range wash, hover and stripe alike. */
   /* NOT the accent itself — macOS fills a selected row with a DARKENED accent (its own
-     `selectedContentBackgroundColor`: for the #007AFF system blue, #0059D1). Light is now a literal MEASURED
-     target, rgb(0,100,225), on request — stated as the colour it must BE rather than as a formula, since the
-     formula's own derived rgb(0,91,208) (see below) wasn't quite it. Dark KEEPS the derived approach — DERIVED
-     rather than hardcoded, so a custom system accent carries through: in OKLCh the measured pair is L ×.827,
-     C ×.915, hue held, which reproduces rgb(0,91,208) from #007AFF — two units off the sampled rgb(0,89,209),
-     i.e. under any perceptual threshold — and darkens any other accent by the same perceptual step rather than
-     a per-hue guess. That's also why dark is a TWO-declaration pair (`background:var(--accent)` first, a real
-     fallback, not a duplicate): relative colour syntax that an engine cannot parse drops THAT DECLARATION ONLY
-     and leaves this one standing. It has to be written as a literal there rather than behind a custom property
-     for that to hold — an unparsable value inside a var() is invalid at computed-value time instead, which
-     discards the fallback too and paints nothing. */
-  table.grid tbody tr.sel td::before{background:rgb(0,100,225)}   /* light: MEASURED target, on request — was the OKLCH-darkened #007AFF (rgb(0,91,208)); stated as the colour it must BE rather than re-tuning the darken-curve's constants for one theme. Dark keeps the old generic formula (below) since darkening it further isn't what was asked */
-  @media (prefers-color-scheme:dark){ table.grid tbody tr.sel td::before{background:var(--accent); background:oklch(from var(--accent) calc(l * .827) calc(c * .915) h)} }
+     `selectedContentBackgroundColor`: for the #007AFF system blue, #0059D1). DERIVED FROM --accent IN BOTH
+     APPEARANCES, on request, and no longer a literal in either: in OKLCh the darkened pair is L ×.827, C ×.915,
+     hue held, which reproduces rgb(0,91,208) from #007AFF — two units off the sampled rgb(0,89,209), i.e. under
+     any perceptual threshold — and darkens ANY other accent by the same perceptual step rather than a per-hue
+     guess. Light used to be the literal rgb(0,100,225), a measured sample of the system blue's own row fill;
+     that is nine units of blue away from what the formula gives, and it was wrong in the way that matters — a
+     user on a graphite, red or purple system accent got a BLUE selected row, because a sampled literal cannot
+     follow an accent it was sampled from. Reading --accent also picks up a live system-accent override for free
+     (js/ui/colours.js rewrites that property).
+     A TWO-DECLARATION PAIR (`background:var(--accent)` first, a real fallback, not a duplicate): relative colour
+     syntax that an engine cannot parse drops THAT DECLARATION ONLY and leaves this one standing, so the row still
+     fills with the plain accent instead of nothing. It has to be written as a literal here rather than behind a
+     custom property for that to hold — an unparsable value inside a var() is invalid at computed-value time
+     instead, which discards the fallback too and paints nothing. */
+  /* .mwtsel rides EVERY rule .sel does, in all four of its states (active/inactive window, grid/diagram zone,
+     and the inverse ink), because a selected multi-word token is not a weaker selection than a selected token —
+     it is the same selection made of several rows, and a wash on the components with a fill on one of them read
+     as "one row is selected and the others are merely near it". `:is()` rather than a duplicated selector list so
+     the two can never drift apart across the eight rules below. Which rows carry it: the MWT's range row and
+     every one of its component rows, toggled together by applySel (js/core/document.js). It sits BELOW .rangesel
+     in source order deliberately — an MWT selection is also a range selection, and this is the more specific
+     reading of the same state, so it must win. */
+  table.grid tbody tr:is(.sel,.mwtsel) td::before{background:var(--accent); background:oklch(from var(--accent) calc(l * .827) calc(c * .915) h)}   /* ONE rule for both appearances now that neither is a literal — the darkening is a perceptual step off whatever --accent currently is, and that is as true in light as in dark. The @media block that used to override this in dark is gone with it, not merely emptied */
   /* …which forces INVERSE INK. The cells carry muted greys (--text-2 / --muted) that fail outright on a
      saturated fill, and unlike the old wash there is no background showing through to keep them legible.
      Scoped to where the full accent ACTUALLY paints: with focus in the diagram the row falls back to the dim
      wash below and keeps its ordinary ink. */
-  html:not(.win-inactive) #doc:not(.zone-diagram) table.grid tbody tr.sel td,
-  html:not(.win-inactive) #doc:not(.zone-diagram) table.grid tbody tr.sel td.rocell,
-  html:not(.win-inactive) #doc:not(.zone-diagram) table.grid tbody tr.sel td.col-id,
-  html:not(.win-inactive) #doc:not(.zone-diagram) table.grid tbody tr.sel .cin,
-  html:not(.win-inactive) #doc:not(.zone-diagram) table.grid tbody tr.sel .csel{color:#fff}
+  html:not(.win-inactive) #doc:not(.zone-diagram) table.grid tbody tr:is(.sel,.mwtsel) td,
+  html:not(.win-inactive) #doc:not(.zone-diagram) table.grid tbody tr:is(.sel,.mwtsel) td.rocell,
+  html:not(.win-inactive) #doc:not(.zone-diagram) table.grid tbody tr:is(.sel,.mwtsel) td.col-id,
+  html:not(.win-inactive) #doc:not(.zone-diagram) table.grid tbody tr:is(.sel,.mwtsel) .cin,
+  html:not(.win-inactive) #doc:not(.zone-diagram) table.grid tbody tr:is(.sel,.mwtsel) .csel{color:#fff}
   /* UNFOCUSED WINDOW: the selection drops the accent for a neutral grey, as every macOS list does — so the ink
      goes back to normal too, which is why the white above is gated on it as well as on the zone. Carries an id
      to outrank the zone-diagram rule below (1,2,5): a window that is not key greys its selection whichever pane
      last held focus inside it. The root is where js/io/bridge.js puts .win-inactive; the kit's own copy on
      .titlebar stays for the title-bar rules written against it. */
-  html.win-inactive #doc table.grid tbody tr.sel td::before{background:var(--row-sel-inactive)}
+  html.win-inactive #doc table.grid tbody tr:is(.sel,.mwtsel) td::before{background:var(--row-sel-inactive)}
   /* focus zone: the selected token gets the full accent highlight in whichever view was last used (grid vs diagram);
      its mirror in the other view is dimmed to a LOWER-chroma blue (--accent-dim / --row-sel-dim), so it still stands out yet reads which view a keypress/edit will act on. The relation label keeps its category colour in BOTH views (a primary accent never recolours it either). */
-  #doc.zone-diagram table.grid tbody tr.sel td::before{background:var(--row-sel-dim)}      /* focus in the diagram → faint-blue the grid row */
+  #doc.zone-diagram table.grid tbody tr:is(.sel,.mwtsel) td::before{background:var(--row-sel-dim)}      /* focus in the diagram → faint-blue the grid row */
   #doc.zone-grid .node.sel .node-lbl,
   #doc.zone-grid .tok-group.sel .tok-word,
   #doc.zone-grid .tok-group.sel .baseword{fill:var(--accent-dim)}                          /* focus in the grid → low-chroma-blue the diagram node */
@@ -1183,10 +1226,10 @@
   .pillfield:hover{border-color:var(--hairline)} .pillfield:focus{background-color:var(--field-focus); box-shadow:inset 0 0 0 1px var(--accent)}   /* focus ring is an INSET box-shadow drawn inside the border-box (border stays 1px transparent in every state) → the field's height is identical unfocused vs focused/selected, no row growth */
   .pillfield .fpill{margin-block:1px; margin-inline-end:3px}   /* inline gap between chips (logical → mirrors in RTL) */
   .fpill{display:inline-flex; align-items:flex-start; gap:0; max-width:100%; padding:1px 2px 1px 6px; border-radius:5px; vertical-align:middle;
-    background:var(--field-bg); border:1.125px solid var(--hairline-strong); font-size:var(--grid-cell); line-height:15px; white-space:nowrap}   /* flex-start, not center: a wrapped .pv (see its own rule below) grows the pill tall, and centring the row would float .pk/.peq away from .pv's own FIRST line — identical to center for the common single-line pill (every child the same height), so this is a no-op there */
+    background:var(--field-bg); border:1.125px solid var(--hairline-strong); font-size:var(--grid-cell); line-height:15px; white-space:nowrap}   /* flex-start, not center: a wrapped .pv (see its own rule below) grows the pill tall, and centring the row would float .pk/.peq away from .pv's own FIRST line — a no-op for the common single-line pill as far as the TEXT children go, since each of those is exactly one 15px line box tall. The one child it isn't a no-op for is the 13px .px button, which carries its own 1px top margin to cancel the difference (see that rule) */
   .fpill .pk{color:var(--muted)} .fpill .peq{color:var(--faint)} .fpill .pv{color:var(--text); white-space:normal; word-break:normal; overflow-wrap:break-word; min-width:0}   /* no ellipsis/clip: the FEATS/MISC column is sized to fit the widest chip, so a value is never truncated — but a value LONGER than that (e.g. a phrasal MGloss, or the column manually dragged narrower via colOverride) wraps internally instead of overflowing. word-break:normal (not break-word/anywhere), matching textarea.cin's own convention above: prefer the Unicode line-break algorithm's natural opportunities — a space or after punctuation — over breaking mid-word. min-width:0 overrides the flex item default of min-width:auto, which would otherwise refuse to shrink .pv below its unwrapped width and just widen .fpill instead of wrapping */
-  .fpill .px{display:inline-flex; align-items:center; justify-content:center; margin-inline-start:3px; width:13px; height:13px; padding:0; border:none; border-radius:3px;
-    background:transparent; color:var(--muted); font:inherit; font-size:12px; line-height:1; cursor:pointer}
+  .fpill .px{display:inline-flex; align-items:center; justify-content:center; align-self:flex-start; margin-block-start:1px; margin-inline-start:3px; width:13px; height:13px; padding:0; border:none; border-radius:3px;
+    background:transparent; color:var(--muted); font:inherit; font-size:12px; line-height:1; cursor:pointer}   /* the ✕ must sit at the SAME offset from the chip's top and right edges however many lines the value wraps to. RIGHT is free: it's the last flex item, so its right edge is the content-box edge either way (chip's 2px right pad + 1.125px border from the outer edge, the same figures .pilledit's padding below reproduces). TOP needs both declarations: align-self:flex-start pins it to the first line rather than letting it ride the centre of a 2-line (30px) .pv — stated explicitly, not left to inherit .fpill's align-items, so the two rules can't drift apart — and margin-block-start reproduces where CENTRING put it on a single-line chip, which is the position being matched: (15px line box − 13px button)/2 = 1px. The 14px margin box still fits the 15px line, so no chip grows taller and .pilledit's height stays in sync */
   .fpill .px:hover{background:var(--accent-weak); color:var(--accent)}
   /* interactive pills: click=select · drag(when selected)=reorder · dbl-click=edit */
   .fpill{-webkit-user-select:none; user-select:none}   /* dragging a pill must not select its text */
@@ -1479,6 +1522,44 @@
   .sheet textarea:focus,.sheet input:focus{border-color:var(--accent); box-shadow:0 0 0 3px var(--accent-weak)}
   .sheet label.fld{display:flex; flex-direction:column; gap:5px; font-size:12px; color:var(--muted); font-weight:600}
   .sheet .actions{display:flex; justify-content:flex-end; gap:8px; padding:16px}   /* 16 gap below the content, sides/bottom 16 */
+  /* ── the Insert-text sheet (sheetInsert in js/ui/sheets.js) ───────────────────────────────────────────
+     ITS FIELDS ARE THE POINT, so it is the one dialog that takes a HEIGHT and not just a max-height: a flex
+     child can share out only space that EXISTS, and a shrink-to-fit box has none — with max-height alone
+     every textarea sat at its own fixed size and a third or fourth field simply overflowed the sheet. 560px
+     is the height the native Insert window opened at, clamped by the same viewport allowance .sheet's own
+     max-height uses, so a short window shrinks the sheet instead of running it off the screen. */
+  .sheet.insertsheet{height:min(560px,calc(100vh - 32px))}
+  .sheet.insertsheet .content{flex:1 1 auto; min-height:0}   /* the scrollable region takes that height; min-height:0 is what lets a flex child shrink below its content and scroll (the fields' own floor is what it scrolls for) */
+  .insfields{display:flex; flex-direction:column; gap:12px; flex:1 1 auto}
+  /* Every field block SHARES the height, basis 0 so the shares go by the flex numbers and not by how much
+     text happens to be in each. The main text carries the document, so it takes twice a translation's
+     share. Below ~2 lines apiece they stop shrinking and .content scrolls instead — the sheet stays usable
+     at a small window size rather than collapsing its fields to nothing.
+     NO min-height:0 on either of these two, deliberately, and it is the whole of what makes that floor
+     hold: min-height:auto on a column flex item IS the min-CONTENT floor, i.e. the row + the textarea's own
+     52px + the note. Set to 0 (the reflex, since that is what lets .content above scroll) the blocks
+     cheerfully shrank past their contents instead — measured 80px of block around 109px of field, so a
+     parallel text's note and the next field's header overlapped by 29px, and at six fields by 69px. */
+  .insblock{display:flex; flex-direction:column; gap:6px; flex:1 1 0}
+  .insblock.main{flex:2 1 0}
+  .sheet .insblock textarea{flex:1 1 auto; min-height:52px; resize:none; font-family:inherit}   /* resize:none — the height is flex's to hand out, and a dragged height would fight it. 52px ≈ two lines of the 13px field type plus its padding. font-family:inherit, not the sheets' ui-monospace: this is running prose in the document's own language (often non-Latin), not a list of tags */
+  .insblock.off textarea{opacity:.45}
+  .insrow{display:flex; align-items:center; gap:8px}
+  .insrow .insnm{font-size:12px; font-weight:600; color:var(--muted)}
+  .insrow .inssp{flex:1}
+  .inschk{display:flex; align-items:center; gap:6px; cursor:pointer; user-select:none}
+  .inschk input{width:auto; margin:0}
+  .inschk input:disabled + .insnm{opacity:.55}   /* the main field of an empty document can't be switched off — there is nothing there to translate */
+  .sheet .insrow select.sel{flex:0 0 auto; max-width:210px; font-size:12.5px}
+  /* a FIXED language (the document's own) is shown, not chosen — a static chip, so it reads as "this is the
+     language" rather than as a menu that happens to be broken */
+  .insfixed{flex:0 0 auto; max-width:210px; height:30px; line-height:30px; padding:0 10px; border-radius:8px;
+    border:.5px solid var(--pill-border); background:var(--field-bg); color:var(--text); font-size:12.5px; font-weight:590;
+    opacity:.75; overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
+  .insnote{font-size:11px; line-height:1.4; color:var(--muted)}
+  .insnote:empty{display:none}   /* an empty note must not still spend the block's 6px gap */
+  .sheet .actions .inserr{margin-inline-end:auto; text-align:start; color:var(--accent-red,#ff383c); font-size:11.5px; line-height:1.35}   /* margin-auto on the leading side pushes the buttons back to the trailing edge the row's justify-content puts them at */
+  .sheet .tbtn .kbd{margin-inline-start:7px; font-weight:510; opacity:.72; direction:ltr; unicode-bidi:isolate}   /* the shortcut glyph on a default button (Insert's ⌘↩), in this app's own menu convention (see .ctx .kbd): the SAME size and weight as the label it trails, dimmed rather than shrunk, and held in LTR order so ⌘↩ never reverses under an RTL system language */
   /* ONLY PILL BUTTONS STRETCH. What decides it is the button's SHAPE, not which dialog it happens to sit in:
      a fully-rounded CAPSULE button (--r-control) fills its share of the actions row — one spans the whole row,
      two take half each, three take equal thirds — while a rounded-RECTANGLE button keeps its natural,
@@ -1519,6 +1600,14 @@
      column-reverse puts the DEFAULT (last in DOM) on top and Cancel at the bottom, as macOS stacks them. */
   .sheet.sm .actions.stacked{flex-direction:column-reverse; align-items:stretch}
   .sheet.sm .actions.stacked .tbtn{width:100%; flex:0 0 auto; min-width:0}   /* min-width:0 releases the 76px floor — a full-width button is never the thing that overflows */
+  /* THE THREE-BUTTON SAVE ALERT reorders when it stacks. Side by side the DOM order IS the macOS order —
+     [Don't Save] [Cancel] [Save], the destructive one leading and the default rightmost — and column-reverse
+     turns that into Save / Cancel / Don't Save, which is not how macOS stacks it: Cancel goes to the BOTTOM,
+     under the discard action, so the two answers that keep working sit together at the top. Pulling Cancel to
+     the front of the ascending order does it, because the container then reverses it to the back — one
+     declaration instead of a second DOM order for the same three buttons. Scoped to the stacked variant, so the
+     side-by-side row is untouched. */
+  .sheet.sm .actions.stacked > [data-cancel]{order:-1}
   .sheet .tbtn:hover{filter:brightness(.96); transform:none}
   .sheet .tbtn:active{filter:brightness(.92); transform:none}
   .sheet .tbtn.primary{background:var(--accent-blue,#0088ff); color:#fff}

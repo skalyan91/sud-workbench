@@ -33,8 +33,10 @@ function isConjDep(si,tokId){ const s=DOC[si], t=s&&s.tokens[tokId-1]; return !!
 // Subj (subject-raising) feature: dropping a token onto a subj/comp:obj/comp:obl/root edge marks it as notionally
 // raised to that argument slot WITHOUT rewiring its own structural head/deprel — purely a FEATS annotation plus a
 // dashed "subj" ghost edge to the derived target (subjRaiseTarget below), exactly like Shared=Yes leaves the real
-// tree alone and only adds a decorative edge. RAISE_TYPES maps the dropped edge's own (base) relation to the Subj
-// feature value used in the general case; NOT used (see attachAsRaisedSubj) when the embedded predicate being
+// tree alone and only adds a decorative edge. RAISE_TYPES maps the ARGUMENT's own (base) relation — whichever of
+// the drop's two tokens that is, see raiseMirror; the code reads it off that token's deprel (attachAsRaisedSubj's
+// `depBase(dragged.deprel)`), NOT off the relation of the edge dropped onto, which this comment used to claim —
+// to the Subj feature value used in the general case; NOT used (see attachAsRaisedSubj) when the embedded predicate being
 // dropped onto is itself a MODIFIER (mod family — mod/mod:relcl/mod:advcl/…) of the dragged argument's OWN head —
 // that configuration is a free adjunct with a coreferential-but-not-raised subject, i.e. "Instantiated", regardless
 // of which type the dragged argument's own deprel would otherwise imply. Per the SUD guidelines page
@@ -52,6 +54,22 @@ const RAISE_TYPES={subj:"SubjRaising","comp:obj":"ObjRaising","comp:obl":"OblRai
 // valid drop target is a VERB/AUX token, full stop, regardless of ITS OWN deprel family (that family plays no
 // part in the raising itself; the crawl's `type` comes from the DRAGGED token's own deprel — see attachAsRaisedSubj).
 function isRaiseTargetDep(si,tokId){ const s=DOC[si], t=s&&s.tokens[tokId-1]; return !!(t && (t.upos==="VERB"||t.upos==="AUX")); }
+/* THE SAME GESTURE THE OTHER WAY ROUND — drag the PREDICATE onto the ARGUMENT's own edge. Everything above
+   describes dropping the argument onto the embedded predicate's edge ("he" → the comp edge pointing at "go"),
+   and that is what isRaiseTargetDep gates: the edge's DEPENDENT has to be the VERB/AUX. Read from the other end
+   the gesture is just as natural, and arguably more so — grab the verb, drop it on the subj edge whose dependent
+   is to be its subject — but under that gate it could never fire, because a subj edge's dependent is the subject,
+   a noun, so the drop fell through to "reorder to that x" and nothing happened at all. Not a broken feature: an
+   unimplemented direction, and one this returns.
+   Nothing about the ANNOTATION changes with the direction. Subj still lives on the predicate, the type still
+   comes from the argument's own deprel, and attachAsRaisedSubj still does the whole crawl-and-validate — this
+   only works out which of the two tokens in the drop is which, under the SAME loose test the original direction
+   uses (the strict check, and the toast that explains a near miss, stay where they were). Where BOTH readings
+   are available — a verb dropped on another verb's raise-type edge — the ORIGINAL orientation wins, so no drop
+   that works today can change meaning. */
+function raiseMirror(si,draggedId,edgeDepId){ const s=DOC[si]; if(!s) return false;
+  const onEdge=s.tokens[edgeDepId-1];
+  return !!(onEdge && isRaiseTargetDep(si,draggedId) && RAISE_TYPES[depBase(onEdge.deprel)]); }
 // The raising target for `tokId`, of the given `targetType` ("subj"/"comp:obj"/"comp:obl"): crawl UP tokId's own
 // (unchanged) head chain, skipping any non-VERB/AUX ancestor freely; the FIRST VERB/AUX ancestor is the stopping
 // point, and the target is THAT ancestor's own dependent whose base relation equals targetType. If the first
@@ -227,7 +245,7 @@ async function attachAsSharedConjunct(si,depId,conjDepId){ const s=DOC[si]; if(!
       if(!overNode){ const fromId=DDRAG.kind==="head"?DDRAG.dep:DDRAG.tok, edgeEl=ddEdge(document.elementFromPoint(e.clientX,e.clientY));
         if(edgeEl && edgeEl.getAttribute("data-dep")!=null && +edgeEl.getAttribute("data-s")===DDRAG.si){
           const cd=+edgeEl.getAttribute("data-dep");
-          if(cd!==fromId && (isConjDep(DDRAG.si,cd)||isRaiseTargetDep(DDRAG.si,cd))){ overEdge=true; edgeEl.classList.add("dtarget"); } } }
+          if(cd!==fromId && (isConjDep(DDRAG.si,cd)||isRaiseTargetDep(DDRAG.si,cd)||raiseMirror(DDRAG.si,fromId,cd))){ overEdge=true; edgeEl.classList.add("dtarget"); } } }   // …raiseMirror: dragging the PREDICATE onto an argument's edge highlights too, or the mirror gesture would give no sign it was going to work right up until the drop
       if(DDRAG.kind==="node"){ if(overNode||overEdge) clearCaret();   // hovering another node/conj edge → it becomes the head (no drop caret)
         else { const blk=document.querySelector(`.sblock[data-i="${DDRAG.si}"]`); if(blk)dropCaret(DDRAG.si,e.clientX,e.clientY,blk,DDRAG.tok); } } } });   // empty space → reorder: show where it would land
   function endDrag(e){ document.body.classList.remove("dg-drag"); clearGhost(); clearCaret();
@@ -248,7 +266,8 @@ async function attachAsSharedConjunct(si,depId,conjDepId){ const s=DOC[si]; if(!
       const edgeDepId=+edge.getAttribute("data-dep");
       if(edgeDepId!==fromId){
         if(isConjDep(d.si,edgeDepId)){ attachAsSharedConjunct(d.si,fromId,edgeDepId); return; }
-        if(isRaiseTargetDep(d.si,edgeDepId)){ attachAsRaisedSubj(d.si,fromId,edgeDepId); return; } } }
+        if(isRaiseTargetDep(d.si,edgeDepId)){ attachAsRaisedSubj(d.si,fromId,edgeDepId); return; }   // the ARGUMENT dropped onto the embedded predicate's edge
+        if(raiseMirror(d.si,fromId,edgeDepId)){ attachAsRaisedSubj(d.si,edgeDepId,fromId); return; } } }   // …and the mirror: the PREDICATE dropped onto the argument's own edge. Same call, the two ids swapped — attachAsRaisedSubj's parameters are (argument, predicate) and the annotation it writes is identical either way. Second, so a drop that satisfies BOTH keeps the meaning it has today
     if(d.kind==="head") return;   // an edge drag that misses both a node and a valid attach target → no-op
     const blk=el&&el.closest&&el.closest(`.sblock[data-i="${d.si}"]`); if(blk) reorderByX(d.si,d.tok,clientX,clientY,blk); }   // node into empty space → reorder to that x
   docEl.addEventListener("pointerup",e=>{ if(!DDRAG)return; const d=DDRAG; DDRAG=null; endDrag(e);

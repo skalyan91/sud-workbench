@@ -12,7 +12,7 @@ document.addEventListener("keydown",e=>{ if(e.key==="Escape" && scrim.classList.
 const confirmScrim=document.getElementById("confirmScrim"),confirmHost=document.getElementById("confirmHost");
 let _confirmResolve=null;
 function closeConfirmSheet(result){ confirmScrim.classList.remove("show"); confirmHost.innerHTML="";
-  if(_confirmResolve){ const r=_confirmResolve; _confirmResolve=null; r(!!result); } }
+  if(_confirmResolve){ const r=_confirmResolve; _confirmResolve=null; r(result==="save"?"save":!!result); } }   // "save" passes through as itself (the third button askConfirm's opts.saveLabel adds); everything else still resolves a plain boolean, so no existing caller sees a change. A caller that doesn't ASK for the button can never be handed the string, and one that does must test for it explicitly — "save" is truthy, so a bare `if(await askConfirm(…))` would otherwise read it as the destructive answer
 confirmScrim.addEventListener("click",e=>{ if(e.target===confirmScrim) closeConfirmSheet(false); });
 document.addEventListener("keydown",e=>{ if(e.key==="Escape" && confirmScrim.classList.contains("show")){ e.preventDefault(); e.stopPropagation(); closeConfirmSheet(false); } },true);
 // An alert is 260px wide (the macOS 26 kit's own alert width), and two buttons sharing that give ~109px each —
@@ -25,18 +25,37 @@ document.addEventListener("keydown",e=>{ if(e.key==="Escape" && confirmScrim.cla
 // reversing the column gives without touching the markup or the focus order.
 function stackActionsIfTight(act){ if(!act) return;
   act.classList.remove("stacked");                                     // measure the side-by-side layout, never a stale stacked one
-  const tight=[...act.querySelectorAll(".tbtn")].some(b=>b.scrollWidth>b.clientWidth+0.5);
-  if(tight) act.classList.add("stacked"); }
+  const btns=[...act.querySelectorAll(".tbtn")];
+  /* THREE TESTS, and the first two were both needed before the three-button save alert would stack. A per-button
+     clip test alone missed it: with three pills sharing 260px the row overflows its OWN box while each label
+     still fits inside the button drawn around it, so nothing reported as clipped and the buttons simply spilled
+     out past the alert's rounded corners. The row's own overflow is the direct measure of "these do not fit side
+     by side", which is the question being asked. The third is not a measurement at all: macOS stacks a
+     three-button alert at this width as a matter of course — there is no arrangement of Save/Don't Save/Cancel
+     that reads well in a 260px row — so three or more buttons stack whatever the measurements say. */
+  const clipped=btns.some(b=>b.scrollWidth>b.clientWidth+0.5);
+  const rowOverflows=act.scrollWidth>act.clientWidth+0.5;
+  if(clipped||rowOverflows||btns.length>=3) act.classList.add("stacked"); }
 function askConfirm(message,opts){ opts=opts||{};
   return new Promise(resolve=>{ _confirmResolve=resolve;
     const s=shell(opts.title||"SUD Workbench",esc(message),"sm");
     const act=s.querySelector(".actions");
-    act.innerHTML=`<button class="tbtn" data-cancel>${esc(opts.cancelLabel||"Cancel")}</button><button class="tbtn ${opts.danger?"destructive":"primary"}" data-ok>${esc(opts.okLabel||"OK")}</button>`;
+    /* opts.saveLabel adds a THIRD button, and with it the macOS document-alert shape: the discard action leads
+       (leftmost), Cancel sits in the middle, Save is last — rightmost, primary and focused. The DOM order IS the
+       visual order here, and it also drives stackActionsIfTight's column-reverse, so stacked the alert reads
+       Save / Cancel / Don't-Save top to bottom, keeping the default on top exactly as the two-button form does.
+       Without saveLabel the markup is byte-for-byte what it was: [Cancel][OK]. */
+    const save=opts.saveLabel?`<button class="tbtn primary" data-save>${esc(opts.saveLabel)}</button>`:"";
+    const ok=`<button class="tbtn ${opts.danger?"destructive":opts.saveLabel?"":"primary"}" data-ok>${esc(opts.okLabel||"OK")}</button>`;   // plain (neither destructive nor primary) only in the three-button form, where Save is the primary and two primaries would be two defaults
+    act.innerHTML=opts.saveLabel
+      ? ok+`<button class="tbtn" data-cancel>${esc(opts.cancelLabel||"Cancel")}</button>`+save
+      : `<button class="tbtn" data-cancel>${esc(opts.cancelLabel||"Cancel")}</button>`+ok;
     act.querySelector("[data-cancel]").onclick=()=>closeConfirmSheet(false);
     act.querySelector("[data-ok]").onclick=()=>closeConfirmSheet(true);
+    if(opts.saveLabel) act.querySelector("[data-save]").onclick=()=>closeConfirmSheet("save");
     confirmHost.innerHTML=""; confirmHost.appendChild(s); confirmScrim.classList.add("show");
     stackActionsIfTight(act);   // side-by-side unless a label won't fit — see below
-    setTimeout(()=>act.querySelector(opts.danger?"[data-cancel]":"[data-ok]").focus(),30); }); }   // default focus lands on Cancel for a destructive action (never arm the risky button by default), OK otherwise
+    setTimeout(()=>act.querySelector(opts.saveLabel?"[data-save]":opts.danger?"[data-cancel]":"[data-ok]").focus(),30); }); }   // default focus lands on Save when there is one — it is the safe answer AND the one macOS arms; else Cancel for a destructive action (never arm the risky button by default), OK otherwise
 // General-purpose "Save As" sheet — filename + a "Where" folder picker — replacing the native SAVE panel
 // throughout the app (treebank Save As, SVG export, the "keep this new untitled document?" prompt). The
 // folder list is a handful of likely locations (recent files' folders, Desktop, Documents, home); its
@@ -119,7 +138,13 @@ async function sheetSaveAsUntitled(){
 // richer save-location sheet above; a named one gets the plain confirm (nothing new to name/locate).
 async function confirmDiscardUnsaved(question){ if(!DIRTY) return true;
   if(!DOCPATH) return (await sheetSaveAsUntitled())!=="cancel";
-  return askConfirm(`You have unsaved changes. ${question}`,{danger:true,okLabel:"Discard"}); }
+  const r=await askConfirm(`You have unsaved changes. ${question}`,{danger:true,okLabel:"Discard",saveLabel:"Save"});
+  if(r!=="save") return r===true;
+  // SAVE, THEN PROCEED. doSave() reports nothing (it toasts its own failure), so the honest test of whether the
+  // file reached disk is DIRTY itself: handleSaveResult clears it on success and leaves it set on an error or a
+  // cancelled panel. Still dirty ⇒ the save didn't happen ⇒ do NOT go on and discard the very changes the user
+  // just asked to keep — the gate simply closes and the New/Open they were attempting is abandoned.
+  await doSave(); return !DIRTY; }
 // native window-close veto (see _warn_on_unsaved_close / confirm_close_without_saving in the Python side): the
 // native ``closing`` handler always vetoes first when dirty, then fires this off a throwaway thread (never the
 // AppKit main thread — see its own comment on why that matters) to show the SAME styled sheet as every other
@@ -127,28 +152,211 @@ async function confirmDiscardUnsaved(question){ if(!DIRTY) return true;
 // force-closes; an untitled document gets the full Save-As sheet, a named one the plain confirm.
 window.__onNativeCloseAttempt=async function(){
   if(!DOCPATH){ if((await sheetSaveAsUntitled())==="cancel") return; }
-  else if(!(await askConfirm("You have unsaved changes. Close without saving?",{danger:true,okLabel:"Close Without Saving"}))) return;
+  else { const r=await askConfirm("You have unsaved changes. Close without saving?",{danger:true,okLabel:"Close Without Saving",saveLabel:"Save"});
+    if(r==="save"){ await doSave(); if(DIRTY) return; }   // save first, then fall through to the force-close below — and abandon the close if the save didn't land (same DIRTY test as confirmDiscardUnsaved, for the same reason)
+    else if(!r) return; }
   try{ await window.pywebview.api.confirm_close_without_saving(); }catch(e){} };
 function shell(title,desc,size){const s=document.createElement("div"); s.className="sheet "+(size||"md");   // size: sm | md | lg — kit-scaled dialog widths
   s.innerHTML=`<header><h3>${title}</h3><p>${desc}</p></header><div class="content"></div><div class="actions"></div>`; return s;}
+/* ── "Insert text" — THE dialog on every path (the toolbar "+", ⌘T, and a per-block insert) ──────────
+   It WAS a native child window whose HTML/CSS/JS Python generated inline (Api.open_insert_window /
+   Api._insert_html), with this sheet as a headless-only fallback carrying the main field and nothing
+   else. One dialog now, and it keeps everything the window had: the language picker an empty document
+   gets (installed parsers grouped first), the model preference order, parallel texts, translations-only
+   mode, ⌘↩ on the default button, and the ITRANS→IAST conversion of typed Sanskrit.
+   What did NOT move is the work behind it — submit builds the very payload the window built and hands it
+   to Api.child_insert_text, so the Python worker that sentencises each parallel text in its own
+   language, its threading and its toasts are untouched.
+   `index` is where the new blocks land; null ⇒ append, resolved at apply time (__insertPastedText). */
 function sheetInsert(index){
-  // …plus the ITRANS note the native Insert window carries (Api._insert_html), for the same reason: an
-  // unannounced rewrite of a whole pasted paragraph is alarming, and this is the one field committed in a single gesture
-  const itr=isSanskritLang()?` Sanskrit typed in <b>ITRANS</b> (kRiShNa, raamaayaNa, ^a for â) becomes IAST; text already in IAST is left as it is.`:"";
-  const s=shell("Insert text", (model?`Model <b>${MODELINFO[model]||model}</b> is selected; its own tokeniser splits each sentence and the parse is filled in.`:`No model selected; each sentence is split on <b>whitespace</b> for manual annotation.`)+itr);
-  const c=s.querySelector(".content"); const lab=document.createElement("label"); lab.className="fld"; lab.textContent="Text (one block per sentence; a blank line starts a new paragraph)";   // item 11: the blank-line rule is worth stating, since the paragraph boundaries it produces are recorded in the file as `# newpar` — see __insertPastedText, which does the split (the textarea's value reaches it untouched)
-  const ta=document.createElement("textarea"); ta.placeholder="The committee approved the proposal after a long debate. It will take effect next week.";
-  ta.spellcheck=false; ta.setAttribute("autocorrect","off"); ta.setAttribute("autocapitalize","off"); ta.setAttribute("autocomplete","off");   // no OS smart-quote/dash substitution: WKWebView ties smart punctuation to autocorrect, so autocorrect=off keeps typed "x" - y straight (no curly quotes / em-dash)
-  ta.style.webkitTextReplacement="none";   // belt-and-braces: opt out of the WebKit text-replacement service where honoured
-  lab.appendChild(ta); c.appendChild(lab);
-  const act=s.querySelector(".actions"); act.innerHTML=`<button class="tbtn" data-x>Cancel</button><button class="tbtn primary" data-go>Insert</button>`;
+  const ctx=insertCtx();   // js/io/bridge.js — what only the live document knows (sentences? language? which translation tiers?)
+  /* WHEN A PARALLEL TEXT IS POSSIBLE AT ALL, read off insertCtx(): a parallel text needs a language to be
+     written in, and with sentences already in the document those are exactly the ENABLED TRANSLATION
+     TIERS (ctx.transLangs) — any other language would invent a `# text_LANG` the translations drawer
+     never offered. An empty document has no tiers yet and nothing pinning it, so every language the
+     registry can name is fair game. Hence the rule: parallel texts are unavailable exactly when the
+     document HAS sentences and NO translation language is enabled — and then the "Add parallel text"
+     control, the fields it would add, and translations-only mode (which has neither anything to act on
+     nor a language to write it in) are ABSENT, not merely disabled. */
+  const parAvail=ctx.hasSentences?ctx.transLangs.length>0:true;
+  const modelHint=model?`Model <b>${esc(MODELINFO[model]||model)}</b> is selected; its own tokeniser splits each sentence and the parse is filled in.`
+                       :`No model selected; each sentence is split on <b>whitespace</b> for manual annotation.`;
+  // An empty document has no language yet, so the picker below decides it — and with it the parser, which
+  // is why the model sentence is REPLACED there rather than added to.
+  const s=shell("Insert text",(ctx.hasSentences?modelHint
+      :"Choose the language of the text you are adding: it becomes this document’s language, and picks the parser.")
+    +" Paste one or more sentences; they are split into separate blocks, and a blank line starts a new paragraph.");   // item 11: the blank-line rule is worth stating, since the paragraph boundaries it produces are recorded in the file as `# newpar` — see __insertPastedText, which does the split (the textarea's value reaches it untouched)
+  s.classList.add("insertsheet");
+  const c=s.querySelector(".content");
+  const fields=document.createElement("div"); fields.className="insfields"; c.appendChild(fields);
+  const errEl=document.createElement("span"); errEl.className="inserr";   // inline validation, in the action row — a sheet the user is still filling in should say what is wrong where it is wrong, not toast over the window
+  const err=m=>{ errEl.textContent=m||""; };
+  let LANGS=null;   // {installed,others} once Api.insert_languages answers (below); null = still loading
+  const PARS=[];    // {row,on,sel,ta,note,sync} per parallel-text field
+  const parserOf=code=>(LANGS&&LANGS.installed.find(e=>e.code===code))||null;
+  // The languages a parallel text may be in — the rule above, as a list. A translation tier is shown with
+  // whatever parser it HAS (same row shape as `installed`), so one select builder covers both cases.
+  const parLangs=()=>ctx.hasSentences
+    ? ctx.transLangs.map(t=>{ const g=parserOf(t.code)||{};
+        return {code:t.code,name:t.name||g.name||t.code,model:g.model||"",label:g.label||""}; })
+    : (LANGS?LANGS.installed.concat(LANGS.others):[]);
+  const optRow=(host,e)=>{ const o=document.createElement("option"); o.value=e.code; o.textContent=(e.name||e.code)+" ("+e.code+")";
+    o.dataset.model=e.model||""; o.dataset.label=e.label||""; host.appendChild(o); return o; };
+  // Installed-first (item 7a): the parsers you actually have, in their own group at the top, then everything
+  // else. Each option carries its model id, so the note under the field can name the parser that will run.
+  const fillSelect=(sel,list)=>{ const keep=sel.value; sel.innerHTML="";
+    const inst=list.filter(e=>e.model), rest=list.filter(e=>!e.model);
+    if(inst.length&&rest.length) [["Installed parsers",inst],["Other languages",rest]].forEach(([label,rows])=>{
+      const g=document.createElement("optgroup"); g.label=label; rows.forEach(e=>optRow(g,e)); sel.appendChild(g); });
+    else inst.concat(rest).forEach(e=>optRow(sel,e));
+    sel.disabled=!sel.options.length;
+    if(keep) sel.value=keep;
+    if(!sel.value&&sel.options.length) sel.selectedIndex=0;
+    return sel; };
+  const selInfo=sel=>{ const o=sel&&sel.options[sel.selectedIndex]; return o?{model:o.dataset.model||"",label:o.dataset.label||""}:{model:"",label:""}; };
+  // ITRANS is announced per FIELD, not once for the dialog: each field has its own language and only the
+  // Sanskrit ones are converted (child_insert_text converts each in its own). An unannounced rewrite of a
+  // whole pasted paragraph is alarming, and this is the one field committed in a single gesture.
+  const sanskritNote=lang=>isSanskritLang(lang)?" Sanskrit typed in ITRANS (kRiShNa, raamaayaNa, ^a for â) becomes IAST; text already in IAST is left as it is.":"";
+  const mkField=ph=>{ const t=document.createElement("textarea"); t.placeholder=ph; t.spellcheck=false;
+    t.setAttribute("autocorrect","off"); t.setAttribute("autocapitalize","off"); t.setAttribute("autocomplete","off");   // no OS smart-quote/dash substitution: WKWebView ties smart punctuation to autocorrect, so autocorrect=off keeps typed "x" - y straight (no curly quotes / em-dash)
+    t.style.webkitTextReplacement="none";   // belt-and-braces: opt out of the WebKit text-replacement service where honoured
+    return t; };
+  // ── the main text ─────────────────────────────────────────────────────────────────────────────────
+  const mb=document.createElement("div"); mb.className="insblock main"; fields.appendChild(mb);
+  const mrow=document.createElement("div"); mrow.className="insrow"; mb.appendChild(mrow);
+  let mainOn=null;
+  if(parAvail){ const lab=document.createElement("label"); lab.className="inschk";
+    mainOn=document.createElement("input"); mainOn.type="checkbox"; mainOn.checked=true;
+    const nm=document.createElement("span"); nm.className="insnm"; nm.textContent="Text";
+    lab.appendChild(mainOn); lab.appendChild(nm); mrow.appendChild(lab);
+    // An EMPTY document has no sentences for a translation to attach to, so translations-only mode is
+    // meaningless there: the checkbox is fixed on rather than offered and then rejected on submit.
+    if(!ctx.hasSentences){ mainOn.disabled=true; mainOn.title="This document has no sentences yet, so there is nothing to translate."; } }
+  else { const nm=document.createElement("span"); nm.className="insnm"; nm.textContent="Text"; mrow.appendChild(nm); }   // no parallel texts ⇒ nothing to switch off in favour of: a label, not a checkbox
+  const msp=document.createElement("span"); msp.className="inssp"; mrow.appendChild(msp);
+  let mainSel=null;
+  if(ctx.hasSentences){   // item 7c: the file's language, shown and NOT choosable — every sentence in one document is in one language
+    const f=document.createElement("span"); f.className="insfixed";
+    f.textContent=(ctx.langName||ctx.lang||"Unknown")+(ctx.lang?" ("+ctx.lang+")":"");
+    f.title="The language of this document; new sentences are read as this language.";
+    mrow.appendChild(f); }
+  else { mainSel=document.createElement("select"); mainSel.className="sel"; mainSel.disabled=true;
+    const o=document.createElement("option"); o.textContent="Loading languages…"; mainSel.appendChild(o);   // filled in when the registry answers — see the loader below
+    mrow.appendChild(mainSel); }
+  const ta=mkField("The committee approved the proposal after a long debate. It will take effect next week.");
+  mb.appendChild(ta);
+  const mnote=document.createElement("div"); mnote.className="insnote"; mb.appendChild(mnote);
+  const mainLang=()=>ctx.hasSentences?(ctx.lang||""):(mainSel?mainSel.value:"");
+  function syncMain(){ const on=!mainOn||mainOn.checked;
+    mb.classList.toggle("off",!on); ta.disabled=!on;
+    let txt="";
+    if(!on) txt="Off: the texts below add translations to sentences already in the document — no new sentences are created.";
+    else if(mainSel&&!mainSel.disabled){ const i=selInfo(mainSel);
+      txt=i.model?("Parsed with "+i.label+"."):"No parser installed for this language — the text is split on whitespace for manual annotation."; }
+    mnote.textContent=txt+(on?sanskritNote(mainLang()):""); }
+  // At least ONE field must stay enabled (item 7d): the last one refuses to switch itself off — the
+  // checkbox is put back and the reason is shown, rather than the submit failing later on a state the
+  // dialog let the user reach.
+  const enabledCount=()=>((!mainOn||mainOn.checked)?1:0)+PARS.filter(p=>p.on.checked).length;
+  const guardOne=box=>{ if(box.checked||enabledCount()>0){ err(""); return true; }
+    box.checked=true; err("At least one text has to stay enabled."); return false; };
+  if(mainOn) mainOn.addEventListener("change",()=>{ if(guardOne(mainOn)) syncMain(); });
+  // ── parallel texts ────────────────────────────────────────────────────────────────────────────────
+  function addPar(){ const list=parLangs();
+    if(!list.length){ err(LANGS?"No translation languages are enabled for this document. Add one from the translations drawer first."
+                              :"The language list is still loading…"); return; }
+    const row=document.createElement("div"); row.className="insblock";
+    const head=document.createElement("div"); head.className="insrow";
+    const lab=document.createElement("label"); lab.className="inschk";
+    const on=document.createElement("input"); on.type="checkbox"; on.checked=true;
+    const nm=document.createElement("span"); nm.className="insnm"; nm.textContent="Parallel text";
+    lab.appendChild(on); lab.appendChild(nm);
+    const sp=document.createElement("span"); sp.className="inssp";
+    const sel=document.createElement("select"); sel.className="sel"; fillSelect(sel,list);
+    // Default to a language nothing else is using (the main text's included): with every field opening on
+    // the same first option, adding a second parallel text produced an immediate "same language" refusal
+    // on a dialog the user had not yet touched. Falls back to the first option when the list is exhausted.
+    const taken={}; taken[mainLang()]=1; PARS.forEach(p=>{ taken[p.sel.value]=1; });
+    const free=list.find(e=>!taken[e.code]); if(free) sel.value=free.code;
+    const rm=document.createElement("button"); rm.type="button"; rm.className="gm-rm ins-rm"; rm.textContent="✕"; rm.title="Remove this text";
+    head.appendChild(lab); head.appendChild(sp); head.appendChild(sel); head.appendChild(rm);
+    const t=mkField("A translation of the text above, one sentence per sentence.");
+    const note=document.createElement("div"); note.className="insnote";
+    row.appendChild(head); row.appendChild(t); row.appendChild(note);
+    function sync(){ row.classList.toggle("off",!on.checked); t.disabled=!on.checked;
+      const i=selInfo(sel);
+      note.textContent=(i.model?("Split into sentences by "+i.label+".")
+                               :"No parser installed for this language — split on sentence punctuation.")+sanskritNote(sel.value); }
+    const rec={row,on,sel,ta:t,note,sync};
+    on.addEventListener("change",()=>{ if(guardOne(on)) sync(); });
+    sel.addEventListener("change",sync);
+    rm.addEventListener("click",()=>{ const k=PARS.indexOf(rec); if(k>=0)PARS.splice(k,1); row.remove();
+      if(enabledCount()===0&&mainOn&&!mainOn.disabled){ mainOn.checked=true; syncMain(); }   // never leave the dialog with nothing to submit
+      err(""); });
+    PARS.push(rec); fields.appendChild(row); sync(); t.focus(); }
+  let addBtn=null;
+  if(parAvail){ addBtn=document.createElement("button"); addBtn.type="button"; addBtn.className="gm-add ins-add"; addBtn.textContent="+ Add parallel text";
+    addBtn.disabled=!ctx.hasSentences;   // an EMPTY document's list is the registry's, which is still loading; a non-empty one's is ctx.transLangs and is here already
+    addBtn.onclick=()=>addPar(); c.appendChild(addBtn); }
+  /* The language list is the one thing this side cannot know: which parsers are installed, and every
+     language either engine ships a model for, both of which live in the registry (Api.insert_languages →
+     models_registry.language_choices) and cost a walk of the venv's metadata to resolve. So the sheet
+     opens FIRST and fills its menus in when the answer lands — where the native window, whose HTML was
+     generated in Python, simply took that second to appear at all. */
+  (async()=>{
+    if(!hasBridge()){   // design mode: no registry to ask, so the menu is what the document itself names
+      const rows=new Map();
+      if(ctx.lang) rows.set(ctx.lang,{code:ctx.lang,name:langName(ctx.lang)||ctx.lang,model:"",label:""});
+      ctx.transLangs.forEach(t=>rows.set(t.code,{code:t.code,name:t.name||t.code,model:"",label:""}));
+      LANGS={installed:[],others:[...rows.values()]}; }
+    else { let r=null;
+      try{ r=await window.pywebview.api.insert_languages(Object.fromEntries(ctx.transLangs.map(t=>[t.code,t.name]))); }catch(e){}
+      LANGS={installed:(r&&r.installed)||[],others:(r&&r.others)||[]}; }
+    if(mainSel){ const all=LANGS.installed.concat(LANGS.others);
+      if(all.length){ const fresh=document.createElement("select"); fresh.className="sel";
+        fillSelect(fresh,all); if(ctx.lang&&all.some(e=>e.code===ctx.lang)) fresh.value=ctx.lang;
+        fresh.addEventListener("change",syncMain); mainSel.replaceWith(fresh); mainSel=fresh; }
+      else mainSel.options[0].textContent="No languages available"; }
+    PARS.forEach(p=>{ fillSelect(p.sel,parLangs()); p.sync(); });   // a field added while it was loading (only reachable with sentences, whose list was ready) gets the parser annotations now
+    if(addBtn){ if(parLangs().length) addBtn.disabled=false; else addBtn.remove(); }   // the registry answered with nothing ⇒ no language to write a parallel text in ⇒ the control goes, per the availability rule above
+    syncMain(); })();
+  // ── submit ────────────────────────────────────────────────────────────────────────────────────────
+  async function submit(){ err("");
+    const mainEnabled=!mainOn||mainOn.checked, text=(ta.value||"").trim();
+    if(mainEnabled&&!text){ err("The text is empty."); ta.focus(); return; }
+    const parallels=[], seen={};
+    for(const p of PARS){ if(!p.on.checked) continue;
+      const lang=p.sel.value, txt=(p.ta.value||"").trim();
+      if(!lang){ err("A parallel text has no language."); p.sel.focus(); return; }
+      if(!txt){ err("A parallel text is empty — fill it in, or turn it off."); p.ta.focus(); return; }
+      // One field per language: two fields in the same language would write the same `# text_LANG` twice
+      // and the second would silently replace the first.
+      if(seen[lang]){ err("Two parallel texts are in the same language."); p.sel.focus(); return; }
+      seen[lang]=1; parallels.push({lang,text:txt}); }
+    if(!mainEnabled&&!parallels.length){ err("Nothing to insert."); return; }
+    // adoptLang: an empty document takes the language this dialog chose (and the parser that goes with
+    // it) — see adoptInsertLang, which must run BEFORE the first sentence is parsed.
+    const payload={index,main:{enabled:mainEnabled,lang:mainLang(),text:mainEnabled?text:"",adoptLang:!ctx.hasSentences},parallels};
+    closeSheet();   // every value is already read off the fields the close tears down
+    if(hasBridge()){ try{ window.pywebview.api.child_insert_text(payload); }catch(e){ toast("Insert failed: "+e); } return; }
+    /* NO BRIDGE (browser design mode): do here the little that the Python worker would have done — the
+       ITRANS conversion (itransFix is itself a no-op without a bridge) and the sentence split of each
+       parallel text — and then hand the SAME __applyInsertPayload the worker drives, so the two paths
+       differ only in who splits. `naive` is every parallel language, because the rule splitter is all
+       there is here. */
+    __applyInsertPayload({index,
+      main:{enabled:mainEnabled&&!!text,lang:payload.main.lang,text:await itransFix(text),model:""},
+      parallels:parallels.map(p=>({lang:p.lang,sents:localSentSplit(p.text)})),
+      adoptLang:!ctx.hasSentences, naive:parallels.map(p=>p.lang)}); }
+  const act=s.querySelector(".actions");
+  act.innerHTML=`<button class="tbtn" data-x>Cancel</button><button class="tbtn primary" data-go>Insert<span class="kbd">⌘↩</span></button>`;
+  act.insertBefore(errEl,act.firstChild);
   act.querySelector("[data-x]").onclick=closeSheet;
-  // item 1: ITRANS → IAST before the text is sentencised/tokenised, matching what the native Insert
-  // window does on the Python side (Api.child_insert_text) — the tokeniser must see the notation the
-  // document is stored in. The value is read BEFORE closeSheet(), which tears the textarea down.
-  const submit=async()=>{const raw=ta.value; closeSheet(); __insertPastedText(await itransFix(raw),index);};
   act.querySelector("[data-go]").onclick=submit;
-  ta.addEventListener("keydown",e=>{ if((e.metaKey||e.ctrlKey)&&e.key==="Enter"){ e.preventDefault(); submit(); } });   // ⌘Enter submits — plain Enter still inserts a newline (the field is multi-sentence, one block per line)
+  s.addEventListener("keydown",e=>{ if((e.metaKey||e.ctrlKey)&&e.key==="Enter"){ e.preventDefault(); submit(); } });   // ⌘Enter submits from ANY field — plain Enter still inserts a newline (every field is multi-sentence)
+  syncMain();
+  setTimeout(()=>ta.focus(),40);   // openSheet focuses the first `textarea,input` in the sheet, which here is the enable CHECKBOX; land on the text instead (40 > its own 30ms)
   return s;
 }
 function sheetSettings(){

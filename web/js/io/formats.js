@@ -5,13 +5,22 @@ function setFormat(fmt){ DOCFORMAT=fmt||"SUD";
   const doc=document.getElementById("doc"); if(doc)doc.classList.toggle("fmt-ud",DOCFORMAT==="UD");
   if(typeof syncGlossUI==="function")syncGlossUI();   // item 2: re-evaluate the "Lexical gloss" disabled state when the format changes
   if(hasBridge())try{window.pywebview.api.set_format(DOCFORMAT);}catch(e){} }
-function fmtMenu(x,y){ showCtx(x,y,[
+// item 9: the Format pill TOGGLES its menu. The pill's own click handler stops propagation (so the window-level
+// `click`→closeCtx listener in context-menu.js never sees it), which meant a second click on the pill just
+// re-rendered the same menu open and read as a dead control. Ownership is decided by showCtx's own `_openedAt`
+// stamp rather than a flag on #ctx: the SAME #ctx element serves every context menu in the app, so "is a menu
+// open" is not the question — "is the open menu the one I opened" is, and the stamp answers it without needing
+// a change in context-menu.js (each showCtx call re-stamps, so a token menu opened in between makes ours stale).
+let _fmtStamp=0;
+function fmtMenu(x,y){ if(ctx.classList.contains("show")&&ctx._openedAt===_fmtStamp){ closeCtx(); return; }
+  showCtx(x,y,[
   ["Convert to SUD",null,()=>convertTo("SUD")],
   ["Annotate as mSUD",null,()=>annotateAsMSUD()],   // a relabel, not a conversion — see annotateAsMSUD
   null,
   ["Import UD…",null,()=>doImportUD()],
   ["Export as UD…",null,()=>doExportUD()],
-],false,false,true); }   // false rtlArg → the status-bar menu is always LTR, regardless of the selected sentence's direction. true fit → shrink to the widest row (four short labels don't fill the 224px floor)
+],false,false,true);   // false rtlArg → the status-bar menu is always LTR, regardless of the selected sentence's direction. true fit → shrink to the widest row (four short labels don't fill the 224px floor)
+  _fmtStamp=ctx._openedAt; }   // remember WHICH open this was, so the next click on the pill can tell "still mine" from "someone else's menu"
 async function doImportUD(){ if(!hasBridge())return toast("Import is available in the desktop app");
   if(!(await confirmDiscardUnsaved("Import a file and discard them?"))) return;
   showBusy("Importing UD…",true); let r;

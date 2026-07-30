@@ -50,11 +50,34 @@ function revealEl(el){ if(!el) return;
       else if(er.right>right) node.scrollLeft+=(er.right-right);
     }
     node=node.parentElement; } }
+/* THE WHOLE OF WHAT A COMMITTED LEMMA SETS OFF, in one place — because two of the three things it sets off are
+   ASYNCHRONOUS, and the order they land in is the difference between the diagram showing the edit and showing it
+   one edit late.
+   afterLemmaEdit (js/io/bridge.js) drops the stale lemma-romanisation, awaits the new one, rewrites MISC
+   LTranslit from it, and only THEN re-derives MSeg (forced) — because on a non-Latin document the segmentation is
+   computed against LTranslit, which that await is what produces. It ends in its own render. So there is nothing
+   for an eager scheduleDoc() to show that isn't already in the cell the user just typed in: no diagram row and no
+   grid column draws a lemma, and the rows that DO change (MSeg, MGloss) cannot be right until the await lands.
+   An eager render there only bought a second full render per lemma edit — and, before the diagram cache learned
+   to notice the sentence's own content (see diaContentSig in js/core/document.js), it was the render that cached
+   the diagram from the PRE-edit MSeg and made the whole edit look one step behind.
+   The one thing left over is MGloss: msegRefill rewrites MSeg's hyphen slots, and MGloss names those slots one
+   for one, so it is re-slotted here (mglossReslot, js/editing/edit-ops.js) inside the SAME undo step — the cell's
+   pendingSnap was taken before any of this. That call is a no-op when msegRefill has already made it (its own
+   call site, which covers the form-edit and re-parse paths this one doesn't), so the two can both be in place. */
+function commitLemmaEdit(si,tokId,t){
+  const before=tierText(t,"mseg");
+  const done=failed=>{ const moved=mglossReslot(t,before,tierText(t,"mseg"));
+    if(moved) markDirty();
+    if(moved||failed) preserveScroll(renderDoc); };   // afterLemmaEdit renders for itself; render again only if this re-slot changed something, or if it never got that far
+  if(typeof afterLemmaEdit!=="function") return done(true);   // guarded like the context menu's own call: afterLemmaEdit lives in js/io/bridge.js, which loads after this module
+  const p=afterLemmaEdit(si,tokId);
+  if(p&&typeof p.then==="function") p.then(()=>done(false),()=>done(true)); else done(true); }
 async function itransCell(ctl,t,key,si,ti){ const v0=t[key]||""; const v=await itransFix(v0);
   if(v===v0 || t[key]!==v0) return;
   t[key]=v; if(ctl&&ctl.isConnected) ctl.value=v; markDirty(); scheduleDoc();
   if(key==="form") afterFormEdit(si,ti+1,true);                                   // romanisation / script / MSeg all re-derive from the form
-  else if(typeof afterLemmaEdit==="function") afterLemmaEdit(si,ti+1); }          // …and MISC LTranslit + the morpheme segmentation from the lemma
+  else commitLemmaEdit(si,ti+1,t); }                                              // …and MISC LTranslit + the morpheme segmentation (and the MGloss slots naming it) from the lemma
 // Head cell shows the head token's form, plus its transliteration in parentheses when the layer is on
 function headText(o){ const st=o?miscTranslit(o.misc):""; return st ? `${o.form} (${st})` : (o?o.form:""); }   // item 1: Head column shows the STORED romanisation (MISC Translit), the canonical transliteration
 // transliteration columns (5th flag) show only when the layer is on AND the sentence's script needs it
@@ -200,7 +223,7 @@ const MWT_TIE_PIN=5;   // the ticks' reach, matching the diagram tie's own PIN=5
 const MWT_TIE_CAS=5*0.75;   // the casing halo's width: .75× the 5px .mwt-tie-cas gives the diagram's tie — the halo only has to clear the grid's own hairlines (the frame, the row rules), not the 15px forms and arcs the diagram tie sits among. Kept here as a number only because the bleed window has to be sized to clear it; keep in step with the .gtie-cas rule
 function tieStroke(){ const S=parseFloat(css("--arc-stroke"))||1.5; return {spine:S*0.75, tick:S}; }   // long connector at .75×, end pins at full weight — the diagram tie's own split, mapped by role (see the block comment). MUST stay in step with the .gtie-spine / .gtie-pin widths in the stylesheet
 function tieBleed(frameW){ return (tieStroke().spine+frameW)/2; }   // centres the spine on the frame line: spine spans [−b, −b+V], frame spans [−frameW, 0] → equal centres at −frameW/2 gives b = (V+frameW)/2
-function drawGridTie(host,wrap,r0,r1,rtl,B){
+function drawGridTie(host,wrap,r0,r1,rtl){
   const cell=r0.querySelector("td.col-id"); if(!cell) return;
   const wr=wrap.getBoundingClientRect(), a=r0.getBoundingClientRect(), b=r1.getBoundingClientRect(), c=cell.getBoundingClientRect();
   const {spine:V,tick:K}=tieStroke();
@@ -208,7 +231,20 @@ function drawGridTie(host,wrap,r0,r1,rtl,B){
   const wcs=getComputedStyle(wrap);
   const bl=parseFloat(wcs.borderLeftWidth)||0, bt=parseFloat(wcs.borderTopWidth)||0;   // getBoundingClientRect is the BORDER box; content coordinates start at the PADDING box
   const edge=rtl?c.right:c.left;   // the ID column's inline-START edge…
-  const x=(edge-wr.left)/FS-bl+wrap.scrollLeft+(rtl?B:-B);   // …bled outward by B, which centres the spine on the frame (leftward in LTR, rightward in RTL)
+  /* …and the bracket sits FLUSH INSIDE the row band's own inline-start edge, --grid-row-pad in from there — not
+     on the grid FRAME, which is where it used to sit (bled outward by B, spine centre at −frameW/2). The rows are
+     drawn as inset pills (see table.grid tbody td::before in styles/app.css) and the MWT range row now joins them,
+     so a bracket still hugging the frame stood a whole 10px clear of the group it brackets. FLUSH, not centred on
+     that edge: the spine's own inline-start edge is what lands on the band's, so the two abut with no seam and no
+     overlap — hence +V/2 (LTR) rather than −V/2 from the band edge. That is also why .mwtgrp squares its
+     inline-start corners in the stylesheet: against a rounded corner "flush" is only true down the middle of the
+     group. Measured off the custom property rather than hard-coded, so bracket and band move together.
+     B and the .gtiebleed window it sizes are LEFT ALONE: nothing bleeds outward any more — the whole bracket,
+     casing included (half of 3.75px), now sits inside a 10px inset — so that window is slack rather than a
+     requirement, but it still does the other job its comment gives it, clipping a bracket to the frame's top and
+     bottom while the grid scrolls. */
+  const P=parseFloat(css("--grid-row-pad"))||0;
+  const x=(edge-wr.left)/FS-bl+wrap.scrollLeft+(rtl?-P:P);   // the box origin IS the band edge: the spine is drawn at sx=V/2 inside it (ex=PIN away in RTL), so its own inline-START edge lands exactly on P — flush, no half-stroke of overhang either way
   const sx=rtl?MWT_TIE_PIN-V/2:V/2, ex=rtl?0:MWT_TIE_PIN;   // spine x within the box, and the x the ticks reach to
   const spine=`M ${sx} 0 V ${h}`, ticks=`M ${sx} ${K/2} H ${ex} M ${sx} ${h-K/2} H ${ex}`;   // ticks inset by half their own width so each sits fully inside the bracket, flush with its top/bottom edge
   const svg=E("svg",{class:"mwt-grid-tie",width:MWT_TIE_PIN,height:h,viewBox:`0 0 ${MWT_TIE_PIN} ${h}`});
@@ -232,7 +268,7 @@ function layoutGridTies(rebind){
     const wr=wrap.getBoundingClientRect(), wcs=getComputedStyle(wrap), rtl=wcs.direction==="rtl";
     const bL=parseFloat(wcs.borderLeftWidth)||0, bR=parseFloat(wcs.borderRightWidth)||0,
           bT=parseFloat(wcs.borderTopWidth)||0, bB=parseFloat(wcs.borderBottomWidth)||0;
-    const B=tieBleed(rtl?bR:bL);              // the frame line the spine centres on is the wrap's INLINE-START border
+    const B=tieBleed(rtl?bR:bL);              // the outward reach the window still allows for. It is no longer where the spine GOES (drawGridTie centres it on the row band, --grid-row-pad inside the frame — see its own note); kept as the window's measure so the clip boundary can't land on the bracket if that inset is ever narrowed
     const pad=B+MWT_TIE_CAS/2+1;              // …and the window reaches far enough past it to clear the casing halo (half its width outward from the spine's centreline), plus 1px so nothing sits on the clip boundary itself
     const pw=wr.width/FS-bL-bR, ph=wr.height/FS-bT-bB;
     if(!(pw>0&&ph>0)) return;
@@ -242,7 +278,7 @@ function layoutGridTies(rebind){
     syncTieScroll(wrap,shift);
     let first=null;
     [...tb.rows].forEach(r=>{ if(r.classList.contains("mwtgrp-first")) first=r;
-      if(first && r.classList.contains("mwtgrp-last")){ drawGridTie(shift,wrap,first,r,rtl,B); first=null; } });
+      if(first && r.classList.contains("mwtgrp-last")){ drawGridTie(shift,wrap,first,r,rtl); first=null; } });
   });
   if(rebind) bindTieObserver();   // only renderDoc passes this — see bindTieObserver on why the observer's own callback must NOT
 }
@@ -273,10 +309,12 @@ function renderGrid(si){
   const idth2=htr.querySelector(".col-id"); if(idth2)idth2.dataset.col="id";
   thead.appendChild(htr); table.appendChild(thead);
   const tb=document.createElement("tbody");
-  const mwtStart={}, mwtComp=new Set(), mwtEnd=new Set(); (sent.mwt||[]).forEach(m=>{mwtStart[m.from]=m; mwtEnd.add(m.to); for(let k=m.from;k<=m.to;k++)mwtComp.add(k);});   // range rows precede their component words
+  const mwtStart={}, mwtComp=new Set(), mwtEnd=new Set(), mwtOf={}; (sent.mwt||[]).forEach(m=>{mwtStart[m.from]=m; mwtEnd.add(m.to); for(let k=m.from;k<=m.to;k++){mwtComp.add(k); mwtOf[k]=m;}});   // range rows precede their component words   // mwtOf: component token id → its range, so each component row can name the group it belongs to
   sent.tokens.forEach((t,i)=>{
     const ms=mwtStart[i+1];
     if(ms){ const mr=document.createElement("tr"); mr.className="mwt-row mwtgrp mwtgrp-first"; mr.title="multi-word token";
+      mr.dataset.s=si; mr.dataset.mwtfrom=ms.from; mr.dataset.mwtto=ms.to;   // the range row is now ADDRESSABLE, which two things need: applySel's .mwtsel pass (js/core/document.js) lights the whole group, and selectMWTRange (js/editing/context-menu.js) scrolls the grid to THIS row when the MWT is clicked in the diagram. Deliberately no data-tok — the row is a range, not a token, and pick()'s own `+tr.dataset.tok===t` pass must never match it (NaN never does)
+      if(mwtGroupSel(si,ms.from,ms.to)) mr.classList.add("mwtsel");
       const mid=document.createElement("td"); mid.className="col-id"; mid.draggable=true; mid.style.cursor="grab"; mid.title="Drag to move the whole multi-word token"; mr.appendChild(mid);   // no range text — the left border marks the group
       mid.addEventListener("dragstart",e=>{ DRAG={si,group:{gf:ms.from-1,gt:ms.to-1}}; mr.classList.add("dragging"); e.dataTransfer.effectAllowed="move"; e.dataTransfer.setData("text/plain","mwt"); });
       mid.addEventListener("dragend",()=>{ mr.classList.remove("dragging"); clearDZ(); });
@@ -307,7 +345,9 @@ function renderGrid(si){
       tb.appendChild(mr); }
     const tr=document.createElement("tr"); tr.dataset.s=si; tr.dataset.tok=i+1; if(i%2)tr.classList.add("striperow");   // zebra: every other token row (indexed by token, so MWT range rows don't skew the alternation)
     if(sel.s===si&&sel.t===i+1)tr.classList.add("sel");
-    if(mwtComp.has(i+1))tr.classList.add("mwtgrp");   // component of an MWT → part of the square-bracket group
+    if(mwtComp.has(i+1)){ tr.classList.add("mwtgrp");   // component of an MWT → part of the square-bracket group
+      const g=mwtOf[i+1]; if(g){ tr.dataset.mwtfrom=g.from; tr.dataset.mwtto=g.to;   // …and it names its group, so the whole group can light as one (applySel's .mwtsel pass)
+        if(mwtGroupSel(si,g.from,g.to)) tr.classList.add("mwtsel"); } }
     if(mwtEnd.has(i+1))tr.classList.add("mwtgrp-last");   // last component → carries the bottom tick of the bracket
     if(selRange&&selRange.s===si&&i+1>=selRange.from&&i+1<=selRange.to)tr.classList.add("rangesel");
     const idTd=document.createElement("td"); idTd.className="col-id"; idTd.textContent=i+1; idTd.draggable=true; idTd.title="Drag to reorder · Shift-click to select a range";
@@ -355,7 +395,7 @@ function renderGrid(si){
         else { t[key]=ctl.value; if(key==="head")afterHeadEdit(t,sent); }   // keep head 0 ⟺ deprel "root"
         if((key==="deps"||key==="misc")&&t[key]==="")t[key]="_";   // empty Deps/Misc round-trips as "_"
         if(key==="form"){ scheduleDoc(); afterFormEdit(si,i+1,true); }
-        else if(key==="lemma"){ scheduleDoc(); afterLemmaEdit(si,i+1); }
+        else if(key==="lemma"){ commitLemmaEdit(si,i+1,t); }   // NO eager scheduleDoc: nothing on screen shows a lemma, and everything that changes BECAUSE of it (MSeg, and the MGloss slots that name it) has to wait on the same await afterLemmaEdit does — see commitLemmaEdit
         else if(key==="upos"){ scheduleDoc(); regenTok(si,i+1); }   // Task B: ONLY upos still reparses (lemma/feats/deps) — head/deprel are purely structural and must not trigger any gloss-touching regen at all
         else if(key==="head"||key==="deprel"||key==="deep"){ scheduleDoc(); }   // re-render only — no regenTok
       };

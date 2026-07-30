@@ -164,7 +164,12 @@ SUD and mSUD are editable; UD is import/export only. Conversion runs grew (via `
 `lang` (the frontend's `DOCLANG`, threaded through `Api.import_ud`/`export_ud_to`/`convert_format`);
 `app/convert.py`'s `_LANG_GRAMMARS` prefers a vendored language-specific `.grs` over the universal
 one when that (language, direction) pair is covered — most language/direction pairs aren't, and
-fall back to the universal grammar.
+fall back to the universal grammar. **The mSUD directions are held out of that table on purpose**
+and always run the universal grammar: the language-specific mSUD grammars differ from it in how a
+fused word is SPELLED, not in its syntax (they pass grew an explicit `"_"`/`" "` separator when
+concatenating the merged pieces' Translit/Tone/MGloss, so one fused word came out spelled as
+several), and the vendored files are verbatim upstream copies that a re-vendor would revert, so the
+fix lives in the table rather than in them.
 
 grew's OCaml backend is an **optional external prerequisite**: `app/convert.py` picks up
 `vendor/grew/bin/grewpy_backend` if bundled (built by `tools/bundle_grew.sh`), else `~/.opam/*/bin`.

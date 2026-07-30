@@ -26,6 +26,22 @@
 
 const FONT_TRIED=new Set();    // families asked about this session — success, failure or already-covered alike
 const FONT_LOADED=new Set();   // families whose @font-face is now injected
+/* THE BACKSTOP: ANY font finishing its load re-lays out the document, once, debounced. ensureScriptFont below
+   awaits its own face explicitly and re-renders, which covers the case this app creates deliberately — but a
+   face can also come in without us having asked: a system fallback resolving late, a second face pulled in by
+   glyphs that only appeared once a Script/transliteration row was switched on, or a download that lands while an
+   unrelated render is already in flight. Every one of those changes ADVANCES under a layout that measured the
+   old ones, and every diagram position in the app is computed from measured advances (meas, js/diagram/
+   diagram-core.js) rather than from the DOM boxes the browser would re-flow by itself. One extra render per
+   font-load burst is cheap; a diagram whose seam marks and token centres sit on stale metrics is not, and it
+   cannot be noticed by the code that caused it — which is the whole reason this listens globally instead of
+   being threaded through the callers. Registered eagerly at load, but it only ever CALLS renderDoc later, from
+   the event, so it is not the forward-reference hazard CLAUDE.md warns about; the typeof guard covers a
+   font finishing before the later modules have finished defining themselves. */
+if(typeof document!=="undefined"&&document.fonts&&document.fonts.addEventListener){
+  let _fontSettle=null;
+  document.fonts.addEventListener("loadingdone",()=>{ clearTimeout(_fontSettle);
+    _fontSettle=setTimeout(()=>{ if(typeof DOC!=="undefined"&&DOC.length&&typeof preserveScroll==="function"&&typeof renderDoc==="function") preserveScroll(renderDoc); },80); }); }   // 80ms: several faces of one document land in a burst (one per script), and each fires its own event — coalesce them into a single re-layout
 // Scripts the CORE faces already cover, plus the ones with no Noto Sans family of their own.
 const FONT_CORE_SCRIPTS=new Set(["Latin","Greek","Cyrillic","Common","Inherited","Unknown","Braille"]);
 // Unicode script name → the family name the font stacks use, where squashing the name doesn't give it.
@@ -89,6 +105,20 @@ async function ensureScriptFont(script,sample){
   const st=document.createElement("style"); st.dataset.font=family;
   st.textContent='@font-face{font-family:"'+family+'";font-style:normal;font-weight:100 900;font-display:swap;src:url("'+r.uri+'")}';
   document.head.appendChild(st); FONT_LOADED.add(family);
+  /* START THE LOAD AND WAIT FOR IT, rather than trusting `document.fonts.ready` on its own. A face declared by
+     an injected @font-face does not begin loading when it is DECLARED — it loads lazily, the first time layout
+     asks for a glyph from it — and `fonts.ready` reports "no font loading is currently outstanding", which in
+     this same microtask is still true, because nothing has asked yet. So the await could fall straight through
+     and the re-render below would measure the FALLBACK face, after which `font-display:swap` quietly swapped the
+     real one in underneath positions already computed. That is precisely the failure the SVG-measurement rework
+     was meant to end (see the note above `meas` in js/diagram/diagram-core.js): token centres, seam marks and
+     folded punctuation land on advances the glyphs no longer have. It shows up ONLY on a script that is actually
+     downloaded — every script macOS already draws skips this path entirely — and never in the wrapped-bracket
+     notation, whose seams hang off the real DOM box and re-flow themselves when the face swaps.
+     `document.fonts.load(font, text)` is the idiom that both kicks the load off and resolves when the face is
+     usable; the sample character is passed so the request names glyphs this face really has. fonts.ready still
+     follows it, to cover any OTHER face the same swap set going. */
+  try{ await document.fonts.load('15px "'+family+'"', sample||"A"); }catch(_){ }
   try{ await document.fonts.ready; }catch(_){ }
   preserveScroll(renderDoc);   // the metrics change under it — re-measure with the face actually present
   if(!r.cached) toast("Downloaded "+family+" ("+Math.round(r.bytes/1024)+" KB)"); }

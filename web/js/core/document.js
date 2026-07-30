@@ -993,7 +993,20 @@ function scrollToSentence(i){
    correctness bug, not a slow one, so the list errs generous rather than clever: every entry is read ONCE per
    renderDoc() (diaFlagsSig is computed once into ctx.diaSig, not once per sentence), so a few unused reads cost
    nothing measurable next to the layout work they guard.
-   STORAGE: si → Map(conv → {sig,node}). A nested map, not one flat `si+conv+sig` string key, because the outer
+   KEYED ON THE SENTENCE'S OWN CONTENT TOO (csig — diaContentSig below), not only on the per-sentence
+   invalidation hook further down. That hook — snapSent(si), which fires when a mutator ANNOUNCES itself — is
+   necessary but not sufficient: it fires BEFORE the edit, and nothing re-fires after any work the edit DEFERS
+   past the render it scheduled. A LEMMA EDIT is exactly that shape, and was the bug this closes. Committing a
+   Lemma cell (commitCell in js/grid/grid.js) writes the lemma and calls afterLemmaEdit (js/io/bridge.js), which
+   AWAITS the new lemma's transliteration before msegRefill can re-derive MSeg from it — while the render that
+   same commit scheduled runs in between, builds the diagram from the OLD MSeg/MGloss, and caches it under a
+   signature nothing has touched since. When msegRefill finally writes the new MSeg and re-renders, that entry is
+   a hit, so the diagram kept serving the pre-edit morphemic rows until the NEXT edit's snapSent happened to drop
+   it: "the grid updates now, the diagram updates one edit late". Every other pass that lands after its own edit's
+   render (a background re-parse revising lemma/feats, an async romanisation fill) had the same hole. One content
+   signature closes all of them, by asking the question the cache actually cares about — "is this still the
+   sentence I drew?" — instead of trusting every mutator to remember to answer it.
+   STORAGE: si → {csig, m:Map(conv → {sig,node})}. A nested map, not one flat `si+conv+sig` string key, because the outer
    level is exactly what per-sentence invalidation needs to drop in O(1) (see invalidateDiaSentence) and what
    window-pruning needs to iterate (pruneDiaCache) — neither wants to filter-scan every (si,conv) pair. The
    inner level caps itself at 5 entries (one per notation) with no LRU needed: there are only 5 notations, so
@@ -1006,7 +1019,7 @@ function scrollToSentence(i){
    in at build time, drop the cache entry on every selection change" (the simple-but-defeats-the-cache option)
    unnecessary — applySel's live class-toggle pass already treats a reused node exactly like a fresh one, since
    both carry the same data-* attributes and applySel never assumes it is looking at just-built DOM. */
-let DIA_CACHE=new Map();   // si → Map(conv → {sig,node})
+let DIA_CACHE=new Map();   // si → {csig, m:Map(conv → {sig,node})}
 // every global that changes a rendered diagram's OUTPUT without changing the SENTENCE (which invalidateDiaSentence
 // covers instead) — read once per render into ctx.diaSig, not once per sentence. FS/AVAILW/idW: zoom + wrap budget
 // + the margin column a wrapped view indents past (js/diagram/diagram-wrap.js). DOCLANG: isSanskritLang() gates
@@ -1033,12 +1046,29 @@ function diaFlagsSig(){
 // call is needed. A stale entry for a DIFFERENT conv or an outdated sig is simply overwritten, never patched —
 // the two situations where per-conv reuse would pay off (switching straight back, or nothing having changed at
 // all) are exactly the ones this returns early for.
+/* THE SENTENCE HALF of the key: everything a renderer reads OFF THE SENTENCE, in one string. Deliberately the
+   WHOLE sentence object rather than an enumerated field list — the flags half above can afford to enumerate
+   (those globals are few and change one at a time), but the sentence half cannot: the renderers reach tokens'
+   form/lemma/upos/feats/head/deprel/MISC (Gloss/MSeg/MGloss/Translit/SpaceAfter/Typo/Foreign/NewPar/…), the MWT
+   ranges, the empty nodes, s.text and the per-token romanisation caches, and a field left out of a hand-written
+   list is a diagram that silently stops updating — the very failure documented above, one field at a time.
+   JSON.stringify is what snapSent(si) (js/core/undo.js) already runs on one sentence per keystroke, so its cost
+   is known to be affordable at this scale; here it runs once per WINDOWED sentence per render (≈31 of them), and
+   it guards a per-sentence layout pass measured in tens of milliseconds. Extra fields it covers that no renderer
+   reads (comments, translations, the URL) can only cost a needless rebuild, never a wrong diagram — the safe
+   direction, and the same "errs generous rather than clever" the flags list above takes. */
+let _DIA_NOSIG=0;
+function diaContentSig(s){ try{ return JSON.stringify(s); }catch(_){ return "\u0000nosig"+(++_DIA_NOSIG); } }   // unstringifiable (it never is — see snapSent) → a value that can never repeat, i.e. this sentence simply doesn't cache, rather than a constant that would collide with the next one
 function diaSentence(i,ctx){
-  let m=DIA_CACHE.get(i);
-  if(m){ const hit=m.get(conv); if(hit&&hit.sig===ctx.diaSig) return hit.node; }
+  const stage=incStageFor(i);   // ≥0 while an incremental post-parse sequence is converging on THIS sentence (see the INCREMENTAL note below); -1 otherwise, and any render the sequence did not start cancels it there
+  if(stage>=0){ const node=incStaged(i,stage); if(node) return node; }   // a STAGE IS NEVER CACHED: it is a deliberate approximation of this sentence, not a rendering of it, and an entry for it could be served back to an ordinary render
+  const csig=diaContentSig(DOC[i]);
+  let e=DIA_CACHE.get(i);
+  if(e&&e.csig!==csig){ DIA_CACHE.delete(i); e=null; }   // the SENTENCE moved since these were built → every notation's entry for it is stale, not just the one on screen
+  if(e){ const hit=e.m.get(conv); if(hit&&hit.sig===ctx.diaSig) return hit.node; }
   const node=renderSentence(i);
-  if(!m){ m=new Map(); DIA_CACHE.set(i,m); }
-  m.set(conv,{sig:ctx.diaSig,node});
+  if(!e){ e={csig,m:new Map()}; DIA_CACHE.set(i,e); }
+  e.m.set(conv,{sig:ctx.diaSig,node});
   return node;
 }
 // Per-sentence invalidation. Called from js/core/undo.js's snapSent(si) — the ONE choke point every
@@ -1066,7 +1096,7 @@ function invalidateDiaSentence(si){ DIA_CACHE.delete(si); }
 // s.orthoLine across arbitrarily many sentences with no pushUndo/snapSent of their own (deliberately — they are
 // not user edits, see those functions' own comments) and so would otherwise race a cache built moments earlier,
 // before the async fill landed, permanently serving the pre-fill rendering back on every later notation switch.
-function invalidateDiaCache(){ DIA_CACHE.clear(); }
+function invalidateDiaCache(){ DIA_CACHE.clear(); cancelIncremental(); }   // …and any in-flight incremental sequence with it: it is keyed on si, and every caller of this is replacing what si NAMES
 // Drop every cached sentence OUTSIDE the current render window. Composes with the virtualization above rather
 // than fighting it: a sentence that has scrolled out of [winLo,winHi) is already gone from the DOM (its .sblock
 // was never rebuilt, or was replaced by a spacer), so a cache entry for it is pure memory with nothing to show
@@ -1075,6 +1105,121 @@ function invalidateDiaCache(){ DIA_CACHE.clear(); }
 // computeWindow() has decided the range — cheap (one Map iteration bounded by however many sentences have EVER
 // been cached, which window-pruning itself keeps close to WIN_BUFFER*2+1 in steady state).
 function pruneDiaCache(lo,hi){ for(const si of DIA_CACHE.keys()) if(si<lo||si>=hi) DIA_CACHE.delete(si); }
+/* ── INCREMENTAL POST-PARSE DIAGRAM (breadth-first by tree depth) ─────────────────────────────────────────────
+   A parse hands the grid its tokens in one go, but the DIAGRAM for a long sentence costs a whole layout pass
+   (stemmaLayout's per-token measurement, spreadForLabels' iterative widening, the label de-collision passes,
+   fitTight) before a single glyph reaches the screen — so the sentence's row sat blank for as long as that took.
+   This draws the tree AS IT IS BEING WORKED OUT instead: stage 0 hangs every token straight off its own root
+   (a flat, one-level shape — cheap, because a flat tree has no crossing edges and almost nothing for the
+   de-collision passes to do), the next stage attaches the root's real immediate dependents, the next theirs, and
+   so on until the LAST stage draws the true tree through the ordinary path above. Each stage is one
+   requestAnimationFrame apart, so the browser paints between them and the diagram visibly converges.
+   THE LAST STAGE IS NOT AN APPROXIMATION OF ANYTHING: it is a plain renderDoc() with this whole mechanism
+   switched off (incStageFor returns -1 once the ladder runs out), so the finished diagram is bit-for-bit what the
+   non-incremental path draws, post-passes and all. That is also why every stage is a full renderDoc rather than a
+   surgical swap of the one `.diagram` node: the alignment/height-cap/wrapproj/seam-mark passes at the tail of
+   renderDoc all measure a block against its diagram, and a staged diagram that skipped them would settle by
+   jumping rather than by converging. The other ~30 sentences in the window cost nothing extra per stage — they
+   are cache hits (see above), and their csig hasn't moved.
+   IT COSTS MORE WORK IN TOTAL, not less, and is therefore armed ONLY for a sentence that was just parsed
+   (renderDiagramIncremental, called from the parse paths in js/io/bridge.js) and only when the shape has enough
+   depth and enough tokens to be worth watching converge. Every ordinary render — an edit, a scroll, a notation
+   switch — takes the one-shot path exactly as before.
+   NOTATIONS: stemma / hierarchy / arcs only (their wrapped variants come along, since wrapDiagram re-renders
+   from the same truncated tree). BRACKETS AND OUTLINE FALL THROUGH to the one-shot render deliberately: both are
+   NESTING notations, so a truncated tree doesn't read as "still working" but as a genuinely different (flat)
+   analysis — and their cost is dominated by the browser's own text layout of the rows, which the truncation
+   doesn't reduce, so there would be nothing to win by it either.
+   THE DOCUMENT IS NEVER MUTATED — see incStaged for how a truncated tree is drawn without touching DOC. */
+const INC_CONV={stemma:1,tree:1,arcs:1};   // where a truncated tree means something — see the note above
+const INC_MIN_TOK=10, INC_MAX_STAGES=5;    // below ~10 tokens the one-shot layout is already imperceptible; and never more than 5 intermediate stages, however deep the tree, so a 20-level chain doesn't buy its convergence with 20 full renders (the ladder then steps by more than one level at a time — see incLadder)
+let INC=null;   // {si, ladder:[depth,…], i, armed, own, raf} — at most ONE sequence at a time: a parse is a per-sentence operation, and a second one supersedes the first
+// Every token's depth below its own root, plus its parent index — computed on the REAL token list (before
+// displaySent's merge-punct/goeswith folds), because that is the list the truncation has to rewrite.
+// Malformed heads are handled the way the renderers already handle them: a head outside 1…n (or pointing at the
+// token itself) is a root, and a cycle is broken by the chain-length guard, leaving its members at finite,
+// arbitrary depths rather than looping forever.
+function incDepths(tokens){ const n=tokens.length, par=new Array(n), d=new Array(n).fill(-1);
+  for(let i=0;i<n;i++){ const h=parseInt(tokens[i].head,10); par[i]=(h>=1&&h<=n&&h!==i+1)?h-1:-1; }
+  for(let i=0;i<n;i++){ if(d[i]>=0) continue;
+    const chain=[]; let j=i;
+    while(j>=0 && d[j]<0 && chain.length<=n){ chain.push(j); j=par[j]; }   // walk up to the first node whose depth is already known (or to a root, or until the guard trips on a cycle)
+    let base=(j>=0&&d[j]>=0)?d[j]:-1;                                      // -1 ⇒ the top of the chain is itself a root (or a cycle member) → depth 0
+    for(let k=chain.length-1;k>=0;k--) d[chain[k]]=++base; }
+  return {par,d}; }
+// The depths the sequence draws before the true tree. Empty ⇒ nothing to converge from: a tree that is already
+// one level deep IS the flat shape stage 0 would draw, so staging it would show the same picture twice.
+function incLadder(maxD){ if(maxD<2) return [];
+  const step=Math.ceil(maxD/INC_MAX_STAGES), out=[];
+  for(let d=0;d<maxD;d+=step) out.push(d);   // always starts at 0 (the flat shape) and always stops short of maxD (which is the true tree, drawn by the ordinary path)
+  return out; }
+/* One stage's TOKEN LIST: every token at depth ≤ k keeps its real head (and its own object, untouched); anything
+   deeper is re-attached to its nearest ancestor within the drawn depth, on a SHALLOW COPY of that token alone.
+   The deprel is deliberately kept as it is: the labels are the ones the finished diagram will carry, so they
+   don't flicker through the stages, and the arc a stage draws is honestly "this token belongs somewhere under
+   there" — which is exactly what the reader is being shown while the rest is worked out. */
+function incTruncTokens(tokens,k){ const {par,d}=incDepths(tokens), n=tokens.length;
+  return tokens.map((t,i)=>{ if(d[i]<=k) return t;
+    let j=i, guard=0; while(j>=0 && d[j]>k && guard++<=n) j=par[j];
+    if(j<0||j===i) return t;   // no ancestor inside the drawn depth (only reachable through a malformed chain) → leave the token exactly as the document has it
+    return Object.assign({},t,{head:String(j+1)}); }); }
+/* Draw sentence si as of stage-depth k. renderSentence(si) reads DOC[si] itself (through displaySent), and it
+   lives in js/diagram/diagram-render.js with no seam for an override, so the truncated sentence is put in the
+   array slot for the duration of that ONE SYNCHRONOUS CALL and taken straight back out in a finally.
+   THAT IS NOT A DOCUMENT MUTATION and must never become one: the sentence OBJECT is not touched (the truncated
+   tokens are a fresh array of untouched originals plus shallow copies), the slot holds the substitute only while
+   a single synchronous, non-dispatching call runs — no event, no await, no observer can see it — and the same
+   object reference is restored on every path out, exception included. Nothing calls markDirty, pushUndo or any
+   serializer here, so dirty-marking, undo and save cannot see this at all.
+   Any throw from a staged render abandons the sequence and falls back to the true one-shot render rather than
+   propagating: a stage is an optimisation, and an optimisation must never be able to blank the document. */
+function incStaged(si,k){ const real=DOC[si]; if(!real||!real.tokens) return null;
+  try{ DOC[si]=Object.assign({},real,{tokens:incTruncTokens(real.tokens,k)});
+    try{ return renderSentence(si); } finally { DOC[si]=real; }
+  }catch(e){ cancelIncremental(); return null; } }
+// diaSentence's hook. Returns the stage-depth to draw for sentence i, or -1 for "draw the real thing". Consuming
+// `armed` here is what lets the caller's own post-parse render BE stage 0, whichever side of it the sequence was
+// armed on; after that, only the sequence's own renders (own) may draw a stage, so ANY other render — a user
+// edit, a notation switch, a scroll re-render, a second document — cancels the sequence and draws the true tree
+// in that same pass. That is also why no cancellation ever leaves a stage on screen as the last word.
+function incStageFor(i){ const seq=INC; if(!seq||seq.si!==i) return -1;
+  if(!(seq.armed||seq.own)){ cancelIncremental(); return -1; }
+  seq.armed=false;
+  return seq.i<seq.ladder.length?seq.ladder[seq.i]:-1; }
+function incTick(){ const seq=INC; if(!seq) return; seq.raf=0;
+  if(seq.armed) seq.armed=false;   // nobody rendered stage 0 on our behalf (the caller rendered before arming, or not at all) → this tick draws it
+  else seq.i++;
+  if(!show.graphs || seq.si<winLo || seq.si>=winHi){ INC=null; return; }   // diagrams switched off, or the sentence has scrolled out of the rendered window — there is nothing on screen to converge
+  const last=seq.i>=seq.ladder.length;
+  seq.own=true;
+  try{ if(typeof preserveScroll==="function") preserveScroll(renderDoc); else renderDoc(); }
+  finally { seq.own=false; }
+  if(INC!==seq) return;            // that render cancelled us (or a second parse replaced the sequence outright)
+  if(last){ INC=null; return; }    // …and that render drew the TRUE tree, so the sequence is finished
+  seq.raf=requestAnimationFrame(incTick); }
+// NO CANCELLATION EVER LEAVES A STAGE AS THE LAST THING DRAWN, and that is a property of the call sites rather
+// than of anything done here: incStageFor cancels from INSIDE a render that then draws the true tree in the same
+// pass; incStaged's catch does the same by returning null and falling through; invalidateDiaCache's callers
+// (document replace / undo / redo / conversion) all re-render immediately after; and renderDiagramIncremental
+// hands over to a fresh sequence. A future caller that fits none of those must render the sentence itself.
+function cancelIncremental(){ const seq=INC; if(!seq) return; if(seq.raf) cancelAnimationFrame(seq.raf); INC=null; }
+/* THE ENTRY POINT — "this sentence was just parsed; converge on its diagram instead of making the reader wait".
+   Call it from the parse paths in js/io/bridge.js, immediately BEFORE the preserveScroll(renderDoc) that shows
+   the parse (that render then costs stage 0 instead of the full layout). Calling it AFTER that render still
+   works — the first tick draws stage 0 itself — it just pays for the full layout first and so wins nothing. */
+function renderDiagramIncremental(si){
+  cancelIncremental();   // a second parse supersedes whatever was still converging
+  if(si==null||si<0||si>=DOC.length) return;
+  if(!show.graphs||!INC_CONV[conv]) return;
+  const s=DOC[si], toks=s&&s.tokens;
+  if(!toks||toks.length<INC_MIN_TOK) return;
+  const ladder=incLadder(incDepths(toks).d.reduce((a,x)=>x>a?x:a,0));   // reduce, not Math.max(...d): a spread that long is an argument list, and a long sentence would blow the call stack rather than report a depth
+  if(!ladder.length) return;
+  DIA_CACHE.delete(si);   // whatever is cached for si describes the PRE-parse tokens; drop it here rather than leave the first staged render racing it
+  INC={si,ladder,i:0,armed:true,own:false,raf:0};
+  INC.raf=requestAnimationFrame(incTick);
+}
+window.renderDiagramIncremental=renderDiagramIncremental;   // also reachable from the native menu / bridge glue, which addresses the frontend through window.*
 /* the per-sentence body renderDoc()'s main loop used to run inline — pulled out so a future windowed/
    incremental render (only the sentences near the viewport) can build ONE block without re-running the
    once-per-render setup above it. ctx carries the few things that are per-render state rather than true
@@ -1716,13 +1861,43 @@ function positionBracketWash(){ document.querySelectorAll("#doc .bwrap").forEach
 // instead of throwing, which is exactly what "selecting a token no longer scrolls the grid" looks like from the
 // user's side. This only uses getBoundingClientRect()/scrollTop, which have been solid across every engine for
 // decades, so it can't have that failure mode regardless of which WebKit version renders the packaged app.
+/* WHAT IS BROUGHT INTO VIEW IS THE ROW, NOT THE FIELD INSIDE IT. Almost every caller here hands over a grid CELL
+   or the <input>/<textarea> in one (pick's own `tr` is the exception), and a field's box is both shorter than its
+   row and centred in it — so "the field is fully visible" left the row's own top edge, band and MWT bracket still
+   cut off, and the scroll appeared to land on the field's top, bottom or text baseline rather than on the row.
+   Snapping the target up to the enclosing <tr> makes the ROW the unit that has to fit, which is the only box the
+   user is actually looking at. Rows are short, so this can never make a needed scroll unsatisfiable. */
+function scrollRowOf(el){ const tr=el&&el.closest&&el.closest("#doc table.grid tbody tr"); return tr||el; }
+/* …and the grid has a STICKY HEADER (table.grid th, position:sticky top:0), which occludes the top of its own
+   scrollport exactly as the pinned boundary headings occlude #doc's. Without charging it, a row scrolled up to
+   the top of .gwrap lands UNDERNEATH the header — the header covers the row's top edge and leaves the middle of
+   the field showing, which is the same symptom from the other direction. Measured off the live <thead> rather
+   than assumed, since the header's height follows the font size. */
+function gridHeadH(node){ if(!node||!node.classList||!node.classList.contains("gwrap")) return 0;
+  const th=node.querySelector("table.grid thead"); return th?th.getBoundingClientRect().height:0; }
+/* SCROLL A GRID ROW TO THE TOP of its grid, rather than merely into view. scrollNearest moves as little as it
+   can, which is right for stepping through rows; this is for arriving at one from somewhere else — selecting an
+   MWT in the diagram — where the rows that follow it (its own components, immediately below) are as much a part
+   of what you asked to see as the row itself, and "just barely on screen at the bottom" shows none of them.
+   Two scrollers, in this order: the OUTER ones first (scrollNearest, so the block is on screen at all and the
+   grid has a visible portion to align within), then the grid's own, set outright rather than nudged. The target
+   is the row's top flush with the TOP OF THE VISIBLE PORTION — below the sticky column header, which occupies
+   the first gridHeadH pixels of the scrollport and would otherwise cover the row we just scrolled to. Clamped by
+   the browser to the scroll range, so a row near the end simply lands as high as the content allows. */
+function scrollRowToGridTop(row){ if(!row) return;
+  scrollNearest(row);
+  const wrap=row.closest&&row.closest(".gwrap"); if(!wrap) return;
+  const wr=wrap.getBoundingClientRect(), rr=row.getBoundingClientRect();
+  wrap.scrollTop+=(rr.top-(wr.top+gridHeadH(wrap)))/FS;   // rects are SCALED viewport px, scrollTop is unscaled CSS px — the same /FS convention the tie geometry uses
+}
 function scrollNearest(el){ if(!el) return;
+  el=scrollRowOf(el);
   let node=el.parentElement;
   while(node){
     const cs=getComputedStyle(node);
     if(/(auto|scroll)/.test(cs.overflowY) && node.scrollHeight>node.clientHeight){
       const nr=node.getBoundingClientRect(), er=el.getBoundingClientRect();   // re-measured each iteration: a nudge on an INNER container shifts el's rect for the NEXT (outer) one
-      const stick=(node.id==="doc"&&typeof stickyHeadH==="function")?stickyHeadH((el.closest&&el.closest(".sblock"))||el):0;   // the document scroller's top is additionally occluded by whatever boundary headings are PINNED over this element's block — scroll-padding-top only clears the toolbar, so without this a token brought to the top of the page lands underneath its own document/paragraph heading
+      const stick=(node.id==="doc"&&typeof stickyHeadH==="function")?stickyHeadH((el.closest&&el.closest(".sblock"))||el):gridHeadH(node);   // the document scroller's top is additionally occluded by whatever boundary headings are PINNED over this element's block — scroll-padding-top only clears the toolbar, so without this a token brought to the top of the page lands underneath its own document/paragraph heading. The grid's own scroller is occluded the same way by its sticky column header
       const top=nr.top+(parseFloat(cs.scrollPaddingTop)||0)+stick, bot=nr.bottom-(parseFloat(cs.scrollPaddingBottom)||0);
       if(er.top<top) node.scrollTop-=(top-er.top);
       else if(er.bottom>bot) node.scrollTop+=(er.bottom-bot);
@@ -1766,14 +1941,40 @@ function selEmphasis(){
   [...peri].forEach(x=>{ if(core.has(x)) peri.delete(x); });   // a token that is core for ONE token of a range and peripheral for another reads as core — the brighter level wins, so a range never dims part of its own argument
   return {core,peri};
 }
+/* IS THIS MWT THE SELECTION? — what lights every row of an MWT group in the grid, range row and components
+   alike. It is mwtTieSelected (js/diagram/diagram-core.js) MINUS that function's one exception: a tie whose
+   surface form is being edited draws itself unaccented, because the accent would sit under an open field on the
+   very glyph the field covers. No field covers the GRID rows, so they stay lit while the form is edited — which
+   is also the only state in which the grid is where you can see what the edit is doing. Everything else about
+   the two tests is the same, deliberately: the grid group lights exactly when the diagram's bracket does. */
+function mwtGroupSel(si,fromId,toId){ return !!(selRange&&selRange.s===si&&selRange.from===fromId&&selRange.to===toId); }
+/* …and the same question asked the other way round: WHICH span, if any, is the selected MWT of the current
+   sentence. An MWT is selected as a RANGE (selectMWTRange, and the grid's own range row click), and sel.t can
+   only ever name ONE of its components — the first — so a diagram cell pass keyed on sel.t lit the first
+   component and left the rest of the same word plain, while the grid showed the whole group filled. The two
+   views state one selection, so every component takes the accent. Returns null unless the range matches an MWT
+   EXACTLY: an ordinary marquee that happens to cover an MWT is a different selection and keeps the lighter .rng
+   marking it already has. */
+function selMwtSpan(){ if(!selRange||selRange.s!==sel.s) return null;
+  const s=DOC[sel.s]; if(!s) return null;
+  const m=(s.mwt||[]).find(x=>mwtGroupSel(sel.s,x.from,x.to));
+  return m?{from:m.from,to:m.to}:null; }
+// does this diagram cell draw a token of that span? data-gw first, for the same reason gwHolds reads it: a
+// goeswith cell draws a whole WORD, and any of its parts falling in the span lights the cell.
+function elInSpan(g,span){ if(!span) return false;
+  const u=g.getAttribute?g.getAttribute("data-gw"):null;
+  const ids=u?u.split(" "):[g.getAttribute?g.getAttribute("data-tok"):null];
+  return ids.some(v=>{ const k=+v; return k>=span.from&&k<=span.to; }); }
 function applySel(){
   applyZone();
-  document.querySelectorAll("#doc .node,#doc .tok-group,#doc .bwtok").forEach(g=>g.classList.toggle("sel",+g.getAttribute("data-s")===sel.s&&gwHolds(g,sel.t)));   // gwHolds, not a bare data-tok test: a goeswith cell draws a whole WORD (two or more tokens sharing one annotation stack), so selecting EITHER half lights the whole word — see the goeswith block in js/diagram/diagram-core.js. For every other cell it IS the bare data-tok test.   // .bwtok (wrapped brackets) was missing here — a selection change via a reflow=false path (e.g. grid-cell focus) left its bold highlight stuck on the PREVIOUS token until an unrelated full render happened
+  const mwtSpan=selMwtSpan();   // a selected MULTI-WORD TOKEN lights ALL of its components, not just the one sel.t names — see selMwtSpan. Declared at the TOP of this function, not beside its first heavy use: several passes below read it, and the earliest of them (.punctsat) runs before that point — a `const` read above its own declaration is a temporal-dead-zone ReferenceError, and one thrown in here would abort the whole selection pass
+  document.querySelectorAll("#doc tbody tr[data-mwtfrom]").forEach(tr=>tr.classList.toggle("mwtsel",mwtGroupSel(+tr.dataset.s,+tr.dataset.mwtfrom,+tr.dataset.mwtto)));   // live, like every other toggle here: a reflow=false pick (a grid click, Tab navigation) changes the selection without re-rendering, and the group's highlight has to follow it in that same pass
+  document.querySelectorAll("#doc .node,#doc .tok-group,#doc .bwtok").forEach(g=>g.classList.toggle("sel",+g.getAttribute("data-s")===sel.s&&(gwHolds(g,sel.t)||elInSpan(g,mwtSpan))));   // gwHolds, not a bare data-tok test: a goeswith cell draws a whole WORD (two or more tokens sharing one annotation stack), so selecting EITHER half lights the whole word — see the goeswith block in js/diagram/diagram-core.js. For every other cell it IS the bare data-tok test.   // .bwtok (wrapped brackets) was missing here — a selection change via a reflow=false path (e.g. grid-cell focus) left its bold highlight stuck on the PREVIOUS token until an unrelated full render happened
   const selDep=gwUnitId(sel.s,sel.t);   // a goeswith continuation's word wears the HEAD's incoming relation — see gwUnitId. Without this, selecting the second half of a word accented its two forms, its shared POS and its slur but left the very relation label above them plain, which is exactly the "a form whose annotations stayed behind" the rule below exists to prevent
   document.querySelectorAll("#doc .arc,#doc .edge-g,#doc .ghost-g").forEach(g=>g.classList.toggle("sel",g.hasAttribute("data-dep")&&+g.getAttribute("data-s")===sel.s&&+g.getAttribute("data-dep")===selDep));   // ghost edges carry the SAME data-s/data-dep contract as a real edge — without this they only picked up .sel on a full re-render, lagging behind every OTHER selection highlight (which this live class-toggle pass already updates instantly). hasAttribute guard: a ghost-g with NO data-dep at all (e.g. the Subj=Generic ∅, which has no real token of its own) must never match — +null coerces to 0, which used to false-match whenever sel.s===0 (sentence 1) && sel.t===0 (nothing selected), the common initial state
-  document.querySelectorAll("#doc .oline").forEach(g=>{ g.classList.toggle("sel",+g.dataset.s===sel.s&&gwHolds(g,sel.t));   // gwHolds for the same reason as the cell pass above: an outline row that draws a whole goeswith word lights for EITHER of its parts
+  document.querySelectorAll("#doc .oline").forEach(g=>{ g.classList.toggle("sel",+g.dataset.s===sel.s&&(gwHolds(g,sel.t)||elInSpan(g,mwtSpan)));   // …and the MWT span for the same reason the cell pass above takes it: an outline ROW is that notation's token cell, so every component of a selected MWT lights there too.   // gwHolds for the same reason as the cell pass above: an outline row that draws a whole goeswith word lights for EITHER of its parts
     g.classList.toggle("insub", +g.dataset.s===sel.s && (g.dataset.anc||"").split(" ").includes(String(sel.t))); });
-  document.querySelectorAll("#doc .punctsat").forEach(g=>g.classList.toggle("sel",+g.dataset.s===sel.s&&+g.dataset.tok===sel.t));   // HTML folded-punctuation satellites (outline / wrapped brackets)
+  document.querySelectorAll("#doc .punctsat").forEach(g=>g.classList.toggle("sel",+g.dataset.s===sel.s&&(+g.dataset.tok===sel.t||elInSpan(g,mwtSpan))));   // HTML folded-punctuation satellites (outline / wrapped brackets) — a satellite is drawn AS PART OF its token's cell, so it follows that token into an MWT selection rather than staying plain beside a lit form
   // item 8: a multi-word token's tie. Keyed off the COMPONENT RANGE it carries rather than off sel.t — clicking a
   // tie selects that range (selectMWTRange), which is the only thing that means "this MWT is selected"; see
   // mwtTieSelected in js/diagram/diagram-core.js, which also holds the tie plain while its editor is open.

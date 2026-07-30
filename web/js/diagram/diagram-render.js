@@ -145,7 +145,7 @@ function stemma(si,{proj,catNodes}){
   // against each OTHER), then the strokes + arrowheads on top (per-edge groups keep click/selection). Item 21.
   edges.forEach(e=>{ e._ink=arcInk(relColor(e.rel)); let a1=[c[e.d],e.y1], a2=[c[e.h],e.y2];
     if(show.arrows){const dir=arrowDir(e.rel); if(dir){const tip=dir==="dep"?a1:a2,frm=dir==="dep"?a2:a1;
-      e._ah=arrowPath(frm,tip,5.25); e._ahc=arrowPath(frm,tip,6.375); if(dir==="dep") a1=backoff(tip,frm,5.25); else a2=backoff(tip,frm,5.25);}}
+      e._ah=arrowPath(frm,tip,5.25); e._ahc=arrowPath(frm,tip,5.25,AH_OUTSET); if(dir==="dep") a1=backoff(tip,frm,5.25); else a2=backoff(tip,frm,5.25);}}   // the casing head is the SAME head (same s, same tip) uniformly OUTSET by AH_OUTSET, not a longer one: passing a bigger s (this was 6.375) left the apex and both leading edges sitting on the stroke head's own, so the halo showed only behind the head
     e._d=`M ${a1[0]} ${a1[1]} L ${a2[0]} ${a2[1]}`; });
   { const cg=E("g",{class:"edge-cases"}); cg.setAttribute("aria-hidden","true");   // combined casing behind all edges + arrowheads
     edges.forEach(e=>{ cg.appendChild(E("path",{class:"arc-casing",d:e._d})); if(e._ahc) cg.appendChild(E("path",{class:"ah-casing",d:e._ahc})); }); svg.appendChild(cg); }
@@ -278,7 +278,7 @@ function arcs(si){
   if(rootI>=0){const col=relColor("root"),ink=arcInk(col),x=c[rootI]+rootOff,tip=[x,rootY],frm=[x,rTop],b=backoff(tip,frm,AH);   // the stub reaches the node position (no circle); item 11: a reported root's stub foot lifts to rootY
     const g=E("g",{class:"arc","data-s":si,"data-dep":OID(rootI)}); rootG=g; rootCol=col;
     rootCasing=E("path",{class:"arc-casing",d:`M ${x} ${rTop} L ${b[0]} ${b[1]}`}); g.appendChild(rootCasing);
-    g.appendChild(E("path",{class:"ah-casing",d:arrowPath(frm,tip,AH+1.5)}));
+    g.appendChild(E("path",{class:"ah-casing",d:arrowPath(frm,tip,AH,AH_OUTSET)}));   // same head, uniformly outset by the line casing's own halo — NOT a longer head (was AH+1.5, which haloed the back only)
     rootPath=E("path",{class:"arc-path",d:`M ${x} ${rTop} L ${b[0]} ${b[1]}`,stroke:ink}); g.appendChild(rootPath); rootXc=x; rootBottomY=b[1];
     g.appendChild(E("path",{class:"ah",d:arrowPath(frm,tip,AH),fill:ink}));
     g.style.cursor="pointer"; g.addEventListener("click",()=>pick(si,OID(rootI))); svg.appendChild(g);
@@ -292,7 +292,7 @@ function arcs(si){
     const dstr=`M ${sl[0][0]} ${sl[0][1]} C ${sl[1][0]} ${sl[1][1]}, ${sl[2][0]} ${sl[2][1]}, ${sl[3][0]} ${sl[3][1]}`;
     const g=E("g",{class:"arc","data-s":si,"data-dep":OID(a.to-1),"data-head":OID(a.from-1)}), ink=arcInk(a.col);
     g.appendChild(E("path",{class:"arc-casing",d:dstr}));                       // halo so a crossing front arrow occludes this one
-    g.appendChild(E("path",{class:"ah-casing",d:arrowPath(P[2],P[3],AH+1.5)}));
+    g.appendChild(E("path",{class:"ah-casing",d:arrowPath(P[2],P[3],AH,AH_OUTSET)}));   // same head, uniformly outset by the line casing's own halo — NOT a longer head (was AH+1.5, which haloed the back only)
     g.appendChild(E("path",{class:"arc-path"+(isMorphRel(a.dep)?" morph-edge":""),d:dstr,stroke:ink}));   // an mSUD "/m" arc dashes like its stemma/hierarchy counterpart — the STROKE only, casing and arrowhead stay solid
     g.appendChild(E("path",{class:"ah",d:arrowPath(P[2],P[3],AH),fill:ink}));
     g.style.cursor="pointer"; g.addEventListener("click",()=>pick(si,OID(a.to-1))); svg.appendChild(g);
@@ -309,7 +309,7 @@ function arcs(si){
     const g=E("g",{class:"ghost-g"+(!a.isEmpty&&sel.s===si&&sel.t===OID(a.to-1)?" sel":""),"data-s":si});   // item 3 (Shared=Yes/Subj-raising — real dependent, highlights correctly). isEmpty (Subj=Generic): NEVER via selection — the predicate is this relation's HEAD, and highlighting a dependency edge on its HEAD's selection has the direction backwards; the ∅ dependent has no real token to select instead, so no data-dep/.sel at all here
     if(!a.isEmpty) g.setAttribute("data-dep",OID(a.to-1));
     g.appendChild(E("path",{class:"arc-path arc-ghost",d:dstr,stroke:ink}));
-    g.appendChild(E("path",{class:"ah ah-ghost",d:arrowPath(P[2],P[3],AH),fill:ink}));
+    g.appendChild(E("path",{class:"ah ah-ghost",d:arrowPath(P[2],P[3],AH),fill:ink}));   // NO outset argument, deliberately: a ghost draws no .arc-casing/.ah-casing at all (it is meant to read as a duplicate, not to occlude what it crosses), so there is no halo for the head to match — same for the stemma ghost head above
     if(a.isEmpty){ const glbl=E("text",{class:"tok-word",x:a.X2,y:repBase(rep,wordY,a.from-1),"text-anchor":"middle"}); glbl.textContent="∅"; g.appendChild(glbl);   // Subj=Generic: the ∅ glyph itself sits on the WORD row, not the arc-attachment height a.y1 uses — and it's now at X2 (the arrowhead end), since the ∅ is the dependent. Its row is the PREDICATE's own (lifted) word baseline, via the shared repBase — a ∅ inside a report steps off the line with the predicate it hangs from
       boxes.push({x:a.X2,y:a.y1-8,hx:8,hy:12}); }
     boxes.push({x:a.mx,y:a.apexY,hx:2,hy:2});   // item 2/11: the ghost's own (possibly lifted) crown, from the shared repArcEnds above, counts toward fitTight's crop

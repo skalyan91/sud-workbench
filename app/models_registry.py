@@ -51,6 +51,12 @@ UD_HOME_URL = "https://universaldependencies.org/"
 UD_STATS_URL = "https://raw.githubusercontent.com/UniversalDependencies/{repo}/master/stats.xml"
 _CACHE_TTL = 3600  # seconds
 _UD_TTL = 30 * 24 * 3600  # treebank sizes are release-stable — refetch monthly, or on Refresh
+# A ``refresh`` value meaning "answer from the disk caches ALONE, however stale they are, and never
+# touch the network".  Not a third TTL: the Insert-text window builds its language list on the BRIDGE
+# THREAD, before the window is created, so on a cold/offline cache an ordinary listing would park the
+# dialog behind a chain of 15-20 s HTTP timeouts before it opened at all.  A cache miss here costs the
+# model ranking one tie-breaker (see _preference_key); a missing dialog costs the feature.
+CACHE_ONLY = "cache-only"
 _TRAIN_CACHE = "ud_train_sentences.json"   # {"<lcode>_<treebank>": train-split sentences}
 _NUM_RE = re.compile(r"^\d+(?:\.\d+)?$")
 
@@ -148,9 +154,15 @@ def parse_asset(name: str) -> dict | None:
 
 
 # ── available ────────────────────────────────────────────────────────────────
-def _fetch_releases(refresh: bool = False) -> list[dict]:
+def _fetch_releases(refresh: bool | str = False) -> list[dict]:
     ensure_dirs()
     cache = os.path.join(CACHE_DIR, "releases.json")
+    if refresh == CACHE_ONLY:   # cache-only: whatever is on disk, however old, and no network at all
+        try:
+            with open(cache, encoding="utf-8") as fh:
+                return json.load(fh)
+        except Exception:  # noqa: BLE001 — no cache yet / unreadable: the caller gets no metadata, not an error
+            return []
     if not refresh and os.path.exists(cache) and (time.time() - os.path.getmtime(cache)) < _CACHE_TTL:
         try:
             with open(cache, encoding="utf-8") as fh:
@@ -175,11 +187,17 @@ def _fetch_releases(refresh: bool = False) -> list[dict]:
         return []
 
 
-def _fetch_text(url: str, cache_name: str, refresh: bool, ttl: float | None = None) -> str:
+def _fetch_text(url: str, cache_name: str, refresh: bool | str, ttl: float | None = None) -> str:
     """Fetch a text resource with a TTL disk cache; offline ⇒ cached copy; failure ⇒ ""."""
     ensure_dirs()
     ttl = _CACHE_TTL if ttl is None else ttl
     cache = os.path.join(CACHE_DIR, cache_name)
+    if refresh == CACHE_ONLY:   # cache-only (see CACHE_ONLY): any cached copy, no network, "" if there is none
+        try:
+            with open(cache, encoding="utf-8") as fh:
+                return fh.read()
+        except Exception:  # noqa: BLE001
+            return ""
     if not refresh and os.path.exists(cache) and (time.time() - os.path.getmtime(cache)) < ttl:
         try:
             with open(cache, encoding="utf-8") as fh:
@@ -203,7 +221,7 @@ def _fetch_text(url: str, cache_name: str, refresh: bool, ttl: float | None = No
         return ""
 
 
-def sud_scores(refresh: bool = False) -> dict[str, dict]:
+def sud_scores(refresh: bool | str = False) -> dict[str, dict]:
     """``package → {"uas":float,"las":float}`` parsed from the SUD README scores table
     (``| `pkg` | Lang | UAS | LAS | … |``).  Empty on failure."""
     out: dict[str, dict] = {}
@@ -222,7 +240,7 @@ def sud_scores(refresh: bool = False) -> dict[str, dict]:
     return out
 
 
-def stanza_scores(refresh: bool = False) -> dict[tuple, dict]:
+def stanza_scores(refresh: bool | str = False) -> dict[tuple, dict]:
     """``(lcode, treebank_lower) → {"uas","las"}`` from the Stanza performance page.  The table
     uses unclosed HTML5 ``<td>``/``<tr>``; per data row cell[1]=Treebank, cell[2]=lcode,
     cell[12]=UAS, cell[13]=LAS.  Empty on failure."""
@@ -262,7 +280,7 @@ _UD_TRAIN_RE = re.compile(r"<train>.*?<sentences>\s*(\d+)\s*</sentences>", re.S)
 _SUD_TB_RE = re.compile(r"SUD_([A-Za-z_]+)-([A-Za-z0-9]+)")
 
 
-def ud_treebanks(refresh: bool = False) -> dict[str, str]:
+def ud_treebanks(refresh: bool | str = False) -> dict[str, str]:
     """``<lcode>_<treebank>`` → GitHub repo name (``UD_English-EWT``) for every UD treebank.
 
     Parsed from the UD home page, whose per-treebank accordion entries are delimited by
@@ -278,7 +296,7 @@ def ud_treebanks(refresh: bool = False) -> dict[str, str]:
     return out
 
 
-def _ud_repo_index(refresh: bool = False) -> dict[tuple, str]:
+def _ud_repo_index(refresh: bool | str = False) -> dict[tuple, str]:
     """``(language_name_lower, treebank_lower)`` → ``<lcode>_<treebank>``, so a treebank named the
     SUD way (``SUD_Classical_Chinese-Kyoto``) resolves to its UD code (``lzh_kyoto``)."""
     idx: dict[tuple, str] = {}
@@ -322,15 +340,15 @@ def _fetch_train_count(repo: str) -> int | None:
     return int(m.group(1)) if m else None
 
 
-def ud_train_sentences(codes, refresh: bool = False, fetch: bool = True) -> dict[str, int]:
+def ud_train_sentences(codes, refresh: bool | str = False, fetch: bool = True) -> dict[str, int]:
     """``<lcode>_<treebank>`` → train-split sentences, for the requested codes.
 
     Served from the on-disk cache; with ``fetch`` the missing ones are pulled from their repos'
     ``stats.xml`` in parallel and folded back into the cache.  ``fetch=False`` is the fast,
     network-free path used while building a model listing."""
-    counts = {} if refresh else _train_cache_load()
+    counts = {} if (refresh and refresh != CACHE_ONLY) else _train_cache_load()   # CACHE_ONLY is a "never fetch" marker, not a "discard the cache" one
     want = [c for c in dict.fromkeys(codes) if c and c not in counts]
-    if not want or not fetch:
+    if not want or not fetch or refresh == CACHE_ONLY:
         return {c: counts[c] for c in codes if c in counts}
     repos = ud_treebanks(refresh)
     todo = [(c, repos[c]) for c in want if c in repos]
@@ -344,7 +362,7 @@ def ud_train_sentences(codes, refresh: bool = False, fetch: bool = True) -> dict
     return {c: counts[c] for c in codes if c in counts}
 
 
-def sud_treebanks(refresh: bool = False) -> dict[str, list[tuple]]:
+def sud_treebanks(refresh: bool | str = False) -> dict[str, list[tuple]]:
     """``package`` → the ``(language_name_lower, treebank_lower)`` pairs it is trained on, read from
     the SUD README's "Available models" table (its Treebank column, e.g. ``SUD_Latin-ITTB+PROIEL+
     Perseus`` or ``SUD_Chinese-GSD + GSDSimp``).  Parenthesised notes are dropped, so the Classical
@@ -383,7 +401,7 @@ def _entry_treebank_codes(entry: dict, sud_map: dict, ud_idx: dict) -> list[str]
     return [f"{STANZA_UD_LANG.get(lang, lang)}_{tb}"]
 
 
-def annotate_train_sentences(entries: list[dict], refresh: bool = False, fetch: bool = True) -> None:
+def annotate_train_sentences(entries: list[dict], refresh: bool | str = False, fetch: bool = True) -> None:
     """Set ``train_sents`` (sentences the model was trained on) on each entry that resolves to one
     or more UD treebanks — the SUM of their train splits for the multi-treebank models.  Entries
     whose count isn't known yet are left untouched, so a caller can fill them in on a later pass."""
@@ -407,7 +425,7 @@ def annotate_train_sentences(entries: list[dict], refresh: bool = False, fetch: 
                 entry["train_sents"] = total
 
 
-def list_available(refresh: bool = False) -> list[dict]:
+def list_available(refresh: bool | str = False) -> list[dict]:
     """SUD models from GitHub Releases (highest version per package) + curated Stanza langs,
     each annotated with its UAS/LAS accuracy (re-fetched when ``refresh``)."""
     sud_sc = sud_scores(refresh)
@@ -531,6 +549,112 @@ def resolve_default_package(lang: str) -> str | None:
         if pkg.startswith(f"{lang}_sud_"):
             return pkg
     return None
+
+
+# ── which ONE model parses a given language (the Insert-text dialog's language picker) ───────
+# The picker names a language, not a model, so exactly one model per language has to be chosen for it.
+# The preference order is fixed, in DECREASING priority, and each clause is backed by a signal that is
+# really in the registry — nothing here is invented:
+#
+#   1. a SUD (spaCy) parser over a Stanza one — ``engine``, always known, and the app's own scheme
+#      (a Stanza model is UD and has to be grew-converted, which needs the optional OCaml backend).
+#   2. the SMALLER model — ``size``, the GitHub release asset's own byte length (list_available reads
+#      it off the asset record). This is the ONLY size signal that exists: Stanza's resources index
+#      publishes no per-model download size at all (see _stanza_models, where ``size`` is None by
+#      construction), so this clause can only ever order SUD against SUD — which is exactly where it
+#      is wanted, clause 1 having already separated the engines. An unknown size sorts LAST within its
+#      engine group (a model we can measure is preferred to one we can't).
+#   3. the model trained on MORE sentences — ``train_sents``, the summed train splits of the model's
+#      UD treebanks (annotate_train_sentences). Known only for what the treebank-size cache already
+#      holds, since this runs cache-only; unknown counts as 0, i.e. sorts last.
+#
+# Being a strict priority order, clause 3 only ever breaks a tie clause 2 left — which, comparing exact
+# byte counts, it almost never does. That is what "in order of decreasing priority" asks for; it is
+# recorded here so the near-deadness of clause 3 reads as intended rather than as a bug.
+def _preference_key(entry: dict) -> tuple:
+    """Sort key for the preference order above — ascending, so ``sorted(...)[0]`` is the best model."""
+    size = entry.get("size")
+    have_size = isinstance(size, (int, float)) and size > 0
+    return (0 if entry.get("engine") == "sud" else 1,
+            0 if have_size else 1, int(size) if have_size else 0,
+            -int(entry.get("train_sents") or 0),
+            entry.get("id") or "")                    # last resort: stable, so the pick never flickers
+
+
+def model_language(entry: dict) -> str:
+    """The CANONICAL (menu) language code of a model entry — a Stanza-specific code is normalised
+    (``zh-hans``/``zh-hant`` → ``zh``), so the two engines group under one language."""
+    code = (entry.get("lang") or "").lower()
+    if entry.get("engine") == "stanza":
+        code = STANZA_LANG_CODE.get(code, code)
+    return code
+
+
+def installed_by_language(refresh=CACHE_ONLY) -> dict[str, list[dict]]:
+    """Installed models grouped by canonical language code, each group ranked best-first.
+
+    ``list_installed`` builds its rows from the FILESYSTEM (an importlib scan + the Stanza model dirs),
+    so they carry no ``size`` and no ``train_sents`` — the ranking metadata comes from the available
+    listing, merged in by id. Cache-only by default (see :data:`CACHE_ONLY`): the caller is usually the
+    Insert-text window, opening on a bridge thread."""
+    try:
+        installed = list_installed()
+    except Exception:  # noqa: BLE001 — a picker with no languages beats a dialog that won't open
+        return {}
+    try:
+        meta = {e["id"]: e for e in list_available(refresh)}
+    except Exception:  # noqa: BLE001 — no metadata ⇒ the ranking falls back to clause 1 alone
+        meta = {}
+    groups: dict[str, list[dict]] = {}
+    for e in installed:
+        merged = dict(meta.get(e.get("id") or "") or {})            # size / train_sents / uas / las …
+        merged.update({k: v for k, v in e.items() if v not in (None, "")})   # …under the INSTALLED record, which is authoritative about what is actually there
+        code = model_language(merged)
+        if code:
+            groups.setdefault(code, []).append(merged)
+    for entries in groups.values():
+        entries.sort(key=_preference_key)
+    return groups
+
+
+def best_installed_model(lang: str, groups: dict | None = None) -> str:
+    """The model id the app should parse ``lang`` with, or ``""`` when nothing is installed for it.
+    Pass ``groups`` (an :func:`installed_by_language` result) to answer many languages off one scan."""
+    code = (lang or "").lower()
+    if not code:
+        return ""
+    if groups is None:
+        groups = installed_by_language()
+    entries = groups.get(code) or []
+    return (entries[0].get("id") or "") if entries else ""
+
+
+def language_choices(extra: dict | None = None) -> dict:
+    """The Insert-text dialog's language menu: ``{"installed": [...], "others": [...]}``.
+
+    ``installed`` is one row per language that HAS a parser — ``{code, name, model, label}``, the model
+    being :func:`best_installed_model`'s pick — and is what the dialog groups at the top. ``others`` is
+    every remaining language the app can name: :data:`LANG_NAMES` (every language either engine ships a
+    model for) plus ``extra`` (``code → name``), which is how a language the DOCUMENT already uses — a
+    translation language with no parser anywhere — still appears in the menu. There is no full ISO-639
+    table here on purpose: a menu of ~7900 rows is not a menu, and every language this app can actually
+    DO anything with is either one an engine covers or one the document already uses, which is exactly
+    the two sources above. (The dialog is an in-page sheet now and could reach the frontend's own
+    ``iso639-3.js``; the list is deliberately unchanged — it is a parser menu, not a language census.)"""
+    groups = installed_by_language()
+    inst = []
+    for code, entries in groups.items():
+        best = entries[0]
+        inst.append({"code": code, "name": _lang_name(code),
+                     "model": best.get("id") or "", "label": best.get("label") or best.get("id") or ""})
+    inst.sort(key=lambda r: r["name"].lower())
+    names = dict(LANG_NAMES)
+    for code, name in (extra or {}).items():
+        if code and code not in names:
+            names[str(code)] = str(name or code)
+    others = [{"code": c, "name": n} for c, n in names.items() if c not in groups]
+    others.sort(key=lambda r: r["name"].lower())
+    return {"installed": inst, "others": others}
 
 
 # ── download / remove ────────────────────────────────────────────────────────
