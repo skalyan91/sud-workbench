@@ -54,6 +54,12 @@ _DATA_DIR = Path(__file__).parent / "data"
 # a well-formed gloss-map key is a single "Feature=Value" pair (no separators/whitespace either side of "=")
 _FEAT_KEY_RE = re.compile(r"^[^=\s|]+=[^=\s|]+$")
 
+# A PARAGRAPH break: two or more newlines, each optionally trailed by horizontal whitespace (an invisible
+# stray space on an "empty" line must not defeat the break). The exact rule js/io/bridge.js's
+# splitParagraphs applies to the main text — restated here because the parallel texts are split on THIS
+# side (see Api._sentencize_parallel), and the two have to agree or the two texts stop lining up.
+_PARA_SPLIT = re.compile(r"\n[ \t]*(?:\n[ \t]*)+")
+
 
 def _load_json_file(name: str) -> dict:
     """Read one of the bundled ``app/data`` JSON files; {} on any error."""
@@ -114,15 +120,16 @@ class Api:
         self._dialog_lock = threading.Lock()
         self._menu: dict | None = None     # title → NSMenuItem, for the conditional token-action items (set at menu wiring)
         self._recent_menu_refresh = None   # callable set by __main__ to live-rebuild the Open Recent submenu
-        # secondary NATIVE windows (Help / About / Model Manager / Insert), keyed by name. Kept referenced so
-        # pywebview's Window objects aren't garbage-collected while open (item 23). Created off the bridge thread.
+        # secondary NATIVE windows (Help / About / Model Manager / Toolbox / Gloss Mappings), keyed by name.
+        # Kept referenced so pywebview's Window objects aren't garbage-collected while open (item 23).
+        # Created off the bridge thread.  Insert Text is NOT among them any more — it is an in-page sheet
+        # (sheetInsert in web/js/ui/sheets.js), so its index travels in child_insert_text's own payload
+        # instead of being parked on self between "open the window" and "the window submitted".
         self._child_windows: dict[str, Any] = {}
-        self._insert_index: int | None = None   # where the Insert-text window's result should land (None ⇒ append)
-        # The document's language, as the frontend last reported it (set_doc_language).  Only the
-        # CHILD windows need it: every other bridge method is called from the main window, which
-        # passes its own DOCLANG in the call.  The Insert-text window is a separate native window
-        # with its own web view and no access to that global, so the ITRANS conversion it runs on
-        # submit (child_insert_text) has to read the language from here.
+        # The document's language, as the frontend last reported it (set_doc_language).  A FALLBACK only:
+        # every caller in the main window passes its own DOCLANG in the call (the Insert sheet included),
+        # but a child window is its own web view with no access to that global, and itrans_to_iast is
+        # reachable from one — so the last-reported language stands in when a call names none.
         self._doclang: str = ""
 
     # ── lifecycle ────────────────────────────────────────────────────────────
@@ -695,8 +702,8 @@ class Api:
 
     def set_doc_language(self, lang: str = "") -> dict:
         """The frontend reports the document's language whenever it changes (js/lang/translit.js's
-        loadTranslitSchemes, which setLang already calls on every change).  Recorded ONLY for the
-        child windows — see ``self._doclang``'s own note on why they can't pass it themselves."""
+        loadTranslitSchemes, which setLang already calls on every change).  Recorded as the FALLBACK
+        for a call that names no language — see ``self._doclang``'s own note."""
         self._doclang = str(lang or "")
         return {"ok": True}
 
@@ -708,8 +715,8 @@ class Api:
         Returns ``{"converted", "changed"}``.  A non-Sanskrit ``lang``, a word with no ITRANS-only
         spelling in it, or a missing aksharamukha all come back unchanged rather than raising — the
         caller can commit the result unconditionally.  ``lang`` empty ⇒ the language the frontend last
-        reported (set_doc_language), which is what the Insert-text child window relies on; with neither
-        known the answer is "not Sanskrit" — an unknown language must leave the text as typed, never
+        reported (set_doc_language), which is what a caller with no DOCLANG of its own falls back on;
+        with neither known the answer is "not Sanskrit" — an unknown language must leave the text as typed, never
         guess Sanskrit and rewrite it."""
         return itrans.convert(text or "", lang or self._doclang or "und")
 
@@ -818,8 +825,10 @@ class Api:
         Import/Export UD and Convert actions instead of failing on click."""
         return convert.available()
 
-    def import_ud(self) -> dict:
-        """Native open → detect format → convert to the app's native SUD."""
+    def import_ud(self, lang: str | None = None) -> dict:
+        """Native open → detect format → convert to the app's native SUD.  ``lang`` (the
+        frontend's DOCLANG) picks a language-specific grammar over the universal one when
+        one is vendored for this (language, direction) pair — see app/convert.py."""
         result = self._modal_dialog(
             webview.FileDialog.OPEN, allow_multiple=False,
             file_types=("CoNLL U treebank (*.conllu;*.conll)", "All files (*.*)"),
@@ -833,7 +842,7 @@ class Api:
             return {"error": str(exc)}
         src = detect.detect_format(sentences)
         try:
-            sentences = convert.to_sud(sentences, src)
+            sentences = convert.to_sud(sentences, src, lang)
         except convert.ConversionUnavailable as exc:
             return {"error": str(exc), "unavailable": True}
         except convert.ConversionError as exc:
@@ -888,11 +897,13 @@ class Api:
         name = os.path.splitext(os.path.basename(self.path))[0] + "_UD" if self.path else "treebank_UD"
         return {"name": name}
 
-    def export_ud_to(self, sentences: list[dict], folder: str, filename: str) -> dict:
+    def export_ud_to(self, sentences: list[dict], folder: str, filename: str,
+                      lang: str | None = None) -> dict:
         """Convert the live document (SUD or mSUD) to UD and write it to folder/filename — no
-        native dialog; backs the in-page Export as UD sheet (the same Save-As sheet as elsewhere)."""
+        native dialog; backs the in-page Export as UD sheet (the same Save-As sheet as elsewhere).
+        ``lang`` picks a language-specific grammar over the universal one, see import_ud."""
         try:
-            ud = convert.to_ud(sentences, self.format)
+            ud = convert.to_ud(sentences, self.format, lang)
         except convert.ConversionUnavailable as exc:
             return {"error": str(exc), "unavailable": True}
         except convert.ConversionError as exc:
@@ -907,11 +918,12 @@ class Api:
             return {"error": str(exc)}
         return {"ok": True, "path": out, "name": os.path.basename(out)}
 
-    def convert_format(self, sentences: list[dict], target: str) -> dict:
-        """Convert the live document to an editable target format (SUD or mSUD)."""
+    def convert_format(self, sentences: list[dict], target: str, lang: str | None = None) -> dict:
+        """Convert the live document to an editable target format (SUD or mSUD).  ``lang``
+        picks a language-specific grammar over the universal one, see import_ud."""
         try:
             if target == "SUD":
-                out = convert.to_sud(sentences, self.format)
+                out = convert.to_sud(sentences, self.format, lang)
             elif target == "mSUD":
                 out = convert.sud_to_msud(sentences)
             else:
@@ -1058,11 +1070,11 @@ class Api:
         return {"job_id": job_id}
 
     # ── secondary native windows (item 23) ────────────────────────────────────
-    # Help / About / Model Manager / Insert are REAL windows (not in-page scrim sheets).
+    # Help / About / Model Manager / Toolbox / Gloss Mappings are REAL windows (not in-page scrim sheets).
     # pywebview requires create_window off the AppKit main thread; every bridge call already
     # runs on its own thread, but we still spawn a worker so the caller returns immediately
     # and a prior window of the same key is torn down first.  The shared ``self`` is passed as
-    # ``js_api`` so the interactive windows (Models/Insert) can call back into the bridge; the
+    # ``js_api`` so the interactive windows (Models/Toolbox/Gloss Mappings) can call back into the bridge; the
     # returned Window is retained in ``self._child_windows`` so it isn't garbage-collected.
     def _open_window(self, key: str, title: str, html: str,
                      width: int, height: int, min_size: tuple = (360, 260)) -> dict:
@@ -1095,8 +1107,7 @@ class Api:
             threading.Thread(target=lambda: self._destroy_quiet(win), daemon=True).start()
 
     def close_all_child_windows(self) -> dict:
-        """Tear down every secondary window (Help / About / Models / Insert / Toolbox / Gloss
-        Mappings) at once.
+        """Tear down every secondary window (Help / About / Models / Toolbox / Gloss Mappings) at once.
 
         Wired to the MAIN window's ``closed`` event: pywebview's run loop lives as long as ANY
         window is open, so a child left behind after the document window goes keeps the app
@@ -1148,19 +1159,9 @@ class Api:
         return self._open_window("glossmap", "Gloss Mappings",
                                  self._glossmap_html(), 560, 600, (440, 420))
 
-    def open_insert_window(self, index=None, model_label: str = "") -> dict:
-        """Open the Insert-text window (items 23/24).  ``index`` (None ⇒ append) is where the
-        resulting sentence blocks land in the main document."""
-        try:
-            self._insert_index = None if index is None else int(index)
-        except (TypeError, ValueError):
-            self._insert_index = None
-        return self._open_window("insert", "Insert Text",
-                                 self._insert_html(model_label or ""), 540, 440, (380, 320))
-
     def open_toolbox_window(self, probe: dict) -> dict:
         """Open the Toolbox field-mapping window (item 21): a SEPARATE native window (mirrors
-        open_insert_window), not an in-page modal.  ``probe`` is the import_toolbox result
+        the Model Manager), not an in-page modal.  ``probe`` is the import_toolbox result
         (path, record_marker, markers, …); Import wires the built document back to the main
         window via child_toolbox_build."""
         # item 7: 440 was too short and clipped the "Token-level fields" section; opened taller (540) so a
@@ -1186,23 +1187,162 @@ class Api:
         self._close_child(str(key or ""))
         return {"ok": True}
 
-    def child_insert_text(self, text: str) -> dict:
-        """Insert-text window → sentencise ``text`` on the MAIN window and add one block per
-        sentence, then close the Insert window (items 23/24)."""
+    def insert_languages(self, extra=None) -> dict:
+        """The Insert sheet's language menu — ``{"installed": [...], "others": [...]}``.
+
+        ``models_registry.language_choices`` made public for the sheet (it was read in-process by
+        ``_insert_html`` when the dialog was a Python-generated child window).  ``extra`` is
+        ``code → name`` for languages the DOCUMENT uses that no engine has a model for — its enabled
+        translation tiers — so those still appear in the menu.
+
+        SLOW (it walks the venv's distribution metadata), which is why the sheet opens first and calls
+        this after: on the frontend a bridge call is a promise, so the dialog is on screen and usable
+        while the language list is still resolving.  Never raises — an empty menu is a poor dialog, a
+        raised one is no dialog."""
+        pairs = {str(k): str(v or k) for k, v in extra.items()} if isinstance(extra, dict) else {}
+        try:
+            return models_registry.language_choices(pairs)
+        except Exception as exc:  # noqa: BLE001
+            print(f"[insert] language list: {exc}", file=sys.stderr)
+            return {"installed": [], "others": []}
+
+    def child_insert_text(self, text) -> dict:
+        """The Insert sheet's submit → sentencise the parallel texts here and hand the whole result to
+        the MAIN window, which adds one block per sentence (items 23/24 + the parallel texts, item 7).
+
+        Named ``child_…`` because it was the Insert child WINDOW's callback; the dialog is an in-page
+        sheet now (sheetInsert in web/js/ui/sheets.js) and this is unchanged apart from where the
+        insertion index comes from — the sheet puts it in the payload, where the window relied on the
+        ``self._insert_index`` its opener had parked.
+
+        ``text`` is either a plain string (one main text, nothing else — the shape every caller had
+        before the dialog grew, still accepted so a one-string call keeps working) or the payload
+
+            {"index", "main": {"enabled", "lang", "text", "adoptLang"}, "parallels": [{"lang", "text"}, …]}
+
+        The MAIN text stays a string all the way to the frontend, because the frontend owns the
+        paragraph/heading structure inside it (splitParagraphs / paragraphsWithIds in js/io/bridge.js)
+        and that structure has to survive to `# newpar` / `# newdoc`. A PARALLEL text has no such
+        structure to keep — its sentences only have to line up one-for-one with the inserted blocks —
+        so it is sentencised HERE, where each language's own installed pipeline can be picked (see
+        _sentencize_parallel)."""
         main = self.window
+        payload = text if isinstance(text, dict) else {"main": {"enabled": True, "text": text or ""}}
+        _main = payload.get("main")   # bound once: two separate .get() calls read as "may be None" to a type checker even behind the isinstance guard, and this is the value four lines below dereference
+        m: dict = _main if isinstance(_main, dict) else {}
+        main_on = bool(m.get("enabled", True))
+        # The language the MAIN text is in: what the dialog's picker chose (an empty document), else the
+        # document's own language as the frontend last reported it (set_doc_language). This is also the
+        # language the document ADOPTS — see __applyInsertPayload on the other side.
+        main_lang = str(m.get("lang") or "").strip() or self._doclang or ""
         # ITRANS → IAST BEFORE the text crosses to the main window, which is where it is sentencised,
         # tokenised and parsed: the tokeniser (and any Sanskrit model behind it) must see the notation
         # the document is stored in, and a re-conversion after tokenisation would have to be applied
         # to every token separately and could no longer see the word boundaries the typist wrote.
         # A no-op for every non-Sanskrit document — see itrans_to_iast.
-        text = itrans.convert(text or "", self._doclang or "und")["converted"]
-        if main is not None and (text or "").strip():
-            idx = self._insert_index
-            js = "window.__insertPastedText && window.__insertPastedText(%s, %s)" % (
-                json.dumps(text), "null" if idx is None else json.dumps(int(idx)))
-            threading.Thread(target=lambda: self._eval_quiet(main, js), daemon=True).start()
-        self._close_child("insert")
-        return {"ok": True}
+        main_text = itrans.convert(str(m.get("text") or ""), main_lang or "und")["converted"] if main_on else ""
+
+        raw_pars = [p for p in (payload.get("parallels") or []) if isinstance(p, dict)]
+        try:                          # where the new blocks land; None (or unusable) ⇒ append, which is
+            _i = payload.get("index")  # what __insertPastedText does with a null index on the other side
+            idx = None if _i is None else int(_i)
+        except (TypeError, ValueError):
+            idx = None
+        adopt = bool(m.get("adoptLang"))   # the dialog owned the language choice ⇒ the document takes it
+
+        # Everything past this point is SLOW — resolving what is installed walks the venv's distribution
+        # metadata (~1 s), and sentencising a parallel text may load that language's whole pipeline (a
+        # cold Stanza load is seconds). Doing it on the bridge thread left the dialog on screen, inert,
+        # for the duration; on a worker the sheet closes on the click and the sentences land a moment
+        # later. Same shape as the _eval_quiet dispatch it replaces — a short-lived daemon thread that
+        # only ever calls evaluate_js on the MAIN window (never the AppKit main thread, per the module's
+        # threading invariants), which is still true now that the caller is that main window itself.
+        def worker():
+            parallels: list[dict] = []
+            naive: list[str] = []   # languages split by the rule-based splitter (no pipeline installed)
+            seen: set[str] = set()
+            # ONE scan of what's installed for the whole submit, shared by every language below.
+            groups = self._installed_groups()
+            for p in raw_pars:
+                lang = str(p.get("lang") or "").strip()
+                raw = str(p.get("text") or "")
+                if not lang or lang in seen or not raw.strip():
+                    continue
+                seen.add(lang)
+                # Each parallel text is ITRANS-converted in ITS OWN language, not the document's: a
+                # Sanskrit translation of an English text is still typed in ITRANS, and an English
+                # translation of a Sanskrit text must not be rewritten as if it were Sanskrit.
+                raw = itrans.convert(raw, lang)["converted"]
+                model_id = self._model_for_language(lang, groups)
+                sents = self._sentencize_parallel(raw, lang, model_id)
+                if sents:
+                    if not model_id:
+                        naive.append(lang)
+                    parallels.append({"lang": lang, "sents": sents})
+            if not ((main_on and main_text.strip()) or parallels):
+                return                                    # nothing survived validation — nothing to send
+            data = {
+                "index": idx,
+                "main": {"enabled": bool(main_on and main_text.strip()), "lang": main_lang,
+                         "text": main_text,
+                         # the parser the main text should be read with — only consulted when the
+                         # document was EMPTY and this dialog chose its language (see best_installed_model)
+                         "model": self._model_for_language(main_lang, groups) if main_on else ""},
+                "parallels": parallels, "adoptLang": adopt, "naive": naive,
+            }
+            self._eval_quiet(main, "window.__applyInsertPayload && window.__applyInsertPayload(%s)"
+                             % json.dumps(data))
+
+        if main is not None:
+            threading.Thread(target=worker, daemon=True).start()
+        return {"ok": True}   # the sheet has already closed itself on the click — nothing to tear down here
+
+    @staticmethod
+    def _installed_groups() -> dict:
+        """``{language code: installed models, best first}`` — one scan, shared by every language a
+        submit mentions. Cache-only and never raising: an empty map just means "no model anywhere",
+        which each caller degrades to the rule-based splitter."""
+        try:
+            return models_registry.installed_by_language()
+        except Exception as exc:  # noqa: BLE001 — a missing model is a degraded feature, not an error
+            print(f"[insert] installed models: {exc}", file=sys.stderr)
+            return {}
+
+    @staticmethod
+    def _model_for_language(lang: str, groups: dict | None = None) -> str:
+        """The installed parser this app would use for ``lang`` (``""`` when there is none), per the
+        preference order documented at models_registry._preference_key. Never raises."""
+        if not lang:
+            return ""
+        try:
+            return models_registry.best_installed_model(lang, groups)
+        except Exception as exc:  # noqa: BLE001
+            print(f"[insert] model lookup for {lang!r}: {exc}", file=sys.stderr)
+            return ""
+
+    @staticmethod
+    def _sentencize_parallel(text: str, lang: str, model_id: str) -> list[str]:
+        """A parallel text → its sentences, in order, using ``lang``'s own installed pipeline when
+        there is one and the script-aware rule splitter when there isn't (parse.sentencize already
+        degrades that way, so a missing model is never an exception).
+
+        PARAGRAPH-SPLIT FIRST, for the reason js/io/bridge.js records at splitParagraphs: parse.sentencize
+        strips its input and returns whitespace-stripped slices, so a text handed to it whole comes back
+        with every blank line gone — and a paragraph break is a hard sentence boundary no model should be
+        free to cross anyway. The main text is split the same way on the frontend, so a parallel text laid
+        out in the same paragraphs stays aligned with it sentence for sentence."""
+        out: list[str] = []
+        for para in _PARA_SPLIT.split((text or "").replace("\r\n", "\n").replace("\r", "\n")):
+            para = para.strip()
+            if not para:
+                continue
+            try:
+                segs = parse.sentencize(para, lang, model_id)
+            except Exception as exc:  # noqa: BLE001 — never let one paragraph lose the whole translation
+                print(f"[insert] sentencize {lang!r}: {exc}", file=sys.stderr)
+                segs = []
+            out.extend(segs or [para])
+        return out
 
     def child_toolbox_build(self, path: str, mapping: dict) -> dict:
         """Toolbox window → build CoNLL-U from the chosen field mapping, load it into the MAIN
@@ -1313,7 +1453,7 @@ class Api:
         except Exception as exc:  # noqa: BLE001
             print(f"[window] evaluate_js: {exc}", file=sys.stderr)
 
-    # ── generated HTML for the Python-built windows (About / Models / Insert) ──
+    # ── generated HTML for the Python-built windows (About / Models / Toolbox / Gloss Mappings) ──
     @staticmethod
     def _confirm_js() -> str:
         """`askConfirm(msg, okLabel, danger) -> Promise<bool>` for the child windows.
@@ -1365,7 +1505,7 @@ class Api:
     h1,h2,h3,h4{margin:0}
     /* one SHARED bottom-action-button style across every dialog window (item 24): same 30px height + 13px font.
        Rounded RECTANGLE, not a capsule — these are all separate-window content dialogs (Manage Models, Gloss
-       Mappings, Insert Text, Import Toolbox, About, Help), the same "sheet" kind as the in-page Settings/Save
+       Mappings, Import Toolbox, About, Help), the same "sheet" kind as the in-page Settings/Save/Insert Text
        As sheets, which use an 8px rect; only a small plain ALERT (a 2-3-button "are you sure?" prompt with no
        other content) gets the fully-rounded pill — see the macos-26-design skill for the alert-vs-sheet split. */
     button{font-family:inherit;font-size:13px;font-weight:590;height:30px;min-width:76px;padding:0 15px;
@@ -1452,51 +1592,6 @@ class Api:
     <div class="ver">Version """ + v + """</div>
     <button onclick="window.pywebview.api.close_child_window('about')">Close</button>
     <script>document.addEventListener('keydown',function(e){if(e.key==='Escape'){e.preventDefault();try{window.pywebview.api.close_child_window('about');}catch(_){}}});</script>
-    </body></html>""")
-
-    def _insert_html(self, model_label: str) -> str:
-        hint = (("Model <b>" + _esc(model_label) + "</b> is selected; its tokeniser splits each "
-                 "sentence and fills in the parse.") if model_label else
-                "No model selected; each sentence is split on whitespace for manual annotation.")
-        # Sanskrit is STORED as IAST but typed as ITRANS, and child_insert_text converts on submit.
-        # Say so here: a silent rewrite of what someone just typed is alarming when it is unannounced,
-        # and this is the one field where a whole paragraph is committed in a single gesture.
-        if itrans.is_sanskrit(self._doclang):
-            hint += (" Sanskrit typed in <b>ITRANS</b> (kRiShNa, raamaayaNa, ^a for â) becomes IAST; "
-                     "text already in IAST is left as it is.")
-        return (
-            "<!DOCTYPE html><html><head><meta charset=\"utf-8\"><style>" + self._base_css() + """
-    body{display:flex;flex-direction:column;padding:18px}
-    .hint{font-size:12.5px;color:var(--muted);margin:0 0 13px;line-height:1.45}
-    label.fld{font-size:13px;color:var(--muted);font-weight:600;display:flex;flex-direction:column;gap:6px;flex:1}
-    textarea{resize:none;flex:1;min-height:120px}
-    .actions{display:flex;justify-content:flex-end;gap:8px;margin-top:14px}
-    </style></head><body>
-    <!-- item 11: say what a blank line does. The paragraph split happens on the MAIN window
-         (__insertPastedText), so nothing here may strip blank lines — go() below trims the edges
-         only, and json.dumps + itrans.to_iast both carry the interior whitespace through verbatim. -->
-    <div class="hint">""" + hint + """ Paste one or more sentences; they are split into separate blocks, and a blank line starts a new paragraph.</div>
-    <label class="fld">Text
-      <textarea id="ta" placeholder="The committee approved the proposal after a long debate. It will take effect next week."
-        spellcheck="false" autocorrect="off" autocapitalize="off" autocomplete="off"></textarea>
-    </label>
-    <div class="actions">
-      <button class="sec" id="cancel">Cancel</button>
-      <button id="go">Insert</button>
-    </div>
-    <script>
-    var ta=document.getElementById('ta');
-    function api(){return window.pywebview&&window.pywebview.api;}
-    function cancel(){try{api().close_child_window('insert');}catch(_){}}
-    function go(){var t=(ta.value||'').trim(); if(!t){cancel();return;} try{api().child_insert_text(t);}catch(_){}}
-    document.getElementById('cancel').onclick=cancel;
-    document.getElementById('go').onclick=go;
-    document.addEventListener('keydown',function(e){
-      if(e.key==='Escape'){e.preventDefault();cancel();}
-      else if((e.metaKey||e.ctrlKey)&&e.key==='Enter'){e.preventDefault();go();}});
-    window.addEventListener('pywebviewready',function(){ta.focus();});
-    setTimeout(function(){ta.focus();},60);
-    </script>
     </body></html>""")
 
     def _models_html(self) -> str:

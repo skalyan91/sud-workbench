@@ -607,7 +607,18 @@
   :hover::-webkit-scrollbar-thumb{border-width:4px; transition-delay:400ms,0s}
   ::-webkit-scrollbar-thumb:hover{background:var(--label-secondary); background-clip:content-box}
   ::-webkit-scrollbar-corner{background:transparent}
-  html[data-platform="win"] .doc::-webkit-scrollbar{width:8px; background:transparent}
+  /* --sbw IS THE ONE WIDTH, and it has to be redeclared here. styles/app.css sets `:root{--sbw:11px}`
+     for the macOS classic scrollbar and then spends it in three places — `.doc`'s own
+     padding-inline-start, this scrollbar's width, and `.doc.paged`'s inline padding — so that the
+     measure stays optically centred against a scrollbar that eats real content-box width. Overriding
+     only the SCROLLBAR here would have left the other two consumers reserving 11px of gutter for an
+     8px bar, i.e. the paged measure sitting ~3px off-centre on Windows for no visible reason.
+     `html[data-platform="win"]` is (0,1,1) against `:root`'s (0,1,0), so this wins on specificity and
+     not on file order — app.css still loads last. 8px is the RESTING width: the hover expansion to
+     12px deliberately does not move it, because the extra 4px is the conveyor growing over the
+     content the way Windows draws it, not a wider gutter to reserve. */
+  html[data-platform="win"]{--sbw:8px}
+  html[data-platform="win"] .doc::-webkit-scrollbar{width:var(--sbw); background:transparent}
   html[data-platform="win"] .doc::-webkit-scrollbar-track{background:transparent; margin-top:calc(var(--tbH,32px) + var(--vbH,0px))}
   html[data-platform="win"] .doc::-webkit-scrollbar-thumb{background:var(--strong-stroke); border-radius:8px;
     border:3px solid transparent; background-clip:content-box;

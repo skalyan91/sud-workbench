@@ -251,7 +251,7 @@ function deepVocabFor(rel){ const vocab=[...new Set([...(DEEP_BY_REL[rel]||[]),.
 // the deep-feature submenu for relation D on this token: "(none)" (the bare relation) + the admissible features + a free-text add.
 function deepSubItems(si,tokId,D,feats){ const s=DOC[si], dep=s&&s.tokens[tokId-1]; if(!dep) return [];
   const isThis=depBase(dep.deprel)===D, cur=isThis?depDeep(dep.deprel):null;   // a checkmark only when this row IS the token's current relation
-  const setDF=f=>{ closeCtx(); const nd=f?D+"@"+f:D; if(nd!==dep.deprel){ pushUndo(); dep.deprel=nd; afterDeprelEdit(dep,s); markDirty(); preserveScroll(renderDoc); } };   // Task B: no regenTok — a deep-feature/relation edit is structural and must never trigger a gloss/MGloss recompute
+  const setDF=f=>{ closeCtx(); const nd=f?D+"@"+f:D; if(nd!==dep.deprel){ pushUndo(si); dep.deprel=nd; afterDeprelEdit(dep,s); markDirty(); preserveScroll(renderDoc); } };   // Task B: no regenTok — a deep-feature/relation edit is structural and must never trigger a gloss/MGloss recompute
   const items=[{header:(deprelExpand(D)||D)+" · deep"}];   // no "(none)" row — clicking the relation itself (in the parent menu) is what clears the deep feature
   const allFeats0=[...new Set([...feats,...DEEP_UNIVERSAL])];   // scrap is always offered, on top of whatever taxonomy/file-usage feats already carries
   // standard (DEEP_OFFICIAL) features keep their taxonomy order; non-standard ones (corpus-specific, picked up
@@ -273,7 +273,7 @@ function relMenu(x,y,si,tokId){ const s=DOC[si]; if(!s)return; const dep=s.token
   DOC.forEach(s2=>s2.tokens.forEach(t=>{ const b=depBase(t.deprel), f=depDeep(t.deprel); if(f){ (dfMap[b]=dfMap[b]||[]); if(!dfMap[b].includes(f))dfMap[b].push(f); } }));
   const subFor=r=>()=>deepSubItems(si,tokId,r,dfMap[r]||[]);   // EVERY relation gets a right-click deep-feature submenu (its taxonomy ∪ file features, or just an add-field)
   const choose=d=>{ if(d==="root"&&rb!=="root"){ setAsRoot(si,tokId); return; }   // not yet root → the FULL re-attach (migrates the old root's dependents, demotes it to udep), not a naive head=0 flip
-    if(d!==dep.deprel){ pushUndo(); dep.deprel=d; afterDeprelEdit(dep,s); markDirty(); preserveScroll(renderDoc); } };   // left-click sets the BARE relation — so clicking the current relation drops its @feature (= "(none)"); a feature is set via the row's submenu. Task B: no regenTok — structural, must never trigger a gloss/MGloss recompute
+    if(d!==dep.deprel){ pushUndo(si); dep.deprel=d; afterDeprelEdit(dep,s); markDirty(); preserveScroll(renderDoc); } };   // left-click sets the BARE relation — so clicking the current relation drops its @feature (= "(none)"); a feature is set via the row's submenu. Task B: no regenTok — structural, must never trigger a gloss/MGloss recompute
   optionMenu(x,y,cands,deprelMenuGroups(cands),deprelExpand,depBase(dep.deprel),choose,guide,sentRTL(s),subFor); }   // deprelMenuGroups interleaves any user-added relation into its own family/Other — no separate "Custom" heading needed
 // right-click a POS tag → pick a POS (all shown, grouped by class)
 /* item 4 — the UD LEXICAL features: the ones that subcategorise the UPOS itself (a SUBTYPE of the tag) rather
@@ -305,7 +305,7 @@ function shortVDesc(s){ s=cleanVDesc(s); const m=s.split(/\s*[\/(,;]/)[0]; retur
 function posSubItems(si,tokId,U){ const s=DOC[si], t=s&&s.tokens[tokId-1]; if(!t) return null;
   const feats=subtypeFeatsFor(U); if(!feats.length) return null;
   const curOf=f=>t.upos===U?(getFeat(t.feats,f)||""):"";
-  const setSub=(f,v)=>{ closeCtx(); const before=t.feats; pushUndo();
+  const setSub=(f,v)=>{ closeCtx(); const before=t.feats; pushUndo(si);
     if(t.upos!==U){ t.upos=U; if(XPOS_MIRRORS_UPOS)t.xpos=U; clearSubjIfNotVA(t); }   // item 1: a tag change away from VERB/AUX drops any now-meaningless Subj
     feats.forEach(o=>{ if(o!==f) t.feats=clearFeat(t.feats,o); });   // one subtype at a time — picking PRON.Dem drops a stale PRON.Int rather than leaving the token claiming both
     t.feats=(f&&v)?setFeat(t.feats,f,v):t.feats;
@@ -324,7 +324,7 @@ function posMenu(x,y,si,tokId,opts){ opts=opts||{}; const s=DOC[si]; if(!s)retur
   if(opts.ext){
     const target=extPosTarget(si,tokId), t=s.tokens[target-1]; if(!t)return;
     const cur=extPosOf(t), sp=subtreeSpan(s,target);
-    const choose=P=>{ const nv=(P===cur)?"":P; const before=t.feats; pushUndo();   // re-picking the current tag clears ExtPos (toggle) — the menu's way to remove it
+    const choose=P=>{ const nv=(P===cur)?"":P; const before=t.feats; pushUndo(si);   // re-picking the current tag clears ExtPos (toggle) — the menu's way to remove it
       t.feats=nv?setFeat(t.feats,"ExtPos",nv):clearFeat(t.feats,"ExtPos");
       featsSyncGloss(t,before); markDirty(); preserveScroll(renderDoc); };   // items 3/10: feature edit only, re-renders at once, no reparse
     const guide=[`Open the guidelines for the “ExtPos” feature`,"↗",()=>openExternal(featGuideUrl("ExtPos"))];
@@ -336,7 +336,7 @@ function posMenu(x,y,si,tokId,opts){ opts=opts||{}; const s=DOC[si]; if(!s)retur
   const subFor=U=>()=>posSubItems(si,tokId,U);   // item 4: every tag gets a right-click submenu of its own dot-suffixed subtypes
   const choose=p=>{ const posChanged=p!==tok.upos, hadSub=UPOS_SUBTYPE_FEATS.some(f=>getFeat(tok.feats,f));
     if(!posChanged&&!hadSub) return;   // same tag, no subtype to drop → nothing to do
-    const before=tok.feats, oldUpos=tok.upos; pushUndo(); tok.upos=p; if(XPOS_MIRRORS_UPOS)tok.xpos=p; clearSubjIfNotVA(tok);   // item 1: a tag change away from VERB/AUX drops any now-meaningless Subj
+    const before=tok.feats, oldUpos=tok.upos; pushUndo(si); tok.upos=p; if(XPOS_MIRRORS_UPOS)tok.xpos=p; clearSubjIfNotVA(tok);   // item 1: a tag change away from VERB/AUX drops any now-meaningless Subj
     UPOS_SUBTYPE_FEATS.forEach(f=>tok.feats=clearFeat(tok.feats,f));   // item 6: selecting a PLAIN tag clears any dot-suffixed subtype
     featsSyncGloss(tok,before);
     if(posChanged) uposSyncGloss(tok,oldUpos);   // Task B: retarget the closed-class gloss prefix IN PLACE, immediately — never a wholesale MGloss rebuild (see uposSyncGloss's own note, js/io/bridge.js)
@@ -472,7 +472,7 @@ function applyWiktionaryDef(si,tokId,text,genderUd,genderAbbr){ const s=DOC[si],
   // about this token, so it settles the question either way rather than leaving a stale answer standing.
   const bare=isUninflectedForm(t.feats);   // read BEFORE anything below edits FEATS
   if(bare){ genderUd=""; genderAbbr=""; }
-  pushUndo(); const enc=glossEnc(text);
+  pushUndo(si); const enc=glossEnc(text);
   if(UPOS_LEIPZIG_ABBR[t.upos]){   // a closed-class UPOS that already carries its OWN standard Leipzig abbreviation (AUX/DET, prepended to MGloss by featsToGloss) — Wiktionary's lexical definition goes to the Gloss tier instead, unconditionally (like the MGloss write below, not gated on GLOSS_ON being toggled on), never into MGloss
     t.misc=setMiscKV(t.misc,"Gloss",enc.replace(/\s+/g,"-"));
     markDirty(); preserveScroll(renderDoc); return; }
@@ -559,7 +559,7 @@ document.getElementById("doc").addEventListener("contextmenu",e=>{
     // Both rows of a tie open the SAME menu, and "Edit surface form" stays coherent under a Sanskrit script
     // because editMWTInline (not this row) decides which element the field opens over — the IAST row when the
     // glyph is derived, the glyph itself otherwise. So the menu item edits whatever the left-click would.
-    showCtx(e.clientX,e.clientY,[["Edit surface form","⏎",()=>editMWTInline(si,from)],["Remove MWT","⌫",()=>{ const s=DOC[si]; if(s){ pushUndo(); s.mwt=(s.mwt||[]).filter(x=>x.from!==from); markDirty(); preserveScroll(renderDoc); } },true]]); return; }
+    showCtx(e.clientX,e.clientY,[["Edit surface form","⏎",()=>editMWTInline(si,from)],["Remove MWT","⌫",()=>{ const s=DOC[si]; if(s){ pushUndo(si); s.mwt=(s.mwt||[]).filter(x=>x.from!==from); markDirty(); preserveScroll(renderDoc); } },true]]); return; }
   // a goeswith continuation's own form field: it lives INSIDE the head's cell, so the generic resolver below would
   // hand back the head. Its right-click menu is the ordinary token menu, for the token it actually draws.
   const gwEl=e.target.closest("[data-gwtok]");
@@ -644,7 +644,9 @@ function editTier(si,tokId,tier,clickXY){ const s=DOC[si]; if(!s||tokId<1||tokId
   // can't type it, can't delete it, and can't leave a stale one behind: it follows the seam and only the seam.
   // Every other tier edits its stored text directly.
   const proxy={ get v(){ return tierText(tk,tier); },
-    set v(val){ const enc=glossEnc(val); tk.misc=setMiscKV(tk.misc,key,tier==="mseg"?msegStrip(enc,!!seamPost(tk),!!seamPre(tk)):enc); } };
+    set v(val){ const enc=glossEnc(val), prev=tier==="mseg"?tierText(tk,"mseg"):"";
+      tk.misc=setMiscKV(tk.misc,key,tier==="mseg"?msegStrip(enc,!!seamPost(tk),!!seamPre(tk)):enc);
+      if(tier==="mseg") mglossSplitTypedHyphen(tk,prev,tierText(tk,"mseg")); } };   // a hyphen TYPED here says where the boundary goes, so a gloss already written as lexical-plus-grammatical divides along it ("walk.PST" over "walk-ed" → "walk-PST"). Narrow on purpose — see mglossSplitTypedHyphen (js/editing/edit-ops.js) for the three conditions and why the machine-driven mglossReslot answers this case differently. Read `prev` from MISC rather than trusting the field's own opening value: the mark msegStrip removes never entered it
   // item 12b: on a committed MGloss edit, sync the token's FEATS from the recognised unambiguous gloss tokens —
   // adds a feature that's missing, UPDATES one whose value the edited gloss now disagrees with, and leaves any
   // feature the gloss text doesn't speak to untouched. This shares the edit's single undo snapshot
@@ -694,7 +696,20 @@ function elClippedOut(el){ if(!el||!el.isConnected)return true; const r=el.getBo
    sentence" from "clicked out of it entirely" — a blur event carries no such information of its own. */
 window.LAST_POINTER_EL=null;   // on `window` rather than a top-level `let`: a classic script's `let` lives in the global LEXICAL environment, which is not the same place a `window.x` lookup reaches — and this value is written by one module and read by another, so the unambiguous slot is worth the verbosity
 document.addEventListener("pointerdown",e=>{ window.LAST_POINTER_EL=e.target; window.LAST_POINTER_PT={x:e.clientX,y:e.clientY}; },true);
-function hideOrig(el){ if(el.namespaceURI===SVGNS){ el.style.fill="transparent"; el.style.stroke="transparent"; } else el.style.color="transparent"; }
+// Hides the diagram element under a freshly-opened inline field, AND drops that sentence's entry in the
+// notation-switch diagram cache (js/core/document.js's DIA_CACHE) — every makeEditable call site (form/lemma/
+// translit/gloss-tier/MWT-form/CorrectForm) targets an element that lives INSIDE a cached diagram, and this is
+// the one place all of them pass through before the field opens. Without this, committing (or even cancelling)
+// the edit calls preserveScroll(renderDoc) → diaSentence() sees the SAME diaFlagsSig() as before (that
+// signature tracks view options, not token content) → CACHE HIT → the rebuild reuses this exact DOM node
+// instead of a fresh one, fill/stroke:transparent and all — the token silently vanishes and the diagram keeps
+// showing its PRE-EDIT text, because nothing ever set el.style.fill back. Bug looked theme-specific when first
+// reported ("disappears in dark mode") only because transparent-on-transparent is unconditionally invisible in
+// either theme and nobody had tried light mode; reproduced and confirmed via headless-Chrome CDP with no theme
+// involved at all — see the fix's own commit for the harness. Eager rather than conditioned on the edit
+// actually changing anything: a CANCELLED edit still ran hideOrig, so its cached node is just as stale.
+function hideOrig(el){ if(el.namespaceURI===SVGNS){ el.style.fill="transparent"; el.style.stroke="transparent"; } else el.style.color="transparent";
+  const blk=el.closest&&el.closest(".sblock[data-i]"); if(blk&&typeof invalidateDiaSentence==="function") invalidateDiaSentence(+blk.getAttribute("data-i")); }
 function makeEditable(el,obj,key,after,rtl,relocate,nav,allowEmpty,caretHint){ if(!el)return; const orig=obj[key]||"", pre=snap();
   const inp=document.createElement("input"); inp.className="nodeedit"+(key==="form"?formDeco(obj):""); inp.value=orig;   // item 4: while editing a token FORM, keep its Typo strikethrough on the edit field so the marker doesn't blink off mid-edit (the Foreign italics come across via applyFont, which copies the form's computed font-style)
   let fontStr; const applyFont=e=>{ const cs=getComputedStyle(e);   // `e` lives inside .sblock{zoom:var(--fs)} but `inp` is appended to <body>, OUTSIDE that zoomed context — getComputedStyle reports the AUTHORED font-size (zoom doesn't rewrite it), so it must be scaled by FS by hand or the field renders at the un-zoomed size while the diagram text it's covering renders at size×FS
@@ -902,7 +917,7 @@ function makeGlossEditableSC(el,obj,key,after,rtl,relocate,nav,caretHint,mglossT
     box.style.visibility=elClippedOut(el)?"hidden":""; };   // see makeEditable's place() for why
   document.addEventListener("scroll",place,{capture:true,passive:true});   // see makeEditable's place() for why: position:fixed appended outside the diagram's own inner-scrolling .doc needs re-placing on every ancestor scroll, caught via capture (scroll doesn't bubble)
   place();
-  box.dir=rtl?"rtl":"ltr"; el.style.opacity="0"; document.body.appendChild(box); box.focus();
+  box.dir=rtl?"rtl":"ltr"; hideOrig(el); document.body.appendChild(box); box.focus();   // hideOrig, NOT the plain el.style.opacity="0" this used to set. Two separate faults, and the second is the one that bit: (a) opacity CASCADES, so on a wrapped .bwform whose other tiers are nested inside it as centring children the whole stack faded, which is the very reason hideOrig exists; (b) — the disappearing gloss — opacity:0 skipped hideOrig's OTHER half, the DIA_CACHE invalidation, so committing (or cancelling) an edit on either gloss tier re-rendered into a CACHE HIT that reused this exact node with opacity:0 still on it: the gloss text vanished from the diagram and the cached row kept its pre-edit content. Identical in kind to the token-form case hideOrig's own note describes; makeGlossEditableSC was simply the one editor that never passed through it
   let _placedAtClick=false;
   if(caretHint){
     if(caretHint.at==="start"||caretHint.at==="end"||typeof caretHint.at==="number"){
@@ -1059,7 +1074,15 @@ function editNodeInline(si,tokId,clickXY){ const s=DOC[si]; if(!s||tokId<1||tokI
 // click listener used to do. It lives here, called by editMWTInline itself, so EVERY route in selects the same
 // way: a click on the tie glyph, a click on the IAST row, and the right-click menu alike.
 function selectMWTRange(si,fromId){ const s=DOC[si]; if(!s)return null; const m=(s.mwt||[]).find(x=>x.from===fromId); if(!m)return null;
-  setRange(si,m.from,m.to); pick(si,m.from,false,false); return m; }
+  setRange(si,m.from,m.to); pick(si,m.from,false,false);
+  // …and bring the MWT's own row to the TOP of the grid. pick() is called with scroll=false on purpose (its
+  // scroll targets the token row, which for an MWT is the first COMPONENT — one row below the range row that was
+  // just clicked, and the one row of the group that isn't the thing selected), so the reveal is done here against
+  // the range row itself, and to the top rather than merely into view: the group's component rows follow it
+  // immediately below, and they are part of what selecting an MWT is asking to look at.
+  const row=document.querySelector(`#doc tr.mwt-row[data-s="${si}"][data-mwtfrom="${fromId}"]`);
+  if(row&&typeof scrollRowToGridTop==="function") scrollRowToGridTop(row);
+  return m; }
 // The element the MWT's surface form is edited OVER. Under iastFormEdit() that is the IAST ROW beneath the tie,
 // not the tie's own glyph, which is only a display rendering derived from that IAST — the same routing
 // editNodeInline applies to single tokens, and guarded the same way: only when the row is actually on screen
@@ -1080,12 +1103,12 @@ async function afterMWTFormEdit(si,m,changed){ if(!changed) return;   // makeEdi
     const v=r&&r.ortho&&r.ortho[0]; if(v) m.ortho=v; }
   preserveScroll(renderDoc); }
 function editMWTInline(si,fromId,clickXY){
-  MWT_EDIT={si,from:fromId};   // item 8: set FIRST, before selectMWTRange — that call selects the component range, which is exactly what accents the tie (mwtTieSelected), and in brackets it re-renders the block on the spot. A tie already drawn accent-blue would hand makeEditable's applyFont() a blue computed ink to copy onto the input, leaving the whole edit sitting in the selection colour. Cleared in `done` below, which then re-runs applySel() to put the accent straight back.
+  MWT_EDIT={si,from:fromId};   // item 8: names the tie whose editor is open, cleared in `done` below. It no longer SUPPRESSES the tie's accent — see the note above mwtTieSelected (js/diagram/diagram-core.js) for why that exception went: the field taking accent ink from the element under it is what every other token's field already does, and holding this one tie plain made an MWT go grey at the very moment it was selected. Still set BEFORE selectMWTRange, which is the call that selects the component range (and, in brackets, re-renders the block on the spot).
   const m=selectMWTRange(si,fromId); if(!m){ MWT_EDIT=null; return; } const s=DOC[si];   // the selection must happen BEFORE the element is resolved: in brackets, pick() re-renders the whole block unconditionally (see its conv==="brackets" branch), so an element resolved first would already be detached by the time makeEditable measured it. It also lives HERE, not in the click handler, so the right-click "Edit surface form" selects identically.
   const iast=iastFormEdit();
   if(iast) m.miast="";   // the row RENDERS m.miast in preference to m.form (trTxt), so leaving the cache in place would freeze the row on the stale fused value while the field grew under the typing; dropping it now makes the live reflow track every keystroke, and afterMWTFormEdit keeps it dropped on commit
   const el=mwtElOf(si,fromId); if(!el){ MWT_EDIT=null; return; }
-  const done=async changed=>{ MWT_EDIT=null; applySel();   // makeEditable's finish() re-renders BEFORE calling this, so that render still draws the tie plain; applySel's live class toggle is what restores the accent on the still-selected range
+  const done=async changed=>{ MWT_EDIT=null; applySel();   // applySel still runs here: the tie is accented throughout the edit now, but `done` is also where the range may have moved (a re-tokenised MWT), and the live class toggle is what keeps every carrier of that accent — tie, form, transliteration row, component cells, grid rows — in step with it
     // item 1: an MWT's stored surface form is a Form field like any other — ITRANS in, IAST stored. Here
     // rather than inside afterMWTFormEdit so it also covers a Sanskrit document with NO script selected,
     // where the tie's own glyph is edited and that call never runs; and BEFORE it, since it re-derives the
@@ -1138,7 +1161,7 @@ function editLemmaPrompt(si,tokId,clickXY,anchor){ const s=DOC[si], t=s&&s.token
   textPrompt(x,y,{rtl, title:`Lemma of “${bform(t)}”`, value:cur,
     hint:"Leave blank for none.",   // an empty lemma is "_" in CoNLL-U, not a blank column — see the commit below
     ok:v=>{ const next=v||"_"; if(next===(t.lemma||"_")) return;   // unchanged (including blank↔"_") ⇒ no undo step, no dirty flag, no refresh
-      pushUndo(); t.lemma=next; markDirty(); preserveScroll(renderDoc);
+      pushUndo(si); t.lemma=next; markDirty(); preserveScroll(renderDoc);
       if(typeof afterLemmaEdit==="function") afterLemmaEdit(si,tokId); }}); }   // guarded: afterLemmaEdit lives in js/io/bridge.js, which loads AFTER this module
 // selection-driven wrapper for the Edit-menu "Edit Lemma…" item / its ⌘L key-equivalent — same "no anchor,
 // no click point" call editLemmaPrompt already falls back to gracefully (centred popover), matching how
@@ -1184,21 +1207,121 @@ function editURL(i,anchor){ const s=DOC[i]; if(!s)return; closeURLPopup();
   pop.style.top=Math.min((r.bottom||0)+5, innerHeight-pop.offsetHeight-8)+"px";
   inp.focus(); inp.select();
   const done=save=>{ if(pop._done)return; pop._done=true;
-    if(save){ const nv=(inp.value||"").trim(); if(nv!==(s.url||"")){ pushUndo(); s.url=nv; markDirty(); preserveScroll(renderDoc); toast(nv?"URL set":"URL cleared"); } }
+    if(save){ const nv=(inp.value||"").trim(); if(nv!==(s.url||"")){ pushUndo(i); s.url=nv; markDirty(); preserveScroll(renderDoc); toast(nv?"URL set":"URL cleared"); } }
     closeURLPopup(); };
   inp.addEventListener("keydown",e=>{ e.stopPropagation(); if(e.key==="Enter"){ e.preventDefault(); done(true); } else if(e.key==="Escape"){ e.preventDefault(); done(false); } });
   inp.addEventListener("blur",()=>done(true)); }
 addEventListener("mousedown",e=>{ if(_urlPop && !_urlPop.contains(e.target)) closeURLPopup(); },true);   // click outside → the input blurs (commits) and the popover closes
 window.editURL=editURL;
-/* export the block's diagram as a self-contained SVG (computed styles inlined so it renders standalone) */
-function inlineStyles(src,dst){ const cs=getComputedStyle(src);
-  const props=["fill","stroke","stroke-width","stroke-linecap","stroke-linejoin","stroke-dasharray","opacity","paint-order","font-size","font-family","font-weight","font-style","text-anchor","dominant-baseline","letter-spacing"];
-  let st=""; props.forEach(p=>{ const v=cs.getPropertyValue(p); if(v&&v!=="normal"&&v!=="none"||p==="fill"||p==="stroke") st+=p+":"+v+";"; }); dst.setAttribute("style",st);
-  const sc=src.children, dc=dst.children; for(let k=0;k<sc.length;k++) inlineStyles(sc[k],dc[k]); }
+/* ══ EXPORT ONE BLOCK'S DIAGRAM AS A SELF-CONTAINED, ALWAYS-LIGHT-MODE SVG ═══════════════════════════
+   Two requirements that turn out to be one: an exported file carries no stylesheet and no appearance, so
+   every colour in it has to be resolved (a) to a literal and (b) to the LIGHT literal, whatever the app
+   itself is currently wearing.
+
+   WHY IT CANNOT SIMPLY BE READ OFF THE SCREEN. The app themes purely through
+   @media (prefers-color-scheme:dark) — there is deliberately no data-theme attribute (js/ui/colours.js) —
+   and prefers-color-scheme cannot be forced per element, per subtree or per same-document iframe. So there
+   is no way to RENDER a light copy of the diagram while the OS is dark. What there IS a way to do is put
+   the CASCADE into light mode for the duration of one synchronous read: svgxForceLight() re-declares, at
+   the same selector and with !important, every CUSTOM PROPERTY that a dark @media block redeclares, using
+   that property's light value; computed styles are read; the override is torn down. All of it happens
+   inside ONE task, and a browser paints only between tasks, so nothing flashes on screen.
+   !important is load-bearing twice over: it beats the dark @media rules (same origin, same specificity,
+   later in source), and it beats the normal-priority inline custom properties js/ui/colours.js writes
+   straight onto :root for the accent-derived palette.
+
+   THE RELATION COLOURS ARE A SEPARATE PROBLEM, and the reason a token override alone is not enough:
+   relColor() reads --c-* through css() at RENDER time and BAKES the resulting hex into the `stroke`/`fill`
+   presentation attribute — on its own for a label, and inside arcInk()'s color-mix() for a stroke. Those
+   literals are frozen dark ink that no later cascade change can reach, so svgxRelight() rewrites them,
+   dark literal → light literal, both sides read from css() on either side of the override so the strings
+   are guaranteed to be exactly the ones the renderer baked.
+
+   THE CLONE IS THEN MEASURED IN CONTEXT: parked off-screen inside the same .sblock, so it keeps every
+   ancestor that carries a custom property (.sblock.sel-block's tinted --occlude/--casing, #doc.no-relcolour's
+   --tie-hue swap, #doc.zone-grid's dimmed accent) and every class rule still beats a presentation attribute
+   exactly as it does on screen. Reading the CLONE rather than the live SVG is also what lets the rewritten
+   relation literals flow through color-mix() for free, instead of being string-substituted after the fact.
+
+   Theme-dependent tokens the diagram reaches, all covered by the sweep: --content-bg (→ --occlude,
+   --block-occlude, --casing, and arcInk's own mix), --casing-lift, --text (→ --ink), --muted (→ --accent-dim),
+   --dia-muted, --dotline, --accent, --warn, --block-sel, --c-subj/comp/mod/other/root/udep (→ --tie-hue) and
+   .dim-out/.dim-peri's --dim-fade/--dim-fade-hue/--dim-fade-2 (→ --dim-text/-muted/-tie/-hue/-edge).
+   --edge-mix is NOT one of them — one value for both appearances; see arcInk()'s note in diagram-core.js. */
+const SVGX_PROPS=["fill","fill-opacity","stroke","stroke-opacity","stroke-width","stroke-linecap","stroke-linejoin","stroke-dasharray","stroke-dashoffset","opacity","paint-order","vector-effect","font-size","font-family","font-weight","font-style","font-feature-settings","text-anchor","dominant-baseline","letter-spacing"];   // font-feature-settings carries .tok-pos/.mwt-pos's "c2sc" small caps — without it every POS tag in an exported diagram silently loses them; vector-effect is .gw-tie-cas's non-scaling stroke; the *-opacity pair and stroke-dashoffset are here so the style attribute states each property unconditionally (see inlineStyles)
+const SVGX_INK=["--c-subj","--c-comp","--c-mod","--c-other","--c-root","--c-udep","--ink"];   // every token relColor() can return — i.e. every colour a renderer BAKES into an attribute. Audited: all other css() reads in js/diagram/** are lengths (--arc-row/--arrow/--arc-stroke/--report-step/…), so this list is the complete set of frozen colour literals
+// Flatten a resolved colour to a legacy sRGB literal. getComputedStyle has already substituted every var()
+// and (in current engines) resolved color-mix(), but the result can be a modern colour function —
+// color(srgb …), oklab(…) — that Illustrator and older SVG renderers don't parse. A canvas 2D fillStyle is a
+// CSS-colour parser whose OUTPUT is always #rrggbb / rgba(), so one round-trip normalises anything.
+let _svgxCv=null;
+function svgxColour(v){ const s=(v||"").trim();
+  if(!s||s.indexOf("(")<0||/^rgba?\(/i.test(s)) return v;   // a keyword, a #hex, `none`, or already legacy rgb()/rgba() → nothing to flatten
+  if(!_svgxCv) _svgxCv=document.createElement("canvas").getContext("2d");
+  _svgxCv.fillStyle="#000"; _svgxCv.fillStyle=s; const a=_svgxCv.fillStyle;
+  _svgxCv.fillStyle="#fff"; _svgxCv.fillStyle=s; const b=_svgxCv.fillStyle;
+  return a===b?a:v; }   // canvas SILENTLY IGNORES a value it cannot parse, leaving fillStyle at whatever it held — so probe from two different grounds and trust only an answer both agree on, rather than emitting a spurious black
+/* Put the cascade into light mode. Returns the teardown. Scanned from the live CSSOM rather than hard-coded,
+   so a token added to a dark block later needs no edit here. */
+function svgxForceLight(){
+  const isDark=t=>/prefers-color-scheme\s*:\s*dark/i.test(t||"");
+  const base=new Map(), darkAt=new Map();   // "selector|--prop" → light value  /  selector → Set(--prop redeclared under dark)
+  const walk=(rules,dark)=>{ for(let n=0;n<rules.length;n++){ const r=rules[n];
+      if(r.cssRules){ walk(r.cssRules, dark||isDark(r.conditionText||(r.media&&r.media.mediaText)||"")); continue; }   // @media/@supports/@layer → recurse. A (prefers-color-scheme:light) block is treated as UNCONDITIONAL: for this export it is the active branch, so its declarations belong in `base`
+      if(!r.style||!r.selectorText) continue;   // @font-face and a @keyframes step have .style but no selectorText
+      for(let k=0;k<r.style.length;k++){ const p=r.style[k]; if(p.slice(0,2)!=="--") continue;   // CUSTOM PROPERTIES ONLY. Audited: no dark @media block in this app repaints a diagram element directly (mac-chrome.css's are titlebar chrome; app.css's are .stx-warn/.oselrow/the grid/.scrim), and restricting the override to tokens is also what guarantees it can move no geometry — nothing here holds a length
+        if(dark){ let s=darkAt.get(r.selectorText); if(!s){ s=new Set(); darkAt.set(r.selectorText,s); } s.add(p); }
+        else base.set(r.selectorText+"|"+p, r.style.getPropertyValue(p)); } } };   // last declaration wins, which is the cascade's own answer at equal specificity — and it is how a user's own colour override (the live #relColOverride <style>) beats the kit's defaults here too
+  for(let s=0;s<document.styleSheets.length;s++){ try{ walk(document.styleSheets[s].cssRules,false); }catch(e){} }   // a cross-origin sheet throws on .cssRules; this app serves its own, so a throw only ever means "nothing to learn here"
+  const root=document.documentElement; let out="";
+  darkAt.forEach((props,sel)=>{ const decls=[];
+    props.forEach(p=>{ if(sel===":root"&&root.style.getPropertyValue(p)) return;   // an INLINE value on :root is the LIVE system accent (arh_applyAccentVars, js/ui/colours.js) — theme-independent, and it has to survive into the export rather than snapping back to the stylesheet's #007aff. The --c-* triad is the one inline family that IS theme-dependent, and it is re-emitted explicitly below
+      const v=base.get(sel+"|"+p);
+      decls.push(p+":"+(v||"unset")+" !important"); });   // no light counterpart at all (--grid-head-fg is declared ONLY in the dark block) → `unset`. A custom property is inherited, so on the root that resolves to the guaranteed-invalid value — exactly "as if never declared", and each var() falls back the way it does in light
+    if(decls.length) out+=sel+"{"+decls.join(";")+"}"; });
+  if(typeof relColLight==="function"&&typeof relColMidLinear==="function"){   // the light relation palette AS THE USER WOULD SEE IT: relColLight() is the same chain the Colours drawer and deriveRelHuesFromAccent resolve through (explicit override → live accent-derived LIGHT triad → static default), so an accent-rotated document exports its own hues instead of snapping to RELCOL_DEFAULTS
+    const L=c=>relColLight(c);
+    out+=":root{"+["subj","comp","mod","other","root"].map(c=>"--c-"+c+":"+L(c)+" !important").join(";")
+       +";--c-udep:"+relColMidLinear(L("comp"),L("mod"))+" !important}"; }   // udep is never user-overridable — the comp/mod LINEAR-sRGB midpoint, exactly as applyRelColours computes it
+  const st=document.createElement("style"); st.id="svgxLight"; st.textContent=out; document.head.appendChild(st);
+  return ()=>st.remove(); }
+// Rewrite the render-time-baked relation literals in a cloned subtree: dark hex → light hex. Whole-string
+// split/join on values css() itself produced, so there is no colour PARSING here and no near-miss matching.
+function svgxRelight(root,map){ if(!map.length) return;
+  const fix=v=>{ let s=v; for(let j=0;j<map.length;j++) if(s.indexOf(map[j][0])>=0) s=s.split(map[j][0]).join(map[j][1]); return s; };
+  (function walk(el){ ["fill","stroke","style"].forEach(a=>{ const v=el.getAttribute(a); if(v==null) return; const nv=fix(v); if(nv!==v) el.setAttribute(a,nv); });
+    for(let k=0;k<el.children.length;k++) walk(el.children[k]); })(root); }
+/* Bake computed style onto the (attached, light-mode) clone, IN PLACE. */
+function inlineStyles(el){ const cs=getComputedStyle(el), vals=[];
+  SVGX_PROPS.forEach(p=>{ let v=cs.getPropertyValue(p); if(!v) return;   // an engine that doesn't know the property → leave whatever attribute is already there alone rather than deleting it below
+    if(p==="fill"||p==="stroke") v=svgxColour(v); vals.push([p,v]); });
+  el.setAttribute("style",vals.map(pv=>pv[0]+":"+pv[1]).join(";"));   // read EVERY value before writing anything — getComputedStyle returns a LIVE object, so writing mid-loop would be seen by the reads still to come on this same element
+  vals.forEach(pv=>el.removeAttribute(pv[0]));   // …then DROP the presentation attribute the value came from. It still holds the render-time `color-mix(…, var(--content-bg) var(--edge-mix))` string, which resolves against nothing in a standalone file, and a viewer that prefers attributes to `style` (Illustrator) would paint from it. Safe only because the style attribute above states each property UNCONDITIONALLY — the old version skipped "normal"/"none" values to save bytes, which is exactly what made deleting the attribute impossible then
+  for(let k=0;k<el.children.length;k++) inlineStyles(el.children[k]); }   // top-down is fine: each child is read before it is written, and its parent was written with the parent's OWN computed values, so every inherited property is unchanged
 async function exportSVG(i){ const b=document.querySelector(`.sblock[data-i="${i}"]`), svg=b&&b.querySelector(".diagram svg.tree");
   if(!svg) return toast("Switch to a diagram view (stemma, hierarchy, arcs, brackets) to export SVG");
-  const clone=svg.cloneNode(true); inlineStyles(svg,clone); clone.setAttribute("xmlns","http://www.w3.org/2000/svg");
-  const src='<?xml version="1.0" encoding="UTF-8"?>\n'+new XMLSerializer().serializeToString(clone);
+  const inkDark=SVGX_INK.map(css);   // the baked literals as the renderer wrote them — read BEFORE the override
+  const restore=svgxForceLight();
+  let src;
+  try{
+    const map=SVGX_INK.map((k,j)=>[inkDark[j],css(k)]).filter(p=>p[0]&&p[1]&&p[0]!==p[1]);   // …and the same tokens after it
+    const clone=svg.cloneNode(true); svgxRelight(clone,map);
+    const stage=document.createElement("div"); stage.setAttribute("aria-hidden","true");
+    stage.style.cssText="position:absolute; left:-99999px; top:0; width:0; height:0; overflow:hidden; pointer-events:none";   // OUT OF FLOW inside the same .sblock: identical ancestor context (see the block comment), and the live layout cannot move. Negative left creates no scrollable overflow, and it is gone before the task ends anyway
+    stage.appendChild(clone); b.appendChild(stage);
+    try{
+      inlineStyles(clone);
+      /* AN EXPLICIT GROUND. The casings and occlusion blobs ARE the page background colour (--casing /
+         --occlude / --block-occlude), so a transparent export reads as a scatter of pale shapes over
+         whatever the viewer happens to sit on, and every occlusion the diagram depends on stops meaning
+         anything. Painted from the LIGHT --content-bg at the viewBox's OWN origin — not 0,0, which
+         fitTight has usually moved off. Inserted after inlineStyles so the walk never sees it. */
+      const vb=(clone.getAttribute("viewBox")||"").trim().split(/[\s,]+/).map(Number);
+      if(vb.length===4&&vb.every(v=>isFinite(v))) clone.insertBefore(E("rect",{x:vb[0],y:vb[1],width:vb[2],height:vb[3],fill:svgxColour(css("--content-bg"))}),clone.firstChild);
+      clone.setAttribute("xmlns","http://www.w3.org/2000/svg");
+      src='<?xml version="1.0" encoding="UTF-8"?>\n'+new XMLSerializer().serializeToString(clone);
+    } finally{ stage.remove(); }
+  } finally{ restore(); }   // the override lives for this ONE synchronous stretch: no await before here, so the page never paints in the wrong appearance
   const stem=(DOC[i].sid||("s"+(i+1))).replace(/[^\w.-]/g,"_");
   if(!hasBridge()){ const a=document.createElement("a"); a.href=URL.createObjectURL(new Blob([src],{type:"image/svg+xml"})); a.download=stem+".svg"; a.click(); URL.revokeObjectURL(a.href); toast("Exported "+stem+".svg"); return; }
   const r=await sheetChooseSaveLocation({title:"Export Diagram",desc:"Choose a name and location for the SVG file.",defaultName:stem,saveLabel:"Export"});
@@ -1231,7 +1354,7 @@ function tokenMenu(x,y,si,idx,target){ const rng=(selRange&&selRange.s===si&&sel
     const url=rel?relGuideUrl(val):posGuideUrl(val);   // relGuideUrl can be null (e.g. unk) — no dedicated page, so omit the row
     if(url){ items.unshift(null); items.unshift([`Guidelines for “${esc(val)}” ${rel?"relation":"POS tag"}`,"↗",()=>openExternal(url)]); } } }
   showCtx(x,y,items); }
-function addMWT(si,from,to){ const s=DOC[si]; pushUndo(); s.mwt=(s.mwt||[]).filter(m=>!(m.from<=to&&m.to>=from));   // replace any overlapping range
+function addMWT(si,from,to){ const s=DOC[si]; pushUndo(si); s.mwt=(s.mwt||[]).filter(m=>!(m.from<=to&&m.to>=from));   // replace any overlapping range
   s.mwt.push({from,to,form:s.tokens.slice(from-1,to).map(t=>t.form).join("")}); s.mwt.sort((a,b)=>a.from-b.from);   // default surface = concatenation (editable in the range row)
   if(isSanskritLang()) sandhiMwtForms(si,[from]);   // item 8: Sanskrit → replace the naive concatenation with the sandhi-fused surface form
   selRange=null; preserveScroll(renderDoc); toast(`Multi-word token ${from}–${to} added — edit its surface form in the range row`); }
@@ -1239,7 +1362,7 @@ function addMWT(si,from,to){ const s=DOC[si]; pushUndo(); s.mwt=(s.mwt||[]).filt
 function groupMWTShortcut(){ if(sel.s<0) return;
   if(selRange && selRange.s===sel.s && selRange.to>selRange.from){ addMWT(sel.s,selRange.from,selRange.to); }
   else toast("Select two or more tokens (shift-click their id cells) to group"); }
-function ungroupMWTShortcut(){ const s=DOC[sel.s]; if(!s||!s.mwt||!s.mwt.length) return toast("No multi-word token to remove"); pushUndo();
+function ungroupMWTShortcut(){ const s=DOC[sel.s]; if(!s||!s.mwt||!s.mwt.length) return toast("No multi-word token to remove"); pushUndo(sel.s);
   const t=sel.t, cover=m=>selRange?(selRange.s===sel.s&&m.from<=selRange.to&&m.to>=selRange.from):(t>=m.from&&t<=m.to);
   const before=s.mwt.length; s.mwt=s.mwt.filter(m=>!cover(m));
   if(s.mwt.length<before){ preserveScroll(renderDoc); toast("Multi-word token removed"); } else toast("No multi-word token at the selection"); }
@@ -1248,7 +1371,7 @@ function ungroupMWTShortcut(){ const s=DOC[sel.s]; if(!s||!s.mwt||!s.mwt.length)
 // the original token stays as the head component (keeps its POS/deprel/head/feats); the extra
 // components are inserted after it as blank words hanging off it; the MWT's surface form = the
 // original form. Flatten (below) is the exact inverse.
-function convertTokenToMWT(si,idx,n){ const s=DOC[si], toks=s.tokens; const head=toks[idx]; if(!head)return; pushUndo();
+function convertTokenToMWT(si,idx,n){ const s=DOC[si], toks=s.tokens; const head=toks[idx]; if(!head)return; pushUndo(si);
   const oldIds=new Map(); toks.forEach((t,i)=>oldIds.set(t,i+1));
   toks.forEach(t=>{const h=parseInt(t.head,10); t._ht=(h>=1&&h<=toks.length)?toks[h-1]:0;});   // heads by identity, so the coming splice renumbers cleanly
   (s.mwt||[]).forEach(m=>{ m._toks=toks.slice(m.from-1,m.to); });                                // existing MWT ranges by identity
@@ -1265,7 +1388,7 @@ function convertTokenToMWT(si,idx,n){ const s=DOC[si], toks=s.tokens; const head
 
 // flatten a multi-word token back to a single token: its form = the MWT's surface form, its POS/deprel/
 // head/other attributes = those of the MWT's head component (the one whose head lies outside the range)
-function flattenMWT(si,m){ const s=DOC[si], toks=s.tokens; if(!m)return; pushUndo();
+function flattenMWT(si,m){ const s=DOC[si], toks=s.tokens; if(!m)return; pushUndo(si);
   const from=m.from, to=m.to;
   const oldIds=new Map(); toks.forEach((t,i)=>oldIds.set(t,i+1));
   toks.forEach(t=>{const h=parseInt(t.head,10); t._ht=(h>=1&&h<=toks.length)?toks[h-1]:0;});   // heads by identity
@@ -1394,7 +1517,7 @@ function extPosMenuAtSel(si,tokId){ const el=tokGroupOf(si,tokId)||document.quer
 function mwtTokenItems(si,tokId){ const m=mwtAtSel(DOC[si],tokId);
   if(m) return [
     ["Flatten MWT","⌥⌘F",()=>flattenMWT(si,m)],
-    ["Ungroup MWT","⇧⌘G",()=>{ const s=DOC[si]; pushUndo(); s.mwt=(s.mwt||[]).filter(x=>x!==m); if(!s.mwt.length)delete s.mwt; markDirty(); preserveScroll(renderDoc); toast("Multi-word token removed"); }],
+    ["Ungroup MWT","⇧⌘G",()=>{ const s=DOC[si]; pushUndo(si); s.mwt=(s.mwt||[]).filter(x=>x!==m); if(!s.mwt.length)delete s.mwt; markDirty(); preserveScroll(renderDoc); toast("Multi-word token removed"); }],
   ];
   return [["Split into MWT…","⌥⌘S",()=>openConvertMWT(si,tokId-1)]]; }
 window.convertTokenMWT=function(){ if(sel.s<0||sel.t<1)return toast("Select a token to convert");

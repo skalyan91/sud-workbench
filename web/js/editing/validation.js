@@ -54,17 +54,19 @@ function normGoesWith(t,s){ if(!s||!s.tokens||!isGoesWith(t.deprel)) return fals
     if(miscKV(head.misc,"CorrectForm")!==joined){ head.misc=setMiscKV(head.misc,"CorrectForm",joined); hit=true; } }
   if(hit&&typeof markDirty==="function") markDirty();   // the caller marks its own edit dirty; this one is the app's, and a normalisation the user can see must show in the title bar even where the caller's own write turned out to be a no-op
   return hit; }
-let ISSUES=[];
-function validateAll(){ ISSUES=[];
+let ISSUES=[], BAD=new Map();   // BAD: "si:tok" → {head,upos,deprel} — the per-token DOM-free verdict paintValidationDom() paints onto whatever grid rows currently exist. Keeping the verdict as data (not DOM writes) is what lets computeIssues() stay a plain O(tokens) pass with no document.querySelector calls, which used to run up to 3 PER TOKEN here and dominated render time on a large document — see the module note above validateAll
+/* computeIssues() is validateAll's old body, MINUS every DOM touch: the algorithm (invalid heads, empty
+   UPOS/deprel, root-count, dependency cycles) is unchanged, it just records verdicts into BAD instead of
+   toggling classes on cells that, once renderDoc is windowed, mostly don't exist yet. paintValidationDom()
+   is the separate, cheap DOM pass — O(rendered rows), not O(DOC) — that applies BAD to whatever's on screen. */
+function computeIssues(){ ISSUES=[]; BAD=new Map();
+  const flag=(si,tok,key)=>{ const k=si+":"+tok; let o=BAD.get(k); if(!o){ o={}; BAD.set(k,o); } o[key]=true; };
   DOC.forEach((s,si)=>{const t=s.tokens,n=t.length,heads=t.map(x=>parseInt(x.head,10)); let roots=0;
     heads.forEach((h,i)=>{ const inv=isNaN(h)||h<0||h>n||h===i+1;
-      const cell=document.querySelector(`#doc tr[data-s="${si}"][data-tok="${i+1}"] td.w-head .csel`); if(cell)cell.classList.toggle("bad",inv);
-      if(inv)ISSUES.push({si,tok:i+1,msg:`Token ${i+1} (“${t[i].form||"?"}”) has an invalid head (${t[i].head})`});
+      if(inv){ flag(si,i+1,"head"); ISSUES.push({si,tok:i+1,msg:`Token ${i+1} (“${t[i].form||"?"}”) has an invalid head (${t[i].head})`}); }
       const draw=depBase(t[i].deprel), dbase=draw.replace(/\/m$/,""); const uposEmpty=!t[i].upos||t[i].upos==="_", deprelEmpty=(!dbase||dbase==="_");   // empty UPOS / deprel (the part before "@", ignoring any mSUD "/m" suffix) are allowed but flagged; a "/m" relation validates as its base does
-      const uc=document.querySelector(`#doc tr[data-s="${si}"][data-tok="${i+1}"] td.w-upos .csel`); if(uc)uc.classList.toggle("bad",uposEmpty);
-      const dc=document.querySelector(`#doc tr[data-s="${si}"][data-tok="${i+1}"] td.w-deprel .cin`); if(dc)dc.classList.toggle("bad",deprelEmpty);
-      if(uposEmpty)ISSUES.push({si,tok:i+1,msg:`Token ${i+1} (“${t[i].form||"?"}”) has no UPOS tag`});
-      if(deprelEmpty&&h!==0)ISSUES.push({si,tok:i+1,msg:`Token ${i+1} (“${t[i].form||"?"}”) has no dependency relation`});   // a head-0 token's empty deprel is covered by the root-agreement check below
+      if(uposEmpty){ flag(si,i+1,"upos"); ISSUES.push({si,tok:i+1,msg:`Token ${i+1} (“${t[i].form||"?"}”) has no UPOS tag`}); }
+      if(deprelEmpty&&h!==0){ flag(si,i+1,"deprel"); ISSUES.push({si,tok:i+1,msg:`Token ${i+1} (“${t[i].form||"?"}”) has no dependency relation`}); }   // a head-0 token's empty deprel is covered by the root-agreement check below
       if(h===0)roots++;
       if((dbase==="root")!==(h===0))   // deprel "root" and head 0 must agree (compare the relation, ignoring any @deep tail)
         ISSUES.push({si,tok:i+1,msg:h===0?`Token ${i+1} has head 0 but deprel “${t[i].deprel}” (a root must be “root”)`:`Token ${i+1} has deprel “root” but head ${t[i].head} (a root must have head 0)`}); });
@@ -78,13 +80,26 @@ function validateAll(){ ISSUES=[];
         const hh=heads[cur]; cur=(hh>=1&&hh<=n)?hh-1:-1; }   // head 0 (root) / NaN / out-of-range ends the walk
       if(cur>=0 && cur<n && cst[cur]===1){ const cyc=path.slice(at.get(cur)).map(x=>x+1).sort((a,b)=>a-b);
         if(cyc.length>1){   // a 1-token self-loop is already reported as "token is its own head"
-          cyc.forEach(id=>{ const c=document.querySelector(`#doc tr[data-s="${si}"][data-tok="${id}"] td.w-head .csel`); if(c)c.classList.add("bad"); });
+          cyc.forEach(id=>flag(si,id,"head"));
           ISSUES.push({si,tok:cyc[0],msg:`Dependency cycle: tokens ${cyc.join(", ")} form a loop with no path to the root`}); } }
       path.forEach(x=>cst[x]=2); } });
   const issues=ISSUES.length;
   document.getElementById("valDot").className="dotmark "+(issues?"dot-bad":"dot-good");
   document.getElementById("valText").textContent=issues?`${issues} issue${issues>1?"s":""}`:"valid";
 }
+// paints BAD onto whatever token rows currently exist in the DOM — one querySelectorAll, not 3×tokens of
+// individual querySelector calls. Safe to call on a partial (windowed) render: a row not yet built simply
+// isn't visited, and gets painted correctly whenever it IS built, since renderGrid's row-building always
+// runs before this (see renderDoc's call order).
+function paintValidationDom(){
+  document.querySelectorAll("#doc tr[data-tok]").forEach(row=>{
+    const o=BAD.get(row.dataset.s+":"+row.dataset.tok)||{};
+    const hc=row.querySelector("td.w-head .csel"); if(hc)hc.classList.toggle("bad",!!o.head);
+    const uc=row.querySelector("td.w-upos .csel"); if(uc)uc.classList.toggle("bad",!!o.upos);
+    const dc=row.querySelector("td.w-deprel .cin"); if(dc)dc.classList.toggle("bad",!!o.deprel);
+  });
+}
+function validateAll(){ computeIssues(); paintValidationDom(); }
 // click the status-bar indicator → list the issues; each row jumps to the offending token/sentence
 function sheetIssues(){ const s=shell("Issues", ISSUES.length?`${ISSUES.length} issue${ISSUES.length>1?"s":""} to resolve.`:"No issues in the document.","sm");   // a plain informational alert (per Figma: translucent glass, pill button), not a content sheet
   const c=s.querySelector(".content");
@@ -94,7 +109,8 @@ function sheetIssues(){ const s=shell("Issues", ISSUES.length?`${ISSUES.length} 
       const sid=(DOC[iss.si]&&DOC[iss.si].sid)||("sentence "+(iss.si+1));
       row.innerHTML=`<span class="issloc">${esc(sid).replace(/([.\-_/:])/g,"$1<wbr>")}</span><span class="issmsg">${esc(iss.msg).replace(/ (\S+)\s*$/," $1")}</span>`;   // <wbr> after punctuation → long ids break there first; nbsp before the last word → it never orphans alone
       row.onclick=()=>{ closeSheet(); if(iss.tok>0)pick(iss.si,iss.tok); else pick(iss.si,0,false,false);
-        const b=document.querySelector(`.sblock[data-i="${iss.si}"]`); if(b)b.scrollIntoView({block:"center",behavior:"smooth"}); };
+        const b=(typeof scrollToSentence==="function")?scrollToSentence(iss.si):document.querySelector(`.sblock[data-i="${iss.si}"]`);   // an issue can be anywhere in the document — bring it into the rendered window first (js/core/document.js)
+        if(b)b.scrollIntoView({block:"center",behavior:"smooth"}); };
       list.appendChild(row); });
     c.appendChild(list); }
   const act=s.querySelector(".actions"); act.innerHTML=`<button class="tbtn primary" data-x>Close</button>`; act.querySelector("[data-x]").onclick=closeSheet;

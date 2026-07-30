@@ -643,7 +643,7 @@ function stextMarkSel(apply){ const F=stextEditEl(); if(!F) return false;
     A.units[i].ids.forEach(id=>{ if(ids.indexOf(id)<0) ids.push(id); }); });
   const toks=ids.map(id=>s.tokens[id-1]).filter(Boolean);
   if(!toks.length){ toast("That selection covers no word of the sentence"); return true; }   // a drag across the space between two words, say
-  pushUndo();                                                                          // ONE entry, before the first write → undo restores the whole selection at once
+  pushUndo(si);                                                                        // ONE entry, before the first write → undo restores the whole selection at once
   const undoRef=UNDO[UNDO.length-1];   // …and a handle on it, so a follow-up the user CANCELS can take the whole command back out (see revertEdit)
   const r=apply(toks,s,ids,si)||{}, msg=(typeof r==="string")?r:r.msg;                 // apply may return a bare message, or {msg, then} when it has follow-up work that must wait for the re-render
   markDirty();
@@ -936,60 +936,300 @@ function alignInlineStart(el,b){ if(!el) return;
   el.style.marginInlineStart=((parseFloat(cs.marginInlineStart)||0)+d)+"px"; }
 
 /* document */
-function renderDoc(){
-  if(typeof refreshFontStacks==="function") refreshFontStacks();   // diagram-core.js: re-reads #doc's LIVE --token-font/--mono-font (a scheme-scoped override, e.g. Ranjana, may have changed it since the last render) into LIVE_TOKEN_STACK/LIVE_MONO_STACK and every measurement font string derived from them (WORD_F, GLOSS_F, …), ONCE per render rather than per meas() call. Must run before computeColW() (→ marginNumWidth) and before anything below that measures token width, or this render would still lay out against the PREVIOUS scheme's metrics. Guarded (as document.js already guards TOKEN_STACK-dependent reads elsewhere) for any harness that renders before diagram-core.js has loaded
-  msegFlagDoc();   // what an MWT grouping implies about its members — the MSeg tier's decorative continuation mark, and in Sanskrit a featureless non-final member's Compound=Yes. A dozen scattered operations move those ranges (grouping, ungrouping, splitting, flattening, inserting/deleting a token, an auto-regroup after a parse), so deriving it HERE, once, at the single point they all funnel through, is what keeps it from ever going stale; it's idempotent and cheap, and marks nothing dirty of its own accord — see msegFlagSent
-  computeColW();
-  const host=document.getElementById("doc"); host.textContent="";
-  host.lang=bcp47Tag();   // BCP-47 tag → inherits to every token/diagram/grid text so the browser picks locale-correct Cyrillic/Han glyphs (locl + system-font region); re-run on every language/script change
-  host.classList.toggle("ortho-script", TRANSLIT_SCHEME==="zhuyin");   // a non-Latin DISPLAYED transliteration (Zhuyin) in the row → drop the romanisation italics
-  host.classList.toggle("script-form", typeof iastFormEdit==="function"&&iastFormEdit());   // Sanskrit under a real script → every token FORM on screen is a derived rendering of the stored IAST, not an editable field, so it takes the pointing hand (app.css). The MWT/goeswith glyphs set the same cursor inline via formCursor(), being SVG text with their own click contract
-  host.classList.toggle("no-relcolour", !show.colour);   // "Relation colours" off → --tie-hue swaps --c-other for --ink, so POS tags/bracket ties go monochrome too, not just the deprel labels relColor() already gates
-  /* Item 3 — PAGED LAYOUT. In paged mode the blocks are grouped into .docsheet containers and a `# newdoc` ENDS one
-     and starts the next, which is what makes a document boundary read as a document boundary rather than as a
-     slightly bigger gap. Unpaged, `host` IS the container and every block is appended straight to it, exactly as
-     before. Nothing downstream had to change: every later pass selects `#doc .sblock` (a descendant selector), so
-     the extra level of nesting is invisible to the alignment/cap/selection passes below.
-     The first sheet is created HERE, above AVAILW, and not lazily in the loop — see item 9 immediately below. */
-  let sheet=host;
-  const newSheet=()=>{ if(!PAGED) return host; const d=document.createElement("div"); d.className="docsheet"; host.appendChild(d); return d; };
-  if(PAGED) sheet=newSheet();
-  /* Item: BOUNDARY SECTIONS. A `# newdoc`/`# newpar` heading is sticky (see .bmark in app.css), and a sticky box
-     pins only for as long as its CONTAINING BLOCK is on screen — so the run of sentences a heading dominates has
-     to be a real element, not merely an interval the renderer knows about. `docSec`/`parSec` are the two open
-     sections: a document boundary closes both and opens a document section, a paragraph boundary closes and
-     reopens the paragraph section INSIDE whichever document section is current (or in the sheet, for a file
-     whose paragraphs precede its first `# newdoc`), and every block is appended to the innermost open one. That
-     IS the dominance rule the headings need — a document heading reaches to the next document, a paragraph
-     heading to the next paragraph or document, whichever comes first.
-     Nothing downstream had to change, for the same reason paged mode's sheets cost nothing: every later pass
-     selects `#doc .sblock`, a DESCENDANT selector. */
-  const NUM=boundNumbers(), SNUM=sentNumbers();   // recomputed here, every render — see boundNumbers on why nothing is stored
-  // Item 9: the width a diagram row may use is the width of the box it will actually be laid out in — the SHEET in
-  // paged view, `#doc` unpaged. Measuring `#doc` in both left every diagram sized to the full window: at 1500px it
-  // decided a row fitted unwrapped when the 900px sheet had no room for it, and a wrapped row broke at the wrong
-  // column. An EMPTY sheet measures correctly (its width comes from max-width + auto margins, not its content), and
-  // renderDoc re-runs on every paged/unpaged switch (setPageMode → preserveScroll(renderDoc)), so the two modes
-  // can never disagree about it.
-  AVAILW=Math.max(240, sheet.clientWidth-52);
-  // Item 1: the cap must equal the VISIBLE viewport height for content — from just below the options bar (or the
-  // titlebar when the options bar is hidden) down to just above the status bar. Only the TOP is occluded: the doc
-  // scrolls UNDER the overlaid titlebar + options bar, which the doc's top padding (--tbH + --vbH) exactly clears.
-  // The status bar is NOT overlaid — it is an in-flow sibling BELOW the doc, so the doc's border-box bottom already
-  // coincides with the status-bar top (host.clientHeight already stops there). The doc's 44px bottom padding is only
-  // trailing scroll room, NOT an occluded band, so it must NOT be subtracted — doing so left the cap 44px too short
-  // (dead space below a tall block). Subtract ONLY the top inset: dh = clientHeight − paddingTop = the exact gap from
-  // the options-bar bottom to the status-bar top (= innerHeight − titlebarH − (options bar shown? optionsBarH : 0) −
-  // statusbarH). Recomputed every render, so showing/hiding the options bar (which changes --vbH → this top padding,
-  // and re-renders) re-tightens the cap.
-  const hcs=getComputedStyle(host), padTop=parseFloat(hcs.paddingTop||0);
-  const dh=Math.max(160, host.clientHeight-padTop), rs=document.documentElement.style; AVAILH=dh;   // caps are relative to the app's VISIBLE document viewport (options-bar bottom → status-bar top), not the browser and not the occluded top padding
-  // #doc isn't zoomed, so dh is REAL px; but .diagram/.gwrap live inside .sblock{zoom:var(--fs)}, which multiplies any max-height by FS. Divide the cap by FS so the VISUAL cap stays a fixed fraction of the viewport at every zoom level (recomputed here on every render → refreshed on each zoom, since setFS re-runs renderDoc). At FS=1 this is a no-op.
-  rs.setProperty("--cap-dia",Math.round(dh*0.6/FS)+"px"); rs.setProperty("--cap-grid",Math.round(dh*0.4/FS)+"px");
-  /* the --bm-stick engine probe was published here; the headings do not pin any more, so there is no inset to measure or hand to CSS. stickyTopFactor() survives below, unused but documented — it records what each engine counts into a sticky view rectangle, which is not obvious and was expensive to establish. */
-
-  DOC.forEach((s,i)=>{
-    if(PAGED && i>0 && hasNewdoc(s)) sheet=newSheet();   // a new document gets a sheet of its own (never for i=0, which would leave an empty first sheet)
+/* ── VIEWPORT VIRTUALIZATION ──────────────────────────────────────────────────────────────────────────────────
+   renderDoc() used to build a `.sblock` (full SVG diagram + grid table) for EVERY sentence, unconditionally, on
+   every open AND every single edit — at 20,000 sentences that's ~20,000 live DOM subtrees rebuilt from scratch
+   per keystroke (every edit-ops.js mutator ends in refresh()→renderDoc()). Windowed instead: only sentences in
+   [winLo,winHi) actually get a `.sblock`; two spacer elements stand in for the estimated height of everything
+   outside that range, sized from AVG_BLOCK_H (the average REAL — already-zoomed, i.e. directly comparable to a
+   plain sibling div's height — height of the blocks actually built, remeasured every render).
+   curBlock() is always inside the window (computeWindow clamps the anchor in, and renderDoc always calls it
+   WITH curBlock() — see below), so preserveScroll's own before/after anchor lookup (js/ui/wiring.js) never has
+   to fall back to a raw scrollTop restore. The window only shifts on a genuine reason to: an edit re-centres on
+   the sentence being edited (curBlock(), since renderDoc recomputes the window every call); scrolling near
+   either edge re-centres on whatever's now nearest the viewport top (js/core/scroll.js's maybeShiftWindow, using
+   the same topVisibleBlock() signal maybeShiftFocus already computes a version of).
+   Everything downstream that already worked off whatever's in the LIVE DOM rather than iterating DOC itself
+   needed NO change at all: js/core/scroll.js's block-position math (querySelectorAll(".sblock") already means
+   "whatever's rendered", never "every sentence"), the settle-alignment sweep at the end of this file, and
+   validateAll's DOM paint (js/editing/validation.js) were already windowed — just to "all 20,000" — and are now
+   windowed to whatever's actually built. The few places that assumed a `.sblock` always exists for ANY sentence
+   (restoreScrollPos, find's scrollToMatch, the Issues sheet's row click) now go through scrollToSentence below. */
+let winLo=0, winHi=0, AVG_BLOCK_H=220;   // AVG_BLOCK_H seeds the very first jump into an unmeasured region (e.g. restoring a saved scroll position deep in a large file before anything has been measured); self-corrects every render
+const WIN_BUFFER=15;   // sentences kept rendered above/below the anchor — generous overscan so ordinary scrolling and arrow-key navigation between adjacent blocks never has to wait on a rebuild
+function computeWindow(anchor){
+  if(!DOC.length){ winLo=0; winHi=0; return; }
+  if(anchor==null||anchor<0) anchor=winLo;   // no valid anchor (nothing selected/focused yet) → keep whatever range was already showing
+  anchor=Math.max(0,Math.min(anchor,DOC.length-1));
+  winLo=Math.max(0,anchor-WIN_BUFFER); winHi=Math.min(DOC.length,anchor+WIN_BUFFER+1);
+}
+// Bring sentence i into the rendered window — recentring + a synchronous re-render if it isn't already there —
+// and return its (now-existing) .sblock. The shared primitive every "jump to a sentence that might be anywhere
+// in the document, not just near whatever's currently on screen" caller needs.
+function scrollToSentence(i){
+  if(i==null||i<0||i>=DOC.length) return null;
+  const host=document.getElementById("doc"); if(!host) return null;
+  let b=host.querySelector(`.sblock[data-i="${i}"]`);
+  if(!b){ computeWindow(i); renderDoc(); b=host.querySelector(`.sblock[data-i="${i}"]`); }
+  return b;
+}
+/* ── NOTATION-SWITCH DIAGRAM CACHE ────────────────────────────────────────────────────────────────────────────
+   renderSentence(si) (js/diagram/diagram-render.js) used to be called fresh on EVERY buildBlock, for EVERY
+   notation switch: stemma/tree/arcs/brackets/outline each re-run their own font-measurement + layout algorithm
+   over every token, even when re-visiting a notation that was already built for this exact sentence with
+   nothing about it or the view changed since. Measured on a 42-token non-projective Sanskrit sentence
+   (samples/brihat_jataka.conllu s1, windowed alongside its 3 siblings × 4 repeats = 16 sentences in view): a
+   full renderDoc() of that window costs ~2–3.6s in EVERY notation, and re-switching arcs→tree→arcs→tree… paid
+   that same cost on EVERY leg, including the ones returning to a notation already seen seconds earlier (a CDP
+   profiling harness, run headless against this exact window, is what produced those numbers — see the
+   before/after figures wherever this change is written up). This is the SAME shape of problem the
+   COLUMN-WIDTH CACHE above (js/grid/grid.js) already solves for computeColW(), and follows its structure: a
+   cache of already-built values, a single per-sentence "this one's dirty now" signal, and wholesale invalidation
+   on the handful of events that can invalidate everything at once.
+   KEYED ON (si, conv, and every OTHER global the five renderers read that can change their OUTPUT without
+   touching the sentence itself) — diaFlagsSig() below is the exhaustive list, gathered by grepping every
+   `show.*`/global read in diagram-render.js/diagram-wrap.js/diagram-core.js's displaySent/bform/mirror/wrap
+   path. Missing one here would mean "toggle a view flag, switch notations, see the OLD flag's rendering" — a
+   correctness bug, not a slow one, so the list errs generous rather than clever: every entry is read ONCE per
+   renderDoc() (diaFlagsSig is computed once into ctx.diaSig, not once per sentence), so a few unused reads cost
+   nothing measurable next to the layout work they guard.
+   KEYED ON THE SENTENCE'S OWN CONTENT TOO (csig — diaContentSig below), not only on the per-sentence
+   invalidation hook further down. That hook — snapSent(si), which fires when a mutator ANNOUNCES itself — is
+   necessary but not sufficient: it fires BEFORE the edit, and nothing re-fires after any work the edit DEFERS
+   past the render it scheduled. A LEMMA EDIT is exactly that shape, and was the bug this closes. Committing a
+   Lemma cell (commitCell in js/grid/grid.js) writes the lemma and calls afterLemmaEdit (js/io/bridge.js), which
+   AWAITS the new lemma's transliteration before msegRefill can re-derive MSeg from it — while the render that
+   same commit scheduled runs in between, builds the diagram from the OLD MSeg/MGloss, and caches it under a
+   signature nothing has touched since. When msegRefill finally writes the new MSeg and re-renders, that entry is
+   a hit, so the diagram kept serving the pre-edit morphemic rows until the NEXT edit's snapSent happened to drop
+   it: "the grid updates now, the diagram updates one edit late". Every other pass that lands after its own edit's
+   render (a background re-parse revising lemma/feats, an async romanisation fill) had the same hole. One content
+   signature closes all of them, by asking the question the cache actually cares about — "is this still the
+   sentence I drew?" — instead of trusting every mutator to remember to answer it.
+   STORAGE: si → {csig, m:Map(conv → {sig,node})}. A nested map, not one flat `si+conv+sig` string key, because the outer
+   level is exactly what per-sentence invalidation needs to drop in O(1) (see invalidateDiaSentence) and what
+   window-pruning needs to iterate (pruneDiaCache) — neither wants to filter-scan every (si,conv) pair. The
+   inner level caps itself at 5 entries (one per notation) with no LRU needed: there are only 5 notations, so
+   "cache every notation this sentence has been shown in, for as long as the sentence is on screen" is already
+   a hard, small bound — the memory question (CLAUDE.md's virtualization note) is answered by the OUTER level
+   instead, pruned to the current [winLo,winHi) below.
+   NEVER GOES STALE UNDER SELECTION: the returned node's .sel/.rng/.dim-* classes are NOT baked in here — they
+   are re-derived from data-s/data-tok attributes by applySel() (below in this file), which renderDoc() already
+   calls unconditionally after every buildBlock loop, cache hit or miss alike. That is what makes "bake selection
+   in at build time, drop the cache entry on every selection change" (the simple-but-defeats-the-cache option)
+   unnecessary — applySel's live class-toggle pass already treats a reused node exactly like a fresh one, since
+   both carry the same data-* attributes and applySel never assumes it is looking at just-built DOM. */
+let DIA_CACHE=new Map();   // si → {csig, m:Map(conv → {sig,node})}
+// every global that changes a rendered diagram's OUTPUT without changing the SENTENCE (which invalidateDiaSentence
+// covers instead) — read once per render into ctx.diaSig, not once per sentence. FS/AVAILW/idW: zoom + wrap budget
+// + the margin column a wrapped view indents past (js/diagram/diagram-wrap.js). DOCLANG: isSanskritLang() gates
+// MWT sandhi-fusion display and the script daṇḍa glyph. TRANSLIT_SCHEME/ORTHO_SCHEME/STORED_SCHEME: the romanised/
+// scripted form a token renders (bform/trTxt/topTransTxt). stemmaProj/stemmaCat: renderSentence's own stemma-only
+// options, included unconditionally rather than only when conv==="stemma" — simpler than a per-conv-conditional
+// signature, and a toggle of either is rare enough that invalidating a tree/arcs/brackets/outline entry it can't
+// possibly affect costs nothing worth avoiding. show.*: pos/labels/colour/arrows/extRel/wrap/translit/mergePunct,
+// every `show.` this app's 3 diagram files read (grepped, not guessed). GLOSS_ON/_VIS, MORPH_ON/_VIS: belowTiers().
+function diaFlagsSig(){
+  // "|", not "" — a bare join() concatenates adjacent NUMBERS (FS/AVAILW/idW) with no boundary between them, so
+  // e.g. FS=1,AVAILW=23 and FS=12,AVAILW=3 both join to "123": two genuinely different view-states producing the
+  // SAME signature, i.e. a false cache hit — a stale diagram silently surviving a real zoom/wrap-width change.
+  // "|" can't appear in any of these values (plain numbers, BCP-47-ish language/scheme names, 0/1 flags), so it's
+  // an unambiguous field separator.
+  return [FS,AVAILW,idW,DOCLANG,TRANSLIT_SCHEME,ORTHO_SCHEME,STORED_SCHEME,
+    stemmaProj?1:0,stemmaCat?1:0,
+    show.pos?1:0,show.labels?1:0,show.colour?1:0,show.arrows?1:0,show.extRel?1:0,show.wrap?1:0,show.translit?1:0,show.mergePunct?1:0,
+    GLOSS_ON?1:0,GLOSS_VIS?1:0,MORPH_ON?1:0,MORPH_VIS?1:0
+  ].join("|");
+}
+// The cached/fresh diagram for sentence i, under the CURRENT conv + ctx.diaSig — renderSentence(i) itself is
+// unchanged (still the single source of truth for what a notation looks like); this only decides whether that
+// call is needed. A stale entry for a DIFFERENT conv or an outdated sig is simply overwritten, never patched —
+// the two situations where per-conv reuse would pay off (switching straight back, or nothing having changed at
+// all) are exactly the ones this returns early for.
+/* THE SENTENCE HALF of the key: everything a renderer reads OFF THE SENTENCE, in one string. Deliberately the
+   WHOLE sentence object rather than an enumerated field list — the flags half above can afford to enumerate
+   (those globals are few and change one at a time), but the sentence half cannot: the renderers reach tokens'
+   form/lemma/upos/feats/head/deprel/MISC (Gloss/MSeg/MGloss/Translit/SpaceAfter/Typo/Foreign/NewPar/…), the MWT
+   ranges, the empty nodes, s.text and the per-token romanisation caches, and a field left out of a hand-written
+   list is a diagram that silently stops updating — the very failure documented above, one field at a time.
+   JSON.stringify is what snapSent(si) (js/core/undo.js) already runs on one sentence per keystroke, so its cost
+   is known to be affordable at this scale; here it runs once per WINDOWED sentence per render (≈31 of them), and
+   it guards a per-sentence layout pass measured in tens of milliseconds. Extra fields it covers that no renderer
+   reads (comments, translations, the URL) can only cost a needless rebuild, never a wrong diagram — the safe
+   direction, and the same "errs generous rather than clever" the flags list above takes. */
+let _DIA_NOSIG=0;
+function diaContentSig(s){ try{ return JSON.stringify(s); }catch(_){ return "\u0000nosig"+(++_DIA_NOSIG); } }   // unstringifiable (it never is — see snapSent) → a value that can never repeat, i.e. this sentence simply doesn't cache, rather than a constant that would collide with the next one
+function diaSentence(i,ctx){
+  const stage=incStageFor(i);   // ≥0 while an incremental post-parse sequence is converging on THIS sentence (see the INCREMENTAL note below); -1 otherwise, and any render the sequence did not start cancels it there
+  if(stage>=0){ const node=incStaged(i,stage); if(node) return node; }   // a STAGE IS NEVER CACHED: it is a deliberate approximation of this sentence, not a rendering of it, and an entry for it could be served back to an ordinary render
+  const csig=diaContentSig(DOC[i]);
+  let e=DIA_CACHE.get(i);
+  if(e&&e.csig!==csig){ DIA_CACHE.delete(i); e=null; }   // the SENTENCE moved since these were built → every notation's entry for it is stale, not just the one on screen
+  if(e){ const hit=e.m.get(conv); if(hit&&hit.sig===ctx.diaSig) return hit.node; }
+  const node=renderSentence(i);
+  if(!e){ e={csig,m:new Map()}; DIA_CACHE.set(i,e); }
+  e.m.set(conv,{sig:ctx.diaSig,node});
+  return node;
+}
+// Per-sentence invalidation. Called from js/core/undo.js's snapSent(si) — the ONE choke point every
+// single-sentence mutator already passes through before it writes (pushUndo(si) calls it directly; grid.js's
+// cell-edit sessions call it themselves via `pendingSnap=snapSent(si)` on focus, ahead of committing anything).
+// touchColW(si,si+1) (js/grid/grid.js) was considered and REJECTED as this hook: it is called at fewer sites
+// than snapSent — e.g. dragging an arc to a new head (js/diagram/diagram-edit.js's setDiagramHead) calls
+// pushUndo(si) but not touchColW, because a stale COLUMN WIDTH after a re-head is cosmetic slop (grid.js's own
+// term) the grid tolerates on purpose, whereas a stale DIAGRAM after a re-head is the wrong tree drawn as if it
+// were current — not a tolerable degree of staleness. snapSent is the strictly more complete signal: every
+// call site touchColW has, snapSent already covers (grid.js's pendingSnap dance IS a snapSent(si) call), plus
+// every structural/relation edit that changes a rendered tree without widening any cell. Fires on FOCUS (grid.js)
+// or before the first write (everywhere else), i.e. slightly early — an edit session that focuses a cell and
+// blurs it unchanged drops a cache entry that was still valid — which only ever costs one extra rebuild, never
+// a wrong one, so erring early is the safe direction.
+function invalidateDiaSentence(si){ DIA_CACHE.delete(si); }
+// Wholesale clear — added at every existing invalidateColW() call site (document replace/undo/redo/new-file,
+// a whole-document conversion, Find & Replace's Replace All, a font-stack change) PLUS the structural edit-ops.js
+// sites (insert/delete/move/re-boundary a SENTENCE): those shift every FOLLOWING sentence's OWN INDEX, and this
+// cache is keyed on si, so "sentence 5" after a splice is a different sentence than the node cached under that
+// key — reusing it would draw sentence 6's old tree under sentence 5's number. colW tolerates exactly the same
+// hazard by re-scanning wholesale for the same reason (see its own note in js/grid/grid.js); this does too.
+// ALSO added in js/lang/translit-load.js's fillTranslit/fillOrtho, which are not si-scoped edits at all but
+// cross-document DERIVED passes (a scheme switch, a fresh parse's romanisation) that mutate t.translit/t.ortho/
+// s.orthoLine across arbitrarily many sentences with no pushUndo/snapSent of their own (deliberately — they are
+// not user edits, see those functions' own comments) and so would otherwise race a cache built moments earlier,
+// before the async fill landed, permanently serving the pre-fill rendering back on every later notation switch.
+function invalidateDiaCache(){ DIA_CACHE.clear(); cancelIncremental(); }   // …and any in-flight incremental sequence with it: it is keyed on si, and every caller of this is replacing what si NAMES
+// Drop every cached sentence OUTSIDE the current render window. Composes with the virtualization above rather
+// than fighting it: a sentence that has scrolled out of [winLo,winHi) is already gone from the DOM (its .sblock
+// was never rebuilt, or was replaced by a spacer), so a cache entry for it is pure memory with nothing to show
+// for it — on a 20,000-sentence document, cycling every notation while scrolling through the whole file would
+// otherwise grow DIA_CACHE to 20,000 × 5 entries and never shrink. Called every renderDoc(), right after
+// computeWindow() has decided the range — cheap (one Map iteration bounded by however many sentences have EVER
+// been cached, which window-pruning itself keeps close to WIN_BUFFER*2+1 in steady state).
+function pruneDiaCache(lo,hi){ for(const si of DIA_CACHE.keys()) if(si<lo||si>=hi) DIA_CACHE.delete(si); }
+/* ── INCREMENTAL POST-PARSE DIAGRAM (breadth-first by tree depth) ─────────────────────────────────────────────
+   A parse hands the grid its tokens in one go, but the DIAGRAM for a long sentence costs a whole layout pass
+   (stemmaLayout's per-token measurement, spreadForLabels' iterative widening, the label de-collision passes,
+   fitTight) before a single glyph reaches the screen — so the sentence's row sat blank for as long as that took.
+   This draws the tree AS IT IS BEING WORKED OUT instead: stage 0 hangs every token straight off its own root
+   (a flat, one-level shape — cheap, because a flat tree has no crossing edges and almost nothing for the
+   de-collision passes to do), the next stage attaches the root's real immediate dependents, the next theirs, and
+   so on until the LAST stage draws the true tree through the ordinary path above. Each stage is one
+   requestAnimationFrame apart, so the browser paints between them and the diagram visibly converges.
+   THE LAST STAGE IS NOT AN APPROXIMATION OF ANYTHING: it is a plain renderDoc() with this whole mechanism
+   switched off (incStageFor returns -1 once the ladder runs out), so the finished diagram is bit-for-bit what the
+   non-incremental path draws, post-passes and all. That is also why every stage is a full renderDoc rather than a
+   surgical swap of the one `.diagram` node: the alignment/height-cap/wrapproj/seam-mark passes at the tail of
+   renderDoc all measure a block against its diagram, and a staged diagram that skipped them would settle by
+   jumping rather than by converging. The other ~30 sentences in the window cost nothing extra per stage — they
+   are cache hits (see above), and their csig hasn't moved.
+   IT COSTS MORE WORK IN TOTAL, not less, and is therefore armed ONLY for a sentence that was just parsed
+   (renderDiagramIncremental, called from the parse paths in js/io/bridge.js) and only when the shape has enough
+   depth and enough tokens to be worth watching converge. Every ordinary render — an edit, a scroll, a notation
+   switch — takes the one-shot path exactly as before.
+   NOTATIONS: stemma / hierarchy / arcs only (their wrapped variants come along, since wrapDiagram re-renders
+   from the same truncated tree). BRACKETS AND OUTLINE FALL THROUGH to the one-shot render deliberately: both are
+   NESTING notations, so a truncated tree doesn't read as "still working" but as a genuinely different (flat)
+   analysis — and their cost is dominated by the browser's own text layout of the rows, which the truncation
+   doesn't reduce, so there would be nothing to win by it either.
+   THE DOCUMENT IS NEVER MUTATED — see incStaged for how a truncated tree is drawn without touching DOC. */
+const INC_CONV={stemma:1,tree:1,arcs:1};   // where a truncated tree means something — see the note above
+const INC_MIN_TOK=10, INC_MAX_STAGES=5;    // below ~10 tokens the one-shot layout is already imperceptible; and never more than 5 intermediate stages, however deep the tree, so a 20-level chain doesn't buy its convergence with 20 full renders (the ladder then steps by more than one level at a time — see incLadder)
+let INC=null;   // {si, ladder:[depth,…], i, armed, own, raf} — at most ONE sequence at a time: a parse is a per-sentence operation, and a second one supersedes the first
+// Every token's depth below its own root, plus its parent index — computed on the REAL token list (before
+// displaySent's merge-punct/goeswith folds), because that is the list the truncation has to rewrite.
+// Malformed heads are handled the way the renderers already handle them: a head outside 1…n (or pointing at the
+// token itself) is a root, and a cycle is broken by the chain-length guard, leaving its members at finite,
+// arbitrary depths rather than looping forever.
+function incDepths(tokens){ const n=tokens.length, par=new Array(n), d=new Array(n).fill(-1);
+  for(let i=0;i<n;i++){ const h=parseInt(tokens[i].head,10); par[i]=(h>=1&&h<=n&&h!==i+1)?h-1:-1; }
+  for(let i=0;i<n;i++){ if(d[i]>=0) continue;
+    const chain=[]; let j=i;
+    while(j>=0 && d[j]<0 && chain.length<=n){ chain.push(j); j=par[j]; }   // walk up to the first node whose depth is already known (or to a root, or until the guard trips on a cycle)
+    let base=(j>=0&&d[j]>=0)?d[j]:-1;                                      // -1 ⇒ the top of the chain is itself a root (or a cycle member) → depth 0
+    for(let k=chain.length-1;k>=0;k--) d[chain[k]]=++base; }
+  return {par,d}; }
+// The depths the sequence draws before the true tree. Empty ⇒ nothing to converge from: a tree that is already
+// one level deep IS the flat shape stage 0 would draw, so staging it would show the same picture twice.
+function incLadder(maxD){ if(maxD<2) return [];
+  const step=Math.ceil(maxD/INC_MAX_STAGES), out=[];
+  for(let d=0;d<maxD;d+=step) out.push(d);   // always starts at 0 (the flat shape) and always stops short of maxD (which is the true tree, drawn by the ordinary path)
+  return out; }
+/* One stage's TOKEN LIST: every token at depth ≤ k keeps its real head (and its own object, untouched); anything
+   deeper is re-attached to its nearest ancestor within the drawn depth, on a SHALLOW COPY of that token alone.
+   The deprel is deliberately kept as it is: the labels are the ones the finished diagram will carry, so they
+   don't flicker through the stages, and the arc a stage draws is honestly "this token belongs somewhere under
+   there" — which is exactly what the reader is being shown while the rest is worked out. */
+function incTruncTokens(tokens,k){ const {par,d}=incDepths(tokens), n=tokens.length;
+  return tokens.map((t,i)=>{ if(d[i]<=k) return t;
+    let j=i, guard=0; while(j>=0 && d[j]>k && guard++<=n) j=par[j];
+    if(j<0||j===i) return t;   // no ancestor inside the drawn depth (only reachable through a malformed chain) → leave the token exactly as the document has it
+    return Object.assign({},t,{head:String(j+1)}); }); }
+/* Draw sentence si as of stage-depth k. renderSentence(si) reads DOC[si] itself (through displaySent), and it
+   lives in js/diagram/diagram-render.js with no seam for an override, so the truncated sentence is put in the
+   array slot for the duration of that ONE SYNCHRONOUS CALL and taken straight back out in a finally.
+   THAT IS NOT A DOCUMENT MUTATION and must never become one: the sentence OBJECT is not touched (the truncated
+   tokens are a fresh array of untouched originals plus shallow copies), the slot holds the substitute only while
+   a single synchronous, non-dispatching call runs — no event, no await, no observer can see it — and the same
+   object reference is restored on every path out, exception included. Nothing calls markDirty, pushUndo or any
+   serializer here, so dirty-marking, undo and save cannot see this at all.
+   Any throw from a staged render abandons the sequence and falls back to the true one-shot render rather than
+   propagating: a stage is an optimisation, and an optimisation must never be able to blank the document. */
+function incStaged(si,k){ const real=DOC[si]; if(!real||!real.tokens) return null;
+  try{ DOC[si]=Object.assign({},real,{tokens:incTruncTokens(real.tokens,k)});
+    try{ return renderSentence(si); } finally { DOC[si]=real; }
+  }catch(e){ cancelIncremental(); return null; } }
+// diaSentence's hook. Returns the stage-depth to draw for sentence i, or -1 for "draw the real thing". Consuming
+// `armed` here is what lets the caller's own post-parse render BE stage 0, whichever side of it the sequence was
+// armed on; after that, only the sequence's own renders (own) may draw a stage, so ANY other render — a user
+// edit, a notation switch, a scroll re-render, a second document — cancels the sequence and draws the true tree
+// in that same pass. That is also why no cancellation ever leaves a stage on screen as the last word.
+function incStageFor(i){ const seq=INC; if(!seq||seq.si!==i) return -1;
+  if(!(seq.armed||seq.own)){ cancelIncremental(); return -1; }
+  seq.armed=false;
+  return seq.i<seq.ladder.length?seq.ladder[seq.i]:-1; }
+function incTick(){ const seq=INC; if(!seq) return; seq.raf=0;
+  if(seq.armed) seq.armed=false;   // nobody rendered stage 0 on our behalf (the caller rendered before arming, or not at all) → this tick draws it
+  else seq.i++;
+  if(!show.graphs || seq.si<winLo || seq.si>=winHi){ INC=null; return; }   // diagrams switched off, or the sentence has scrolled out of the rendered window — there is nothing on screen to converge
+  const last=seq.i>=seq.ladder.length;
+  seq.own=true;
+  try{ if(typeof preserveScroll==="function") preserveScroll(renderDoc); else renderDoc(); }
+  finally { seq.own=false; }
+  if(INC!==seq) return;            // that render cancelled us (or a second parse replaced the sequence outright)
+  if(last){ INC=null; return; }    // …and that render drew the TRUE tree, so the sequence is finished
+  seq.raf=requestAnimationFrame(incTick); }
+// NO CANCELLATION EVER LEAVES A STAGE AS THE LAST THING DRAWN, and that is a property of the call sites rather
+// than of anything done here: incStageFor cancels from INSIDE a render that then draws the true tree in the same
+// pass; incStaged's catch does the same by returning null and falling through; invalidateDiaCache's callers
+// (document replace / undo / redo / conversion) all re-render immediately after; and renderDiagramIncremental
+// hands over to a fresh sequence. A future caller that fits none of those must render the sentence itself.
+function cancelIncremental(){ const seq=INC; if(!seq) return; if(seq.raf) cancelAnimationFrame(seq.raf); INC=null; }
+/* THE ENTRY POINT — "this sentence was just parsed; converge on its diagram instead of making the reader wait".
+   Call it from the parse paths in js/io/bridge.js, immediately BEFORE the preserveScroll(renderDoc) that shows
+   the parse (that render then costs stage 0 instead of the full layout). Calling it AFTER that render still
+   works — the first tick draws stage 0 itself — it just pays for the full layout first and so wins nothing. */
+function renderDiagramIncremental(si){
+  cancelIncremental();   // a second parse supersedes whatever was still converging
+  if(si==null||si<0||si>=DOC.length) return;
+  if(!show.graphs||!INC_CONV[conv]) return;
+  const s=DOC[si], toks=s&&s.tokens;
+  if(!toks||toks.length<INC_MIN_TOK) return;
+  const ladder=incLadder(incDepths(toks).d.reduce((a,x)=>x>a?x:a,0));   // reduce, not Math.max(...d): a spread that long is an argument list, and a long sentence would blow the call stack rather than report a depth
+  if(!ladder.length) return;
+  DIA_CACHE.delete(si);   // whatever is cached for si describes the PRE-parse tokens; drop it here rather than leave the first staged render racing it
+  INC={si,ladder,i:0,armed:true,own:false,raf:0};
+  INC.raf=requestAnimationFrame(incTick);
+}
+window.renderDiagramIncremental=renderDiagramIncremental;   // also reachable from the native menu / bridge glue, which addresses the frontend through window.*
+/* the per-sentence body renderDoc()'s main loop used to run inline — pulled out so a future windowed/
+   incremental render (only the sentences near the viewport) can build ONE block without re-running the
+   once-per-render setup above it. ctx carries the few things that are per-render state rather than true
+   globals: NUM/SNUM (boundNumbers()/sentNumbers(), computed once per render) and sheet/newSheet (the PAGED
+   .docsheet a block gets appended into, which can change mid-loop when a `# newdoc` opens a new one — see
+   the reassignment below). Everything else this body reads (idW, show, PAGED, DOC itself, …) is already
+   true module-level state, unaffected by which sentence is being built. Zero behaviour change from the
+   original inline loop — same statements, same order, just addressed through ctx instead of a closure. */
+function buildBlock(i,ctx){ const s=DOC[i];
+    if(PAGED && i>0 && hasNewdoc(s)) ctx.sheet=ctx.newSheet();   // a new document gets a sheet of its own (never for i=0, which would leave an empty first sheet)
     /* THE HEADINGS BELONG TO THE BLOCK THEY OPEN, and are built here to be appended INSIDE it below. They spent a
        while as .bsec section wrappers around the run of blocks they named, which is what a sticky heading needs (a
        sticky box pins within its containing block, so the run had to BE a box). The pinning is gone — the
@@ -997,16 +1237,30 @@ function renderDoc(){
        the sections existed, so the extra nesting went too: a boundary is a fact about ONE sentence, the sentence
        that starts the document or paragraph, and it now reads as part of that sentence's block again. */
     const heads=[];
-    if(hasNewdoc(s)) heads.push(boundHeading(s,"newdoc",NEWDOC_MARK,"document",NUM[i].newdoc));   // a `# newdoc` ALWAYS gets its heading; boundNumbers decides only whether a § goes in front of the title
-    if(hasNewpar(s)) heads.push(boundHeading(s,"newpar",NEWPAR_MARK,"paragraph",NUM[i].newpar));   // document first, paragraph under it — the order the two rows stack in
+    if(hasNewdoc(s)) heads.push(boundHeading(s,"newdoc",NEWDOC_MARK,"document",ctx.NUM[i].newdoc));   // a `# newdoc` ALWAYS gets its heading; boundNumbers decides only whether a § goes in front of the title
+    if(hasNewpar(s)) heads.push(boundHeading(s,"newpar",NEWPAR_MARK,"paragraph",ctx.NUM[i].newpar));   // document first, paragraph under it — the order the two rows stack in
     const b=document.createElement("div"); b.className="sblock"+(curBlock()===i?" sel-block":"")+(show.grids?"":" no-grid")+(hasNewpar(s)?" nd-par":"")+(hasNewdoc(s)?" nd-doc":""); b.dataset.i=i;   // curBlock(), not sel.s: the focused-block tint marks the sentence being READ, which scrolling moves on its own without disturbing the selection (see the CURBLOCK note in js/core/prefs.js)
     b.dir=sentRTL(s)?"rtl":"ltr";   // RTL sentence → mirror the whole block: number, controls, grid columns
     const head=document.createElement("div"); head.className="shead";
-    const num=document.createElement("span"); num.className="snum"; num.textContent=SNUM[i]; num.style.width=idW+"px";   // item 4: numbered within its paragraph / document / the file — see sentNumbers.   // match the grid ID column → diagram aligns with Form
-    const sid=document.createElement("input"); sid.className="sid-in mono"; sid.value=s.sid; sid.title="sent_id"; sid.setAttribute("aria-label","sent_id");
-    sizeSid(sid);
-    sid.addEventListener("input",()=>sizeSid(sid));
-    sid.addEventListener("change",()=>{ if(sid.value.trim()&&sid.value.trim()!==s.sid)pushUndo(); s.sid=sid.value.trim()||s.sid; sizeSid(sid);});
+    const num=document.createElement("span"); num.className="snum"; num.textContent=ctx.SNUM[i]; num.style.width=idW+"px";   // item 4: numbered within its paragraph / document / the file — see sentNumbers.   // match the grid ID column → diagram aligns with Form
+    // a plain contenteditable span, not an <input> — an <input>'s box model is only PART of what
+    // WebKit renders: it's a replaced element whose actual text sits in an internal user-agent
+    // shadow DOM (its own "text field content" div), which -webkit-appearance:none resets the
+    // outer chrome of but not always the inner one, and which was still showing uneven insets for
+    // a long value. A contenteditable span has no such hidden layer — what app.css says about its
+    // box IS the whole box — and it needs no JS width measurement at all (sizeSid, gone): a flex
+    // item with no explicit width simply sizes to its own text, exactly like .bm-id already does
+    // (js/core/document.js's boundHeading, the same contenteditable-id pattern this now mirrors).
+    const sid=document.createElement("span"); sid.className="sid-in mono"; sid.textContent=s.sid; sid.title="sent_id";
+    sid.setAttribute("contenteditable","plaintext-only"); sid.setAttribute("role","textbox"); sid.setAttribute("aria-label","sent_id"); sid.spellcheck=false;
+    sid.addEventListener("mousedown",e=>e.stopPropagation()); sid.addEventListener("click",e=>e.stopPropagation());   // the block's own click handler deselects on empty space; this field is not empty space (same reason .bm-id stops these two — js/core/document.js's boundHeading)
+    let sidOrig=s.sid;
+    sid.addEventListener("focus",()=>{ sidOrig=s.sid; });
+    sid.addEventListener("keydown",e=>{ e.stopPropagation();   // a contenteditable isn't INPUT/SELECT/TEXTAREA → keep the doc nav handler off it
+      if(e.key==="Enter"){ e.preventDefault(); sid.blur(); }
+      else if(e.key==="Escape"){ e.preventDefault(); sid.textContent=sidOrig; sid.blur(); } });
+    sid.addEventListener("blur",()=>{ const v=(sid.textContent||"").replace(/\s+/g," ").trim();
+      if(v&&v!==s.sid)pushUndo(i); s.sid=v||s.sid; sid.textContent=s.sid; });
     // editable sentence text (# text): commit on blur/Enter re-tokenises or re-parses the sentence (Item 4).
     // Item 3: under a SCRIPT orthography the top line shows the sentence in that script (read-only) and this
     // editable original moves DOWN into the transliteration slot (mirroring the per-token original-in-row rule).
@@ -1058,7 +1312,7 @@ function renderDoc(){
         line=parts.join(" "); }
       txt.textContent=line||s.text||"(empty)"; txt.title="Sentence in "+orSchemeLabel(ORTHO_SCHEME)+" (display)";
       txt.classList.add("stext-script");   // item 20: the script top line's text left edge is aligned to the transliteration input below it (see .stext.stext-script CSS)
-      if(ORTHO_SCHEME==="Grantha"||ORTHO_SCHEME==="Javanese"||ORTHO_SCHEME==="Balinese"||ORTHO_SCHEME==="Kawi"||ORTHO_SCHEME==="ZanabazarSquare") txt.classList.add("stext-stacked");   // item 18: Grantha's stacked vowel marks need extra vertical room → double-spaced (see .stext.stext-stacked CSS); Javanese and Balinese share the same stacked-diacritic problem, so they get the same treatment. Kawi too (added alongside its _AKSHARA_SCRIPTS reinstatement): verified by rendering a real 4-line Sanskrit verse (samples/brihat_jataka.conllu s1) at line-height:1.4 — a stacked/subjoined conjunct cluster on one line visibly overlapped the line below it, which line-height:2 clears. Zanabazar Square joined the set on user report from the real app (a synthetic @font-face CDP test during its own reinstatement read as clean at normal spacing, but the shipping WKWebView face disagreed) — trust the live report over that synthetic result. ONLY the top script line; the editable translit/original below keeps normal spacing
+      if(ORTHO_SCHEME==="Grantha"||ORTHO_SCHEME==="Javanese"||ORTHO_SCHEME==="Balinese"||ORTHO_SCHEME==="Kawi"||ORTHO_SCHEME==="ZanabazarSquare") txt.classList.add("stext-stacked");   // item 18: Grantha's stacked vowel marks need extra vertical room → double-spaced (see .stext.stext-stacked CSS); Javanese and Balinese share the same stacked-diacritic problem, so they get the same treatment. Kawi too (added alongside its _AKSHARA_SCRIPTS reinstatement): verified by rendering a real 4-line Sanskrit verse (samples/brihat_jataka.conllu s1) at line-height:1.4 — a stacked/subjoined conjunct cluster on one line visibly overlapped the line below it, which line-height:2 clears. Zanabazar Square joined the set on user report from the real app (a synthetic @font-face CDP test during its own reinstatement read as clean at normal spacing, but the shipping WKWebView face disagreed) — trust the live report over that synthetic result. Tibetan is NOT in this set: it briefly rendered via TibetanMachineUnicode (a stacked-subjoined-consonant face needing the same double-spacing), but that font is never fetched by fontload.js's on-demand mechanism — Tibetan now goes through the SAME "Noto Sans <Script>" pipeline every other script does (see FONT_SCRIPTS, fontload.js), whose ordinary composed glyphs need no extra vertical room. ONLY the top script line; the editable translit/original below keeps normal spacing
       txt.addEventListener("mousedown",e=>e.stopPropagation());
       // Sanskrit-only: Displayed transliteration "None" (trPick("")) collapses the .strans-orig edit line below
       // (see the scriptTransLine.hidden assignment further down) — the row the user asked to hide is also the
@@ -1088,10 +1342,10 @@ function renderDoc(){
     urlBtn.addEventListener("keydown",e=>{ if(e.key==="Enter"||e.key===" "){ e.preventDefault(); editURL(i,urlBtn); } });
     head.appendChild(num); head.appendChild(txt); head.appendChild(urlBtn); head.appendChild(sid); head.appendChild(ctrl);   // item 6: number stays first (left margin); the URL link sits in flow just BEFORE the sentence ID
     head.addEventListener("contextmenu",e=>{ if(e.target===sid)return; e.preventDefault(); sentMenu(e.clientX,e.clientY,i); });
-    b.addEventListener("click",e=>{ if(e.target.closest(".sctrl")||e.target.closest("input")||e.target.closest("select")||e.target.closest(".gridbox"))return;
+    b.addEventListener("click",e=>{ if(e.target.closest(".sctrl")||e.target.closest("input")||e.target.closest("select")||e.target.closest(".gridbox")||e.target.closest(".sid-in"))return;   // .sid-in: a contenteditable span, not an <input> — its own mousedown/click stopPropagation already keeps events from reaching here (see buildBlock), but excluded here too for anything that reaches this handler by another path
       if(e.target.closest(".node,.tok-group,.arc,.edge-g,.oline,.brk,.bwtok,.bwbr,.mwt-form"))return;   // a token/bracket/MWT-tie handles its own selection
       pick(i,0,false); });   // clicked empty diagram space → deselect any node
-    b.addEventListener("contextmenu",e=>{ if(e.target.closest(".gridbox")||e.target.closest(".sctrl")||e.target.closest("input")||e.target.closest("select"))return;   // grid/controls have their own menus
+    b.addEventListener("contextmenu",e=>{ if(e.target.closest(".gridbox")||e.target.closest(".sctrl")||e.target.closest("input")||e.target.closest("select")||e.target.closest(".sid-in"))return;   // grid/controls have their own menus; .sid-in gets the browser's own contenteditable context menu, same as an <input> would have
       if(e.target.closest(".lbl,.orel,.tok-pos,.node-cat,.opos,.node,.tok-group,.oline,.bwtok"))return;   // labels + nodes handled at the doc level
       e.preventDefault(); sentMenu(e.clientX,e.clientY,i); });   // right-click anywhere else in the block → the block menu
     // (the boundary's own heading was built and appended to its section ABOVE this block — see the sectioning
@@ -1115,13 +1369,88 @@ function renderDoc(){
       const line=parts.join(" ").trim(), base=(s.text||s.tokens.map(t=>t.form).join(" ")).trim();
       if(line && line!==base){ const tl=document.createElement("div"); tl.className="strans"; tl.style.marginInlineStart=(idW+8)+"px"; tl.textContent=line; capTransWidth(tl); b.appendChild(tl); } }
     if(TRANS_LANGS.size) b.appendChild(renderBlockTrans(i));   // item 13: a field per enabled translation language, just above the diagram
-    if(show.graphs) b.appendChild(renderSentence(i));
+    if(show.graphs) b.appendChild(diaSentence(i,ctx));   // notation-switch cache: same node reused (and re-highlighted by applySel below) if THIS sentence, under THIS conv + view-state, was already built — see the "NOTATION-SWITCH DIAGRAM CACHE" note above computeWindow
     if(show.grids) b.appendChild(renderGrid(i));
-    sheet.appendChild(b);
-  });
-  const addWrap=document.createElement("div"); addWrap.className="addsent";
-  const addBtn=document.createElement("button"); addBtn.innerHTML='<span class="sfi" style="--m:var(--sf-add)"></span>Add sentence'; addBtn.onclick=()=>insertAt(DOC.length);
-  addWrap.appendChild(addBtn); sheet.appendChild(addWrap);   // inside the LAST sheet, so the button keeps the measure rather than straying into the page margin — and NOT inside a boundary section, which would hang the button off the last paragraph rather than off the page
+    ctx.sheet.appendChild(b);
+  return b; }
+
+function renderDoc(){
+  if(typeof refreshFontStacks==="function") refreshFontStacks();   // diagram-core.js: re-reads #doc's LIVE --token-font/--mono-font (a scheme-scoped override, e.g. Ranjana, may have changed it since the last render) into LIVE_TOKEN_STACK/LIVE_MONO_STACK and every measurement font string derived from them (WORD_F, GLOSS_F, …), ONCE per render rather than per meas() call. Must run before computeColW() (→ marginNumWidth) and before anything below that measures token width, or this render would still lay out against the PREVIOUS scheme's metrics. Guarded (as document.js already guards TOKEN_STACK-dependent reads elsewhere) for any harness that renders before diagram-core.js has loaded
+  msegFlagDoc();   // what an MWT grouping implies about its members — the MSeg tier's decorative continuation mark, and in Sanskrit a featureless non-final member's Compound=Yes. A dozen scattered operations move those ranges (grouping, ungrouping, splitting, flattening, inserting/deleting a token, an auto-regroup after a parse), so deriving it HERE, once, at the single point they all funnel through, is what keeps it from ever going stale; it's idempotent and cheap, and marks nothing dirty of its own accord — see msegFlagSent
+  computeWindow(curBlock());   // recentre the rendered window on whatever sentence the reader is on — see the virtualization note above buildBlock. MUST run before computeColW(): that scans the CURRENT window (js/grid/grid.js), so the window has to be known first
+  pruneDiaCache(winLo,winHi);   // drop every cached diagram outside the range this render is about to (re)build — see the "NOTATION-SWITCH DIAGRAM CACHE" note above buildBlock. AFTER computeWindow (winLo/winHi just moved), BEFORE the buildBlock loop below reads the cache
+  computeColW();
+  const host=document.getElementById("doc"); host.textContent="";
+  host.lang=bcp47Tag();   // BCP-47 tag → inherits to every token/diagram/grid text so the browser picks locale-correct Cyrillic/Han glyphs (locl + system-font region); re-run on every language/script change
+  host.classList.toggle("ortho-script", TRANSLIT_SCHEME==="zhuyin");   // a non-Latin DISPLAYED transliteration (Zhuyin) in the row → drop the romanisation italics
+  host.classList.toggle("script-form", typeof iastFormEdit==="function"&&iastFormEdit());   // Sanskrit under a real script → every token FORM on screen is a derived rendering of the stored IAST, not an editable field, so it takes the pointing hand (app.css). The MWT/goeswith glyphs set the same cursor inline via formCursor(), being SVG text with their own click contract
+  host.classList.toggle("no-relcolour", !show.colour);   // "Relation colours" off → --tie-hue swaps --c-other for --ink, so POS tags/bracket ties go monochrome too, not just the deprel labels relColor() already gates
+  /* Item 3 — PAGED LAYOUT. In paged mode the blocks are grouped into .docsheet containers and a `# newdoc` ENDS one
+     and starts the next, which is what makes a document boundary read as a document boundary rather than as a
+     slightly bigger gap. Unpaged, `host` IS the container and every block is appended straight to it, exactly as
+     before. Nothing downstream had to change: every later pass selects `#doc .sblock` (a descendant selector), so
+     the extra level of nesting is invisible to the alignment/cap/selection passes below.
+     The first sheet is created HERE, above AVAILW, and not lazily in the loop — see item 9 immediately below. */
+  let sheet=host;
+  const newSheet=()=>{ if(!PAGED) return host; const d=document.createElement("div"); d.className="docsheet"; host.appendChild(d); return d; };
+  if(PAGED) sheet=newSheet();
+  /* Item: BOUNDARY SECTIONS. A `# newdoc`/`# newpar` heading is sticky (see .bmark in app.css), and a sticky box
+     pins only for as long as its CONTAINING BLOCK is on screen — so the run of sentences a heading dominates has
+     to be a real element, not merely an interval the renderer knows about. `docSec`/`parSec` are the two open
+     sections: a document boundary closes both and opens a document section, a paragraph boundary closes and
+     reopens the paragraph section INSIDE whichever document section is current (or in the sheet, for a file
+     whose paragraphs precede its first `# newdoc`), and every block is appended to the innermost open one. That
+     IS the dominance rule the headings need — a document heading reaches to the next document, a paragraph
+     heading to the next paragraph or document, whichever comes first.
+     Nothing downstream had to change, for the same reason paged mode's sheets cost nothing: every later pass
+     selects `#doc .sblock`, a DESCENDANT selector. */
+  const NUM=boundNumbers(), SNUM=sentNumbers();   // recomputed here, every render — see boundNumbers on why nothing is stored
+  // Item 9: the width a diagram row may use is the width of the box it will actually be laid out in — the SHEET in
+  // paged view, `#doc` unpaged. Measuring `#doc` in both left every diagram sized to the full window: at 1500px it
+  // decided a row fitted unwrapped when the 900px sheet had no room for it, and a wrapped row broke at the wrong
+  // column. An EMPTY sheet measures correctly (its width comes from max-width + auto margins, not its content), and
+  // renderDoc re-runs on every paged/unpaged switch (setPageMode → preserveScroll(renderDoc)), so the two modes
+  // can never disagree about it.
+  AVAILW=Math.max(240, sheet.clientWidth-52);
+  // Item 1: the cap must equal the VISIBLE viewport height for content — from just below the options bar (or the
+  // titlebar when the options bar is hidden) down to just above the status bar. Only the TOP is occluded: the doc
+  // scrolls UNDER the overlaid titlebar + options bar, which the doc's top padding (--tbH + --vbH) exactly clears.
+  // The status bar is NOT overlaid — it is an in-flow sibling BELOW the doc, so the doc's border-box bottom already
+  // coincides with the status-bar top (host.clientHeight already stops there). The doc's 44px bottom padding is only
+  // trailing scroll room, NOT an occluded band, so it must NOT be subtracted — doing so left the cap 44px too short
+  // (dead space below a tall block). Subtract ONLY the top inset: dh = clientHeight − paddingTop = the exact gap from
+  // the options-bar bottom to the status-bar top (= innerHeight − titlebarH − (options bar shown? optionsBarH : 0) −
+  // statusbarH). Recomputed every render, so showing/hiding the options bar (which changes --vbH → this top padding,
+  // and re-renders) re-tightens the cap.
+  const hcs=getComputedStyle(host), padTop=parseFloat(hcs.paddingTop||0);
+  const dh=Math.max(160, host.clientHeight-padTop), rs=document.documentElement.style; AVAILH=dh;   // caps are relative to the app's VISIBLE document viewport (options-bar bottom → status-bar top), not the browser and not the occluded top padding
+  // #doc isn't zoomed, so dh is REAL px; but .diagram/.gwrap live inside .sblock{zoom:var(--fs)}, which multiplies any max-height by FS. Divide the cap by FS so the VISUAL cap stays a fixed fraction of the viewport at every zoom level (recomputed here on every render → refreshed on each zoom, since setFS re-runs renderDoc). At FS=1 this is a no-op.
+  rs.setProperty("--cap-dia",Math.round(dh*0.6/FS)+"px"); rs.setProperty("--cap-grid",Math.round(dh*0.4/FS)+"px");
+  /* the --bm-stick engine probe was published here; the headings do not pin any more, so there is no inset to measure or hand to CSS. stickyTopFactor() survives below, unused but documented — it records what each engine counts into a sticky view rectangle, which is not obvious and was expensive to establish. */
+
+  const ctx={sheet,NUM,SNUM,newSheet,diaSig:diaFlagsSig()};   // diaSig computed ONCE per render (not per sentence — every sentence in this render shares the same view-state) and read back by diaSentence() below
+  // top spacer FIRST — stands in for [0,winLo), sized below once the window's real blocks have been measured.
+  // Inserted ONLY when there's something above the window to stand in for (winLo>0): app.css's
+  // `.doc.paged > .docsheet:first-child{margin-top:14px}` (the gap that keeps the very first sheet's rounded
+  // corner clear of the toolbar) depends on the first REAL sheet actually being #doc's first child — an
+  // unconditional spacer here would sit in front of it and silently break that rule at the true top of the
+  // document, which is the one state (winLo===0) where the rule's effect is visible at all.
+  const topSpacer=document.createElement("div"); topSpacer.className="winspacer winspacer-before"; topSpacer.setAttribute("aria-hidden","true");
+  if(winLo>0) host.insertBefore(topSpacer,host.firstChild);
+  for(let i=winLo;i<winHi;i++) buildBlock(i,ctx);   // ONLY the windowed range — see the virtualization note above buildBlock
+  const _rendered=host.querySelectorAll(".sblock");
+  if(_rendered.length){ let _h=0; _rendered.forEach(b=>_h+=b.getBoundingClientRect().height); AVG_BLOCK_H=_h/_rendered.length; }   // remeasure every render — blocks vary a lot in height (a 3-token sentence vs. a wrapped Sanskrit verse with translations), so this is only ever an estimate (see the virtualization note above)
+  topSpacer.style.height=Math.round(winLo*AVG_BLOCK_H)+"px";
+  if(winHi===DOC.length){   // the window reaches the true end of the document → the reader can actually add a sentence after the last one
+    const addWrap=document.createElement("div"); addWrap.className="addsent";
+    const addBtn=document.createElement("button"); addBtn.innerHTML='<span class="sfi" style="--m:var(--sf-add)"></span>Add sentence'; addBtn.onclick=()=>insertAt(DOC.length);
+    addWrap.appendChild(addBtn); ctx.sheet.appendChild(addWrap);   // inside the LAST sheet (ctx.sheet, not the outer `sheet` — buildBlock may have reassigned it mid-loop on a `# newdoc`), so the button keeps the measure rather than straying into the page margin — and NOT inside a boundary section, which would hang the button off the last paragraph rather than off the page
+  }
+  // bottom spacer — stands in for [winHi,DOC.length); a plain sibling of the sheets (not appended inside the
+  // last one), so it never has to reproduce a partial sheet's page-margin chrome for content that isn't rendered
+  const bottomSpacer=document.createElement("div"); bottomSpacer.className="winspacer winspacer-after"; bottomSpacer.setAttribute("aria-hidden","true");
+  bottomSpacer.style.height=Math.round((DOC.length-winHi)*AVG_BLOCK_H)+"px";
+  host.appendChild(bottomSpacer);
   // …and the one block per sheet whose bottom hairline the sheet's own edge replaces. Marked here rather than
   // matched in CSS because a block now sits inside its boundary SECTION: `.docsheet > .sblock:last-child` no
   // longer names anything, and the obvious rewrite (`.sblock:last-child`) would fire on the last block of every
@@ -1532,13 +1861,43 @@ function positionBracketWash(){ document.querySelectorAll("#doc .bwrap").forEach
 // instead of throwing, which is exactly what "selecting a token no longer scrolls the grid" looks like from the
 // user's side. This only uses getBoundingClientRect()/scrollTop, which have been solid across every engine for
 // decades, so it can't have that failure mode regardless of which WebKit version renders the packaged app.
+/* WHAT IS BROUGHT INTO VIEW IS THE ROW, NOT THE FIELD INSIDE IT. Almost every caller here hands over a grid CELL
+   or the <input>/<textarea> in one (pick's own `tr` is the exception), and a field's box is both shorter than its
+   row and centred in it — so "the field is fully visible" left the row's own top edge, band and MWT bracket still
+   cut off, and the scroll appeared to land on the field's top, bottom or text baseline rather than on the row.
+   Snapping the target up to the enclosing <tr> makes the ROW the unit that has to fit, which is the only box the
+   user is actually looking at. Rows are short, so this can never make a needed scroll unsatisfiable. */
+function scrollRowOf(el){ const tr=el&&el.closest&&el.closest("#doc table.grid tbody tr"); return tr||el; }
+/* …and the grid has a STICKY HEADER (table.grid th, position:sticky top:0), which occludes the top of its own
+   scrollport exactly as the pinned boundary headings occlude #doc's. Without charging it, a row scrolled up to
+   the top of .gwrap lands UNDERNEATH the header — the header covers the row's top edge and leaves the middle of
+   the field showing, which is the same symptom from the other direction. Measured off the live <thead> rather
+   than assumed, since the header's height follows the font size. */
+function gridHeadH(node){ if(!node||!node.classList||!node.classList.contains("gwrap")) return 0;
+  const th=node.querySelector("table.grid thead"); return th?th.getBoundingClientRect().height:0; }
+/* SCROLL A GRID ROW TO THE TOP of its grid, rather than merely into view. scrollNearest moves as little as it
+   can, which is right for stepping through rows; this is for arriving at one from somewhere else — selecting an
+   MWT in the diagram — where the rows that follow it (its own components, immediately below) are as much a part
+   of what you asked to see as the row itself, and "just barely on screen at the bottom" shows none of them.
+   Two scrollers, in this order: the OUTER ones first (scrollNearest, so the block is on screen at all and the
+   grid has a visible portion to align within), then the grid's own, set outright rather than nudged. The target
+   is the row's top flush with the TOP OF THE VISIBLE PORTION — below the sticky column header, which occupies
+   the first gridHeadH pixels of the scrollport and would otherwise cover the row we just scrolled to. Clamped by
+   the browser to the scroll range, so a row near the end simply lands as high as the content allows. */
+function scrollRowToGridTop(row){ if(!row) return;
+  scrollNearest(row);
+  const wrap=row.closest&&row.closest(".gwrap"); if(!wrap) return;
+  const wr=wrap.getBoundingClientRect(), rr=row.getBoundingClientRect();
+  wrap.scrollTop+=(rr.top-(wr.top+gridHeadH(wrap)))/FS;   // rects are SCALED viewport px, scrollTop is unscaled CSS px — the same /FS convention the tie geometry uses
+}
 function scrollNearest(el){ if(!el) return;
+  el=scrollRowOf(el);
   let node=el.parentElement;
   while(node){
     const cs=getComputedStyle(node);
     if(/(auto|scroll)/.test(cs.overflowY) && node.scrollHeight>node.clientHeight){
       const nr=node.getBoundingClientRect(), er=el.getBoundingClientRect();   // re-measured each iteration: a nudge on an INNER container shifts el's rect for the NEXT (outer) one
-      const stick=(node.id==="doc"&&typeof stickyHeadH==="function")?stickyHeadH((el.closest&&el.closest(".sblock"))||el):0;   // the document scroller's top is additionally occluded by whatever boundary headings are PINNED over this element's block — scroll-padding-top only clears the toolbar, so without this a token brought to the top of the page lands underneath its own document/paragraph heading
+      const stick=(node.id==="doc"&&typeof stickyHeadH==="function")?stickyHeadH((el.closest&&el.closest(".sblock"))||el):gridHeadH(node);   // the document scroller's top is additionally occluded by whatever boundary headings are PINNED over this element's block — scroll-padding-top only clears the toolbar, so without this a token brought to the top of the page lands underneath its own document/paragraph heading. The grid's own scroller is occluded the same way by its sticky column header
       const top=nr.top+(parseFloat(cs.scrollPaddingTop)||0)+stick, bot=nr.bottom-(parseFloat(cs.scrollPaddingBottom)||0);
       if(er.top<top) node.scrollTop-=(top-er.top);
       else if(er.bottom>bot) node.scrollTop+=(er.bottom-bot);
@@ -1582,14 +1941,40 @@ function selEmphasis(){
   [...peri].forEach(x=>{ if(core.has(x)) peri.delete(x); });   // a token that is core for ONE token of a range and peripheral for another reads as core — the brighter level wins, so a range never dims part of its own argument
   return {core,peri};
 }
+/* IS THIS MWT THE SELECTION? — what lights every row of an MWT group in the grid, range row and components
+   alike. It is mwtTieSelected (js/diagram/diagram-core.js) MINUS that function's one exception: a tie whose
+   surface form is being edited draws itself unaccented, because the accent would sit under an open field on the
+   very glyph the field covers. No field covers the GRID rows, so they stay lit while the form is edited — which
+   is also the only state in which the grid is where you can see what the edit is doing. Everything else about
+   the two tests is the same, deliberately: the grid group lights exactly when the diagram's bracket does. */
+function mwtGroupSel(si,fromId,toId){ return !!(selRange&&selRange.s===si&&selRange.from===fromId&&selRange.to===toId); }
+/* …and the same question asked the other way round: WHICH span, if any, is the selected MWT of the current
+   sentence. An MWT is selected as a RANGE (selectMWTRange, and the grid's own range row click), and sel.t can
+   only ever name ONE of its components — the first — so a diagram cell pass keyed on sel.t lit the first
+   component and left the rest of the same word plain, while the grid showed the whole group filled. The two
+   views state one selection, so every component takes the accent. Returns null unless the range matches an MWT
+   EXACTLY: an ordinary marquee that happens to cover an MWT is a different selection and keeps the lighter .rng
+   marking it already has. */
+function selMwtSpan(){ if(!selRange||selRange.s!==sel.s) return null;
+  const s=DOC[sel.s]; if(!s) return null;
+  const m=(s.mwt||[]).find(x=>mwtGroupSel(sel.s,x.from,x.to));
+  return m?{from:m.from,to:m.to}:null; }
+// does this diagram cell draw a token of that span? data-gw first, for the same reason gwHolds reads it: a
+// goeswith cell draws a whole WORD, and any of its parts falling in the span lights the cell.
+function elInSpan(g,span){ if(!span) return false;
+  const u=g.getAttribute?g.getAttribute("data-gw"):null;
+  const ids=u?u.split(" "):[g.getAttribute?g.getAttribute("data-tok"):null];
+  return ids.some(v=>{ const k=+v; return k>=span.from&&k<=span.to; }); }
 function applySel(){
   applyZone();
-  document.querySelectorAll("#doc .node,#doc .tok-group,#doc .bwtok").forEach(g=>g.classList.toggle("sel",+g.getAttribute("data-s")===sel.s&&gwHolds(g,sel.t)));   // gwHolds, not a bare data-tok test: a goeswith cell draws a whole WORD (two or more tokens sharing one annotation stack), so selecting EITHER half lights the whole word — see the goeswith block in js/diagram/diagram-core.js. For every other cell it IS the bare data-tok test.   // .bwtok (wrapped brackets) was missing here — a selection change via a reflow=false path (e.g. grid-cell focus) left its bold highlight stuck on the PREVIOUS token until an unrelated full render happened
+  const mwtSpan=selMwtSpan();   // a selected MULTI-WORD TOKEN lights ALL of its components, not just the one sel.t names — see selMwtSpan. Declared at the TOP of this function, not beside its first heavy use: several passes below read it, and the earliest of them (.punctsat) runs before that point — a `const` read above its own declaration is a temporal-dead-zone ReferenceError, and one thrown in here would abort the whole selection pass
+  document.querySelectorAll("#doc tbody tr[data-mwtfrom]").forEach(tr=>tr.classList.toggle("mwtsel",mwtGroupSel(+tr.dataset.s,+tr.dataset.mwtfrom,+tr.dataset.mwtto)));   // live, like every other toggle here: a reflow=false pick (a grid click, Tab navigation) changes the selection without re-rendering, and the group's highlight has to follow it in that same pass
+  document.querySelectorAll("#doc .node,#doc .tok-group,#doc .bwtok").forEach(g=>g.classList.toggle("sel",+g.getAttribute("data-s")===sel.s&&(gwHolds(g,sel.t)||elInSpan(g,mwtSpan))));   // gwHolds, not a bare data-tok test: a goeswith cell draws a whole WORD (two or more tokens sharing one annotation stack), so selecting EITHER half lights the whole word — see the goeswith block in js/diagram/diagram-core.js. For every other cell it IS the bare data-tok test.   // .bwtok (wrapped brackets) was missing here — a selection change via a reflow=false path (e.g. grid-cell focus) left its bold highlight stuck on the PREVIOUS token until an unrelated full render happened
   const selDep=gwUnitId(sel.s,sel.t);   // a goeswith continuation's word wears the HEAD's incoming relation — see gwUnitId. Without this, selecting the second half of a word accented its two forms, its shared POS and its slur but left the very relation label above them plain, which is exactly the "a form whose annotations stayed behind" the rule below exists to prevent
   document.querySelectorAll("#doc .arc,#doc .edge-g,#doc .ghost-g").forEach(g=>g.classList.toggle("sel",g.hasAttribute("data-dep")&&+g.getAttribute("data-s")===sel.s&&+g.getAttribute("data-dep")===selDep));   // ghost edges carry the SAME data-s/data-dep contract as a real edge — without this they only picked up .sel on a full re-render, lagging behind every OTHER selection highlight (which this live class-toggle pass already updates instantly). hasAttribute guard: a ghost-g with NO data-dep at all (e.g. the Subj=Generic ∅, which has no real token of its own) must never match — +null coerces to 0, which used to false-match whenever sel.s===0 (sentence 1) && sel.t===0 (nothing selected), the common initial state
-  document.querySelectorAll("#doc .oline").forEach(g=>{ g.classList.toggle("sel",+g.dataset.s===sel.s&&gwHolds(g,sel.t));   // gwHolds for the same reason as the cell pass above: an outline row that draws a whole goeswith word lights for EITHER of its parts
+  document.querySelectorAll("#doc .oline").forEach(g=>{ g.classList.toggle("sel",+g.dataset.s===sel.s&&(gwHolds(g,sel.t)||elInSpan(g,mwtSpan)));   // …and the MWT span for the same reason the cell pass above takes it: an outline ROW is that notation's token cell, so every component of a selected MWT lights there too.   // gwHolds for the same reason as the cell pass above: an outline row that draws a whole goeswith word lights for EITHER of its parts
     g.classList.toggle("insub", +g.dataset.s===sel.s && (g.dataset.anc||"").split(" ").includes(String(sel.t))); });
-  document.querySelectorAll("#doc .punctsat").forEach(g=>g.classList.toggle("sel",+g.dataset.s===sel.s&&+g.dataset.tok===sel.t));   // HTML folded-punctuation satellites (outline / wrapped brackets)
+  document.querySelectorAll("#doc .punctsat").forEach(g=>g.classList.toggle("sel",+g.dataset.s===sel.s&&(+g.dataset.tok===sel.t||elInSpan(g,mwtSpan))));   // HTML folded-punctuation satellites (outline / wrapped brackets) — a satellite is drawn AS PART OF its token's cell, so it follows that token into an MWT selection rather than staying plain beside a lit form
   // item 8: a multi-word token's tie. Keyed off the COMPONENT RANGE it carries rather than off sel.t — clicking a
   // tie selects that range (selectMWTRange), which is the only thing that means "this MWT is selected"; see
   // mwtTieSelected in js/diagram/diagram-core.js, which also holds the tie plain while its editor is open.

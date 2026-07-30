@@ -5,17 +5,26 @@ function setFormat(fmt){ DOCFORMAT=fmt||"SUD";
   const doc=document.getElementById("doc"); if(doc)doc.classList.toggle("fmt-ud",DOCFORMAT==="UD");
   if(typeof syncGlossUI==="function")syncGlossUI();   // item 2: re-evaluate the "Lexical gloss" disabled state when the format changes
   if(hasBridge())try{window.pywebview.api.set_format(DOCFORMAT);}catch(e){} }
-function fmtMenu(x,y){ showCtx(x,y,[
+// item 9: the Format pill TOGGLES its menu. The pill's own click handler stops propagation (so the window-level
+// `click`→closeCtx listener in context-menu.js never sees it), which meant a second click on the pill just
+// re-rendered the same menu open and read as a dead control. Ownership is decided by showCtx's own `_openedAt`
+// stamp rather than a flag on #ctx: the SAME #ctx element serves every context menu in the app, so "is a menu
+// open" is not the question — "is the open menu the one I opened" is, and the stamp answers it without needing
+// a change in context-menu.js (each showCtx call re-stamps, so a token menu opened in between makes ours stale).
+let _fmtStamp=0;
+function fmtMenu(x,y){ if(ctx.classList.contains("show")&&ctx._openedAt===_fmtStamp){ closeCtx(); return; }
+  showCtx(x,y,[
   ["Convert to SUD",null,()=>convertTo("SUD")],
   ["Annotate as mSUD",null,()=>annotateAsMSUD()],   // a relabel, not a conversion — see annotateAsMSUD
   null,
   ["Import UD…",null,()=>doImportUD()],
   ["Export as UD…",null,()=>doExportUD()],
-],false,false,true); }   // false rtlArg → the status-bar menu is always LTR, regardless of the selected sentence's direction. true fit → shrink to the widest row (four short labels don't fill the 224px floor)
+],false,false,true);   // false rtlArg → the status-bar menu is always LTR, regardless of the selected sentence's direction. true fit → shrink to the widest row (four short labels don't fill the 224px floor)
+  _fmtStamp=ctx._openedAt; }   // remember WHICH open this was, so the next click on the pill can tell "still mine" from "someone else's menu"
 async function doImportUD(){ if(!hasBridge())return toast("Import is available in the desktop app");
   if(!(await confirmDiscardUnsaved("Import a file and discard them?"))) return;
   showBusy("Importing UD…",true); let r;
-  try{ r=await window.pywebview.api.import_ud(); }catch(e){ return toast("Import failed: "+e); }finally{ hideBusy(); }
+  try{ r=await window.pywebview.api.import_ud(DOCLANG); }catch(e){ return toast("Import failed: "+e); }finally{ hideBusy(); }
   if(!r||r.cancelled) return;
   if(r.unavailable) return toast("UD import needs grew (grewpy + opam backend): "+r.error);
   if(r.error) return toast("Import failed: "+r.error);
@@ -144,7 +153,7 @@ async function doExportUD(){ if(!hasBridge())return toast("Export is available i
   const pick=await sheetChooseSaveLocation({title:"Export as UD",desc:"Choose a name and location for the converted file.",defaultName,saveLabel:"Export"});
   if(pick.action!=="save") return;
   showBusy("Exporting UD…",true); let r;
-  try{ r=await window.pywebview.api.export_ud_to(getDocJSON(),pick.folder,pick.filename); }catch(e){ return toast("Export failed: "+e); }finally{ hideBusy(); }
+  try{ r=await window.pywebview.api.export_ud_to(getDocJSON(),pick.folder,pick.filename,DOCLANG); }catch(e){ return toast("Export failed: "+e); }finally{ hideBusy(); }
   if(!r||r.cancelled) return;
   if(r.unavailable) return toast("UD export needs grew (grewpy + opam backend): "+r.error);
   if(r.error) return toast("Export failed: "+r.error);
@@ -181,10 +190,12 @@ async function convertTo(target){
   if(target==="SUD" && DOCFORMAT==="mSUD" && !docHasMorphAnnotation()){ setFormat("SUD"); return toast("Back to SUD"); }
   if(!hasBridge())return toast("Conversion is available in the desktop app");
   showBusy("Converting to "+target+"…",true); let r;
-  try{ r=await window.pywebview.api.convert_format(getDocJSON(),target); }catch(e){ return toast("Convert failed: "+e); }finally{ hideBusy(); }
+  try{ r=await window.pywebview.api.convert_format(getDocJSON(),target,DOCLANG); }catch(e){ return toast("Convert failed: "+e); }finally{ hideBusy(); }
   if(!r) return; if(r.unavailable) return toast(r.error);
   if(r.error) return toast("Convert failed: "+r.error);
   pushUndo(); DOC.length=0; normSents(r.sentences).forEach(s=>DOC.push(s));
+  if(typeof invalidateColW==="function") invalidateColW();   // every token was just replaced — the column-width cache from before the conversion is meaningless against it
+  if(typeof invalidateDiaCache==="function") invalidateDiaCache();   // …and every cached diagram (js/core/document.js) — same reasoning, plus a format conversion can change the very relation SET a tree is drawn from (SUD ↔ mSUD)
   setFormat(r.format); syncGlossTiersFromDoc(); syncDeprelVocabFromDoc(); detectXposMirrorsUpos(); syncDocFonts();   // item 1: mSUD gains MSeg/MGloss (morphemic tier on), SUD drops them (off) — reflect the converted doc
   markDirty(); renderDoc(); clearSelToBlock(0,false);   // item 9: a whole-document conversion replaces every token, so the old selection is meaningless and a new one would be the app's choice — the same reading as the re-parse and open paths (see clearSelToBlock, js/io/bridge.js): nothing selected, reading focus at the top
   if(show.translit) fillTranslit();   // conversion drops the (non-CoNLL-U) transliteration column → re-derive it

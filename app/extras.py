@@ -15,6 +15,7 @@ Tiers (each behind a lazy ``try: import`` in ``translit`` / ``parse``):
 from __future__ import annotations
 
 import importlib
+import platform
 import site
 import subprocess
 import sys
@@ -26,7 +27,14 @@ from .paths import EXTRAS_DIR, ensure_dirs
 TIERS: dict[str, dict] = {
     "stanza": {
         "label": "UD parsing (Stanza)",
-        "pip": ["stanza", "spacy-stanza"],
+        # Pinned to match requirements.txt's dev/tested set exactly: an unpinned "spacy-stanza"
+        # here resolves the VANILLA PyPI package, whose own metadata pins `stanza<1.7.0` — that
+        # silently drags in the pre-1.7 stanza (1.6.1 as of this writing) instead of the 1.10.1
+        # this app is actually developed and verified against, on a code path (app/parse.py's
+        # Stanza MWT extraction) that reads Stanza's own object model directly. The git+ fork is
+        # the SAME one requirements.txt uses, because it relaxes the vanilla package's spaCy pin.
+        "pip": ["stanza==1.10.1",
+                "spacy-stanza @ git+https://github.com/omri374/spacy-stanza.git"],
         "probe": "stanza",
         "note": "Stanza UD parsers + PyTorch (~1.1 GB)",
     },
@@ -43,6 +51,26 @@ TIERS: dict[str, dict] = {
         "note": "CAMeL Tools Arabic morphology (~0.3 GB)",
     },
 }
+
+def _stanza_platform_pins() -> list[str]:
+    """Extra pip constraints for the ``stanza`` tier, needed only on Intel macOS.
+
+    PyTorch stopped publishing macOS x86_64 wheels after 2.2.2 (confirmed against PyPI: every
+    torch>=2.3.0 release ships `macosx_11_0_arm64` only for cp312, no x86_64 build at all), so an
+    unconstrained `pip install stanza` on an Intel Mac resolves torch to that final 2.2.2 build —
+    which predates NumPy 2.0 (June 2024) and was compiled against the pre-2.0 C-ABI. `stanza`
+    itself pins no numpy ceiling, so pip happily pulls the current numpy (2.x) alongside that old
+    torch, and the ABI mismatch surfaces at runtime as `RuntimeError: Numpy is not available!` —
+    not a missing dependency, an incompatible pair (reported by a user on Catalina/Intel; the OS
+    version is incidental, every Intel Mac hits this since there is no newer x86_64 torch wheel to
+    resolve to instead). Apple Silicon and Linux/Windows keep getting current torch releases, which
+    are numpy-2.x-safe, so this constraint would be a no-op there — scope it to the one platform
+    that's actually stuck on old torch.
+    """
+    if platform.system() == "Darwin" and platform.machine() == "x86_64":
+        return ["numpy<2"]
+    return []
+
 
 _activated = False
 
@@ -92,10 +120,11 @@ def install(feature: str, progress=None) -> dict:
             progress(pct, msg)
 
     note(None, f"Installing {tier['label']}…")
+    extra_pins = _stanza_platform_pins() if feature == "stanza" else []
     # --target keeps the extras isolated from the (read-only, in a bundle) core site-packages;
     # --upgrade lets a re-run replace files already present in the shared target.
     cmd = [sys.executable, "-m", "pip", "install", "--no-input", "--upgrade",
-           "--target", EXTRAS_DIR, *tier["pip"]]
+           "--target", EXTRAS_DIR, *tier["pip"], *extra_pins]
     try:
         subprocess.run(cmd, check=True, capture_output=True, text=True)
     except subprocess.CalledProcessError as exc:

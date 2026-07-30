@@ -214,6 +214,8 @@ const isBlankDoc=()=>DOC.length===0||(DOC.length===1&&DOC[0].tokens.length<=1&&!
 async function doNew(){ if(!(await confirmDiscardUnsaved("Discard them and start a new document?"))) return; pushUndo();
   saveScrollPos(true);   // remember the outgoing file's reading position before we drop it
   DOC.length=0; DOCNAME="untitled.conllu"; DOCPATH=""; markDirty(false);   // a new document starts empty — zero sentences
+  if(typeof invalidateColW==="function") invalidateColW();   // drop the outgoing file's column-width cache rather than carry its widths into an empty document
+  if(typeof invalidateDiaCache==="function") invalidateDiaCache();   // …and the outgoing file's cached diagrams (js/core/document.js) — every si is about to name a sentence of the NEW (empty) document instead
   if(hasBridge())try{window.pywebview.api.new_document();}catch(e){}
   syncGlossTiersFromDoc(); detectXposMirrorsUpos(); syncDocFonts();   // item 1: an empty new document carries NO Gloss/MSeg/MGloss → glossing tiers reset to off, never inherited from the file just closed
   refreshTransLangs(); renderTransDrawer();   // item 13: reset enabled translation languages
@@ -395,7 +397,15 @@ function handleSaveResult(r){ if(!r||r.cancelled) return;
   if(r.error) return toast("Save failed: "+r.error);
   markDirty(false); if(r.path)DOCPATH=r.path; setTitle(r.name); toast("Saved · "+r.name); }
 
-function addTextSheet(){ if(hasBridge()){ try{ window.pywebview.api.open_insert_window(null, model?(MODELINFO[model]||model):""); return; }catch(e){} } openSheet(sheetInsert(DOC.length)); }   // item 23/24: "Insert text" native window (append); null index ⇒ append at apply time. Sheet is the headless fallback
+/* item 7 — what the Insert-text dialog needs to know about the LIVE document, which only this side owns:
+   whether there are any sentences yet (an empty document gets to CHOOSE its language; one with sentences
+   is pinned to the language it already has), and which translation tiers are enabled — the only languages
+   a parallel text may be written in, since any other would invent a `# text_LANG` the translations drawer
+   never offered. Read at open time, so a tier added a moment ago is already in the menu. */
+function insertCtx(){ const codes=[...TRANS_LANGS].sort((a,b)=>(langName(a)||a).localeCompare(langName(b)||b));
+  return {hasSentences:DOC.length>0, count:DOC.length, lang:DOCLANG||"", langName:langName(DOCLANG)||"",
+          transLangs:codes.map(c=>({code:c,name:langName(c)||c}))}; }
+function addTextSheet(){ openSheet(sheetInsert(null)); }   // items 23/24: the "Insert text" dialog, appending — null index ⇒ append at apply time. ONE dialog on every path now (it was a native child window here, with the sheet as a headless-only fallback); see sheetInsert in js/ui/sheets.js
 
 // status-bar activity: a spinner while a parser runs, a sliding bar during document conversions (ref-counted so
 // overlapping async work doesn't hide it early)
@@ -426,6 +436,7 @@ doInsert=async function(index,text){
     try{ r=await window.pywebview.api.parse_text(text,model); }catch(e){ hideBusy(); return toast("Parse failed: "+e); }finally{ hideBusy(); }
     const b=DOC[index]; b.tokens=r.tokens.map(t=>({...t,head:String(t.head)})); b.mwt=r.mwt||[]; if(!b.mwt.length)delete b.mwt;
     morphAfterReparse(b);   // an inserted sentence's tokens carry no MSeg/MGloss either — seed both tiers from the FEATS this parse produced, so a new block doesn't sit tierless among sentences that all have them (same undo entry as the insert)
+    renderDiagramIncremental(index);   // as in applySentText's parsed branch — the freshly parsed block converges on its tree instead of sitting blank
     markDirty(); renderDoc(); pick(index,1,true);
     toast(r.parsed?`Parsed · ${MODELINFO[model]||model}`:(r.reason?`Whitespace tokeniser (no parse: ${r.reason})`:"Whitespace tokeniser"));
     if(show.translit)fillTranslit(); if((ORTHO_SCHEME&&ORTHO_SCHEME!=="none")||isSanskritLang())fillOrtho();   // item 2: re-apply the SCRIPT (and Sanskrit MWT sandhi) now the parse's tokens are in
@@ -437,7 +448,8 @@ doInsert=async function(index,text){
 
 /* item 24: the "Insert text" flow takes pasted text, runs the parser's SENTENCISER (backend spaCy/stanza when a
    model is loaded, else a script-aware rule-based split — Latin .?!… + Indic daṇḍa ।॥), and adds ONE BLOCK PER
-   SENTENCE. Called by the native Insert-text window (via the bridge) and by the in-page fallback sheet. */
+   SENTENCE. The rule splitter here is what runs with no bridge — including for the Insert sheet's parallel
+   texts, which the Python worker would otherwise sentencise in each field's own language. */
 function localSentSplit(text){ const ENDERS=".?!…।॥", CLOSERS="\"'”’)]}》」』›»", out=[];
   (text||"").replace(/\r\n?/g,"\n").split("\n").forEach(line=>{ line=line.trim(); if(!line)return;
     let last=0,i=0; const n=line.length;
@@ -485,9 +497,14 @@ function paragraphsWithIds(text){ const out=[]; let doc=null, par=null;
     if(!h.body) return;                       // heading-only → its ids wait for the next body
     out.push({body:h.body,doc,par}); doc=null; par=null; });   // consumed: the ids belong to THIS paragraph, not to every one after it
   return out; }
-window.__insertPastedText=async function(text,index){
-  const paras=paragraphsWithIds(text); if(!paras.length)return;
+/* `opts.quiet` suppresses the "Inserted N sentences" toast when the CALLER is going to report the whole
+   operation itself (a parallel-text insert has translations to account for too — see __applyInsertPayload);
+   the return value {start,count} is how that caller knows which blocks it just created. Both are additive:
+   the two-argument call every earlier path makes behaves exactly as it did. */
+window.__insertPastedText=async function(text,index,opts){ opts=opts||{};
+  const paras=paragraphsWithIds(text); if(!paras.length)return {start:(index==null?DOC.length:index),count:0};
   if(index==null||index<0||index>DOC.length) index=DOC.length;
+  const start=index;   // captured BEFORE the loop, which walks `index` forward one block at a time
   /* The boundary goes on the first sentence of EVERY paragraph INCLUDING THE FIRST — but only when there are two
      or more paragraphs. With a single paragraph there is no structure to record, and marking it would assert a
      paragraph break at the insertion point that the pasted text says nothing about (and, appended after an
@@ -506,7 +523,78 @@ window.__insertPastedText=async function(text,index){
         else if(multi) DOC[index].newpar=true; }               // …and with no heading the old rule stands: bare `# newpar` on every paragraph when there is more than one   // `true`, never an id: UD's ids are optional and inventing one would put a name in the file that nothing here can justify (see the _BOUNDARY_KEYS contract in app/io_conllu.py)
       index++; n++; } }
   if(multi) renderDoc();   // the ¶ marks were set AFTER doInsert had already drawn each block, so one repaint at the end puts them on screen
-  if(n>1) toast(multi?`Inserted ${n} sentences in ${paras.length} paragraphs`:`Inserted ${n} sentences`); };
+  if(n>1&&!opts.quiet) toast(multi?`Inserted ${n} sentences in ${paras.length} paragraphs`:`Inserted ${n} sentences`);
+  return {start,count:n,paras:paras.length}; };
+
+/* ── item 7: the Insert-text dialog's full result — a main text and/or any number of PARALLEL texts ──────
+   The sheet (sheetInsert) submits to Api.child_insert_text, which converts each field's ITRANS in its own
+   language and sentencises the parallel texts with that language's own installed pipeline (or the rule
+   splitter), then calls this — and with no bridge the sheet does that little itself and calls this
+   directly, so both paths end here. Payload:
+     {index, main:{enabled,lang,text,model}, parallels:[{lang,sents:[…]}], adoptLang, naive:[lang,…]}
+   The MAIN text arrives as a STRING, not as sentences, because the paragraph/heading structure inside it
+   still has to become `# newpar`/`# newdoc` here (paragraphsWithIds) — a parallel text has no structure to
+   keep, only an order to line up with. */
+window.__applyInsertPayload=async function(p){ p=p||{};
+  const pars=(p.parallels||[]).filter(x=>x&&x.lang&&(x.sents||[]).length);
+  const main=p.main||{};
+  if(main.enabled&&(main.text||"").trim()){
+    // An empty document adopts the language the dialog chose (and the parser that goes with it) BEFORE the
+    // first sentence is inserted — doInsert parses with whatever `model` is set at that moment, so adopting
+    // afterwards would parse the whole insert with the outgoing language's model.
+    if(p.adoptLang&&main.lang) adoptInsertLang(main.lang,main.model||"");
+    const r=await __insertPastedText(main.text,p.index,{quiet:pars.length>0});
+    if(pars.length) applyParallelTexts(pars,r.start,r.count,`Inserted ${r.count} sentence${r.count===1?"":"s"}`,p.naive);
+    return; }
+  // TRANSLATIONS-ONLY (item 7d): no new sentences — the supplied texts land on sentences that are already
+  // there, starting just after the last one that already carries a translation in any of these languages.
+  const start=transStartIndex(pars.map(x=>x.lang));
+  applyParallelTexts(pars,start,DOC.length-start,"",p.naive); };
+
+/* Where a translations-only insert starts: the block AFTER the last sentence that already has a translation
+   in at least one of the submitted languages — i.e. carry on from where the translating stopped. Nothing
+   translated yet ⇒ -1 ⇒ start at the first sentence, which is the same rule read on an empty slate. Only a
+   NON-EMPTY translation counts: an enabled tier puts an empty {lang,text:""} row on every sentence it is
+   shown under (renderBlockTrans), so testing for the row's presence would always answer "the last one". */
+function transStartIndex(langs){ let last=-1;
+  DOC.forEach((s,i)=>{ if((sentTranslations(s)||[]).some(t=>langs.indexOf(t.lang)>=0&&(t.text||"").trim())) last=i; });
+  return last+1; }
+
+/* Write each parallel text's n-th sentence onto the n-th block from `start`. `room` is how many blocks this
+   insert may use (the count just inserted, or the rest of the document); anything past it is reported rather
+   than dropped silently — the alternative would be to invent sentences the main text never had. */
+function applyParallelTexts(pars,start,room,lead,naive){ if(!pars||!pars.length)return;
+  const avail=Math.max(0,Math.min(room,DOC.length-start));
+  if(!avail){ toast(lead?lead+" · no sentences left for the translations":"No sentences left to translate — every sentence already has one"); return; }
+  pushUndo();   // ONE entry for the whole translation pass (the insert path's own per-sentence entries are already behind us)
+  let over=0;
+  pars.forEach(par=>{ TRANS_LANGS.add(par.lang);   // an insert in a new language enables its tier, so the field shows up under every block
+    over=Math.max(over,par.sents.length-avail);
+    par.sents.slice(0,avail).forEach((txt,k)=>{ const s=DOC[start+k]; if(!s)return;
+      const rows=sentTranslations(s); let row=rows.find(r=>r.lang===par.lang);
+      if(!row){ row={lang:par.lang,text:""}; rows.push(row); }
+      row.text=txt; }); });
+  markDirty(); renderTransDrawer(); preserveScroll(renderDoc);
+  const names=pars.map(x=>langName(x.lang)||x.lang).join(", ");
+  const done=Math.min(avail,Math.max(...pars.map(x=>x.sents.length)));   // sentences that actually received one
+  const bits=[]; if(lead)bits.push(lead);
+  bits.push(`${lead?"translations":"Added translations"} in ${names} on ${done} sentence${done===1?"":"s"}`);
+  if(over>0) bits.push(`${over} translation sentence${over===1?"":"s"} left over`);   // the document ran out of sentences first
+  if(naive&&naive.length) bits.push(`${naive.map(c=>langName(c)||c).join(", ")} split on punctuation (no parser installed)`);   // the optional-dependency degrade, surfaced the way this app surfaces them
+  toast(bits.join(" · ")); }
+
+/* An empty document takes the language chosen in the Insert dialog, and the parser the registry ranked best
+   for it (Api._model_for_language → models_registry.best_installed_model, which prefers SUD over Stanza).
+   applyLang already syncs a model from MODELLANG, but that map keeps only the first installed model per
+   language, so the explicit id is applied over it — with a guard, since a model that isn't in the dropdown
+   (removed since the listing was built) must leave the picker consistent rather than pointing at nothing. */
+function adoptInsertLang(lang,modelId){
+  if(typeof applyLang==="function") applyLang(lang,true); else setLang(lang);
+  if(!modelId) return;
+  const sel=document.getElementById("modelSel");
+  if(sel){ sel.value=modelId; if(sel.value!==modelId) return; }   // not in the picker → keep whatever applyLang settled on
+  model=modelId; if(typeof syncMenu==="function")syncMenu(); }
+
 /* "Reset parse" / ⌘R — run the sentence through the parser again on its OWN text. Nothing about the text changes,
    so this IS commitSentText's operation with the string held fixed, and it runs applySentText's body rather than a
    second copy of it (which is how the two drifted: the copy here never re-seeded the morphemic tiers). It adds
@@ -582,10 +670,10 @@ async function applySentText(i,newText,opts){ const s=DOC[i]; if(!s)return; opts
   const cur=(s.text!=null?s.text:s.tokens.map(t=>t.form).join(" ")).replace(/\s+/g," ").trim();
   if(!parseText){ preserveScroll(renderDoc); return; }
   if(!force && parseText===cur){   // tokens unchanged — only the line breaks differ → update the display text, no re-parse
-    if(display!==s.text){ pushUndo(); s.text=display; markDirty(); }
+    if(display!==s.text){ pushUndo(i); s.text=display; markDirty(); }
     preserveScroll(renderDoc); return; }
   if(hasBridge()&&model){
-    const pre=snap();   // BEFORE anything is written, so both failure paths can leave the document exactly as they found it
+    const pre=snapSent(i);   // BEFORE anything is written, so both failure paths can leave the document exactly as they found it
     showBusy("Tokenising…"); let tk;
     try{ tk=await window.pywebview.api.tokenize(parseText,model); }catch(e){ hideBusy(); toast("Parse failed: "+e); preserveScroll(renderDoc); return; }   // nothing written yet → nothing to undo, nothing to restore
     s.text=display; s.tokens=tk.tokens.map(t=>({...t,head:String(t.head)})); s.mwt=tk.mwt||[]; if(!s.mwt.length)delete s.mwt; s.orthoLine=""; restoreMarks(s,marks);   // the tokeniser's tokens carry no hand-placed marks — put back the ones whose word survived the edit   // item 19: NEW tokens have no cached t.ortho; clear the stale running-line so fillOrtho re-fetches the SCRIPT
@@ -601,12 +689,13 @@ async function applySentText(i,newText,opts){ const s=DOC[i]; if(!s)return; opts
     try{ r=await window.pywebview.api.parse_text(parseText,model); }catch(e){ hideBusy(); rollback(); toast("Parse failed: "+e); return; }finally{ hideBusy(); }
     s.tokens=r.tokens.map(t=>({...t,head:String(t.head)})); s.mwt=r.mwt||[]; if(!s.mwt.length)delete s.mwt; s.orthoLine=""; restoreMarks(s,marks);   // …and again after the PARSE, which replaces the tokeniser's tokens in turn (its FEATS come from the model and know nothing of Foreign/Reported/Typo)
     morphAfterReparse(s);   // the new tokens carry no MSeg/MGloss — re-seed both tiers from the FEATS this parse just produced (inside the same undo entry: it is part of the re-parse, not a second edit)
+    renderDiagramIncremental(i);   // js/core/document.js: this sentence was just parsed → let the render on the next line draw its tree breadth-first by depth and converge on the real one, rather than leaving the row blank for the whole layout pass. ARMS the sequence; the render below IS its first stage
     markDirty(); preserveScroll(renderDoc); clearSelToBlock(i,scroll);   // item 9, as above: the parse's tokens land with nothing selected
     toast(r.parsed?`Re-parsed · ${MODELINFO[model]||model}`:`Re-tokenised on whitespace${r.reason?" (no parse: "+r.reason+")":""}`); if(show.translit)fillTranslit(); if((ORTHO_SCHEME&&ORTHO_SCHEME!=="none")||isSanskritLang())fillOrtho();   // item 19: re-apply the SCRIPT now the parse's tokens are in
     if(isSanskritLang())autoGroupSanskritMWTs(i);   // Sanskrit: (re)group the parsed tokens into MWTs by Compound=Yes
     annotateTranslitMisc(i).then(ch=>{ if(ch)preserveScroll(renderDoc); }); return;
   }
-  pushUndo();
+  pushUndo(i);
   s.text=display; s.tokens=buildTokens(parseText); delete s.mwt; s.orthoLine=""; restoreMarks(s,marks);   // the whitespace path replaces tokens too, so it restores on the same terms   // no model (or no bridge to run one) → whitespace tokenisation with EMPTY annotations; item 19: clear running-line so fillOrtho re-scripts the new tokens
   morphAfterReparse(s);   // no FEATS to compose an MGloss from without a parse, but MSeg still seeds from the new forms
   markDirty(); preserveScroll(renderDoc); clearSelToBlock(i,scroll);   // item 9, as in the parsed branch above: a re-tokenise leaves nothing selected
@@ -1306,7 +1395,9 @@ function msegRefill(t,force){ if(!MORPH_ON||!t) return false;
   if(!force && cur && cur!==(t._msegPre||"")) return false;   // hand-edited → the user's, not ours — UNLESS force: a direct lemma edit (afterLemmaEdit's own call) is new evidence about what the word IS, strong enough to supersede a hand correction that was made against the OLD lemma, so it always re-derives; the background-reparse and form-edit callers below stay unforced (weaker evidence: a parser guess, or a form change that hasn't touched the lemma at all)
   const pv=glossEnc(msegPrefillParts(t).seg);
   if(!pv||pv===cur) return false;
-  t.misc=setMiscKV(t.misc,"MSeg",pv); t._msegPre=pv; return true; }
+  t.misc=setMiscKV(t.misc,"MSeg",pv); t._msegPre=pv;
+  mglossReslot(t,cur,pv);   // MSeg's hyphen slots just moved, and MGloss names those slots one for one — keep the two rows in step (js/editing/edit-ops.js). Placed HERE, at the single point every MSeg re-derivation passes through, so the form-edit and background-re-parse callers are covered too, not only the lemma edit. A no-op when the two are already in step, which is what lets the grid's own lemma-commit call for the same edit not double-apply it
+  return true; }
 // Seed one sentence's morphemic tiers wherever they're EMPTY, leaving anything already there untouched:
 //  · MSeg  (item 11b) — the TRANSLITERATION for non-Latin-script languages, else the surface form, SEGMENTED
 //    against the lemma by msegSegment above (unsegmented where the lemma is missing or says nothing).
@@ -1372,7 +1463,7 @@ function renderBlockTrans(i){ const s=DOC[i], rows=sentTranslations(s);
     let row=rows.find(r=>r.lang===code); if(!row){ row={lang:code,text:""}; rows.push(row); }
     const text=document.createElement("div"); text.className="tg-text"; text.setAttribute("contenteditable","plaintext-only"); text.setAttribute("role","textbox"); text.spellcheck=false; text.dir="auto"; text.setAttribute("aria-label",(langName(code)||code)+" translation");
     text.textContent=row.text||""; if(!row.text)text.dataset.empty="1";   // data-empty → CSS placeholder (unfocused looks like plain text)
-    let pre=null,orig=null; text.addEventListener("focus",()=>{ pre=snap(); orig=row.text||""; setCurBlock(i); });   // one undo per edit session; setCurBlock: clicking/tabbing into a translation field is arriving at its block (same as the running-sentence line — document.js's wireStext), and it has to happen here rather than rely on bubbling to .sblock's own click handler because .tgrid stops mousedown/click propagation outright (see box's own listeners above, added so a click inside the grid never falls through to token deselection)
+    let pre=null,orig=null; text.addEventListener("focus",()=>{ pre=snapSent(i); orig=row.text||""; setCurBlock(i); });   // one undo per edit session; setCurBlock: clicking/tabbing into a translation field is arriving at its block (same as the running-sentence line — document.js's wireStext), and it has to happen here rather than rely on bubbling to .sblock's own click handler because .tgrid stops mousedown/click propagation outright (see box's own listeners above, added so a click inside the grid never falls through to token deselection)
     text.addEventListener("blur",()=>{ if(pre&&(row.text||"")!==orig){ UNDO.push(pre); if(UNDO.length>80)UNDO.shift(); REDO.length=0; updateUndoUI(); } pre=null; });
     text.addEventListener("input",()=>{ row.text=text.textContent||""; if(row.text)delete text.dataset.empty; else text.dataset.empty="1"; markDirty(); });
     text.addEventListener("keydown",e=>{ e.stopPropagation(); if(e.key==="Enter"&&!e.shiftKey){ e.preventDefault(); text.blur(); } });   // Enter commits; Shift+Enter newline; keep keys off the doc nav handler

@@ -704,6 +704,20 @@ def _sentencizer_nlp(lang: str = "", model_id: str = ""):
     return None
 
 
+def _stanza_sentence_ends(text: str, lang: str, package: str) -> list[int]:
+    """Sentence-end character offsets from a Stanza TOKENISE-only pipeline — offsets into ``text``
+    ITSELF, since Stanza's tokeniser reports real ``start_char``/``end_char`` and never rewrites the
+    string (unlike a sandhi-splitting spaCy tokeniser, which is why the spaCy path needs _align_map).
+
+    Stanza's tokeniser IS its sentence splitter, so this is the segmentation the selected model would
+    use on this text anyway; the tokenise-only pipeline is the same object the fast first parse step
+    loads (`_load_stanza_tok`), so asking for it here costs nothing extra once it is warm. Raises
+    ParserUnavailable when the model isn't installed — the caller falls back to the rule splitter."""
+    pipe = _load_stanza_tok(lang, package)
+    sdoc = pipe(text)
+    return [s.tokens[-1].end_char for s in sdoc.sentences if getattr(s, "tokens", None)]
+
+
 def _rule_sentencize(text: str) -> list[str]:
     """A script-aware rule-based splitter: each non-blank line is segmented on runs of
     sentence-final punctuation (Latin + Indic daṇḍa), keeping the terminator with its
@@ -773,35 +787,50 @@ def _extend_over_ender(text: str, pos: int) -> int:
 
 
 def sentencize(text: str, lang: str = "", model_id: str = "") -> list[str]:
-    """Split ``text`` into sentences.  Uses the selected spaCy model's sentence segmentation
-    when one is loaded (its handling of the various sentence-final marks is best), but ALWAYS
-    returns slices of the ORIGINAL ``text`` — a sandhi/compound-splitting tokeniser (Sanskrit)
-    reconstructs altered token text, so we keep the model's boundaries yet leave the sentence
-    verbatim and let the parser do the tokenisation.  Falls back to :func:`_rule_sentencize`."""
+    """Split ``text`` into sentences.  Uses the selected model's own sentence segmentation when one
+    is loaded (its handling of the various sentence-final marks is best), but ALWAYS returns slices
+    of the ORIGINAL ``text`` — a sandhi/compound-splitting tokeniser (Sanskrit) reconstructs altered
+    token text, so we keep the model's boundaries yet leave the sentence verbatim and let the parser
+    do the tokenisation.  Falls back to :func:`_rule_sentencize`, which needs no model at all."""
     text = (text or "").strip()
     if not text:
         return []
-    nlp = _sentencizer_nlp(lang, model_id)
-    if nlp is not None:
+    ends: list[int] = []
+    to_orig = (lambda p: p)
+    engine, _, name = (model_id or "").partition(":")
+    if engine == "stanza" and name:
+        # A Stanza model used to fall straight through to the rule splitter — its pipeline isn't a spaCy
+        # nlp, so _sentencizer_nlp returned None for it — which left a Stanza-only language with no model
+        # segmentation at all in the one flow (Insert text / parallel texts) whose whole job is splitting
+        # sentences. Its offsets are already into `text`, hence no _align_map (see _stanza_sentence_ends).
+        lcode, _, pkg = name.partition("#")
         try:
-            doc = nlp(text)
-            ends = [s.end_char for s in doc.sents if s.text and s.text.strip()]
-            if ends:
+            ends = _stanza_sentence_ends(text, lcode, pkg or "default")
+        except Exception:  # noqa: BLE001 — not installed / Stanza tier absent: rules below
+            ends = []
+    else:
+        nlp = _sentencizer_nlp(lang, model_id)
+        if nlp is not None:
+            try:
+                doc = nlp(text)
+                ends = [s.end_char for s in doc.sents if s.text and s.text.strip()]
                 # map each model boundary (an offset into the RECONSTRUCTED doc.text) back onto
                 # the original text; identity when the tokeniser preserved the text (e.g. English)
-                to_orig = (lambda p: p) if doc.text == text else _align_map(doc.text, text)
-                segs, prev = [], 0
-                for e in ends:
-                    cut = _extend_over_ender(text, to_orig(e))   # keep the terminator with THIS sentence
-                    seg = text[prev:cut].strip()
-                    if seg:
-                        segs.append(seg)
-                    prev = cut
-                tail = text[prev:].strip()   # anything past the last boundary
-                if tail:
-                    segs.append(tail)
-                if segs:
-                    return segs
-        except Exception:  # noqa: BLE001 — segmentation is best-effort; fall back to rules
-            pass
+                if ends and doc.text != text:
+                    to_orig = _align_map(doc.text, text)
+            except Exception:  # noqa: BLE001 — segmentation is best-effort; fall back to rules
+                ends = []
+    if ends:
+        segs, prev = [], 0
+        for e in ends:
+            cut = _extend_over_ender(text, to_orig(e))   # keep the terminator with THIS sentence
+            seg = text[prev:cut].strip()
+            if seg:
+                segs.append(seg)
+            prev = cut
+        tail = text[prev:].strip()   # anything past the last boundary
+        if tail:
+            segs.append(tail)
+        if segs:
+            return segs
     return _rule_sentencize(text)

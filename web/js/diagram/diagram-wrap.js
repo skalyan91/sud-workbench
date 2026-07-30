@@ -22,15 +22,63 @@ function bracketsWrapped(si){
   // exactly as in the flat view. A token whose display-parent isn't its real head is an INTERRUPTER (it sits, in
   // surface order, inside a constituent it doesn't belong to): it stays in place, bracketed, and is tied to its
   // head by a cross-line arc — exactly as the flat bracket view does.
-  const tlo=Array(n),thi=Array(n),disc=Array(n),fin=Array(n); let _dt=0;
-  (function dfs(i){tlo[i]=i;thi[i]=i;disc[i]=_dt++; children[i].forEach(c=>{dfs(c); tlo[i]=Math.min(tlo[i],tlo[c]); thi[i]=Math.max(thi[i],thi[c]);}); fin[i]=_dt++;})(root);
-  const isRealDesc=(anc,x)=>disc[anc]<=disc[x]&&disc[x]<=fin[anc];   // x is anc's descendant (or anc itself) in the REAL head tree, via Euler-tour discovery/finish times — independent of tlo/thi's SURFACE-ORDER span, which a non-projective parse can make numerically overlap even where there's no real ancestor/descendant relationship (see below)
+  const disc=Array(n),fin=Array(n); let _dt=0;
+  (function dfs(i){disc[i]=_dt++; children[i].forEach(c=>dfs(c)); fin[i]=_dt++;})(root);
+  const isRealDesc=(anc,x)=>disc[anc]<=disc[x]&&disc[x]<=fin[anc];   // x is anc's descendant (or anc itself) in the REAL head tree, via Euler-tour discovery/finish times — UNCONDITIONAL (every real child folds in), independent of the interrupt-aware tlo/thi computed below
+  // UNCONDITIONAL full subtree spans (every real child folds in) — used ONLY to find, per constituent, which OTHER
+  // tokens sit inside its numeric span (case b below). NOT what brackets nest from (see the corrected tlo/thi
+  // further down): folding everything in unconditionally is exactly what let mūrtitve's span reach out to bhṛtaḥ.
+  const rtlo=Array(n),rthi=Array(n);
+  (function rdfs(i){rtlo[i]=i;rthi[i]=i; children[i].forEach(c=>{rdfs(c); rtlo[i]=Math.min(rtlo[i],rtlo[c]); rthi[i]=Math.max(rthi[i],rthi[c]); });})(root);
+  // INTERRUPTER, the SAME two complementary shapes diagram-wrap.js's flat brackets() computes (see its own comment
+  // for the full derivation — kept in sync here so the two renderers can't disagree about which token gets the arc):
+  //  (b) THE ORDINARY CASE — an UNRELATED token p (no ancestor/descendant relation to C either way) sits inside
+  //      constituent C's numeric span: flag p itself (e.g. "yesterday" parked inside "man"'s NP span in the
+  //      fixture's "I saw a man yesterday who was tall" → arc yesterday→saw).
+  //  (a) BRIHAT_JATAKA S1'S SHAPE — mūrtitve's real subtree spans PAST its own head parikalpitaḥ, out to bhṛtaḥ.
+  //      The OLD dparent algorithm tested this the (b)-only way — "is p the smallest constituent some OTHER span
+  //      numerically contains?" — which let dparent[mūrtitve]=parikalpitaḥ (its real head, matches — no flag),
+  //      dparent[parikalpitaḥ]=vartmā (its real head, since a REAL descendant can never be its own display-parent —
+  //      matches, no flag) and ALSO dparent[bhṛtaḥ]=mūrtitve (its real head too, because mūrtitve's UNCONDITIONAL
+  //      span still reached out to bhṛtaḥ) — so isInt() was false for all four tokens and dchildren ended up
+  //      identical to the REAL (non-projective) tree: rendering it walked mūrtitve's dchild bhṛtaḥ (and bhṛtaḥ's
+  //      own child śaśa) BEFORE mūrtitve's own parent parikalpitaḥ, since flatInto/render sort members by `lo[c]`
+  //      and bhṛtaḥ's subtree's lo is smaller than parikalpitaḥ's own position — confirmed with a CDP dump of the
+  //      rendered .bwtok data-tok sequence: 1,3,4,2,… instead of 1,2,3,4. (a) catches exactly this: for dependent
+  //      d, if one of ITS HEAD'S OWN ANCESTORS sits between them in surface order, flag d (not the ancestor), tied
+  //      to its real head — matching ātmā/iti/vidām (vidām, not iti) and śrutau/yaḥ/anekadā (anekadā, not yaḥ)
+  //      elsewhere in the same sentence, while leaving (b)'s "yesterday" example alone (yesterday is man's
+  //      unrelated SIBLING, not man's ancestor, so (a) declines to flag "was" and (b) flags yesterday as it always did).
+  const interrupt=new Set();
+  for(let C=0;C<n;C++) for(let p=rtlo[C]+1;p<rthi[C];p++)
+    if(!isRealDesc(C,p)&&!isRealDesc(p,C)) interrupt.add(p);                 // (b) unrelated interloper
+  for(let d=0;d<n;d++){ if(d===root)continue; const h=head[d]-1; if(h<0||h>=n||h===d)continue;
+    const a=Math.min(h,d), b=Math.max(h,d);
+    for(let p=a+1;p<b;p++) if(isRealDesc(p,h)){ interrupt.add(d); break; } } // (a) an ancestor of h crosses d's own arc
+  // corrected spans: fold a child's span into its parent's only when that child is NOT an interrupter — an
+  // interrupter's own span is still computed (for ITS OWN bracket) but stops at whatever it can honestly claim,
+  // instead of reaching past whatever real token sits, non-projectively, between it and ITS head.
+  const tlo=Array(n),thi=Array(n);
+  (function dfs2(i){tlo[i]=i;thi[i]=i; children[i].forEach(c=>{dfs2(c); if(interrupt.has(c))return; tlo[i]=Math.min(tlo[i],tlo[c]); thi[i]=Math.max(thi[i],thi[c]); });})(root);
   const dparent=Array(n).fill(-1);
-  for(let p=0;p<n;p++){ if(p===root)continue; let best=-1,bs=Infinity;
-    for(let C=0;C<n;C++){ if(C===p||isRealDesc(p,C))continue;   // a REAL descendant of p can never be p's display-parent, even when non-projectivity makes its span numerically contain p — picking one would invert the relationship into a 2-cycle (p→C→p), silently dropping BOTH (and everything under them) from dchildren's root-rooted walk since neither is ever reachable. Concretely: token A's real head is token B, but B's own linear position sits INSIDE A's (non-projective) subtree span — without this exclusion, A's smallest-enclosing search picks B (correct), but B's search also picks A back (same tied span size), orphaning the pair.
-      if(tlo[C]<=p&&p<=thi[C]){ const sp=thi[C]-tlo[C]; if(sp<bs){bs=sp;best=C;} } } dparent[p]=best>=0?best:root; }
+  for(let p=0;p<n;p++){ if(p===root)continue;
+    if(!interrupt.has(p)){ dparent[p]=head[p]-1; continue; }   // the ordinary case: nest under the real head, same as the flat view
+    // an interrupter can't nest under its own real head (that's what "interrupter" means here) — search EVERY
+    // constituent (not just p's own real ancestors: case (b)'s interrupters, like "yesterday", attach to an
+    // unrelated SIBLING subtree — "man"'s — that sits nowhere on their own head chain at all) for the SMALLEST
+    // (corrected) span that contains p, excluding p's own real descendants (picking one would 2-cycle: p→C→p). This
+    // is the same search the ORIGINAL dparent algorithm ran, just over the corrected tlo/thi instead of the
+    // unconditional one — an earlier version of this fix walked UP p's real head chain only, which finds
+    // brihat_jataka s1's vartmā correctly (it happens to sit on bhṛtaḥ's own ancestor chain) but put "yesterday" at
+    // the SENTENCE ROOT instead of nested inside "man"'s bracket where the flat view (and the pre-fix dparent
+    // search) both put it — confirmed by a CDP dump showing "yesterday" rendered LAST, after the whole relative
+    // clause, instead of in its natural position between "man" and "who".
+    let best=-1,bs=Infinity;
+    for(let C=0;C<n;C++){ if(C===p||isRealDesc(p,C))continue;
+      if(tlo[C]<=p&&p<=thi[C]){ const sp=thi[C]-tlo[C]; if(sp<bs){bs=sp;best=C;} } }
+    dparent[p]=best>=0?best:root; }
   const dchildren=Array.from({length:n},()=>[]); for(let p=0;p<n;p++) if(p!==root) dchildren[dparent[p]].push(p);
-  const isInt=p=>p!==root && dparent[p]!==head[p]-1;   // displayed under a constituent that isn't its head → interrupter
+  const isInt=p=>interrupt.has(p);   // now the directly-verified per-arc set, not re-derived from dparent vs head
   const lo=Array(n); (function dfs(i){lo[i]=i; dchildren[i].forEach(c=>{dfs(c); lo[i]=Math.min(lo[i],lo[c]);});})(root);
   const mwtComp=new Set(); (D.mwt||[]).forEach(m=>{mwtComp.add(m.from-1); mwtComp.add(m.to-1);});
   const BRK='700 15px '+LIVE_TOKEN_STACK, G=6, brW=meas("[",BRK)+6, IND=brW;   // brW: width for fit maths (a bracket plus the gap to what follows). IND: the per-level indent unit — SAME currency as brW/flatW (bracket + G), not the bare glyph. It used to be meas("[",BRK) alone: the bracket glyph with NO trailing gap, which under-priced every level of nesting by G against flatW's own accounting (flatW prices an opened level at brW, and prices every child-to-child step at +G — see below), so `indent`/`cind` (built purely by summing IND) and flatW stopped being apples-to-apples in the `indent+flatW(i)<=AV` fit checks. No longer rounded, and no longer +2 for margins .bwbr does not have; the line() below prints a real (invisible) bracket per level regardless of what IND measures, so THIS number's own job is only to keep the fit maths honest, not the per-level pixels — the one place pixels needed a real fix (a leadhead line dropping straight into content with no bracket of its own to supply the usual bracket→word gap) is patched separately, in line()'s own trailing space (see `bare` below)
@@ -75,7 +123,7 @@ function bracketsWrapped(si){
     grp.appendChild(wf);   // only in-flow child → the token baselines on the form; folded punctuation is appended as separate satellites AFTER the cell (see flatInto/render). The seam mark is an out-of-flow child, so it hangs past the form without widening the cell
     const below=[];
     { const rt=trTxt(t[i]); if(rt){ const tr=document.createElement("span"); tr.className="otrans"+(trRowEdit()?" tr-edit":"")+frnUp(t[i]); tr.textContent=rt; tr.style.marginTop=descent(POS_F)+"px"; htmlSeamMark(tr,t[i],"translit"); below.push(tr); } }   // Item 8: the translit row gains the same descender-matched top gap (+descent(POS_F)) the POS row carries, matching belowStack's per-row step (the .bwund flex column steps 18px per row; this margin folds in the label-font descender)
-    belowTiers().forEach(tier=>{ const txt=tierText(t[i],tier); const gs=document.createElement("span"); gs.className="gloss gl-edit"+(txt?"":" gl-empty")+frnUp(t[i]); gs.dataset.tier=tier; gs.tabIndex=0; setGlossText(gs,tier,txt||"…"); gs.style.marginTop=descent(POS_F)+"px"; if(tier==="mseg"&&txt)htmlSeamMark(gs,t[i],"mseg"); below.push(gs); });   // Item 8: each gloss / morphemic-gloss tier gains the same +descent(POS_F) top gap as the POS row; between translit and POS. The segmentation row takes the seam mark as an out-of-flow child, so .bwund's flex column still centres the row on its own real text
+    belowTiers().forEach(tier=>{ const txt=tierText(t[i],tier); const gs=document.createElement("span"); gs.className="gloss gl-edit"+(txt?"":" gl-empty")+frnUp(t[i]); gs.dataset.tier=tier; gs.tabIndex=0; setGlossText(gs,tier,txt||"…"); gs.style.marginTop=descent(POS_F)+"px"; if(tier==="mseg"||tier==="mgloss")htmlSeamMark(gs,t[i],tier); below.push(gs); });   // Item 8: each gloss / morphemic-gloss tier gains the same +descent(POS_F) top gap as the POS row; between translit and POS. The segmentation AND morphemic-gloss rows both take the seam mark as an out-of-flow child (both per-morpheme, unlike the lexical gloss row), so .bwund's flex column still centres each row on its own real text — drawn even where THIS tier is the "…" placeholder (not gated on txt), so a seam MSeg marks cleanly never silently vanishes from MGloss just because that one morpheme isn't glossed yet (see the note beside the SVG twin of this call in diagram-core.js)
     if(show.pos&&t[i].upos){ const p=document.createElement("span"); p.className="bwpos"; p.textContent=posDisp(t[i]); p.title=posTitle(t[i].upos); p.style.marginTop=descent(POS_F)+"px"; below.push(p); }   // Item 1: descent(POS_F) extra top gap above the POS row (the .bwund flex column steps 18px per row; this margin folds in the label-font descender so wrapped brackets match belowStack's new 18+descent(POS_F) POS step)
     if(below.length){ const und=document.createElement("span"); und.className="bwund"; below.forEach(e=>und.appendChild(e)); wf.appendChild(und); }   // POS/translit nested IN the form → centres under the form, not the wider slot (matters when the form is flush-left on a leadhead line)
     return grp; };
@@ -317,7 +365,7 @@ function drawBump(g,x1,x2,arcZone,top,NR,AH,col,arrow,startY,morph,ends){
   const dstr=`M ${sl[0][0]} ${sl[0][1]} C ${sl[1][0]} ${sl[1][1]}, ${sl[2][0]} ${sl[2][1]}, ${sl[3][0]} ${sl[3][1]}`;
   const ink=arcInk(col);   // stroke/arrowhead recede toward bg; drawBump's caller keeps col for the label
   g.appendChild(E("path",{class:"arc-casing",d:dstr}));
-  if(arrow) g.appendChild(E("path",{class:"ah-casing",d:arrowPath(P[2],P[3],AH+1.5)}));
+  if(arrow) g.appendChild(E("path",{class:"ah-casing",d:arrowPath(P[2],P[3],AH,AH_OUTSET)}));
   g.appendChild(E("path",{class:"arc-path"+(morph?" morph-edge":""),d:dstr,stroke:ink}));
   if(arrow) g.appendChild(E("path",{class:"ah",d:arrowPath(P[2],P[3],AH),fill:ink}));
   return ends?Math.min(ends.y1,ends.y2)-ARC_APEX*h:startY!=null?bezYExtent(P)[0]:arcZone-0.75*h;   // visible crown y (label sits above it); with per-endpoint baselines the bump is still symmetric ABOUT ITS OWN crown, which arcCtrl2 puts h above the higher end — the same min(y1,y2)−0.75h the flat view's apexY uses: the raised (asymmetric) bump's TRUE peak from bezYExtent — NOT the control-point height P[1][1], which floats above the curve and would leave a lifted label + its leader hanging above the arc (matches the flat-brackets raised-bump crown at drawLabel, bezYExtent(P)[0]). The symmetric bump's peak is exactly arcZone-0.75h.
@@ -334,14 +382,14 @@ function drawCrossLine(g,frm,tip,col,AH,casing,gap,openTop,morph){
   const ink=arcInk(col);   // stroke/arrowhead recede toward bg (no label drawn here)
   if(Math.atan2(Math.abs(tip[1]-frm[1]),Math.abs(tip[0]-frm[0]))>=ARC_ANGLE){
     const b=backoff(tip,frm,AH), d=`M ${frm[0]} ${frm[1]} L ${b[0]} ${b[1]}`;
-    if(casing){ g.appendChild(E("path",{class:"arc-casing",d})); g.appendChild(E("path",{class:"ah-casing",d:arrowPath(frm,tip,AH+1.5)})); }
+    if(casing){ g.appendChild(E("path",{class:"arc-casing",d})); g.appendChild(E("path",{class:"ah-casing",d:arrowPath(frm,tip,AH,AH_OUTSET)})); }
     g.appendChild(E("path",{class:"arc-path"+(morph?" morph-edge":""),d,stroke:ink}));
     g.appendChild(E("path",{class:"ah",d:arrowPath(frm,tip,AH),fill:ink}));
   } else {
     const P=arcCtrlChord(frm,tip,chordSide(frm,tip),gap,openTop);   // S-curve, angle-preservingly scaled to fit the inter-line gap; drawn to the tip so the arrowhead stays attached
     const d=`M ${P[0][0]} ${P[0][1]} C ${P[1][0]} ${P[1][1]}, ${P[2][0]} ${P[2][1]}, ${P[3][0]} ${P[3][1]}`;
     const aFrm=bezInDir(P,AH+2);   // Item 10: aim the arrowhead along the curve's REAL incoming direction near the tip — the true tangent for a bowed arc, the chord for a near-straight one — NOT the bare P[2]→P[3] end tangent, which for a nearly-straight S points off at the take-off angle θ and rotates the head wrongly
-    if(casing){ g.appendChild(E("path",{class:"arc-casing",d})); g.appendChild(E("path",{class:"ah-casing",d:arrowPath(aFrm,P[3],AH+1.5)})); }
+    if(casing){ g.appendChild(E("path",{class:"arc-casing",d})); g.appendChild(E("path",{class:"ah-casing",d:arrowPath(aFrm,P[3],AH,AH_OUTSET)})); }
     g.appendChild(E("path",{class:"arc-path"+(morph?" morph-edge":""),d,stroke:ink}));
     g.appendChild(E("path",{class:"ah",d:arrowPath(aFrm,P[3],AH),fill:ink}));
   }
@@ -552,7 +600,7 @@ function arcsWrapped(si){
     for(let i=r.s;i<=r.e;i++){ if(heads[i]-1>=0)continue; const X=r.LX(i), top=r.rTop, col=relColor("root"), ink=arcInk(col),
       tip=[X,repBase(rep,r.arcZone,i)],frm=[X,top],b=backoff(tip,frm,AH), g=E("g",{class:"arc","data-s":si,"data-dep":OID(i)});   // item 11: a reported root lifts its stub's FOOT too, exactly as the flat view's rootY does (shared repBase)
       g.appendChild(E("path",{class:"arc-casing",d:`M ${X} ${top} L ${b[0]} ${b[1]}`}));
-      g.appendChild(E("path",{class:"ah-casing",d:arrowPath(frm,tip,AH+1.5)}));
+      g.appendChild(E("path",{class:"ah-casing",d:arrowPath(frm,tip,AH,AH_OUTSET)}));
       const rp=E("path",{class:"arc-path",d:`M ${X} ${top} L ${b[0]} ${b[1]}`,stroke:ink}); g.appendChild(rp);
       g.appendChild(E("path",{class:"ah",d:arrowPath(frm,tip,AH),fill:ink}));
       g.style.cursor="pointer"; g.addEventListener("click",()=>pick(si,OID(i))); svg.appendChild(g);
@@ -634,6 +682,7 @@ function stemmaGeomW(t,n,withLabels){
   for(let i=0;i<n;i++){const h=head[i]; if(h<1||h>n||h===i+1) continue;
     edges.push({d:i,h:h-1,rel:t[i].deprel,w:withLabels?meas(t[i].deprel,POS_F)+SPW:0});}
   if(withLabels) spreadForLabels(c,edges);
+  ensureNodeGaps(c,lw);   // re-guarantee each node's own below-stack width after label-spreading — see its own note in diagram-core.js
   const maxD=Math.max(0,...depth), ny=d=>TOP+d*LV, natW=Math.max(2,...c.map((cx,i)=>cx+lw[i]/2))+2;
   mirror(c,natW);
   return {pos:c.map((cx,i)=>({x:cx,y:ny(depth[i])})), edges, natW, natH:ny(maxD)+LV};
@@ -773,7 +822,7 @@ function wpDraw(box){ const wp=box._wp; if(!wp) return;
   // edges run node-centre → node-centre, so an incoming and an outgoing edge meet directly at the node (no gap, no dot)
   wp.edges.forEach(e=>{ e._ink=arcInk(relColor(e.rel)); let a1=[NX(e.d),NY(e.d)], a2=[NX(e.h),NY(e.h)];
     if(show.arrows){const dir=arrowDir(e.rel); if(dir){const tip=dir==="dep"?a1:a2,frm=dir==="dep"?a2:a1;
-      e._ah=arrowPath(frm,tip,5.25); e._ahc=arrowPath(frm,tip,6.375); if(dir==="dep")a1=backoff(tip,frm,5.25); else a2=backoff(tip,frm,5.25);} else {e._ah=null;e._ahc=null;}} else {e._ah=null;e._ahc=null;}
+      e._ah=arrowPath(frm,tip,5.25); e._ahc=arrowPath(frm,tip,5.25,AH_OUTSET); if(dir==="dep")a1=backoff(tip,frm,5.25); else a2=backoff(tip,frm,5.25);} else {e._ah=null;e._ahc=null;}} else {e._ah=null;e._ahc=null;}
     e._d=`M ${a1[0]} ${a1[1]} L ${a2[0]} ${a2[1]}`; });
   { const cg=E("g",{class:"edge-cases"}); cg.setAttribute("aria-hidden","true");   // Item 21: edges + arrowheads cased as ONE unit behind the strokes (occludes proj-lines/tokens behind, edges don't case against each other)
     wp.edges.forEach(e=>{ cg.appendChild(E("path",{class:"arc-casing",d:e._d})); if(e._ahc) cg.appendChild(E("path",{class:"ah-casing",d:e._ahc})); }); svg.appendChild(cg); }
@@ -781,9 +830,23 @@ function wpDraw(box){ const wp=box._wp; if(!wp) return;
     if(e._ah) g.appendChild(E("path",{class:"ah",d:e._ah,fill:e._ink}));
     g.appendChild(E("path",{class:"edge"+(isMorphRel(e.rel)?" morph-edge":""),d:e._d,stroke:e._ink}));
     g.style.cursor="pointer"; g.addEventListener("click",()=>pick(wp.si,wp.oid[e.d])); svg.appendChild(g); });
-  // node hit targets — no visible marker; edges already meet at the point, and selecting highlights the incoming edge
+  // node hit targets — no visible marker; edges already meet at the point, and selecting highlights the incoming edge.
+  // sx=bw/wp.natW squeezes the WHOLE sentence's natural tree width into one row's width, so for anything past a
+  // handful of tokens sx<<1 and neighbouring nodes can land closer together than the flat r:10 below reaches —
+  // their circles then overlap, and since SVG hit-testing gives the point to whichever shape is PAINTED LAST (this
+  // loop, in token order), a click/drag aimed dead-centre at token i instead grabs token i+1 the moment their
+  // circles cross. That silently misdirects a Subj-raising or Shared-conjunct drag onto the wrong node — the exact
+  // "nothing happens" a user sees, since the SOURCE token is wrong from the first pointerdown, not the drop —
+  // confirmed by a synthetic CDP drag landing on tok 18 ("really") when aimed at tok 17's own measured centre
+  // ("he") in a 26-token sentence. Clamp each node's own radius to at most half its distance to the NEAREST other
+  // node (Euclidean — depth is compressed by sy too, so a diagonal neighbour can be the closest one) rather than
+  // dropping the flat 10: the wash shrinks gracefully as the overview densifies instead of ever reaching into a
+  // neighbour's own centre.
+  const hitR=wp.nodes.map((_,i)=>{ let minD=Infinity;
+    for(let j=0;j<wp.nodes.length;j++){ if(j===i)continue; const d=Math.hypot(NX(i)-NX(j),NY(i)-NY(j)); if(d<minD)minD=d; }
+    return Math.max(2,Math.min(10,minD/2)); });   // floored at 2px so a pathologically dense run (e.g. same-depth siblings stacked near-coincident) still leaves a real, if tiny, hit target rather than vanishing
   for(let i=0;i<wp.nodes.length;i++){ const g=E("g",{class:"node"+(sel.s===wp.si&&sel.t===wp.oid[i]?" sel":""),"data-s":wp.si,"data-tok":wp.oid[i]});
-    g.appendChild(E("circle",{class:"tok-hit tok-wash",cx:NX(i),cy:NY(i),r:10}));   // node point = its own wash region
+    g.appendChild(E("circle",{class:"tok-hit tok-wash",cx:NX(i),cy:NY(i),r:hitR[i]}));   // node point = its own wash region
     g.style.cursor="pointer"; g.addEventListener("click",()=>pick(wp.si,wp.oid[i])); svg.appendChild(g); }
   // edge labels: horizontal only, centred on each edge (the layout was already spread so they don't overlap)
   if(wp.showLbl) wp.edges.forEach(e=>{ const g=E("g",{class:"edge-g"+(sel.s===wp.si&&sel.t===wp.oid[e.d]?" sel":""),"data-s":wp.si,"data-dep":wp.oid[e.d],"data-head":wp.oid[e.h]});
@@ -883,7 +946,7 @@ function tree(si){
   // edges as ONE cased unit (Item 21): pre-compute stroke path + arrowhead, draw all casings behind, then strokes on top
   edges.forEach(e=>{ e._ink=arcInk(relColor(e.rel)); let dEnd=[x[e.d],e.y1], hEnd=[x[e.h],e.y2];
     if(show.arrows){const dir=arrowDir(e.rel); if(dir){const tip=dir==="dep"?dEnd:hEnd,frm=dir==="dep"?hEnd:dEnd;
-      e._ah=arrowPath(frm,tip,5.25); e._ahc=arrowPath(frm,tip,6.375); if(dir==="dep") dEnd=backoff(tip,frm,5.25); else hEnd=backoff(tip,frm,5.25);} else {e._ah=null;e._ahc=null;}} else {e._ah=null;e._ahc=null;}
+      e._ah=arrowPath(frm,tip,5.25); e._ahc=arrowPath(frm,tip,5.25,AH_OUTSET); if(dir==="dep") dEnd=backoff(tip,frm,5.25); else hEnd=backoff(tip,frm,5.25);} else {e._ah=null;e._ahc=null;}} else {e._ah=null;e._ahc=null;}
     e._d=`M ${hEnd[0]} ${hEnd[1]} L ${dEnd[0]} ${dEnd[1]}`; });
   { const cg=E("g",{class:"edge-cases"}); cg.setAttribute("aria-hidden","true");
     edges.forEach(e=>{ cg.appendChild(E("path",{class:"arc-casing",d:e._d})); if(e._ahc) cg.appendChild(E("path",{class:"ah-casing",d:e._ahc})); }); svg.appendChild(cg); }
@@ -926,8 +989,8 @@ function tree(si){
     const hit=E("rect",{class:"tok-hit tok-wash",x:x[i]-Math.max(26,tw/2+4),y:ny(depth[i])-A,width:Math.max(52,tw+8),height:A+B});   // node box = its own wash region
     g.appendChild(hit);
     { const rt=trTxt(t[i]); if(rt){ const ty=ny(depth[i])+18+descent(POS_F); const e=E("text",{class:"translit"+frnUp(t[i]),x:x[i],y:ty,"text-anchor":"middle"}); e.textContent=rt; if(trRowEdit())e.classList.add("tr-edit"); g.appendChild(e); boxes.push({x:x[i],y:ny(depth[i])+14,hx:meas(rt,trFont(t[i]))/2,hy:7}); svgSeamMark(g,t[i],x[i],ty,meas(rt,trFont(t[i]))/2,trFont(t[i]),boxes,null,"translit"); } }   // Item 8: same descender-matched top gap (18+descent(POS_F)) the other renderers give the translit row
-    belowTiers().forEach((tier,ti)=>{ const gy=ny(depth[i])+(trTxt(t[i])?18+descent(POS_F):0)+(ti+1)*(18+descent(POS_F)), txt=tierText(t[i],tier); const e=E("text",{class:"gloss gl-edit"+(txt?"":" gl-empty")+frnUp(t[i]),x:x[i],y:gy,"text-anchor":"middle","data-tier":tier,tabindex:"0"}); setGlossText(e,tier,txt||"…"); g.appendChild(e); boxes.push({x:x[i],y:gy-4,hx:meas(txt||"…",trFont(t[i]))/2,hy:7});
-      if(tier==="mseg"&&txt) svgSeamMark(g,t[i],x[i],gy,meas(txt,tierFont(tier,t[i]))/2,tierFont(tier,t[i]),boxes,null,"mseg"); });   // gloss / morphemic tiers under the node (hierarchy has no per-node POS row) — the segmentation row carries the seam mark, the gloss rows don't
+    belowTiers().forEach((tier,ti)=>{ const gy=ny(depth[i])+(trTxt(t[i])?18+descent(POS_F):0)+(ti+1)*(18+descent(POS_F)), txt=tierText(t[i],tier), dtxt=txt||"…"; const e=E("text",{class:"gloss gl-edit"+(txt?"":" gl-empty")+frnUp(t[i]),x:x[i],y:gy,"text-anchor":"middle","data-tier":tier,tabindex:"0"}); setGlossText(e,tier,dtxt); g.appendChild(e); boxes.push({x:x[i],y:gy-4,hx:meas(dtxt,trFont(t[i]))/2,hy:7});
+      if(tier==="mseg"||tier==="mgloss") svgSeamMark(g,t[i],x[i],gy,(tier==="mgloss"?measGloss(dtxt,tierFont(tier,t[i])):meas(dtxt,tierFont(tier,t[i])))/2,tierFont(tier,t[i]),boxes,null,tier); });   // gloss / morphemic tiers under the node (hierarchy has no per-node POS row) — the segmentation AND morphemic-gloss rows carry the seam mark (both per-morpheme, drawn off the "…" placeholder's own width where this tier isn't annotated for this token — see the note beside diagram-core.js's belowStack); the lexical gloss row doesn't
     g.appendChild(lbl); gwFormSVG(g,lbl,t[i],x[i],ny(depth[i]),NODE_F,"node-lbl",si,boxes);   // goeswith: the continuation parts join the head on the node row, so the ONE translit/gloss stack drawn above spans the whole word
     if(gwOf(t[i]).length){ const ids=[OID(i)].concat(gwOf(t[i]).map(p=>p.oid));
       g.setAttribute("data-gw",ids.join(" "));
@@ -945,16 +1008,54 @@ function brackets(si){
   const AH=parseFloat(css("--arrow"))||5.5;   // interrupter-arc arrowheads, same CSS var every other view's arrowheads track
   const rep=reportOffsets(D);   // item 6/11: reported-speech UPWARD step — the form, its deprel label above, its below-stack, its brackets AND its interrupter-arc endpoints all lift together, so the reported constituent floats off the line as one unit
   const {children,head,root}=structure(sent);
-  // full subtree spans
-  const lo=Array(n),hi=Array(n),size=Array(n),seen=Array(n).fill(false);
-  (function dfs(i){seen[i]=true; lo[i]=i;hi[i]=i;size[i]=1;
-    children[i].slice().sort((a,b)=>a-b).forEach(c=>{ if(seen[c])return; dfs(c); lo[i]=Math.min(lo[i],lo[c]); hi[i]=Math.max(hi[i],hi[c]); size[i]+=size[c]; });})(root);
-  for(let i=0;i<n;i++) if(!seen[i]){lo[i]=i;hi[i]=i;size[i]=1;}
   const isAnc=(C,p)=>{ let x=p,g=0; while(x>=0&&g++<=n){ if(x===C)return true; const hp=head[x]-1; if(hp<0||hp===x)break; x=hp; } return false; };
-  // a token sitting inside a constituent it does not belong to interrupts it → leave it in place, don't
-  // bracket it, and draw an arc from it to its head (e.g. "yesterday" inside "man"'s constituent → saw→yesterday)
+  // UNCONDITIONAL full subtree spans (every real child folds in, regardless) — used ONLY to find, per constituent,
+  // which OTHER tokens sit inside its numeric span. NOT the spans brackets are drawn from (see the corrected lo/hi
+  // below): folding everything in unconditionally is exactly what let mūrtitve's span reach out to bhṛtaḥ in the
+  // first place (see the interrupt-detection comment right below).
+  const rlo=Array(n),rhi=Array(n),seen=Array(n).fill(false);
+  (function rdfs(i){seen[i]=true; rlo[i]=i;rhi[i]=i;
+    children[i].slice().sort((a,b)=>a-b).forEach(c=>{ if(seen[c])return; rdfs(c); rlo[i]=Math.min(rlo[i],rlo[c]); rhi[i]=Math.max(rhi[i],rhi[c]); });})(root);
+  for(let i=0;i<n;i++) if(!seen[i]){rlo[i]=i;rhi[i]=i;}
+  // INTERRUPTER, two complementary shapes — a token sitting inside a constituent it does not belong to interrupts
+  // it: it stays in place, bracketed, and is tied to its real head by a cross arc instead of nesting normally.
+  //  (b) THE ORDINARY CASE — an UNRELATED token p (no ancestor/descendant relation to C either way) sits inside
+  //      constituent C's numeric span: flag p itself (e.g. "yesterday" parked inside "man"'s NP span in the
+  //      fixture's "I saw a man yesterday who was tall" → arc yesterday→saw; see diagram-core.js's subtreeMembers
+  //      for the same example cited as the canonical small-scale non-projective test, brihat_jataka s1 being the
+  //      "widely non-projective" large one).
+  //  (a) BRIHAT_JATAKA S1'S SHAPE — testing (b) alone against C=mūrtitve mis-fires: mūrtitve's REAL subtree
+  //      {mūrtitve, bhṛtaḥ, śaśa} reaches PAST mūrtitve's own head parikalpitaḥ in surface order (mūrtitve 1st,
+  //      parikalpitaḥ 2nd, śaśa/bhṛtaḥ 3rd/4th). parikalpitaḥ sits inside mūrtitve's span, but it's mūrtitve's own
+  //      ANCESTOR — not "unrelated" — so (b)'s own `!isAnc(p,C)` guard correctly refuses to flag it (flagging an
+  //      ancestor as if it needed a cross-arc BACK to its own head, e.g. parikalpitaḥ→vartmā, is nonsensical: it's
+  //      an ordinary, correctly-nested token relative to ITS OWN parent). But nothing then looked the OTHER way to
+  //      find the token that actually can't nest — bhṛtaḥ, whose own arc to mūrtitve is what's crossed by
+  //      parikalpitaḥ sitting in between — so neither token was flagged, and mūrtitve's/parikalpitaḥ's brackets
+  //      were left to literally cross (confirmed via a CDP dump of the rendered .brk/.arc elements from an earlier,
+  //      (b)-only version of this fix: rendered order was open(mūrtitve) open(parikalpitaḥ) … close(mūrtitve)
+  //      close(parikalpitaḥ) instead of one nesting inside the other, and the arc ran parikalpitaḥ→vartmā). (a)
+  //      catches exactly this: for dependent d, if one of ITS HEAD'S OWN ANCESTORS sits between them in surface
+  //      order, flag d (not the ancestor), tied to its real head — matching the two other instances of this exact
+  //      shape elsewhere in the same sentence: ātmā/iti/vidām (vidām, not iti, gets the arc) and śrutau/yaḥ/anekadā
+  //      (anekadā, not yaḥ) — while leaving (b)'s "yesterday" example alone: "was" (→man)'s own arc is ALSO
+  //      crossed by an intervening token (yesterday), but yesterday is man's unrelated SIBLING, not man's ancestor,
+  //      so (a)'s `isAnc(p,h)` test correctly declines to flag "was", leaving (b) to flag yesterday as it always did.
   const interrupt=new Set();
-  for(let C=0;C<n;C++) for(let p=lo[C]+1;p<hi[C];p++) if(!isAnc(C,p)) interrupt.add(p);
+  for(let C=0;C<n;C++) for(let p=rlo[C]+1;p<rhi[C];p++)
+    if(!isAnc(C,p)&&!isAnc(p,C)) interrupt.add(p);                          // (b) unrelated interloper
+  for(let d=0;d<n;d++){ if(d===root)continue; const h=head[d]-1; if(h<0||h>=n||h===d)continue;
+    const a=Math.min(h,d), b=Math.max(h,d);
+    for(let p=a+1;p<b;p++) if(isAnc(p,h)){ interrupt.add(d); break; } }      // (a) an ancestor of h crosses d's own arc
+  // CORRECTED subtree spans — what brackets are actually drawn from: fold a child's span into its parent's only
+  // when that child is NOT an interrupter. An interrupter's own span is still computed (it gets its OWN bracket,
+  // over whatever non-interrupting descendants it has) but does NOT fold into its real head's span — folding it in
+  // unconditionally (see rlo/rhi above) is exactly what dragged mūrtitve's bracket rightward to swallow parikalpitaḥ.
+  const lo=Array(n),hi=Array(n),size=Array(n); seen.fill(false);
+  (function dfs(i){seen[i]=true; lo[i]=i;hi[i]=i;size[i]=1;
+    children[i].slice().sort((a,b)=>a-b).forEach(c=>{ if(seen[c])return; dfs(c); if(interrupt.has(c))return;
+      lo[i]=Math.min(lo[i],lo[c]); hi[i]=Math.max(hi[i],hi[c]); size[i]+=size[c]; });})(root);
+  for(let i=0;i<n;i++) if(!seen[i]){lo[i]=i;hi[i]=i;size[i]=1;}
   const opens=Array.from({length:n},()=>[]), closes=Array.from({length:n},()=>[]);
   const addBr=(a,b,col,sz,owner)=>{opens[a].push({sz,col,owner}); closes[b].push({sz,col,owner});};
   for(let i=0;i<n;i++){ if(i===root)continue; addBr(lo[i],hi[i],relColor(t[i].deprel),hi[i]-lo[i],i); }   // every dependent subtree — interrupters bracketed too
@@ -1034,7 +1135,7 @@ function brackets(si){
     const dstr=`M ${sl[0][0]} ${sl[0][1]} C ${sl[1][0]} ${sl[1][1]}, ${sl[2][0]} ${sl[2][1]}, ${sl[3][0]} ${sl[3][1]}`;
     const g=E("g",{class:"arc","data-s":si,"data-dep":OID(a.d),"data-head":OID(a.h)});
     g.appendChild(E("path",{class:"arc-casing",d:dstr}));                       // opaque halo so crossing interrupter arcs occlude cleanly
-    g.appendChild(E("path",{class:"ah-casing",d:arrowPath(P[2],P[3],AH+1.5)}));
+    g.appendChild(E("path",{class:"ah-casing",d:arrowPath(P[2],P[3],AH,AH_OUTSET)}));
     g.appendChild(E("path",{class:"arc-path",d:dstr,stroke:ink}));
     g.appendChild(E("path",{class:"ah",d:arrowPath(P[2],P[3],AH),fill:ink}));
     if(show.labels){const apex=hasHRel?bezYExtent(P)[0]:base-ml-0.75*a.hgt, mx=(XH+XD)/2; drawLabel(g,mx,apex-8,a.rel,col); boxes.push({x:mx,y:apex-8,hx:meas(a.rel,POS_F)/2+2,hy:7});}   // label above the arc's visible peak (the raised bump's true crown when the start is lifted)

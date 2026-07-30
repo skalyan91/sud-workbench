@@ -69,13 +69,22 @@ are disabled (surfaced as a toast). The conversion grammars are vendored from
   and MWT ties), outline — with relation colouring, the Show/Hide drawer, Merge
   punctuation, semantic arrows, extended (ghost) relations, RTL.
 - **Diagram editing** — drag a node to reorder tokens, drag an edge onto a node to
-  re-attach it; an attachment the SUD validator rejects outright won't stick.
+  re-attach it; an attachment the SUD validator rejects outright won't stick. Dropping
+  onto an **edge** rather than a node annotates instead of rewiring: onto a `conj` edge
+  attaches as a shared dependent of the coordination (`Shared=Yes`), and a predicate and
+  one of its arguments dropped onto each other — in **either direction**, the argument
+  onto the predicate's edge or the predicate onto the argument's `subj`/`comp:obj`/
+  `comp:obl` edge — records subject raising (FEATS `Subj`) on the predicate. Both draw a
+  dashed ghost edge and leave the real tree alone.
 - **Per-sentence grids** — shared column widths, dropdowns for UPOS/Head/DepRel,
   `Key=Value` chip editing for FEATS/MISC, Excel-style edit expansion,
   token/sentence insert-delete-reorder with id renumber and head fix-up, MWT
   group/ungroup/split/flatten, live validation.
 - **Undo/redo** across the whole document, **Find** (⌘F) over sentence ids, text and
-  transliterations, and **Export Diagram as SVG** for the selected sentence.
+  transliterations, and **Export Diagram as SVG** for the selected sentence — always in
+  light-mode colours and self-contained, so the file reads the same wherever it's opened.
+- A freshly parsed sentence draws its diagram **incrementally**, deepening the tree one
+  level at a time, so the row fills in as the layout runs instead of staying blank.
 - **Relation colours** are customisable (five categories, light and dark
   independently) and otherwise follow the macOS system accent colour.
 
@@ -98,6 +107,14 @@ are disabled (surfaced as a toast). The conversion grammars are vendored from
 
 ### Parsing
 
+- **Insert Text** (⌘T, or the toolbar +) takes a block of text and adds one sentence per
+  sentence it finds. On an empty document it offers a **language** to parse as, listing
+  the languages a parser is installed for first and picking the best model for the one
+  chosen; on a document that already has sentences the language is the file's. Any number
+  of **parallel texts** in other languages can be entered alongside: each is sentencised
+  in its own language and the n-th sentence lands as the n-th block's translation. The
+  main field can also be switched off, so a submitted text supplies **translations only**,
+  continuing after the last sentence already translated in one of those languages.
 - Pick a model in the toolbar; Insert Text then parses in-process:
   - **SUD spaCy** models (`en_sud_ewt`, `zh_sud_gsdboth`, …) from Sunflower AI.
   - **Stanza UD** models via `spacy-stanza`, post-processed UD → SUD with grew;
@@ -132,7 +149,10 @@ are disabled (surfaced as a toast). The conversion grammars are vendored from
   and a save-and-reopen.
 - **Glossing** — lexical (MISC `Gloss`) and morphemic (`MSeg`/`MGloss`) tiers render
   under the tokens, with an editor for the Feature=Value → Leipzig-abbreviation
-  mapping. The right-click menu on a token can look the word up — on Wiktionary, or,
+  mapping. The two morphemic rows are one sequence read twice, and they stay in step:
+  correcting a lemma re-derives `MSeg` and carries `MGloss` across with it, and typing a
+  hyphen into `MSeg` splits a gloss that divides cleanly into a lexical and a grammatical
+  part (`walk.PST` over `walk-ed` becomes `walk-PST`). The right-click menu on a token can look the word up — on Wiktionary, or,
   for Sanskrit, in Apte's *Practical Sanskrit-English Dictionary* (revised ed. 1957,
   vendored from the Cologne digitisation, so it works offline) — and pre-fill the
   morphemic gloss from a chosen definition.
@@ -145,7 +165,7 @@ are disabled (surfaced as a toast). The conversion grammars are vendored from
   macOS-style proxy-title block (filename plus language · transliteration · scheme,
   right-click for the folder path), grouped toolbar pills with three display modes,
   real SF Symbols rendered natively, full-screen and system-accent awareness.
-- Native secondary windows for Help, About, Manage Models and Insert Text.
+- Native secondary windows for Help, About and Manage Models.
 - Packaged as **SUD Workbench.app** with a `.conllu`/`.conll` file association, so
   it can be the default viewer for treebank files (see Packaging below).
 

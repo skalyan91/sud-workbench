@@ -34,9 +34,11 @@ function cascadeSids(from){ if(!AUTONUM) return; for(let i=from;i<DOC.length-1;i
 function renumberAfterDelete(i,delSid){ let target=delSid, expected=bumpSid(delSid);
   for(let j=i; j<DOC.length && expected!=null; j++){ if(DOC[j].sid!==expected) break;
     DOC[j].sid=target; target=expected; expected=bumpSid(expected); } }
-function insertAt(index){ if(hasBridge()){ try{ window.pywebview.api.open_insert_window(index, model?(MODELINFO[model]||model):""); return; }catch(e){} } openSheet(sheetInsert(index)); }   // item 23/24: Insert-text native window; sheet is the headless fallback
+function insertAt(index){ openSheet(sheetInsert(index)); }   // items 23/24: the "Insert text" dialog, inserting BEFORE block `index` — the same sheet the toolbar's + and ⌘T open (addTextSheet), which was a native child window until the two paths were merged. It reads insertCtx() (js/io/bridge.js) itself: whether to offer a language picker, and which translation languages a parallel text may be written in
 function doInsert(index,text){ pushUndo(); const sid=autoInsertSid(index), tokens=buildTokens(text);
   DOC.splice(index,0,{sid,text:text.trim(),tokens}); cascadeSids(index); sel={s:index,t:1};
+  if(typeof invalidateColW==="function") invalidateColW();   // a new sentence shifts every following sentence's margin numbering (marginNumWidth) — simplest to rescan wholesale rather than reason about how far the shift reaches
+  if(typeof invalidateDiaCache==="function") invalidateDiaCache();   // …and shifts every following sentence's INDEX — js/core/document.js's notation-switch cache is keyed on si, and a splice makes every si past `index` name a different sentence than whatever was cached under it
   morphAfterReparse(DOC[index]);   // the new tokens carry no MSeg/MGloss — seed the morphemic tiers the same way every other sentence got them (no FEATS here, so MSeg seeds from the forms and MGloss stays empty), inside this same undo step
   refresh();
   // …and the toast says what actually ran. This branch is reached ONLY with no model or no bridge, so nothing was
@@ -53,13 +55,19 @@ function doInsert(index,text){ pushUndo(); const sid=autoInsertSid(index), token
 // applySentText. It used to be defined here as a local, model-free re-tokenisation that bridge.js then WRAPPED,
 // and the two copies drifted: the wrapper never re-seeded the morphemic tiers, so a re-parse left MSeg/MGloss
 // empty while re-typing the same text through commitSentText filled them.
-function moveSent(from,to){ if(to<0||to>DOC.length)return; pushUndo(); if(from<to)to--; const [m]=DOC.splice(from,1); DOC.splice(to,0,m); sel={s:DOC.indexOf(m),t:sel.t}; refresh(); }
+function moveSent(from,to){ if(to<0||to>DOC.length)return; pushUndo(); if(from<to)to--; const [m]=DOC.splice(from,1); DOC.splice(to,0,m); sel={s:DOC.indexOf(m),t:sel.t};
+  if(typeof invalidateColW==="function") invalidateColW();   // reordering shifts the margin numbering of everything between the old and new position
+  if(typeof invalidateDiaCache==="function") invalidateDiaCache();   // …and every si between the old and new position now names a different sentence — see doInsert's own note on why this cache can't tolerate that the way colW does
+  refresh(); }
 function delSent(i){ pushUndo(); const delSid=DOC[i]&&DOC[i].sid; DOC.splice(i,1);
   if(AUTONUM) renumberAfterDelete(i,delSid);   // keep the numbering continuous across the deletion
-  sel=DOC.length?{s:Math.min(i,DOC.length-1),t:1}:{s:-1,t:0}; refresh(); }
+  sel=DOC.length?{s:Math.min(i,DOC.length-1),t:1}:{s:-1,t:0};
+  if(typeof invalidateColW==="function") invalidateColW();   // every following sentence's margin numbering shifts down by one
+  if(typeof invalidateDiaCache==="function") invalidateDiaCache();   // …and every following si now names the sentence that used to sit one further along — see doInsert's own note
+  refresh(); }
 
 /* token ops with id renumber + head fix-up */
-function insertToken(si,pos){ pushUndo(); const s=DOC[si], toks=s.tokens;
+function insertToken(si,pos){ pushUndo(si); if(typeof touchColW==="function") touchColW(si,si+1); const s=DOC[si], toks=s.tokens;
   const oldIds=new Map(); toks.forEach((t,i)=>oldIds.set(t,i+1));
   toks.forEach(t=>{const h=parseInt(t.head,10); if(!isNaN(h)&&h>=pos+1) t.head=String(h+1);});
   (s.mwt||[]).forEach(m=>{ m._toks=toks.slice(m.from-1,m.to); });   // component tokens by identity
@@ -113,7 +121,7 @@ function remapMWT(s,toks){ if(!s.mwt) return;
   s.mwt=s.mwt.map(m=>{ const ix=[...new Set(m._toks.map(x=>toks.indexOf(x)).filter(i=>i>=0))].sort((a,b)=>a-b); delete m._toks;
     if(ix.length<2) return null; m.from=ix[0]+1; m.to=ix[ix.length-1]+1; return m; }).filter(Boolean);
   if(!s.mwt.length) delete s.mwt; }
-function deleteToken(si,idx){ const s=DOC[si]; if(s.tokens.length<=1)return toast("Keep at least one token"); pushUndo();
+function deleteToken(si,idx){ const s=DOC[si]; if(s.tokens.length<=1)return toast("Keep at least one token"); pushUndo(si); if(typeof touchColW==="function") touchColW(si,si+1);
   const toks=s.tokens, del=idx+1;
   const oldIds=new Map(); toks.forEach((t,i)=>oldIds.set(t,i+1));
   (s.mwt||[]).forEach(m=>{ m._toks=toks.slice(m.from-1,m.to); });   // ranges by identity — this op alone used to skip the step every other structural edit here takes, so deleting a token before or inside a range left its endpoints pointing at the wrong tokens
@@ -138,7 +146,7 @@ function deleteToken(si,idx){ const s=DOC[si]; if(s.tokens.length<=1)return toas
 function mergeTokens(si,from,to){ const s=DOC[si]; if(!s)return; const toks=s.tokens;
   if(!(to>from)||from<1||to>toks.length) return toast("Select two or more adjacent tokens to merge");
   if(!isSpacelessLang()) return toast("Merging is for languages written without spaces — use a goeswith relation instead");   // guarded HERE too, not just on the menu rows: this is the one entry point every caller shares
-  pushUndo();
+  pushUndo(si); if(typeof touchColW==="function") touchColW(si,si+1);
   const oldIds=new Map(); toks.forEach((t,i)=>oldIds.set(t,i+1));
   toks.forEach(t=>{const h=parseInt(t.head,10); t._ht=(h>=1&&h<=toks.length)?toks[h-1]:0;});   // heads by identity
   const comps=toks.slice(from-1,to), compSet=new Set(comps);
@@ -170,7 +178,7 @@ window.mergeTokensShortcut=function(){ if(sel.s<0) return;
   if(!isSpacelessLang()) return toast("Merging is for languages written without spaces — use a goeswith relation instead");
   if(selRange&&selRange.s===sel.s&&selRange.to>selRange.from) mergeTokens(sel.s,selRange.from,selRange.to);
   else toast("Select two or more tokens (shift-click their id cells) to merge"); };
-function reorderToken(si,from,to){ const s=DOC[si],toks=s.tokens; if(from===to||from===to-1)return; pushUndo();
+function reorderToken(si,from,to){ const s=DOC[si],toks=s.tokens; if(from===to||from===to-1)return; pushUndo(si); if(typeof touchColW==="function") touchColW(si,si+1);
   const oldIds=new Map(); toks.forEach((t,i)=>oldIds.set(t,i+1));
   toks.forEach(t=>{const h=parseInt(t.head,10); t._ht=(h>=1&&h<=toks.length)?toks[h-1]:0;});
   (s.mwt||[]).forEach(mm=>{ mm._toks=toks.slice(mm.from-1,mm.to); });   // remember each MWT's component tokens by identity
@@ -180,7 +188,7 @@ function reorderToken(si,from,to){ const s=DOC[si],toks=s.tokens; if(from===to||
   remapTokenRefs(s,idMapAfter(oldIds,toks));   // a move drops nothing, so an empty node simply travels with the token it was anchored to
   sel={s:si,t:t2+1}; refresh(); toast("Reordered tokens"); }
 // move a contiguous block [gfrom..gto] (0-based) — an MWT and its component tokens — to drop index `to`
-function reorderTokenGroup(si,gfrom,gto,to){ const s=DOC[si],toks=s.tokens; if(to>=gfrom && to<=gto+1)return; pushUndo();
+function reorderTokenGroup(si,gfrom,gto,to){ const s=DOC[si],toks=s.tokens; if(to>=gfrom && to<=gto+1)return; pushUndo(si); if(typeof touchColW==="function") touchColW(si,si+1);
   const oldIds=new Map(); toks.forEach((t,i)=>oldIds.set(t,i+1));
   toks.forEach(t=>{const h=parseInt(t.head,10); t._ht=(h>=1&&h<=toks.length)?toks[h-1]:0;});   // heads by identity
   (s.mwt||[]).forEach(m=>{ m._toks=toks.slice(m.from-1,m.to); });                               // MWT ranges by identity
@@ -204,7 +212,7 @@ function moveTokenIndex(si,tokId,delta){ const s=DOC[si]; if(!s)return; const id
 function setAsRoot(si,tokId){ const s=DOC[si]; if(!s||tokId<1||tokId>s.tokens.length)return; const toks=s.tokens, xt=toks[tokId-1];
   if(parseInt(xt.head,10)===0 && depBase(xt.deprel)==="root")return toast("Already the root");
   const oldRoot=toks.findIndex(t=>parseInt(t.head,10)===0)+1;   // 1-based (0 = none)
-  pushUndo();
+  pushUndo(si); if(typeof touchColW==="function") touchColW(si,si+1);
   toks.forEach((t,i)=>{ const id=i+1; if(id===tokId)return; if(parseInt(t.head,10)===oldRoot){ t.head=String(tokId); syncSharedFeat(t,s); } });   // migrate the old root's dependents onto the new root
   if(oldRoot && oldRoot!==tokId){ const or=toks[oldRoot-1]; or.head=String(tokId); syncSharedFeat(or,s); if(depBase(or.deprel)==="root")or.deprel=withDepBase(or.deprel,"udep"); }   // the old root now hangs off the new one
   xt.head="0"; syncSharedFeat(xt,s); xt.deprel=withDepBase(xt.deprel,"root");
@@ -219,7 +227,7 @@ function stepHead(si,tokId,dir){ const s=DOC[si]; if(!s||tokId<1||tokId>s.tokens
   const h=parseInt(dep.head,10); let i=cands.indexOf(h), ni;
   if(i<0) ni=dir>0?0:cands.length-1;   // currently rootless/self → step in from the near end
   else { ni=i+dir; if(ni<0||ni>=cands.length)return toast(dir>0?"Already the last candidate head":"Already the first candidate head"); }
-  pushUndo(); dep.head=String(cands[ni]); afterHeadEdit(dep,s);   // Task B: no regenTok — same as setAsRoot above
+  pushUndo(si); if(typeof touchColW==="function") touchColW(si,si+1); dep.head=String(cands[ni]); afterHeadEdit(dep,s);   // Task B: no regenTok — same as setAsRoot above
   markDirty(); sel={s:si,t:tokId}; preserveScroll(renderDoc); pick(si,tokId,false); toast(`Head of token ${tokId} → ${cands[ni]}`); }
 // selection-driven wrappers for the keyboard shortcuts / Edit menu
 window.moveTokenLeft=()=>{ if(sel.s>=0&&sel.t>0)moveTokenSpatial(sel.s,sel.t,-1); };
@@ -235,6 +243,106 @@ window.insertTokenBelow=()=>{ if(sel.s>=0&&sel.t>0)insertToken(sel.s,sel.t); };
 window.setTokenAsRoot=()=>{ if(sel.s>=0&&sel.t>0)setAsRoot(sel.s,sel.t); };
 window.selectPrevHead=()=>{ if(sel.s>=0&&sel.t>0)stepHead(sel.s,sel.t,-1); };
 window.selectNextHead=()=>{ if(sel.s>=0&&sel.t>0)stepHead(sel.s,sel.t,1); };
+/* ── MSeg AND MGloss ARE ONE SEQUENCE READ IN TWO ROWS ────────────────────────────────────────────────────────
+   Both fields are hyphen-delimited and positional: MSeg holds the form's morph segments, MGloss the gloss of
+   each of them, and the two are drawn one above the other with a mark per shared boundary (belowStack /
+   svgSeamMark in js/diagram/diagram-core.js), so slot k of one names slot k of the other. The Leipzig ATTACHMENT
+   marks the prefill writes are that same fact seen from the other side: "walk-ed" glossed "-walk.PST" IS two
+   slots whose first one — the stem's — is empty, and an EMPTY SLOT is already how this data spells "this
+   segment isn't glossed" (the row draws it as the "…" placeholder). So a new slot needs nothing invented for it.
+   WHEN THE SEGMENTATION MOVES UNDER A GLOSS THAT IS ALREADY THERE, the gloss has to move with it or the two rows
+   stop describing the same morphemes. A LEMMA EDIT is the commonest way in: MSeg is derived from the form
+   against the LEMMA (msegSegment/msegRefill in js/io/bridge.js), so correcting a lemma can add a boundary
+   ("walked" → "walk-ed") or take one away, while MGloss — which the lemma says nothing about — stays exactly as
+   the prefill or the annotator left it, one slot out of step from then on.
+   THIS RE-SLOTS, IT DOES NOT RE-DERIVE. No gloss text is invented and none is thrown away: the slots on either
+   side of the change keep their own glosses untouched, and whatever stood in the stretch that changed is carried
+   across as one unit (dot-joined, the same separator that already joins several categories within one morpheme's
+   gloss). Re-deriving from FEATS instead would silently discard a hand-written lexical gloss, which is precisely
+   the material FEATS cannot reconstruct.
+   WHERE THE SURVIVING GLOSS LANDS when one slot becomes several: in the SHORTEST new piece — a gloss written for
+   a word that is now cut into stem + affix is nearly always the affix's, the stem's own lexical meaning living in
+   the Gloss tier — which reproduces the prefill's own convention exactly ("walked"/"walk" → "-walk.PST",
+   "unhappy"/"happy" → "NEG…-"). Where the shortest length is SHARED, the longest piece takes it instead: equal
+   flanking pieces is the signature of a circumfix (ge-gang-en), and there the prefill's answer is the middle
+   stem slot with an attachment mark on each side ("-M-"), which is what that rule picks.
+   Returns true iff it wrote something, so the caller can markDirty() for a real change and stay silent for a
+   no-op — and it is a no-op whenever MGloss is already in step with the new segmentation, which is also what
+   makes a second call for the same edit harmless rather than a second, destructive re-slot. */
+function mglossReslot(t,prevSeg,nextSeg){
+  if(!t) return false;
+  const mg=tierText(t,"mgloss"); if(!mg) return false;   // nothing glossed yet → nothing to keep in step (the prefill writes both rows together, from one segmentation — see morphPrefillSent)
+  const A=String(prevSeg||"").split("-"), B=String(nextSeg||"").split("-");
+  if(A.length===B.length) return false;                  // the same number of segments before and after → whatever moved inside them, no slot did
+  let G=mg.split("-");
+  if(G.length===B.length) return false;                  // already in step with the NEW segmentation
+  // Bring the gloss into step with the OLD segmentation first, so the alignment below is a straight positional
+  // one. A gloss with FEWER slots than the segmentation it was written against simply hasn't glossed the last
+  // morphemes; one with MORE has slots the segmentation never had, and they fold into the last real one rather
+  // than being dropped (nothing here throws gloss text away).
+  while(G.length<A.length) G.push("");
+  if(G.length>A.length) G=G.slice(0,A.length-1).concat([G.slice(A.length-1).filter(Boolean).join(".")]);
+  let p=0; while(p<A.length&&p<B.length&&A[p]===B[p]) p++;                                            // leading slots the change didn't touch
+  let s=0; while(s<A.length-p&&s<B.length-p&&A[A.length-1-s]===B[B.length-1-s]) s++;                   // …and trailing ones (never overlapping the head above)
+  const mid=G.slice(p,A.length-s).filter(Boolean).join("."), room=B.length-p-s, out=G.slice(0,p);
+  if(room<=0){   // the changed stretch lost every slot it had → its gloss joins the nearest surviving neighbour rather than vanishing
+    if(mid){ if(out.length) out[out.length-1]=[out[out.length-1],mid].filter(Boolean).join(".");
+      else if(A.length-s<G.length) G[A.length-s]=[mid,G[A.length-s]].filter(Boolean).join("."); } }
+  else { const len=k=>Array.from(B[p+k]||"").length;   // CODE POINTS, matching msegSegment's own measure of a piece
+    let min=Infinity,minCount=0,pick=0,max=-1,maxAt=0;
+    for(let k=0;k<room;k++){ const L=len(k);
+      if(L<min){ min=L; minCount=1; pick=k; } else if(L===min) minCount++;
+      if(L>max){ max=L; maxAt=k; } }
+    if(minCount>1) pick=maxAt;   // a shared shortest ⇒ the circumfix shape — see the note above
+    for(let k=0;k<room;k++) out.push(k===pick?mid:""); }
+  for(let k=A.length-s;k<G.length;k++) out.push(G[k]);
+  const next=out.some(Boolean)?glossEnc(out.join("-")):"";   // all-empty ⇒ write nothing at all: a bare run of hyphens is that nothing dressed up as a gloss (the same judgement mglossMarks makes)
+  if(next===mg) return false;
+  const wasPrefill=(mg===(t._mglossPre||""));
+  t.misc=setMiscKV(t.misc,"MGloss",next);
+  if(wasPrefill) t._mglossPre=next;   // re-slotting an UNTOUCHED prefill leaves it an untouched prefill: morphEdited() (js/io/bridge.js) reads "differs from _mglossPre" as "the annotator has been here", and this move wasn't theirs
+  return true; }
+/* A HYPHEN TYPED BY HAND INTO MSeg cuts one morpheme in two, and where the gloss for that morpheme was already
+   written as a lexical part plus a grammatical one, the cut is exactly the boundary between them: "walked"
+   glossed "walk.PST", cut to "walk-ed", is "walk-PST". This is a NARROWER rule than mglossReslot above and runs
+   INSTEAD of it, at the one site where a person types the segmentation directly (the diagram's MSeg field, see
+   editTier in js/editing/context-menu.js) — mglossReslot's own answer for a 1→2 cut is the prefill's convention,
+   the whole gloss in the shortest piece and the other left empty ("-walk.PST"), which is right when the machine
+   re-derives a segmentation and wrong when a person has just said where the boundary goes.
+   THREE CONDITIONS, all required, because each one is what makes the split a reading of the data rather than a
+   guess at it:
+    · the new MSeg holds EXACTLY ONE hyphen, both pieces non-empty, and the old one held none — so this edit IS
+      the typed hyphen. Two or more cuts have no two-part gloss to match them and fall to mglossReslot.
+    · MGloss is a single slot (no hyphen of its own) and non-empty — there is one gloss to divide.
+    · its dot-separated units divide CLEANLY into one contiguous grammatical run and one contiguous lexical run,
+      both non-empty. "walk.PST" and "NEG.happy" do; "walk" alone doesn't (nothing grammatical to split off), and
+      an interleaved "PST.walk.3SG" doesn't either — a gloss whose two kinds alternate is not a two-morpheme
+      gloss, and there is no honest way to say which units belong to which side.
+   The two runs keep their ORDER, which is what maps them onto the segments: a gloss is written in morph order, so
+   the run that comes first glosses the piece that comes first. Length is deliberately NOT consulted as a second
+   signal ("the stem is the longer piece"), because it says nothing at all where the two morphemes are the same
+   length — one Han character each, say — and would only ever contradict the order in data that is already wrong.
+   Returns true iff it wrote a new MGloss. */
+function mglossSplitTypedHyphen(t,prevSeg,nextSeg){
+  if(!t) return false;
+  const A=String(prevSeg||""), B=String(nextSeg||"");
+  if(A.includes("-")) return false;                     // the hyphen isn't new — this edit changed something else
+  const pieces=B.split("-");
+  if(pieces.length!==2||!pieces[0]||!pieces[1]) return false;   // exactly one hyphen, and it cuts rather than dangles
+  const mg=tierText(t,"mgloss"); if(!mg||mg.includes("-")) return false;
+  const units=mg.split(".").filter(Boolean); if(units.length<2) return false;
+  // grammatical = the unit is ENTIRELY a Leipzig abbreviation run, by the same test the small-caps rendering uses
+  // (glossAbbrSegments, js/core/prefs.js) — one classifier for "is this an abbreviation", never a second table.
+  const gram=units.map(u=>{ const segs=glossAbbrSegments(u); return segs.length===1&&segs[0][1]; });
+  const first=gram[0]; let cut=0; while(cut<gram.length&&gram[cut]===first) cut++;
+  if(cut===gram.length) return false;                   // all one kind → nothing to divide
+  for(let k=cut;k<gram.length;k++) if(gram[k]===first) return false;   // …and the second run must be the whole rest: an alternating gloss is not cleanly separable
+  const next=glossEnc(units.slice(0,cut).join(".")+"-"+units.slice(cut).join("."));
+  if(next===mg) return false;
+  const wasPrefill=(mg===(t._mglossPre||""));
+  t.misc=setMiscKV(t.misc,"MGloss",next);
+  if(wasPrefill) t._mglossPre=next;   // as in mglossReslot: dividing an untouched prefill along its own seam leaves it an untouched prefill
+  return true; }
 // items 2/3 — the token ids the marker commands act on: a multi-token range if one is selected, else the single
 // selected token. (Same "range if there is one, else the token" rule ⌘G and the MWT menu items already follow.)
 function selTokIds(){ if(sel.s<0||sel.t<=0) return [];
@@ -248,7 +356,7 @@ function selHasFeat(name){ const s=DOC[sel.s]; if(!s)return false; const ids=sel
 function toggleMarkFeat(name,label){ if(sel.s<0||sel.t<=0) return toast("Select a token first");
   const s=DOC[sel.s], toks=selTokIds().map(id=>s.tokens[id-1]).filter(Boolean); if(!toks.length) return;
   const on=!toks.every(t=>hasFeat(t.feats,name,"Yes"));
-  pushUndo();
+  pushUndo(sel.s); if(typeof touchColW==="function") touchColW(sel.s,sel.s+1);
   toks.forEach(t=>{ const before=t.feats; t.feats=on?setFeat(t.feats,name,"Yes"):clearFeat(t.feats,name); featsSyncGloss(t,before); });   // featsSyncGloss is a no-op for these two (neither has a Leipzig abbreviation — see FEATS_GLOSS's item-5 note), but routing every FEATS write through it keeps the invariant in one place
   markDirty(); preserveScroll(renderDoc); syncMenu(true);
   toast(`${label} ${on?"marked":"cleared"} on ${toks.length===1?"1 token":toks.length+" tokens"}`); }
@@ -261,7 +369,7 @@ function toggleReported(){ if(typeof stextMarkReported==="function" && stextMark
   const s=DOC[sel.s], ids=selTokIds(), target=ids.length>1?rangeHead(s,ids[0],ids[ids.length-1]):sel.t;
   const t=s.tokens[target-1]; if(!t) return;
   const on=!isReported(t);
-  pushUndo(); t.misc=setMiscKV(t.misc,"Reported",on?"Yes":"");
+  pushUndo(sel.s); if(typeof touchColW==="function") touchColW(sel.s,sel.s+1); t.misc=setMiscKV(t.misc,"Reported",on?"Yes":"");
   markDirty(); preserveScroll(renderDoc); syncMenu(true);
   const sp=subtreeSpan(s,target);
   toast(on?`Reported speech: tokens ${sp.from}–${sp.to} (marked on token ${target})`:`Reported speech cleared from token ${target}`); }
@@ -304,7 +412,7 @@ function askCorrectForms(si,queue,anchorFor,undoRef){ const s=DOC[si]; if(!s||!q
     {rtl, title:`Correct form of “${bform(t)}”`, value:miscKV(t.misc,"CorrectForm"),
      hint:"Optional — leave blank for none.",
      ok:v=>{ const cur=miscKV(t.misc,"CorrectForm");
-       if(v!==cur){ t.misc=setMiscKV(t.misc,"CorrectForm",v); markDirty(); preserveScroll(renderDoc); }
+       if(v!==cur){ t.misc=setMiscKV(t.misc,"CorrectForm",v); if(typeof touchColW==="function") touchColW(si,si+1); markDirty(); preserveScroll(renderDoc); }
        askCorrectForms(si,queue,anchorFor,undoRef); },
      /* item 2 — ESCAPE CANCELS THE MARKING, not merely the prompt. Typo=Yes and its CorrectForm are one gesture:
         the box opens as part of marking, so backing out of the box means backing out of the mark. Leaving the
@@ -348,7 +456,8 @@ window.toggleWrap=toggleWrap;
    property of the sentence being read, and scrolling moves that without disturbing the token selection. */
 function setBound(si,key,on){ const s=DOC[si]; if(!s) return false;
   if(hasBound(s,key)===!!on) return false;
-  pushUndo(); s[key]=on?true:false; markDirty(); preserveScroll(renderDoc); syncMenu(); return true; }   // syncMenu: both rows are checkable and this is the only path that moves their state
+  pushUndo(si); if(typeof invalidateColW==="function") invalidateColW();   // a document/paragraph boundary shifts the margin numbering (marginNumWidth) of every following sentence — but NOT its si (setBound flags DOC[si] in place, unlike insert/delete/move above): the diagram cache doesn't need a matching wholesale clear here, since renderSentence never reads hasNewdoc/hasNewpar (the heading they gate is built by buildBlock itself, outside the cached node) and pushUndo(si) just above already dropped si's own entry
+  s[key]=on?true:false; markDirty(); preserveScroll(renderDoc); syncMenu(); return true; }   // syncMenu: both rows are checkable and this is the only path that moves their state
 function toggleBound(si,key){ const s=DOC[si]; if(!s) return toast("Select a sentence first");
   const on=!hasBound(s,key); setBound(si,key,on);
   if(on && typeof focusBoundId==="function") focusBoundId(si,key);   // creating a boundary opens its id for typing (js/core/document.js) — the marker and its optional name are one gesture. ONLY on creation: a removed boundary has no field left to focus, and setBound has just re-rendered without it
@@ -356,7 +465,7 @@ function toggleBound(si,key){ const s=DOC[si]; if(!s) return toast("Select a sen
 window.toggleDocBoundary=()=>{ const i=curBlock(); if(i>=0&&i<DOC.length) toggleBound(i,"newdoc"); else toast("Select a sentence first"); };
 window.toggleParBoundary=()=>{ const i=curBlock(); if(i>=0&&i<DOC.length) toggleBound(i,"newpar"); else toast("Select a sentence first"); };
 function toggleTokNewPar(si,tokId){ const s=DOC[si], t=s&&s.tokens[tokId-1]; if(!t) return;
-  const on=!isNewParTok(t); pushUndo(); t.misc=setMiscKV(t.misc,"NewPar",on?"Yes":""); markDirty(); preserveScroll(renderDoc); syncMenu();
+  const on=!isNewParTok(t); pushUndo(si); if(typeof touchColW==="function") touchColW(si,si+1); t.misc=setMiscKV(t.misc,"NewPar",on?"Yes":""); markDirty(); preserveScroll(renderDoc); syncMenu();
   toast(on?("Paragraph starts at token "+tokId):("Paragraph break cleared from token "+tokId)); }
 window.toggleTokenNewPar=()=>{ if(sel.s>=0&&sel.t>0) toggleTokNewPar(sel.s,sel.t); else toast("Select a token first"); };
 window.toggleTokNewPar=toggleTokNewPar;   // the block/token context menus call it with explicit coordinates

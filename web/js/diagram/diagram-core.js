@@ -77,7 +77,7 @@ function deepGuideUrl(feat){ return GUIDE+"Deep/"+encodeURIComponent((feat||"").
 function cat(r){const f=famOf(r); return (f==="subj"||f==="comp"||f==="mod"||f==="udep")?f:(f==="root"?"root":"other");}   // udep gets its own --c-udep (comp/mod linear-RGB midpoint, see relColMidLinear) instead of falling into "other"
 function css(v){return getComputedStyle(document.documentElement).getPropertyValue(v).trim();}
 function relColor(r){ if(!show.colour) return css("--ink"); return css("--c-"+cat(r)); }
-function arcInk(col){ return `color-mix(in srgb, ${col}, var(--content-bg) var(--edge-mix))`; }   // arc/edge STROKE ink. LIGHT: --edge-mix=40% → the stroke recedes toward the white bg, lighter than its full-colour label (unchanged). DARK: --edge-mix=0% → no mix, the stroke stays the FULL relation colour, i.e. IDENTICAL to its relation label (labels keep the full relColor in both modes). Not opacity, which would also dim the casing/occlusion halo (that stays on --block-occlude).
+function arcInk(col){ return `color-mix(in srgb, ${col}, var(--content-bg) var(--edge-mix))`; }   // arc/edge STROKE ink: the relation colour mixed toward the page ground so the stroke recedes just slightly from its full-colour label (labels keep the full relColor). Not opacity, which would also dim the casing/occlusion halo (that stays on --block-occlude). --edge-mix is now ONE value for BOTH appearances (33%, macos-kit/mac-tokens.css) — light lifts toward white, dark recedes toward #1e1e1e, and the token is deliberately NOT redeclared in the dark block. THIS COMMENT USED TO DOCUMENT A 40%/0% LIGHT/DARK SPLIT; that split was collapsed in the stylesheet and the note went stale, which matters beyond tidiness — exportSVG (js/editing/context-menu.js) has to know exactly which tokens are theme-dependent, and --edge-mix is not one of them.
 // SEMANTIC DEPENDENCE, one relation at a time — what the "Semantic arrows" option draws. (The seam mark's
 // placement used to run on this same test; it no longer does — seamOwner in js/core/prefs.js now decides from word
 // class, nounhood and whether the relation is asymmetric, "which of the two leans on the other" having been a
@@ -207,15 +207,27 @@ _lazyFont("GLOSS_F",()=>weightCurve(13.2)+' 13.2px '+LIVE_TOKEN_STACK); _lazyFon
 function tierFont(tier,tk){ return tier==="mseg"?(isForeign(tk)?MSEG_UP_F:MSEG_F):(tier==="mgloss"?MGLOSS_F:GLOSS_F); }   // the MSeg tier is the only italic one, so it's the only one a Foreign=Yes token flips upright (see frnUp)
 // widest below-token gloss row for a token, in its real font (0 when no gloss tier is on). An empty tier draws "…"
 // (gl-empty) so it contributes that narrow placeholder width — a real gloss dominates. Folded into every slot-width max.
-function glossSlotW(t){ let w=0; belowTiers().forEach(tier=>{ w=Math.max(w,meas(tierText(t,tier)||"…",tierFont(tier,t))); }); return w; }
-function meas(s,f){
+function glossSlotW(t){ let w=0; belowTiers().forEach(tier=>{ const dtxt=tierText(t,tier)||"…"; w=Math.max(w,tier==="mseg"?meas(dtxt,tierFont(tier,t)):measGloss(dtxt,tierFont(tier,t))); }); return w; }
+function _measOne(s,f,extraCss){
   // Mirror CSS letter-spacing for sizes that carry the tracking curve (.node-lbl/.baseword at 14px → .0055em,
   // etc.). Canvas measureText ignored it; SVG getComputedTextLength honours style.letterSpacing. Sizes at the
   // 15px reference (WORD_F/POS_F/…) keep 0 — trackCurve(15)===0 — so this is a no-op for those.
-  const px=parseFloat(f)||TOK_REF_SIZE, track=trackCurve(px);
-  _mtxt.style.cssText="white-space:pre;font:"+f+(track?(";letter-spacing:"+track+"em"):"");   // white-space FIRST so the font shorthand can't reset it; pairs with the xml:space attribute set above — see that note for why a bare " " otherwise measures 0
+  const pxm=f.match(/(\d+(?:\.\d+)?)px/), px=pxm?parseFloat(pxm[1]):TOK_REF_SIZE, track=trackCurve(px);   // the font SIZE, not just parseFloat(f)'s naive "first leading number in the whole shorthand" — that read the WEIGHT off GLOSS_F/MGLOSS_F ("455 13.2px …", a font-weight number ahead of the size) as if it were the size, feeding trackCurve(455) instead of trackCurve(13.2): a wildly wrong negative letter-spacing (~-0.27em) that compressed every MGloss/Gloss measurement to roughly half its actual rendered width — layout (stemmaLayout's lw, glossSlotW) reserved half the space these tiers actually need, and adjacent tokens' MGloss text visibly overlapped. MSEG_F/MSEG_UP_F/WORD_F-class strings never hit this: "italic 15px …" has no leading digit (parseFloat → NaN → the SAME 15px fallback the size actually is), and a bare "15px …" parses correctly by luck alone — only a WEIGHT-prefixed shorthand exposed the bug
+  _mtxt.style.cssText="white-space:pre;font:"+f+(track?(";letter-spacing:"+track+"em"):"")+(extraCss||"");   // white-space FIRST so the font shorthand can't reset it; pairs with the xml:space attribute set above — see that note for why a bare " " otherwise measures 0
   _mtxt.textContent=s||"";
   try{ return _mtxt.getComputedTextLength(); }catch(_){ return 0; } }
+function meas(s,f){ return _measOne(s,f); }
+// Gloss/MGloss-aware measurement: setGlossText wraps every Leipzig abbreviation run (glossAbbrSegments) in its own
+// .glabbr tspan, which turns on font-feature-settings "c2sc"/"onum" (small caps from capitals + old-style figures)
+// — a plain meas() call measures the whole string at the tier's ordinary (non-c2sc) advance widths, which the font's
+// actual small-caps glyphs need not match. That drift is invisible for a plain word ("possess") but MGloss text is
+// almost always MOSTLY an abbreviation run ("PST.PTCP-GEN.SG.M"), so glossSlotW/stemmaLayout's reserved slot and a
+// seam mark's "half this text's own width" placement both measured the wrong number — the mark hung off wherever
+// the UN-small-capped width said the text ended, not where the small-capped glyphs actually end. Split exactly as
+// setGlossText does and sum each segment's OWN width, measured with the SAME feature-settings its own tspan gets.
+function measGloss(s,f){ const segs=glossAbbrSegments(s);
+  if(segs.length===1&&!segs[0][1]) return _measOne(s,f);   // no abbreviation run at all → identical to meas()
+  return segs.reduce((w,[t,abbr])=>w+_measOne(t,f,abbr?";font-feature-settings:'c2sc' 1,'onum' 1":""),0); }
 // Re-reads #doc's LIVE --token-font/--mono-font (getComputedStyle resolves the var() to a plain string canvas CAN
 // use — confirmed empirically; a canvas `font` string handed a literal `var(--token-font)` token is a DIFFERENT,
 // silent failure: the browser rejects the whole assignment and `.font` reverts to its default, exactly the
@@ -230,10 +242,19 @@ function meas(s,f){
 // re-renders — see orPick/loadOrthoSchemes). Every font string below is a cheap string concat off the cached
 // LIVE_TOKEN_STACK/LIVE_MONO_STACK, not a fresh DOM read.
 function refreshFontStacks(){
-  const d=document.getElementById("doc");
+  const d=document.getElementById("doc"), prevT=LIVE_TOKEN_STACK, prevM=LIVE_MONO_STACK;
   if(d){ const cs=getComputedStyle(d);
     const t=cs.getPropertyValue("--token-font").trim(), m=cs.getPropertyValue("--mono-font").trim();
     if(t) LIVE_TOKEN_STACK=t; if(m) LIVE_MONO_STACK=m; }   // empty (no #doc, or the property somehow unset) → keep whatever was last live, which starts as the static base
+  // a font-stack change is the ONE non-content thing that can change what meas() returns (js/grid/grid.js's
+  // computeColW/pillColW measure against GRID_F/HEAD_F, both built from LIVE_MONO_STACK/LIVE_TOKEN_STACK below)
+  // → the column-width cache's every cached measurement is now stale, so force a full rescan rather than trust
+  // the (now wrong) cached widths forward.
+  if((LIVE_TOKEN_STACK!==prevT||LIVE_MONO_STACK!==prevM) && typeof invalidateColW==="function") invalidateColW();
+  // …and every renderer's own cached diagram (js/core/document.js's notation-switch cache): stemma/arcs/tree/
+  // brackets/outline all measure through this same meas()/WORD_F/NODE_F/POS_F/… family, so a font-stack change
+  // invalidates their output exactly as it invalidates colW's, for the same reason.
+  if((LIVE_TOKEN_STACK!==prevT||LIVE_MONO_STACK!==prevM) && typeof invalidateDiaCache==="function") invalidateDiaCache();
   WORD_F='15px '+LIVE_TOKEN_STACK; NODE_F='14px '+LIVE_TOKEN_STACK; WORD_F_BOLD='640 '+WORD_F; NODE_F_BOLD='640 '+NODE_F;
   POS_F='15px '+LIVE_TOKEN_STACK; GRID_F='462 13px '+LIVE_MONO_STACK; HEAD_F='640 9.5px '+LIVE_TOKEN_STACK;
   TRANS_F='italic 15px '+LIVE_TOKEN_STACK; TRANS_UP_F='15px '+LIVE_TOKEN_STACK; MWT_F=WORD_F;
@@ -320,7 +341,7 @@ function htmlSeamMark(host,tk,row){ if(!host) return;
 // ONLY the middle marks move. A post/pre mark stays flush against the row it hangs off, ragged edge and all: it
 // belongs to ONE token, as that word's own suffix/prefix, and hanging it out at a column shared with the other
 // rows reads as a boundary standing apart from the word rather than as part of it.
-const SEAM_ROW_SEL={form:".tok-word,.baseword,.node-lbl,.bwform,.oform", translit:".translit,.otrans", mseg:'.gloss[data-tier="mseg"]'};
+const SEAM_ROW_SEL={form:".tok-word,.baseword,.node-lbl,.bwform,.oform", translit:".translit,.otrans", mseg:'.gloss[data-tier="mseg"]', mgloss:'.gloss[data-tier="mgloss"]'};
 // …and, in the BRACKETS notations ONLY, a bracket glyph counts as the far wall of the gap too. "Squarely between
 // the two tokens" is the right centre wherever the gap really is empty — every other notation puts nothing between
 // two words but whitespace. Brackets do: the seam between two tokens of one word almost always has a "]" and/or a
@@ -364,10 +385,27 @@ function positionSeamMarks(){ const marks=[...document.querySelectorAll("#doc .s
     if(!seams.has(key)) seams.set(key,[]);
     seams.get(key).push({m,mr,svg,lo,hi}); });
   seams.forEach(rows=>{
-    let lo=-Infinity, hi=Infinity;
-    rows.forEach(r=>{ if(r.lo>lo)lo=r.lo; if(r.hi<hi)hi=r.hi; });   // the gap they ALL share
+    // The shared strip every row's own clear span agrees on — but ONE tight row (an MGloss phrase that fills
+    // most of its slot leaves far less spare room than a short mseg segment or script glyph sitting over the
+    // same seam) can single-handedly make the FULL-GROUP intersection empty, which used to drop EVERY row back
+    // to centring in its own individual gap — not just the tight one. The other rows' own gaps are usually
+    // similar enough in width that their independently-computed centres still land close together, so the mark
+    // stack reads as "the wide rows agree, the narrow one sits off to the side" (measured: brihat_jataka s1's
+    // pralaya/udbhava/sthiti, MGloss "destruction=…=maintenance" flush against its own neighbours while the
+    // script/translit/mseg rows above it centre cleanly) — exactly backwards from what a reader expects, since
+    // the narrower mark is the one with the LEAST reason to need its own private clearance. Iteratively drop
+    // the row with the tightest own span (the likeliest culprit) and recompute, so 3 rows that agree can still
+    // share a centre even when a 4th can't fit the same strip — and give that AGREED centre to every row in the
+    // group, including the one dropped, rather than letting it opt out into its own answer. Only once fewer
+    // than two rows remain in agreement does a row fall back to its own individual centre, same as before.
+    let active=rows.slice(), lo=-Infinity, hi=Infinity;
+    while(active.length>1){ lo=-Infinity; hi=Infinity;
+      active.forEach(r=>{ if(r.lo>lo)lo=r.lo; if(r.hi<hi)hi=r.hi; });
+      if(hi>lo) break;
+      active=active.slice().sort((a,b)=>(a.hi-a.lo)-(b.hi-b.lo)).slice(1); }
+    const shared=active.length>1&&hi>lo;
     rows.forEach(r=>{
-      const centre=(hi>lo)?(lo+hi)/2:(r.lo+r.hi)/2;   // no strip clear on every row (rows of wildly different widths) → that row centres in its own gap rather than landing on top of something
+      const centre=shared?(lo+hi)/2:(r.lo+r.hi)/2;   // no 2+ rows could agree on a strip clear on all of them → each centres in its own gap rather than landing on top of something
       const shift=centre-r.mr.width/2-r.mr.left, m=r.m, svg=r.svg;
       if(svg){ const ctm=svg.getScreenCTM(); const sc=ctm&&ctm.a?ctm.a:1; m.setAttribute("x",m._x0+shift/sc); }
       else { const fs=(typeof FS==="number"&&FS)?FS:1; m.style.transform="translateX("+(shift/fs)+"px)"; } }); }); }
@@ -760,8 +798,12 @@ function appendHangHTML(container,t,si,cls,oid){ const show=correctFormShown(t,s
     s.addEventListener("click",ev=>{ ev.stopPropagation(); pick(si,oid); }); container.appendChild(s); }); }
 function descent(f){_cv.font=f; const m=_cv.measureText("gjpqy"); return m.actualBoundingBoxDescent||3;}   // how far tokens hang below the baseline
 function xHeight(f){_cv.font=f; const m=_cv.measureText("x"); return m.actualBoundingBoxAscent||6;}   // the x-height of a (POS) glyph — subtracted from the inter-tier step to seat the MWT bracket (POS tags now render via c2sc small caps, whose visual height sits at x-height, not full cap height)
-// item 14: measure at the input's OWN computed font-size (driven by the --stext-fs CSS var) so the field width tracks the sentence-text size instead of a hardcoded px that could drift.
-function sizeSid(inp){ const fs=(inp.isConnected&&getComputedStyle(inp).fontSize)||'13.2px'; inp.style.width=Math.ceil(meas(inp.value||inp.placeholder||"s?",fs+" ui-monospace, monospace"))+16+"px"; }
+// sizeSid() — the JS width-measurement this comment described — is GONE: .sid-in is a contenteditable
+// span now (js/core/document.js's buildBlock), not an <input>, and a span with no explicit width simply
+// sizes to its own text as a flex item, same as .bm-id already does. That JS math (measuring at the
+// field's own computed font-size, +14 for its padding/border) was itself a correct fix for the WRONG
+// problem: the residual uneven padding a user kept seeing on long ids was WebKit's <input> internal
+// shadow DOM, invisible to any amount of outer-box arithmetic — removing the <input> removed the bug.
 const SVGNS="http://www.w3.org/2000/svg";
 function E(n,a){const e=document.createElementNS(SVGNS,n); for(const k in a) e.setAttribute(k,a[k]); return e;}
 function svgTip(el,text){ if(text){ const t=document.createElementNS(SVGNS,"title"); t.textContent=text; el.appendChild(t); } return el; }   // SVG hover tooltip = a <title> CHILD (the title ATTRIBUTE doesn't surface a tooltip on SVG)
@@ -779,9 +821,41 @@ function trimT(P,end,R){const anc=end===0?P[0]:P[3], S=0.004;
 function normv(a,b){const dx=b[0]-a[0],dy=b[1]-a[1],L=Math.hypot(dx,dy)||1; return [dx/L,dy/L];}
 const AEXT=2;   // arrowheads overshoot the endpoint a touch so the visual tip reaches it
 const AH_RATIO=0.6;   // arrowhead half-width / length → its half-angle is atan(AH_RATIO); the arc arrives at this angle so the arrowhead's lower edge is horizontal
-function arrowPath(from,tip,s){const [ux,uy]=normv(from,tip),T=[tip[0]+ux*AEXT,tip[1]+uy*AEXT],px=-uy,py=ux,base=[T[0]-ux*s,T[1]-uy*s],w=s*AH_RATIO;
+/* CASING OUTSET — how far the casing arrowhead must stand proud of the stroke arrowhead, on ALL THREE sides.
+   1.75px, read off the CSS rather than invented: .arc-casing strokes at calc(var(--arc-stroke) + 3.5px) against
+   .arc-path/.edge's var(--arc-stroke) (styles/app.css), and a stroke grows symmetrically about its centreline,
+   so the halo either side of a cased LINE is 3.5/2 = 1.75px. The head now carries the same halo as the line it
+   terminates. */
+const AH_OUTSET=1.75;
+/* 1/sin(α), the mitre factor for the apex, where α = atan(AH_RATIO) is the head's half-angle at the tip.
+   THE HEAD IS AN ISOSCELES TRIANGLE: apex at T, axial length s, half-width s·AH_RATIO — so tan α = AH_RATIO
+   and sin α = AH_RATIO/√(1+AH_RATIO²), giving 1/sin α = √(1+AH_RATIO²)/AH_RATIO = 1.9437 at AH_RATIO = 0.6.
+   Offsetting the two LEADING edges outward by `out` moves their intersection — the apex — FORWARD along the
+   axis by out/sin α (the standard wedge-mitre result: a vertex travels 1/sin of its half-angle per unit of
+   edge offset). This is precisely what the old "just pass a bigger s" casing could never do: `s` pins the apex
+   at T and only pushes the BASE backwards, so the casing showed behind the head and its tip and both leading
+   edges sat exactly on the stroke head's own edges — no halo at the front at all, which is the bug. */
+const AH_MITRE=Math.sqrt(1+AH_RATIO*AH_RATIO)/AH_RATIO;
+/* `out` inflates the head into the triangle whose three edges each lie `out` further out along their own
+   normals — a uniform outset, not a scale:
+     · apex:   T' = T + u·(out·AH_MITRE)                   — the mitre above (3.401px at out = 1.75)
+     · base:   one further `out` BACKWARDS, so the axial length becomes s + out·AH_MITRE + out
+     · flanks: free. Offsetting all three edges of a triangle by the same distance yields a SIMILAR triangle
+               (the angles are unchanged), so the half-width is still (axial length)·AH_RATIO — no separate
+               widening term, and no need to fudge AH_RATIO.
+   Verified numerically (scratch: perpendicular distance from each casing edge to its stroke-head counterpart)
+   at 1.7500 on all three edges, for horizontal, diagonal and arbitrary-angle heads alike.
+   out = 0 (or omitted) reproduces the original path bit-for-bit, so every un-cased call site is untouched. */
+function arrowPath(from,tip,s,out){const o=out||0,ext=AEXT+o*AH_MITRE,L=s+o*(AH_MITRE+1);
+  const [ux,uy]=normv(from,tip),T=[tip[0]+ux*ext,tip[1]+uy*ext],px=-uy,py=ux,base=[T[0]-ux*L,T[1]-uy*L],w=L*AH_RATIO;
   return `M ${T[0]} ${T[1]} L ${base[0]+px*w} ${base[1]+py*w} L ${base[0]-px*w} ${base[1]-py*w} Z`;}
-function backoff(tip,frm,d){const [ux,uy]=normv(frm,tip); return [tip[0]-ux*(d-AEXT), tip[1]-uy*(d-AEXT)];}   // stop a line at the (overshot) arrowhead base
+/* stop a line at the (overshot) arrowhead base — backoff(tip,frm,s) returns exactly arrowPath(frm,tip,s)'s base
+   point. DELIBERATELY BLIND TO AH_OUTSET: the STROKE's stop must not move, and the casing line shares the very
+   same `d` as the stroke it haloes (one path, two widths), so there is only one stop point to place. It still
+   hides: the casing head's base sits a further AH_OUTSET back along the axis, so the stop lands *inside* the
+   casing triangle, where that triangle is (s + AH_OUTSET·AH_MITRE)·AH_RATIO ≈ 5.2px half-wide — comfortably
+   over the casing line's own 2.5px half-width (--arc-stroke + 3.5px). */
+function backoff(tip,frm,d){const [ux,uy]=normv(frm,tip); return [tip[0]-ux*(d-AEXT), tip[1]-uy*(d-AEXT)];}
 function edgeAngle(x1,y1,x2,y2){let a=Math.atan2(y2-y1,x2-x1); if(a>Math.PI/2)a-=Math.PI; if(a<-Math.PI/2)a+=Math.PI; return a;}
 function labelAngle(x1,y1,x2,y2){const a=edgeAngle(x1,y1,x2,y2); return Math.abs(a)>Math.PI/4?0:a;}   // steeper than 45° → horizontal label
 
@@ -965,16 +1039,35 @@ function linear(sent, depAbove){const gap=8,pad=2,SP=meas(" ",WORD_F),tk=sent.to
 // adjacent sibling SUBTREES apart only as far as their node boxes (lw/hgw/ldw) OR their incoming edge-labels
 // (elw) require. size = node count, root = root index, childrenOf(i) = child indices; the metrics are per-index
 // width accessors. Returns the array of node x-centres — the caller derives natural width / depth / RTL mirror.
+//   BOTTOM-TO-TOP, WITH THE WHOLE SUBTREE FANNED OUT AT EVERY STEP UP: place() recurses into every child (and
+//   THEIR children, all the way down) before it runs the separation loop over its OWN direct children — so the
+//   deepest layer is fully packed and decluttered first, and a parent's own de-collision pass never runs until
+//   every layer beneath it has already settled. Whenever that pass has to push a child apart from its sibling,
+//   `shift()` moves that child's ENTIRE subtree — every layer below it — by the same dx, rigidly, so the
+//   correction a lower layer already has doesn't come undone as we climb back toward the root.
+//   lext/rext (added below) are what make that upward walk SEE the lower layers at all: each node tracks its own
+//   subtree's actual left/right reach (own box ∪ every descendant's, kept in lockstep through every shift), and
+//   the separation loop compares THAT — not just the two nodes' own lw/hgw/ldw — when it decides how far apart
+//   two siblings need to be. Comparing bare node widths one layer at a time used to let a subtree's own box be
+//   perfectly clear of its immediate sibling while something hanging off it two or three layers down (a long
+//   MGloss/gloss stack under an otherwise ordinary-width node is the case this app actually hits) still overlapped
+//   an unrelated cousin subtree the level above never re-examined — the fan-out kept the SHAPE of a widened
+//   subtree intact on the way up, but nothing propagated its true footprint upward for the NEXT separation to see.
+//   A synthetic stress test (2000 random trees, node widths 5–85px) hit that collision in 59% of trees under the
+//   bare-width comparison; tracking lext/rext eliminated it in all 2000.
 function tidyLayout(size,root,childrenOf,{lw,hgw,ldw,elw,SPW,NGAP}){
-  const x=new Array(size).fill(0); let cur=6;
-  function shift(i,dx){ x[i]+=dx; childrenOf(i).forEach(c=>shift(c,dx)); }
+  const x=new Array(size).fill(0), lext=new Array(size).fill(0), rext=new Array(size).fill(0);   // lext/rext[i]: node i's own subtree's actual left/right extent (its own box, unioned with every descendant's) — see the block comment above
+  let cur=6;
+  function shift(i,dx){ x[i]+=dx; lext[i]+=dx; rext[i]+=dx; childrenOf(i).forEach(c=>shift(c,dx)); }   // rigid: x AND its subtree's extent move together, so a lower layer's already-settled shape survives the trip up to the root
   (function place(i){ const ks=childrenOf(i).slice().sort((a,b)=>a-b);
-    if(!ks.length){ x[i]=cur+ldw(i)+lw(i)/2; cur+=ldw(i)+lw(i)+hgw(i)+NGAP; return; }   // item 2: leading-satellite room before the node
-    ks.forEach(place);
+    if(!ks.length){ x[i]=cur+ldw(i)+lw(i)/2; lext[i]=x[i]-lw(i)/2-ldw(i); rext[i]=x[i]+lw(i)/2+hgw(i); cur=rext[i]+NGAP; return; }   // item 2: leading-satellite room before the node
+    ks.forEach(place);   // deepest layer first — every child's own subtree (lext/rext included) is fully resolved before this node's separation loop below ever runs
     for(let j=1;j<ks.length;j++){ const a=ks[j-1],b=ks[j],
-      need=Math.max(lw(a)/2+hgw(a)+ldw(b)+lw(b)/2+NGAP, elw(a)+elw(b)+4*SPW), have=x[b]-x[a];   // widest of the node-box separation and the sibling edge-label clearance (~2 word spaces)
-      if(have<need-0.5){ const dx=need-have; for(let m=j;m<ks.length;m++) shift(ks[m],dx); cur+=dx; } }
-    x[i]=(x[ks[0]]+x[ks[ks.length-1]])/2; })(root);
+      need=Math.max((rext[a]-x[a])+(x[b]-lext[b])+NGAP, elw(a)+elw(b)+4*SPW), have=x[b]-x[a];   // widest of the two subtrees' REACH (not just a/b's own node boxes — see block comment) and the sibling edge-label clearance (~2 word spaces)
+      if(have<need-0.5){ const dx=need-have; for(let m=j;m<ks.length;m++) shift(ks[m],dx); cur=Math.max(cur, rext[ks[ks.length-1]]+NGAP); } }   // fan the push out to b's (and every later sibling's) WHOLE subtree, every layer below it, in one rigid move
+    x[i]=(x[ks[0]]+x[ks[ks.length-1]])/2;
+    lext[i]=Math.min(x[i]-lw(i)/2-ldw(i), ...ks.map(c=>lext[c])); rext[i]=Math.max(x[i]+lw(i)/2+hgw(i), ...ks.map(c=>rext[c]));   // this node's own reach is the union of its own box and everything now settled beneath it — what the NEXT layer up compares against
+    })(root);
   return x;
 }
 function stemmaLayout(sent,catNodes,posBelow){const pad=2, SP=meas(" ",WORD_F)+8;   // gap matches arc view; slot also fits the baseline POS tag so they don't crowd
@@ -989,8 +1082,8 @@ function hasTr(toks){ return trLayer() && toks.some(x=>trTxt(x)); }   // the tra
 function belowStack(g,x,y0,tk,boxes,trRow){ let y=y0;   // trRow: reserve the transliteration row even for a token that has none (so POS stays aligned across the sentence)
   const showTr = trRow!=null ? trRow : (trLayer() && !!trTxt(tk));
   if(showTr){ y+=18+descent(POS_F); const rt=trTxt(tk); if(rt){ const e=E("text",{class:"translit"+frnUp(tk),x:x,y:y,"text-anchor":"middle"}); e.textContent=rt; if(trRowEdit())e.classList.add("tr-edit"); g.appendChild(e); boxes&&boxes.push({x,y:y-4,hx:meas(rt,trFont(tk))/2,hy:7}); svgSeamMark(g,tk,x,y,meas(rt,trFont(tk))/2,trFont(tk),boxes,null,"translit"); } }   // Item 8: the translit row gains the SAME descender-matched top gap the POS row carries (+descent(POS_F), the label-font descender) so the row above's descenders don't crowd it; .tr-edit → click-to-edit the romanisation, or the STORED transliteration behind it (see trRowEdit). The romanisation is a WORD-LIKE row, so it carries the seam mark too — a word broken across tokens reads as broken on every row that spells it out
-  belowTiers().forEach(tier=>{ y+=18+descent(POS_F); const txt=tierText(tk,tier); const e=E("text",{class:"gloss gl-edit"+frnUp(tk),x:x,y:y,"text-anchor":"middle","data-tier":tier,tabindex:"0"}); setGlossText(e,tier,txt||"…"); if(!txt)e.classList.add("gl-empty"); g.appendChild(e); boxes&&boxes.push({x,y:y-4,hx:meas(txt||"…",trFont(tk))/2,hy:7});
-    if(tier==="mseg"&&txt) svgSeamMark(g,tk,x,y,meas(txt,tierFont(tier,tk))/2,tierFont(tier,tk),boxes,null,"mseg"); });   // Item 8: each gloss / morphemic-gloss tier gains the SAME +descent(POS_F) top gap as the POS row, so all sub-token tiers share the descender-based breathing room; BELOW the transliteration and ABOVE the POS row; double-click or Enter to edit → MISC. Only the SEGMENTATION tier takes a seam mark (and only once it has text to hang it off) — the gloss tiers state a meaning, not a piece of the word
+  belowTiers().forEach(tier=>{ y+=18+descent(POS_F); const txt=tierText(tk,tier), dtxt=txt||"…"; const e=E("text",{class:"gloss gl-edit"+frnUp(tk),x:x,y:y,"text-anchor":"middle","data-tier":tier,tabindex:"0"}); setGlossText(e,tier,dtxt); if(!txt)e.classList.add("gl-empty"); g.appendChild(e); boxes&&boxes.push({x,y:y-4,hx:meas(dtxt,trFont(tk))/2,hy:7});
+    if(tier==="mseg"||tier==="mgloss") svgSeamMark(g,tk,x,y,(tier==="mgloss"?measGloss(dtxt,tierFont(tier,tk)):meas(dtxt,tierFont(tier,tk)))/2,tierFont(tier,tk),boxes,null,tier); });   // Item 8: each gloss / morphemic-gloss tier gains the SAME +descent(POS_F) top gap as the POS row, so all sub-token tiers share the descender-based breathing room; BELOW the transliteration and ABOVE the POS row; double-click or Enter to edit → MISC. The SEGMENTATION tier (mseg) and the MORPHEMIC GLOSS tier (mgloss) both take a seam mark — a mark drawn regardless of whether THIS tier happens to be annotated for this token (measured off the "…" placeholder's own width when it isn't), because the seam it decorates is a fact about the SEGMENTATION, not about this tier's own annotation coverage. Gating on `txt` used to silently drop the mark wherever MGloss was sparser than MSeg (a common, unremarkable state for hand-glossed data) — the row still shows a "…" cell there, so a boundary that MSeg draws cleanly would vanish from MGloss for that one seam while surviving on the very next one, reading as the mark randomly relocating/centring rather than a coverage gap. Both are PER-MORPHEME rows that a word-break genuinely interrupts; the lexical GLOSS tier (a single whole-word meaning, on request unchanged) does not
   if(show.pos && tk.upos){ y+=18+descent(POS_F); const pd=posDisp(tk); const e=E("text",{class:"tok-pos",x:x,y:y,"text-anchor":"middle"}); e.textContent=pd; svgTip(e,posTitle(tk.upos)); g.appendChild(e); boxes&&boxes.push({x,y,hx:meas(pd,POS_F)/2,hy:6}); }   // POS hover tooltip (Item 2). Item 1: +descent(POS_F) extra top gap on the POS step — the label font's (POS_F) descender depth, mirroring how the above-token rows fold in descent(WORD_F) — so the POS row isn't crowded by the descenders of the row above it. Every below-reserve that feeds a row height (stackH / belowH / stackBot / --undpad) folds in the SAME descent(POS_F), so POS stays aligned across renderers and nothing clips.
   return y;
 }
@@ -1044,14 +1137,17 @@ function tieLayout(D){ const rows=tieRows(D); if(!rows.length) return {rows:[],d
    selection IS the state, for every route in alike (the tie glyph, the IAST row, the right-click menu). Matching
    BOTH ends keeps an ordinary marquee that merely happens to start at the same token from lighting a tie it doesn't
    cover. selRange always holds ORIGINAL token ids, which is why the display MWT records carry _from/_to.
-   The one exception is while the surface form is being EDITED: editMWTInline selects the range and THEN opens a
-   field over the tie, and makeEditable copies the edited element's COMPUTED INK into that field — so an accented
-   tie would hand the input a blue `color` and the text would sit blue for the whole edit, reading as selection
-   rather than as a field. MWT_EDIT names the tie whose editor is open; context-menu.js clears it and re-runs
-   applySel() on commit/cancel, so the accent comes straight back. */
+   THERE USED TO BE AN EXCEPTION HERE, and it is gone: while the surface form was being EDITED this returned
+   false, so the tie, the surface form and the transliteration row all sat plain. The reason given was that
+   makeEditable copies the edited element's COMPUTED INK into its field, so an accented tie would hand the input
+   an accent-coloured `color` for the duration of the edit. But every OTHER token does exactly that — .node.sel /
+   .tok-group.sel stay on while a token's form is edited, and their fields carry the accent ink — so the MWT was
+   the one thing in the app that went plain at the very moment it was selected, and since clicking a tie IS what
+   opens its editor, that was the only state a click could ever produce. An MWT now reads like any other selected
+   token. MWT_EDIT is still set and cleared around the edit (context-menu.js) and still names the open editor for
+   anything that needs to know; it simply no longer suppresses the selection. */
 let MWT_EDIT=null;   // {si, from} — the MWT whose surface form currently has an inline editor open (original token id)
 function mwtTieSelected(si,fromId,toId){ if(!(si>=0)||fromId==null) return false;
-  if(MWT_EDIT&&MWT_EDIT.si===si&&MWT_EDIT.from===fromId) return false;   // being edited → not "selected but at rest"
   return !!(selRange&&selRange.s===si&&selRange.from===fromId&&(toId==null||selRange.to===toId)); }
 // the ORIGINAL token ids of a tie row's MWT (null for an ExtPos-only bracket, which owns no MWT and never accents)
 function tieOrigIds(r){ const m=r&&r.m; if(!m||r.kind!=="mwt") return null;
@@ -1243,4 +1339,17 @@ function spreadForLabels(x,edges){ const live=edges.filter(e=>e.w); if(!live.len
           moved=true; } } });
     if(!moved) break; }
   const mn=Math.min(...x); if(mn<2) for(let k=0;k<n;k++) x[k]+=(2-mn); }   // keep the leftmost node non-negative
+// spreadForLabels only clears EDGE-LABEL width (`e.w`) between siblings sharing a head — a subtree shift made purely
+// for that can still leave two SURFACE-ADJACENT nodes closer together than their own below-stack content (word/POS/
+// translit/gloss rows, sized by stemmaLayout's `lw`) needs, since a label like "mod" is usually far narrower than a
+// phrasal MGloss. That showed up as one token's MGloss text overlapping its neighbour's (brihat_jataka s1's
+// śaśa/bhṛtaḥ, ~41px of overlap) even though stemmaLayout's OWN c[]/lw[] had reserved a clean gap before spreading
+// moved things. Call this AFTER spreadForLabels: a single left-to-right sweep in SURFACE order (by final x, not
+// original index — a non-projective spread can reorder them) that pushes each node only as far as its predecessor's
+// and its own half-width require, cascading the push through every later node. Purely additive (only ever widens a
+// gap), so it can't re-open an edge-label collision spreadForLabels just closed — that pass only ever guaranteed a
+// MINIMUM clearance, and widening further is always safe.
+function ensureNodeGaps(x,lw){ const gap=meas(" ",WORD_F)+8, order=x.map((_,i)=>i).sort((a,b)=>x[a]-x[b]);
+  for(let k=1;k<order.length;k++){ const a=order[k-1],b=order[k], need=lw[a]/2+lw[b]/2+gap, have=x[b]-x[a];
+    if(have<need-0.5){ const dx=need-have; for(let m=k;m<order.length;m++) x[order[m]]+=dx; } } }
 

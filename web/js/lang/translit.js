@@ -165,7 +165,9 @@ function openTranslitMenu(x,y){ const m=trEl(); trRender(); m.classList.add("sho
   m.style.left=Math.max(8,Math.min(x,innerWidth-w-8))+"px";
   if(y-h-6>=8){ m.style.top=""; m.style.bottom=(innerHeight-(y-6))+"px"; }
   else { m.style.bottom=""; m.style.top=Math.min(y+6,innerHeight-h-8)+"px"; } }
-document.getElementById("translitPill").addEventListener("click",e=>{ e.stopPropagation(); if(e.currentTarget.classList.contains("disabled"))return; const r=e.currentTarget.getBoundingClientRect(); openTranslitMenu(r.left,r.top); });   // item 6: the disabled pill is inert
+document.getElementById("translitPill").addEventListener("click",e=>{ e.stopPropagation(); if(e.currentTarget.classList.contains("disabled"))return;
+  if(_trMenu&&_trMenu.classList.contains("show")){ trClose(); return; }   // item 9: the TRIGGER toggles — a click on the pill while its own menu is open closes it (the mousedown closer below deliberately exempts the pill, so the menu is still "show" by the time this click runs; without this the pill would just re-render the menu open and look inert)
+  const r=e.currentTarget.getBoundingClientRect(); openTranslitMenu(r.left,r.top); });   // item 6: the disabled pill is inert
 addEventListener("mousedown",e=>{ if(_trMenu&&_trMenu.classList.contains("show")&&!_trMenu.contains(e.target)&&!(e.target.closest&&e.target.closest("#translitPill"))) trClose(); },true);
 addEventListener("resize",trClose);
 
@@ -332,7 +334,9 @@ function openOrthoMenu(x,y){ const m=orEl(); orRender(); m.classList.add("show")
   m.style.left=Math.max(8,Math.min(x,innerWidth-w-8))+"px";
   if(y-h-6>=8){ m.style.top=""; m.style.bottom=(innerHeight-(y-6))+"px"; }
   else { m.style.bottom=""; m.style.top=Math.min(y+6,innerHeight-h-8)+"px"; } }
-document.getElementById("orthoPill").addEventListener("click",e=>{ e.stopPropagation(); const r=e.currentTarget.getBoundingClientRect(); openOrthoMenu(r.left,r.top); });
+document.getElementById("orthoPill").addEventListener("click",e=>{ e.stopPropagation();
+  if(_orMenu&&_orMenu.classList.contains("show")){ orClose(); return; }   // item 9: click-to-close on the trigger, exactly as #translitPill above
+  const r=e.currentTarget.getBoundingClientRect(); openOrthoMenu(r.left,r.top); });
 addEventListener("mousedown",e=>{ if(_orMenu&&_orMenu.classList.contains("show")&&!_orMenu.contains(e.target)&&!(e.target.closest&&e.target.closest("#orthoPill"))) orClose(); },true);
 addEventListener("resize",orClose);
 
