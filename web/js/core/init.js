@@ -27,6 +27,7 @@ function bootBridge(){
   if(!hasBridge()) return;   // browser design mode → keep the sample document
   window.pywebview.api.get_state().then(async st=>{
     if(typeof invalidateColW==="function") invalidateColW();   // a fresh document at boot — the column-width cache from any previous DOC (there shouldn't be one, but see the other invalidateColW call sites) is meaningless against this one
+    if(typeof invalidateDiaCache==="function") invalidateDiaCache();   // …and so is the notation-switch diagram cache (js/core/document.js)
     if(st&&st.sentences&&st.sentences.length){ DOC.length=0; normSents(st.sentences).forEach(s=>DOC.push(s)); }
     else { DOC.length=0; }   // no file → start empty (zero sentences)
     if(st&&st.name)DOCNAME=st.name; if(st&&st.path)DOCPATH=st.path;

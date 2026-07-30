@@ -973,6 +973,108 @@ function scrollToSentence(i){
   if(!b){ computeWindow(i); renderDoc(); b=host.querySelector(`.sblock[data-i="${i}"]`); }
   return b;
 }
+/* ── NOTATION-SWITCH DIAGRAM CACHE ────────────────────────────────────────────────────────────────────────────
+   renderSentence(si) (js/diagram/diagram-render.js) used to be called fresh on EVERY buildBlock, for EVERY
+   notation switch: stemma/tree/arcs/brackets/outline each re-run their own font-measurement + layout algorithm
+   over every token, even when re-visiting a notation that was already built for this exact sentence with
+   nothing about it or the view changed since. Measured on a 42-token non-projective Sanskrit sentence
+   (samples/brihat_jataka.conllu s1, windowed alongside its 3 siblings × 4 repeats = 16 sentences in view): a
+   full renderDoc() of that window costs ~2–3.6s in EVERY notation, and re-switching arcs→tree→arcs→tree… paid
+   that same cost on EVERY leg, including the ones returning to a notation already seen seconds earlier (a CDP
+   profiling harness, run headless against this exact window, is what produced those numbers — see the
+   before/after figures wherever this change is written up). This is the SAME shape of problem the
+   COLUMN-WIDTH CACHE above (js/grid/grid.js) already solves for computeColW(), and follows its structure: a
+   cache of already-built values, a single per-sentence "this one's dirty now" signal, and wholesale invalidation
+   on the handful of events that can invalidate everything at once.
+   KEYED ON (si, conv, and every OTHER global the five renderers read that can change their OUTPUT without
+   touching the sentence itself) — diaFlagsSig() below is the exhaustive list, gathered by grepping every
+   `show.*`/global read in diagram-render.js/diagram-wrap.js/diagram-core.js's displaySent/bform/mirror/wrap
+   path. Missing one here would mean "toggle a view flag, switch notations, see the OLD flag's rendering" — a
+   correctness bug, not a slow one, so the list errs generous rather than clever: every entry is read ONCE per
+   renderDoc() (diaFlagsSig is computed once into ctx.diaSig, not once per sentence), so a few unused reads cost
+   nothing measurable next to the layout work they guard.
+   STORAGE: si → Map(conv → {sig,node}). A nested map, not one flat `si+conv+sig` string key, because the outer
+   level is exactly what per-sentence invalidation needs to drop in O(1) (see invalidateDiaSentence) and what
+   window-pruning needs to iterate (pruneDiaCache) — neither wants to filter-scan every (si,conv) pair. The
+   inner level caps itself at 5 entries (one per notation) with no LRU needed: there are only 5 notations, so
+   "cache every notation this sentence has been shown in, for as long as the sentence is on screen" is already
+   a hard, small bound — the memory question (CLAUDE.md's virtualization note) is answered by the OUTER level
+   instead, pruned to the current [winLo,winHi) below.
+   NEVER GOES STALE UNDER SELECTION: the returned node's .sel/.rng/.dim-* classes are NOT baked in here — they
+   are re-derived from data-s/data-tok attributes by applySel() (below in this file), which renderDoc() already
+   calls unconditionally after every buildBlock loop, cache hit or miss alike. That is what makes "bake selection
+   in at build time, drop the cache entry on every selection change" (the simple-but-defeats-the-cache option)
+   unnecessary — applySel's live class-toggle pass already treats a reused node exactly like a fresh one, since
+   both carry the same data-* attributes and applySel never assumes it is looking at just-built DOM. */
+let DIA_CACHE=new Map();   // si → Map(conv → {sig,node})
+// every global that changes a rendered diagram's OUTPUT without changing the SENTENCE (which invalidateDiaSentence
+// covers instead) — read once per render into ctx.diaSig, not once per sentence. FS/AVAILW/idW: zoom + wrap budget
+// + the margin column a wrapped view indents past (js/diagram/diagram-wrap.js). DOCLANG: isSanskritLang() gates
+// MWT sandhi-fusion display and the script daṇḍa glyph. TRANSLIT_SCHEME/ORTHO_SCHEME/STORED_SCHEME: the romanised/
+// scripted form a token renders (bform/trTxt/topTransTxt). stemmaProj/stemmaCat: renderSentence's own stemma-only
+// options, included unconditionally rather than only when conv==="stemma" — simpler than a per-conv-conditional
+// signature, and a toggle of either is rare enough that invalidating a tree/arcs/brackets/outline entry it can't
+// possibly affect costs nothing worth avoiding. show.*: pos/labels/colour/arrows/extRel/wrap/translit/mergePunct,
+// every `show.` this app's 3 diagram files read (grepped, not guessed). GLOSS_ON/_VIS, MORPH_ON/_VIS: belowTiers().
+function diaFlagsSig(){
+  // "|", not "" — a bare join() concatenates adjacent NUMBERS (FS/AVAILW/idW) with no boundary between them, so
+  // e.g. FS=1,AVAILW=23 and FS=12,AVAILW=3 both join to "123": two genuinely different view-states producing the
+  // SAME signature, i.e. a false cache hit — a stale diagram silently surviving a real zoom/wrap-width change.
+  // "|" can't appear in any of these values (plain numbers, BCP-47-ish language/scheme names, 0/1 flags), so it's
+  // an unambiguous field separator.
+  return [FS,AVAILW,idW,DOCLANG,TRANSLIT_SCHEME,ORTHO_SCHEME,STORED_SCHEME,
+    stemmaProj?1:0,stemmaCat?1:0,
+    show.pos?1:0,show.labels?1:0,show.colour?1:0,show.arrows?1:0,show.extRel?1:0,show.wrap?1:0,show.translit?1:0,show.mergePunct?1:0,
+    GLOSS_ON?1:0,GLOSS_VIS?1:0,MORPH_ON?1:0,MORPH_VIS?1:0
+  ].join("|");
+}
+// The cached/fresh diagram for sentence i, under the CURRENT conv + ctx.diaSig — renderSentence(i) itself is
+// unchanged (still the single source of truth for what a notation looks like); this only decides whether that
+// call is needed. A stale entry for a DIFFERENT conv or an outdated sig is simply overwritten, never patched —
+// the two situations where per-conv reuse would pay off (switching straight back, or nothing having changed at
+// all) are exactly the ones this returns early for.
+function diaSentence(i,ctx){
+  let m=DIA_CACHE.get(i);
+  if(m){ const hit=m.get(conv); if(hit&&hit.sig===ctx.diaSig) return hit.node; }
+  const node=renderSentence(i);
+  if(!m){ m=new Map(); DIA_CACHE.set(i,m); }
+  m.set(conv,{sig:ctx.diaSig,node});
+  return node;
+}
+// Per-sentence invalidation. Called from js/core/undo.js's snapSent(si) — the ONE choke point every
+// single-sentence mutator already passes through before it writes (pushUndo(si) calls it directly; grid.js's
+// cell-edit sessions call it themselves via `pendingSnap=snapSent(si)` on focus, ahead of committing anything).
+// touchColW(si,si+1) (js/grid/grid.js) was considered and REJECTED as this hook: it is called at fewer sites
+// than snapSent — e.g. dragging an arc to a new head (js/diagram/diagram-edit.js's setDiagramHead) calls
+// pushUndo(si) but not touchColW, because a stale COLUMN WIDTH after a re-head is cosmetic slop (grid.js's own
+// term) the grid tolerates on purpose, whereas a stale DIAGRAM after a re-head is the wrong tree drawn as if it
+// were current — not a tolerable degree of staleness. snapSent is the strictly more complete signal: every
+// call site touchColW has, snapSent already covers (grid.js's pendingSnap dance IS a snapSent(si) call), plus
+// every structural/relation edit that changes a rendered tree without widening any cell. Fires on FOCUS (grid.js)
+// or before the first write (everywhere else), i.e. slightly early — an edit session that focuses a cell and
+// blurs it unchanged drops a cache entry that was still valid — which only ever costs one extra rebuild, never
+// a wrong one, so erring early is the safe direction.
+function invalidateDiaSentence(si){ DIA_CACHE.delete(si); }
+// Wholesale clear — added at every existing invalidateColW() call site (document replace/undo/redo/new-file,
+// a whole-document conversion, Find & Replace's Replace All, a font-stack change) PLUS the structural edit-ops.js
+// sites (insert/delete/move/re-boundary a SENTENCE): those shift every FOLLOWING sentence's OWN INDEX, and this
+// cache is keyed on si, so "sentence 5" after a splice is a different sentence than the node cached under that
+// key — reusing it would draw sentence 6's old tree under sentence 5's number. colW tolerates exactly the same
+// hazard by re-scanning wholesale for the same reason (see its own note in js/grid/grid.js); this does too.
+// ALSO added in js/lang/translit-load.js's fillTranslit/fillOrtho, which are not si-scoped edits at all but
+// cross-document DERIVED passes (a scheme switch, a fresh parse's romanisation) that mutate t.translit/t.ortho/
+// s.orthoLine across arbitrarily many sentences with no pushUndo/snapSent of their own (deliberately — they are
+// not user edits, see those functions' own comments) and so would otherwise race a cache built moments earlier,
+// before the async fill landed, permanently serving the pre-fill rendering back on every later notation switch.
+function invalidateDiaCache(){ DIA_CACHE.clear(); }
+// Drop every cached sentence OUTSIDE the current render window. Composes with the virtualization above rather
+// than fighting it: a sentence that has scrolled out of [winLo,winHi) is already gone from the DOM (its .sblock
+// was never rebuilt, or was replaced by a spacer), so a cache entry for it is pure memory with nothing to show
+// for it — on a 20,000-sentence document, cycling every notation while scrolling through the whole file would
+// otherwise grow DIA_CACHE to 20,000 × 5 entries and never shrink. Called every renderDoc(), right after
+// computeWindow() has decided the range — cheap (one Map iteration bounded by however many sentences have EVER
+// been cached, which window-pruning itself keeps close to WIN_BUFFER*2+1 in steady state).
+function pruneDiaCache(lo,hi){ for(const si of DIA_CACHE.keys()) if(si<lo||si>=hi) DIA_CACHE.delete(si); }
 /* the per-sentence body renderDoc()'s main loop used to run inline — pulled out so a future windowed/
    incremental render (only the sentences near the viewport) can build ONE block without re-running the
    once-per-render setup above it. ctx carries the few things that are per-render state rather than true
@@ -1122,7 +1224,7 @@ function buildBlock(i,ctx){ const s=DOC[i];
       const line=parts.join(" ").trim(), base=(s.text||s.tokens.map(t=>t.form).join(" ")).trim();
       if(line && line!==base){ const tl=document.createElement("div"); tl.className="strans"; tl.style.marginInlineStart=(idW+8)+"px"; tl.textContent=line; capTransWidth(tl); b.appendChild(tl); } }
     if(TRANS_LANGS.size) b.appendChild(renderBlockTrans(i));   // item 13: a field per enabled translation language, just above the diagram
-    if(show.graphs) b.appendChild(renderSentence(i));
+    if(show.graphs) b.appendChild(diaSentence(i,ctx));   // notation-switch cache: same node reused (and re-highlighted by applySel below) if THIS sentence, under THIS conv + view-state, was already built — see the "NOTATION-SWITCH DIAGRAM CACHE" note above computeWindow
     if(show.grids) b.appendChild(renderGrid(i));
     ctx.sheet.appendChild(b);
   return b; }
@@ -1131,6 +1233,7 @@ function renderDoc(){
   if(typeof refreshFontStacks==="function") refreshFontStacks();   // diagram-core.js: re-reads #doc's LIVE --token-font/--mono-font (a scheme-scoped override, e.g. Ranjana, may have changed it since the last render) into LIVE_TOKEN_STACK/LIVE_MONO_STACK and every measurement font string derived from them (WORD_F, GLOSS_F, …), ONCE per render rather than per meas() call. Must run before computeColW() (→ marginNumWidth) and before anything below that measures token width, or this render would still lay out against the PREVIOUS scheme's metrics. Guarded (as document.js already guards TOKEN_STACK-dependent reads elsewhere) for any harness that renders before diagram-core.js has loaded
   msegFlagDoc();   // what an MWT grouping implies about its members — the MSeg tier's decorative continuation mark, and in Sanskrit a featureless non-final member's Compound=Yes. A dozen scattered operations move those ranges (grouping, ungrouping, splitting, flattening, inserting/deleting a token, an auto-regroup after a parse), so deriving it HERE, once, at the single point they all funnel through, is what keeps it from ever going stale; it's idempotent and cheap, and marks nothing dirty of its own accord — see msegFlagSent
   computeWindow(curBlock());   // recentre the rendered window on whatever sentence the reader is on — see the virtualization note above buildBlock. MUST run before computeColW(): that scans the CURRENT window (js/grid/grid.js), so the window has to be known first
+  pruneDiaCache(winLo,winHi);   // drop every cached diagram outside the range this render is about to (re)build — see the "NOTATION-SWITCH DIAGRAM CACHE" note above buildBlock. AFTER computeWindow (winLo/winHi just moved), BEFORE the buildBlock loop below reads the cache
   computeColW();
   const host=document.getElementById("doc"); host.textContent="";
   host.lang=bcp47Tag();   // BCP-47 tag → inherits to every token/diagram/grid text so the browser picks locale-correct Cyrillic/Han glyphs (locl + system-font region); re-run on every language/script change
@@ -1180,7 +1283,7 @@ function renderDoc(){
   rs.setProperty("--cap-dia",Math.round(dh*0.6/FS)+"px"); rs.setProperty("--cap-grid",Math.round(dh*0.4/FS)+"px");
   /* the --bm-stick engine probe was published here; the headings do not pin any more, so there is no inset to measure or hand to CSS. stickyTopFactor() survives below, unused but documented — it records what each engine counts into a sticky view rectangle, which is not obvious and was expensive to establish. */
 
-  const ctx={sheet,NUM,SNUM,newSheet};
+  const ctx={sheet,NUM,SNUM,newSheet,diaSig:diaFlagsSig()};   // diaSig computed ONCE per render (not per sentence — every sentence in this render shares the same view-state) and read back by diaSentence() below
   // top spacer FIRST — stands in for [0,winLo), sized below once the window's real blocks have been measured.
   // Inserted ONLY when there's something above the window to stand in for (winLo>0): app.css's
   // `.doc.paged > .docsheet:first-child{margin-top:14px}` (the gap that keeps the very first sheet's rounded

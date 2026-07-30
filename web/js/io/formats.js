@@ -185,6 +185,7 @@ async function convertTo(target){
   if(r.error) return toast("Convert failed: "+r.error);
   pushUndo(); DOC.length=0; normSents(r.sentences).forEach(s=>DOC.push(s));
   if(typeof invalidateColW==="function") invalidateColW();   // every token was just replaced — the column-width cache from before the conversion is meaningless against it
+  if(typeof invalidateDiaCache==="function") invalidateDiaCache();   // …and every cached diagram (js/core/document.js) — same reasoning, plus a format conversion can change the very relation SET a tree is drawn from (SUD ↔ mSUD)
   setFormat(r.format); syncGlossTiersFromDoc(); syncDeprelVocabFromDoc(); detectXposMirrorsUpos(); syncDocFonts();   // item 1: mSUD gains MSeg/MGloss (morphemic tier on), SUD drops them (off) — reflect the converted doc
   markDirty(); renderDoc(); clearSelToBlock(0,false);   // item 9: a whole-document conversion replaces every token, so the old selection is meaningless and a new one would be the app's choice — the same reading as the re-parse and open paths (see clearSelToBlock, js/io/bridge.js): nothing selected, reading focus at the top
   if(show.translit) fillTranslit();   // conversion drops the (non-CoNLL-U) transliteration column → re-derive it

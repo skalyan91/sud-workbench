@@ -224,6 +224,10 @@ function refreshFontStacks(){
   // → the column-width cache's every cached measurement is now stale, so force a full rescan rather than trust
   // the (now wrong) cached widths forward.
   if((LIVE_TOKEN_STACK!==prevT||LIVE_MONO_STACK!==prevM) && typeof invalidateColW==="function") invalidateColW();
+  // …and every renderer's own cached diagram (js/core/document.js's notation-switch cache): stemma/arcs/tree/
+  // brackets/outline all measure through this same meas()/WORD_F/NODE_F/POS_F/… family, so a font-stack change
+  // invalidates their output exactly as it invalidates colW's, for the same reason.
+  if((LIVE_TOKEN_STACK!==prevT||LIVE_MONO_STACK!==prevM) && typeof invalidateDiaCache==="function") invalidateDiaCache();
   WORD_F='15px '+LIVE_TOKEN_STACK; NODE_F='14px '+LIVE_TOKEN_STACK; WORD_F_BOLD='640 '+WORD_F; NODE_F_BOLD='640 '+NODE_F;
   POS_F='15px '+LIVE_TOKEN_STACK; GRID_F='462 13px '+LIVE_MONO_STACK; HEAD_F='640 9.5px '+LIVE_TOKEN_STACK;
   TRANS_F='italic 15px '+LIVE_TOKEN_STACK; TRANS_UP_F='15px '+LIVE_TOKEN_STACK; MWT_F=WORD_F;
