@@ -223,6 +223,12 @@
     --hairline:rgba(0,0,0,0.0588);          /* DividerStrokeColorDefault */
     --hairline-strong:rgba(0,0,0,0.1608);   /* ControlStrokeColorSecondary — the heavier of the two control strokes */
     --sep-line:rgba(0,0,0,0.0588);          /* ControlStrokeColorDefault */
+    /* Fluent's pull-down indicator: a SINGLE chevron-down (ChevronDown), not the up/down pair macOS uses on a
+       pop-up button. Lifted into a token because two controls draw it — select.sel as a background-image (a
+       <select> can render no pseudo-element, so it must bake an ink) and the Save As "Where" button as a MASK,
+       which reads alpha only and so ignores the baked stroke colour. One path, no drift. */
+    --fluent-chevron-down:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'><path d='M2.5 4.5L6 8l3.5-3.5' fill='none' stroke='%23666' stroke-width='1.1' stroke-linecap='round' stroke-linejoin='round'/></svg>");
+    --menu-sep:#e6e6e6;   /* the in-surface separator, opaque — see the macOS kit's note. Sits within a pixel of Fluent's own DividerStrokeColorDefault composited over a light menu fill, so it is the same rule, stated as a literal. */
     --viewbar-border:var(--hairline);
     --sheet-border:rgba(117,117,117,0.4000);   /* SurfaceStrokeColorDefault #66757575 — the stroke WinUI puts around a window-level surface (a dialog), as opposed to the lighter flyout stroke below */
     --field-border:rgba(0,0,0,0.0588);         /* ControlStrokeColorDefault — a TextBox's three non-bottom edges; the BOTTOM edge is the accented one and is set by fluent-chrome.css, not by a token */
@@ -390,6 +396,7 @@
       --label-tertiary:rgba(255,255,255,0.5294);  /* TextFillColorTertiary  #87FFFFFF */
       --label-quaternary:rgba(255,255,255,0.0941);/* ControlStrokeColorSecondary #18FFFFFF */
       --label-quinary:rgba(255,255,255,0.0824);   /* DividerStrokeColorDefault   #15FFFFFF */
+      --menu-sep:#343434;   /* the in-surface separator's dark counterpart, opaque — see the light declaration and the macOS kit's fuller note. APPROX: it is DividerStrokeColorDefault flattened over a dark menu fill rather than a value Microsoft publishes as a literal. */
       --hairline:rgba(255,255,255,0.0824);        /* DividerStrokeColorDefault */
       --hairline-strong:rgba(255,255,255,0.0941); /* ControlStrokeColorSecondary. NOTE it is LOWER than light's .1608 — that is not a typo and not a flip: Fluent's dark strokes are white and a white stroke reads stronger on a dark ground at the same alpha, so the source specifies less of it. */
       --sep-line:rgba(255,255,255,0.0706);        /* ControlStrokeColorDefault */

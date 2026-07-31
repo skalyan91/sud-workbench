@@ -183,10 +183,11 @@ function lmFilter(q){ q=(q||"").trim().toLowerCase(); const SUB=lmSub();
   if(!q){ ms=all;
     if(DOCLANG){ const ci=all.findIndex(e=>(e[1]||e[0])===DOCLANG); if(ci>0) ms=[all[ci], ...all.slice(0,ci), ...all.slice(ci+1)]; }   // item 16: on open (no query) the current language goes FIRST → it renders at the top (was beyond the LM_MAX render cap, so the old scroll-to-.cur never found a row)
   }
-  else { const pre=[],sub=[];   // prefix/code-exact matches first, then substring — mirrors the grid autocomplete idiom
+  else { const pre=[],sub=[];   // whole-name prefix / code-exact matches first, then any LATER word of the name — the two are still ranked, the second tier is just no longer a substring sweep
+    const wp=wordPrefixRe(q);   // built ONCE per keystroke rather than per row (wordPrefix would recompile it ~7,900 times a keystroke, the length of the ISO 639-3 table)
     for(const e of all){ const name=(glotName(e[0])||e[2]).toLowerCase();   // item 22: search matches the Glottolog name where it overrides the ISO name
-      if(e[0]===q||e[1]===q||name.startsWith(q)) pre.push(e);   // exact 3-letter OR 2-letter code, or name prefix
-      else if(name.includes(q)||e[0].includes(q)||(e[1]&&e[1].includes(q))) sub.push(e); }
+      if(e[0]===q||e[1]===q||name.startsWith(q)) pre.push(e);   // exact 3-letter OR 2-letter code, or a prefix of the WHOLE name — the strongest match, so it leads
+      else if(wp.test(name)||e[0].startsWith(q)||(e[1]&&e[1].startsWith(q))) sub.push(e); }   // item: WORD PREFIX, not substring (see wordPrefixRe, js/core/state.js) — "eng" finds "Middle English" but no longer every name with "eng" buried inside a word. The two CODE tests move from .includes to .startsWith for the same reason: a code is a single word, so a substring hit in the middle of one ("ng" finding "eng") is the very thing being removed
     ms=pre.concat(sub); }
   lmRender(ms); }
 function lmRender(ms){ _lmItems=ms.slice(0,LM_MAX); _lmIdx=-1; const list=_lmList; list.innerHTML="";
@@ -204,8 +205,18 @@ function lmHi(k,noScroll){ _lmIdx=k; const rows=_lmList.querySelectorAll(".lmrow
   if(!noScroll&&k>=0&&rows[k])rows[k].scrollIntoView({block:"nearest"}); }
 function lmPick(e){ lmClose(); const lang=e[1]||e[0];   // canonical UD code: 2-letter where the language has one, else the 3-letter code
   applyLang(lang,true); toast("Language: "+(glotName(e[0])||e[2])+" ("+lang+")"); }   // sets the language and auto-switches the model to match (or None)
-function lmClose(){ if(_langMenu)_langMenu.classList.remove("show"); }
-function openLangMenu(x,y){ const m=lmEl(); _lmInput.value=""; lmFilter(""); m.classList.add("show");
+/* THE STATUS-BAR CHEVRONS POINT AT WHAT THE CLICK WILL DO. Closed they point UP — the menus all open upward out
+   of the bottom bar, so up is where the list is about to appear; open they point DOWN, at the bar the click will
+   collapse them back into. The glyph itself never changes: the markup carries one chevron.down <svg> and the
+   kits rotate it 180° at rest, un-rotating it on `.menuopen` (see .pillchev there), so there is one path to keep
+   in step and the flip animates.
+   A CLASS ON THE PILL, set by each menu's own open/close, rather than a CSS relationship: the menus are children
+   of <body>, not siblings of their pills, so no selector can reach from one to the other. Called from all four —
+   #tokInfo (here), #translitPill and #orthoPill (js/lang/translit.js) and #fmtPill (js/io/formats.js, plus
+   closeCtx in js/editing/context-menu.js, which is where its menu can be closed from anywhere else). */
+function setPillMenuOpen(pillId,open){ const p=document.getElementById(pillId); if(p)p.classList.toggle("menuopen",!!open); }
+function lmClose(){ if(_langMenu)_langMenu.classList.remove("show"); setPillMenuOpen("tokInfo",false); }
+function openLangMenu(x,y){ const m=lmEl(); _lmInput.value=""; lmFilter(""); m.classList.add("show"); setPillMenuOpen("tokInfo",true);
   const w=m.offsetWidth,h=m.offsetHeight;   // the pill sits in the bottom status bar → open the menu upward, above it
   const left=Math.max(8,Math.min(x,innerWidth-w-8)); m.style.left=left+"px";
   if(y-h-6>=8){ m.style.top=""; m.style.bottom=(innerHeight-(y-6))+"px"; }   // room above → anchor by the BOTTOM edge (6px over the pill) so the menu collapses toward the pill as results thin out, keeping the search field put
@@ -214,7 +225,8 @@ function openLangMenu(x,y){ const m=lmEl(); _lmInput.value=""; lmFilter(""); m.c
   // item 16: the current language is rendered FIRST (see lmFilter), so lmRender's list.scrollTop=0 already
   // seats it at the top; a double-rAF re-affirms it after the bottom-anchored menu's geometry settles.
   requestAnimationFrame(()=>requestAnimationFrame(()=>{ if(_lmList) _lmList.scrollTop=0; })); }
-document.getElementById("tokInfo").addEventListener("click",e=>{ e.stopPropagation();   // always open the picker; the ✕ inside stops propagation so it clears without opening
+document.getElementById("tokInfo").addEventListener("click",e=>{ e.stopPropagation();   // the ✕ inside stops propagation so it clears without opening
+  if(_langMenu&&_langMenu.classList.contains("show")){ lmClose(); return; }   // item: the TRIGGER TOGGLES, the same fix #translitPill and #orthoPill already carry (js/lang/translit.js) and for the same reason — the mousedown closer below deliberately exempts this pill, so the menu is still "show" by the time this click runs, and without this branch a second click just re-rendered the menu open and the pill read as dead
   const r=e.currentTarget.getBoundingClientRect(); openLangMenu(r.left,r.top); });
 addEventListener("mousedown",e=>{ if(_langMenu&&_langMenu.classList.contains("show")&&!_langMenu.contains(e.target)&&!(e.target.closest&&e.target.closest("#tokInfo"))) lmClose(); },true);
 addEventListener("resize",lmClose);
@@ -238,7 +250,15 @@ document.getElementById("toggles").addEventListener("click",e=>{
   const btn=e.target.closest(".drawer-btn"); if(!btn)return;   // open/close a drawer
   const d=btn.parentElement, wasOpen=d.classList.contains("open");
   document.querySelectorAll("#toggles .drawer.open").forEach(x=>x.classList.remove("open"));
-  if(!wasOpen){ d.classList.add("open"); syncGlossUI(); } });
+  if(!wasOpen){ d.classList.add("open"); syncGlossUI();
+    /* A DRAWER THAT OPENS WITH A SEARCH FIELD PUTS THE CARET IN IT, on request for Translations — which is the
+       only drawer that has one today, but written generically because the reason is generic: a drawer whose
+       first control is a search box is a drawer you opened in order to search, and the status-bar language menu
+       (openLangMenu) has always focused its own field on open for exactly that reason. The two are the same
+       gesture and should not disagree. Guarded on there BEING such a field, so Show/Hide, Glossing and Colours —
+       whose first control is a checkbox — are untouched and keep focus where it was. */
+    const q=d.querySelector(".drawer-pop input.lmsearch");
+    if(q) requestAnimationFrame(()=>q.focus()); } });   // NEXT FRAME, not this one: .drawer-pop is display:none until the `.open` class above takes effect, and focus() on a still-unrendered element is silently dropped — the class was added microseconds ago and the style recalc it needs has not necessarily run
 /* An open drawer closes on any press outside it — including on a diagram token, which is the case that was
    missing, and which is missing for a reason worth recording because it is not obvious:
    A CLICK ON A DIAGRAM TOKEN OFTEN FIRES NO `click` EVENT AT ALL. The token's pointerdown selects it, which

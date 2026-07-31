@@ -277,7 +277,7 @@
     color:var(--text); font:inherit; font-size:var(--fs-body); font-weight:var(--fw-normal); padding:0 30px 0 11px;
     box-shadow:none;
     background-image:linear-gradient(var(--field-bg),var(--field-bg)),var(--ctrl-stroke-grad),
-      url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'><path d='M2.5 4.5L6 8l3.5-3.5' fill='none' stroke='%23666' stroke-width='1.1' stroke-linecap='round' stroke-linejoin='round'/></svg>");
+      var(--fluent-chevron-down);   /* the shared ChevronDown token (fluent-tokens.css) — the Save As "Where" button masks the same path */
     background-clip:padding-box,border-box,padding-box; background-repeat:no-repeat,no-repeat,no-repeat;
     background-position:0 0,0 0,right 10px center; background-size:auto,auto,12px 12px}
   select.sel:hover{--_fill:var(--subtle-hover)}
@@ -375,13 +375,14 @@
   .tbmodemenu .fpitem{padding:8px 11px 9px; gap:8px}
   .tbmodemenu:not(.tbgroupmenu) .fpitem{font-size:var(--fs-body); font-weight:var(--fw-normal)}
   .tbgroupmenu .fpitem{font-size:var(--fs-body); min-height:32px}
-  .tbgroupmenu .fpsep,.ctx hr{border:none; border-top:1px solid var(--hairline); height:0;
+  .tbgroupmenu .fpsep,.ctx hr{border:none; border-top:1px solid var(--label-quinary); height:0;   /* the SAME ink as a list's row separator, matching the macOS kit's own change. Here it is also the more correct citation: --label-quinary IS DividerStrokeColorDefault (fluent-tokens.css), which is the brush WinUI's MenuFlyoutSeparator paints — so this reads as a token fix, not a tint. */
     margin:1px -2px}   /* MenuFlyoutSeparatorThemePadding -4,1,-4,1: the negative sides cancel the item inset so the rule spans the menu while the rows do not. Here the menu's own padding is 2px, so -2px is what reaches its edge. */
   .ctx hr.note-rule{margin:1px -2px 3px}
   /* the context menu's own extras */
   .ctx button{position:relative; justify-content:space-between; gap:16px; -webkit-user-select:none; user-select:none}
   .ctx button.danger{color:var(--bad)}
   .ctx button.danger:hover{background:var(--subtle-hover)}
+  .ctx button:disabled{color:var(--label-tertiary); pointer-events:none}   /* MenuFlyoutItemForegroundDisabled → TextFillColorDisabledBrush; the same treatment .fpitem[disabled] already gets in the menubar, stated for the context menus' own rows (the grid column chooser's obligatory ID/Form rows). pointer-events:none also drops the hover fill, which `:disabled` alone would not */
   .ctx .kbd{font-size:var(--fs-body); font-weight:var(--fw-normal); color:var(--menu-shortcut); direction:ltr; unicode-bidi:isolate}   /* MenuFlyoutItemKeyboardAcceleratorTextForeground → TextFillColorSecondaryBrush, at the row's own size */
   .ctx .mlbl{direction:ltr; unicode-bidi:isolate}
   .ctx .expand{font-size:var(--fs-caption); color:var(--label-secondary); font-style:normal; white-space:nowrap; direction:ltr; unicode-bidi:isolate}
@@ -393,6 +394,8 @@
     padding:6px 15px 4px; text-align:start; pointer-events:none; user-select:none}   /* 15 = the row's 11px padding + the 4px inset, so a header sits on the same optical line as the labels below it */
   .ctx .note{font-size:var(--fs-caption); line-height:var(--lh-caption); font-weight:var(--fw-normal); font-style:normal;
     color:var(--label-secondary); padding:4px 15px 6px; text-align:start; pointer-events:none; user-select:none; white-space:normal}   /* NOT italic: Segoe UI Variable's UI ramp has no italic, and Microsoft's own rule is that emphasis is a weight step */
+  .ctx.colmenu button{font-size:var(--fs-caption); padding-inline-start:22px; padding-inline-end:11px}
+  .ctx.colmenu .ck{inset-inline-start:11px}   /* pulled in from the shared 15px so this kit's two margins measure equal too (its rows carry 11px of padding, so the tick lands level with the label's trailing inset) */   /* the column chooser: smaller type, and a leading gutter cut back to what the tick alone needs so both of the menu's margins read equal — see the macOS kit's fuller note. The numbers are this kit's own (its rows carry 11px of padding, not the macOS kit's 7px); do not copy them across. */
   .ctx button.opt{padding-inline-start:39px}   /* the 28px icon column + the row's 11px padding */
   .ctx .ck{position:absolute; inset-inline-start:15px; top:50%; transform:translateY(-50%); font-size:12px; opacity:1}
   .ctx button:hover .ck{opacity:1}
@@ -488,7 +491,7 @@
   .drawer-group-h{font-size:var(--fs-caption); line-height:var(--lh-caption); font-weight:var(--fw-semibold);
     letter-spacing:normal; text-transform:none; color:var(--menu-hdr); margin:2px 4px 0; padding:6px 11px 2px; border-top:none}
   .drawer-pop .drawer-group-h:first-child{padding-top:4px}
-  .drawer-sep{border:none; border-top:1px solid var(--hairline); margin:1px -2px; width:auto}
+  .drawer-sep{border:none; border-top:1px solid var(--menu-sep); margin:1px -2px; width:auto}   /* the shared in-surface separator, as in the macOS kit. (This kit's .drawer-group-h draws no rule of its own — it uses explicit .drawer-sep elements — so there is no group-heading border to repoint here.) */
   .gm-editbtn{height:32px; padding:0 11px; color:var(--label-primary); font:inherit; font-size:var(--fs-body);
     font-weight:var(--fw-normal); cursor:default; text-align:left; white-space:nowrap; margin:4px}
   .gm-editbtn:hover{--_fill:color-mix(in srgb,var(--subtle-hover),var(--fill-secondary))}
@@ -496,8 +499,8 @@
   /* ── Status bar ───────────────────────────────────────────────────────────────────────────────
      Flat and opaque (SolidBackgroundFillColorSecondary), with a 1px divider. No backdrop blur: it
      sits on the window's own ground, and there is nothing behind it to sample. */
-  .statusbar{flex:none; display:flex; align-items:center; gap:14px; padding:0 16px; height:32px;
-    background:var(--statusbar-bg); border-top:1px solid var(--hairline);
+  .statusbar{flex:none; display:flex; align-items:center; gap:10px; padding:0 16px; height:32px;   /* 14px → 10px, matching the macOS kit's own reduction */
+    background:var(--statusbar-bg); border-top:1px solid var(--viewbar-border,var(--hairline));   /* the SAME token as this kit's options-bar bottom border, matching the macOS kit's own pairing of the two chrome-bar seams. Here both still resolve to --hairline (DividerStrokeColorDefault) — fluent-tokens.css aliases --viewbar-border to it — so this is a no-op today and a guarantee tomorrow: if either seam is ever given its own value, they move together rather than one being missed. */
     font-size:var(--fs-caption); line-height:var(--lh-caption); color:var(--label-secondary)}
   .statusbar .pill{display:inline-flex; align-items:center; gap:5px}
   .statusbar .pill b{color:var(--label-primary); font-weight:var(--fw-semibold)}
@@ -522,7 +525,8 @@
   .fmtpill:hover{--_fill:var(--subtle-hover)}
   .fmtpill.disabled{opacity:.36; cursor:default; border:1px solid var(--ctrl-stroke-weak); border-radius:var(--r-control); background:none}   /* excluded from the stroke rule by its own :not(.disabled), so this one states its flat border outright */
   .fmtpill.disabled:hover{background:none}
-  .pillchev{width:9px; height:6px; flex:none; opacity:.7; margin-inline-start:auto}
+  .pillchev{width:9px; height:6px; flex:none; opacity:.7; margin-inline-start:auto; transform:rotate(180deg); transition:transform .15s ease}   /* AT REST IT POINTS UP — the status bar sits at the bottom and its menus open upward, so the closed chevron points at where the list will appear and the open one (below) points back at the bar. Same treatment as the macOS kit, which carries the full note */
+  .pill.menuopen .pillchev{transform:none}   /* menu open → the glyph's own downward direction; class set by setPillMenuOpen (js/ui/wiring.js) */
 
   /* ── Modal layer ──────────────────────────────────────────────────────────────────────────────
      SmokeFillColorDefault is #4D000000 — black at 30 %, and THEME-INVARIANT in the source (the same
@@ -566,7 +570,8 @@
   .sheet .wherebtn:hover{--_fill:color-mix(in srgb,var(--subtle-hover),var(--field-bg))}
   .sheet .wherebtn .fpimg{width:16px; height:16px; flex:none; object-fit:contain}
   .sheet .wherebtn .wherename{flex:1 1 auto; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
-  .sheet .wherebtn .wherechev{flex:none; font-size:var(--fs-caption); color:var(--label-secondary)}
+  .sheet .wherebtn .wherechev{flex:none; width:12px; height:12px; background-color:var(--label-secondary);
+    -webkit-mask:var(--fluent-chevron-down) no-repeat center/contain; mask:var(--fluent-chevron-down) no-repeat center/contain}   /* THE ELEMENT NOW CARRIES NO TEXT — sheets.js stopped writing a "⌄" into it when the macOS kit moved this to a real masked SF Symbol, so styling it as text (font-size/color) would draw nothing at all here. Fluent's pull-down indicator is a SINGLE chevron-down, not macOS's up/down pair, so this kit draws its own glyph: the same 12px path select.sel already uses above, lifted into a token so the two cannot drift. */
   .sheet .wherebrowse{flex:none; width:32px; height:32px; --_fill:var(--field-bg); color:var(--label-primary);
     cursor:default; display:flex; align-items:center; justify-content:center; font-size:15px; padding:0}
   .sheet .wherebrowse:hover{--_fill:color-mix(in srgb,var(--subtle-hover),var(--field-bg))}

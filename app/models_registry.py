@@ -499,12 +499,28 @@ def _installed_sud_packages() -> set[str]:
     # pip-installed into this process would otherwise stay invisible until restart.
     import importlib
     import importlib.metadata as md
+    import importlib.util
     importlib.invalidate_caches()
     out: set[str] = set()
     for dist in md.distributions():
         name = (dist.metadata["Name"] or "").replace("-", "_")
         if "_sud_" in name:
             out.add(name)
+    # A BUNDLED model is present by construction (requirements-core.txt pins it), so a metadata scan
+    # that misses one is a packaging accident rather than a user choice — and the cost is not
+    # cosmetic: the model dropdown (populateModels in js/io/models.js) is built from the INSTALLED
+    # list alone, so an unseen en_sud_ewt takes English parsing out of the menu altogether. Ask the
+    # import system directly for whatever BUNDLED_SUD names the scan didn't find: find_spec locates
+    # the package on sys.path WITHOUT importing it, so it costs nothing and can't execute a broken
+    # model's __init__. Deliberately not the same fallback for every model: a non-bundled package
+    # with no metadata was never installed by download(), has no version to report and no matching
+    # release asset, so a row for it would be a guess — whereas a bundled one is a stated fact.
+    for pkg in sorted(BUNDLED_SUD - out):
+        try:
+            if importlib.util.find_spec(pkg) is not None:
+                out.add(pkg)
+        except Exception:  # noqa: BLE001 — a broken/partial install: not installed, as far as this goes
+            pass
     return out
 
 
@@ -531,8 +547,9 @@ def list_installed() -> list[dict]:
         try:
             from importlib.metadata import version
             entry["version"] = version(pkg)
-        except Exception:  # noqa: BLE001
-            pass
+        except Exception:  # noqa: BLE001 — no distribution metadata (the BUNDLED find_spec path above
+            entry.pop("version", None)   # finds a package that has none): the "0" of the synthetic
+            #                              wheel name a line up is regex filler, not a version to show.
         entry.update(engine="sud", installed=True)
         if pkg in BUNDLED_SUD:
             entry["bundled"] = True   # the Model Manager shows a "Bundled" pill in place of the Remove button
@@ -541,6 +558,48 @@ def list_installed() -> list[dict]:
         out.append({"id": f"stanza:{lang}#{tb}", "engine": "stanza", "lang": lang, "treebank": tb,
                     "label": _stanza_label(lang, tb), "installed": True})
     return out
+
+
+def merge_installed(available: list[dict], installed: list[dict]) -> list[dict]:
+    """The Manage Models list: every OFFERED model, flagged with what is installed, PLUS a row for
+    every installed model the offer list doesn't mention.
+
+    The two lists have different provenance, and that is the whole reason this exists.
+    :func:`list_available` is a NETWORK listing (GitHub Releases for the SUD wheels, the Stanza
+    performance table for the rest); :func:`list_installed` is a filesystem scan. So a model can be
+    installed and absent from ``available``: offline with a cold releases cache, a GitHub rate-limit,
+    an asset withdrawn from the release, a wheel side-loaded by hand.
+
+    Before this merge existed the Manage Models list drew from ``available`` ALONE (the frontend's
+    ``drawModelList`` filters exactly that array), so such a model vanished from the sheet entirely.
+    Measured with every fetch failing and no cached releases: ``list_available`` returns 62 rows, ALL
+    of them Stanza — the SUD group is empty, and the BUNDLED English parser has no row at all. No
+    "Bundled" pill, nothing to say the model the Wiktionary → MGloss lookup itself runs on is even
+    there, and the sheet reads "No models found (offline?)" about a machine that has three.
+
+    Nothing is dropped and nothing is duplicated: each installed id is matched against ``available``
+    ONCE (popped as it is consumed), so a model that IS offered gets its own row flagged rather than
+    a second one appended."""
+    inst_by_id = {e["id"]: e for e in installed if e.get("id")}
+    for e in available:
+        rec = inst_by_id.pop(e.get("id") or "", None)
+        e["installed"] = rec is not None
+        if rec is not None:
+            if rec.get("bundled"):
+                e["bundled"] = True    # ships with the app (BUNDLED_SUD) → the row offers no Remove
+            if rec.get("version") and not e.get("version"):
+                e["version"] = rec["version"]   # what is ON DISK, for a row the release list didn't date
+    if not inst_by_id:
+        return available               # the ordinary online case: same list, same order, as before
+    rows = list(available) + [dict(rec) for rec in inst_by_id.values()]
+    # Re-sort so the synthesised rows land IN their group rather than after it, keeping the engine
+    # order (SUD then Stanza) list_available already established and the by-label order within it.
+    # The engine rank is STATED rather than inferred from the merged list: infer it and an offline
+    # run, whose ``available`` holds no SUD row at all to be seen first, puts Stanza ahead of SUD.
+    # An unknown engine sorts after both rather than jumping the queue.
+    rank = {"sud": 0, "stanza": 1}
+    rows.sort(key=lambda e: (rank.get(e.get("engine") or "", 2), e.get("label") or e.get("id") or ""))
+    return rows
 
 
 def resolve_default_package(lang: str) -> str | None:

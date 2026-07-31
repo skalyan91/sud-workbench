@@ -116,7 +116,7 @@ let _trMenu=null;
 function trEl(){ if(_trMenu)return _trMenu; const m=document.createElement("div"); m.className="trmenu"; document.body.appendChild(m);
   m.addEventListener("mousedown",e=>e.preventDefault());   // clicking a row must not dismiss the menu (via the document mousedown) before its click fires
   _trMenu=m; return m; }
-function trClose(){ if(_trMenu)_trMenu.classList.remove("show"); }
+function trClose(){ setPillMenuOpen("translitPill",false); if(_trMenu)_trMenu.classList.remove("show"); }
 function trMenuSep(m){ const d=document.createElement("div"); d.className="trsep"; m.appendChild(d); }   // a hairline between the .trmenu's logical groups
 /* TWO COLUMNS OF RADIO BUTTONS over one shared list of schemes. The two settings do not offer the same options,
    and the grid says so by leaving a cell EMPTY rather than by disabling a control:
@@ -160,7 +160,7 @@ function trPick(id){ trClose();
   TRANSLIT_SCHEME=id; show.translit=true; updateTranslitPill(); clearTranslitCache(); fillTranslit(); if(DOC.length)preserveScroll(renderDoc);
   if(DOCLANG){ PREFS.translit[DOCLANG]=id; savePrefs(); }
   toast("Displayed transliteration: "+trSchemeLabel(id)); }
-function openTranslitMenu(x,y){ const m=trEl(); trRender(); m.classList.add("show");
+function openTranslitMenu(x,y){ const m=trEl(); trRender(); m.classList.add("show"); setPillMenuOpen("translitPill",true);
   const w=m.offsetWidth,h=m.offsetHeight;   // opens upward, above the status-bar pill (like the language picker)
   m.style.left=Math.max(8,Math.min(x,innerWidth-w-8))+"px";
   if(y-h-6>=8){ m.style.top=""; m.style.bottom=(innerHeight-(y-6))+"px"; }
@@ -307,7 +307,7 @@ function updateOrthoPill(){ const p=document.getElementById("orthoPill"); if(!p)
 let _orMenu=null;
 function orEl(){ if(_orMenu)return _orMenu; const m=document.createElement("div"); m.className="trmenu"; document.body.appendChild(m);
   m.addEventListener("mousedown",e=>e.preventDefault()); _orMenu=m; return m; }
-function orClose(){ if(_orMenu)_orMenu.classList.remove("show"); }
+function orClose(){ setPillMenuOpen("orthoPill",false); if(_orMenu)_orMenu.classList.remove("show"); }
 function orRender(){ const m=orEl(); m.innerHTML="";
   // item 11: "Original" (default, stored form) + "None" (→ displayed transliteration becomes the main glyph) + the scripts.
   // Sanskrit is stored in Latin (IAST) so "Original" would just be a romanisation, not a script → list scripts only.
@@ -329,7 +329,7 @@ function orPick(id){ orClose(); id=id||""; if(id===ORTHO_SCHEME) return;
   if(isSanskritLang()&&show.translit) fillTranslit();   // fill the IAST row now that a script is active
   if(DOCLANG){ PREFS.ortho[DOCLANG]=ORTHO_SCHEME; savePrefs(); }   // store ALL THREE kinds of choice verbatim — a script id, "none", and "" (Original). Deleting the key on Original (what this did before) left a deliberate Original indistinguishable from "never chose", so it could not be restored for a language whose default is not Original — see prefOrtho.
   toast(ORTHO_SCHEME==="none"?"Script: None (transliteration as main)":(ORTHO_SCHEME?("Script: "+orSchemeLabel(ORTHO_SCHEME)):"Original script")); }
-function openOrthoMenu(x,y){ const m=orEl(); orRender(); m.classList.add("show");
+function openOrthoMenu(x,y){ const m=orEl(); orRender(); m.classList.add("show"); setPillMenuOpen("orthoPill",true);
   const w=m.offsetWidth,h=m.offsetHeight;
   m.style.left=Math.max(8,Math.min(x,innerWidth-w-8))+"px";
   if(y-h-6>=8){ m.style.top=""; m.style.bottom=(innerHeight-(y-6))+"px"; }

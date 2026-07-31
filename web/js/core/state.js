@@ -29,6 +29,21 @@ let _glotName=null;
 function glotName(c){ if(_glotName===null){ _glotName=new Map(); (window.GLOTTOLOG_NAME||"").split("\t").forEach(e=>{ const i=e.indexOf("="); if(i>0)_glotName.set(e.slice(0,i),e.slice(i+1)); }); } return _glotName.get(c)||""; }
 function isoName(c){ if(!_isoName){ _isoName=new Map(); (window.ISO639_3||[]).forEach(e=>{ const nm=glotName(e[0])||e[2]; _isoName.set(e[0],nm); if(e[1])_isoName.set(e[1],nm); }); } return _isoName.get(c)||""; }   // reachable by either the 3-letter or the 2-letter code; prefers the Glottolog name
 function langName(l){ return LANGNAMES[l]||isoName(l)||l||""; }   // built-in two-letter names first, then the ISO 639-1 or ISO 639-3 reference name
+/* ── HOW A TYPED QUERY MATCHES A LANGUAGE NAME, everywhere a language is searched for ─────────────────────────
+   WORD PREFIX, on request: "eng" matches all and only the languages one of whose NAME WORDS begins with "eng" —
+   English, Engenni, Middle English — and no longer Bemba-Engo… by way of a bare substring hit in the middle of a
+   word. The old test was `name.includes(q)`, which at two or three letters pulled in a long tail of languages
+   with the letters buried inside them; those swamped the rows anyone was actually looking for, since the list
+   renders only its first LM_MAX rows.
+   A "word" starts at the beginning of the name or after any character that is not a letter or a digit — which is
+   what makes it right for the names actually in the table: spaces ("Ancient Greek"), hyphens ("Serbo-Croatian"),
+   apostrophes ("K'iche'"), slashes and parentheses ("Kalaallisut (Greenlandic)"). \p{L}/\p{N} with the `u` flag
+   rather than [A-Za-z0-9], because the names are not all Latin-script and a byte-class test would find a word
+   boundary in the middle of one that is not.
+   The query is REGEX-ESCAPED before it is spliced in: it is arbitrary text the user typed, and a stray "(" would
+   otherwise throw a SyntaxError out of the keystroke handler and freeze the menu on that character. */
+function wordPrefixRe(q){ return new RegExp("(?:^|[^\\p{L}\\p{N}])"+String(q).replace(/[.*+?^${}()|[\]\\]/g,"\\$&"),"u"); }
+function wordPrefix(name,q){ return !!name && !!q && wordPrefixRe(q).test(name); }   // `name` is expected already lowercased by the caller (every call site lowercases both sides once, rather than per-row)
 // 2-letter ISO 639-1 ↔ 3-letter ISO 639-3 bridge: each ISO639_3 row carries [code3, code1||"", name]. The
 // canonical UD code of a row is code1||code3 (used at pick time); isoName above resolves EITHER code to a name.
 function modelLang(id){ if(!id)return ""; const i=id.indexOf(":"); if(i<0)return ""; const eng=id.slice(0,i),name=id.slice(i+1);

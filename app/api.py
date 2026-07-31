@@ -949,12 +949,11 @@ class Api:
             installed = models_registry.list_installed()
         except Exception as exc:  # noqa: BLE001
             return {"error": str(exc), "available": [], "installed": []}
-        inst_ids = {e["id"] for e in installed}
-        bundled_ids = {e["id"] for e in installed if e.get("bundled")}   # ships with the app (models_registry.BUNDLED_SUD) → the row offers no Remove
-        for e in available:
-            e["installed"] = e["id"] in inst_ids
-            if e["id"] in bundled_ids:
-                e["bundled"] = True
+        # The flagging AND the merge both live in models_registry.merge_installed: `available` is a
+        # network listing and `installed` a filesystem scan, so an installed model can be missing
+        # from the offer list (offline, rate-limited, asset withdrawn) — and the Manage Models sheet
+        # draws from `available` alone, so it used to disappear from the sheet. See that function.
+        available = models_registry.merge_installed(available, installed)
         return {"available": available, "installed": installed}
 
     def model_train_sizes(self, refresh: bool = False) -> dict:
@@ -1145,8 +1144,20 @@ class Api:
 
     def open_about_window(self, version: str = "") -> dict:
         """Open the About window (item 26): separate native window; created by Siva Kalyan."""
+        # HEIGHT IS MEASURED, NOT GUESSED. _about_html's column is 366 px tall — 26 top padding,
+        # a 128 px icon (+3), 25 name, 39 two-line description, 19 byline, 17 version, 30 button,
+        # six 7 px gaps, 22 bottom padding — and it does not change with width anywhere from 312 px
+        # up (the description wraps to two lines at every width this window can be given). At the
+        # old 320 the block overflowed by 46 px, and because the body is `justify-content:center`
+        # the overflow was split BOTH ways: the top of the icon and the bottom of the Close button
+        # were each clipped by ~23 px, with no scrollbar to reveal either. 380 fits it with a little
+        # slack. The two numbers are not in the same coordinate system, which is why they differ by
+        # more than the 28 px title bar: pywebview's cocoa backend passes `height` to
+        # initWithContentRect_ (a CONTENT height) but `min_size` to NSWindow.setMinSize_ (a FRAME
+        # minimum, title bar included), so the floor is 366 + 28 ≈ 400 — below which the page clips
+        # again, and there is nothing here to scroll.
         return self._open_window("about", "About SUD Workbench",
-                                 self._about_html(version), 380, 320, (340, 300))
+                                 self._about_html(version), 380, 380, (340, 400))
 
     def open_models_window(self) -> dict:
         """Open the Model Manager as a real window (item 23)."""
@@ -1222,10 +1233,11 @@ class Api:
 
         The MAIN text stays a string all the way to the frontend, because the frontend owns the
         paragraph/heading structure inside it (splitParagraphs / paragraphsWithIds in js/io/bridge.js)
-        and that structure has to survive to `# newpar` / `# newdoc`. A PARALLEL text has no such
-        structure to keep — its sentences only have to line up one-for-one with the inserted blocks —
-        so it is sentencised HERE, where each language's own installed pipeline can be picked (see
-        _sentencize_parallel)."""
+        and that structure has to survive to `# newpar` / `# newdoc`. A PARALLEL text is sentencised
+        HERE, where each language's own installed pipeline can be picked (see _sentencize_parallel) —
+        but it comes back as PARAGRAPHS of sentences, not as one flat list: its sentences line up with
+        the inserted blocks paragraph by paragraph, and the frontend (the only side holding both
+        splits) is where that alignment is done."""
         main = self.window
         payload = text if isinstance(text, dict) else {"main": {"enabled": True, "text": text or ""}}
         _main = payload.get("main")   # bound once: two separate .get() calls read as "may be None" to a type checker even behind the isinstance guard, and this is the value four lines below dereference
@@ -1274,11 +1286,17 @@ class Api:
                 # translation of a Sanskrit text must not be rewritten as if it were Sanskrit.
                 raw = itrans.convert(raw, lang)["converted"]
                 model_id = self._model_for_language(lang, groups)
-                sents = self._sentencize_parallel(raw, lang, model_id)
-                if sents:
+                paras = self._sentencize_parallel(raw, lang, model_id)
+                if paras:
                     if not model_id:
                         naive.append(lang)
-                    parallels.append({"lang": lang, "sents": sents})
+                    # PARAGRAPHS, not a flat sentence list: the frontend aligns paragraph n of the
+                    # translation to paragraph n of the main text and only then sentence n to sentence n
+                    # (see alignToParagraphs in js/io/bridge.js).  Flattening here would throw away the
+                    # only structure that alignment has to work with — which is exactly the bug this
+                    # shape fixes: one extra sentence anywhere used to shift every later translation by
+                    # one, for the whole rest of the document.
+                    parallels.append({"lang": lang, "paras": paras})
             if not ((main_on and main_text.strip()) or parallels):
                 return                                    # nothing survived validation — nothing to send
             data = {
@@ -1321,17 +1339,22 @@ class Api:
             return ""
 
     @staticmethod
-    def _sentencize_parallel(text: str, lang: str, model_id: str) -> list[str]:
-        """A parallel text → its sentences, in order, using ``lang``'s own installed pipeline when
-        there is one and the script-aware rule splitter when there isn't (parse.sentencize already
-        degrades that way, so a missing model is never an exception).
+    def _sentencize_parallel(text: str, lang: str, model_id: str) -> list[list[str]]:
+        """A parallel text → its PARAGRAPHS, each a list of sentences in order, using ``lang``'s own
+        installed pipeline when there is one and the script-aware rule splitter when there isn't
+        (parse.sentencize already degrades that way, so a missing model is never an exception).
 
         PARAGRAPH-SPLIT FIRST, for the reason js/io/bridge.js records at splitParagraphs: parse.sentencize
         strips its input and returns whitespace-stripped slices, so a text handed to it whole comes back
         with every blank line gone — and a paragraph break is a hard sentence boundary no model should be
-        free to cross anyway. The main text is split the same way on the frontend, so a parallel text laid
-        out in the same paragraphs stays aligned with it sentence for sentence."""
-        out: list[str] = []
+        free to cross anyway.  A blank line is the paragraph break here for the same reason it is one in
+        the MAIN field (the dialog's own copy says so), so both sides of the alignment read the same rule
+        off the same typing.
+
+        The paragraph structure is RETURNED rather than flattened away, because it is what the frontend
+        aligns on — paragraph n to paragraph n, and only within that sentence n to sentence n.  Flattening
+        (what this used to do) made one extra sentence anywhere shift every later translation by one."""
+        out: list[list[str]] = []
         for para in _PARA_SPLIT.split((text or "").replace("\r\n", "\n").replace("\r", "\n")):
             para = para.strip()
             if not para:
@@ -1341,7 +1364,7 @@ class Api:
             except Exception as exc:  # noqa: BLE001 — never let one paragraph lose the whole translation
                 print(f"[insert] sentencize {lang!r}: {exc}", file=sys.stderr)
                 segs = []
-            out.extend(segs or [para])
+            out.append(list(segs or [para]))   # a paragraph the sentenciser refused is one sentence, not none
         return out
 
     def child_toolbox_build(self, path: str, mapping: dict) -> dict:
@@ -1672,7 +1695,14 @@ class Api:
       var r; try{r=await api().model_train_sizes(!!refresh);}catch(e){return;}
       var s=(r&&r.sizes)||{}; for(var k in s)TRAIN[k]=s[k]; applyTrain();
       if(r&&r.pending)setTimeout(function(){pollTrain(false);},1200);}
-    function match(e,q){return !q||(e.label||'').toLowerCase().indexOf(q)>=0||(e.lang||'').toLowerCase()===q;}
+    // WORD-PREFIX language matching, the same rule as web/js/core/state.js's wordPrefixRe and the two in-page
+    // language menus that read it. Restated inline because this window is a self-contained page: it loads none
+    // of the app's scripts, so it cannot call the shared helper and the rule has to be written twice. Keep the
+    // two in step — a query matches a name only where some WORD of it starts with the query, a word beginning
+    // at the string start or after any non-letter/non-digit. The query is regex-escaped: it is typed text, and
+    // a stray '(' would otherwise throw out of the keystroke handler and freeze the field.
+    function wpRe(q){return new RegExp('(?:^|[^\\\\p{L}\\\\p{N}])'+String(q).replace(/[.*+?^${}()|[\\]\\\\]/g,'\\\\$&'),'u');}
+    function match(e,q){return !q||wpRe(q).test((e.label||'').toLowerCase())||(e.lang||'').toLowerCase()===q;}
     async function load(refresh){var host=document.getElementById('list'); if(!api()){host.textContent='Model management is available in the desktop app.';return;}
       KEEP_SCROLL=host.scrollTop;   // remember scroll before 'Loading…' clears it (item 17)
       host.textContent='Loading…';
@@ -1700,8 +1730,14 @@ class Api:
       info.innerHTML='<span class="nm">'+esc(e.label||e.id)+'</span>'+(meta?'<small>'+esc(meta)+'</small>':'')
         +'<small class="ts">'+trainHtml(e.id)+'</small>'+sc;
       var right=document.createElement('div');right.className='right';
-      if(e.installed){var tag=document.createElement('span');tag.className='pill';tag.textContent='Installed ✓';right.appendChild(tag);
-        var b=document.createElement('button');b.className='danger sm';b.textContent='Remove';b.onclick=function(){removeModel(e,row);};right.appendChild(b);}
+      if(e.installed){var tag=document.createElement('span');tag.className='pill';tag.textContent=e.bundled?'Bundled ✓':'Installed ✓';right.appendChild(tag);
+        // A bundled model (models_registry.BUNDLED_SUD — the English parser the definition lookup
+        // itself runs on) gets no Remove button: it came with the app, so it isn't the user's to
+        // manage, and remove() refuses it anyway. THIS window is the one macOS actually opens
+        // (manageModels() → open_models_window), and it was offering the button and then failing on
+        // the click; the in-page sheet in js/io/models.js had the pill from the start, which is what
+        // made the gap easy to miss.
+        if(!e.bundled){var b=document.createElement('button');b.className='danger sm';b.textContent='Remove';b.onclick=function(){removeModel(e,row);};right.appendChild(b);}}
       else{var d=document.createElement('button');d.className='sm';d.textContent='Download';d.onclick=function(){downloadModel(e,row,d);};right.appendChild(d);}
       row.appendChild(info);row.appendChild(right);return row;}
     async function downloadModel(e,row,btn){btn.disabled=true;btn.textContent='Starting…';

@@ -20,7 +20,7 @@ function fmtMenu(x,y){ if(ctx.classList.contains("show")&&ctx._openedAt===_fmtSt
   ["Import UD…",null,()=>doImportUD()],
   ["Export as UD…",null,()=>doExportUD()],
 ],false,false,true);   // false rtlArg → the status-bar menu is always LTR, regardless of the selected sentence's direction. true fit → shrink to the widest row (four short labels don't fill the 224px floor)
-  _fmtStamp=ctx._openedAt; }   // remember WHICH open this was, so the next click on the pill can tell "still mine" from "someone else's menu"
+  _fmtStamp=ctx._openedAt; setPillMenuOpen("fmtPill",true); }   // remember WHICH open this was, so the next click on the pill can tell "still mine" from "someone else's menu". The chevron flips to point DOWN with it — cleared again by closeCtx (js/editing/context-menu.js), which is the one place EVERY way of closing this menu funnels through, the pill's own toggle above included
 async function doImportUD(){ if(!hasBridge())return toast("Import is available in the desktop app");
   if(!(await confirmDiscardUnsaved("Import a file and discard them?"))) return;
   showBusy("Importing UD…",true); let r;

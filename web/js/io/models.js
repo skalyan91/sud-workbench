@@ -1,5 +1,10 @@
 //@module js/models.js
 /* ── parser model registry (dropdown + Manage Models sheet) ──────────────── */
+// The dropdown is built from `installed` ALONE — never from `available`, which is a network listing
+// and is empty of SUD models on an offline first launch. That is also why nothing here special-cases
+// the bundled English parser: models_registry guarantees it in `installed` (it is pinned in
+// requirements-core.txt, and _installed_sud_packages falls back to find_spec for a BUNDLED_SUD
+// package the metadata scan misses), so the menu always offers English however the fetch went.
 async function populateModels(){ if(!hasBridge())return;
   let r; try{ r=await window.pywebview.api.list_models(); }catch(e){ return; }
   const inst=(r&&r.installed)||[]; MODELINFO={}; MODELLANG={};
@@ -47,7 +52,8 @@ async function renderModelList(host,refresh){ if(!host)return;
   const box=host.closest(".content"), sb=box&&box.querySelector("#msearch");
   drawModelList(host, sb?sb.value:""); pollModelTrain(!!refresh); }
 function drawModelList(host,query){ if(!host)return; const q=(query||"").trim().toLowerCase(); host.innerHTML="";
-  const match=e=>!q || (e.label||"").toLowerCase().includes(q) || (e.lang||"").toLowerCase()===q;
+  const wp=q?wordPrefixRe(q):null;   // item: the Manage Models search field is a LANGUAGE search ("Search language…"), so it matches the way the other two language menus do — by word prefix, not substring. Built once here rather than per row, as they do
+  const match=e=>!q || wp.test((e.label||"").toLowerCase()) || (e.lang||"").toLowerCase()===q;   // a label reads "English (EWT)" / "Ancient Greek (PROIEL)", so the treebank name in the brackets is a word of it and stays searchable; what goes is the mid-word hit ("ewt" no longer finding a language whose NAME happens to contain those letters)
   const mk=(title,engine)=>{ const rows=MODELS_AVAIL.filter(e=>e.engine===engine && match(e)); if(!rows.length)return;
     const h=document.createElement("div"); h.className="mgroup-h"; h.textContent=title; host.appendChild(h);
     rows.forEach(e=>host.appendChild(modelRow(e))); };

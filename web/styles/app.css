@@ -191,6 +191,7 @@
   .np-grid{position:absolute; inset-inline-start:1px; top:50%; transform:translateY(-50%); font-size:12px; line-height:1; pointer-events:none}   /* the grid Form cell has 8px of inline padding, which is where this sits — inside the cell but clear of the input's own text */
   .sblock.no-grid{padding-bottom:0}   /* grids off → the diagram is the last thing in the block, so its OWN bottom gap (the .diagram's 13px padding, or the equivalent baked into .bwrap/.outline/.wrapproj) is the only space that belongs below it. The block's 14px bottom padding exists to sit BELOW the grid; with no grid it would stack on top of the diagram's own gap and read as a too-large bottom. Dropping it to 0 for EVERY notation leaves exactly one normal bottom gap under the diagram, consistent across stemma/hierarchy/arcs/brackets/outline AND the wrapped variants */
   .sblock.sel-block{background:var(--block-sel); --occlude:color-mix(in srgb,var(--accent) 5%,var(--content-bg)); --block-occlude:color-mix(in oklch, color-mix(in srgb,var(--accent) 5%,var(--content-bg)) 50%, var(--content-bg) 50%);
+    --focus-ground:color-mix(in srgb,var(--accent) 5%,var(--content-bg));   /* the SAME colour as --occlude just above, under a second name, so a descendant that must REDECLARE --occlude can still reach the focused ground without forming a self-referential cycle — .softcase is the one such descendant (see the residue note in the .dim-* block) */
     --casing:var(--occlude)}   /* arc/leader casing (--block-occlude) = the OKLCH midpoint between the focused-block background and the plain (unfocused) background — a notch less tinted than the full focused bg. Unfocused blocks keep --block-occlude at content-bg (midpoint of content-bg with itself). */   /* focused block → the text halo IS the focused background colour (= --occlude, the opaque equivalent of content-bg + the block-sel tint), not a lifted version, so casing blends with the focused background */
   .shead{display:flex; align-items:baseline; gap:8px; margin-bottom:2px; position:relative; z-index:3; --stext-fs:13px}   /* Item 16 (fix): raise the WHOLE header (z-index:3) above the transliteration/original (.strans, z-index:1) and translations (.tgrid, z-index:1). The earlier fix lifted only the inner .stext (z-index:2), which wins ONLY while .shead is not its own stacking context; the moment .shead forms one (a transform/filter/opacity on the header, or the flex container being treated as a context), .stext's z-index is TRAPPED inside .shead and the header — z-index:auto — sinks under .strans, so the block-initial sentence paints UNDERNEATH its transliteration. Putting z-index:3 on the already-positioned .shead itself makes the sentence sit above reliably, whether .stext's z-index is hoisted or trapped. */   /* item 10 (rev): BASELINE-align the row so the sentence NUMBER and ID sit on the FIRST line of .stext (align-items:center floated them to the vertical middle of a wrapped sentence). The control icons/URL are pinned to the first line independently via align-self:flex-start + a one-line box + translateY, so they're unaffected by this and stay centred on the ID's optical line. */   /* item 14: --stext-fs is the SINGLE source of truth for the sentence-text size; .snum and the .sid-in input reference it so the sentence NUMBER and sentence ID always match .stext (and follow it if the document font is bumped) */
   .snum{font-size:var(--stext-fs); color:var(--muted); font-weight:700; font-variant-numeric:tabular-nums; min-width:15px; text-align:end; flex:none}   /* end → right in LTR, left in RTL */   /* item 14: same size as the sentence text (.stext) */
@@ -310,9 +311,28 @@
   .tgrid{margin:7px 0 3px; position:relative; z-index:1; padding-inline-start:3px; box-sizing:border-box; font-size:13px;   /* space ABOVE the grid = the x-height-to-baseline distance WITHIN one of its own rows (not the baseline-to-baseline pitch BETWEEN rows) — i.e. exactly one x-height at the grid's own 13px. Real x-height, not a guess: notosans.ttf's OS/2.sxHeight/unitsPerEm = 536/1000 = 0.536 (checked via fontTools) → 13 × 0.536 ≈ 6.97px, still rounded to 7px — the 13.2→13px resize moves it by a tenth of a pixel, so the 7 stands unchanged rather than being re-derived to a value it cannot render. margin-top (was 2px, then briefly 25px under an earlier baseline-to-baseline reading of this requirement) collapses with whatever precedes the grid (.strans's 3px margin-bottom, or .shead's 2px) to land at 7px */
     display:grid; grid-template-columns:max-content 1fr; column-gap:6px; row-gap:2px; align-items:baseline}   /* item 13: 3px left inset matches .stext's text padding so translation rows align with the sentence + transliteration */   /* Item 16: z-index:1 → the translation rows sit BELOW the block-initial sentence (.stext, z-index:2) */   /* item 3: ONE grid for every row → the language-name column is sized to the WIDEST name across all rows (not per-row), and align-items:baseline lines up each name with its translation field's text baseline instead of a hand-tuned padding-top nudge */
   .tgrid-row{display:contents}   /* item 3: rows no longer box their own children — they hand .tg-lname/.tg-text straight to the parent grid so columns/baselines line up across rows */
-  .tg-lname{white-space:nowrap; font-size:13px; font-weight:462;   /* weight curve @13px */ color:var(--muted)}   /* item 17: the language NAME shrinks to fit; the text field takes the rest to the right edge */
+  /* THE NAME'S VERTICAL BOX IS MADE IDENTICAL TO THE FIELD'S BESIDE IT — same line-height, same block padding,
+     same (transparent) block border — so the two share one baseline in every engine rather than only where the
+     sub-pixel arithmetic happens to land the same way. They are baseline-aligned by the grid, which in principle
+     needs none of this; in practice the two boxes were structurally different (name: line-height `normal`, no
+     padding, no border; field: 17.55px, 2px padding, a .5px border), and the field's baseline therefore sat at a
+     FRACTIONAL offset inside its box — 0.5px of border plus the half-leading of a 17.55px line. Chrome resolved
+     that exactly and measured the two baselines equal to three decimal places; WebKit rounded it and drew the
+     translation about a pixel low. Matching the boxes removes the difference at its source instead of nudging
+     one of them by a hand-tuned margin, which would only be right at one zoom level and one font. The 1.35
+     line-height became a whole 18px for the same reason — it is what `normal` already computed to on this face,
+     so nothing moves, and there is no longer a fraction to round. Both values are stated on both rules: they are
+     a matched pair, and changing one without the other is exactly what reintroduces this. */
+  .tg-lname{white-space:nowrap; font-size:13px; font-weight:462;   /* weight curve @13px */ line-height:18px; padding-block:2px; border-block:.5px solid transparent; color:var(--muted)}   /* item 17: the language NAME shrinks to fit; the text field takes the rest to the right edge */
   /* item 9: the translation field is contenteditable — PLAIN text when unfocused (like the sentence), field affordance on focus */
-  .tg-text{flex:1; min-width:0; font:inherit; font-size:13px; font-weight:462;   /* weight curve @13px */ line-height:1.35; color:var(--text); padding:2px 4px; border-radius:4px; border:.5px solid transparent; background:transparent; white-space:pre-wrap; overflow-wrap:anywhere; min-height:20px; box-sizing:border-box; outline:none; cursor:text}
+  /* THE FIELD STRETCHES THE FULL COLUMN — out to the sentence's own right edge, which renderBlockTrans pulls the
+     whole .tgrid in to meet — because that is the box the translation is typed into and its focus ring should
+     span. Shrinking it to its content (justify-self:start + width:max-content) was tried and reverted: it made
+     the click land only on the text, at the cost of the field's width. The click needs no help at all — the box
+     IS the target, and renderBlockTrans (js/io/bridge.js) carries the note on the two gates that were tried
+     there and removed. NOTE the field is transparent at rest and only shows its extent on :hover/:focus below,
+     which is what made "the input" look narrower than it is. */
+  .tg-text{min-width:0; font:inherit; font-size:13px; font-weight:462;   /* weight curve @13px — the SAME size and weight as .tg-lname beside it, which is what "the same font size" asks for; both are stated rather than inherited so neither can drift */ line-height:18px;   /* whole pixels, and the SAME value .tg-lname states — see its own note: a fractional line-height put this field's baseline at a sub-pixel offset that WebKit rounded and Chrome did not, drawing the translation a pixel below its language name */ color:var(--text); padding:2px 4px; border-radius:4px; border:.5px solid transparent; background:transparent; white-space:pre-wrap; overflow-wrap:anywhere; min-height:20px; box-sizing:border-box; outline:none; cursor:text}
   .tg-text:hover{background:var(--field-bg)}
   .tg-text:focus{background:var(--field-bg); border-color:var(--accent); box-shadow:0 0 0 2px var(--accent-weak)}
   .tg-text[data-empty]::before{content:"translation"; color:var(--muted); pointer-events:none}
@@ -578,7 +598,23 @@
      variables-1 §3.2) and computes to nothing at all. So the classes derive DIFFERENTLY-NAMED colours (--dim-*)
      and the register rules name them. --occlude, not --content-bg, is what they mix toward: it is this
      app's "what is actually behind this" colour, so the fade tracks the focused block's tint and the selected
-     subtree's own wash (.softcase reassigns it) instead of drifting off the local ground.
+     subtree's own wash (.softcase reassigns it) instead of drifting off the local ground. RE-AUDITED (item 2,
+     "dimmed colours must mix with the FOCUSED background, not the unfocused one"): every mix in the recipe below
+     ends on --occlude and therefore already lands on the colour the block actually paints — dimming only ever
+     happens inside the block being worked in, whose ground IS .sblock.sel-block's tinted --occlude. The one
+     literal --content-bg left in the recipe is arcInk()'s own base-ink formula, not a dimming step; see the note
+     on --dim-edge. No measurement in this comment block changes as a result — the ΔE ladder and the outside
+     endpoint were all computed against --occlude to begin with (that is what the "inside a FOCUSED block it lands
+     a further .013 off" note above is recording).
+     ONE RESIDUE the same audit turned up, now fixed the only way it can be: the .softcase rule below reassigns
+     --occlude to `color-mix(… var(--washcol) 15%, <ground>)`, and while that ground was a literal --content-bg a
+     wrapped-brackets or wrapped-projective box inside a FOCUSED block faded toward wash-over-PLAIN-page and
+     missed the block's own 5 % accent tint. .softcase cannot simply mix toward --occlude instead: a custom
+     property that references its own outer value on the same element is a CYCLE (css-variables-1 §3.2 — the very
+     cycle the --dim-* renaming exists to break). So the ground is a SEPARATELY-NAMED token, --focus-ground,
+     declared on .sblock.sel-block (same value as its --occlude) and read by .softcase through a
+     var(--focus-ground, var(--content-bg)) fallback — an unfocused block simply never declares it and lands on
+     the plain page, which is the correct answer there.
      WHY THE MIX IS TAKEN `in oklab` AND NOT `in oklch`, when the move being described is the OKLCH one. They are
      the same space; oklab is its Cartesian form, and a mix toward a neutral background in it does precisely what
      the polar description says — L travels toward the background's L, a and b toward the background's (≈0, so
@@ -654,11 +690,19 @@
   @media (prefers-color-scheme:dark){ .dim-out{--dim-fade:55%; --dim-fade-hue:55%; --dim-fade-2:0%} }   /* the SAME endpoint, recomputed: the dark palette is derived to preserve CONTRAST rather than lightness (see --c-other in mac-tokens.css), so the fraction differs from light's. #dddddd (L .8975) onto #666c78's L over #1e1e1e is 55.4 % — was 59.9 % against the old #f5f5f7. One number cannot serve both themes without missing the stated endpoint in one of them */
   @media (prefers-color-scheme:dark){ .dim-peri{--dim-fade:24%; --dim-fade-hue:12%} }   /* mirrors the light .dim-peri revision above: --dim-fade pulled back proportionally to dark's own endpoints, same "more headroom from --dim-out's 55%" reasoning. --dim-fade-2 stays at 0% (this override no longer sets it, so it falls through to the light block's own 0% — same value either way, kept as a single declaration rather than repeated per theme) */
   .dim-peri,.dim-out{
-    --dim-text:color-mix(in oklab, var(--text), var(--occlude) var(--dim-fade));
-    --dim-muted:color-mix(in oklab, var(--dia-muted), var(--occlude) var(--dim-fade));   /* the transliteration/gloss rows stay on the FORM's channel. They start BETWEEN --text and --c-other, so holding them back the way the POS register is held back would leave them BRIGHTER than the form they annotate — the opposite of receding */
-    --dim-tie:color-mix(in oklab, var(--tie-hue), var(--occlude) var(--dim-fade-2, var(--dim-fade)));   /* THE POS-TAG REGISTER, and the one that actually had to move. The split fade was first given only to --dim-muted — but --dim-muted dresses the transliteration/gloss rows, whereas a POS tag is painted from --dim-tie (see the .tok-pos/.node-cat/.mwt-pos rule below), so forms and POS tags went on fading in lockstep exactly as before and the split had no visible effect at all. Both secondary registers now take --dim-fade-2 */
-    --dim-hue:color-mix(in oklab, var(--tie-hue), var(--occlude) var(--dim-fade-hue));
-    --dim-edge:color-mix(in oklab, color-mix(in srgb, var(--tie-hue), var(--content-bg) var(--edge-mix)), var(--occlude) var(--dim-fade-hue))}   /* the arc ink is arcInk()'s own mix FIRST, then faded — so a dimmed arc still lands exactly where a neutral-relation arc would, one fade further back */
+    /* WHY EVERY ENDPOINT BELOW IS WRITTEN `var(--occlude, var(--content-bg))` AND NOT A BARE var(--occlude).
+       Both kits DO declare --occlude at :root (mac-tokens.css / fluent-tokens.css, `--occlude:var(--content-bg)`),
+       so the fallback is never the live path — it is a guard against a third kit that ships without the token.
+       It is worth the characters because the failure mode is not a mistint: a color-mix() with an unresolvable
+       component is INVALID AT COMPUTED-VALUE TIME, so --dim-text would compute to `unset` and a dimmed token
+       would paint at FULL strength — the recession would silently stop happening rather than land in the wrong
+       place. Same reasoning as the --arc-row/--arc-node-r parseFloat reads in the JS, which have no fallback and
+       fill the SVG with NaN when a kit fails to load. */
+    --dim-text:color-mix(in oklab, var(--text), var(--occlude, var(--content-bg)) var(--dim-fade));
+    --dim-muted:color-mix(in oklab, var(--dia-muted), var(--occlude, var(--content-bg)) var(--dim-fade));   /* the transliteration/gloss rows stay on the FORM's channel. They start BETWEEN --text and --c-other, so holding them back the way the POS register is held back would leave them BRIGHTER than the form they annotate — the opposite of receding */
+    --dim-tie:color-mix(in oklab, var(--tie-hue), var(--occlude, var(--content-bg)) var(--dim-fade-2, var(--dim-fade)));   /* THE POS-TAG REGISTER, and the one that actually had to move. The split fade was first given only to --dim-muted — but --dim-muted dresses the transliteration/gloss rows, whereas a POS tag is painted from --dim-tie (see the .tok-pos/.node-cat/.mwt-pos rule below), so forms and POS tags went on fading in lockstep exactly as before and the split had no visible effect at all. Both secondary registers now take --dim-fade-2 */
+    --dim-hue:color-mix(in oklab, var(--tie-hue), var(--occlude, var(--content-bg)) var(--dim-fade-hue));
+    --dim-edge:color-mix(in oklab, color-mix(in srgb, var(--tie-hue), var(--content-bg) var(--edge-mix)), var(--occlude, var(--content-bg)) var(--dim-fade-hue))}   /* the arc ink is arcInk()'s own mix FIRST, then faded — so a dimmed arc still lands exactly where a neutral-relation arc would, one fade further back */   /* THE INNER --content-bg IS THE ONE THE ITEM-2 AUDIT LEFT ALONE, and deliberately: it is not the dimming mix (that is the outer one, on --occlude) but a verbatim copy of arcInk() (js/diagram/diagram-core.js), the formula every UNDIMMED arc, arrowhead and .mwt-tie is painted with. Moving it to --occlude here alone would tint the dimmed arc's BASE ink toward the focused block while every undimmed arc beside it still receded toward the plain page — i.e. it would break the very equality the rest of this declaration exists to preserve, and in the one register where the two inks are meant to be indistinguishable but for the fade. The pair is ONE formula written twice: if arcInk() is ever moved onto --occlude (which is arguable on the same grounds as the fade — an arc in a focused block does recede toward the tinted ground), move this with it, in the same change. */
   .dim-peri .lbl,.dim-out .lbl{fill:var(--dim-hue)}                                    /* SVG relation label — a CSS `fill` always beats drawLabel's fill PRESENTATION attribute, the same way .brk.sel does */
   .dim-peri .edge,.dim-peri .arc-path,.dim-peri .leader,
   .dim-out .edge,.dim-out .arc-path,.dim-out .leader{stroke:var(--dim-edge)}            /* …and the curve/edge/leader under it, drained through arcInk()'s OWN formula (the mix .mwt-tie already uses) and then faded, so a drained arc lands exactly where a neutral-relation arc would, not one step brighter than its own label */
@@ -772,7 +816,7 @@
   .arc-casing{fill:none; stroke:var(--casing); stroke-width:calc(var(--arc-stroke) + 3.5px); stroke-linecap:round; pointer-events:stroke}   /* Item 4: the arc-stroke casing halo now uses the SHARED --casing (the background-mixed text-halo colour every other diagram element uses via paint-order:stroke / text-shadow), so arcs carry the same lifted halo as the deprel/POS labels instead of the plainer --block-occlude. Still opaque → a front arrow occludes one it crosses; in a .sel-block --casing tracks the focused-block background (=--occlude), never the span wash. pointer-events:stroke → clicking the casing selects the arc */
   .ah-casing{fill:var(--casing); stroke:none; pointer-events:fill}   /* Item 4: arrowhead halo on the SAME shared --casing as the arc stroke above; also selectable */
   .leader-casing{fill:none; stroke:var(--casing); stroke-width:4.3px; stroke-linecap:round}   /* Item 4: a lifted deprel label's leader casing on the shared --casing, matching the arc stroke and the label halo, so the whole arc+label unit shares one halo colour */
-  .softcase{--occlude:color-mix(in srgb, var(--washcol, var(--content-bg)) 15%, var(--content-bg));
+  .softcase{--occlude:color-mix(in srgb, var(--washcol, var(--content-bg)) 15%, var(--focus-ground, var(--content-bg)));   /* the ground the wash sits ON is the block's own, so inside a focused block this picks up its 5 % accent tint via --focus-ground (.sblock.sel-block) rather than fading toward the plain page — see the residue note in the .dim-* block above for why it can't just be var(--occlude) here */
     --washcase:color-mix(in srgb, var(--occlude), var(--casing-lift) 22%)}   /* occlusion = wash; --washcase = the wash-tinted text halo (lifted --occlude). The box keeps the AMBIENT --casing (background, or the sel-block tint); only the FORM text the span wash actually covers tints to --washcase (below). NOTE the contract this states is about the HALO TINT alone, and only that: the wash tints the halo of the subtree's FORMS and of the brackets over them, never the halo of the deprel/POS/translit annotations or of the arcs. It is no longer a statement about what a selection recolours at large — a selection now also accents the selected token's POS and incoming deprel, and recedes the rest of the sentence on two levels (see the .dim-peri/.dim-out note above). Those ride `color`/`fill`/`opacity`; the halo colours here are untouched by them, which is why the two can coexist. */
   .bwform,.bwrel,.bwpos,.bwbr,.bwclose,.bwtok .otrans,.bwtok .gloss,.bwrap .punctsat{
     text-shadow:0 0 2px var(--casing),0 0 2px var(--casing),0 0 3px var(--casing)}   /* item 4: give the gloss/mseg/mgloss tier rows (.bwtok .gloss) the SAME --casing halo the translit (.otrans) and POS already carry, so every wrapped-bracket tier stays legible over a crossing arc */   /* wrapped-bracket text casing halo (HTML → no paint-order stroke), matching the flat-brackets/.oline look and keeping text crisp over the wash/selection/hover bands. Uses the ambient default --casing everywhere; the subtree form + brackets override to --washcase below */
@@ -873,6 +917,16 @@
     display:flex; align-items:baseline; line-height:1;   /* item 4: a flex row → the spans stay BASELINE-aligned with each other, but the group's box tightly wraps them (no line-height leading skewed by the tall 15px POS box), so the symmetric 5px top/bottom padding centres the contents vertically within the row */
     text-shadow:0 0 2px var(--casing),0 0 2px var(--casing),0 0 3px var(--casing)}   /* casing halo → text stays crisp over the subtree/selection/hover bands */
   .oline.sel .oform{color:var(--accent)}   /* accent only, no weight bump — see the "selected token text" note beside .node.sel .node-lbl */
+  /* NO CASING ON A SELECTED ROW. The halo above is three CONTENT-BACKGROUND-coloured shadows stacked behind every
+     glyph, and its job is legibility over the subtree/hover bands, which are translucent washes that leave the
+     page showing through. The SELECTION band (.oselrow) is not one of those: it is opaque in all three of its
+     states — the darkened accent, the low-chroma mirror, and the grey inactive fill — so it supplies its own
+     contrast and the halo has no work left to do. What it does instead is paint a pale fur around each letter,
+     which is most of what a light halo can do behind white text on a saturated fill. Exactly the artefact, and
+     exactly the fix, that `.stext mark.findhit` above already records for the amber find highlight.
+     Scoped to .sel alone: .rng (the extended range) and .oline-ghost keep their casing, because the boxes behind
+     THEM (.osubbox, the range band) really are the translucent washes the halo exists for. */
+  #doc .oline.sel{text-shadow:none}   /* (1,2,0) — beats .oline's own (0,1,0) without resting on source order, the same way the inverse-ink rules below are lifted clear of the dim rules */
   .oline-ghost{opacity:.5}   /* Shared=Yes ghost row: a dimmed copy of the dependent's row under every OTHER conjunct in the coordination */
   .oline-ghost.sel,.oline-ghost.rng{opacity:.85}   /* item 3: still brighter when selected, though never fully opaque (stays visually a "ghost"). .rng joins it because a range is the selection generalised — the same reason applySel now toggles .rng on .ghost-g. The row's own ink already takes the accent through the ordinary .oline.sel/.oline.rng rules (this IS an .oline), so the outline's ghost has always been "accented but recessed"; only its recession lives here. It keeps .5→.85 rather than the SVG ghosts' .55→.75: this recedes a whole duplicated ROW of content — form, relation, POS, translit — not a single hairline, and a row that faint reads as unreadable rather than as quiet. */
   .osubbox{position:absolute; z-index:0; background:color-mix(in srgb,var(--accent) 7%,transparent); border-radius:6px; pointer-events:none; display:none}   /* subtree — subdued */
@@ -958,9 +1012,38 @@
   .gwrap{overflow:auto; max-height:calc(var(--cap-grid,40vh) + 1px); margin-top:2px; border:.5px solid var(--hairline-strong); border-radius:var(--grid-r); position:relative}   /* position:relative → the containing block for the .mwt-grid-tie overlays (absolutely positioned inside a scroll container, so they scroll WITH the rows they mark) */   /* +1px so the .5px top+bottom border doesn't eat into the content cap and force a 1px phantom scroll */   /* the radius needs no matching one on table.grid or the corner cells: .gwrap is the scroll container (overflow:auto), so it CLIPS to its own padding box and the square-cornered sticky header and last row are cut to the curve for free */
   table.grid{border-collapse:separate; border-spacing:0; font-family:var(--mono-font); font-size:var(--grid-cell); font-weight:462;   /* weight curve @13px = --grid-cell, see the :root comment — was a flat 400, reading noticeably lighter than every other 12.65px sans text in the block (e.g. .tg-lname) at the same size */ table-layout:fixed; width:100%;
     background:var(--content-bg)}   /* solid ground → grid unaffected by the selected block's tint; the enclosing frame is the .gwrap outline */
-  table.grid th{font-family:var(--token-font); text-align:start; font-weight:640; color:var(--grid-head-fg,var(--muted)); font-size:9.5px; letter-spacing:.4px; text-transform:uppercase; line-height:12px;
-    padding:4px 8px; box-shadow:inset 0 -.5px 0 var(--grid-head-border); white-space:nowrap; background:var(--grid-head-bg,var(--grid-struct-bg));   /* --grid-head-bg is the structural grey in light and the ODD ROW's own ground in dark (see mac-tokens.css); the fallback keeps the kit usable if a consumer defines only --grid-struct-bg */
+  /* THE HEADING BAND. Three deliberate departures from what it used to be, all of them requested:
+     · TITLE CASE IN THE UI FONT. The labels are UI chrome naming a column, not treebank content, so they belong
+       in --ui-font like every other label in the app — not in --token-font, which is the face the DATA is set in.
+       The old rule uppercased them (text-transform + .4px letter-spacing) at 9.5px: a small-caps-ish register that
+       needs the extra tracking to stay legible and the small size to stay quiet. Title case needs neither, and at
+       9.5px the UI font's lowercase would read as fine print rather than as a heading — so the size goes back up
+       to 11px, the smallest size the macOS/Fluent UI faces are actually drawn for, and the weight comes down from
+       640 (which was carrying the emphasis the uppercasing no longer supplies at all) to 590, the "emphasized
+       label" weight the rest of the chrome uses. Line-height 14px keeps the 11px text off the .5px bottom rule.
+       COLS (js/grid/grid.js) already carried title-case labels — "Form", "Lemma", "Deps" — and the acronyms
+       ("UPOS", "XPOS") are acronyms in that table, so nothing had to be relettered.
+       scanColW/pillColW measure the heading with meas(H,HEAD_F) and HEAD_F is built to match this rule — change
+       one and the other must follow, or every column is sized to a face it isn't drawn in.
+     · WHITE (the content ground) IN LIGHT MODE. --grid-head-bg is the kits' structural grey in light and the odd
+       row's own ground in dark; the request was for white in light, and in dark the token ALREADY resolves to
+       --content-bg — so both appearances are just --content-bg and the token has nothing left to say here. The
+       column dividers and the bottom hairline are what fence the band now, as they already were in dark.
+     · --text INK ON THE OBLIGATORY COLUMNS (.th-req below): ID and Form can't be switched off, and their headings
+       read at full strength to say so. Everything else keeps the muted heading colour. */
+  /* THE TWO HEADING INKS, on request: the obligatory columns at 85 % and the optional ones at 50 %, both of the
+     appearance's own ink rather than of --muted (which carries its own hue and alpha and could not hit either
+     figure). Stated as black in light and white in dark — this IS one of the places a straight black↔white flip
+     is right, unlike the hairlines (see --hairline's note in mac-tokens.css): these are TEXT inks, where the two
+     appearances genuinely mirror, and the alphas were given as a contrast ratio against the band, which is
+     --content-bg in both. Declared here, in app.css, and not in either kit: the grid is the app's own document
+     surface (CLAUDE.md's rule — the kits own chrome, app.css owns what draws the treebank). */
+  :root{--grid-head-ink-req:rgb(0 0 0 / .85); --grid-head-ink-opt:rgb(0 0 0 / .5)}
+  @media (prefers-color-scheme:dark){ :root{--grid-head-ink-req:rgb(255 255 255 / .85); --grid-head-ink-opt:rgb(255 255 255 / .5)} }
+  table.grid th{font-family:var(--ui-font); text-align:start; font-weight:500; color:var(--grid-head-ink-opt); font-size:11px; line-height:14px;   /* 500 = SF Pro Medium, on request (was 590, the "emphasized label" weight) — the optional headings now carry no emphasis at all, which is the point: the two obligatory ones below take Bold and the contrast between the two states is what says which columns can be switched off */
+    padding:4px 8px; box-shadow:inset 0 -.5px 0 var(--grid-head-border); white-space:nowrap; background:var(--content-bg);
     position:sticky; top:0; z-index:3}   /* headers stay fixed while the grid body scrolls; bottom rule via box-shadow (not border) so it adds no fractional row height → no 1px phantom scroll. Figma: black at 5% (--grid-head-border) */
+  table.grid th.th-req{font-weight:700; color:var(--grid-head-ink-req)}   /* ID and Form — the two columns the header's context menu draws as disabled, since neither can be turned off. 700 = SF Pro Bold at 85 % ink, on request; was --text at the shared 590. HEAD_F_REQ (js/diagram/diagram-core.js) measures against this weight, and scanColW/pillColW pick it per column — change the weight here and that string must follow, or the two columns are sized to a face they aren't drawn in */
   .colresize{position:absolute; top:0; inset-inline-end:0; width:9px; height:100%; transform:translateX(50%); cursor:col-resize; z-index:5}   /* straddles the column border (pseudo-element divider doesn't eat cell padding) */
   [dir="rtl"] .colresize{transform:translateX(-50%)}
   .colresize.fixed{pointer-events:none; cursor:default}   /* non-resizable column: keep the divider line, disable dragging */
@@ -1300,21 +1383,47 @@
      share. Below ~2 lines apiece they stop shrinking and .content scrolls instead — the sheet stays usable
      at a small window size rather than collapsing its fields to nothing.
      NO min-height:0 on either of these two, deliberately, and it is the whole of what makes that floor
-     hold: min-height:auto on a column flex item IS the min-CONTENT floor, i.e. the row + the textarea's own
-     52px + the note. Set to 0 (the reflex, since that is what lets .content above scroll) the blocks
+     hold: min-height:auto on a column flex item IS the min-CONTENT floor, i.e. the two form rows + the
+     textarea's own 52px + the note. Set to 0 (the reflex, since that is what lets .content above scroll) the blocks
      cheerfully shrank past their contents instead — measured 80px of block around 109px of field, so a
      parallel text's note and the next field's header overlapped by 29px, and at six fields by 69px. */
   .insblock{display:flex; flex-direction:column; gap:6px; flex:1 1 0}
   .insblock.main{flex:2 1 0}
-  .sheet .insblock textarea{flex:1 1 auto; min-height:52px; resize:none; font-family:inherit}   /* resize:none — the height is flex's to hand out, and a dragged height would fight it. 52px ≈ two lines of the 13px field type plus its padding. font-family:inherit, not the sheets' ui-monospace: this is running prose in the document's own language (often non-Latin), not a list of tags */
+  /* EVERY TEXT FIELD IN THIS SHEET OPENS AT THREE LINES — the main one and each parallel text alike, on request.
+     68px is derived, not chosen: the box is 9px of padding and 1px of border on each side (20px of chrome,
+     measured) around a 16px line box at the field's 13px, so 3 × 16 + 20 = 68. It replaces a 52px floor that was
+     the same arithmetic for two lines, and it is a FLOOR, not a height: the main field is flex:2 against the
+     parallels' flex:1, so it still takes twice whatever slack the sheet has to give and only falls back to this
+     when there is none. (The parallels were briefly four lines; both are three now.)
+     resize:none — the height is flex's to hand out, and a dragged height would fight it. font-family:inherit,
+     not the sheets' ui-monospace: this is running prose in the document's own language (often non-Latin), not a
+     list of tags. */
+  .sheet .insblock textarea{flex:1 1 auto; min-height:68px; resize:none; font-family:inherit}
   .insblock.off textarea{opacity:.45}
-  .insrow{display:flex; align-items:center; gap:8px}
-  .insrow .insnm{font-size:12px; font-weight:600; color:var(--muted)}
-  .insrow .inssp{flex:1}
+  /* ── the form rows (item 7): a native two-column form, ONE layout for both platforms ─────────────────
+     A leading LABEL column and a single CONTROL AXIS that everything on a row starts from — popup, text
+     view and footnote alike. That is the macOS HIG form, and it is what this sheet's nearest sibling
+     already does (sheetChooseSaveLocation's "Save As:" / "Where:", labelled with the same trailing colon).
+     It is also one of Fluent's two sanctioned form layouts ("labels leading, left-aligned beside their
+     controls"), so app.css needs no platform branching for the LAYOUT. The one thing the two guidelines
+     genuinely disagree on is the label's own alignment — macOS trailing-aligns a form label against the
+     control axis, Fluent leading-aligns it — and that single declaration is the whole of the branch below.
+     WHAT REPLACED WHAT: the row was [checkbox+name] [flex spacer] [select], which pinned the label to one
+     edge of the sheet and the control to the other with nothing lining up down the column.
+     --ins-label is kept tight (the longest label is "Language:", ~58px at this size): the fields are this
+     dialog's whole point and every pixel of the indent comes out of the prose the user is pasting. */
+  .insfields{--ins-label:66px; --ins-gap:8px}
+  .insrow{display:grid; grid-template-columns:var(--ins-label) minmax(0,1fr); align-items:center; column-gap:var(--ins-gap)}
+  .insrow .inslab{text-align:end; font-size:12px; color:var(--muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
+  :root[data-platform="win"] .insrow .inslab{text-align:start}   /* the ONLY platform branch in the sheet: Fluent leading-aligns a form label where macOS trailing-aligns it. Layout, spacing and the control axis are identical, so nothing else forks */
+  .insctl{display:flex; align-items:center; gap:8px; min-width:0}   /* the control axis itself — a row's controls start here, never at the sheet's edge */
+  .insctl .ins-rm{margin-inline-start:auto}   /* …and the row's Right Accessory still goes to the trailing edge (see .gm-rm/.ins-rm above) */
+  .sheet .insblock textarea,.insblock .insnote{margin-inline-start:calc(var(--ins-label) + var(--ins-gap)); width:auto}   /* the text view and its footnote are controls too: on the axis, or the form has two of them. width:auto is NOT decoration — both kits give .sheet textarea width:100%, and 100% OF THE BLOCK plus the indent put the field's whole trailing edge outside the sheet; auto lets the column flex container stretch it to what is left after the margin */
+  .insrow .insnm{font-size:12.5px; color:var(--text)}   /* a CHECKBOX TITLE now, not a section heading — per the HIG a checkbox carries no leading label, it sits on the control axis with its own text beside the box, so this reads as ordinary control text rather than the muted caption it was when it stood in the label position */
   .inschk{display:flex; align-items:center; gap:6px; cursor:pointer; user-select:none}
   .inschk input{width:auto; margin:0}
   .inschk input:disabled + .insnm{opacity:.55}   /* the main field of an empty document can't be switched off — there is nothing there to translate */
-  .sheet .insrow select.sel{flex:0 0 auto; max-width:210px; font-size:12.5px}
+  .sheet .insrow select.sel{flex:0 1 auto; min-width:0; max-width:230px; font-size:12.5px}
   /* a FIXED language (the document's own) is shown, not chosen — a static chip, so it reads as "this is the
      language" rather than as a menu that happens to be broken */
   .insfixed{flex:0 0 auto; max-width:210px; height:30px; line-height:30px; padding:0 10px; border-radius:8px;
@@ -1324,13 +1433,17 @@
   .insnote:empty{display:none}   /* an empty note must not still spend the block's 6px gap */
   .sheet .actions .inserr{margin-inline-end:auto; text-align:start; color:var(--accent-red,#ff383c); font-size:11.5px; line-height:1.35}   /* margin-auto on the leading side pushes the buttons back to the trailing edge the row's justify-content puts them at */
   .sheet .tbtn .kbd{margin-inline-start:7px; font-weight:510; opacity:.72; direction:ltr; unicode-bidi:isolate}   /* the shortcut glyph on a default button (Insert's ⌘↩), in this app's own menu convention (see .ctx .kbd): the SAME size and weight as the label it trails, dimmed rather than shrunk, and held in LTR order so ⌘↩ never reverses under an RTL system language */
-  /* THE THREE-BUTTON SAVE ALERT reorders when it stacks. Side by side the DOM order IS the macOS order —
-     [Don't Save] [Cancel] [Save], the destructive one leading and the default rightmost — and column-reverse
-     turns that into Save / Cancel / Don't Save, which is not how macOS stacks it: Cancel goes to the BOTTOM,
-     under the discard action, so the two answers that keep working sit together at the top. Pulling Cancel to
-     the front of the ascending order does it, because the container then reverses it to the back — one
-     declaration instead of a second DOM order for the same three buttons. Scoped to the stacked variant, so the
-     side-by-side row is untouched. */
+  /* THE RULE, stated generally because it governs any alert this app grows, not just the one that exists today:
+     WHENEVER AN ALERT HAS THREE STACKED BUTTONS THEY READ, TOP TO BOTTOM, PRIMARY → DESTRUCTIVE → SECONDARY.
+     Today's only such alert is the three-button save prompt (askConfirm with opts.saveLabel, js/ui/sheets.js),
+     where that is Save / Don't Save / Cancel. A fourth button, or a second three-button alert, must land in the
+     same order — check it against this line rather than against how the DOM happens to be written.
+     THE MECHANISM. Side by side the DOM order IS the macOS order — [Don't Save] [Cancel] [Save], the destructive
+     one leading and the default rightmost — and column-reverse alone would turn that into Save / Cancel / Don't
+     Save, which puts the secondary in the middle. Pulling Cancel to the front of the ascending order fixes it,
+     because the container then reverses it to the back: one declaration instead of a second DOM order for the
+     same three buttons, which also leaves the focus order (and so the tab order) reading from the DOM alone.
+     Scoped to the stacked variant, so the side-by-side row is untouched. */
   .sheet.sm .actions.stacked > [data-cancel]{order:-1}
   .issuelist{display:flex; flex-direction:column; gap:2px}
   .issuerow{display:flex; gap:10px; align-items:baseline; width:100%; text-align:start; padding:7px 9px; border:none; background:transparent; border-radius:7px; cursor:pointer; font:inherit; color:var(--text)}
@@ -1504,7 +1617,7 @@
   #findBar .findaddf{align-self:flex-start; width:auto; height:22px; padding:0 8px; border:none; border-radius:6px; background:transparent;
     color:var(--accent); font:inherit; font-size:12px; font-weight:500; cursor:pointer}
   #findBar .findaddf:hover{background:var(--accent-weak)}
-  .findhr{height:1px; margin:2px 0; background:var(--hairline)}
+  .findhr{height:1px; margin:2px 0; background:var(--menu-sep)}   /* the rule between the find and replace rows — the same in-surface separator the menus and drawers use (was --hairline, which light mode raised to 90% black for in-CONTENT dividers and which drew a hard black line across the bar) */
   .findfoot{display:flex; align-items:center; gap:10px}
   .findstat{flex:1; min-width:0; font-size:11.5px; color:var(--muted); overflow:hidden; text-overflow:ellipsis; white-space:nowrap}   /* the live "what will change" line — a count always, plus the first before→after once a replacement is typed */
   .findstat.finderr{color:var(--bad); white-space:normal}   /* an invalid pattern gets to wrap: the engine's own message is the useful part and must not be clipped */

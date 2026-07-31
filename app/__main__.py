@@ -283,7 +283,9 @@ def main(argv: list[str] | None = None):
             mac_shell._unify_titlebar_on_show(window, api)
         else:
             print("[chrome] SUD_CHROME=win — Fluent kit in a native window; macOS titlebar "
-                  "unification skipped. The NSMenu is still macOS's; Mica/caption buttons are not "
+                  "unification skipped. The NSMenu is still macOS's, but its AppKit wiring rides "
+                  "along with the unification and is skipped too, so this preview has no menu key "
+                  "equivalents and no injected Cut/Copy/Paste. Mica/caption buttons are not "
                   "wired here (that is app/win/, and it needs Windows).", file=sys.stderr)
         mac_shell._enable_first_mouse()
     elif IS_WIN:
@@ -297,6 +299,21 @@ def main(argv: list[str] | None = None):
     # Windows the menu is drawn by the web layer INSIDE the title bar, and handing pywebview a menu
     # there would additionally raise a native WinForms MenuStrip band above the page — two menu bars,
     # one of them un-styleable. Api.menu_spec() serves that same table to js/ui/menubar.js instead.
+    # NO DEFAULT MENUS. pywebview's cocoa backend builds its own View and Edit menus on top of
+    # whatever menu it is handed (_recreate_menus → _add_view_menu / _add_edit_menu, platforms/
+    # cocoa.py), gated on this one setting, which defaults to True. app/menu_spec.py declares an Edit
+    # and a View of its own, so the bar came up with each of the two TWICE — pywebview's pair
+    # (inserted at index 1, i.e. ahead of ours) and ours. Switching the setting off is the supported
+    # way to stop it; the alternative, hunting the duplicates down and removing them from the live
+    # NSMenu afterwards, would have to re-run on every menu rebuild and races the rebuild itself.
+    #
+    # What those defaults PROVIDED is not lost: Cut/Copy/Paste/Select All and Enter Full Screen are
+    # first-responder AppKit selectors (they work inside the WKWebView's own text fields precisely
+    # BECAUSE they have no target), and app/mac/shell.py now injects them as native NSMenuItems into
+    # our own Edit and View menus — from menu_spec.NATIVE_MAC, so the chords stay in the one table.
+    # The setting is written unconditionally: only the cocoa backend reads it (winforms has no
+    # default menus at all), and the answer would be "no" on any backend that later did.
+    webview.settings["SHOW_DEFAULT_MENUS"] = False
     menu = build_menu(window, api) if IS_MAC else []
     # trace window teardown so a "vanished window" is attributed: did a close event fire, or did
     # the run loop just end? (logged to crash.log alongside the faulthandler/exception hooks)

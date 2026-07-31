@@ -1342,11 +1342,32 @@ function buildBlock(i,ctx){ const s=DOC[i];
     urlBtn.addEventListener("keydown",e=>{ if(e.key==="Enter"||e.key===" "){ e.preventDefault(); editURL(i,urlBtn); } });
     head.appendChild(num); head.appendChild(txt); head.appendChild(urlBtn); head.appendChild(sid); head.appendChild(ctrl);   // item 6: number stays first (left margin); the URL link sits in flow just BEFORE the sentence ID
     head.addEventListener("contextmenu",e=>{ if(e.target===sid)return; e.preventDefault(); sentMenu(e.clientX,e.clientY,i); });
+    /* A CLICK ON BARE BLOCK BACKGROUND MUST NOT PLACE A CARET IN AN EDITABLE THAT ISN'T UNDER IT.
+       The reported symptom was that clicking well to the RIGHT of a translation field — out in the gutter under
+       the block controls, where elementFromPoint returns this .sblock and nothing else — focused that field
+       anyway. It is not the app doing it: a focus trace showed the focusin arriving with no programmatic
+       .focus() in the stack. It is the engine's own caret placement, which for a click that lands on a
+       non-editable block resolves to the CLOSEST EDITABLE POSITION rather than to nothing — and on the
+       translation row's line the closest editable is the .tg-text to its left. Two things made it hard to
+       corner: it needs the click to be the FIRST one on the block (once a caret exists elsewhere the engine
+       resolves differently), and headless Chrome only reproduces it under exactly that condition, which is why
+       two earlier attempts to fix this from inside .tg-text were built on a misreading and had to be reverted
+       (see renderBlockTrans, js/io/bridge.js).
+       preventDefault() on the MOUSEDOWN is what suppresses that caret placement — the click handler below runs
+       too late, focus having already moved. But preventDefault alone would ALSO stop the click from moving focus
+       AWAY, leaving a focused field focused when the user clicks off it; so the blur is done explicitly. Scoped
+       to `e.target===b`, i.e. the block's own background and nothing inside it: every editable, control, token,
+       grid cell and label is a descendant, so none of them is affected, and a click on them still behaves exactly
+       as before. */
+    b.addEventListener("mousedown",e=>{ if(e.target!==b) return;
+      const ae=document.activeElement;
+      if(ae&&ae!==document.body&&b.contains(ae)&&(ae.isContentEditable||/INPUT|TEXTAREA|SELECT/.test(ae.tagName))) ae.blur();   // clicking off a field commits it — the field's own blur handler is what pushes its undo entry
+      e.preventDefault(); });
     b.addEventListener("click",e=>{ if(e.target.closest(".sctrl")||e.target.closest("input")||e.target.closest("select")||e.target.closest(".gridbox")||e.target.closest(".sid-in"))return;   // .sid-in: a contenteditable span, not an <input> — its own mousedown/click stopPropagation already keeps events from reaching here (see buildBlock), but excluded here too for anything that reaches this handler by another path
       if(e.target.closest(".node,.tok-group,.arc,.edge-g,.oline,.brk,.bwtok,.bwbr,.mwt-form"))return;   // a token/bracket/MWT-tie handles its own selection
       pick(i,0,false); });   // clicked empty diagram space → deselect any node
     b.addEventListener("contextmenu",e=>{ if(e.target.closest(".gridbox")||e.target.closest(".sctrl")||e.target.closest("input")||e.target.closest("select")||e.target.closest(".sid-in"))return;   // grid/controls have their own menus; .sid-in gets the browser's own contenteditable context menu, same as an <input> would have
-      if(e.target.closest(".lbl,.orel,.tok-pos,.node-cat,.opos,.node,.tok-group,.oline,.bwtok"))return;   // labels + nodes handled at the doc level
+      if(e.target.closest(".lbl,.orel,.tok-pos,.node-cat,.opos,.node,.tok-group,.oline,.bwtok,.mwt-form,.mwt-tr"))return;   // labels + nodes handled at the doc level   /* .mwt-form/.mwt-tr joined the list: the delegated handler on #doc raises the MWT's own menu for both rows, but THIS listener is on the .sblock and therefore runs FIRST (bubbling reaches the block before the document), so without the exclusion every right-click on a multi-word token built the whole sentence menu and threw it away a moment later — and, while sentMenu was broken, threw a TypeError on the way */
       e.preventDefault(); sentMenu(e.clientX,e.clientY,i); });   // right-click anywhere else in the block → the block menu
     // (the boundary's own heading was built and appended to its section ABOVE this block — see the sectioning
     //  note at the top of this loop. It used to be an absolutely-positioned child of the block; a sticky box
@@ -1374,7 +1395,23 @@ function buildBlock(i,ctx){ const s=DOC[i];
     ctx.sheet.appendChild(b);
   return b; }
 
+/* ── HOLDING THE RE-RENDER FOR THE DURATION OF A BATCH OPERATION ──────────────────────────────────────────────
+   renderDoc() rebuilds the whole windowed view, and on a large document that is not cheap: MEASURED at ~250 ms
+   on a 2,000-sentence / 24,000-token file. doInsert renders once per sentence, so pasting 80 sentences into that
+   document called it 80 times and took 44 SECONDS — the other half of "insert a lot of text and the app slows to
+   a crawl" (the first half being the undo stack; see UNDO_BUDGET in js/core/undo.js). Nothing in that loop needs
+   the intermediate DOM: each iteration writes to DOC and the next reads DOC, never the page.
+   So a batch holds rendering, and every renderDoc() inside it just RECORDS that one is owed; endRenderHold()
+   performs exactly one at the end. A DEPTH COUNTER, like the undo batch it is opened beside, so nesting is safe;
+   and the pending flag is checked on the way out so an operation that never asked for a render doesn't get one.
+   Callers MUST use try/finally — a throw between begin and end would otherwise leave rendering held for the rest
+   of the session, i.e. a frozen-looking app. */
+let RENDER_HOLD=0, RENDER_PENDING=false;
+function beginRenderHold(){ RENDER_HOLD++; }
+function endRenderHold(){ if(RENDER_HOLD>0) RENDER_HOLD--;
+  if(RENDER_HOLD===0&&RENDER_PENDING){ RENDER_PENDING=false; renderDoc(); } }
 function renderDoc(){
+  if(RENDER_HOLD>0){ RENDER_PENDING=true; return; }   // batched — see the note above
   if(typeof refreshFontStacks==="function") refreshFontStacks();   // diagram-core.js: re-reads #doc's LIVE --token-font/--mono-font (a scheme-scoped override, e.g. Ranjana, may have changed it since the last render) into LIVE_TOKEN_STACK/LIVE_MONO_STACK and every measurement font string derived from them (WORD_F, GLOSS_F, …), ONCE per render rather than per meas() call. Must run before computeColW() (→ marginNumWidth) and before anything below that measures token width, or this render would still lay out against the PREVIOUS scheme's metrics. Guarded (as document.js already guards TOKEN_STACK-dependent reads elsewhere) for any harness that renders before diagram-core.js has loaded
   msegFlagDoc();   // what an MWT grouping implies about its members — the MSeg tier's decorative continuation mark, and in Sanskrit a featureless non-final member's Compound=Yes. A dozen scattered operations move those ranges (grouping, ungrouping, splitting, flattening, inserting/deleting a token, an auto-regroup after a parse), so deriving it HERE, once, at the single point they all funnel through, is what keeps it from ever going stale; it's idempotent and cheap, and marks nothing dirty of its own accord — see msegFlagSent
   computeWindow(curBlock());   // recentre the rendered window on whatever sentence the reader is on — see the virtualization note above buildBlock. MUST run before computeColW(): that scans the CURRENT window (js/grid/grid.js), so the window has to be known first
@@ -1425,7 +1462,7 @@ function renderDoc(){
   const hcs=getComputedStyle(host), padTop=parseFloat(hcs.paddingTop||0);
   const dh=Math.max(160, host.clientHeight-padTop), rs=document.documentElement.style; AVAILH=dh;   // caps are relative to the app's VISIBLE document viewport (options-bar bottom → status-bar top), not the browser and not the occluded top padding
   // #doc isn't zoomed, so dh is REAL px; but .diagram/.gwrap live inside .sblock{zoom:var(--fs)}, which multiplies any max-height by FS. Divide the cap by FS so the VISUAL cap stays a fixed fraction of the viewport at every zoom level (recomputed here on every render → refreshed on each zoom, since setFS re-runs renderDoc). At FS=1 this is a no-op.
-  rs.setProperty("--cap-dia",Math.round(dh*0.6/FS)+"px"); rs.setProperty("--cap-grid",Math.round(dh*0.4/FS)+"px");
+  rs.setProperty("--cap-dia",Math.round(dh*0.6/FS)+"px"); rs.setProperty("--cap-grid",Math.round(dh*0.4/FS)+"px");   // the :root pair is the FALLBACK only: it reserves 60/40 of the bare viewport, i.e. of a block with no chrome at all. Each block overrides both with its own share of what is left after its padding + heading + sentence + transliteration + translation rows — see the per-block pass just after the buildBlock loop below.
   /* the --bm-stick engine probe was published here; the headings do not pin any more, so there is no inset to measure or hand to CSS. stickyTopFactor() survives below, unused but documented — it records what each engine counts into a sticky view rectangle, which is not obvious and was expensive to establish. */
 
   const ctx={sheet,NUM,SNUM,newSheet,diaSig:diaFlagsSig()};   // diaSig computed ONCE per render (not per sentence — every sentence in this render shares the same view-state) and read back by diaSentence() below
@@ -1439,6 +1476,48 @@ function renderDoc(){
   if(winLo>0) host.insertBefore(topSpacer,host.firstChild);
   for(let i=winLo;i<winHi;i++) buildBlock(i,ctx);   // ONLY the windowed range — see the virtualization note above buildBlock
   const _rendered=host.querySelectorAll(".sblock");
+  /* ── THE 60/40 RESERVATION IS OF WHAT THE DIAGRAM AND GRID CAN ACTUALLY HAVE, PER BLOCK ────────────────────
+     --cap-dia / --cap-grid were 60 % and 40 % of `dh` — the whole document viewport — which over-reserves by
+     everything that stands BETWEEN the two: the block's own vertical padding and border, the boundary heading,
+     the running sentence, the script/transliteration rows and the translations grid. A block with three
+     translation languages therefore declared a diagram cap it could not honour, and the reservation only came
+     right when the authoritative per-block pass further down (search "per-block height caps") replaced these
+     caps with measured inline max-heights. Everything measured in BETWEEN those two points — AVG_BLOCK_H
+     immediately below, and with it both virtualization spacers — saw the over-large caps.
+     So subtract the chrome here, per block, because it differs from sentence to sentence: the CSS vars are
+     inline on the .sblock, which beats the :root pair for that block with no change to app.css at all (.diagram,
+     .text-conv and .gwrap already read var(--cap-dia)/var(--cap-grid)). The :root pair stays as the fallback for
+     anything outside a block, and for the instant before this pass runs.
+     ONE ITERATION IS ENOUGH, and that is not an approximation: none of the chrome rows' heights depends on
+     --cap-dia/--cap-grid — they are text rows above the two scrollers, sized by their own content — so writing
+     the caps cannot change the chrome that was just measured, and there is no fixed point to iterate toward.
+     (The heights are read BEFORE stxWrapRoom/alignInlineStart have run, so a wrapped running sentence can still
+     grow by a line afterwards. That is why this is a BUDGET and the later pass is the authority: erring here
+     costs a few px of cap on the blocks that wrap, never a wrong final layout.)
+     .diagram.wrapproj is untouched by construction: its `max-height:none` (app.css) outranks .diagram's
+     var(--cap-dia) whatever this writes, and its height is driven explicitly at layout time. */
+  _rendered.forEach(b=>{
+    const bcs=getComputedStyle(b);
+    let chrome=parseFloat(bcs.paddingTop||0)+parseFloat(bcs.paddingBottom||0)+parseFloat(bcs.borderTopWidth||0)+parseFloat(bcs.borderBottomWidth||0);
+    const outer=el=>{ const cs=getComputedStyle(el);
+      if(cs.position==="absolute"||cs.position==="fixed") return 0;   // out of flow → opens no space (the grid's .gtiebleed bracket window is the one that matters here)
+      return el.offsetHeight+parseFloat(cs.marginTop||0)+parseFloat(cs.marginBottom||0); };   // margins count: they are space the row opens, exactly as the later pass's bmH/tgH charge them
+    for(const ch of b.children){
+      if(ch.classList.contains("diagram")||ch.classList.contains("text-conv")) continue;   // the diagram scroller — one of the two boxes being capped, so never its own chrome
+      if(ch.classList.contains("gridbox")){   // renderGrid returns a .gridbox = [.gwrap, .gtiebleed, button.addtok]; only .gwrap is capped, its siblings are chrome
+        const gcs=getComputedStyle(ch); chrome+=parseFloat(gcs.marginTop||0)+parseFloat(gcs.marginBottom||0);
+        for(const gk of ch.children) chrome+=gk.classList.contains("gwrap")
+          ? parseFloat(getComputedStyle(gk).marginTop||0)+parseFloat(getComputedStyle(gk).marginBottom||0)   // the capped box's own margins ARE chrome — max-height bounds the border box, not the margin box
+          : outer(gk);
+        continue; }
+      chrome+=outer(ch); }
+    // dh is REAL px and the chrome above was measured INSIDE .sblock{zoom:var(--fs)}, i.e. in LOCAL px — so bring
+    // the viewport into local px FIRST (dh/FS) and subtract there, rather than dividing the finished cap by FS.
+    // The 140px floor is the same one the authoritative pass below uses, so a block whose chrome alone overflows
+    // the viewport still leaves both scrollers a usable minimum instead of collapsing them.
+    const avail=Math.max(140, dh/FS-chrome);
+    b.style.setProperty("--cap-dia",Math.round(avail*0.6)+"px");
+    b.style.setProperty("--cap-grid",Math.round(avail*0.4)+"px"); });
   if(_rendered.length){ let _h=0; _rendered.forEach(b=>_h+=b.getBoundingClientRect().height); AVG_BLOCK_H=_h/_rendered.length; }   // remeasure every render — blocks vary a lot in height (a 3-token sentence vs. a wrapped Sanskrit verse with translations), so this is only ever an estimate (see the virtualization note above)
   topSpacer.style.height=Math.round(winLo*AVG_BLOCK_H)+"px";
   if(winHi===DOC.length){   // the window reaches the true end of the document → the reader can actually add a sentence after the last one
@@ -1783,8 +1862,9 @@ function positionBracketAnnots(){ document.querySelectorAll("#doc .bwrap").forEa
     if(m.kind==="xpos"){ drawTieLabel(svg,mx,fyb,m.pos,"mwt-pos","mwt-pos-cas",POS_F,null); tagXPosLabel(svg.lastElementChild,si0,m); return; }   // item 1: an ExtPos-only bracket — the value itself is the label, in the POS register
     const mfd=bform(m); let ly=fyb;
     const iastRow=iastFormEdit();   // Sanskrit + a real script → the surface form is edited on the IAST ROW, never on the derived glyph; same contract (and same {data-s, data-mwtfrom} tagging) as the SVG views' mwtTie
-    { const mrt=trTxt(m); if(mrt){ ly+=STEP; const tr=E("text",{class:"translit"+(iastRow?" mwt-tr-edit":""),x:mx,y:ly,"text-anchor":"middle"}); tr.textContent=mrt; svg.appendChild(tr);
-      if(iastRow&&si0>=0&&m.fromTok!=null){ tr.setAttribute("data-s",si0); tr.setAttribute("data-mwtfrom",m.fromTok); tr.style.cursor="text"; svgTip(tr,"multi-word token — click to edit the surface form (the script glyph above is derived from it)"); } } }   // cursor:text matches mwtTie and the other click-to-edit diagram texts (.tr-edit/.gl-edit/.cform): clicking opens a field, not a button   // item 6: the MWT form→translit gap is a full inter-tier step (18+descent(POS_F)) — matching a NON-MWT token and the SVG mwtTie.   // Item 9: draw the MWT transliteration row FIRST so the MWT form (and its backing) below paints ON TOP where they crowd — consistent with the SVG mwtTie and .stext-over-.strans
+    { const mrt=trTxt(m); if(mrt){ ly+=STEP; const tr=E("text",{class:"translit mwt-tr"+(iastRow?" mwt-tr-edit":""),x:mx,y:ly,"text-anchor":"middle"}); tr.textContent=mrt; svg.appendChild(tr);
+      if(si0>=0&&m.fromTok!=null){ tr.setAttribute("data-s",si0); tr.setAttribute("data-mwtfrom",m.fromTok); }   /* tagged in EVERY language, so the row's right-click resolves to its MWT rather than falling through to the ordinary token menu — see the fuller note on the same line in js/diagram/diagram-core.js. The .mwt-tr-edit class above stays gated on iastRow, because that is what the click-to-EDIT handler matches. */
+      if(iastRow&&si0>=0&&m.fromTok!=null){ tr.style.cursor="text"; svgTip(tr,"multi-word token — click to edit the surface form (the script glyph above is derived from it)"); } } }   // cursor:text matches mwtTie and the other click-to-edit diagram texts (.tr-edit/.gl-edit/.cform): clicking opens a field, not a button   // item 6: the MWT form→translit gap is a full inter-tier step (18+descent(POS_F)) — matching a NON-MWT token and the SVG mwtTie.   // Item 9: draw the MWT transliteration row FIRST so the MWT form (and its backing) below paints ON TOP where they crowd — consistent with the SVG mwtTie and .stext-over-.strans
     if(m.pos){ drawTieLabel(svg,mx,ly+STEP,m.pos,"mwt-pos","mwt-pos-cas",POS_F,null); tagXPosLabel(svg.lastElementChild,si0,m); }   // item 1: the coinciding-span case — the MWT bracket simply gains the ExtPos as a POS annotation instead of a second bracket over the same tokens
     const cas=E("text",{class:"mwt-cas",x:mx,y:fyb,"text-anchor":"middle"}); cas.textContent=mfd; cas.setAttribute("aria-hidden","true"); svg.appendChild(cas);   // opaque backing behind the reconstructed word (and over the translit row above)
     const fe=E("text",{class:"mwt-form",x:mx,y:fyb,"text-anchor":"middle"}); fe.textContent=mfd;

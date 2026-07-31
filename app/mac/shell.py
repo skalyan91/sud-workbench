@@ -114,6 +114,55 @@ def _about_menu_target():
     return _about_target
 
 
+# ── the rows only AppKit can supply (Cut/Copy/Paste/Select All, Enter Full Screen) ───────────
+def _inject_native_items(AppKit, menus_by_title: dict) -> None:
+    """Put ``menu_spec.NATIVE_MAC``'s first-responder rows into OUR Edit and View menus.
+
+    These used to arrive in pywebview's OWN default View and Edit menus, which is precisely why the
+    menu bar showed two Edits and two Views — the backend inserts them on top of whatever menu it is
+    handed.  ``SHOW_DEFAULT_MENUS`` is off now (see ``__main__.py``), so we own the only copy and
+    have to supply what it provided.
+
+    They cannot be ordinary table rows with a ``js`` string.  What makes Cut/Copy/Paste/Select All
+    work inside the WKWebView's own text fields is a **nil target**: the selector then travels the
+    responder chain to whatever is first responder, which is the text field being edited.  So no
+    ``setTarget_`` call below, deliberately — an item pointed at some object of ours would be dead
+    everywhere the web view is focused, i.e. everywhere it matters.
+
+    IDEMPOTENT, and it has to be: ``_wire_menu`` re-runs on every menu open because pywebview
+    rebuilds these items underneath us.  A group whose selectors are already present is skipped
+    whole; one that a rebuild has wiped is re-inserted whole.  All-or-nothing per group so a half
+    state can't leave a second separator behind."""
+    flag = {"cmd": AppKit.NSEventModifierFlagCommand, "shift": AppKit.NSEventModifierFlagShift,
+            "ctrl": AppKit.NSEventModifierFlagControl, "alt": AppKit.NSEventModifierFlagOption}
+    for group in menu_spec.NATIVE_MAC:
+        sub = menus_by_title.get(group["menu"])
+        if sub is None:
+            continue
+        present = set()
+        for j in range(sub.numberOfItems()):
+            act = sub.itemAtIndex_(j).action()
+            if act is not None:
+                present.add(str(act))
+        if any(row["sel"] in present for row in group["items"]):
+            continue                       # already installed this pass — nothing to do
+        # `after` names the row to sit below (Redo, so Cut..Select All land in the HIG's own slot
+        # between Redo and Find); None appends at the end (Enter Full Screen, bottom of View).
+        anchor = sub.indexOfItemWithTitle_(group["after"]) if group["after"] else -1
+        at = anchor + 1 if anchor >= 0 else sub.numberOfItems()
+        sub.insertItem_atIndex_(AppKit.NSMenuItem.separatorItem(), at)
+        at += 1
+        for row in group["items"]:
+            it = AppKit.NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
+                row["title"], row["sel"], row["key"])
+            mask = 0
+            for m in row["mods"]:
+                mask |= flag[m]
+            it.setKeyEquivalentModifierMask_(mask)   # explicit: the initialiser's default is ⌘ alone, which is wrong for ⌃⌘F
+            sub.insertItem_atIndex_(it, at)
+            at += 1
+
+
 def _rebuild_recent_menu_main(window, api):
     """Rebuild the Open Recent submenu in place. MUST run on the AppKit main thread."""
     try:
@@ -836,10 +885,16 @@ def _unify_titlebar_on_show(window, api=None):
             conditional = menu_spec.CONDITIONAL
             has_sym = hasattr(AppKit.NSImage, "imageWithSystemSymbolName_accessibilityDescription_")
             menu_map: dict = {}
+            menus_by_title: dict = {}   # top-level title → submenu, for the native injection below
             for i in range(mainmenu.numberOfItems()):
                 sub = mainmenu.itemAtIndex_(i).submenu()
                 if sub is None:
                     continue
+                # Keyed on the SUBMENU's title, not the item's: AppKit displays the submenu's title
+                # for a top-level menu, and pywebview sets the item's only in _add_custom_menu (its
+                # own default menus left it as the literal "NSMenuItem" — which is how a bar that
+                # visibly read Edit/View/File/Format/Edit/View reported six differently-named items).
+                menus_by_title[str(sub.title() or mainmenu.itemAtIndex_(i).title())] = sub
                 prev_sep = None
                 for j in range(sub.numberOfItems()):
                     it = sub.itemAtIndex_(j)
@@ -916,6 +971,14 @@ def _unify_titlebar_on_show(window, api=None):
                             break
             except Exception as exc:  # noqa: BLE001
                 print(f"[menu] about inject: {exc}", file=sys.stderr)
+            # …and the Edit/View rows AppKit alone can serve, now that pywebview's duplicate default
+            # menus are switched off (SHOW_DEFAULT_MENUS in __main__.py).  After the loop above, so
+            # the injected items are never fed to the spec lookup, and idempotent for the same
+            # reason the About retarget is: this whole function re-runs on every menu open.
+            try:
+                _inject_native_items(AppKit, menus_by_title)
+            except Exception as exc:  # noqa: BLE001 — a missing Cut item must never break the menu
+                print(f"[menu] native items: {exc}", file=sys.stderr)
             if api is not None:
                 api._menu = menu_map
         except Exception as exc:  # noqa: BLE001

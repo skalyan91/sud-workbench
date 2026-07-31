@@ -1,11 +1,13 @@
 //@module js/grid.js
 /* column alignment: content + cell padding (+ chevron); narrow ID; Misc stretches */
-// Task E: DEPS (enhanced dependencies) is intentionally NOT a column here — it's auto-filled at save time
-// (depsAutofill, js/io/bridge.js's getDocJSON) from what the SUD tree already says (Shared=Yes/Subj), and
-// showing it alongside FEATS/MISC's pill columns would be redundant, noisy detail nobody edits by hand; it
-// still round-trips and serializes normally, just with no grid cell of its own.
+// Task E: DEPS (enhanced dependencies) IS a column now, but it is still the one nobody edits by hand — it is
+// auto-filled at save time (depsAutofill, js/io/bridge.js's getDocJSON) from what the SUD tree already says
+// (Shared=Yes/Subj), and it sits alongside FEATS/MISC's pill columns as more of the same derivable detail. That
+// is why it is the FIRST column the width rule drops (AUTOHIDE below) rather than being omitted outright, which
+// is what this comment used to record: it round-trips and serialises exactly as it always did, and now it is also
+// visible and editable whenever the page is wide enough to carry it.
 const COLS=[["form","w-form","text","Form"],["lemma","","text","Lemma"],["upos","w-upos","upos","UPOS"],["xpos","","text","XPOS"],
-  ["feats","","text","Feats"],["head","w-head","head","Head"],["deprel","w-deprel","deprel","DepRel"],["deep","w-deep","deep","Deep"],["misc","","text","Misc"]];
+  ["feats","","text","Feats"],["head","w-head","head","Head"],["deprel","w-deprel","deprel","DepRel"],["deep","w-deep","deep","Deep"],["deps","","text","Deps"],["misc","","text","Misc"]];   // CoNLL-U column order, with DEPREL split into its two halves (DepRel = depBase, Deep = the "@" tail) — so DEPS lands where the format puts it, between them and MISC
 function sentHasTranslit(s){ return s.tokens.some(t=>t.translit&&t.translit.length) || (s.mwt||[]).some(m=>m.translit); }
 /* item 1 — ITRANS → IAST on a committed Form/Lemma cell, for a Sanskrit document (itransFix in
    js/lang/translit.js is a no-op everywhere else). Three deliberate choices:
@@ -81,7 +83,36 @@ async function itransCell(ctl,t,key,si,ti){ const v0=t[key]||""; const v=await i
 // Head cell shows the head token's form, plus its transliteration in parentheses when the layer is on
 function headText(o){ const st=o?miscTranslit(o.misc):""; return st ? `${o.form} (${st})` : (o?o.form:""); }   // item 1: Head column shows the STORED romanisation (MISC Translit), the canonical transliteration
 // transliteration columns (5th flag) show only when the layer is on AND the sentence's script needs it
-const AC=si=>COLS.filter(c=>!c[4] || (show.translit && (si==null ? DOC.some(sentHasTranslit) : sentHasTranslit(DOC[si]))));
+// ALLCOLS is every column the DOCUMENT admits — the base list AC narrows further by visibility (see below). Kept
+// separate because the two have different jobs: scanColW has to measure columns that are currently HIDDEN (else a
+// column could never be shown again — see computeAutoHide), and the header's column menu has to LIST them.
+const ALLCOLS=si=>COLS.filter(c=>!c[4] || (show.translit && (si==null ? DOC.some(sentHasTranslit) : sentHasTranslit(DOC[si]))));
+/* ── WHICH COLUMNS ARE SHOWN ────────────────────────────────────────────────────────────────────────────────────
+   Two things decide, in this order:
+    · THE USER'S OWN CHOICE, made by ticking or unticking a row in the header's column menu (columnMenu,
+      js/editing/context-menu.js). That PINS the column to that state for good — the width rule below stops
+      managing it entirely. The pins live in PREFS.gridCols because they are an APPLICATION preference, not a
+      property of the file: which columns you read a treebank in is a property of the reader, the same argument
+      the notation and the paged/unpaged layout are stored on the same object for.
+    · OTHERWISE THE WIDTH RULE (computeAutoHide), which shows every remaining column that fits at its natural
+      content width and drops the rest in a fixed order.
+   ID and Form are obligatory in both: a row with no id and no form is not a row. They are the two the menu draws
+   as disabled, and the two whose headings are drawn Bold at 85 % ink rather than Medium at 50 % (table.grid
+   th.th-req, styles/app.css) — which is also why scanColW measures them against HEAD_F_REQ. */
+const REQ_COL={id:1,form:1};   // the obligatory columns, named ONCE: read by colShown/toggleCol (neither can be pinned off), by renderGrid (.th-req), and by scanColW (the Bold measuring face). Three call sites used to spell `k==="id"||k==="form"` out separately, which is three places to miss if the set ever changes
+const AUTOHIDE=["deps","misc","xpos","feats"];   // the order the width rule DROPS columns in as the page narrows — first to go first. Nothing outside this list is ever auto-dropped: ID/Form are obligatory, and Lemma/Head/DepRel/Deep are what the annotation actually IS
+let colAuto=new Set();   // the columns the width rule is currently hiding. Recomputed once per render (computeColW → computeAutoHide), never written anywhere else
+function colPin(k){ const p=PREFS&&PREFS.gridCols; return (p&&typeof p==="object"&&typeof p[k]==="boolean")?p[k]:null; }   // true = pinned shown, false = pinned hidden, null = never touched → the width rule decides. A BOOLEAN test, not a truth test: `false` is a real, remembered choice here exactly as it is for prefOrtho/prefTranslit (js/core/prefs.js), and reading it as `!!p[k]` would collapse "the user hid this" into "the user never said"
+function colShown(k){ if(REQ_COL[k]) return true; const p=colPin(k); return p==null ? !colAuto.has(k) : p; }
+const AC=si=>ALLCOLS(si).filter(c=>colShown(c[0]));
+// Toggle one column from the header menu. EVERY grid in the document shares one set of column widths and one
+// visibility set (both are document-wide, not per-sentence, exactly as a column drag already is), so this
+// re-renders the whole document rather than the one block whose heading was clicked.
+function toggleCol(k){ if(REQ_COL[k]) return;   // obligatory — the menu already draws these rows disabled; this is the other half of that, so no caller can pin them off by accident
+  if(!PREFS.gridCols||typeof PREFS.gridCols!=="object") PREFS.gridCols={};
+  PREFS.gridCols[k]=!colShown(k);   // toggling the EFFECTIVE state, so unticking an auto-shown column hides it and ticking an auto-hidden one shows it — the checkmarks the user is reading are what the click acts on
+  if(typeof savePrefs==="function") savePrefs();
+  preserveScroll(renderDoc); }
 let colW={}, idW=26, colOverride={};   // colOverride: key ('id' or a column key) → user-dragged px width; double-click a border clears it
 const MISC_MIN=64;   // floor width for the FEATS/MISC pill columns when they hold no (or only tiny) chips
 const PILL_PAD=42;   // a Key=Value chip's chrome (chip padding + the × button + borders + field/cell padding) + the chip's 3px margin-inline-end + rounding slack → a column sized to the widest single chip never clips it, AND leaves room for the trailing caret-anchor text node so it never wraps to an empty line-box (which would inflate the row height and stop it auto-fitting back to a single line)
@@ -106,7 +137,7 @@ const PILL_PAD=42;   // a Key=Value chip's chrome (chip padding + the × button 
 let colWRaw={}, idWRaw=0, colWReady=false, colWDirtyFrom=Infinity, colWDirtyTo=-Infinity;
 function touchColW(from,to){ colWDirtyFrom=Math.min(colWDirtyFrom,from); colWDirtyTo=Math.max(colWDirtyTo,to); }
 function invalidateColW(){ colWReady=false; colWRaw={}; idWRaw=0; colWDirtyFrom=Infinity; colWDirtyTo=-Infinity; }
-function pillColW(k,H,from,to){ let m=Math.max(MISC_MIN, meas(H.toUpperCase(),HEAD_F)+H.length*0.4+16);
+function pillColW(k,H,from,to){ let m=Math.max(MISC_MIN, meas(H,HEAD_F)+16);   // headings render TITLE CASE in the UI font now (see the table.grid th rule in styles/app.css) → measure the label as written. The old `H.toUpperCase()` + H.length*0.4 pair sized an UPPERCASED run plus its .4px letter-spacing, both of which are gone; leaving them in would have over-sized every column by roughly a character
   const eat=raw=>{ if(!raw||raw==="_")return; String(raw).split("|").forEach(s=>{ s=s.trim(); if(s) m=Math.max(m, meas(s,GRID_F)+PILL_PAD); }); };
   DOC.slice(from,to).forEach(s=>{ s.tokens.forEach(t=>eat(t[k])); if(k==="misc")(s.mwt||[]).forEach(mm=>eat(mm.misc)); });   // include MWT-row MISC chips
   return Math.round(m); }
@@ -114,8 +145,13 @@ function pillColW(k,H,from,to){ let m=Math.max(MISC_MIN, meas(H.toUpperCase(),HE
 function scanColW(from,to){
   let maxTok=0; DOC.slice(from,to).forEach(s=>maxTok=Math.max(maxTok,s.tokens.length));
   idWRaw=Math.max(idWRaw, Math.ceil(meas(String(Math.max(maxTok,1)),GRID_F))+12);   // …and the LEFT MARGIN shares this width: the sentence number and the §/¶ marks are drawn in the same box at their own sizes, and a number too wide for the token ids must widen the column rather than overflow it (js/core/document.js)   // content-fit like the columns below: the widest displayed id string (String(maxTok) is the largest index → longest id) + the cell's 6+6px padding. NOT floored to the "ID" header, which used to oversize the column whenever ids are short (single-digit). MWT range rows render no id text (see renderGrid), so they don't widen it
-  AC().forEach(([k,cls,ty,H])=>{ if(k==="feats"||k==="misc") return;   // handled above — pillColW already merges into colWRaw
-    let m=meas(H.toUpperCase(),HEAD_F)+H.length*0.4+16;   // headers render UPPERCASE with .4px letter-spacing → size to that so the right padding isn't eaten (padding 8+8)
+  // EVERY column the document admits, not just the VISIBLE ones (ALLCOLS, not AC). That is what makes the width
+  // rule below monotonic: a hidden column still has a live natural width in colWRaw, so widening the page can find
+  // it again. Measuring only the visible ones froze a column's width at whatever it was when it went away — and a
+  // brand-new column (one that has never been shown) would have had no width at all, so it could never come back.
+  ALLCOLS().forEach(([k,cls,ty,H])=>{
+    if(k==="feats"||k==="misc"){ colWRaw[k]=Math.max(colWRaw[k]||0, pillColW(k,H,from,to)); return; }   // the pill columns are sized to their widest single CHIP, not to the whole |-joined field — see pillColW. (This call had been dropped at some point and the two columns were left with no colWRaw entry at all, so their <col> width came out "undefinedpx" and the browser auto-sized them; the width rule below needs a real number for Misc, since Misc is the second column it drops.)
+    let m=meas(H,REQ_COL[k]?HEAD_F_REQ:HEAD_F)+16;   // headings render TITLE CASE in the UI font (see pillColW's own note) → size to the label as written, so the cell's 8+8px padding isn't eaten. TWO faces: the obligatory columns are drawn Bold and the rest Medium (table.grid th / th.th-req, styles/app.css), so "Form" measured at Medium came out narrower than it renders. pillColW needs no such branch — Feats and Misc are both optional by construction (they are in AUTOHIDE)
     DOC.slice(from,to).forEach(s=>s.tokens.forEach((t,i)=>{ let str=t[k]??"";
       if(k==="deprel")str=depBase(t.deprel); else if(k==="deep")str=depDeep(t.deprel);   // DepRel/Deep are the two halves of the token's deprel field
       if(k==="head"){ const h=parseInt(t.head,10); const o=s.tokens[h-1]; const maxDig=String(s.tokens.length).length, padHead=v=>String(v).padStart(maxDig," ");   // item 4: space-pad the token number (display only, never persisted) so the "·" separators line up down the column
@@ -141,28 +177,61 @@ function computeColW(){
   if(!colWReady){ if(typeof marginNumWidth==="function") idWRaw=Math.max(idWRaw, marginNumWidth()); colWReady=true; }   // marginNumWidth is its own, much cheaper, full-document pass (no per-token meas() — see its own note) and only needs to run once (or after invalidateColW) rather than every render
   if(colWDirtyTo>colWDirtyFrom) scanColW(Math.max(0,colWDirtyFrom),Math.min(DOC.length,colWDirtyTo));   // whatever a mutator explicitly reported (see the note above)
   colWDirtyFrom=Infinity; colWDirtyTo=-Infinity;
+  computeAutoHide();   // BEFORE fitColW (and before renderGrid): the width rule decides which columns exist at all, and fitColW's budget is then spent only on the survivors. AFTER the scans above, so it tests against freshly-measured natural widths
   colW=Object.assign({},colWRaw); idW=idWRaw;   // a FRESH copy each render, so fitColW's proportional shrink below never compounds across renders (see its own note)
   fitColW();
   for(const k in colOverride){ if(k==="id") idW=colOverride.id; else if(k in colW) colW[k]=colOverride[k]; }   // user-set widths win over auto-fit
 }
-/* if the shared columns would be wider than the grid's port, shrink them proportionally so the grid never
-   overflows (the Excel-style edit-expansion still shows a cell's full value on focus). idW is kept; Misc
-   stays auto and takes any slack. */
-function fitColW(){ const docEl=document.getElementById("doc"); if(!docEl) return;
+/* THE GRID'S WIDTH BUDGET, in unzoomed px — ONE computation shared by the auto-hide rule and by fitColW's
+   proportional shrink, so the two can never disagree about how much room there is. Returns null when there is no
+   #doc to measure (a harness), which both callers read as "decide nothing".
+   Task F — PAGED layout centres every block inside a .docsheet capped at --page-measure (app.css); #doc
+   itself stays the full WINDOW width (its own padding-inline:16px is already counted in clientWidth), so
+   measuring docEl.clientWidth alone — as the unpaged case always has — overstated the room a paged grid
+   actually has, and the fixed-layout columns overflowed the (narrower) sheet instead of shrinking to
+   fit it. Clamp to the sheet's real available width instead: #doc's own 16px inline padding on each side
+   (already inside clientWidth) isn't available to centre the sheet in, and the sheet itself never exceeds
+   --page-measure. Read as a CSS custom property rather than a stale previous-render .docsheet measurement
+   (computeColW runs before renderDoc clears #doc, so a queried .docsheet would exist — but not yet on the
+   very first paged render, and this is exact in both cases).
+   Toggling paged/unpaged therefore moves this number, and setPageMode (js/ui/wiring.js) re-renders — which is
+   what recomputes the auto-hide set for the new measure. A live window resize does the same through the
+   ResizeObserver on #doc in js/core/scroll.js, so neither needs a listener of its own here. */
+function gridAvail(){ const docEl=document.getElementById("doc"); if(!docEl) return null;
   let availPx=docEl.clientWidth;   // real (post-zoom) px — #doc itself carries no zoom, only .sblock does
-  /* Task F — PAGED layout centres every block inside a .docsheet capped at --page-measure (app.css); #doc
-     itself stays the full WINDOW width (its own padding-inline:16px is already counted in clientWidth), so
-     measuring docEl.clientWidth alone — as the unpaged case always has — overstated the room a paged grid
-     actually has, and the fixed-layout columns below overflowed the (narrower) sheet instead of shrinking to
-     fit it. Clamp to the sheet's real available width instead: #doc's own 16px inline padding on each side
-     (already inside clientWidth) isn't available to centre the sheet in, and the sheet itself never exceeds
-     --page-measure. Read as a CSS custom property rather than a stale previous-render .docsheet measurement
-     (computeColW runs before renderDoc clears #doc, so a queried .docsheet would exist — but not yet on the
-     very first paged render, and this is exact in both cases). */
   if(PAGED){ const pm=parseFloat(getComputedStyle(docEl).getPropertyValue("--page-measure"))||Infinity;
     availPx=Math.min(availPx-32, pm); }
   const avail=availPx/FS-42;   // block padding (36) + slack; sblock is zoomed by FS, meas() is unzoomed
-  if(avail<=0) return;
+  return avail>0?avail:null; }
+// the width the auto-hide rule tests a column at: its user-dragged override if it has one, else its NEVER-SHRUNK
+// natural content width. Never the post-fitColW colW — see computeAutoHide's monotonicity note.
+function natColW(k){ if(k==="id") return (colOverride.id||idWRaw); return (colOverride[k]||colWRaw[k]||0); }
+/* THE WIDTH RULE — show every column that fits at its natural (unshrunk) content width, and otherwise drop the
+   lowest-priority auto-hideable one, ONE AT A TIME, until the rest fit. AUTOHIDE names the order: Deps, then Misc,
+   then XPOS, then Feats. Once even that is exhausted, fitColW's proportional shrink takes over as the last resort
+   — which is the OLD behaviour, now demoted from first response to last: a narrow page used to squeeze every
+   column and let the cells wrap to several lines (`multiline` in renderGrid), where it now sheds the columns
+   nobody edits by hand and keeps the rest legible.
+   WHY IT IS MONOTONIC — widening the page can only REVEAL columns, narrowing can only HIDE them. The hidden set is
+   a pure step function of `avail`: walk AUTOHIDE, dropping while the running total exceeds the budget. That is
+   monotone in `avail` for exactly one reason — THE WIDTHS IT TESTS AGAINST DO NOT DEPEND ON WHICH COLUMNS ARE
+   SHOWN. Hence natColW reads colWRaw (the never-shrunk cached content widths, measured for every column whether
+   shown or not — see scanColW) and never colW, which fitColW has already shrunk BY the very set this function
+   decides. Feeding colW back in would make the rule depend on its own output: hiding a column widens the survivors
+   (less shrink), which changes the total, which can hide another — a ratchet that never reverses when the window
+   is widened back, and the exact behaviour the user asked us not to have. */
+function computeAutoHide(){ const hide=new Set(), avail=gridAvail();
+  if(avail==null){ colAuto=hide; return; }   // nothing to measure against → hide nothing, rather than guess a budget
+  const cols=ALLCOLS().map(c=>c[0]).filter(k=>colPin(k)!==false);   // a column the user has pinned OFF is already gone and costs the budget nothing
+  let total=natColW("id")+cols.reduce((s,k)=>s+natColW(k),0);
+  for(const k of AUTOHIDE){ if(total<=avail) break;
+    if(!cols.includes(k) || colPin(k)!=null) continue;   // not in play (translit-gated / already pinned off), or PINNED by the user — an explicit choice is not the rule's to overrule
+    hide.add(k); total-=natColW(k); }
+  colAuto=hide; }
+/* if the shared columns would STILL be wider than the grid's port once the width rule above has dropped what it
+   can, shrink them proportionally so the grid never overflows (the Excel-style edit-expansion still shows a
+   cell's full value on focus). idW is kept; Misc stays auto and takes any slack. */
+function fitColW(){ const avail=gridAvail(); if(avail==null) return;
   const pillW=AC().map(c=>c[0]).filter(k=>k==="feats"||k==="misc").reduce((s,k)=>s+(colW[k]||0),0);   // FEATS/MISC keep their full widest-chip width — they'd sooner scroll the grid than clip a pill
   const keys=AC().map(c=>c[0]).filter(k=>k!=="misc"&&k!=="feats");
   const fixed=keys.reduce((s,k)=>s+(colW[k]||0),0), budget=avail-pillW-idW;
@@ -300,12 +369,23 @@ function renderGrid(si){
   const grip=(key,fixed)=>{const g=document.createElement("div"); g.className="colresize"+(fixed?" fixed":""); g.dataset.col=key; if(!fixed)g.title="Drag to resize · double-click to auto-size"; return g;};
   const FIXEDW={id:1,upos:1,deprel:1};   // fixed-option columns (ID + the dropdown vocabularies) aren't user-resizable — the divider stays, dragging is off
   const thead=document.createElement("thead"); const htr=document.createElement("tr");
-  const idth=Object.assign(document.createElement("th"),{className:"col-id",textContent:"ID"}); idth.appendChild(grip("id",true)); htr.appendChild(idth);
+  const idth=Object.assign(document.createElement("th"),{className:"col-id th-req",textContent:"ID"}); idth.appendChild(grip("id",true)); htr.appendChild(idth);   // .th-req: ID and Form are the two OBLIGATORY columns, and their headings say so by taking the full --text ink instead of the muted heading colour (styles/app.css) — the same distinction the column menu draws by greying their rows out
   AC(si).forEach(([k,cls,ty,H])=>{const th=document.createElement("th"); th.dataset.col=k;
     if(ty==="rotext"){ th.className="th-tr"; const sp=document.createElement("span"); sp.dir="ltr"; sp.textContent=H; th.appendChild(sp); }   // LTR span → "Translit." keeps its dot on the right even under RTL
     else th.textContent=H;
+    if(k==="form") th.classList.add("th-req");   // …the other obligatory heading (classList.add, not className=, so the rotext branch's own class survives)
     if(k!=="misc") th.appendChild(grip(k, !!FIXEDW[k]));   // Misc stretches to fill, so it isn't resizable
     htr.appendChild(th);});
+  /* Right-click ANY heading → the Finder-style column chooser (columnMenu). Bound to the header ROW rather than
+     to each <th>, so the gaps between cells answer too and one listener serves however many columns are drawn.
+     The resize grip straddles the column border and owns its own gestures, so it is excluded; stopPropagation
+     keeps the event off the block/sentence menus that would otherwise also see it bubble past.
+     columnMenu lives in js/editing/context-menu.js, which loads AFTER this module — safe because this closure
+     runs at RENDER time, long after every module is defined (see CLAUDE.md's forward-reference hazard), and
+     guarded anyway for a harness that doesn't load that file. */
+  htr.addEventListener("contextmenu",ev=>{ if(ev.target.closest(".colresize")) return;
+    ev.preventDefault(); ev.stopPropagation();
+    if(typeof columnMenu==="function") columnMenu(ev.clientX,ev.clientY,si); });
   const idth2=htr.querySelector(".col-id"); if(idth2)idth2.dataset.col="id";
   thead.appendChild(htr); table.appendChild(thead);
   const tb=document.createElement("tbody");

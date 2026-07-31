@@ -85,7 +85,7 @@ async function sheetChooseSaveLocation(opts){ opts=opts||{};
     if(window.__folderIcon){ const im=document.createElement("img"); im.className="fpimg"; im.src=window.__folderIcon; im.alt=""; whereBtn.appendChild(im); }   // the SAME native NSWorkspace folder icon the titlebar proxy menu uses
     else { const ic=document.createElement("span"); ic.className="sfi"; ic.style.setProperty("--m","var(--sf-open)"); whereBtn.appendChild(ic); }   // browser/design-mode fallback (no bridge → no native icon yet), matching openFolderMenu's own fallback
     const nm=document.createElement("span"); nm.className="wherename"; nm.textContent=folderLabel(currentFolder); nm.title=currentFolder||""; whereBtn.appendChild(nm);
-    const chev=document.createElement("span"); chev.className="wherechev"; chev.textContent="⌄"; whereBtn.appendChild(chev); };
+    const chev=document.createElement("span"); chev.className="wherechev"; whereBtn.appendChild(chev); };   // NO text content: .wherechev is now a masked box drawing the real SF Symbols up-down chevron (--sf-updown, macos-kit/mac-tokens.css). It used to hold a literal "⌄" (U+2304 DOWN ARROWHEAD) — wrong glyph for a pull-down, and a mask applies to an element's TEXT as well as its background, so leaving the character in would have masked the glyph into the chevron shape on top of the chevron itself
   renderWhereBtn();
   whereBtn.onclick=()=>openWherePop(whereBtn,folders,currentFolder,p=>{ currentFolder=p; renderWhereBtn(); });
   const browseBtn=document.createElement("button"); browseBtn.type="button"; browseBtn.className="wherebrowse"; browseBtn.title="Choose a different folder…"; browseBtn.textContent="…";
@@ -224,9 +224,20 @@ function sheetInsert(index){
     t.setAttribute("autocorrect","off"); t.setAttribute("autocapitalize","off"); t.setAttribute("autocomplete","off");   // no OS smart-quote/dash substitution: WKWebView ties smart punctuation to autocorrect, so autocorrect=off keeps typed "x" - y straight (no curly quotes / em-dash)
     t.style.webkitTextReplacement="none";   // belt-and-braces: opt out of the WebKit text-replacement service where honoured
     return t; };
+  /* item 7 — ONE FORM ROW: a label in the leading column, the row's controls on the shared control axis.
+     Returns the control cell for the caller to fill. Both cells are always emitted, even when the label is
+     empty, because grid auto-placement would otherwise put a lone control cell in the LABEL column and the
+     axis would break on exactly the rows that have no label.
+     An empty label is the HIG's own answer for a CHECKBOX row: a checkbox takes no leading label, it stands
+     on the control axis with its title beside the box (which is why the block's name rides the checkbox and
+     the language row is the one that carries a label). */
+  const formRow=(host,label)=>{ const r=document.createElement("div"); r.className="insrow";
+    const l=document.createElement("span"); l.className="inslab"; l.textContent=label||"";
+    const ctl=document.createElement("div"); ctl.className="insctl";
+    r.appendChild(l); r.appendChild(ctl); host.appendChild(r); return ctl; };
   // ── the main text ─────────────────────────────────────────────────────────────────────────────────
   const mb=document.createElement("div"); mb.className="insblock main"; fields.appendChild(mb);
-  const mrow=document.createElement("div"); mrow.className="insrow"; mb.appendChild(mrow);
+  const mrow=formRow(mb,"");   // the block's identity: a checkbox (or, with nothing to switch off in favour of, its plain name)
   let mainOn=null;
   if(parAvail){ const lab=document.createElement("label"); lab.className="inschk";
     mainOn=document.createElement("input"); mainOn.type="checkbox"; mainOn.checked=true;
@@ -235,17 +246,17 @@ function sheetInsert(index){
     // An EMPTY document has no sentences for a translation to attach to, so translations-only mode is
     // meaningless there: the checkbox is fixed on rather than offered and then rejected on submit.
     if(!ctx.hasSentences){ mainOn.disabled=true; mainOn.title="This document has no sentences yet, so there is nothing to translate."; } }
-  else { const nm=document.createElement("span"); nm.className="insnm"; nm.textContent="Text"; mrow.appendChild(nm); }   // no parallel texts ⇒ nothing to switch off in favour of: a label, not a checkbox
-  const msp=document.createElement("span"); msp.className="inssp"; mrow.appendChild(msp);
+  else { const nm=document.createElement("span"); nm.className="insnm"; nm.textContent="Text"; mrow.appendChild(nm); }   // no parallel texts ⇒ nothing to switch off in favour of: a label, not a checkbox — still on the control axis, so the two shapes of the row read the same
+  const mlang=formRow(mb,"Language:");   // …and the language gets a real form label instead of an unlabelled popup floating at the sheet's trailing edge
   let mainSel=null;
   if(ctx.hasSentences){   // item 7c: the file's language, shown and NOT choosable — every sentence in one document is in one language
     const f=document.createElement("span"); f.className="insfixed";
     f.textContent=(ctx.langName||ctx.lang||"Unknown")+(ctx.lang?" ("+ctx.lang+")":"");
     f.title="The language of this document; new sentences are read as this language.";
-    mrow.appendChild(f); }
+    mlang.appendChild(f); }
   else { mainSel=document.createElement("select"); mainSel.className="sel"; mainSel.disabled=true;
     const o=document.createElement("option"); o.textContent="Loading languages…"; mainSel.appendChild(o);   // filled in when the registry answers — see the loader below
-    mrow.appendChild(mainSel); }
+    mlang.appendChild(mainSel); }
   const ta=mkField("The committee approved the proposal after a long debate. It will take effect next week.");
   mb.appendChild(ta);
   const mnote=document.createElement("div"); mnote.className="insnote"; mb.appendChild(mnote);
@@ -269,12 +280,12 @@ function sheetInsert(index){
     if(!list.length){ err(LANGS?"No translation languages are enabled for this document. Add one from the translations drawer first."
                               :"The language list is still loading…"); return; }
     const row=document.createElement("div"); row.className="insblock";
-    const head=document.createElement("div"); head.className="insrow";
+    const head=formRow(row,"");                 // identity row — checkbox on the control axis, remove button at the trailing edge
     const lab=document.createElement("label"); lab.className="inschk";
     const on=document.createElement("input"); on.type="checkbox"; on.checked=true;
     const nm=document.createElement("span"); nm.className="insnm"; nm.textContent="Parallel text";
     lab.appendChild(on); lab.appendChild(nm);
-    const sp=document.createElement("span"); sp.className="inssp";
+    const langCell=formRow(row,"Language:");    // …and the language row, labelled like the main text's
     const sel=document.createElement("select"); sel.className="sel"; fillSelect(sel,list);
     // Default to a language nothing else is using (the main text's included): with every field opening on
     // the same first option, adding a second parallel text produced an immediate "same language" refusal
@@ -282,10 +293,10 @@ function sheetInsert(index){
     const taken={}; taken[mainLang()]=1; PARS.forEach(p=>{ taken[p.sel.value]=1; });
     const free=list.find(e=>!taken[e.code]); if(free) sel.value=free.code;
     const rm=document.createElement("button"); rm.type="button"; rm.className="gm-rm ins-rm"; rm.textContent="✕"; rm.title="Remove this text";
-    head.appendChild(lab); head.appendChild(sp); head.appendChild(sel); head.appendChild(rm);
-    const t=mkField("A translation of the text above, one sentence per sentence.");
+    head.appendChild(lab); head.appendChild(rm); langCell.appendChild(sel);
+    const t=mkField("A translation of the text above, aligned paragraph by paragraph and sentence by sentence.");   // item 4: the placeholder states the alignment the insert actually performs — a blank line is a paragraph break here exactly as it is in the main field
     const note=document.createElement("div"); note.className="insnote";
-    row.appendChild(head); row.appendChild(t); row.appendChild(note);
+    row.appendChild(t); row.appendChild(note);   // the two form rows are already in place (formRow appended them)
     function sync(){ row.classList.toggle("off",!on.checked); t.disabled=!on.checked;
       const i=selInfo(sel);
       note.textContent=(i.model?("Split into sentences by "+i.label+".")
@@ -339,18 +350,33 @@ function sheetInsert(index){
     if(!mainEnabled&&!parallels.length){ err("Nothing to insert."); return; }
     // adoptLang: an empty document takes the language this dialog chose (and the parser that goes with
     // it) — see adoptInsertLang, which must run BEFORE the first sentence is parsed.
-    const payload={index,main:{enabled:mainEnabled,lang:mainLang(),text:mainEnabled?text:"",adoptLang:!ctx.hasSentences},parallels};
+    const adopt=!ctx.hasSentences, mainInfo=selInfo(mainSel);
+    const payload={index,main:{enabled:mainEnabled,lang:mainLang(),text:mainEnabled?text:"",adoptLang:adopt},parallels};
+    /* ITEM 8 — THE LANGUAGE CHOSEN HERE IS THE ONE THAT PARSES. Adopt it ON THE CLICK, through the same
+       adoptInsertLang the payload path uses (never a second language→model route), so the model menu shows
+       the choice immediately instead of only when the Python worker's round trip lands — that trip
+       sentencises every parallel text first and a cold pipeline load is seconds, and it never lands at all
+       if the submit turned out to have nothing insertable. The id passed is the one the dialog's own
+       <option> carries, which is what the note under the field PROMISED would run (registry pick, same
+       Api._model_for_language / models_registry.best_installed_model answer Python recomputes); no parser
+       for that language ⇒ "" ⇒ applyLang→syncModelToLang falls to "None (manual)" and the text is
+       whitespace-tokenised, which is the other half of the same promise.
+       Only when the document is EMPTY: that is the only case with a picker, and a document that already
+       has sentences must keep its own language and parser. */
+    if(adopt&&mainEnabled&&payload.main.lang) adoptInsertLang(payload.main.lang,mainInfo.model||"");
     closeSheet();   // every value is already read off the fields the close tears down
     if(hasBridge()){ try{ window.pywebview.api.child_insert_text(payload); }catch(e){ toast("Insert failed: "+e); } return; }
     /* NO BRIDGE (browser design mode): do here the little that the Python worker would have done — the
-       ITRANS conversion (itransFix is itself a no-op without a bridge) and the sentence split of each
-       parallel text — and then hand the SAME __applyInsertPayload the worker drives, so the two paths
-       differ only in who splits. `naive` is every parallel language, because the rule splitter is all
-       there is here. */
+       ITRANS conversion (itransFix is itself a no-op without a bridge) and the paragraph+sentence split of
+       each parallel text — and then hand the SAME __applyInsertPayload the worker drives, so the two paths
+       differ only in who splits. localParaSplit (js/io/bridge.js) produces the very shape
+       Api._sentencize_parallel does, paragraphs of sentences, because the alignment that consumes it is
+       written once and only on this side. `naive` is every parallel language, because the rule splitter is
+       all there is here. */
     __applyInsertPayload({index,
-      main:{enabled:mainEnabled&&!!text,lang:payload.main.lang,text:await itransFix(text),model:""},
-      parallels:parallels.map(p=>({lang:p.lang,sents:localSentSplit(p.text)})),
-      adoptLang:!ctx.hasSentences, naive:parallels.map(p=>p.lang)}); }
+      main:{enabled:mainEnabled&&!!text,lang:payload.main.lang,text:await itransFix(text),model:mainInfo.model||""},
+      parallels:parallels.map(p=>({lang:p.lang,paras:localParaSplit(p.text)})),
+      adoptLang:adopt, naive:parallels.map(p=>p.lang)}); }
   const act=s.querySelector(".actions");
   act.innerHTML=`<button class="tbtn" data-x>Cancel</button><button class="tbtn primary" data-go>Insert<span class="kbd">⌘↩</span></button>`;
   act.insertBefore(errEl,act.firstChild);

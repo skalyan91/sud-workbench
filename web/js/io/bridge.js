@@ -209,6 +209,33 @@ function normSents(sents,base){ base=base||0; return sents.map((s,i)=>{
   return s; }); }
 const isBlankDoc=()=>DOC.length===0||(DOC.length===1&&DOC[0].tokens.length<=1&&!(DOC[0].tokens[0]&&DOC[0].tokens[0].form));
 
+/* WHAT COUNTS AS A FILE-SPECIFIC DISPLAY SETTING, and therefore belongs in the reset below.
+   A setting is FILE-SPECIFIC when its value is DERIVED FROM (or adopted from) the document that is open — the
+   glossing tiers from the tokens' MISC, the translation languages from the `# text_LANG` comments, the relation
+   vocabulary from the relations actually used, the stored-transliteration scheme from a `# translit_scheme`
+   metadata comment, the language from the text itself. Carrying such a value into a NEW, empty document is
+   carrying a fact about a file that is no longer open.
+   It is an APPLICATION preference — and must NOT be reset — when it is a property of the reader rather than of
+   the document. The reliable test is PREFS: anything savePrefs()/loadPrefs() persists (js/core/prefs.js) is an
+   application preference by construction. That covers the notation, paged/unpaged layout, the Show/Hide toggles
+   (colour, labels, POS, arrows, merge-punct, wrap, grids), the grid column pins (PREFS.gridCols), the titlebar
+   display mode, the relation colours, and the three PER-LANGUAGE scheme memories (PREFS.ortho/translit/stored) —
+   those last are keyed by language precisely so they OUTLIVE the file that first selected them. The document
+   zoom (FS) and SETTINGS.scheme/upos (the Settings sheet's own inventories, typed by the user, never read off a
+   file) are reader properties too.
+   THE OPEN PATH IS THE REFERENCE for what to call and in what order: doOpen/openRecentFile/applyOpenedDoc each
+   run this same sequence against a real file, and init.js runs it for the launch document. This function is that
+   sequence asked the same questions with nothing loaded — so a new setting only ever has to be added in two
+   places, not three, and cannot drift into meaning something different here. */
+function resetFileSettings(){
+  setFormat("SUD");                    // an empty document is SUD by definition — the detected format of the file just closed says nothing about it
+  adoptDocSchemes();                   // DOC[0] is gone → FILE_STORED:=null, so the closed file's `# translit_scheme` cannot be applied to the next language load (and DOCSCHEME_GEN moves, invalidating an in-flight one)
+  syncGlossTiersFromDoc();             // item 1: no MISC Gloss/MSeg/MGloss anywhere → both tiers reset to off AND both VISIBILITY flags (GLOSS_VIS/MORPH_VIS) back to true, then syncGlossUI repaints the Glossing drawer + its Show/Hide rows
+  syncDeprelVocabFromDoc();            // …and SETTINGS.deprel back to DEPREL_DEFAULT: the extra relations in it were read off the closed file's tokens, so they have no business in the new document's DepRel autocomplete
+  detectXposMirrorsUpos(); syncDocFonts();
+  refreshTransLangs(); renderTransDrawer();   // item 13: no `# text_LANG` anywhere → no enabled translation languages, and the Translations drawer redrawn empty
+  applyLang("en",true);                // DOCLANG is DETECTED from the file (langid/filename/Kyoto — see maybeAutoDetectLang), so it is the file's, not the reader's; an empty document has nothing to detect from and falls back to the documented default (js/core/state.js). `true` re-runs syncModelToLang, so the parser auto-selected for the old language is released too — and setLang re-resolves the Script/Displayed/Stored pills, which is what puts ORTHO_SCHEME/TRANSLIT_SCHEME/STORED_SCHEME and show.translit back onto the per-language preference instead of the closed file's values.
+}
 /* Open REPLACES the current document (warning first if there are unsaved changes) and adopts the file
    as the save target; Append adds a file's sentences to the current document without changing the target. */
 async function doNew(){ if(!(await confirmDiscardUnsaved("Discard them and start a new document?"))) return; pushUndo();
@@ -217,9 +244,8 @@ async function doNew(){ if(!(await confirmDiscardUnsaved("Discard them and start
   if(typeof invalidateColW==="function") invalidateColW();   // drop the outgoing file's column-width cache rather than carry its widths into an empty document
   if(typeof invalidateDiaCache==="function") invalidateDiaCache();   // …and the outgoing file's cached diagrams (js/core/document.js) — every si is about to name a sentence of the NEW (empty) document instead
   if(hasBridge())try{window.pywebview.api.new_document();}catch(e){}
-  syncGlossTiersFromDoc(); detectXposMirrorsUpos(); syncDocFonts();   // item 1: an empty new document carries NO Gloss/MSeg/MGloss → glossing tiers reset to off, never inherited from the file just closed
-  refreshTransLangs(); renderTransDrawer();   // item 13: reset enabled translation languages
-  sel={s:-1,t:0}; selRange=null; setFormat("SUD"); setTitle(); renderDoc(); toast("New document — add a sentence to begin"); }
+  resetFileSettings();   // every display setting the CLOSED file decided goes back to its no-document state — see the note above for the file-vs-application test, and add new settings there rather than inline here
+  sel={s:-1,t:0}; selRange=null; setTitle(); renderDoc(); toast("New document — add a sentence to begin"); }
 // Filename `<langcode>_…` prefix → the language: the HIGHEST-priority signal, validated against the embedded ISO
 // tables (2-letter ISO 639-1 or 3-letter ISO 639-3) via isoName(); an unknown code falls through. A validated
 // code is normalised to the app's canonical form (2-letter where the ISO row has one, e.g. san→sa).
@@ -471,6 +497,13 @@ function localSentSplit(text){ const ENDERS=".?!…।॥", CLOSERS="\"'”’)]
 function splitParagraphs(text){ return (text||"").replace(/\r\n?/g,"\n")
   .split(/\n[ \t]*(?:\n[ \t]*)+/)   // ≥2 newlines, each optionally followed by horizontal whitespace ⇒ one paragraph break however many blank lines it spans
   .map(p=>p.trim()).filter(Boolean); }   // …and a leading/trailing blank run leaves an empty piece, which is not a paragraph
+/* A PARALLEL text split the way Api._sentencize_parallel splits it — paragraphs first (the same blank-line
+   rule the main field uses), then sentences within each — for the no-bridge path, where the rule splitter is
+   all there is. The two sides must produce the SAME SHAPE (paragraphs of sentences), because the alignment
+   below is written once and consumes both; they differ only in who splits, which is the invariant the Insert
+   dialog has always kept. A paragraph the splitter can make nothing of is one sentence, not none — exactly
+   what the Python side's `segs or [para]` says. */
+function localParaSplit(text){ return splitParagraphs(text).map(p=>{ const s=localSentSplit(p); return s.length?s:[p]; }); }
 /* MARKDOWN HEADINGS NAME THE BOUNDARIES. A `# …` line is the id of the document that starts there, a `## …` line
    the id of the paragraph — so a pasted text that is already structured as prose arrives with its own divisions
    named, instead of a run of anonymous `# newpar`s the user then has to label by hand.
@@ -499,10 +532,12 @@ function paragraphsWithIds(text){ const out=[]; let doc=null, par=null;
   return out; }
 /* `opts.quiet` suppresses the "Inserted N sentences" toast when the CALLER is going to report the whole
    operation itself (a parallel-text insert has translations to account for too — see __applyInsertPayload);
-   the return value {start,count} is how that caller knows which blocks it just created. Both are additive:
-   the two-argument call every earlier path makes behaves exactly as it did. */
+   the return value {start,count,paras,paraCounts} is how that caller knows which blocks it just created.
+   `paraCounts` is how MANY blocks each paragraph contributed, in order — the main text's paragraph shape as
+   BLOCKS rather than as strings, which is the half of the parallel-text alignment this side owns. All of it
+   is additive: the two-argument call every earlier path makes behaves exactly as it did. */
 window.__insertPastedText=async function(text,index,opts){ opts=opts||{};
-  const paras=paragraphsWithIds(text); if(!paras.length)return {start:(index==null?DOC.length:index),count:0};
+  const paras=paragraphsWithIds(text); if(!paras.length)return {start:(index==null?DOC.length:index),count:0,paraCounts:[]};
   if(index==null||index<0||index>DOC.length) index=DOC.length;
   const start=index;   // captured BEFORE the loop, which walks `index` forward one block at a time
   /* The boundary goes on the first sentence of EVERY paragraph INCLUDING THE FIRST — but only when there are two
@@ -511,6 +546,14 @@ window.__insertPastedText=async function(text,index,opts){ opts=opts||{};
      existing paragraph, would split that one). */
   const multi=paras.length>1;
   let n=0;
+  const paraCounts=[];   // blocks contributed by each paragraph, in order — see the header comment
+  /* THE WHOLE INSERT IS ONE UNDO ENTRY. The loop below calls doInsert once per sentence and doInsert pushes a
+     whole-document snapshot of its own, so without this a paste of 80 sentences cost 80 full clones and took 80
+     presses of ⌘Z to take back. beginUndoBatch takes ONE snapshot here, before anything lands, and neutralises
+     those per-sentence pushes (js/core/undo.js). try/finally because a failed tokenise/parse mid-loop must not
+     leave the batch counter raised — every later edit in the session would then push no undo entry at all. */
+  beginUndoBatch(); beginRenderHold();   // …and hold the per-sentence re-render with it: doInsert repaints the whole document each time round, which is ~250 ms per sentence on a large file (see beginRenderHold, js/core/document.js)
+  try{
   for(const para of paras){
     let sents=null;
     if(hasBridge()){ try{ const r=await window.pywebview.api.sentencize(para.body, DOCLANG||"", model||""); sents=(r&&r.sentences)||null; }catch(e){ sents=null; } }
@@ -521,35 +564,99 @@ window.__insertPastedText=async function(text,index,opts){ opts=opts||{};
         if(para.doc!=null) DOC[index].newdoc=para.doc||true;   // a `# Heading` ⇒ a NAMED document boundary. `||true` because an empty heading is still a boundary, just an unnamed one
         if(para.par!=null) DOC[index].newpar=para.par||true;   // a `## Heading` ⇒ a NAMED paragraph boundary…
         else if(multi) DOC[index].newpar=true; }               // …and with no heading the old rule stands: bare `# newpar` on every paragraph when there is more than one   // `true`, never an id: UD's ids are optional and inventing one would put a name in the file that nothing here can justify (see the _BOUNDARY_KEYS contract in app/io_conllu.py)
-      index++; n++; } }
-  if(multi) renderDoc();   // the ¶ marks were set AFTER doInsert had already drawn each block, so one repaint at the end puts them on screen
+      index++; n++; }
+    paraCounts.push(sents.length); }   // ≥1 by construction (the two fallbacks above guarantee it), which the aligner relies on: a zero-block paragraph would have no sentence for its translation to land on
+  if(multi) renderDoc();   // the ¶ marks were set AFTER doInsert had already drawn each block, so one repaint at the end puts them on screen — INSIDE the hold, so it simply marks the single pending render rather than adding one of its own
+  } finally { endRenderHold(); endUndoBatch(); }   // unwind in the reverse order they were opened; endRenderHold is what performs the one real repaint
   if(n>1&&!opts.quiet) toast(multi?`Inserted ${n} sentences in ${paras.length} paragraphs`:`Inserted ${n} sentences`);
-  return {start,count:n,paras:paras.length}; };
+  return {start,count:n,paras:paras.length,paraCounts}; };
 
 /* ── item 7: the Insert-text dialog's full result — a main text and/or any number of PARALLEL texts ──────
    The sheet (sheetInsert) submits to Api.child_insert_text, which converts each field's ITRANS in its own
    language and sentencises the parallel texts with that language's own installed pipeline (or the rule
    splitter), then calls this — and with no bridge the sheet does that little itself and calls this
    directly, so both paths end here. Payload:
-     {index, main:{enabled,lang,text,model}, parallels:[{lang,sents:[…]}], adoptLang, naive:[lang,…]}
+     {index, main:{enabled,lang,text,model}, parallels:[{lang,paras:[[…],…]}], adoptLang, naive:[lang,…]}
    The MAIN text arrives as a STRING, not as sentences, because the paragraph/heading structure inside it
-   still has to become `# newpar`/`# newdoc` here (paragraphsWithIds) — a parallel text has no structure to
-   keep, only an order to line up with. */
+   still has to become `# newpar`/`# newdoc` here (paragraphsWithIds) — a parallel text arrives already
+   split, but split into PARAGRAPHS of sentences, because that structure is what it is lined up by. */
 window.__applyInsertPayload=async function(p){ p=p||{};
-  const pars=(p.parallels||[]).filter(x=>x&&x.lang&&(x.sents||[]).length);
+  const pars=(p.parallels||[]).filter(x=>x&&x.lang&&parParas(x).length);
   const main=p.main||{};
+  /* THE WHOLE PAYLOAD IS ONE UNDO ENTRY — one press of ⌘Z takes back everything the Insert-text sheet did,
+     main text and every parallel translation together, because that is what the user did: one dialog, one
+     Insert. This is the OUTER batch; __insertPastedText opens one of its own inside it and applyParallelTexts
+     pushes an entry of its own, both of which the depth counter neutralises (js/core/undo.js). */
+  beginUndoBatch(); beginRenderHold();
+  try{
   if(main.enabled&&(main.text||"").trim()){
     // An empty document adopts the language the dialog chose (and the parser that goes with it) BEFORE the
     // first sentence is inserted — doInsert parses with whatever `model` is set at that moment, so adopting
-    // afterwards would parse the whole insert with the outgoing language's model.
+    // afterwards would parse the whole insert with the outgoing language's model. (The sheet ALSO adopts on
+    // the click, so the model menu shows the choice at once rather than after this round trip; re-adopting
+    // the same language and model here is a no-op, and it is still the only adopt on a payload that did not
+    // come from the sheet — see adoptInsertLang.)
     if(p.adoptLang&&main.lang) adoptInsertLang(main.lang,main.model||"");
     const r=await __insertPastedText(main.text,p.index,{quiet:pars.length>0});
-    if(pars.length) applyParallelTexts(pars,r.start,r.count,`Inserted ${r.count} sentence${r.count===1?"":"s"}`,p.naive);
+    if(pars.length) applyParallelTexts(pars,r.start,r.count,`Inserted ${r.count} sentence${r.count===1?"":"s"}`,p.naive,r.paraCounts);
     return; }
   // TRANSLATIONS-ONLY (item 7d): no new sentences — the supplied texts land on sentences that are already
   // there, starting just after the last one that already carries a translation in any of these languages.
+  // The main text's paragraphs are read off the DOCUMENT here (docParaCounts): the blocks are already in
+  // the file, so their `# newpar`/`# newdoc` marks ARE the paragraph structure the translation aligns to.
   const start=transStartIndex(pars.map(x=>x.lang));
-  applyParallelTexts(pars,start,DOC.length-start,"",p.naive); };
+  applyParallelTexts(pars,start,DOC.length-start,"",p.naive,docParaCounts(start,DOC.length-start));
+  } finally { endRenderHold(); endUndoBatch(); } };
+
+/* ── PARAGRAPH-FIRST ALIGNMENT of a parallel text onto the main text's sentences ─────────────────────────
+   The rule, and the only sane one for texts that no sentenciser will ever segment identically in two
+   languages: paragraph n of the translation belongs to paragraph n of the main text, and WITHIN a paragraph
+   sentence n belongs to sentence n. A translated paragraph with MORE sentences than the main paragraph has
+   its excess COLLAPSED onto the last aligned sentence (joined with a single space), so the error stays
+   inside the paragraph that caused it instead of shifting every later translation by one — which is exactly
+   what the old whole-text positional zip did.
+   Fewer sentences simply leaves the tail of the main paragraph untranslated in that tier.
+   MISMATCHED PARAGRAPH COUNTS are handled as the honest analogue of the sentence rule: excess translation
+   paragraphs collapse onto the LAST aligned paragraph (and thence, by the rule above, onto its last
+   sentence), and excess MAIN paragraphs simply go untranslated. Nothing is ever dropped.
+   Returns {sents,collapsed}: one entry per main sentence ("" where there is none) and how many translation
+   sentences were merged into the sentence before them. */
+function alignToParagraphs(paras,sizes){ const out=[]; let collapsed=0;
+  const np=(sizes||[]).length; if(!np) return {sents:out,collapsed:0};
+  let src=(paras||[]).map(par=>(par||[]).map(s=>(s||"").trim()).filter(Boolean)).filter(par=>par.length);   // an empty paragraph is not a paragraph — it must not consume one of the main text's
+  if(src.length>np) src=src.slice(0,np-1).concat([[].concat(...src.slice(np-1))]);   // the excess paragraphs join the last aligned one, which the sentence rule below then collapses onto its final sentence
+  for(let i=0;i<np;i++){ const want=sizes[i], got=src[i]||[];
+    if(want<=0) continue;   // can't happen (every paragraph yields ≥1 block — see __insertPastedText/docParaCounts) but a 0 would silently swallow a paragraph's whole translation
+    for(let k=0;k<want;k++){
+      if(k>=got.length){ out.push(""); continue; }                                        // the translation ran out inside this paragraph
+      if(k===want-1&&got.length>want){ collapsed+=got.length-want; out.push(got.slice(k).join(" ")); }   // last aligned sentence takes the remainder of the paragraph
+      else out.push(got[k]); } }
+  return {sents:out,collapsed}; }
+/* A parallel text's paragraphs, whichever shape the payload used. `paras` is what both producers now send;
+   a flat `sents` (the shape before paragraph alignment existed) is read as ONE paragraph, which degrades to
+   the old positional zip rather than to nothing. */
+function parParas(par){ return (par&&par.paras)||((par&&par.sents&&par.sents.length)?[par.sents]:[]); }
+/* The main text's paragraph sizes for a run of blocks ALREADY IN THE DOCUMENT (the translations-only path):
+   a block carrying `# newpar` (or `# newdoc`, which opens a paragraph too) starts one, so the run's paragraph
+   shape reads straight off the marks __insertPastedText wrote — or off the ones the file was opened with.
+   No marks at all ⇒ one paragraph, which is what an unstructured document is.
+   hasNewpar/hasNewdoc, NOT a bare `!=null` test: the four boundary states are documented at _BOUNDARY_KEYS
+   (js/core/prefs.js) and `false` means "removed", which a null test would read as "present".
+   A mid-sentence paragraph start (MISC NewPar=Yes) is deliberately not read here — it divides a sentence, and
+   a sentence is the smallest thing a translation can attach to, so it names no boundary this can align on. */
+function docParaCounts(start,room){ const out=[];
+  for(let i=0;i<Math.max(0,room);i++){ const s=DOC[start+i];
+    if(!out.length||(s&&(hasNewpar(s)||hasNewdoc(s)))) out.push(0);
+    out[out.length-1]++; }
+  return out; }
+/* Paragraph sizes clipped to the blocks this insert may actually use. Only bites when the document runs out
+   of sentences mid-way (translations-only, near the end of a file); the remainder, if the marks named fewer
+   blocks than there are, is given to the last paragraph rather than dropped. */
+function clipCounts(counts,avail){ const out=[]; let n=0;
+  for(const c of ((counts&&counts.length)?counts:[avail])){ if(n>=avail) break;
+    const k=Math.min(c,avail-n); if(k>0){ out.push(k); n+=k; } }
+  if(n<avail){ if(out.length) out[out.length-1]+=avail-n; else out.push(avail); }
+  return out; }
 
 /* Where a translations-only insert starts: the block AFTER the last sentence that already has a translation
    in at least one of the submitted languages — i.e. carry on from where the translating stopped. Nothing
@@ -560,26 +667,30 @@ function transStartIndex(langs){ let last=-1;
   DOC.forEach((s,i)=>{ if((sentTranslations(s)||[]).some(t=>langs.indexOf(t.lang)>=0&&(t.text||"").trim())) last=i; });
   return last+1; }
 
-/* Write each parallel text's n-th sentence onto the n-th block from `start`. `room` is how many blocks this
-   insert may use (the count just inserted, or the rest of the document); anything past it is reported rather
-   than dropped silently — the alternative would be to invent sentences the main text never had. */
-function applyParallelTexts(pars,start,room,lead,naive){ if(!pars||!pars.length)return;
+/* Write each parallel text onto the blocks from `start`, ALIGNED PARAGRAPH-FIRST (alignToParagraphs above).
+   `room` is how many blocks this insert may use (the count just inserted, or the rest of the document) and
+   `counts` is how those blocks divide into the main text's paragraphs. Nothing is dropped: a translation
+   with too many sentences collapses its excess onto the last sentence of the paragraph it belongs to, which
+   is reported rather than left to be discovered later. */
+function applyParallelTexts(pars,start,room,lead,naive,counts){ if(!pars||!pars.length)return;
   const avail=Math.max(0,Math.min(room,DOC.length-start));
   if(!avail){ toast(lead?lead+" · no sentences left for the translations":"No sentences left to translate — every sentence already has one"); return; }
+  const sizes=clipCounts(counts,avail);
   pushUndo();   // ONE entry for the whole translation pass (the insert path's own per-sentence entries are already behind us)
-  let over=0;
+  let collapsed=0, done=0;
   pars.forEach(par=>{ TRANS_LANGS.add(par.lang);   // an insert in a new language enables its tier, so the field shows up under every block
-    over=Math.max(over,par.sents.length-avail);
-    par.sents.slice(0,avail).forEach((txt,k)=>{ const s=DOC[start+k]; if(!s)return;
+    const a=alignToParagraphs(parParas(par),sizes); collapsed+=a.collapsed; let got=0;
+    a.sents.forEach((txt,k)=>{ if(!txt) return;   // an unaligned slot writes NOTHING — it must not blank a translation this tier already carried, and an empty row is not an absent one (renderBlockTrans shows one under every sentence anyway)
+      const s=DOC[start+k]; if(!s)return; got++;
       const rows=sentTranslations(s); let row=rows.find(r=>r.lang===par.lang);
       if(!row){ row={lang:par.lang,text:""}; rows.push(row); }
-      row.text=txt; }); });
+      row.text=txt; });
+    done=Math.max(done,got); });
   markDirty(); renderTransDrawer(); preserveScroll(renderDoc);
   const names=pars.map(x=>langName(x.lang)||x.lang).join(", ");
-  const done=Math.min(avail,Math.max(...pars.map(x=>x.sents.length)));   // sentences that actually received one
   const bits=[]; if(lead)bits.push(lead);
   bits.push(`${lead?"translations":"Added translations"} in ${names} on ${done} sentence${done===1?"":"s"}`);
-  if(over>0) bits.push(`${over} translation sentence${over===1?"":"s"} left over`);   // the document ran out of sentences first
+  if(collapsed>0) bits.push(`${collapsed} extra translation sentence${collapsed===1?"":"s"} folded into the last sentence of their paragraph`);   // where a paragraph's translation outran its main text — said plainly, since a fold leaves no trace in the result to notice later
   if(naive&&naive.length) bits.push(`${naive.map(c=>langName(c)||c).join(", ")} split on punctuation (no parser installed)`);   // the optional-dependency degrade, surfaced the way this app surfaces them
   toast(bits.join(" · ")); }
 
@@ -1429,7 +1540,23 @@ function renderTransDrawer(){ const pop=document.getElementById("transPop"); if(
   pop.appendChild(search); pop.appendChild(list);   // item 13: search field on TOP of the language list
   const fill=q=>{ list.innerHTML=""; q=(q||"").trim().toLowerCase(); let entries;
     if(!q){ entries=[...TRANS_LANGS].sort((a,b)=>(langName(a)||a).localeCompare(langName(b)||b)).map(c=>[c,langName(c)||c]); }
-    else { entries=(window.ISO639_3||[]).filter(e=>{ const nm=(glotName(e[0])||e[2]||"").toLowerCase(); return e[0]===q||e[1]===q||nm.startsWith(q)||nm.includes(q)||e[0].includes(q); }).slice(0,60).map(e=>[e[1]||e[0], glotName(e[0])||e[2]]); }   // item 22: prefer Glottolog name
+    /* RANKED AND ALPHABETISED, exactly as the status-bar Languages menu does it (lmFilter, js/ui/wiring.js) —
+       the two are the same search over the same table and must not answer differently. Matching by word prefix
+       was only half of that: this list walked ISO639_3 in FILE order and cut at 60, so "eng" could bury English
+       among codes that happen to sort earlier in the table, or push it past the cut entirely. Two tiers, each
+       alphabetised by display name: an exact code or a prefix of the WHOLE name leads, then any later word of
+       the name. The 60-row cap stays, but it now cuts the tail rather than an arbitrary slice.
+       ONE DELIBERATE DIVERGENCE from lmFilter: no lmSub() filtering. That menu hides Glottolog-dialect
+       sub-languages because it is choosing what the DOCUMENT is written in, where a dialect code is usually a
+       mistake; this one is choosing what a translation tier is written in, and there is no reason a translation
+       may not be into one. The request was about how the search matches, not about narrowing what can be added. */
+    else { const wp=wordPrefixRe(q), pre=[], sub=[];   // one regex per keystroke, not per row — see lmFilter's own note; this list walks the same ~7,900-row table
+      for(const e of (window.ISO639_3||[])){ const nm=(glotName(e[0])||e[2]||"").toLowerCase();
+        if(e[0]===q||e[1]===q||nm.startsWith(q)) pre.push(e);
+        else if(wp.test(nm)||e[0].startsWith(q)||(e[1]&&e[1].startsWith(q))) sub.push(e); }
+      const byName=(a,b)=>(glotName(a[0])||a[2]||"").localeCompare(glotName(b[0])||b[2]||"");
+      pre.sort(byName); sub.sort(byName);
+      entries=pre.concat(sub).slice(0,60).map(e=>[e[1]||e[0], glotName(e[0])||e[2]]); }   // item 22: prefer Glottolog name
     if(!entries.length){ const d=document.createElement("div"); d.className="lmnote"; d.textContent=q?"No matching language.":"No translation languages yet — search to add one."; list.appendChild(d); return; }
     entries.forEach(([code,name])=>{ const row=document.createElement("label"); row.className="tdrow";
       const cb=document.createElement("input"); cb.type="checkbox"; cb.checked=TRANS_LANGS.has(code);
@@ -1463,10 +1590,34 @@ function renderBlockTrans(i){ const s=DOC[i], rows=sentTranslations(s);
     let row=rows.find(r=>r.lang===code); if(!row){ row={lang:code,text:""}; rows.push(row); }
     const text=document.createElement("div"); text.className="tg-text"; text.setAttribute("contenteditable","plaintext-only"); text.setAttribute("role","textbox"); text.spellcheck=false; text.dir="auto"; text.setAttribute("aria-label",(langName(code)||code)+" translation");
     text.textContent=row.text||""; if(!row.text)text.dataset.empty="1";   // data-empty → CSS placeholder (unfocused looks like plain text)
+    /* NO CLICK GATE HERE, AND THAT IS THE POINT — recorded because it was got wrong twice and the wrong version
+       is the tempting one. The field's BOX is its click target: anywhere inside it focuses and places a caret,
+       anywhere outside it does not (and blurs it, since nothing out there is focusable). That is the browser's
+       own behaviour for a contenteditable and it is exactly what is wanted; it needs no help.
+       WHAT THE TWO FAILED ATTEMPTS WERE, so neither is re-derived: a mousedown handler that preventDefault()ed
+       unless the point hit the TEXT's own client rects, and then a variant that measured an empty field's
+       placeholder by briefly setting width:max-content. Both were answering a misreading of "clicking to the
+       right of the input focuses it". An UNFOCUSED, EMPTY field is fully transparent (.tg-text has no background
+       until :hover/:focus), so what reads as "the input" is the grey placeholder word alone and everything right
+       of it looks like block background — but it is all still inside the box, and focusing it there is correct.
+       The field's real extent is the box you see on hover, which stops at the sentence text's right edge because
+       renderBlockTrans insets the whole .tgrid to meet it (below). Gating anything inside that box only made the
+       field feel dead across most of its own width. */
     let pre=null,orig=null; text.addEventListener("focus",()=>{ pre=snapSent(i); orig=row.text||""; setCurBlock(i); });   // one undo per edit session; setCurBlock: clicking/tabbing into a translation field is arriving at its block (same as the running-sentence line — document.js's wireStext), and it has to happen here rather than rely on bubbling to .sblock's own click handler because .tgrid stops mousedown/click propagation outright (see box's own listeners above, added so a click inside the grid never falls through to token deselection)
     text.addEventListener("blur",()=>{ if(pre&&(row.text||"")!==orig){ UNDO.push(pre); if(UNDO.length>80)UNDO.shift(); REDO.length=0; updateUndoUI(); } pre=null; });
     text.addEventListener("input",()=>{ row.text=text.textContent||""; if(row.text)delete text.dataset.empty; else text.dataset.empty="1"; markDirty(); });
-    text.addEventListener("keydown",e=>{ e.stopPropagation(); if(e.key==="Enter"&&!e.shiftKey){ e.preventDefault(); text.blur(); } });   // Enter commits; Shift+Enter newline; keep keys off the doc nav handler
+    text.addEventListener("keydown",e=>{ e.stopPropagation();   // Enter commits; Shift+Enter newline; keep keys off the doc nav handler
+      if(e.key==="Enter"&&!e.shiftKey){ e.preventDefault(); text.blur(); return; }
+      /* ESCAPE LEAVES THE FIELD, on request — and it has to be handled HERE because this listener
+         stopPropagation()s every key, so the app's own Escape ladder (js/grid/columns.js) never saw it and the
+         key did nothing at all in a translation field. This is the same rung that ladder gives the grid's own
+         .cin/.csel inputs: defocus the field, keep the block selected, and let a second Escape fall through to
+         the selection itself. preventDefault() is what stops the macOS BEEP — an Escape WebKit hands back
+         unhandled becomes AppKit's cancelOperation:, which nothing implements.
+         IT COMMITS, like Enter, rather than reverting: the `input` handler above has already written every
+         keystroke through to row.text, so there is nothing held back to discard, and the undo snapshot taken on
+         focus is what actually restores the pre-edit text (⌘Z), for this field exactly as for every other. */
+      if(e.key==="Escape"){ e.preventDefault(); text.blur(); return; } });
     tr.appendChild(lab); tr.appendChild(text); box.appendChild(tr); });
   // item 6: after layout, pull the grid's RIGHT edge in to coincide with the sentence text's (.stext) right edge —
   // so the translation column shares the sentence's right margin (the id / link / block controls sit in the gutter beyond it).

@@ -2,9 +2,10 @@
 /* context menus */
 const ctx=document.getElementById("ctx");
 const ctx2=document.createElement("div"); ctx2.className="ctx ctx-sub"; document.body.appendChild(ctx2);   // one nested flyout for "Other ▸"
-// item forms accepted: null → separator; [label,kbd,fn,danger] tuple; {header} → section label; {label,expand,kbd,fn,danger,sub}
+// item forms accepted: null → separator; [label,kbd,fn,danger] tuple; {header} → section label; {label,expand,kbd,fn,danger,sub,disabled}
 function normItem(it){ return (it==null||Array.isArray(it)) ? (it&&{label:it[0],kbd:it[1],fn:it[2],danger:it[3]}) : it; }
 function makeCtxButton(it,isSub){ const b=document.createElement("button"); if(it.danger)b.className="danger"; if(it.opt)b.classList.add("opt");
+  if(it.disabled) b.disabled=true;   // a row that is SHOWN but inert — the column chooser's obligatory ID/Form rows, which still carry their checkmark. A real `disabled` attribute rather than a class, so it also can't be reached by keyboard or by a synthesised click; the kits dim it and drop its hover (.ctx button:disabled)
   if(it.footLink)b.classList.add("ctx-footlink");   // item 1: openSub lifts this row into the flyout's FIXED footer (an ordinary .ctx button, not a full-bleed sticky bar). This replaced an earlier `sticky:true` form (a position:sticky full-bleed bar, .ctx-sticky) that rode at the bottom of the SCROLLING list rather than sitting below it — the footer is what both callers actually wanted, so the sticky form has no users left and both it and its rule are gone
   let inner="";
   if(it.expand) inner+=`<span class="expand">${it.expand}</span>`;
@@ -159,6 +160,7 @@ function showCtx(x,y,items,twoCol,rtlArg,fit){ const norm=items.map(normItem);
   const rtl = rtlArg!=null ? rtlArg : !!(sel && sel.s>=0 && sel.s<DOC.length && sentRTL(DOC[sel.s]));   // callers that don't pre-select (POS/deprel label menus) pass their sentence's direction explicitly
   ctx.dir=rtl?"rtl":"ltr";   // RTL sentence → mirror the whole menu (text, checkmarks, headings, the two-column rule)
   ctx.classList.toggle("defctx",!!fit);
+  ctx.classList.remove("colmenu");   // cleared on EVERY open; columnMenu re-adds it for itself, so the class can never leak onto the next menu to use this shared #ctx
   renderMenu(ctx,norm,!!twoCol && norm.filter(it=>it&&!it.header&&!it.sub).length>12, rtl); closeSub();
   ctx.classList.add("show"); ctx._openedAt=Date.now();   // stamp open time: a menu opened right after a pick()/renderDoc must ignore that re-render's ASYNC scroll event (else it self-closes → the long-standing "right-click a bracket token does nothing")
   // item 1 — now the menu is laid out, cap any hint (.note) to the two-column group width so a longer note WRAPS
@@ -169,7 +171,8 @@ function showCtx(x,y,items,twoCol,rtlArg,fit){ const norm=items.map(normItem);
   const w=ctx.offsetWidth, h=ctx.offsetHeight;
   let left = rtl ? x-w : x;   // RTL → the menu opens to the bottom-left of the cursor
   ctx.style.left=Math.max(8,Math.min(left,innerWidth-w-8))+"px"; ctx.style.top=Math.max(8,Math.min(y,innerHeight-h-8))+"px"; }
-function closeCtx(){ ctx.classList.remove("show"); closeSub(); void ctx.offsetHeight; }   // same forced-reflow fix as closeSub, for ctx's own backdrop-filter layer
+function closeCtx(){ ctx.classList.remove("show"); closeSub(); void ctx.offsetHeight;   // same forced-reflow fix as closeSub, for ctx's own backdrop-filter layer
+  if(typeof setPillMenuOpen==="function") setPillMenuOpen("fmtPill",false); }   // the Format pill borrows this shared #ctx for its own menu (fmtMenu, js/io/formats.js) and its chevron has to point back UP however the menu was dismissed — Escape, a pick, a click outside, or another menu stealing #ctx. Unconditional and idempotent: for every OTHER #ctx menu the pill is already un-flagged, so clearing it again costs a no-op class toggle. typeof-guarded because this file loads before js/ui/wiring.js, which defines the helper — harmless at runtime (closeCtx only ever runs from a handler, long after both are defined), but the guard is what the codebase's forward-reference rule asks for
 addEventListener("click",closeCtx); addEventListener("scroll",e=>{ if(e.target===ctx||ctx.contains(e.target)||e.target===ctx2||ctx2.contains(e.target)) return;   // a scroll INSIDE the menu itself (e.g. the Wiktionary "Definitions of …" flyout's own overflow-y:auto list) must not dismiss it — only a scroll of whatever's BEHIND the menu should
   if(ctx.classList.contains("show") && Date.now()-(ctx._openedAt||0)<250) return; closeCtx(); },true);   // ignore the programmatic scroll from the pick()/re-render that immediately precedes a menu open; a genuine later user-scroll still closes it
 addEventListener("keydown",e=>{ if(e.key!=="Escape")return;   // item 3: Escape dismisses an open flyout (e.g. a POS-subtype submenu) FIRST, keeping the parent menu; a second Escape closes the parent
@@ -385,7 +388,14 @@ function nodeTokenMenu(x,y,si,tokId){ const s=DOC[si]; if(!s)return; const rtl=s
     if(isSpacelessLang()) items.unshift([`Merge ${selRange.from}–${selRange.to} into one token`,"⌃⌘M",()=>mergeTokens(si,selRange.from,selRange.to)]);   // spaceless languages only (see SPACELESS_LANGS); under Group, and deliberately: grouping keeps the tokens, merging destroys them, so the reversible one is offered first
     items.unshift([`Group ${selRange.from}–${selRange.to} as MWT`,"⌘G",()=>addMWT(si,selRange.from,selRange.to)]); }
   const tok=s.tokens[tokId-1], lemma=tok&&((tok.lemma&&tok.lemma!=="_")?tok.lemma:tok.form);   // EITHER gloss tier can receive a dictionary sense: the lexical tier takes it whole (MISC Gloss), the morphemic one folds it in beside the grammatical abbreviations (MISC MGloss) — see applyWiktionaryDef, which writes whichever tiers are on
-  if((GLOSS_ON||MORPH_ON) && lemma && DOCLANG!=="en"){   // English lemmas gain nothing from an English Wiktionary gloss of themselves — this is for glossing OTHER languages' words
+  /* THE DICTIONARY IS AVAILABLE WITH NO GLOSSING TIER ENABLED, on request — the tier gate ((GLOSS_ON||MORPH_ON))
+     that used to be part of this condition is gone. Looking a word up is worth doing on its own, and requiring a
+     tier first meant the only way to READ a definition was to create annotation you might not want. Picking a
+     sense still writes to MGloss and so still needs a tier: applyWiktionaryDef returns without doing anything
+     when neither is on (see its own note), so the flyout reads as a dictionary and clicking a sense is inert.
+     The remaining two conditions stand: a lemma to look up, and not an English document (an English gloss of an
+     English lemma says nothing). */
+  if(lemma && DOCLANG!=="en"){
     items.unshift(null); items.unshift({label:`Definitions of “${esc(lemma)}”`, sub:()=>wiktionaryDefItems(si,tokId,lemma,tok.upos), subFit:true}); }
   showCtx(x,y,items); }
 // dictionary → MGloss (item: "Definitions of …"). Fetches word senses through the Python bridge, which picks the
@@ -464,6 +474,12 @@ const WIKT_GENDER_ABBRS=["M","F","N","CG"];   // this app's own Leipzig set for 
 // inherent to the lexeme; only the very FIRST time gender is added does it need a fresh position, which it gets
 // from MGLOSS_FEAT_ORDER via insertGlossAbbrevAtRank, same as everything else.
 function applyWiktionaryDef(si,tokId,text,genderUd,genderAbbr){ const s=DOC[si], t=s&&s.tokens[tokId-1]; if(!t)return;
+  /* NO TIER, NO EFFECT — and deliberately no toast either, per the request that clicking a definition simply do
+     nothing there. The "Definitions of …" flyout is now offered whether or not a glossing tier exists (see
+     nodeTokenMenu), because reading a sense is useful by itself; but a sense is COMMITTED to MISC MGloss, and
+     with neither tier created there is nowhere for it to go. Writing it anyway would silently create the very
+     annotation the user did not ask for, and is what this guard exists to prevent. */
+  if(!GLOSS_ON && !MORPH_ON) return;
   // …EXCEPT onto a form that doesn't inflect. A compound member, a construct-state form or any other bound stem
   // (isUninflectedForm) stands in for the word without realising its categories, so Wiktionary's gender — a fact
   // about the LEXEME, read off a dictionary entry rather than off this token — has nothing to attach to here. The
@@ -555,7 +571,7 @@ document.getElementById("doc").addEventListener("contextmenu",e=>{
   const xpEl=e.target.closest(".mwt-pos");
   if(xpEl&&xpEl.hasAttribute("data-xpostok")){ e.preventDefault(); e.stopPropagation();
     extPosMenu(e.clientX,e.clientY,+xpEl.getAttribute("data-s"),+xpEl.getAttribute("data-xpostok")); return; }
-  const mwtEl=e.target.closest(".mwt-form,.mwt-tr-edit"); if(mwtEl&&mwtEl.hasAttribute("data-mwtfrom")){ e.preventDefault(); e.stopPropagation(); const si=+mwtEl.getAttribute("data-s"), from=+mwtEl.getAttribute("data-mwtfrom");
+  const mwtEl=e.target.closest(".mwt-form,.mwt-tr"); if(mwtEl&&mwtEl.hasAttribute("data-mwtfrom")){ e.preventDefault(); e.stopPropagation(); const si=+mwtEl.getAttribute("data-s"), from=+mwtEl.getAttribute("data-mwtfrom");   // `.mwt-tr`, not `.mwt-tr-edit`: the transliteration row belongs to the MWT in EVERY language, so its menu is the MWT's menu — the -edit class is narrower (it marks the row the click-to-edit handler below may open a field on, which is Sanskrit-only)
     // Both rows of a tie open the SAME menu, and "Edit surface form" stays coherent under a Sanskrit script
     // because editMWTInline (not this row) decides which element the field opens over — the IAST row when the
     // glyph is derived, the glyph itself otherwise. So the menu item edits whatever the left-click would.
@@ -1182,7 +1198,14 @@ function SCTRL(i){ return [
   ["delete","Delete sentence","⌘⌫",()=>delSent(i),true],
 ]; }
 function sentMenu(x,y,i){ const by={}; SCTRL(i).forEach(e=>by[e[0]]=e); const mk=e=>[e[1],e[2],e[3],e[4]];
-  const items=[mk(by.insbefore),mk(by.insafter),null,mk(by.duplicate),mk(by.url),mk(by.reenter)];
+  /* `by.duplicate` USED TO BE HERE AND IS GONE. SCTRL's Duplicate entry was replaced by "Document boundary" (see
+     its own comment: "replaced Duplicate (⌘D), which is gone"), but this line kept dereferencing it — and mk()
+     reads e[1] off whatever it is handed, so `mk(undefined)` threw a TypeError out of sentMenu. The whole
+     SENTENCE CONTEXT MENU therefore never opened at all: right-clicking bare block background did nothing,
+     silently, because the throw happened inside the contextmenu listener. Nothing else references by.duplicate.
+     mk() is left as-is rather than made undefined-tolerant: a missing key is a bug in this list, and a tolerant
+     mk would have hidden this one instead of announcing it. */
+  const items=[mk(by.insbefore),mk(by.insafter),null,mk(by.url),mk(by.reenter)];
   items.push(null,mk(by.moveup),mk(by.movedown),mk(by.export));
   // item 2: the document/paragraph boundaries this sentence STARTS. Checkable, because each is a toggle and the
   // checkmark is the only thing in the menu that says whether the sentence already carries one.
@@ -1329,6 +1352,30 @@ async function exportSVG(i){ const b=document.querySelector(`.sblock[data-i="${i
   let filename=r.filename||stem; if(!filename.toLowerCase().endsWith(".svg")) filename+=".svg";
   let res; try{ res=await window.pywebview.api.save_svg_to(r.folder,filename,src); }catch(e){ return toast("Export failed: "+e); }
   res.error?toast("Export failed: "+res.error):toast("Exported "+res.name); }
+/* THE GRID'S COLUMN CHOOSER — right-click any column heading (renderGrid binds it on the header row).
+   Modelled on Finder's list-view header menu, which is a PLAIN CHECKLIST and nothing else: one row per column,
+   a leading checkmark on the ones being shown, and the columns that can't be turned off drawn as disabled rows
+   that still carry their tick. No headings, no separators, no "Show All" — Finder has none of those and the
+   list is short enough not to want them.
+   `fit` (the last argument) shrinks the menu to its widest row instead of the shared 224px floor: these labels
+   are one short word each and the floor would leave most of the menu empty — the same call the status-bar
+   Format menu makes, for the same reason.
+   The checkmark shows the EFFECTIVE visibility, so a column the width rule has auto-hidden reads as unchecked —
+   it is, after all, not on screen. Clicking it then pins it ON (toggleCol toggles that same effective state), which
+   is what makes the menu's own display and its behaviour agree without the user having to know the rule exists.
+   `si` names the sentence whose header was clicked: the column SET is document-wide, but which columns a document
+   admits at all is not (ALLCOLS's transliteration gate is per-sentence), so the list is built for that sentence. */
+function columnMenu(x,y,si){
+  /* ID AND FORM ARE NOT LISTED AT ALL. They were shown as ticked-but-disabled rows, on the reasoning that a
+     chooser should account for every column; but a row that cannot be changed is not a choice, and two inert
+     rows at the top of a short menu are mostly what the reader has to look past to reach the ones that work.
+     REQ_COL (js/grid/grid.js) stays the single definition of which those are — this filters by it rather than
+     naming them again, so a change there reaches here for free. */
+  const rows=ALLCOLS(si).map(c=>[c[0],c[3]]).filter(([k])=>!REQ_COL[k]);
+  showCtx(x,y,rows.map(([k,H])=>({label:H, opt:true, check:colShown(k), fn:()=>toggleCol(k)})),
+    false,undefined,true);
+  ctx.classList.add("colmenu");   // styling hook: a smaller type size and a trailing padding that matches the checkmark gutter (see .ctx.colmenu in the kits). Added AFTER showCtx, which clears it on every open
+}
 function tokenMenu(x,y,si,idx,target){ const rng=(selRange&&selRange.s===si&&selRange.to>selRange.from&&idx+1>=selRange.from&&idx+1<=selRange.to)?selRange:null;
   pick(si,idx+1,false); const tokId=idx+1;
   const items=[
@@ -1516,7 +1563,7 @@ function extPosMenuAtSel(si,tokId){ const el=tokGroupOf(si,tokId)||document.quer
   extPosMenu(b?(rtl?b.right:b.left+20):innerWidth/2, b?b.bottom+4:innerHeight/2, si, tokId); }
 function mwtTokenItems(si,tokId){ const m=mwtAtSel(DOC[si],tokId);
   if(m) return [
-    ["Flatten MWT","⌥⌘F",()=>flattenMWT(si,m)],
+    ["Flatten MWT","⌥⌘G",()=>flattenMWT(si,m)],   // ⌥⌘G, matching app/menu_spec.py's "Flatten Multi-word Token" — this row still read ⌥⌘F, the binding that item moved OFF when Find and Replace took ⌥⌘F (menu_spec records why: AppKit matches a key equivalent against the first eligible item in menu order, and Find and Replace sits above Flatten in the Edit menu, so ⌥⌘F here would have flattened nothing). The keystroke has been ⌥⌘G since; only this label was left behind
     ["Ungroup MWT","⇧⌘G",()=>{ const s=DOC[si]; pushUndo(si); s.mwt=(s.mwt||[]).filter(x=>x!==m); if(!s.mwt.length)delete s.mwt; markDirty(); preserveScroll(renderDoc); toast("Multi-word token removed"); }],
   ];
   return [["Split into MWT…","⌥⌘S",()=>openConvertMWT(si,tokId-1)]]; }

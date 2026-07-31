@@ -91,6 +91,10 @@ def item(title, js=None, *, key=None, mods=(), win_key=None, win_mods=None, sf=N
         "spec_title": spec_title or title.replace("…", "").strip(),
         "js": js, "action": action, "submenu": submenu,
         "key": key, "mods": list(mods),
+        # The RESOLVED Windows chord, always (a copy of key/mods where nothing overrides them), so
+        # audit_accelerators() can compare every row in one currency rather than a mixture of chords
+        # and pre-rendered labels.  Not part of as_json's field list — the web layer reads the label.
+        "win_key": wk, "win_mods": wm,
         "accel": accel_label(key, mods),
         # Emitted only where it DIFFERS, so a reader of the JSON can tell an override from a copy.
         "win_accel": (accel_label(wk, wm) if (win_key is not None or win_mods is not None) else None),
@@ -314,6 +318,44 @@ MENUS: list[dict] = [
 # SEQUENCE differs, never the rows, so the two can't drift in content.
 WIN_ORDER = ["File", "Edit", "Format", "View", "Help"]
 
+# ── rows AppKit provides and the web layer cannot (macOS only) ───────────────
+# Cut / Copy / Paste / Select All and Enter Full Screen are FIRST-RESPONDER selectors: an NSMenuItem
+# with a nil target sends them down the responder chain, which is what makes them work inside the
+# WKWebView's own text fields and what no `js` string in the table above can reproduce.  pywebview
+# used to supply them in default View and Edit menus of its own, which is exactly why the bar had two
+# Edits and two Views (see the SHOW_DEFAULT_MENUS note in __main__.py); app/mac/shell.py now injects
+# them into OUR Edit and View instead, from this list.
+#
+# THEY ARE DELIBERATELY NOT ROWS IN `MENUS`.  `as_json` walks MENUS only, so the Windows in-window
+# menu bar never sees them — which is right twice over: it can't dispatch an ObjC selector, and
+# Windows has no free equivalent to dispatch (WebView2's own edit accelerators and context menu
+# already handle Ctrl+X/C/V/A inside a field, and F11 full screen is not this app's to bind).  Keeping
+# them here rather than in mac/shell.py is only so ONE file still knows every chord this app spends —
+# audit_accelerators() below reads them, and the ⌥⌘F / ⌃⌘G notes above are the record of what a
+# chord this table couldn't see would cost.
+#   ``after``   the spec_title to insert below (with a separator first); None ⇒ append at the end
+NATIVE_MAC: list[dict] = [
+    # HIG order for the Edit menu is Undo, Redo, ─, Cut, Copy, Paste, Select All, ─, Find… — so these
+    # go straight after Redo, ahead of the separator that already precedes Find.
+    {"menu": "Edit", "after": "Redo", "items": [
+        {"title": "Cut", "sel": "cut:", "key": "x", "mods": ("cmd",)},
+        {"title": "Copy", "sel": "copy:", "key": "c", "mods": ("cmd",)},
+        {"title": "Paste", "sel": "paste:", "key": "v", "mods": ("cmd",)},
+        {"title": "Select All", "sel": "selectAll:", "key": "a", "mods": ("cmd",)},
+    ]},
+    # ⌃⌘F and the bottom of the View menu: both are the system's own placement, and the same ones
+    # pywebview's default View used.  AppKit retitles the item "Exit Full Screen" itself.
+    {"menu": "View", "after": None, "items": [
+        {"title": "Enter Full Screen", "sel": "toggleFullScreen:", "key": "f", "mods": ("ctrl", "cmd")},
+    ]},
+]
+
+
+def native_mac_items() -> list[dict]:
+    """Every :data:`NATIVE_MAC` row, flat, each tagged with the menu it belongs to."""
+    return [dict(row, menu=group["menu"]) for group in NATIVE_MAC for row in group["items"]]
+
+
 # ── entries with no menu row (yet) ───────────────────────────────────────────
 # Carried over verbatim from the old `specs` dict, where they were likewise inert: no MenuAction
 # with these titles is built, so the wiring loop never matched them.  Kept because their comments
@@ -423,6 +465,58 @@ def toggle_fs_toolbar_mirror() -> bool:
     return bool(_fs_toolbar_mirror["on"])
 
 
+# ── accelerator clash audit ──────────────────────────────────────────────────
+# Run it after adding ANY shortcut: `python -m app.menu_spec`.  It exists because AppKit matches a
+# key equivalent against the FIRST eligible item in menu order and silently ignores the rest — which
+# has bitten this table twice (the ⌥⌘F and ⌃⌘G notes above are both post-mortems), and both times the
+# dead row was a CONDITIONAL one, so the clash only showed itself when a particular selection made
+# the row visible.  Two runs, because the two platforms spend different chords: macOS as written,
+# Windows after ⌘→Ctrl and ⌃/⌥ BOTH → Alt (js/core/platform.js `_MOD_WIN`; the ⌥⌘/⌃⌘ collapse is
+# forced — five ⌘-families over there, four here).
+#
+# A shared chord is only reported where BOTH rows can be visible at once.  FOUR pairs share one on
+# purpose (the same four on each platform): a sentence command and a token command that take
+# mutually exclusive selections — a block with no token vs a token — i.e. Move Sentence Up/Down
+# against Move Token Up/Down on ⌃⌘↑↓, and Insert Sentence Before/After against Insert Token
+# Above/Below on ⌥⌘↑↓.  Those are the pairs whose `vis` rules are disjoint by construction, and
+# nothing else is excused: a clash between two rows that a wrapping "they're different modes"
+# argument would cover is exactly the clash that goes unnoticed for months.
+_DISJOINT_VIS = {frozenset(("blockOnly", "grid")), frozenset(("blockOnly", "diagram"))}
+_WIN_MOD = {"cmd": "ctrl", "ctrl": "alt", "alt": "alt", "shift": "shift"}   # ⌃ and ⌥ both land on Alt
+
+
+def _chords(win: bool) -> list[tuple]:
+    """``(chord, label, vis)`` for every LIVE row that binds one.  RESERVED rows are excluded: no
+    MenuAction is built for them, so they can't shadow anything — their comments record which
+    letters are spent, which is a different job from this one."""
+    rows: list[tuple] = []
+    for it in all_items(include_reserved=False):
+        key = it["win_key"] if win else it["key"]      # win_key/win_mods are always resolved (see item())
+        if not key:
+            continue
+        mods = it["win_mods"] if win else it["mods"]
+        chord = (key.lower(), frozenset(_WIN_MOD[m] for m in mods) if win else frozenset(mods))
+        rows.append((chord, it["spec_title"], it.get("vis")))
+    if not win:                                # the native rows are macOS-only by construction
+        for it in native_mac_items():
+            rows.append(((it["key"].lower(), frozenset(it["mods"])), it["title"], None))
+    return rows
+
+
+def audit_accelerators() -> list[str]:
+    """Human-readable lines describing every unresolved clash; empty ⇒ the table is clean."""
+    out: list[str] = []
+    for win in (False, True):
+        seen: dict = {}
+        for chord, title, vis in _chords(win):
+            for other, other_vis in seen.get(chord, []):
+                if vis and other_vis and frozenset((vis, other_vis)) in _DISJOINT_VIS:
+                    continue                   # mutually exclusive selections — deliberate, see above
+                out.append(f"{'win' if win else 'mac'}: {chord!r} — {other!r} and {title!r}")
+            seen.setdefault(chord, []).append((title, vis))
+    return out
+
+
 # ── JSON for the frontend ────────────────────────────────────────────────────
 def as_json(order: list[str] | None = None) -> list[dict]:
     """The table as plain JSON for ``web/js/ui/menubar.js`` (served by ``Api.menu_spec``).
@@ -446,3 +540,12 @@ def as_json(order: list[str] | None = None) -> list[dict]:
                           "fluent", "vis", "check")})
         out.append({"title": title, "items": rows})
     return out
+
+
+if __name__ == "__main__":   # `python -m app.menu_spec` — the accelerator audit, and nothing else
+    _clashes = audit_accelerators()
+    for _line in _clashes:
+        print(_line)
+    print(f"{len(all_items(include_reserved=False))} rows + {len(native_mac_items())} native (macOS): "
+          + (f"{len(_clashes)} UNRESOLVED CLASH(ES)" if _clashes else "no accelerator clashes"))
+    raise SystemExit(1 if _clashes else 0)
