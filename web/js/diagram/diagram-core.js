@@ -901,6 +901,49 @@ function backoff(tip,frm,d){const [ux,uy]=normv(frm,tip); return [tip[0]-ux*(d-A
 function edgeAngle(x1,y1,x2,y2){let a=Math.atan2(y2-y1,x2-x1); if(a>Math.PI/2)a-=Math.PI; if(a<-Math.PI/2)a+=Math.PI; return a;}
 function labelAngle(x1,y1,x2,y2){const a=edgeAngle(x1,y1,x2,y2); return Math.abs(a)>Math.PI/4?0:a;}   // steeper than 45° → horizontal label
 
+/* ── CJK PUNCTUATION IS ATTACHED BY ITS OWN GLYPH, and nothing else knows ─────────────────────────────────────
+   The SpaceAfter rule displaySent uses below (see its comment) is a TYPOGRAPHIC test, and in a script written
+   without word spaces it has nothing to read: every token carries SpaceAfter=No, so `gluedLeft` and `gluedRight`
+   are BOTH true for every mark, the "attached on exactly one side" test never fires, and the tiebreak — the
+   head's direction — silently becomes the whole rule. That tiebreak is wrong for exactly the marks that matter
+   most: a sentence-medial 、/，separates two clauses, and both UD and SUD attach such a mark to the head of the
+   material it introduces, i.e. to a token on its RIGHT, so `h>i+1` held and the comma folded onto the FOLLOWING
+   word — 我喜欢猫，他喜欢狗 drawn as 我喜欢猫 ，他 喜欢狗. In Chinese and Japanese a sentence-medial mark belongs
+   to what precedes it, whatever the parser hung it off.
+   THE GLYPH DECIDES, NOT THE DOCUMENT LANGUAGE. These characters are CJK-exclusive and their typographic side is
+   fixed by the character itself, so testing the glyph settles a Chinese sentence quoted inside an English or
+   Korean document too, and cannot misfire on a language that never writes them — Thai/Lao/Khmer/Tibetan/Burmese
+   are all in SPACELESS_LANGS (js/core/state.js) and use NONE of these, so gating on isSpacelessLang() would have
+   covered them for no gain while still missing the embedded sentence. DOCLANG is therefore not consulted here.
+   Both halves are needed, and they are the same fact seen from two sides: a closing 」）hugs what PRECEDES it,
+   an opening 「（《 hugs what FOLLOWS and must never be dragged left. The openers are listed for that reason —
+   without them the force-left set would have to be a blocklist, and a parser that hangs 「 off the matrix verb to
+   its left (which happens) would still fold the quote mark onto the wrong side.
+   DELIBERATELY NOT INCLUDED — three sets of near-misses:
+     · ASCII/shared marks in a CJK document (", . ” ’ …). A shared glyph appears in spaced text too, where
+       SpaceAfter genuinely carries information, and overriding it there would discard real evidence in favour of
+       a guess. "," is not by itself evidence of anything.
+     · ・ U+30FB, the katakana middle dot: a separator INSIDE a name (ジョン・スミス), set solid on both sides and
+       belonging to neither — no typographic side to assert.
+     · 〜 U+301C and the CJK dashes: range/linking marks, set solid on both sides — same reason.
+   The sentence-ENDERS 。！？ ARE included even though "sentence-medial" is the case that was broken. They are
+   left-attaching on the identical grounds, and at a true sentence end the override changes nothing (a mark with
+   no following token cannot merge right — see the `i<t.length-1` guard). What it does fix is the mark that is
+   final for a CLAUSE but medial in the token list: 「…。」, or two sentences annotated as one.
+   Nothing downstream needs to know: a forced-LEFT mark takes the ordinary TRAILING path (`hangs`), so its `sp`
+   still comes from the SpaceAfter of the token to its left — =No throughout a spaceless script, so the mark is
+   drawn set solid against its host, which is exactly what CJK typography wants — and a forced-RIGHT one still
+   goes through `pendingLeads`. The head remapping, the goeswith re-fold and the MWT remap all read the same two
+   lists as before. */
+const CJK_PUNCT_LEFT=new Set(Array.from("、。〉》」』】〕〗〙〛〞〟！），．：；？］｝｡｣､"));   // trail the material before them: ideographic comma/full stop, the fullwidth and halfwidth forms, and every CLOSING bracket/quote
+const CJK_PUNCT_RIGHT=new Set(Array.from("〈《「『【〔〖〘〚〝（［｛｢"));                       // lead the material after them: every OPENING bracket/quote
+// → "left" / "right" / "" (no CJK claim). Tested on the WHOLE form, not per character, so a multi-mark PUNCT
+// token (「「 or ！？) still answers, while a token that merely CONTAINS one does not get its side asserted.
+function cjkPunctSide(form){ const f=String(form||""); if(!f) return "";
+  const chars=Array.from(f);
+  if(chars.every(c=>CJK_PUNCT_LEFT.has(c))) return "left";
+  if(chars.every(c=>CJK_PUNCT_RIGHT.has(c))) return "right";
+  return ""; }
 /* merge-punctuation is a display transform: fold each punctuation mark OFF the adjoining token (drop it from the
    annotation token list so arcs/nodes/columns ignore it) but keep it, per host, as a `hangs` satellite entry
    {form, sp, orig}. Heads are remapped. Returns the display tokens plus map[displayIndex] = original token index
@@ -909,8 +952,9 @@ function displaySent(sent){
   const rtl=sentRTL(sent), mwt=sent.mwt||[];
   if(!show.mergePunct){ const D0=foldGoesWith({tokens:sent.tokens, map:sent.tokens.map((_,i)=>i), rtl, mwt}); D0.xpos=extPosSpans(D0); return D0; }   // the goeswith fold runs on BOTH paths — it is the relation's rendering, not an option
   const t=sent.tokens, disp=[], oldToDisp=new Array(t.length).fill(-1);
-  /* item 2 — a punctuation token folds onto a neighbour. WHICH neighbour is decided by SPACING FIRST and by the
-     dependency edge only when the spacing does not say:
+  /* item 2 — a punctuation token folds onto a neighbour. WHICH neighbour is decided by the mark's own GLYPH where
+     that glyph states a side, then by SPACING, and by the dependency edge only when neither says:
+       · a CJK mark (、。！？，「」（） …) → the side the character itself attaches to — see cjkPunctSide above
        · the token before it has SpaceAfter=No (nothing between them) → the mark is ATTACHED to the left  → merge LEFT
        · the mark itself has SpaceAfter=No     (nothing after it)     → the mark is ATTACHED to the right → merge RIGHT
        · glued on both sides, or free on both  → no typographic answer → fall back to the head's direction
@@ -931,7 +975,8 @@ function displaySent(sent){
       const h=parseInt(tk.head,10);
       const gluedLeft=i>0&&spaceAfterNo(t[i-1]);            // no gap between the previous token and this mark
       const gluedRight=spaceAfterNo(tk);                    // no gap between this mark and whatever follows
-      const right=(gluedLeft!==gluedRight)?gluedRight:(h>i+1);   // attached on exactly one side → that side wins; otherwise the edge
+      const cjk=cjkPunctSide(tk.form);                      // a CJK mark states its own side — see CJK_PUNCT_LEFT above; "" for every other glyph
+      const right=cjk?(cjk==="right"):((gluedLeft!==gluedRight)?gluedRight:(h>i+1));   // the glyph first (it is the only witness in a spaceless script), then attached-on-exactly-one-side, then the edge
       if(right && i<t.length-1){ pendingLeads.push({form:tk.form, sp:!spaceAfterNo(tk), orig:i}); return; }   // leads the next token; sp = a gap after the mark, toward the host
       if(disp.length>0){ const last=disp[disp.length-1]; last.hangs.push({form:tk.form, sp:!spaceAfterNo(t[i-1]), orig:i}); oldToDisp[i]=disp.length-1; return; }   // edge points left (or 0/invalid) → trails the previous host
       // no previous host → fall through and push as a standalone token
