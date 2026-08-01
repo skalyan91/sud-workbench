@@ -81,11 +81,6 @@ if [ -d "$FONTDIR" ]; then
     [ -f "$FONTDIR/$f" ] || { echo "!! core font missing from web/fonts: $f" >&2; exit 1; }
     mv "$FONTDIR/$f" "$KEEPDIR/$f"
   done
-  # …and the gf/ subdirectory whole: it holds Google's own woff2 subsets of the SAME three core faces
-  # (tools/vendor_core_fonts.py), which is what web/styles/fonts.css asks for first — the .ttf files
-  # above are now only its fallback. Kept as a directory rather than named file-by-file because the
-  # subset count is Google's to decide (23 today) and re-vendoring may change it.
-  [ -d "$FONTDIR/gf" ] && mv "$FONTDIR/gf" "$KEEPDIR/gf"
   rm -rf "$FONTDIR"/*
   mv "$KEEPDIR"/* "$FONTDIR"/ && rmdir "$KEEPDIR"
 fi
