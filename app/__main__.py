@@ -159,6 +159,39 @@ def _forget_window(window) -> None:
                 break
 
 
+def _is_closed(window) -> bool:
+    """True once pywebview has torn ``window`` down — the question every DEFERRED, main-thread window
+    action below has to ask before it touches an NSWindow.
+
+    ⚠️ A CLOSED NSWindow IS STILL A LIVE OBJECT, AND ORDERING IT FRONT RESURRECTS IT AS A GHOST.
+    pywebview's cocoa backend creates every window with ``setReleasedWhenClosed_(False)`` and, in
+    ``windowWillClose_``, guts it rather than releasing it: the WKWebView is removed from the view
+    tree and set to None, and the uid is dropped from ``BrowserView.instances``. The NSWindow object
+    survives, EMPTY. So a later ``makeKeyAndOrderFront_`` / ``addTabbedWindow_ordered_`` on it puts a
+    blank window back on screen — and that window CANNOT BE CLOSED: its delegate is still installed,
+    so clicking the close button reaches ``WindowDelegate.windowShouldClose_``, which looks the uid up
+    in ``instances``, gets None, and raises ``AttributeError`` on ``i.pywebview_window``; PyObjC turns
+    a throw from a BOOL-returning delegate method into NO, i.e. a permanent close veto. That is
+    exactly the "closing a tab brings up a blank window I can't close" report, and BOTH deferred paths
+    below could reach it — the 6 s ``_show_if_hidden`` fallback for a tab closed before it fired, and
+    ``_attach_as_tab``'s merge for a tab (or a HOST) closed while the merge was still queued.
+
+    ``events.closed`` is the signal, in preference to our own ``_WINDOWS`` registry, because pywebview
+    sets it SYNCHRONOUSLY inside ``windowWillClose_`` on the AppKit main thread — ``Event.set()`` flips
+    its flag inline and only DISPATCHES the handlers on a thread — so a check made from a ``callAfter``
+    block, which runs on that same thread, cannot interleave with the teardown. ``_WINDOWS`` is
+    consulted as a backstop (its removal rides on one of those dispatched handlers, so it can lag by a
+    few microseconds, but it never lags in the other direction)."""
+    ev = getattr(getattr(window, "events", None), "closed", None)
+    try:
+        if ev is not None and ev.is_set():
+            return True
+    except Exception:  # noqa: BLE001 — an event object we don't recognise is not evidence of a close
+        pass
+    with _WIN_LOCK:
+        return not any(win is window for win, _api in _WINDOWS)
+
+
 def _new_document_window(path: str | None = None, as_tab: bool = False) -> None:
     """Open another document window in THIS process (File ▸ New Window, and the bridge's own
     ``api._new_window``).  Empty unless a path is handed in.
@@ -214,6 +247,14 @@ def _attach_as_tab(window, host) -> None:
             return
 
         def join(*_a):
+            # NEITHER END MAY HAVE CLOSED IN THE MEANTIME. This runs a callAfter later than the decision
+            # to merge, and both windows are closable in between: merging a closed window orders its
+            # empty husk front, and so does merging INTO a closed host — the ghost-window resurrection
+            # _is_closed documents. Checked HERE rather than at the call site precisely because this is
+            # the main thread, the same one windowWillClose_ runs on, so the answer cannot go stale
+            # between the test and the AppKit calls below.
+            if _is_closed(window) or _is_closed(host):
+                return
             # `window.native` is resolved HERE, not above: pywebview fills it in as the GUI creates the
             # window, so at the moment _new_document_window returns it is still None — reading it early
             # made this function return before it ever tried, silently (the symptom: ⌘T opened a window
@@ -247,6 +288,8 @@ def _attach_as_tab(window, host) -> None:
         # the better trade (asked for explicitly). The window stays hidden until this merge shows it,
         # so it is a tab from the first moment it is visible: never a separate window that then merges.
         def try_join(attempt=0):
+            if _is_closed(window):
+                return   # closed while we were still waiting for its NSWindow — stop polling; there is nothing left to merge and a merge would resurrect it (see _is_closed)
             if getattr(window, "native", None) is None:
                 if attempt < 100:   # ~5s at 50ms, then _show_if_hidden's fallback takes over
                     threading.Timer(0.05, lambda: try_join(attempt + 1)).start()
@@ -307,8 +350,18 @@ def _setup_window(window, api) -> None:
 
 def _show_if_hidden(window) -> None:
     """Last resort for a tab that never joined its group: show it as an ordinary window rather than
-    leave the user with a document they cannot see. A no-op once the merge has ordered it front."""
+    leave the user with a document they cannot see. A no-op once the merge has ordered it front.
+
+    ⚠️ AND A NO-OP ONCE THE TAB HAS BEEN CLOSED — which is the case this timer got wrong, and the
+    whole of the "closing a tab brings up a blank window that can't be closed" bug. A tab closed
+    within its first six seconds (⌘T, look, ⌘W — the ordinary way anyone tries tabs out) left this
+    timer armed on a window pywebview had already gutted: `tabGroup()` is nil for a closed window and
+    `isVisible()` is False, so BOTH guards below read exactly as they do for a merge that never
+    happened, and the fallback dutifully ordered the empty husk front. See _is_closed for why that
+    husk exists and why it then refuses to close."""
     try:
+        if _is_closed(window):
+            return
         native = getattr(window, "native", None)
         if native is None:
             return
@@ -317,7 +370,15 @@ def _show_if_hidden(window) -> None:
             return   # it did become a tab; the merge showed it
         if not native.isVisible():
             from PyObjCTools import AppHelper
-            AppHelper.callAfter(lambda: native.makeKeyAndOrderFront_(None))
+
+            def show():
+                # Asked AGAIN, on the main thread. The read above is off a timer thread, so a close
+                # landing between it and this block would slip through; windowWillClose_ runs here,
+                # so on this thread the two cannot interleave.
+                if _is_closed(window):
+                    return
+                native.makeKeyAndOrderFront_(None)
+            AppHelper.callAfter(show)
     except Exception as exc:  # noqa: BLE001
         print(f"[window] show tab: {exc}", file=sys.stderr)
 
