@@ -612,8 +612,10 @@ def _baxter_display(oc: str) -> str:
     return plain or " ".join(oc.replace("{", "").replace("}", "").split()).strip()
 
 
-def _baxter_variants(field: str) -> list[str]:
-    """One table field → its VARIANT RECONSTRUCTIONS, in source order.
+def _baxter_variants(field: str, mc: str = "") -> list[str]:
+    """One table field → its VARIANT RECONSTRUCTIONS, in source order.  ``mc`` is the row's Middle
+    Chinese, and is what tells a two-guesses-at-one-word pair from a root-and-derivative pair — see
+    `_drop_derivational_s`, which this defers to before returning.
 
     ⚠️ THE TILDE IS A SECOND AXIS OF POLYPHONY, NOT THE SAME ONE AS THE MULTIPLE ROWS.  A graph's
     several ROWS are several WORDS (數 "number" / "count" / "frequently"); a ` ~ ` INSIDE one row's
@@ -661,7 +663,37 @@ def _baxter_variants(field: str) -> list[str]:
             p = "*" + p
         if p not in out:
             out.append(p)
-    return out
+    return _drop_derivational_s(out, mc)
+
+
+def _drop_derivational_s(variants: list[str], mc: str) -> list[str]:
+    """Collapse a ` ~ ` pair that is a ROOT AND ITS DERIVATIVE back to the one word the row records.
+
+    ⚠️ NOT EVERY TILDE PAIR IS TWO RECONSTRUCTIONS OF ONE WORD.  Of the 31 rows that split, 23 differ
+    in a PRE-INITIAL (前 "*dzˁen ~ *m-dzˁen") — one word, two guesses at its prefix, which is what the
+    split exists for.  The other 8 differ by exactly the ``-s`` SUFFIX (右 "*m-qʷəʔ-s ~ *m-qʷəʔ"), and
+    that is a different relation entirely: ``*-s`` is the 去聲別義 derivational suffix, the morpheme
+    that derives a noun from a verb or the reverse.  Root and derivative are two WORDS, so listing the
+    bare root among a graph's readings offers something that is not a reading of the word this row is
+    about — and the row can only be about one of them, because it carries a single Middle Chinese
+    transcription.
+
+    THAT TRANSCRIPTION IS WHAT DECIDES, and it must be consulted rather than the order assumed: ``*-s``
+    is precisely the source of the MC departing tone, so a row whose MC ends in the tone letter ``H``
+    records the DERIVED form and one that does not records the root.  All 8 are ``H`` rows and 7 keep
+    their first variant — but 夏 (MC hæH) is written "*ɡˁraʔ ~ *[g]ˁraʔ-s", root first, so "keep the
+    one the file lists first" would have kept the wrong member of the only pair where it differs.
+
+    Tested on the DISPLAY form, since the ``{…}`` annex trails the suffix and hides it (戊 "*muʔ-s
+    {*m(r)uʔ-s}"), and applied only to a pair — three variants are not this pattern.  With no ``mc`` to
+    judge against, nothing is dropped."""
+    if len(variants) != 2 or not mc:
+        return variants
+    a, b = (_baxter_display(v) for v in variants)
+    if a.endswith("-s") == b.endswith("-s"):
+        return variants           # both suffixed or neither → a prefix pair, genuinely two guesses at one word
+    derived = mc.rstrip().endswith("H")   # departing tone ⇒ this row IS the *-s derivative
+    return [variants[0] if a.endswith("-s") == derived else variants[1]]
 
 
 def _baxter_table() -> dict[str, tuple[str, str]]:
@@ -676,7 +708,7 @@ def _baxter_table() -> dict[str, tuple[str, str]]:
         _BAXTER = {}
         for ch, rows in _baxter_rows().items():
             mc, oc = rows[0][1], rows[0][2]
-            ocv = _baxter_variants(oc)
+            ocv = _baxter_variants(oc, mc)
             _BAXTER[ch] = (mc, _baxter_display(ocv[0]) if ocv else "")   # variant 0 is what the Displayed row shows; the rest reach the user through `readings` (see _baxter_variants)
     return _BAXTER
 
@@ -1970,7 +2002,7 @@ def _pos_render(text: str, base: str, scheme: str, upos: str) -> str:
         if scheme == "mc":
             val = row[1]
         else:
-            ocv = _baxter_variants(row[2])
+            ocv = _baxter_variants(row[2], row[1])
             val = _baxter_display(ocv[0]) if ocv else ""
         if not val:
             return ""
@@ -2288,7 +2320,7 @@ def _baxter_all() -> dict[str, list[tuple[str, str]]]:
         for ch, rows in _baxter_rows().items():
             out: list[tuple[str, str]] = []
             for _py, mc, oc, _pos, _gloss in rows:
-                for ocv in (_baxter_variants(oc) or [""]):
+                for ocv in (_baxter_variants(oc, mc) or [""]):
                     rec = (mc, _baxter_display(ocv))
                     if rec not in out:
                         out.append(rec)
