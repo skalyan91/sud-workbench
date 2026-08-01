@@ -198,6 +198,34 @@ format detection + conversion, model list/download/remove, extras install, trans
 Wiktionary lookup, prefs and recent files (persisted in `state.json` under `paths.APP_DATA` —
 `~/Library/Application Support/SUD Workbench` on macOS, `%LOCALAPPDATA%\SUD Workbench` on Windows).
 
+**Launching with no file reopens the last document.** `Api.record_last_doc` writes `state.json`'s
+`last_doc` from each window's `closed` handler — so it is the LAST WINDOW TO CLOSE that decides — and
+`main()` adopts it when nothing was named on the command line. A window closed with no file records
+`None`, which is how you ask for an empty one next time. `--empty` opts a command line out.
+
+### Several document windows, one process
+
+`_new_document_window` opens another document window **in this process** — `webview.create_window`
+called from a non-main thread, the same way `api.py`'s `_open_window` already makes Help / About /
+Model Manager. It replaced a `subprocess.Popen([sys.executable, "-m", "app"])` per window, and the
+reason is native window tabbing: macOS groups NSWindows **within an application**, so process-per-
+window could not have Merge All Windows / ⌃⇥ at any price. One `Api` per window, as before; what is
+now shared is the menu bar, the model/parse caches and the single `state.json` writer.
+
+⚠️ **Nothing may close over "the" window.** There is one NSMenu for N documents, so every command
+resolves its target when it RUNS: `_key_pair()` reads `NSApp.keyWindow` against the `_WINDOWS`
+registry, `build_menu`'s `js()` sends there, and `mac/shell.py` gets the same resolver through
+`set_key_provider` for the items it owns natively (Open Recent, Clear Recent, About, and the menu
+delegate's conditional show/hide). `Api._apply_menu` refuses to write the shared menu unless its own
+window is key — every window's frontend pushes selection state, and a background one would otherwise
+hide rows according to a selection nobody can see; the delegate re-applies the key window's cached
+state (`force=True`) whenever a menu opens.
+
+`_wire_menu` also injects a **Window menu** and hands it to `NSApp.setWindowsMenu_`, after which
+AppKit maintains it: the window list, and the tab commands that the shared `tabbingIdentifier`
+(`"sud-document"`, set in `_mutate`) makes available. Verified live: `addTabbedWindow_ordered_` —
+the API Merge All Windows itself calls — puts two document windows in one tab group.
+
 **Two hard-won invariants — violating either produces an intermittent, hard-to-diagnose hang:**
 
 - pywebview dispatches every JS→Python call on its **own new thread** (calls are *not* serialised),
@@ -325,7 +353,28 @@ missing tier must surface as an offer to install, never an exception.
   reads like a picked English one: that condensation, `_decap` (a sense is lowercased at its LEADING
   capital only — mid-string capitals are proper names or Leipzig small-caps runs — and not at all for
   a PROPN token), and `_pos_matches` (a PROPN token also takes NOUN entries, since dictionaries file
-  a name as a noun; deliberately not symmetric).
+  a name as a noun; deliberately not symmetric). **Both dictionaries filter in TWO TIERS**, and the
+  second runs only where the first left nothing at all — an empty result is far more often a gap in
+  the source than a real "this word is never a NOUN". Apte has always widened to every sense it
+  holds; Wiktionary (`_pos_plausible`, ordered by `_head_rank`) widens only to what the page does
+  not actually rule out: an entry with **no part-of-speech heading** (every Chinese sense) or one
+  whose heading names **no UD class** ("Phrase", "Participle", "Contraction", "Han character" —
+  `_WIKI_POS_TO_UPOS` maps none of them, so those senses were unreachable from every tagged token in
+  every language), plus a condensed phrase whose re-parsed head disagrees, which at that tier only
+  sorts. An explicit contrary heading still excludes, so a verb-only page still answers a NOUN token
+  with nothing. A lookup that matched anything strictly is untouched by all of this.
+  **A headword is queried in the spelling the wiki files it under, not the one the token carries**:
+  Sanskrit in Devanagari (the app stores IAST), Chinese in **TRADITIONAL** characters. en.wiktionary
+  keeps every Chinese sense on the traditional page and gives the simplified one only a `{{zh-see}}`
+  soft redirect — no senses, no POS heading — so 编程 404s from the definition endpoint while 編程
+  answers, and *every* character that simplification changed was silently unglossable. OpenCC
+  (already core, via `translit`'s Traditional orthography) folds the query; `_zh_see_target` chases
+  the page's own `{{zh-see}}` pointer, read out of Parsoid's `data-mw`, when the fold lands on a
+  spelling the wiki doesn't use (a variant pair such as 着/著, which OpenCC leaves alone) — and only
+  on a lookup that has already come back empty, so the common case costs no extra request. Chinese
+  senses arrive through the **`_definitions_glosses`** HTML path, not the definition endpoint: one
+  Chinese section covers Mandarin, Cantonese and the rest, so the wiki files their senses under a
+  shared "Definitions" heading and that endpoint, which keys off POS headings, emits nothing.
 - `app/apte.py` — the SAME flyout for Sanskrit, from Apte's dictionary instead of Wiktionary.
   Headwords are indexed in **SLP1**, so the IAST this app stores is converted straight to SLP1 via
   aksharamukha (no Devanagari round-trip) and then *folded*, every homorganic nasal to anusvāra, on

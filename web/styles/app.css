@@ -50,7 +50,14 @@
   .fsbtn:hover{background:color-mix(in srgb,var(--accent) 10%,var(--field-bg))}
   .fontctl #fsVal{font-size:11px; color:var(--muted); min-width:36px; display:grid; place-items:center; padding:0 8px; font-variant-numeric:tabular-nums}   /* restore horizontal padding around the % */
 
-  .doc{flex:1; overflow:auto; min-height:0; padding:calc(var(--tbH,44px) + var(--vbH,0px)) 0 44px; scroll-padding-top:calc(var(--tbH,44px) + var(--vbH,0px))}   /* the document scrolls UNDER the translucent titlebar and options bar and is blurred through them, which is the whole point of the glass — so the scroller starts at the top of the window and its top PADDING is what puts the first block below the bars. (Briefly this was a margin instead, which did start the scrollbar below the bars but also cut the document off at a hard line.) */
+  /* HOW FAR DOWN THE PAGE'S OWN CONTENT STARTS: the lower of (title bar + options bar) and a
+     window-tab bar's bottom edge (--tabH, from app/mac/shell.py; 0 when no bar is up, which collapses
+     this to --tbH). NOTHING IS ADDED BEYOND THE BAR — the document begins where the bar ends, exactly
+     as it begins where the options bar ends. An earlier version padded the document by the 12px that
+     sits ABOVE the bar too, to centre it in its band; that made the bar look inset compared with the
+     options bar, which is the reference. */
+  .body{--top-chrome:max(calc(var(--tbH,44px) + var(--vbH,0px)),var(--tabH,0px))}   /* ON .body, NOT :root — that is where syncChrome (js/ui/wiring.js) sets --tbH/--vbH, and a custom property's var()s are substituted where the property is DECLARED, not where it is used: declared on :root this read --tbH as its 44px fallback and mis-sized the reservation, since the real toolbar is 54. --tabH comes from documentElement and inherits down to here. */
+  .doc{flex:1; overflow:auto; min-height:0; padding:var(--top-chrome) 0 44px; scroll-padding-top:var(--top-chrome)}   /* --tabH: WHERE A NATIVE WINDOW-TAB BAR ENDS (its bottom edge in page coordinates, 0 when there is none), measured in app/mac/shell.py and taken here as a FLOOR — max(), not a sum — because the page must simply start below whichever is lower, the web toolbar or the bar. Same intent as --vbH: real chrome above the page, so the viewport shrinks by it rather than being overlapped. THE DOCUMENT MOVES DOWN, THE TOOLBAR DOES NOT: the bar sits at the BOTTOM of the title-bar band, directly above the content (AppKit's own numbers, read bottom-up: a 102-tall NSTitlebarContainerView with NSToolbarView at y=36 h=66 — i.e. the toolbar keeps the top 66 and the bar takes the lowest 36). Giving .titlebar a matching `top` was tried and is wrong: it slides the web toolbar down INTO the bar, which then paints over it. 0 unless this window is in a tab group showing its bar. */   /* the document scrolls UNDER the translucent titlebar and options bar and is blurred through them, which is the whole point of the glass — so the scroller starts at the top of the window and its top PADDING is what puts the first block below the bars. (Briefly this was a margin instead, which did start the scrollbar below the bars but also cut the document off at a hard line.) */
   /* …and the SCROLLBAR alone is held below the chrome. A scroller's track runs its full height, so with the
      document correctly passing under the bars the bar ran up behind them too, ending above the content it
      scrolls. `margin-top` on the track piece is the one lever that insets a track without moving the scroller,
@@ -75,7 +82,7 @@
   :root{--sbw:11px}
   .doc{padding-inline-start:var(--sbw)}
   .doc::-webkit-scrollbar{width:var(--sbw); background:transparent}
-  .doc::-webkit-scrollbar-track{background:transparent; margin-top:calc(var(--tbH,44px) + var(--vbH,0px))}
+  .doc::-webkit-scrollbar-track{background:transparent; margin-top:var(--top-chrome)}
   .doc::-webkit-scrollbar-thumb{background:color-mix(in srgb,var(--text) 28%,transparent); border-radius:6px; border:3px solid transparent; background-clip:content-box}
   .doc::-webkit-scrollbar-thumb:hover{background:color-mix(in srgb,var(--text) 44%,transparent); background-clip:content-box}
   /* item 10: full-screen auto-hide of the toolbar + options bar. NEW rules (not edits to the .titlebar/.viewbar
@@ -348,8 +355,21 @@
   .tdrow:hover{background:var(--block-sel)}
   .tdname{flex:1 1 auto; white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
   .tdcode{flex:none; font-size:11px; color:var(--muted); font-variant-numeric:tabular-nums}
-  .strans{font-size:13px; font-weight:462;   /* weight curve @13px */ position:relative; z-index:1; font-style:italic; color:var(--muted); font-family:var(--token-font); margin:-1px 0 3px; padding:1px 3px; box-sizing:border-box; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; unicode-bidi:isolate}   /* item 11: same 1px 3px padding as .stext so the transliteration text-left aligns with the sentence */   /* Item 16: z-index:1 → the translit/original line sits BELOW the block-initial sentence (.stext, z-index:2) */
-  .strans.strans-orig{white-space:pre-wrap; overflow-wrap:anywhere; overflow:visible; text-overflow:clip; cursor:text; border-radius:3px; padding:1px 3px}   /* item 3: editable original # text in the translit slot (under a script orthography); item 12: pre-wrap preserves typed line breaks */
+  .strans{font-size:13px; font-weight:462;   /* weight curve @13px */ position:relative; z-index:1; font-style:italic; color:var(--muted); font-family:var(--token-font); margin:-1px 0 3px; padding:1px 3px; box-sizing:border-box; white-space:pre-wrap; overflow-wrap:anywhere; overflow:visible; text-overflow:clip; unicode-bidi:isolate}   /* item 11: same 1px 3px padding as .stext so the transliteration text-left aligns with the sentence */   /* Item 16: z-index:1 → the translit/original line sits BELOW the block-initial sentence (.stext, z-index:2) */
+  /* IT WRAPS, AS THE SENTENCE ABOVE IT DOES. This row was `overflow:hidden; text-overflow:ellipsis;
+     white-space:nowrap`, so a long sentence's transliteration was cut off at the block's right edge
+     with an ellipsis while the `# text` it romanises (.stext: pre-wrap + overflow-wrap:anywhere)
+     wrapped onto as many lines as it needed — the two rows are one reading, and only one of them was
+     readable in full. The wrapping properties are now the SAME THREE .stext carries, and are stated
+     here rather than only on .strans-orig, which had them all along (that line is an editable `# text`
+     in the transliteration slot, so it always wrapped: the plain derived transliteration beside it
+     was the odd one out).
+     What the row does NOT lose is its right-edge alignment: applyTransInset (js/io/bridge.js) still
+     sets margin-inline-end so the row ends level with .stext, and with wrapping that inset is what
+     the text wraps AT — the same column the sentence wraps in, rather than a clip boundary. The
+     height caps measure the row after that sweep (see the note above applyTransInset), so the extra
+     lines are accounted for rather than overrunning the block. */
+  .strans.strans-orig{cursor:text; border-radius:3px; padding:1px 3px}   /* item 3: editable original # text in the translit slot (under a script orthography). Its wrapping (incl. item 12's pre-wrap, which preserves typed line breaks) now comes from .strans above, which shares it */
   .strans.strans-orig:hover{background:var(--field-bg)}
   .strans.strans-orig:focus{outline:none; background:var(--field-bg); box-shadow:0 0 0 1px var(--accent)}
   .sctrl{display:flex; gap:10px; margin-inline-start:0; margin-inline-end:-2px; align-self:flex-start; font-size:var(--stext-fs); height:calc(var(--stext-fs) * 1.4); align-items:center; transform:translateY(calc(0.5em - 0.5ex))}   /* item 10: pinned to the FIRST header line — flex-start + a fixed one-line-height box overlay the box on .stext's first line box, so the controls don't drift down when .stext wraps to 2+ lines. font-size = --stext-fs so em/ex track the SENTENCE-TEXT metrics; the +(0.5em − 0.5ex) downward nudge drops the icons off the line-box centre toward the text baseline. *//* margin-inline-start:0, NOT auto — an auto margin here absorbs whatever slack .stext{flex:1} doesn't need (auto margins are resolved BEFORE flex-grow distributes remaining space), pushing the controls to the row's far right and leaving a large, width-dependent gap after the sentence ID while the gap BEFORE it (link icon → ID) stayed the small fixed 8px shead gap — exactly the unevenness the .url-ctl comment below's own "gap(ID text → first ctrl box) = 15, equal" math already assumes this is 0 to get. */

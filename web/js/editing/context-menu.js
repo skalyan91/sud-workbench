@@ -283,7 +283,7 @@ function relMenu(x,y,si,tokId){ const s=DOC[si]; if(!s)return; const dep=s.token
    than inflect the word, so a token carrying one is naturally read as a dot-suffixed tag — PRON.Dem, NUM.Ord,
    DET.Poss. universaldependencies.org/u/feat groups exactly these under "Lexical features"; ExtPos, Foreign and
    Typo belong to the same group but get their own commands here (items 1/2/3) and are deliberately left out,
-   and SUD's own Shared/Subject are bookkeeping, not word classes. Everything else in the FEATS inventory is
+   and SUD's own Shared (FEATS) and Subject/Object (MISC) are bookkeeping, not word classes. Everything else in the FEATS inventory is
    inflectional and belongs on the morphemic-gloss tier, which is where its Leipzig abbreviation already goes. */
 const UPOS_SUBTYPE_FEATS=["PronType","NumType","Poss","Reflex","Abbr"];
 // Where each one is actually attested, per its own page at universaldependencies.org/u/feat/* — so a VERB's POS
@@ -412,7 +412,10 @@ async function wiktionaryDefItems(si,tokId,lemma,upos){
   const defs=(r&&r.definitions)||[];
   const link=(r&&r.page_url)?[{label:esc((r&&r.page_label)||`Open on ${src}`),kbd:"↗",fn:()=>openExternal(r.page_url),footLink:true}]:[];   // where the senses came from, labelled by the source itself: Wiktionary links the word's own language section (not the filtered POS — see app.wiktionary.lookup), Apte the scan of the printed page the entry is on (the only per-entry URL the C-SALT API exposes — see app.apte). footLink:true → openSub lifts the row (and the separator above it) into the flyout's FIXED footer, so it sits below the (often long, scrolling) sense list and stays put while the senses scroll — it was a position:sticky bar riding at the bottom of the list itself before
   if(!defs.length) return [{header: (r&&r.error)?`${src} lookup failed`:`No definitions found for “${esc(lemma)}”`}, ...(link.length?[null,...link]:[])];
-  // already filtered server-side to this token's own UPOS (app.wiktionary.lookup / app.apte.lookup) → no per-POS header needed…
+  // already filtered server-side to this token's own UPOS (app.wiktionary.lookup / app.apte.lookup) → no per-POS header needed.
+  // Where that filter would have emptied the flyout, both dictionaries fall back to a wider set rather than report the token's
+  // own dictionary as silent (see either module's lookup) — and those senses have no heading to print either, since what
+  // admits them is precisely that their entry states no word class…
   // …EXCEPT nouns, which group under a gender heading when the dictionary's headword line marked one (grouped by
   // gender_ud, not just split wherever it happens to change between consecutive senses — see app.wiktionary.lookup)
   const hasGender=(upos==="NOUN"||upos==="PROPN") && defs.some(d=>d.gender_ud);   // PROPN too, now that a proper-noun token draws on the dictionary's NOUN entries (dictionaries file a name as a noun — app.apte._pos_matches / app.wiktionary._pos_matches): those senses arrive carrying the same gender, so a PROPN lookup lands the same masculine/feminine/neuter mix a NOUN one does. Grouping is not decoration here — picking a sense WRITES its gender to FEATS, so an ungrouped list would have the user choose one blind
@@ -580,13 +583,23 @@ document.getElementById("doc").addEventListener("contextmenu",e=>{
   // hand back the head. Its right-click menu is the ordinary token menu, for the token it actually draws.
   const gwEl=e.target.closest("[data-gwtok]");
   if(gwEl&&gwEl.hasAttribute("data-s")){ const gs=+gwEl.getAttribute("data-s"), gt=+gwEl.getAttribute("data-gwtok");
-    e.preventDefault(); e.stopPropagation(); pick(gs,gt,false); nodeTokenMenu(e.clientX,e.clientY,gs,gt); return; }
+    e.preventDefault(); e.stopPropagation(); nodeTokenMenu(e.clientX,e.clientY,gs,gt); return; }
   // a direct token/node hit wins; otherwise, inside a brackets diagram, the resolver is deterministic (never null).
   const nodeEl=e.target.closest(".node,.tok-group,.oline,.bwtok") || bracketTokenEl(e);
   if(nodeEl){ const tk=tokFromEl(nodeEl); if(tk){ e.preventDefault(); e.stopPropagation();
-    if(e.shiftKey){ if(!inSelRange(tk.si,tk.tokId)) pick(tk.si,tk.tokId,false); extPosMenu(e.clientX,e.clientY,tk.si,tk.tokId); return; }   // item 1: ⇧-right-click a node → external POS. A click INSIDE the current range must NOT re-pick (that would collapse the very selection being tagged); one outside starts a fresh single-token selection.
-    pick(tk.si,tk.tokId,false); nodeTokenMenu(e.clientX,e.clientY,tk.si,tk.tokId); } }
+    if(e.shiftKey){ extPosMenu(e.clientX,e.clientY,tk.si,tk.tokId); return; }   // item 1: ⇧-right-click a node → external POS, on the whole selected expression where the range covers this token (posMenu's own `multi` test) and on this node alone otherwise
+    nodeTokenMenu(e.clientX,e.clientY,tk.si,tk.tokId); } }
 });
+/* NO pick() ON ANY OF THOSE PATHS: OPENING A MENU IS NOT SELECTING. Right-clicking a token used to
+   select it — collapsing a multi-token range you had just marqueed, if the click landed outside it —
+   which is neither what the platform menus do nor what the rest of this app does: the deprel, POS,
+   ExtPos-bracket, MWT-tie and grid-row menus above and in js/grid/grid.js have never picked either.
+   Nothing is lost by it, because a token menu addresses the token it was opened ON, by id, all the
+   way down (nodeTokenMenu/posMenu/relMenu take si+tokId; the few rows that run a SELECTION-based
+   command, e.g. markFeatRow's Foreign/Typo toggles, pick() for themselves at the moment they run).
+   The range-scoped rows behave the same as before for the same reason they were written: "Group N–M
+   as MWT" and ExtPos-over-an-expression are gated on the range actually covering the right-clicked
+   token, so a range left standing somewhere else in the sentence can't silently capture the menu. */
 // a single click on a token/tier opens its inline editor directly, caret at the click point (Enter on a selected
 // token does the same, select-all instead — see makeEditable/makeGlossEditableSC's clickXY param). Node clicks in
 // the four DRAGGABLE notations (stemma/tree/arcs/brackets: .node/.tok-group/.bwtok) are handled by the pointerdown/

@@ -80,7 +80,7 @@ function stemma(si,{proj,catNodes}){
   const ghostPairs=ghostPairsFor(t);   // [originIdx,targetIdx], 0-based — computed once, before ANY Y-position is derived from depth
   applyGhostDepth(depth,head,ghostPairs,n);   // item 4: a ghost's TARGET is pulled above its shallowest ghost dependent, cascading to its own real subtree — replaces the earlier per-edge "swap which end draws where" hack (which never touched real node positions)
   const LV=48,TOP=18,A=16,B=7,realMaxD=Math.max(0,...depth),ny=d=>TOP+d*LV;   // shorter edges; A above clears ascenders; TOP is small so the root (no incoming edge) gets no extra headroom
-  // Subj=Generic: the ∅ sits one level BELOW its predicate (ny(depth[i]+1), like any dependent) — if the predicate
+  // Subject=Generic: the ∅ sits one level BELOW its predicate (ny(depth[i]+1), like any dependent) — if the predicate
   // is already at the deepest REAL level, that lands exactly where baseY/the bottom margin was sized for, with no
   // room of its own. Raise the whole figure's reserved depth by one extra level so the ∅ gets genuine space.
   const maxD=[...Array(n).keys()].some(i=>hasGenericSubj(t,i)&&depth[i]===realMaxD)?realMaxD+1:realMaxD;
@@ -112,7 +112,7 @@ function stemma(si,{proj,catNodes}){
   const baseY=TOP+maxD*LV+(proj?LV+maxRep:0), lowest=proj?baseY:ny(maxD), H=lowest+16+belowH+tieH;   // baseline sits one level (LV) below the lowest node; #3: dropped a further maxRep so a token raised by its reported-speech step (by=baseY−rep[i]) STILL clears the lowest tier by the full LV — the most-raised token lands exactly one level below, the rest hang beneath it
   const svg=E("svg",{class:"tree",width:total,height:H,viewBox:`0 0 ${total} ${H}`}); const boxes=[];
   let baseBot=baseY;
-  // Subj=Generic: the ∅ virtual token — computed HERE (declaration + positions) so the proj baseline block below,
+  // Subject=Generic: the ∅ virtual token — computed HERE (declaration + positions) so the proj baseline block below,
   // the ghost-label decollision pass, and the node-band draw can all reference it (was declared far below its
   // first use in the proj block → a temporal-dead-zone ReferenceError that blanked the whole diagram).
   const genericEntries=[]; for(let i=0;i<n;i++) if(hasGenericSubj(t,i)) genericEntries.push({i});
@@ -131,7 +131,7 @@ function stemma(si,{proj,catNodes}){
     if(gwOf(t[i]).length) bg.setAttribute("data-gw",[OID(i)].concat(gwOf(t[i]).map(p=>p.oid)).join(" "));   // selecting EITHER half lights the whole word — see gwHolds/applySel
     bg.style.cursor="pointer"; bg.addEventListener("click",()=>pick(si,OID(i))); svg.appendChild(bg);
     drawHangsSVG(svg,t[i],c[i],by,NODE_F,"baseword",si,boxes,OID(i)); drawLeadsSVG(svg,t[i],c[i],by,NODE_F,"baseword",si,boxes,OID(i)); }   // folded punctuation (and item 6's correct form) beside the baseline word
-    // Subj=Generic: give the ∅ the SAME node→baseline pairing every real token gets in proj mode — a projection
+    // Subject=Generic: give the ∅ the SAME node→baseline pairing every real token gets in proj mode — a projection
     // line down from its node height (ge.gy, already used by the diagonal ghost edge above) to a baseline glyph
     // of its own, rather than leaving it floating at node height with no baseline presence at all.
     genericEntries.forEach(ge=>{ const i=ge.i, by=baseY-rep[i];
@@ -161,7 +161,7 @@ function stemma(si,{proj,catNodes}){
     edges.forEach(e=>{ const mx=(c[e.d]+c[e.h])/2, my=e.midY, lg=E("g",{class:"edge-g","data-s":si,"data-dep":OID(e.d),"data-head":OID(e.h)});
       drawLabel(lg,mx,my,e.rel,relColor(e.rel));
       lg.style.cursor="pointer"; lg.addEventListener("click",()=>pick(si,OID(e.d))); svg.appendChild(lg); boxes.push({x:mx,y:my,hx:meas(e.rel,POS_F)/2+2,hy:7}); }); }
-  // Subj=Generic positions (genericEntries) are computed near the top of stemma() now, so they're available to the
+  // Subject=Generic positions (genericEntries) are computed near the top of stemma() now, so they're available to the
   // proj baseline block above and to this decollision pass below (both need ge.emptyX/gy/y1/y2).
   // ghost label positions, decollided (HORIZONTAL-only, matching stemma's own real-label convention): ONLY ghost
   // labels move — `boxes` (every real edge/node/label already placed this render) is read but never altered.
@@ -178,7 +178,7 @@ function stemma(si,{proj,catNodes}){
     boxes.push({x:(a1[0]+a2[0])/2,y:(a1[1]+a2[1])/2,hx:Math.abs(a2[0]-a1[0])/2,hy:Math.abs(a2[1]-a1[1])/2+2});   // item 2: the ghost's own line extent counts toward fitTight's crop
     if(show.labels){ const L=ghostLabAt.get(e); drawLabel(g,L.mx,L.my,e.rel,relColor(e.rel)); const lb=g.lastElementChild; if(lb)lb.classList.add("lbl-ghost"); boxes.push({x:L.mx,y:L.my,hx:meas(e.rel,POS_F)/2+2,hy:7}); }
     svg.appendChild(g); });
-  // item 2 (redesign): Subj=Generic — the ∅ is a virtual TOKEN, drawn in the real reserved band just before the
+  // item 2 (redesign): Subject=Generic — the ∅ is a virtual TOKEN, drawn in the real reserved band just before the
   // predicate (stemmaLayout already left the space) at the SAME depth a real dependent would sit — not
   // editable/interactable/grid-visible, but positioned exactly like any other token would be.
   genericEntries.forEach(ge=>{ const i=ge.i, col=relColor("subj"), ink=arcInk(col);
@@ -255,7 +255,7 @@ function arcs(si){
     ghostSlot[dK]=(ghostSlot[dK]!=null?ghostSlot[dK]:(maxRealSlot[dK]||0))+1;
     const X1=c[p.from-1]+hSide*ghostSlot[hK]*SPREAD, X2=c[p.to-1]+dSide*ghostSlot[dK]*SPREAD, h=arcHgt(Math.abs(X2-X1),ROW);
     return {from:p.from,to:p.to,dep:p.dep,X1,X2,mx:(X1+X2)/2,h,col:relColor(p.dep)}; });
-  // item 2: Subj=Generic folds into this SAME ghostArcs array — same endpoint-fanning at the predicate's shared
+  // item 2: Subject=Generic folds into this SAME ghostArcs array — same endpoint-fanning at the predicate's shared
   // bucket, same label-decollision pass below — rather than being computed as a disconnected afterthought (which
   // is what let its label collide with a real label sitting at the same spot). Its "∅" side has no real token to
   // fan/look up, so that endpoint is the pre-reserved gap centre directly; isEmpty flags it for the draw pass.
@@ -298,7 +298,7 @@ function arcs(si){
     g.style.cursor="pointer"; g.addEventListener("click",()=>pick(si,OID(a.to-1))); svg.appendChild(g);
     arcG[OID(a.to-1)]=g; boxes.push({x:a.mx,y:a.apexY,hx:2,hy:2});     // arc crown in the bounding box
     if(show.labels) labs.push({dep:OID(a.to-1),mx:a.mx,y0:a.apexY-8,apex:a.apexY,text:a.dep,col:a.col,level:a.h});});
-  // Shared=Yes / Subj-raising ghost arcs: dashed, dimmed, drawn at their own natural apex. The LINE draws now
+  // Shared=Yes / Subject-raising ghost arcs: dashed, dimmed, drawn at their own natural apex. The LINE draws now
   // (item 2: its crown counts toward fitTight's boxes); its LABEL is deferred until after the real labels'
   // decollision pass below finishes, so it can be lifted (item 6: only ghost labels move — never a real one)
   // clear of every already-placed real label, using the exact same vertical-lift algorithm.
@@ -306,11 +306,11 @@ function arcs(si){
   ghostArcs.forEach((a,gi)=>{ const P=arcCtrl2(a.X1,a.y1,a.X2,a.y2,a.h), ink=arcInk(a.col);
     const te=trimT(P,1,AH-AEXT), sl=(te>0.001&&te<0.999)?subCurve(P,0,te):P;
     const dstr=`M ${sl[0][0]} ${sl[0][1]} C ${sl[1][0]} ${sl[1][1]}, ${sl[2][0]} ${sl[2][1]}, ${sl[3][0]} ${sl[3][1]}`;
-    const g=E("g",{class:"ghost-g"+(!a.isEmpty&&sel.s===si&&sel.t===OID(a.to-1)?" sel":""),"data-s":si});   // item 3 (Shared=Yes/Subj-raising — real dependent, highlights correctly). isEmpty (Subj=Generic): NEVER via selection — the predicate is this relation's HEAD, and highlighting a dependency edge on its HEAD's selection has the direction backwards; the ∅ dependent has no real token to select instead, so no data-dep/.sel at all here
+    const g=E("g",{class:"ghost-g"+(!a.isEmpty&&sel.s===si&&sel.t===OID(a.to-1)?" sel":""),"data-s":si});   // item 3 (Shared=Yes/Subject-raising — real dependent, highlights correctly). isEmpty (Subject=Generic): NEVER via selection — the predicate is this relation's HEAD, and highlighting a dependency edge on its HEAD's selection has the direction backwards; the ∅ dependent has no real token to select instead, so no data-dep/.sel at all here
     if(!a.isEmpty) g.setAttribute("data-dep",OID(a.to-1));
     g.appendChild(E("path",{class:"arc-path arc-ghost",d:dstr,stroke:ink}));
     g.appendChild(E("path",{class:"ah ah-ghost",d:arrowPath(P[2],P[3],AH),fill:ink}));   // NO outset argument, deliberately: a ghost draws no .arc-casing/.ah-casing at all (it is meant to read as a duplicate, not to occlude what it crosses), so there is no halo for the head to match — same for the stemma ghost head above
-    if(a.isEmpty){ const glbl=E("text",{class:"tok-word",x:a.X2,y:repBase(rep,wordY,a.from-1),"text-anchor":"middle"}); glbl.textContent="∅"; g.appendChild(glbl);   // Subj=Generic: the ∅ glyph itself sits on the WORD row, not the arc-attachment height a.y1 uses — and it's now at X2 (the arrowhead end), since the ∅ is the dependent. Its row is the PREDICATE's own (lifted) word baseline, via the shared repBase — a ∅ inside a report steps off the line with the predicate it hangs from
+    if(a.isEmpty){ const glbl=E("text",{class:"tok-word",x:a.X2,y:repBase(rep,wordY,a.from-1),"text-anchor":"middle"}); glbl.textContent="∅"; g.appendChild(glbl);   // Subject=Generic: the ∅ glyph itself sits on the WORD row, not the arc-attachment height a.y1 uses — and it's now at X2 (the arrowhead end), since the ∅ is the dependent. Its row is the PREDICATE's own (lifted) word baseline, via the shared repBase — a ∅ inside a report steps off the line with the predicate it hangs from
       boxes.push({x:a.X2,y:a.y1-8,hx:8,hy:12}); }
     boxes.push({x:a.mx,y:a.apexY,hx:2,hy:2});   // item 2/11: the ghost's own (possibly lifted) crown, from the shared repArcEnds above, counts toward fitTight's crop
     svg.appendChild(g); ghostG[gi]=g; });

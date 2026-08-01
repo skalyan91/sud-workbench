@@ -114,15 +114,25 @@ MENUS: list[dict] = [
     {"title": "File", "items": [
         item("New", "window.doNew && doNew()",
              key="n", mods=("cmd", "shift"), sf="square.and.pencil", fluent="Add"),   # ⇧⌘N — ⌘N is now New Window (item 14)
-        # item 14: fresh window + empty doc (a DETACHED second process — pywebview is single-window)
+        # a fresh window + empty doc, in THIS process (app/__main__.py's _new_document_window)
         item("New Window", "window.__newWindow && __newWindow()", action="new_window",
              key="n", mods=("cmd",), sf="macwindow.badge.plus", fluent="NewWindow"),
+        # …and the same document window opened AS A TAB of the current one. ⌘T is the system-wide
+        # convention for it, and the tab bar's own + button raises this too (AppKit sends
+        # newWindowForTab: — see the category in app/mac/shell.py), so the two entry points cannot
+        # drift. macOS-only in effect: Windows has no window tabbing, and menu_spec.visibility keeps
+        # the row out of the in-window menu bar there (see WIN_HIDE).
+        item("New Tab", "window.__newTab && __newTab()", action="new_tab",
+             key="t", mods=("cmd",), sf="plus.rectangle.on.rectangle", fluent="TabAdd"),
         item("Open…", "window.doOpen && doOpen()", key="o", mods=("cmd",), sf="folder", fluent="OpenFolderHorizontal"),
         item("Open Recent", submenu="recent", sf="clock.arrow.circlepath", fluent="Recent"),   # submenu parent (no key-equivalent)
         item("Append…", "window.doAppend && doAppend()",
              key="o", mods=("cmd", "shift"), sf="plus.rectangle.on.folder", fluent="FolderAdd"),
+        # ⇧⌘T, not ⌘T: New Tab above took the plain chord, which is what ⌘T means in every document
+        # app on the platform, and the audit below refuses to let two live rows share one. Insert Text
+        # keeps the same letter one modifier along, so the pairing is still legible.
         item("Insert Text…", "window.addTextSheet && addTextSheet()",
-             key="t", mods=("cmd",), sf="text.badge.plus", fluent="InsertTextBox"),
+             key="t", mods=("cmd", "shift"), sf="text.badge.plus", fluent="InsertTextBox"),
         SEP,
         item("Import UD…", "window.doImportUD && doImportUD()",
              key="i", mods=("cmd", "shift"), sf="square.and.arrow.down.on.square", fluent="Import"),   # ⇧⌘I — ⌘I is now Mark as Foreign

@@ -110,7 +110,7 @@ function bracketsWrapped(si){
   const wordSpan=i=>{ const grp=document.createElement("span"); grp.className="bwtok"+(sel.s===si&&sel.t===OID(i)?" sel":""); grp.dataset.s=si; grp.dataset.tok=OID(i); grp.style.cursor="pointer"; grp.style.width=wordW(i)+"px"; grp.addEventListener("click",()=>pick(si,OID(i)));   // reserve the widest-row width (rel/POS/translit are absolute, so JS sizes the box as the flex column did before) — a firm `width` (not `minWidth`): wordW already reserves the BOLD width too, so the box never needs to grow when a token is selected; it bolds in place, centred, exactly like unwrapped brackets
     if(selDesc.has(i)) grp.classList.add("inspan");   // in the selected constituent → covered by the continuous wash (drawn as a per-line overlay after layout)
     if(isInt(i)){ grp.classList.add("bwint"); grp.dataset.inthead=OID(head[i]-1); grp.dataset.intrel=t[i].deprel; grp.dataset.intcol=relColor(t[i].deprel); }
-    { const ghosts=ghostsByOrigin[i].map(([tg,rel])=>OID(tg)+":"+rel);   // ghost targets: pairs of (OTHER token, relation label to show on that dashed arc) — Shared=Yes → one per other conjunct, labelled with this token's OWN deprel; Subj-raising → one, always labelled "subj" (positionBracketAnnots draws them)
+    { const ghosts=ghostsByOrigin[i].map(([tg,rel])=>OID(tg)+":"+rel);   // ghost targets: pairs of (OTHER token, relation label to show on that dashed arc) — Shared=Yes → one per other conjunct, labelled with this token's OWN deprel; Subject-raising → one, always labelled "subj" (positionBracketAnnots draws them)
       if(ghosts.length) grp.dataset.ghostheads=ghosts.join(","); }
     if(mwtComp.has(i)) grp.classList.add("bwmwt");
     if(repOff[i]) grp.style.top=(-repOff[i])+"px";   // item 11: .bwtok is position:relative, so a NEGATIVE `top` steps the whole token cell (form + its below-stack) UP off the line visually; interrupter arcs/ties measured from offsetTop follow it (offsetTop includes `top`), so a reported token's arcs lift with it
@@ -630,7 +630,7 @@ function arcsWrapped(si){
       drawHangsSVG(svg,tk,X,wy,WORD_F,"tok-word",si,boxes,OID(i)); drawLeadsSVG(svg,tk,X,wy,WORD_F,"tok-word",si,boxes,OID(i)); });   // folded punctuation (and item 6's correct form) beside the word
     mwtTie(svg, r.c.map(x=>x+r.offX), r.wform, rowTies(D,r.s,r.e), r.stackBot+5, boxes, si);
   });
-  // Ghost edges (Shared=Yes AND Subj-raising): dashed, dimmed — decorative, not a diagram element of their own,
+  // Ghost edges (Shared=Yes AND Subject-raising): dashed, dimmed — decorative, not a diagram element of their own,
   // but still: (item 7) fan-shared with the real arcs at any token they land on (never the reverse), (item 2)
   // counted toward fitTight's boxes, (item 3) highlighted when their dependent is selected, (item 6) their
   // labels decollided against the real ones — only ghost labels ever move.
@@ -835,7 +835,7 @@ function wpDraw(box){ const wp=box._wp; if(!wp) return;
   // handful of tokens sx<<1 and neighbouring nodes can land closer together than the flat r:10 below reaches —
   // their circles then overlap, and since SVG hit-testing gives the point to whichever shape is PAINTED LAST (this
   // loop, in token order), a click/drag aimed dead-centre at token i instead grabs token i+1 the moment their
-  // circles cross. That silently misdirects a Subj-raising or Shared-conjunct drag onto the wrong node — the exact
+  // circles cross. That silently misdirects a Subject-raising or Shared-conjunct drag onto the wrong node — the exact
   // "nothing happens" a user sees, since the SOURCE token is wrong from the first pointerdown, not the drop —
   // confirmed by a synthetic CDP drag landing on tok 18 ("really") when aimed at tok 17's own measured centre
   // ("he") in a 26-token sentence. Clamp each node's own radius to at most half its distance to the NEAREST other
@@ -861,6 +861,7 @@ function wpDraw(box){ const wp=box._wp; if(!wp) return;
     g.appendChild(E("path",{class:"edge edge-ghost",d:`M ${a1[0]} ${a1[1]} L ${a2[0]} ${a2[1]}`,stroke:ink}));
     if(wp.showLbl){ drawLabel(g,(NX(e.d)+NX(e.h))/2,(NY(e.d)+NY(e.h))/2,e.rel,relColor(e.rel)); const lb=g.lastElementChild; if(lb)lb.classList.add("lbl-ghost"); }
     svg.appendChild(g); });
+  ghostsBehind(svg);   // …and behind the real edges above, as everywhere else. Called HERE and not only from wrap(): this svg is (re)filled by wpDraw long after the box was wrapped — from the post-layout pass in js/core/document.js — so the one call in wrap() never sees these ghosts
   wpDrawProj(box);
 }
 // projection lines: node → its word, only for whichever row currently sits at the top of the scrolled token box
@@ -912,7 +913,7 @@ function tree(si){
   const hgw=i=>tailW(t[i],NODE_F);                                    // real-width room for the node's folded-punctuation satellites (to its inline-end)
   const ldw=i=>leadW(t[i],NODE_F);                                    // item 2: room for right-merging leads (inline-start)
   const elw=i=>(show.labels&&i!==root)?meas(t[i].deprel,POS_F):0;      // incoming edge-label width
-  // Subj=Generic: give each predicate a VIRTUAL LEAF CHILD (index n, n+1, … one per generic-subj token) in a
+  // Subject=Generic: give each predicate a VIRTUAL LEAF CHILD (index n, n+1, … one per generic-subj token) in a
   // SEPARATE copy of the tree used ONLY for layout (place()/depth) — so it's positioned by the SAME recursive
   // subtree-packing every other dependent uses, exactly like any other token, rather than squeezed into a linear
   // reading-order gap (which "contorted" it relative to its real siblings). Real edges/ghosts/node-drawing stay
@@ -957,7 +958,7 @@ function tree(si){
   if(show.labels) edges.forEach(e=>{ const mx=(x[e.d]+x[e.h])/2, my=e.midY;   // pass 2: all labels in front of all edges
     const lg=E("g",{class:"edge-g","data-s":si,"data-dep":OID(e.d),"data-head":OID(e.h)}); drawLabel(lg,mx,my,e.rel,relColor(e.rel));
     lg.style.cursor="pointer"; lg.addEventListener("click",()=>pick(si,OID(e.d))); svg.appendChild(lg); boxes.push({x:mx,y:my,hx:meas(e.rel,POS_F)/2+2,hy:7}); });
-  // Subj=Generic: computed here (positions only) so it can fold into the SAME horizontal label-decollision pass
+  // Subject=Generic: computed here (positions only) so it can fold into the SAME horizontal label-decollision pass
   // as the real ghost edges below — a disconnected decollision pass is what let its label collide with a real one.
   const genericEntries=genericToks.map(i=>{ const vi=vOf[i], gx=x[vi], gy=ny(depth[vi]);
     return {i,gx,gy,y1:gy-A,y2:parentEndY(i)}; });
@@ -974,7 +975,7 @@ function tree(si){
     boxes.push({x:(dEnd[0]+hEnd[0])/2,y:(dEnd[1]+hEnd[1])/2,hx:Math.abs(hEnd[0]-dEnd[0])/2,hy:Math.abs(hEnd[1]-dEnd[1])/2+2});   // item 2
     if(show.labels){ const L=ghostLabAt.get(e); drawLabel(g,L.mx,L.my,e.rel,relColor(e.rel)); const lb=g.lastElementChild; if(lb)lb.classList.add("lbl-ghost"); boxes.push({x:L.mx,y:L.my,hx:meas(e.rel,POS_F)/2+2,hy:7}); }
     svg.appendChild(g); });
-  // item 2 (redesign): Subj=Generic — the ∅ is a virtual TOKEN, positioned by the SAME recursive subtree-packing
+  // item 2 (redesign): Subject=Generic — the ∅ is a virtual TOKEN, positioned by the SAME recursive subtree-packing
   // as any other dependent (x[vOf[i]]/depth[vOf[i]], computed above via children2) — not editable/interactable/
   // grid-visible, but arranged exactly like a real dependent of its head, never contorted to a linear position.
   genericEntries.forEach(ge=>{ const i=ge.i, col=relColor("subj"), ink=arcInk(col);
@@ -1065,7 +1066,7 @@ function brackets(si){
   const RF='600 15px '+LIVE_TOKEN_STACK, WBOLD='640 15px '+LIVE_TOKEN_STACK, gap=5;
   const seq=[]; for(let p=0;p<n;p++){
     opens[p].forEach(o=>seq.push({t:"o",glyph:"[",col:o.col,owner:o.owner}));   // the predicate's OWN incoming brackets (from its real head) open first
-    if(hasGenericSubj(t,p)){ const col=relColor("subj");   // Subj=Generic: its OWN small bracket pair, nested INSIDE the predicate's own brackets (opened after them, closed before its word) — a real seq entry (not an interrupter-style arc), so it gets uniform inter-item spacing on BOTH sides like any other bracketed unit
+    if(hasGenericSubj(t,p)){ const col=relColor("subj");   // Subject=Generic: its OWN small bracket pair, nested INSIDE the predicate's own brackets (opened after them, closed before its word) — a real seq entry (not an interrupter-style arc), so it gets uniform inter-item spacing on BOTH sides like any other bracketed unit
       seq.push({t:"o",glyph:"[",col,owner:null,ghost:true}); seq.push({t:"g",i:p}); seq.push({t:"c",glyph:"]",col,owner:null,ghost:true}); }
     seq.push({t:"w",i:p}); closes[p].forEach(o=>seq.push({t:"c",glyph:"]",col:o.col,owner:o.owner})); }
   const relOf=i=>(show.labels && !interrupt.has(i)) ? (i===root ? (t[i].deprel||"root") : t[i].deprel) : null;   // deprel shown above each non-displaced token — INCLUDING the root (shows "root", like wrapped brackets)
@@ -1075,7 +1076,7 @@ function brackets(si){
       ww=Math.max(fw, show.pos?meas(posDisp(t[it.i]),POS_F):0, trLayer()?meas(trTxt(t[it.i]),trFont(t[it.i])):0, glossSlotW(t[it.i])); const r=relOf(it.i); if(r) ww=Math.max(ww,meas(r,POS_F));   // item 3: fold in the gloss/MSeg/MGloss row width (glossSlotW → 0 when no gloss tier is shown) so a long gloss under a SHORT form — typically an MWT component (sat/ādi) with a long MSeg/MGloss — can't crowd its neighbour. The stemma/arc/wrapped-bracket layouts already reserve this; unwrapped brackets was the last one missing it.
       ld=leadW(t[it.i],WORD_F);   // item 2: right-merging leads sit before the word
       it.x=x+ld+ww/2; wx[it.i]=it.x; wlo[it.i]=it.x-ww/2; whi[it.i]=it.x+ww/2; }
-    else if(it.t==="g"){ ww=Math.max(meas("∅",WORD_F), show.labels?meas("subj",POS_F):0); it.x=x+ww/2; genericX[it.i]=it.x; }   // Subj=Generic: a real seq slot of its own — same uniform `gap` on both sides any bracketed unit gets, reserved wide enough for its own "subj" label above it
+    else if(it.t==="g"){ ww=Math.max(meas("∅",WORD_F), show.labels?meas("subj",POS_F):0); it.x=x+ww/2; genericX[it.i]=it.x; }   // Subject=Generic: a real seq slot of its own — same uniform `gap` on both sides any bracketed unit gets, reserved wide enough for its own "subj" label above it
     else { ww=meas("[",RF); it.x=x+ww/2; } it.w=ww; x+=ld+ww+(it.t==="w"?tailW(t[it.i],WORD_F):0)+gap; });   // reserve real-width room after a word for its folded-punctuation satellites (before the following close bracket)
   const total=x+2;
   if(RTL){ seq.forEach(it=>{ it.x=total-it.x; if(it.t==="o")it.t="c"; else if(it.t==="c")it.t="o"; });   // mirror the sequence; swap only the open/close ROLE (for span logic), keeping the original glyph
@@ -1088,7 +1089,7 @@ function brackets(si){
   // with the real interrupters — see .ghost-g). Heights count toward maxAH so a tall ghost never clips the top.
   // ghostPairsFor gives [originIdx,targetIdx,rel] — `d` (dependent) is the origin, `h` (head) is the target.
   const ghostArcs=ghostPairsFor(t).map(([o,tg,rel])=>({d:o,h:tg,rel,hgt:arcHgt(Math.abs(wx[o]-wx[tg]),38)}));
-  // Subj=Generic no longer folds in here: it's drawn as its own small bracket pair in the seq itself (see the seq
+  // Subject=Generic no longer folds in here: it's drawn as its own small bracket pair in the seq itself (see the seq
   // construction above), not as an interrupter-style ghost arc — a real dependent's own bracket, not a decorative bump.
   const maxAH=Math.max(12,...np.map(a=>a.hgt),...ghostArcs.map(a=>a.hgt));
   const RELDESC=descent(WORD_F);   // deprel→form gap copies the wrapped stemma (projWrapped) EXACTLY: 20px + the form's descender depth (projWrapped is now the authoritative reference, not the old flat-tuned "20")
@@ -1176,7 +1177,7 @@ function brackets(si){
       g.style.cursor="pointer"; g.addEventListener("click",()=>pick(si,OID(it.i))); svg.appendChild(g);
       boxes.push({x:it.x,y:wy-8,hx:it.w/2,hy:12});
       drawHangsSVG(svg,t[it.i],it.x,wy,WORD_F,"tok-word",si,boxes,OID(it.i)); drawLeadsSVG(svg,t[it.i],it.x,wy,WORD_F,"tok-word",si,boxes,OID(it.i));   // folded punctuation (and item 6's correct form) beside the word, before the following close bracket
-    } else if(it.t==="g"){   // Subj=Generic: the ∅ — a real seq slot, drawn like any bracketed single-token dependent (its own label above, its own glyph on the word row), dimmed via .ghost-g. NEVER highlighted via the predicate's own selection — the predicate is this relation's HEAD, not its dependent, and the ∅ dependent has no real token of its own to select instead
+    } else if(it.t==="g"){   // Subject=Generic: the ∅ — a real seq slot, drawn like any bracketed single-token dependent (its own label above, its own glyph on the word row), dimmed via .ghost-g. NEVER highlighted via the predicate's own selection — the predicate is this relation's HEAD, not its dependent, and the ∅ dependent has no real token of its own to select instead
       const i=it.i, col=relColor("subj"), g=E("g",{class:"ghost-g","data-s":si});
       const wy=yWord-rep[i], rly=relY-rep[i];
       if(show.labels){ drawLabel(g,it.x,rly,"subj",col); const lb=g.lastElementChild; if(lb)lb.classList.add("lbl-ghost"); boxes.push({x:it.x,y:rly,hx:meas("subj",POS_F)/2+2,hy:7}); }
@@ -1194,7 +1195,7 @@ function brackets(si){
 function outline(si){const D=displaySent(DOC[si]), t=D.tokens, n=t.length, OID=k=>D.map[k]+1, sent={tokens:t},{children,root}=structure(sent); RTL=D.rtl;
   const kids=children;   // a Shared=Yes token nests under its literal head, same as any other dependent — no redirection
   // Ghost rows: a semi-transparent copy of a token's row under every OTHER conjunct in its coordination
-  // (Shared=Yes, labelled with the token's own deprel) or under its re-derived Subj-raising target (labelled
+  // (Shared=Yes, labelled with the token's own deprel) or under its re-derived Subject-raising target (labelled
   // "subj", regardless of the token's own actual deprel — the raising relationship, not its real attachment) —
   // alongside its one real (fully-opaque) row under wherever it's actually attached.
   // ghostsAt is indexed by TARGET (the row a ghost nests under); each entry names its ORIGIN (gi, the token
@@ -1246,7 +1247,7 @@ function outline(si){const D=displaySent(DOC[si]), t=D.tokens, n=t.length, OID=k
       const gpos=document.createElement("span"); gpos.className="opos"; gpos.textContent=posDisp(t[gi]); gpos.title=posTitle(t[gi].upos); grow.appendChild(gpos);
       grow.style.cursor="pointer"; grow.addEventListener("click",()=>pick(si,OID(gi)));
       box.appendChild(grow); });
-    if(hasGenericSubj(t,i)){ const grow=document.createElement("div"); grow.className="oline oline-ghost";   // item 2: Subj=Generic — a real ROW, like any other token, nested under its head; never selectable/editable (nothing real to click)
+    if(hasGenericSubj(t,i)){ const grow=document.createElement("div"); grow.className="oline oline-ghost";   // item 2: Subject=Generic — a real ROW, like any other token, nested under its head; never selectable/editable (nothing real to click)
       grow.style.marginInlineStart=((d+1)*22)+"px";
       if(show.labels){ const relEl=document.createElement("span"); relEl.className="orel"; setRelLabel(relEl,"subj"); relEl.title=relTitle("subj");
         if(show.colour) relEl.style.color=relColor("subj"); grow.appendChild(relEl); }
@@ -1254,6 +1255,28 @@ function outline(si){const D=displaySent(DOC[si]), t=D.tokens, n=t.length, OID=k
       box.appendChild(grow); }
     })(root,0,[],[]);
   return box;}
-function wrap(svg){const d=document.createElement("div"); d.className="diagram"; d.appendChild(svg); return d;}
+/* A GHOST DRAWS BEHIND EVERY REAL EDGE — one z-order pass here rather than reordered appends in five
+   renderers. A ghost duplicates an attachment the diagram already draws for real (Shared=Yes
+   coordination, Subject-raising, the Subject=Generic ∅), so wherever a ghost and a real edge cross,
+   the real one has to be the one that reads as continuous — and a real edge carries a casing whose
+   whole job is to occlude what it passes over, which it could not do while the ghost was painted
+   after it. Every renderer appends its ghosts AFTER its real edges, because a ghost label is placed
+   by decolliding against the real labels' FINAL positions, and that ordering is what put them in
+   front: SVG has no z-index, paint order IS document order.
+   Moving the `.ghost-g` GROUP carries the ghost's label and its leader line with it — both are its
+   own children (see the drawLabel/insertBefore pairs in each renderer) — so the three move as the
+   one object they read as.
+   Only ghosts that sit AFTER the first real edge move, and they keep their order among themselves,
+   so nothing else in the stack shifts: the projection lines and baseline words a ghost already
+   draws over stay behind it, and the token/node layer every renderer appends last stays in front. */
+const GHOST_LAYER=".ghost-g,.proj-ghost";
+const REAL_EDGE_LAYER=".arc,.edge-g,.edge-cases";   // every notation's real dependency layer, and GROUPS only — an .arc/.edge-g <g> holds its own stroke, arrowhead, casing, label and leader, so this one selector covers all four things a ghost has to go behind. (The paths inside are .arc-path/.arc-casing/…, which `.arc` does not match: class selectors match whole tokens.)
+function ghostsBehind(svg){
+  if(!svg||!svg.children) return;
+  const kids=[...svg.children], ai=kids.findIndex(el=>el.matches(REAL_EDGE_LAYER));
+  if(ai<0) return;   // nothing real to sit behind — a single-token sentence, or the bracket/outline notations, which draw no edges at all
+  for(let i=ai+1;i<kids.length;i++) if(kids[i].matches(GHOST_LAYER)) svg.insertBefore(kids[i],kids[ai]);
+}
+function wrap(svg){ghostsBehind(svg); const d=document.createElement("div"); d.className="diagram"; d.appendChild(svg); return d;}
 function esc(s){return (s||"").replace(/[&<>]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;"}[c]));}
 

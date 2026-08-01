@@ -39,9 +39,30 @@ const FONT_LOADED=new Set();   // families whose @font-face is now injected
    the event, so it is not the forward-reference hazard CLAUDE.md warns about; the typeof guard covers a
    font finishing before the later modules have finished defining themselves. */
 if(typeof document!=="undefined"&&document.fonts&&document.fonts.addEventListener){
-  let _fontSettle=null;
-  document.fonts.addEventListener("loadingdone",()=>{ clearTimeout(_fontSettle);
-    _fontSettle=setTimeout(()=>{ if(typeof DOC!=="undefined"&&DOC.length&&typeof preserveScroll==="function"&&typeof renderDoc==="function") preserveScroll(renderDoc); },80); }); }   // 80ms: several faces of one document land in a burst (one per script), and each fires its own event — coalesce them into a single re-layout
+  let _fontSettle=null,_fontPending=false;   // _fontPending: a CORE face landed somewhere in this burst → the coalesced clear must be the wide one
+  /* WHICH cached measurements a landed face actually invalidates. A CORE face (Noto Sans, Noto Sans
+     Mono) draws essentially every string in the document, so its arrival drops the lot — that is what
+     corrects the first render's fallback-metric widths. A per-script face draws only its own script,
+     so it drops only the strings that CONTAIN that script: a Devanagari face landing must not re-measure
+     every Latin label in the document, which is exactly what a blanket clear did. And when nothing was
+     dropped, nothing on screen changed — no diagram invalidation, no re-render.
+     NOT a cache-efficiency fix, and measured as such before writing it: with one clear per load the
+     cache already runs at 100% (440 misses against 440 distinct strings — misses == distinct == cache
+     size), so the measurements themselves are irreducible. What this saves is the WORK AFTER a clear:
+     a document in a non-Latin script fetches its face mid-session, and that used to throw away every
+     Latin measurement and re-render the lot. */
+  const _NON_CORE=/[^\p{Script=Latin}\p{Script=Greek}\p{Script=Cyrillic}\p{Script=Common}\p{Script=Inherited}]/u;
+  document.fonts.addEventListener("loadingdone",ev=>{ clearTimeout(_fontSettle);
+    const fams=[...new Set(((ev&&ev.fontfaces)||[]).map(f=>String(f.family||"").replace(/^["']|["']$/g,"")))];
+    const core=!fams.length||fams.some(f=>/^Noto Sans( Mono)?$/i.test(f));   // no family list (an engine that doesn't populate it) ⇒ assume the worst and clear everything
+    _fontPending=_fontPending||core;
+    _fontSettle=setTimeout(()=>{ const wide=_fontPending; _fontPending=false;
+      const dropped=(typeof clearMeasCacheWhere==="function")
+        ? clearMeasCacheWhere(wide?null:(t=>_NON_CORE.test(t)))
+        : (typeof clearMeasCache==="function"?clearMeasCache():0);
+      if(!dropped) return;   // the face changed nothing that has been measured — leave the rendered diagrams alone
+      if(typeof invalidateDiaCache==="function") invalidateDiaCache();   // …the RENDERED diagrams too: the notation-switch cache (js/core/document.js) hands back an SVG laid out with the metrics of whatever face was in force when it was built, so a re-render alone would redraw nothing. Measured: token WIDTHS were identical across a font change while every token's x moved 4-5px, which is exactly a stale cropped diagram being reused
+      if(typeof DOC!=="undefined"&&DOC.length&&typeof preserveScroll==="function"&&typeof renderDoc==="function") preserveScroll(renderDoc); },80); }); }   // 80ms: several faces of one document land in a burst (one per script), and each fires its own event — coalesce them into a single re-layout   // 80ms: several faces of one document land in a burst (one per script), and each fires its own event — coalesce them into a single re-layout
 // Scripts the CORE faces already cover, plus the ones with no Noto Sans family of their own.
 const FONT_CORE_SCRIPTS=new Set(["Latin","Greek","Cyrillic","Common","Inherited","Unknown","Braille"]);
 // Unicode script name → the family name the font stacks use, where squashing the name doesn't give it.

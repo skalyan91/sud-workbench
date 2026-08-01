@@ -24,6 +24,39 @@
 </script>
 <link rel="stylesheet" href="styles/app.css">
 
+<style>
+/* BOOT COVER — a blank document surface, held over the document area until there is a document.
+
+   NOT a wireframe of a sentence block. It was one (a card with bar-shaped stand-ins for the running
+   sentence, the diagram and the grid) and that is gone on request: drawing the shape of a block that
+   is not there yet claims more than the app knows, and for a NEW TAB — which has no document coming
+   at all — it would have been a straight lie. What is left is the honest part: an opaque surface the
+   colour the document area will be.
+
+   WHY IT EXISTS AT ALL. Two blank states, one of which is ugly. A launch spends ~1.2s of native
+   window + WebKit bring-up where nothing web can paint (app/appearance.py's window colour is all
+   there is), and then ~1s more before the document lands. During that second stretch #doc is LIVE and
+   already rendered once, empty — which in paged layout means a blank white SHEET, a card with a
+   border, sitting where the document will be. This covers that with a plain surface until the real
+   thing arrives. It is one element and one rule; the reason it is worth them is that the sheet
+   flashing in and out is the sort of thing that reads as a bug.
+
+   INLINE and self-contained: it must be in the very first paint, so it cannot wait for a script, and
+   it must not depend on a class app.css owns (a rename there would silently blank it). */
+.bootskel{position:absolute; inset:var(--top-chrome,54px) 0 0 0; overflow:hidden;
+  background:var(--content-bg,#fff); pointer-events:none; user-select:none;
+  transition:opacity .16s ease}
+  /* .body is position:relative in both kits and the status bar is a child of it — but the status bar
+     comes after this in source order, so `bottom:0` tucks under it rather than over it. */
+.bootskel.gone{opacity:0}
+  /* THE PICTURE OF THE LAST VIEW, when there is one, is hung on this element as a background-image by
+     bootBridge (js/core/init.js) — the whole web view scaled to the window's width and pulled up by
+     the chrome height it was taken at, so the document in the picture sits where the document is
+     about to be. It is only ever handed over for provably the same view (Api._launch_snapshot), so
+     the real render lands on top of a near-identical image; clearBootSkeleton fades rather than cuts,
+     because a swap between two nearly identical frames is exactly what reads as a flicker. */
+</style>
+
 <div class="window" role="application" aria-label="SUD Workbench">
   <div class="titlebar">
     <!-- Progressive scroll-edge blur (options bar CLOSED). Empty sibling layers behind the controls —
@@ -193,6 +226,14 @@
     </div>
 
     <div class="doc" id="doc"></div>
+
+    <!-- BOOT COVER (styles + rationale in <head>). A SIBLING of #doc, not a child: init.js's boot
+         render calls renderDoc() on a still-empty document, whose first act is `#doc.textContent=""`,
+         so a cover inside #doc was wiped at ~100ms — before the page had painted once (measured:
+         removed at 93-172ms against a first contentful paint of 209-312ms, i.e. it never appeared).
+         clearBootSkeleton (js/core/document.js) takes it away instead: on the first render that has
+         sentences, and unconditionally once bootBridge knows what the document is, empty or not. -->
+    <div class="bootskel" aria-hidden="true"></div>
 
     <!-- LINEAR-LIGHT DROP SHADOWS. CSS `box-shadow` composites in gamma-encoded sRGB; Figma and CoreGraphics
          composite in linear light, which is why the same numbers (0 8 40 / black 12 %) read tighter and harder in

@@ -58,6 +58,7 @@ let ARH_ACCENT_OVERRIDE=null;
 // Called ONLY when a sticky override is active — at rest these inline props are absent and the CSS keyword/hex
 // owns the accent (so the steady state still tracks the real AccentColor and the dark-mode #0a84ff stays put).
 function arh_applyAccentVars(root,rgb){
+  if(typeof clearCssVarCache==="function") clearCssVarCache();   // the --accent family is about to change → drop diagram-core's cached reads of it
   const dark=matchMedia("(prefers-color-scheme: dark)").matches, [r,g,b]=rgb, c=`rgb(${r},${g},${b})`;
   const wk=dark?.22:.14, rs=dark?.20:.12, ff=dark?.22:.10, bs=dark?.09:.05;   // per-theme alphas mirror the light/dark :root definitions
   root.style.setProperty("--accent-blue",c);   // active-pill highlight (#btnOptions.active) + the arh probe
@@ -188,6 +189,7 @@ function relColMidLinear(hexA,hexB){ const na=parseInt(hexA.slice(1),16), nb=par
   return "#"+hx(mix(16))+hx(mix(8))+hx(mix(0)); }
 // Write (or clear) the live override <style>. Does NOT re-render — callers re-render when needed.
 function applyRelColours(){
+  if(typeof clearCssVarCache==="function") clearCssVarCache();   // …and the --c-* relation hues, for the same reason
   const o=(PREFS.relColours&&typeof PREFS.relColours==="object")?PREFS.relColours:{};
   const cats=RELCOL_CATS.map(c=>c[0]);
   const linked=relColLinked();

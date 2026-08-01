@@ -75,7 +75,18 @@ function relGuideUrl(rel){ const base=depBase(rel), fam=famOf(base);   // ignore
 function posGuideUrl(pos){ return GUIDE+"Upos/"+encodeURIComponent((pos||"").trim())+"/"; }
 function deepGuideUrl(feat){ return GUIDE+"Deep/"+encodeURIComponent((feat||"").trim())+"/"; }   // each deep feature has its own subpage (…/Deep/relcl/)
 function cat(r){const f=famOf(r); return (f==="subj"||f==="comp"||f==="mod"||f==="udep")?f:(f==="root"?"root":"other");}   // udep gets its own --c-udep (comp/mod linear-RGB midpoint, see relColMidLinear) instead of falling into "other"
-function css(v){return getComputedStyle(document.documentElement).getPropertyValue(v).trim();}
+/* CSS-VARIABLE READS ARE CACHED PER RENDER. relColor() calls this for every label, edge, arrowhead and
+   bracket, and each call is a getComputedStyle on documentElement: 941 of them in one load (measured by
+   wrapping the layout-flushing DOM APIs), against a handful of distinct variables. They can only change
+   when the theme or the accent does, and both already have a single choke point — js/ui/colours.js's
+   deriveRelHuesFromAccent / applyRelColours, which write the --c-* and --accent family — so those clear
+   it (clearCssVarCache below). Anything that changes a variable WITHOUT going through them must clear it
+   too, or a stale colour survives until the next clear. */
+const _CSSVAR=new Map();
+function clearCssVarCache(){ _CSSVAR.clear(); }
+function css(v){ let hit=_CSSVAR.get(v);
+  if(hit===undefined){ hit=getComputedStyle(document.documentElement).getPropertyValue(v).trim(); _CSSVAR.set(v,hit); }
+  return hit; }
 function relColor(r){ if(!show.colour) return css("--ink"); return css("--c-"+cat(r)); }
 function arcInk(col){ return `color-mix(in srgb, ${col}, var(--content-bg) var(--edge-mix))`; }   // arc/edge STROKE ink: the relation colour mixed toward the page ground so the stroke recedes just slightly from its full-colour label (labels keep the full relColor). Not opacity, which would also dim the casing/occlusion halo (that stays on --block-occlude). --edge-mix is now ONE value for BOTH appearances (33%, macos-kit/mac-tokens.css) — light lifts toward white, dark recedes toward #1e1e1e, and the token is deliberately NOT redeclared in the dark block. THIS COMMENT USED TO DOCUMENT A 40%/0% LIGHT/DARK SPLIT; that split was collapsed in the stylesheet and the note went stale, which matters beyond tidiness — exportSVG (js/editing/context-menu.js) has to know exactly which tokens are theme-dependent, and --edge-mix is not one of them.
 // SEMANTIC DEPENDENCE, one relation at a time — what the "Semantic arrows" option draws. (The seam mark's
@@ -208,7 +219,37 @@ function tierFont(tier,tk){ return tier==="mseg"?(isForeign(tk)?MSEG_UP_F:MSEG_F
 // widest below-token gloss row for a token, in its real font (0 when no gloss tier is on). An empty tier draws "…"
 // (gl-empty) so it contributes that narrow placeholder width — a real gloss dominates. Folded into every slot-width max.
 function glossSlotW(t){ let w=0; belowTiers().forEach(tier=>{ const dtxt=tierText(t,tier)||"…"; w=Math.max(w,tier==="mseg"?meas(dtxt,tierFont(tier,t)):measGloss(dtxt,tierFont(tier,t))); }); return w; }
+/* MEASUREMENTS ARE CACHED, because the same handful of strings is measured over and over: one load of
+   the sample document makes 4,985 calls with 183 DISTINCT (text, font, extra-css) triples, and a
+   notation switch 6,883 with 325 — 96% repeats. Each miss is a real cost: the body below writes into
+   an SVG <text> and calls getComputedTextLength(), which forces style+layout, and the load profile
+   attributed 1.36s of a ~2.5s page-load budget to this one function.
+   The key is the whole input, so nothing that changes the answer is left out of it. What is NOT in
+   the key is the FONT DATA behind the family list — a face that finishes loading, or a switch of the
+   token/mono stack, changes what these strings measure — so both are invalidated explicitly:
+   refreshFontStacks below (stack change) and the fonts "loadingdone" handler (js/lang/fontload.js),
+   which already force a re-render for the same reason. Capped rather than unbounded: a large treebank
+   has many distinct forms, and a cleared cache costs one re-measure, not correctness. */
+const _MEAS_CACHE=new Map(), _MEAS_CAP=20000;
+function clearMeasCache(){ const n=_MEAS_CACHE.size; _MEAS_CACHE.clear(); return n; }
+/* …or only the entries a given face could have changed. A landed font invalidates a cached width only
+   if the string it measured is DRAWN in that face, and a per-script face (Noto Sans Devanagari, …)
+   draws only its own script — so dropping every Latin measurement because a Devanagari face arrived
+   re-measures the whole document for nothing. `pred` receives the measured TEXT (the cache key's first
+   field); returns how many entries were dropped, so the caller can skip the re-render entirely when a
+   face changed nothing on screen. */
+function clearMeasCacheWhere(pred){ if(typeof pred!=="function") return clearMeasCache();
+  let n=0;
+  for(const k of [..._MEAS_CACHE.keys()]){ const i=k.indexOf("\u0000");
+    if(pred(i<0?k:k.slice(0,i))){ _MEAS_CACHE.delete(k); n++; } }
+  return n; }
 function _measOne(s,f,extraCss){
+  const _k=(s||"")+"\u0000"+f+"\u0000"+(extraCss||"");
+  const _hit=_MEAS_CACHE.get(_k); if(_hit!==undefined) return _hit;
+  const _w=_measOneUncached(s,f,extraCss);
+  if(_MEAS_CACHE.size>=_MEAS_CAP) _MEAS_CACHE.clear();   // a document big enough to blow the cap re-measures rather than growing without bound
+  _MEAS_CACHE.set(_k,_w); return _w; }
+function _measOneUncached(s,f,extraCss){
   // Mirror CSS letter-spacing for sizes that carry the tracking curve (.node-lbl/.baseword at 14px → .0055em,
   // etc.). Canvas measureText ignored it; SVG getComputedTextLength honours style.letterSpacing. Sizes at the
   // 15px reference (WORD_F/POS_F/…) keep 0 — trackCurve(15)===0 — so this is a no-op for those.
@@ -250,6 +291,7 @@ function refreshFontStacks(){
   // computeColW/pillColW measure against GRID_F/HEAD_F, both built from LIVE_MONO_STACK/LIVE_TOKEN_STACK below)
   // → the column-width cache's every cached measurement is now stale, so force a full rescan rather than trust
   // the (now wrong) cached widths forward.
+  if((LIVE_TOKEN_STACK!==prevT||LIVE_MONO_STACK!==prevM)) clearMeasCache();   // …and every cached text width, for the same reason: they were measured in the OLD families
   if((LIVE_TOKEN_STACK!==prevT||LIVE_MONO_STACK!==prevM) && typeof invalidateColW==="function") invalidateColW();
   // …and every renderer's own cached diagram (js/core/document.js's notation-switch cache): stemma/arcs/tree/
   // brackets/outline all measure through this same meas()/WORD_F/NODE_F/POS_F/… family, so a font-stack change
@@ -1024,7 +1066,7 @@ function linear(sent, depAbove){const gap=8,pad=2,SP=meas(" ",WORD_F),tk=sent.to
   const w=tk.map((t,i)=>Math.max(wform[i], show.pos?meas(posDisp(t),POS_F):0, trLayer()?meas(trTxt(t),trFont(t)):0, depAbove?meas(t.deprel||"",POS_F):0, glossSlotW(t), 16));   // item 13: fold in the gloss-tier rows so a wide gloss can't crowd/overlap its neighbour. Bold width (.tok-word.sel) reserved for EVERY token, not just the selected one — the token that's bold can change without a layout re-run (no reflow-on-select path here, unlike brackets), so the slot must already fit either state
   const hg=tk.map(t=>tailW(t,WORD_F));   // real-width room reserved to each host's inline-end for its folded punctuation (node centre c[i] stays on the host, so arc endpoints are unchanged)
   const ld=tk.map(t=>leadW(t,WORD_F));   // item 2: room reserved at the host's inline-START for right-merging punctuation that leads it
-  // Subj=Generic: reserve a virtual ∅-token band just BEFORE this token's own slot (not widening the slot itself,
+  // Subject=Generic: reserve a virtual ∅-token band just BEFORE this token's own slot (not widening the slot itself,
   // so c[i] keeps meaning "this token's own centre" — arc endpoints stay exactly where they belong; the ∅ simply
   // gets real space inserted ahead of it, like inserting a real token would).
   const c=[]; c[0]=pad+genericSubjGapW(tk,0)+ld[0]+w[0]/2;
@@ -1072,7 +1114,7 @@ function tidyLayout(size,root,childrenOf,{lw,hgw,ldw,elw,SPW,NGAP}){
 }
 function stemmaLayout(sent,catNodes,posBelow){const pad=2, SP=meas(" ",WORD_F)+8;   // gap matches arc view; slot also fits the baseline POS tag so they don't crowd
   const lw=sent.tokens.map(t=>Math.max(fmeas(t,WORD_F),fmeas(t,WORD_F_BOLD),catNodes?meas(posDisp(t)||"X",POS_F):fmeas(t,NODE_F),catNodes?0:fmeas(t,NODE_F_BOLD), posBelow?meas(posDisp(t)||"X",POS_F):0, trLayer()?meas(trTxt(t),trFont(t)):0, glossSlotW(t)));   // item 13: include the gloss-tier width so glosses stay spaced. Bold width reserved for the baseline word AND (when the node itself shows the word, not a POS category — catNodes' .node-cat never bolds on single selection) the node label too, for every token — see linear()'s own comment on why
-  const c=[]; let x=pad; sent.tokens.forEach((t,i)=>{ x+=genericSubjGapW(sent.tokens,i,catNodes?POS_F:NODE_F)+leadW(t,NODE_F); c.push(x+lw[i]/2); x+=lw[i]+tailW(t,NODE_F)+SP; });   // reserve inline-START room for right-merging leads (item 2) + inline-end room for trailing satellites; node centre stays on the host (arc endpoints unchanged). Subj=Generic: a virtual ∅-token band inserted just before, same idea as linear()
+  const c=[]; let x=pad; sent.tokens.forEach((t,i)=>{ x+=genericSubjGapW(sent.tokens,i,catNodes?POS_F:NODE_F)+leadW(t,NODE_F); c.push(x+lw[i]/2); x+=lw[i]+tailW(t,NODE_F)+SP; });   // reserve inline-START room for right-merging leads (item 2) + inline-end room for trailing satellites; node centre stays on the host (arc endpoints unchanged). Subject=Generic: a virtual ∅-token band inserted just before, same idea as linear()
   const total=x-SP+pad;
   return {c,total,lw};   // caller mirrors after any label-spacing pass
 }

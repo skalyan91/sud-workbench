@@ -150,17 +150,17 @@ function markDirtyBase(){ DIRTY_BASE=true; markDirty(); }   // an unsaved change
    with their own deterministic derivation (used to draw the very same facts as dashed "ghost" edges):
      · conjunct propagation (enhanced-syntax §2/§3) — FEATS Shared=Yes plus conjunctsOf (js/diagram/
        diagram-render.js) already say exactly which OTHER conjuncts a shared dependent belongs to;
-     · control/raising subjects (§4, UD's own `:xsubj` extension) — FEATS Subj plus subjRaiseTarget/
+     · control/raising subjects (§4, UD's own `:xsubj` extension) — MISC Subject plus subjRaiseTarget/
        SUBJ_TYPE_OF (js/diagram/diagram-edit.js) already say exactly which token is the raised argument and
-       which predicate it is raised to. Subj=Generic has no real token to attach to (a synthetic ∅ node, not a
+       which predicate it is raised to. Subject=Generic has no real token to attach to (a synthetic ∅ node, not a
        word) and is correctly skipped — the type lookup below simply never resolves a target for it. */
 // like subjRaiseTargetFor (js/diagram/diagram-edit.js), but ALSO reports which raising TYPE resolved — needed to
 // label the DEPS :xsubj pair, which subjRaiseTargetFor's own return value (just the target id) doesn't carry for
-// Instantiated (it collapses all four types into one FEATS value; see that function's own comment).
+// Instantiated (it collapses all four types into one MISC value; see that function's own comment).
 function subjRaiseTypeAndTarget(tokens,tokId,subjVal){
   const type=SUBJ_TYPE_OF[subjVal];
   if(type){ const r=subjRaiseTarget(tokens,tokId,type); return r?{id:r,type}:null; }
-  if(subjVal!=="Instantiated") return null;
+  if(!UNTYPED_RAISING[subjVal]) return null;   // Instantiated and the @x-migration artefact Raising — see UNTYPED_RAISING (js/diagram/diagram-edit.js)
   for(const ty of ["subj","comp:obj","comp:obl"]){ const r=subjRaiseTarget(tokens,tokId,ty); if(r) return {id:r,type:ty}; }
   return null; }
 // every EXTRA (head,relation) pair beyond a token's own basic edge, keyed by 1-based token id — see the block
@@ -170,9 +170,15 @@ function depsForSent(s){ const toks=s.tokens, n=toks.length, extra={};
   toks.forEach((t,i)=>{ const id=i+1;
     if(hasFeat(t.feats,"Shared","Yes")){ const hid=parseInt(t.head,10);   // conjunct propagation: the basic edge already names ONE conjunct — add the SAME relation to every OTHER one
       if(hid>=1&&hid<=n) conjunctsOf(toks,hid).forEach(c=>{ if(c!==hid) add(id,c,t.deprel); }); }
-    const subjVal=getFeat(t.feats,"Subj");
+    const subjVal=raiseGet(t,"Subject");
     if(subjVal){ const r=subjRaiseTypeAndTarget(toks,id,subjVal);   // control/raising: the ARGUMENT gets the extra pair, pointing back at this predicate — never the predicate itself
-      if(r) add(r.id,id,r.type+":xsubj"); } });
+      if(r) add(r.id,id,r.type+":xsubj"); }
+    /* MISC Object contributes NO DEPS pair, deliberately. `:xsubj` is UD's own documented extension for exactly
+       this construction (enhanced-syntax §4) and is what the raised-SUBJECT case above emits; UD publishes no
+       `:xobj` counterpart, and depsAutofill's whole contract is that it only ever states what a SUD tree can
+       HONESTLY assert in UD's vocabulary (see the header comment on this section). Inventing a relation name to
+       round the feature out would be exactly the fabrication that comment rules out — so the object-raising
+       annotation lives in MISC and in the ghost edge, and stops there. */ });
   return extra; }
 // one sentence's tokens, DEPS filled in wherever the file left it unspecified — a plain array of token objects
 // (shallow-copied only where actually touched), never mutating the live model
@@ -201,11 +207,28 @@ function getDocJSON(){ if(DOC.length){ const s=DOC[0];
     return out; }); }
 function blankSent(){ return {sid:"s1",text:"",tokens:[tok("","","","","",0,"root")]}; }
 // bring backend sentences into the renderer's shape (heads as strings, display sid, no null cells)
+/* ONE-SHOT MIGRATION OF THE OLD `Subj` SPELLING, run on every token as a file is read.
+   This app once wrote SUD's raising feature as FEATS `Subj`, which was wrong in both the column and the name:
+   it belongs in MISC (it describes a relation between two tokens, not a morphological property of one) and the
+   guidelines, the validator and the conversion grammars all spell it `Subject`. Rewriting at load means nothing
+   downstream ever has to know the old form existed — there is no legacy branch in the accessors (raiseGet /
+   raiseSet, js/core/prefs.js), no second spelling in the completion inventory, and no way to author the old form
+   again.
+   THIS DELIBERATELY BREAKS BYTE-STABILITY for a file that carries `Subj=` — opening and saving such a file
+   rewrites that one field. That is the point, and it was explicitly asked for: the mistake should leave no trace
+   rather than be preserved for the sake of an invariant. Every other field is untouched, so a file WITHOUT the
+   old spelling is byte-stable exactly as before (all seven samples still round-trip).
+   An existing MISC Subject wins, on the "already correct" principle — a token carrying both is taken to have
+   been migrated already, with the FEATS copy left over. */
+function migrateLegacySubj(t){ const old=getFeat(t.feats,"Subj"); if(!old) return;
+  t.feats=clearFeat(t.feats,"Subj");
+  if(!getFeat(t.misc,"Subject")) t.misc=setMiscKV(t.misc,"Subject",old); }
 function normSents(sents,base){ base=base||0; return sents.map((s,i)=>{
   if(s.sid==null) s.sid="s"+(base+i+1);
   if(typeof s.text==="string" && s.text.indexOf("\\n")>=0) s.text=s.text.replace(/\\n/g,"\n");   // item 13: a literal \n in `# text` is a preserved display line break → restore the real newline for the .stext (pre-wrap) display; re-serialised back to a literal \n by getDocJSON (byte-stable)
   (s.tokens||[]).forEach(t=>{ t.head=String(t.head==null?0:t.head);
-    if(t.deps==null)t.deps="_"; if(t.misc==null)t.misc="_"; if(t.translit==null)t.translit=""; if(t.translitLemma==null)t.translitLemma=""; });
+    if(t.deps==null)t.deps="_"; if(t.misc==null)t.misc="_"; if(t.translit==null)t.translit=""; if(t.translitLemma==null)t.translitLemma="";
+    migrateLegacySubj(t); });
   return s; }); }
 const isBlankDoc=()=>DOC.length===0||(DOC.length===1&&DOC[0].tokens.length<=1&&!(DOC[0].tokens[0]&&DOC[0].tokens[0].form));
 
@@ -1142,7 +1165,7 @@ function clearFeat(featsStr,name){ const cur=(featsStr&&featsStr!=="_")?featsStr
   return cur.filter(s=>s.slice(0,s.indexOf("="))!==name).join("|")||"_"; }
 // item 1: Subj only ever lives on a VERB/AUX (it marks a predicate whose subject is raised/shared) — call this
 // right after ANY UPOS change so a token retagged away from VERB/AUX can't keep a now-meaningless Subj value.
-function clearSubjIfNotVA(t){ if(t.upos!=="VERB"&&t.upos!=="AUX"&&getFeat(t.feats,"Subj")) t.feats=clearFeat(t.feats,"Subj"); }
+function clearSubjIfNotVA(t){ if(t.upos!=="VERB"&&t.upos!=="AUX"&&raiseGet(t,"Subject")) raiseSet(t,"Subject",""); }   // Subject lives on a PREDICATE, so a token retagged away from VERB/AUX must not keep it
 // a Shared=Yes dependent must stay attached to a conj relation's head to keep the marker meaningful — call
 // this right after ANY reparent (t.head just changed) with the token's sentence, so a rehead onto a token whose
 // deprel isn't conj-based (or onto no token at all, e.g. head 0) drops the now-stale Shared=Yes.
@@ -1579,8 +1602,26 @@ async function toggleTransLang(code,on){
 // a field per enabled language under a block, SORTED BY LANGUAGE NAME, labelled with the name (item 13)
 // item 11: after layout, cap a block-header line's RIGHT edge to the sentence input's (.stext) right edge, so the
 // transliteration line is only as wide as the sentence (its left already matches via the shared idW+8 margin + 3px pad).
-function capTransWidth(el){ requestAnimationFrame(()=>{ const blk=el.closest(".sblock"); if(!blk)return; const st=blk.querySelector(".shead .stext"); if(!st)return;
-  const inset=el.getBoundingClientRect().right-st.getBoundingClientRect().right; el.style.marginInlineEnd=(inset>0?Math.round(inset):0)+"px"; }); }
+/* PULL A BLOCK-HEADER ROW'S RIGHT EDGE IN TO THE SENTENCE TEXT'S. Applied to the translations grid and to the
+   script-mode transliteration line, so both share the sentence's right margin rather than running on into the
+   gutter where the block controls sit.
+   applyTransInset IS SYNCHRONOUS AND THAT MATTERS: narrowing the box REWRAPS its text, so it changes the row's
+   HEIGHT — and the per-block height caps (js/core/document.js) measure exactly that height to decide how much
+   room the diagram and grid may have. Measured on a two-language block with long translations, the .tgrid is
+   1115px/158px tall when it is built and 821px/194px once inset: doing the inset a frame later handed both cap
+   passes a row 36px shorter than the one actually drawn, and the block overran the viewport by that much. So the
+   sweep below runs inside the render, before anything measures a height.
+   The rAF wrapper survives only as a fallback for a row revealed OUTSIDE a render (the Sanskrit script line's
+   click-to-reveal), where no sweep is coming; it is idempotent, so a row that the sweep already handled simply
+   recomputes the same number. */
+function applyTransInset(el){ const blk=el.closest(".sblock"); if(!blk)return; const st=blk.querySelector(".shead .stext"); if(!st)return;
+  el.style.marginInlineEnd="0px";   // measure from the UN-inset width every time, or a second pass would inset an already-inset row again
+  const inset=el.getBoundingClientRect().right-st.getBoundingClientRect().right;
+  el.style.marginInlineEnd=(inset>0?Math.round(inset):0)+"px"; }
+// every row in the document that wants that treatment, in one synchronous sweep — called from renderDoc just
+// before the height caps are computed. data-capw is set where the row is built, so this needs no class taxonomy.
+function applyTransInsets(){ document.querySelectorAll("#doc [data-capw]").forEach(applyTransInset); }
+function capTransWidth(el){ requestAnimationFrame(()=>applyTransInset(el)); }
 function renderBlockTrans(i){ const s=DOC[i], rows=sentTranslations(s);
   const langs=[...TRANS_LANGS].sort((a,b)=>(langName(a)||a).localeCompare(langName(b)||b));
   const box=document.createElement("div"); box.className="tgrid"; box.dir="ltr"; box.style.marginInlineStart=(idW+8)+"px";   // left edge aligns with the sentence text
@@ -1621,8 +1662,7 @@ function renderBlockTrans(i){ const s=DOC[i], rows=sentTranslations(s);
     tr.appendChild(lab); tr.appendChild(text); box.appendChild(tr); });
   // item 6: after layout, pull the grid's RIGHT edge in to coincide with the sentence text's (.stext) right edge —
   // so the translation column shares the sentence's right margin (the id / link / block controls sit in the gutter beyond it).
-  requestAnimationFrame(()=>{ const blk=box.closest(".sblock"); if(!blk)return; const st=blk.querySelector(".shead .stext"); if(!st)return;
-    const inset=box.getBoundingClientRect().right-st.getBoundingClientRect().right; box.style.marginInlineEnd=(inset>0?Math.round(inset):0)+"px"; });
+  box.setAttribute("data-capw","1");   // swept synchronously by applyTransInsets during the render — see its note on why this must not wait for a frame
   return box; }
 
 // Re-derive lemma/xpos/feats/deps/misc for one or more tokens by re-running the selected parser on the
@@ -1632,7 +1672,7 @@ function renderBlockTrans(i){ const s=DOC[i], rows=sentTranslations(s);
 // head/tree are always left untouched (this function only ever re-derives the fields listed in PARSE_FIELDS).
 // Returns false (no change) when there's no model, no real parse, or the re-tokenisation no longer aligns 1:1.
 const PARSE_FIELDS=["lemma","xpos","feats","deps","misc"];
-const GESTURE_FEATS=["Shared","Subj"];   // FEATS keys settable only via a drag gesture or keyboard shortcut — a token re-parse must preserve them, same as Gloss/MSeg/MGloss
+const GESTURE_FEATS=["Shared"];   // FEATS keys settable only via a drag gesture or keyboard shortcut — a token re-parse must preserve them, same as Gloss/MSeg/MGloss. (Subject was here too until it moved to MISC; it is preserved by the `keep` list below instead — see raiseGet/raiseSet, js/core/prefs.js.)
 async function reparseTokenFields(si,tokIds,opts){
   opts=opts||{};
   if(!(hasBridge()&&model)) return false;
@@ -1645,7 +1685,7 @@ async function reparseTokenFields(si,tokIds,opts){
   const targets=tokIds?new Set(tokIds):null;
   s.tokens.forEach((t,i)=>{ if(targets && !targets.has(i+1)) return; const p=r.tokens[i]; if(!p)return;
     const oldFeatsStr=t.feats;   // captured BEFORE PARSE_FIELDS overwrites it below — Task B needs the pre-regen value to retarget MGloss in place, same shape featsSyncGloss's caller already supplies for a live FEATS-cell edit
-    const keep={}; ["Gloss","MSeg","MGloss","Reported","CorrectForm","NewPar"].forEach(kk=>{ const vv=miscKV(t.misc,kk); if(vv) keep[kk]=vv; });   // item 3: the parser's MISC doesn't carry the annotation tiers, so writing it raw would wipe them — preserve the user's lexical gloss + morphemic segmentation/gloss, reported-speech marker, typo correction and mid-sentence paragraph break across a re-parse (e.g. after a Form edit); only a full re-parse may clear these
+    const keep={}; ["Gloss","MSeg","MGloss","Reported","CorrectForm","NewPar","Subject"].forEach(kk=>{ const vv=miscKV(t.misc,kk); if(vv) keep[kk]=vv; });   /* Subject joined this list when the raising feature moved out of FEATS: `misc` is in PARSE_FIELDS, so the parser's own MISC overwrites the column wholesale, and a drag-set raising annotation would be silently lost by the next background re-parse — exactly what GESTURE_FEATS protects on the FEATS side. */   // item 3: the parser's MISC doesn't carry the annotation tiers, so writing it raw would wipe them — preserve the user's lexical gloss + morphemic segmentation/gloss, reported-speech marker, typo correction and mid-sentence paragraph break across a re-parse (e.g. after a Form edit); only a full re-parse may clear these
     if(t._trPick){ const tv=miscKV(t.misc,"Translit"); if(tv) keep.Translit=tv; }   // …and a HAND-CORRECTED stored transliteration is the user's in exactly the same way (a Han heteronym, a kanji reading, an unwritten short vowel): it belongs to the annotator, not to the parser. Only conditional because every OTHER token's Translit is derived and SHOULD be regenerated — annotateTranslitMisc, at the end of this function, does that. It also reads a _trPick token's value back FROM MISC, so without this line the correction would be lost here and then replaced by whatever the displayed row happens to hold (a different scheme in general)
     const spAfter=miscKV(t.misc,"SpaceAfter");   // SpaceAfter survives a re-parse VERBATIM — its absence as much as its value (hence the restore below, not a `keep` entry). This function re-parses the sentence's forms JOINED WITH SPACES and never re-tokenises, so the parser has nothing to say about spacing here: taking its answer would silently drop every SpaceAfter=No in the sentence. Only a full re-parse (doInsert/reparse/commitSentText — they replace s.tokens wholesale, from the real text) may regenerate it
     const keepFeats={}; GESTURE_FEATS.forEach(kk=>{ const vv=getFeat(t.feats,kk); if(vv) keepFeats[kk]=vv; });   // Shared/Subj are set by drag gestures, not the parser — a per-token regen must not silently clear them; only a full re-parse (doInsert/reparse/commitSentText, which replace s.tokens wholesale) may do that

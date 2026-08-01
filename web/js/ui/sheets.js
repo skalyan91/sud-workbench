@@ -424,7 +424,7 @@ function bindFeatInput(inp){
       FEATS_CATS.forEach(cat=>{ const gi=ms.filter(v=>FEATS_CAT[v]===cat); gi.forEach(v=>seen.add(v)); if(gi.length)groups.push({title:cat,items:gi}); });
       const rest=ms.filter(v=>!seen.has(v)); if(rest.length)groups.push({title:"Other (in document)",items:rest});
       acShowGrouped(inp,groups,pick); }
-    else { const descFn=(keyName&&UD_FEATS[keyName])?(v=>(FEATS_VDESC[keyName]||{})[v]||""):null; acShowCustom(inp,ms,pick,descFn); } };
+    else { const descFn=(keyName&&(UD_FEATS[keyName]||UD_MISC_VALS[keyName]))?(v=>(FEATS_VDESC[keyName]||{})[v]||""):null;   /* …and a MISC key with a known value set, which since Subject/Object moved out of FEATS is the only way their value glosses still reach the dropdown */ acShowCustom(inp,ms,pick,descFn); } };
   inp.addEventListener("input",openAC);
   inp.addEventListener("focus",openAC);
   inp.addEventListener("blur",()=>{ if(_acInput===inp)acCloseSoon(); });

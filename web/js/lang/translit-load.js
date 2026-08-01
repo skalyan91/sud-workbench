@@ -43,21 +43,60 @@ async function adoptStoredPicks(){ if(!TRANSLIT_AMBIG||!STORED_SCHEME) return fa
   items.forEach(([t,st])=>{ t._trChk=1; const auto=map[t.form]||"";   // no rendering at all (an engine whose extras tier is missing) ⇒ nothing to compare against, so nothing is adopted
     if(auto&&st!==auto){ t._trPick=true; t._trMisc=true; t.translit=""; any=true; } });
   return any; }
+/* THE DOCUMENT'S OWN MISC Translit IS THE SOURCE — the file already holds a romanisation for every
+   token that has one, so opening it must not re-derive what it can read. This used to discard MISC
+   the moment a display scheme was selected (`TRANSLIT_SCHEME ? "" : miscTranslit(misc)`) and hand
+   EVERY unique form to the engines instead, which on a large document is two full passes over the
+   bridge — adoptStoredPicks' comparison pass and the automatic pass below — plus the re-render each
+   triggers, all to arrive at strings the file already contained.
+   Now: the stored value is taken always, and only CONVERTED when the displayed scheme differs from
+   the stored one (translit_derive, one deduplicated batch — "held in Pinyin, shown in Zhuyin").
+   Where a pair cannot be related at all it comes back "" and the automatic pass romanises the form,
+   exactly as before, so nothing that used to be filled is left blank.
+   The same-scheme case now costs NOTHING: no engine call, no bridge round-trip, no waiting render. */
 async function fillTranslit(){ if(!hasBridge()||!DOCLANG) return;   // transliteration is enabled only when a model sets the language
   let any=false;
-  if(await adoptStoredPicks()) any=true;   // before the passes below: an adopted correction must be treated as one by both of them
-  // An authored MISC Translit= wins over the automatic pass ONLY when no display scheme is actively
-  // selected. When the user has picked a transliteration scheme, that scheme drives the diagram display
-  // (fetched fresh below), so a stale MISC value from an earlier parse/scheme doesn't override it.
+  const same=(!TRANSLIT_SCHEME||!STORED_SCHEME||STORED_SCHEME===TRANSLIT_SCHEME);   // is the row showing the scheme the file stores?
+  // …and only THEN is a hand correction worth detecting: adoptStoredPicks exists so a corrected value
+  // drives a DERIVED row (see its own note), but when the row shows the stored scheme the stored value
+  // is displayed verbatim whether or not it was corrected — so its full comparison pass over every
+  // form (a second engine pass, the expensive half of an open) buys nothing and is skipped.
+  if(!same && await adoptStoredPicks()) any=true;   // before the passes below: an adopted correction must be treated as one by both of them
+  const derive=[];   // [obj, field, surface, storedValue] — a stored romanisation to re-express in the displayed scheme
   const fromMisc=(o,misc)=>{ if(o._trPick) return;   // a reading PICKED by hand from the CJK readings flyout (js/lang/readings.js) is authoritative for as long as the scheme it was picked under is displayed — it is already both in o.translit and in MISC, and re-deriving it here would silently put the automatic (wrong) reading back
-    const mt=TRANSLIT_SCHEME?"":miscTranslit(misc);
-    if(mt){ if(o.translit!==mt){ o.translit=mt; any=true; } o._trMisc=true; }
-    else if(o._trMisc){ o.translit=""; o._trMisc=false; any=true; } };   // MISC Translit removed / scheme selected → clear so the automatic pass below refills it
-  DOC.forEach(s=>{ s.tokens.forEach(t=>fromMisc(t,t.misc));
+    const mt=miscTranslit(misc);
+    if(mt){ o._trMisc=true;
+      if(same){ if(o.translit!==mt){ o.translit=mt; any=true; } }   // the stored string IS the displayed one
+      else if(!o.translit) derive.push([o,"translit",o.form,mt]); }
+    else if(o._trMisc){ o.translit=""; o._trMisc=false; any=true; } };   // MISC Translit removed → clear so the automatic pass below refills it
+  // …and a token's LEMMA romanisation the same way, from MISC LTranslit — the companion key
+  // annotateTranslitMisc writes beside Translit, and the one msegPrefillParts already reads in
+  // preference to the cached value. Without this the lemma column alone kept the whole engine pass
+  // alive on open (one entry per distinct lemma, i.e. most of the document) even where every FORM was
+  // answered from MISC. The identity below covers what LTranslit doesn't: where the lemma IS the form
+  // — the ordinary case in Chinese, and common everywhere — its romanisation is by definition the
+  // form's, so it needs neither a stored value nor a call.
+  const fromMiscLemma=t=>{ if(!t.lemma||t.lemma==="_"||t.translitLemma) return;
+    const lt=miscKV(t.misc,"LTranslit");
+    if(lt){ if(same){ t.translitLemma=lt; any=true; } else derive.push([t,"translitLemma",t.lemma,lt]); }
+    else if(t.lemma===t.form&&t.translit){ t.translitLemma=t.translit; any=true; } };
+  DOC.forEach(s=>{ s.tokens.forEach(t=>{ fromMisc(t,t.misc); fromMiscLemma(t); });
     (s.mwt||[]).forEach(m=>fromMisc(m, m._cols?m._cols[9]:m.misc)); });   // an MWT's MISC is column 9 of its raw CoNLL-U row
+  if(derive.length){
+    // ONE batch, deduplicated by (surface, stored): a document repeats its words, and the conversion
+    // depends on nothing else — so a 20,000-token text of 3,000 distinct spellings crosses the bridge
+    // 3,000 times, not 20,000. Forms and lemmas share the batch; each entry carries the field to fill.
+    const key=x=>x[2]+"\u0000"+x[3], uniq=new Map();
+    derive.forEach(it=>{ if(!uniq.has(key(it))) uniq.set(key(it), it); });
+    const batch=[...uniq.values()]; let d=[];
+    try{ const r=await window.pywebview.api.translit_derive(batch.map(x=>x[2]),batch.map(x=>x[3]),DOCLANG,STORED_SCHEME,TRANSLIT_SCHEME); d=(r&&r.translit)||[]; }catch(e){ d=[]; }
+    const got={}; batch.forEach((it,i)=>{ if(d[i]) got[key(it)]=d[i]; });
+    derive.forEach(it=>{ const v=got[key(it)]; if(v){ it[0][it[1]]=v; any=true; } });   // "" ⇒ not derivable (a character-keyed scheme, an unrecognised reading) → left for the automatic pass
+    DOC.forEach(s=>s.tokens.forEach(t=>{ if(!t.translitLemma&&t.lemma===t.form&&t.translit){ t.translitLemma=t.translit; any=true; } }));   // …and re-apply the identity now the forms are in: a lemma equal to its form takes whatever the form just got
+  }
   if(await deriveTrPicks()) any=true;   // a hand-corrected token's row is derived from its STORED value, not from the form
   const need=new Set();   // unique surface forms still missing a transliteration (no MISC Translit, none computed yet)
-  DOC.forEach(s=>{ s.tokens.forEach(t=>{ if(t.form&&!t.translit)need.add(t.form); if(t.lemma&&t.lemma!=="_"&&!t.translitLemma)need.add(t.lemma); }); (s.mwt||[]).forEach(m=>{ if(m.form&&!m.translit)need.add(m.form); }); });   // lemmas ride the same batch so the lemma-translit column stays automatic even when a MISC Translit supplies the form's translit
+  DOC.forEach(s=>{ s.tokens.forEach(t=>{ if(t.form&&!t.translit)need.add(t.form); if(t.lemma&&t.lemma!=="_"&&!t.translitLemma&&t.lemma!==t.form)need.add(t.lemma); }); (s.mwt||[]).forEach(m=>{ if(m.form&&!m.translit)need.add(m.form); }); });   // lemmas ride the same batch so the lemma-translit column stays automatic — minus the ones a MISC LTranslit or the lemma==form identity already answered above
   if(need.size){
     const forms=[...need]; let r;
     try{ r=await window.pywebview.api.transliterate(forms,DOCLANG,TRANSLIT_SCHEME); }catch(e){ if(any){ if(typeof invalidateDiaCache==="function")invalidateDiaCache(); preserveScroll(renderDoc); } return; }   // TRANSLIT_SCHEME = the scheme chosen in the status-bar menu ("" ⇒ the language's default)

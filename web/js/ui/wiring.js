@@ -298,14 +298,30 @@ function toggleOptionsBar(){ const vb=document.querySelector(".viewbar"), btn=do
   const hidden=vb.classList.toggle("hidden");
   if(btn){ btn.classList.toggle("active",!hidden); btn.setAttribute("aria-pressed",String(!hidden)); btn.title=hidden?"Show the options bar":"Hide the options bar"; }
   syncChrome();   // fix 3: recompute the doc top-padding for the now shown/hidden options bar
+  if(hasBridge()){ try{ window.pywebview.api.options_bar_state(!hidden); }catch(e){} }   // …and every other tab follows: the options bar is app-wide (Api.options_bar_state)
   // Item 1: showing/hiding the options bar changed --vbH → the doc's top padding → the VISIBLE viewport height. The
   // per-block height cap is computed only inside renderDoc from that visible height, so re-render to re-tighten it —
   // otherwise a block sized to the taller/shorter old viewport overflows (bar shown) or wastes room (bar hidden).
   preserveScroll(renderDoc); }
 document.getElementById("btnOptions").addEventListener("click",toggleOptionsBar);
+// …the same change arriving FROM another window. Everything toggleOptionsBar does except the
+// broadcast — which is what stops two windows from telling each other about it forever — and a no-op
+// when this window already agrees, so a round of broadcasts settles immediately.
+window.__setOptionsBar=function(on){ const vb=document.querySelector(".viewbar"), btn=document.getElementById("btnOptions"); if(!vb)return;
+  if(vb.classList.contains("hidden")!==!!on) return;   // already in the asked-for state
+  vb.classList.toggle("hidden",!on);
+  if(btn){ btn.classList.toggle("active",!!on); btn.setAttribute("aria-pressed",String(!!on)); btn.title=on?"Hide the options bar":"Show the options bar"; }
+  syncChrome();
+  if(typeof preserveScroll==="function"&&typeof renderDoc==="function") preserveScroll(renderDoc); };
 // fix 3: keep the doc's top inset (--vbH/--tbH → .doc padding-top) and the options-bar's top edge synced to the
 // DYNAMIC titlebar + options-bar heights, so the document scrolls UNDER the translucent bars and their
 // backdrop-filter blurs the content through (previously the bars sat in flow over an opaque background → no blur).
+let TB_RESERVED=-1, CHROME_H={tb:-1,vb:-1};   // last reported bar heights, so a no-op sync neither crosses the bridge nor re-caps
+// The options bar's height, handed to the shell so it can hold that much space inside the native
+// title-bar band. Only on a CHANGE: syncChrome runs on every resize/reflow and this crosses the
+// bridge. -1 as the initial value so the first report (commonly 0, the bar closed) still goes.
+function reserveTitlebar(h){ if(h===TB_RESERVED||!hasBridge())return; TB_RESERVED=h;
+  try{ window.pywebview.api.titlebar_reserve(h); }catch(e){} }
 function syncChrome(){
   const body=document.querySelector(".body"), tb=document.querySelector(".titlebar"), vb=document.querySelector(".viewbar");
   if(!body||!tb)return;
@@ -314,8 +330,20 @@ function syncChrome(){
   const collapsed=document.body.classList.contains("fs-chrome-hidden");
   const tbH=collapsed?0:(Math.round(tb.getBoundingClientRect().height)||44);
   const vbH=collapsed?0:((vb&&!vb.classList.contains("hidden"))?Math.round(vb.getBoundingClientRect().height):0);
+  const moved=(tbH!==CHROME_H.tb||vbH!==CHROME_H.vb); CHROME_H.tb=tbH; CHROME_H.vb=vbH;
+  // …captured BEFORE the properties below move .doc's padding, and only when something actually moved:
+  // the port is about to change height FROM THE TOP, which slides the block being read up behind the
+  // bars unless it is put back (js/core/scroll.js). syncChrome runs on every resize/reflow, so the
+  // capture — one rect per block — is charged only to the toggles that really change the chrome.
+  const anchor=(moved&&typeof captureTopAnchor==="function")?captureTopAnchor():null;
   body.style.setProperty("--tbH",tbH+"px");
   body.style.setProperty("--vbH",vbH+"px");
+  // …and a chrome that changed height changed the VIEWPORT: every block's diagram/grid share is
+  // measured against .doc's remaining height, and opening the options bar moves it with no re-render
+  // to recompute the caps. rAF so the new padding is laid out before anything is measured.
+  if(moved && typeof recapBlocks==="function") requestAnimationFrame(()=>{ recapBlocks();
+    if(anchor && typeof restoreTopAnchor==="function") restoreTopAnchor(anchor); });   // …then put the reader back where they were, measured against the NEW inset
+  reserveTitlebar(vbH);   // …and let the native title bar reserve the options bar's space, so a window-tab bar lands BELOW it (macOS; see Api.titlebar_reserve)
   fsCaptureLights();   // item 5: keep a fresh snapshot of the WINDOWED traffic-light metrics for the full-screen titlebar-padding restore (no-op while in full screen)
 }
 /* ── item 10: full-screen auto-hide of the toolbar (.titlebar) + options bar (.viewbar) ──────────────

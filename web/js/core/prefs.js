@@ -87,7 +87,7 @@ let MODELLANG={};   // language code → an installed model id, for auto-selecti
 // Language authority order (see maybeAutoDetectLang): (1) a filename `<langcode>_…` prefix pins the
 //  language and overrides everything; else (2) the Kyoto XPOS ⇒ lzh heuristic; else (3) fastText. The chosen
 //  language drives the parser via applyLang(lang,true)→syncModelToLang.
-let show={graphs:true,grids:true,colour:true,labels:true,pos:true,arrows:false,mergePunct:true,translit:false,wrap:true,extRel:true};   // translit starts OFF — turned on by the status-bar transliteration menu when a scheme is picked. extRel = Shared=Yes/Subj-raising ghost edges (dashed, decorative), on by default
+let show={graphs:true,grids:true,colour:true,labels:true,pos:true,arrows:false,mergePunct:true,translit:false,wrap:true,extRel:true};   // translit starts OFF — turned on by the status-bar transliteration menu when a scheme is picked. extRel = Shared=Yes/Subject-raising ghost edges (dashed, decorative), on by default
 // Document-level glossing TIERS (item 4). Visibility flags; the data lives in MISC and round-trips there.
 //  · GLOSS_ON  → a single Gloss tier (MISC Gloss), one editable row per token.
 //  · MORPH_ON  → a morphemic gloss: TWO tiers, morpheme segmentation (MISC MSeg) + morpheme gloss (MISC MGloss),
@@ -456,5 +456,20 @@ function famOf(r){return (r||"").split(/[:@\/]/)[0];}   // base of a relation (c
 // does a "|"-joined FEATS string carry this exact Feat=Val pair? (setFeat/clearFeat below add/remove one; this checks one)
 function hasFeat(featsStr,name,val){ if(!featsStr||featsStr==="_")return false;
   return featsStr.split("|").some(kv=>{const i=kv.indexOf("="); return i>=0&&kv.slice(0,i)===name&&kv.slice(i+1)===val;}); }
-function getFeat(featsStr,name){ if(!featsStr||featsStr==="_")return null;
+function getFeat(featsStr,name){ if(!featsStr||featsStr==="_")return null;   // NAME NOTWITHSTANDING, this parses any `|`-joined k=v column — FEATS and MISC share that syntax, so the raising accessors below read MISC through it rather than duplicating the loop
   for(const kv of featsStr.split("|")){ const i=kv.indexOf("="); if(i>=0&&kv.slice(0,i)===name) return kv.slice(i+1); } return null; }
+/* ── SUD'S `Subject` FEATURE LIVES IN MISC, NOT FEATS ─────────────────────────────────────────────────────────
+   It records how the unexpressed subject of a controlled/raised predicate is instantiated. Despite being written
+   up on the guidelines' Features pages it is NOT a morphological feature of the token: it describes a
+   relationship between two tokens, which is MISC's business. VERIFIED to survive the move where it actually
+   matters — grew reads a CoNLL-U MISC entry as a node feature just as it reads FEATS, so SUD_to_UD.grs's
+   `D[Subject=ObjRaising|OblRaising|SubjRaising|Raising]` still fires and a raising complement still converts to
+   `xcomp` rather than `ccomp` (tested both ways round through the real grammar; that ccomp/xcomp split IS how UD
+   represents subject raising, and is the whole reason this feature exists).
+   THE KEY IS `Subject`, SPELLED OUT. This app briefly wrote `Subj` into FEATS, which was wrong in both the
+   column and the name — the validator's own obsolete-@x message names the feature `Subject`, the conversion
+   grammars match on `Subject`, and grid.js's completion inventory always offered `Subject`. No reader here
+   accepts the old spelling: migrateLegacySubj (js/io/bridge.js) rewrites it once at load, so nothing downstream
+   ever has to know it existed. */
+function raiseGet(t,key){ return t?getFeat(t.misc,key):null; }
+function raiseSet(t,key,val){ if(t) t.misc=setMiscKV(t.misc,key,val||""); }   // setMiscKV (js/lang/translit-load.js) treats ""/null as "remove the key"   // …and the legacy FEATS spelling goes with it, whether we are setting or clearing

@@ -1381,7 +1381,7 @@ function buildBlock(i,ctx){ const s=DOC[i];
     if(scriptTop){   // item 3: translit slot carries the EDITABLE original # text (the top line now holds the script)
       const tl=document.createElement("div"); tl.className="strans strans-orig"; tl.style.marginInlineStart=(idW+8)+"px"; wireStext(tl);
       tl.hidden=!show.translit;   // Sanskrit Displayed:"None" → the row is collapsed by default; the script .stext click handler above reveals + focuses it on demand
-      if(!tl.hidden) capTransWidth(tl);   // a hidden row is unmeasurable (0-width rect) — the reveal handler re-runs this itself once it's shown
+      tl.setAttribute("data-capw","1"); if(!tl.hidden) applyTransInset(tl);   // swept with the translations grid, synchronously, so the height the caps measure is the height that is drawn   // a hidden row is unmeasurable (0-width rect) — the reveal handler re-runs this itself once it's shown
       tl.addEventListener("blur",()=>{ if(!show.translit) tl.hidden=true; });   // …and re-collapses on blur, still gated on Displayed:"None" — if the user changed the Displayed scheme away from None WHILE this row was open, show.translit is now true and the row stays, exactly as a fresh render would leave it
       scriptTransLine=tl; b.appendChild(tl); }
     else if(trLayer()){   // romanisation OR a Latin-output orthography → a plain whole-sentence line under the text (no displacement)
@@ -1418,6 +1418,7 @@ function renderDoc(){
   pruneDiaCache(winLo,winHi);   // drop every cached diagram outside the range this render is about to (re)build — see the "NOTATION-SWITCH DIAGRAM CACHE" note above buildBlock. AFTER computeWindow (winLo/winHi just moved), BEFORE the buildBlock loop below reads the cache
   computeColW();
   const host=document.getElementById("doc"); host.textContent="";
+  if(DOC.length) clearBootSkeleton();   // …and the boot skeleton goes the moment there is a real block to put in its place (index.html; a no-op once it has)
   host.lang=bcp47Tag();   // BCP-47 tag → inherits to every token/diagram/grid text so the browser picks locale-correct Cyrillic/Han glyphs (locl + system-font region); re-run on every language/script change
   host.classList.toggle("ortho-script", TRANSLIT_SCHEME==="zhuyin");   // a non-Latin DISPLAYED transliteration (Zhuyin) in the row → drop the romanisation italics
   host.classList.toggle("script-form", typeof iastFormEdit==="function"&&iastFormEdit());   // Sanskrit under a real script → every token FORM on screen is a derived rendering of the stored IAST, not an editable field, so it takes the pointing hand (app.css). The MWT/goeswith glyphs set the same cursor inline via formCursor(), being SVG text with their own click contract
@@ -1475,6 +1476,14 @@ function renderDoc(){
   const topSpacer=document.createElement("div"); topSpacer.className="winspacer winspacer-before"; topSpacer.setAttribute("aria-hidden","true");
   if(winLo>0) host.insertBefore(topSpacer,host.firstChild);
   for(let i=winLo;i<winHi;i++) buildBlock(i,ctx);   // ONLY the windowed range — see the virtualization note above buildBlock
+  /* THE ROW WIDTHS MUST BE FINAL BEFORE ANY HEIGHT IS MEASURED, and this is the first point at which every
+     block is in the DOM. The translations grid and the script-mode transliteration line are each pulled in to
+     the sentence text's right edge, and narrowing a row REWRAPS it — so its height is not knowable until that
+     inset has been applied. It used to be applied a frame LATER, which handed both height-cap passes below a
+     translations grid measured at its full pre-inset width (measured on a two-language block: 158px tall at
+     1115px wide, 194px once inset to 821px) and so over-granted the diagram and grid by the difference, letting
+     the block overrun the viewport it was supposed to fit. One sweep here serves both passes. */
+  applyTransInsets();
   const _rendered=host.querySelectorAll(".sblock");
   /* ── THE 60/40 RESERVATION IS OF WHAT THE DIAGRAM AND GRID CAN ACTUALLY HAVE, PER BLOCK ────────────────────
      --cap-dia / --cap-grid were 60 % and 40 % of `dh` — the whole document viewport — which over-reserves by
@@ -1496,6 +1505,13 @@ function renderDoc(){
      costs a few px of cap on the blocks that wrap, never a wrong final layout.)
      .diagram.wrapproj is untouched by construction: its `max-height:none` (app.css) outranks .diagram's
      var(--cap-dia) whatever this writes, and its height is driven explicitly at layout time. */
+  /* READ EVERYTHING, THEN WRITE EVERYTHING. The budget below reads computed styles and offsetHeights
+     for every block and each of its children, and used to write --cap-dia/--cap-grid at the end of
+     each block's own turn — which dirties style and layout for the NEXT block's reads, so the browser
+     recalculated once per block instead of once for the pass. Same arithmetic, same values, in two
+     phases: the profile put this pass (document.js:1506 + its `outer` helper) at ~360ms of a ~750ms
+     script budget after the measurement cache landed. */
+  const _budget=[];
   _rendered.forEach(b=>{
     const bcs=getComputedStyle(b);
     let chrome=parseFloat(bcs.paddingTop||0)+parseFloat(bcs.paddingBottom||0)+parseFloat(bcs.borderTopWidth||0)+parseFloat(bcs.borderBottomWidth||0);
@@ -1516,6 +1532,8 @@ function renderDoc(){
     // The 140px floor is the same one the authoritative pass below uses, so a block whose chrome alone overflows
     // the viewport still leaves both scrollers a usable minimum instead of collapsing them.
     const avail=Math.max(140, dh/FS-chrome);
+    _budget.push([b,avail]); });
+  _budget.forEach(([b,avail])=>{   // …the writes, now that every read is done
     b.style.setProperty("--cap-dia",Math.round(avail*0.6)+"px");
     b.style.setProperty("--cap-grid",Math.round(avail*0.4)+"px"); });
   if(_rendered.length){ let _h=0; _rendered.forEach(b=>_h+=b.getBoundingClientRect().height); AVG_BLOCK_H=_h/_rendered.length; }   // remeasure every render — blocks vary a lot in height (a 3-token sentence vs. a wrapped Sanskrit verse with translations), so this is only ever an estimate (see the virtualization note above)
@@ -1579,6 +1597,16 @@ function renderDoc(){
   // so two of them simply stack in flow and no measurement is needed to make that happen.)
   /* align each diagram / outline so its leftmost drawn content sits under the text of the Form column
      (measured, so it's exact regardless of each renderer's internal offset) */
+  /* THREE PHASES, NOT ONE PER BLOCK. This zeroes a diagram's padding, measures where its leftmost ink
+     lands, and writes the padding that pulls it under the Form column — and doing all three per block
+     meant every block's measurement flushed layout for the write the previous block had just made.
+     Measured by wrapping the layout-flushing DOM APIs: this line alone made 2,223 getBoundingClientRect
+     calls in one load, the largest single source in the app, and the Safari timeline for the same load
+     showed 4,657 forced layouts totalling 3.9 s. Split, the whole document costs ONE flush: every write
+     happens, then every read, then every write. The emphasis dance below is unchanged in meaning (the
+     comment it carries still applies) — it just runs across all blocks at once, which is safe for the
+     same reason it was safe per block: nothing paints in between. */
+  const _align=[];
   document.querySelectorAll("#doc .sblock").forEach(b=>{ const dg=b.querySelector(".diagram, .text-conv"); if(!dg) return;
     dg.style.paddingLeft="0px"; dg.style.paddingRight="0px";   // getBoundingClientRect is in scaled (zoomed) viewport px; padding is set in unscaled CSS px → divide by FS
     const rtl=b.dir==="rtl", els=[...dg.querySelectorAll("svg text, .oline, .bwline2")];
@@ -1592,16 +1620,18 @@ function renderDoc(){
     // casing colour and nothing else. Scoped to `dg`, so the grid's own row classes are untouched.)
     const emph=[...dg.querySelectorAll(".sel,.rng")].map(e=>({e,s:e.classList.contains("sel"),r:e.classList.contains("rng")}));
     emph.forEach(({e})=>e.classList.remove("sel","rng"));
-    let prop=null,val=null;
-    const target=formTextTarget(b,rtl);   // the SAME target the text rows above are aligned to — one measurement, two consumers, so the sentence and its diagram can never disagree about where the column starts (this was written out twice, once here per direction; the fallback for a hidden grid is the same too)
-    if(rtl){   // align the rightmost drawn content under the Form column's start (right) edge
-      let maxR=-Infinity; els.forEach(el=>{const r=el.getBoundingClientRect().right; if(r>maxR)maxR=r;});
-      if(maxR>-Infinity){ prop="paddingRight"; val=Math.max(0,Math.round((maxR-target)/FS))+"px"; }
+    _align.push({b,dg,rtl,els,emph,prop:null,val:null}); });
+  _align.forEach(a=>{   // …every read, with the writes above already flushed exactly once
+    const target=formTextTarget(a.b,a.rtl);   // the SAME target the text rows above are aligned to — one measurement, two consumers, so the sentence and its diagram can never disagree about where the column starts (this was written out twice, once here per direction; the fallback for a hidden grid is the same too)
+    if(a.rtl){   // align the rightmost drawn content under the Form column's start (right) edge
+      let maxR=-Infinity; a.els.forEach(el=>{const r=el.getBoundingClientRect().right; if(r>maxR)maxR=r;});
+      if(maxR>-Infinity){ a.prop="paddingRight"; a.val=Math.max(0,Math.round((maxR-target)/FS))+"px"; }
     } else {
-      let minLeft=Infinity; els.forEach(el=>{const l=el.getBoundingClientRect().left; if(l<minLeft)minLeft=l;});
-      if(minLeft<Infinity){ prop="paddingLeft"; val=Math.max(0,Math.round((target-minLeft)/FS))+"px"; } }
-    emph.forEach(({e,s,r})=>{ if(s)e.classList.add("sel"); if(r)e.classList.add("rng"); });   // emphasis back on before anything can paint
-    if(prop) dg.style[prop]=val; });
+      let minLeft=Infinity; a.els.forEach(el=>{const l=el.getBoundingClientRect().left; if(l<minLeft)minLeft=l;});
+      if(minLeft<Infinity){ a.prop="paddingLeft"; a.val=Math.max(0,Math.round((target-minLeft)/FS))+"px"; } } });
+  _align.forEach(a=>{
+    a.emph.forEach(({e,s,r})=>{ if(s)e.classList.add("sel"); if(r)e.classList.add("rng"); });   // emphasis back on before anything can paint
+    if(a.prop) a.dg.style[a.prop]=a.val; });
   // Item 6 (safety net): the wrapproj token strip is HARD-clipped at the diagram's right edge, and the alignment above
   // shifts it right by the Form-column indent. projWrapped already bounds the strip width to the clip-safe port, but if
   // an unusually wide indent (a long ID column, RTL, or a very wide row-edge token) would still push the strip past the
@@ -1619,40 +1649,7 @@ function renderDoc(){
   stxWrapRoom();   // running-sentence above-the-line marks: give the room to the WRAPPED lines that need it (see stxWrapRoom). Here rather than in paintStext because the blocks are still detached while that runs — and BEFORE the per-block height caps below, so the extra leading is inside the header height they measure
   // per-block height caps: the block ≤ 100% of the document viewport; the diagram gets 60% and the grid 40% of
   // what remains after the sentence header, block padding, AND the gaps around/between the diagram and grid
-  document.querySelectorAll("#doc .sblock").forEach(b=>{
-    const shead=b.querySelector(".shead"), dg=b.querySelector(".diagram,.text-conv"), gw=b.querySelector(".gwrap");
-    const cs=getComputedStyle(b), pad=parseFloat(cs.paddingTop||0)+parseFloat(cs.paddingBottom||0),
-          bord=parseFloat(cs.borderTopWidth||0)+parseFloat(cs.borderBottomWidth||0), cap=(dh-sheetGapAbove(b)-sheetGapBelow(b)-stickyHeadH(b))/FS;   // item 10: a block at the edge of a sheet is charged the page-ground gap beside it, so block+gap fill the viewport rather than overflowing it by the gap. The gaps are OUTSIDE .sblock{zoom:FS} → real px, so they come off dh before the ÷FS. Both 0 unpaged.   // …and the same charge for the STICKY boundary headings that dominate this block (stickyHeadH): pinned, they own the top of the viewport for as long as the block is in it, so block + gaps + headings must fill exactly one viewport between them. Real px too, for the same reason — the heading carries its own zoom:FS.   // a full block's border-box exactly fills the viewport. dh is REAL px; the block is inside .sblock{zoom:FS}, whose offset*/scroll* measurements below are LOCAL (unzoomed) px, so express the cap in LOCAL px too (÷FS) — then heights set here render ×FS to exactly the viewport. Recomputed each render → correct at every zoom (no-op at FS=1).
-    b.style.maxHeight=cap+"px";
-    const shH=shead?shead.offsetHeight:0;
-    /* …and the boundary heading, which is now IN FLOW at the top of the block (see .bmarks in app.css) and so
-       takes real height off what the diagram and grid have to share. Missing this is invisible until a block that
-       opens a document sits at the viewport's height cap: the heading pushes the grid's last rows past the bottom
-       edge, and only that one block in the file is wrong. Its margins count too — they are the space it opens. */
-    const bm=b.querySelector(".bmarks"), bmCS=bm?getComputedStyle(bm):null,
-          bmH=bm?bm.offsetHeight+(parseFloat(bmCS.marginTop||0)+parseFloat(bmCS.marginBottom||0)):0;
-    const tg=b.querySelector(".tgrid"), tgH=tg?tg.offsetHeight+parseFloat(getComputedStyle(tg).marginTop||0):0;   // the translations grid sits just above the diagram → reserve its height so it (and the diagram) stay in view (Item 6)
-    const gapHead=(dg&&shead)?Math.max(0,dg.offsetTop-(shead.offsetTop+shH)-tgH):0;   // whitespace gap above the diagram; the trans grid (if present) sits in this span → subtract its height so it isn't double-counted (it's charged once via tgH below)
-    const gapMid=(dg&&gw)?Math.max(0,gw.offsetTop-(dg.offsetTop+dg.offsetHeight)):0;   // the diagram↔grid gap, excluded
-    const addBtn=b.querySelector(".addtok"), addH=addBtn?addBtn.offsetHeight+parseFloat(getComputedStyle(addBtn).marginTop||0):0;   // the "Add token" button sits below the scrollable grid frame → reserve its height so it (and the block's bottom padding) stay in view
-    const avail=Math.max(140, cap-shH-bmH-pad-bord-gapHead-gapMid-addH-tgH);   // subtract the border ONCE so content fills to exactly the viewport, no more, no less
-    // allocate by natural content height: the diagram gets up to 2/3 and the grid up to 1/3, but if one needs
-    // less than its share the other may expand into the leftover (so neither scrolls while there's room).
-    // A wrapped stemma/hierarchy reports its wanted height (scaled tree + one token row) via data-dia-nat.
-    const wrapproj=dg&&dg.classList.contains("wrapproj");
-    // natural heights as BORDER-box (scrollHeight is padding-box): add each element's border so a cap set to the
-    // natural fully contains the content — otherwise a .5px+.5px grid border leaves it 1px scrollable (phantom)
-    const diaNat=dg?(wrapproj?(+dg.dataset.diaNat||dg.scrollHeight):(dg.scrollHeight+dg.offsetHeight-dg.clientHeight)):0, gridNat=gw?(gw.scrollHeight+gw.offsetHeight-gw.clientHeight):0;
-    const g=Math.min(gridNat, Math.max(avail/3, avail-diaNat)), d=Math.min(diaNat, avail-g);
-    if(wrapproj){ const stem=dg.querySelector(".wp-stem"), toksEl=dg.querySelector(".wp-toks"), wp=dg._wp,
-        dcs=getComputedStyle(dg), dpad=parseFloat(dcs.paddingTop||0)+parseFloat(dcs.paddingBottom||0), one=(wp&&wp.oneRowH)?wp.oneRowH:(toksEl?toksEl.offsetHeight:0),   // the true one-row height (not offsetHeight, which can't be trusted mid-layout) → the token strip is always kept to exactly one row so it stays a scroller
-        dd=Math.round(d), content=dd-dpad;                       // the diagram's content box (consistent rounding, so nothing spills)
-      const treeRoom=Math.max(24, content-one);                  // reserve the ONE token row first → its POS line never clips (grid or no grid)
-      dg.style.height=dd+"px";
-      if(stem) stem.style.height=treeRoom+"px";                  // tree fills all the room above the tokens (its own bottom level already leaves a gap over the token line); no extra "air" below the tokens → the space under the single visible token line is just the diagram's normal bottom padding, not a reserved inter-row gap
-      if(toksEl){ toksEl.style.marginBottom="0px"; toksEl.style.height=one+"px"; }   // pin the strip to one row so its N rows overflow and it scrolls, grids on or off
-    } else if(dg) dg.style.maxHeight=Math.round(d)+"px";
-    if(gw) gw.style.maxHeight=Math.round(g)+"px"; });
+  document.querySelectorAll("#doc .sblock").forEach(b=>{ capBlock(b,dh); observeBlockHeader(b); });
   document.querySelectorAll("#doc .diagram.wrapproj").forEach(wpDraw);   // draw the tree (+ projections) now the box has its final size
   positionBracketWash();
   positionBracketAnnots();
@@ -1878,10 +1875,10 @@ function positionBracketAnnots(){ document.querySelectorAll("#doc .bwrap").forEa
     if(si0>=0&&m.fromTok!=null){ tg.setAttribute("data-s",si0); tg.setAttribute("data-mwtfrom",m.fromTok); tg.setAttribute("data-mwtto",m.toTok); }
     while(svg.childNodes.length>mark0) tg.appendChild(svg.childNodes[mark0]);   // index mark0 keeps naming the next node to move → order preserved
     svg.appendChild(tg); });
-  // Ghost arcs (Shared=Yes and Subj-raising): dashed, dimmed. Within-line → a plain bump; cross-line → the SAME
+  // Ghost arcs (Shared=Yes and Subject-raising): dashed, dimmed. Within-line → a plain bump; cross-line → the SAME
   // straight-vs-Hobby-spline logic drawCrossLine gives the real cross-line arcs. data-ghostheads packs "oid:rel"
   // pairs — each ghost target carries its OWN relation label (Shared=Yes ghosts show the dependent's own deprel;
-  // Subj-raising always "subj"). Item 7: fanned against the SAME buckets wArcs/cArcs just resolved (never the
+  // Subject-raising always "subj"). Item 7: fanned against the SAME buckets wArcs/cArcs just resolved (never the
   // reverse). Item 6: labels decollided against wlabs/clabs (already finalized above) — only ghost labels move.
   const ghostPairs=[];
   ghostToks.forEach(dep=>dep.dataset.ghostheads.split(",").forEach(pair=>{ const [ghOid,rel]=pair.split(":"); ghostPairs.push({dep,ghOid,rel}); }));
@@ -2051,7 +2048,7 @@ function applySel(){
   document.querySelectorAll("#doc tbody tr[data-mwtfrom]").forEach(tr=>tr.classList.toggle("mwtsel",mwtGroupSel(+tr.dataset.s,+tr.dataset.mwtfrom,+tr.dataset.mwtto)));   // live, like every other toggle here: a reflow=false pick (a grid click, Tab navigation) changes the selection without re-rendering, and the group's highlight has to follow it in that same pass
   document.querySelectorAll("#doc .node,#doc .tok-group,#doc .bwtok").forEach(g=>g.classList.toggle("sel",+g.getAttribute("data-s")===sel.s&&(gwHolds(g,sel.t)||elInSpan(g,mwtSpan))));   // gwHolds, not a bare data-tok test: a goeswith cell draws a whole WORD (two or more tokens sharing one annotation stack), so selecting EITHER half lights the whole word — see the goeswith block in js/diagram/diagram-core.js. For every other cell it IS the bare data-tok test.   // .bwtok (wrapped brackets) was missing here — a selection change via a reflow=false path (e.g. grid-cell focus) left its bold highlight stuck on the PREVIOUS token until an unrelated full render happened
   const selDep=gwUnitId(sel.s,sel.t);   // a goeswith continuation's word wears the HEAD's incoming relation — see gwUnitId. Without this, selecting the second half of a word accented its two forms, its shared POS and its slur but left the very relation label above them plain, which is exactly the "a form whose annotations stayed behind" the rule below exists to prevent
-  document.querySelectorAll("#doc .arc,#doc .edge-g,#doc .ghost-g").forEach(g=>g.classList.toggle("sel",g.hasAttribute("data-dep")&&+g.getAttribute("data-s")===sel.s&&+g.getAttribute("data-dep")===selDep));   // ghost edges carry the SAME data-s/data-dep contract as a real edge — without this they only picked up .sel on a full re-render, lagging behind every OTHER selection highlight (which this live class-toggle pass already updates instantly). hasAttribute guard: a ghost-g with NO data-dep at all (e.g. the Subj=Generic ∅, which has no real token of its own) must never match — +null coerces to 0, which used to false-match whenever sel.s===0 (sentence 1) && sel.t===0 (nothing selected), the common initial state
+  document.querySelectorAll("#doc .arc,#doc .edge-g,#doc .ghost-g").forEach(g=>g.classList.toggle("sel",g.hasAttribute("data-dep")&&+g.getAttribute("data-s")===sel.s&&+g.getAttribute("data-dep")===selDep));   // ghost edges carry the SAME data-s/data-dep contract as a real edge — without this they only picked up .sel on a full re-render, lagging behind every OTHER selection highlight (which this live class-toggle pass already updates instantly). hasAttribute guard: a ghost-g with NO data-dep at all (e.g. the Subject=Generic ∅, which has no real token of its own) must never match — +null coerces to 0, which used to false-match whenever sel.s===0 (sentence 1) && sel.t===0 (nothing selected), the common initial state
   document.querySelectorAll("#doc .oline").forEach(g=>{ g.classList.toggle("sel",+g.dataset.s===sel.s&&(gwHolds(g,sel.t)||elInSpan(g,mwtSpan)));   // …and the MWT span for the same reason the cell pass above takes it: an outline ROW is that notation's token cell, so every component of a selected MWT lights there too.   // gwHolds for the same reason as the cell pass above: an outline row that draws a whole goeswith word lights for EITHER of its parts
     g.classList.toggle("insub", +g.dataset.s===sel.s && (g.dataset.anc||"").split(" ").includes(String(sel.t))); });
   document.querySelectorAll("#doc .punctsat").forEach(g=>g.classList.toggle("sel",+g.dataset.s===sel.s&&(+g.dataset.tok===sel.t||elInSpan(g,mwtSpan))));   // HTML folded-punctuation satellites (outline / wrapped brackets) — a satellite is drawn AS PART OF its token's cell, so it follows that token into an MWT selection rather than staying plain beside a lit form
@@ -2067,7 +2064,7 @@ function applySel(){
   // multi-selection: highlight every selected token and its relation edge in the diagram + grid
   const inR=(s,tk)=>selRange&&s===selRange.s&&tk>=selRange.from&&tk<=selRange.to;
   document.querySelectorAll("#doc .tok-group,#doc .node,#doc .oline,#doc .bwtok,#doc .punctsat").forEach(g=>g.classList.toggle("rng",inR(+g.dataset.s,+g.dataset.tok)));
-  document.querySelectorAll("#doc .arc,#doc .edge-g,#doc .ghost-g").forEach(g=>g.classList.toggle("rng",g.hasAttribute("data-dep")&&inR(+g.getAttribute("data-s"),+g.getAttribute("data-dep"))));   // item 3: .ghost-g joins the RANGE pass for the same reason it already joins the .sel pass above — a ghost now takes the selection accent, and a range is the selection generalised, so a ghost whose dependent falls inside a marquee must light with it. hasAttribute guard, exactly as the .sel pass documents: a ghost with NO data-dep (the Subj=Generic ∅) must never match, and +null coerces to 0.
+  document.querySelectorAll("#doc .arc,#doc .edge-g,#doc .ghost-g").forEach(g=>g.classList.toggle("rng",g.hasAttribute("data-dep")&&inR(+g.getAttribute("data-s"),+g.getAttribute("data-dep"))));   // item 3: .ghost-g joins the RANGE pass for the same reason it already joins the .sel pass above — a ghost now takes the selection accent, and a range is the selection generalised, so a ghost whose dependent falls inside a marquee must light with it. hasAttribute guard, exactly as the .sel pass documents: a ghost with NO data-dep (the Subject=Generic ∅) must never match, and +null coerces to 0.
   document.querySelectorAll("#doc tbody tr").forEach(tr=>tr.classList.toggle("rangesel",inR(+tr.dataset.s,+tr.dataset.tok)));
   // Three-level emphasis (see selEmphasis above and the .dim-peri/.dim-out note in styles/app.css): the periphery
   // of the selected token's subtree recedes one step, everything outside that subtree two. Deliberately toggled
@@ -2268,4 +2265,81 @@ function positionHoverBox(row){ const box=row.closest(".outline"), hb=box&&box.q
   const {L,W}=bandLW(box,row);
   hb.style.display="block"; hb.style.left=L+"px"; hb.style.top=(row.offsetTop-2)+"px"; hb.style.width=W+"px"; hb.style.height=(row.offsetHeight+4)+"px"; }
 function dim(){}   /* hover dimming removed */
+/* ONE BLOCK'S SHARE OF THE VIEWPORT — split out of the render pass so it can be re-run for a single
+   block when its HEADER changes height, which happens without a re-render: the running sentence is
+   edited (and wraps), its transliteration wraps with it, a translation field grows a line. Whatever
+   the header takes comes off what the diagram and grid may have, so a header that grows after the
+   render left the two of them still sized for the old one — overflowing the block's own cap.
+   observeBlockHeader below watches exactly those three rows and calls this again. */
+function capBlock(b,dh){
+    const shead=b.querySelector(".shead"), dg=b.querySelector(".diagram,.text-conv"), gw=b.querySelector(".gwrap");
+    const cs=getComputedStyle(b), pad=parseFloat(cs.paddingTop||0)+parseFloat(cs.paddingBottom||0),
+          bord=parseFloat(cs.borderTopWidth||0)+parseFloat(cs.borderBottomWidth||0), cap=(dh-sheetGapAbove(b)-sheetGapBelow(b)-stickyHeadH(b))/FS;   // item 10: a block at the edge of a sheet is charged the page-ground gap beside it, so block+gap fill the viewport rather than overflowing it by the gap. The gaps are OUTSIDE .sblock{zoom:FS} → real px, so they come off dh before the ÷FS. Both 0 unpaged.   // …and the same charge for the STICKY boundary headings that dominate this block (stickyHeadH): pinned, they own the top of the viewport for as long as the block is in it, so block + gaps + headings must fill exactly one viewport between them. Real px too, for the same reason — the heading carries its own zoom:FS.   // a full block's border-box exactly fills the viewport. dh is REAL px; the block is inside .sblock{zoom:FS}, whose offset*/scroll* measurements below are LOCAL (unzoomed) px, so express the cap in LOCAL px too (÷FS) — then heights set here render ×FS to exactly the viewport. Recomputed each render → correct at every zoom (no-op at FS=1).
+    b.style.maxHeight=cap+"px";
+    const shH=shead?shead.offsetHeight:0;
+    /* …and the boundary heading, which is now IN FLOW at the top of the block (see .bmarks in app.css) and so
+       takes real height off what the diagram and grid have to share. Missing this is invisible until a block that
+       opens a document sits at the viewport's height cap: the heading pushes the grid's last rows past the bottom
+       edge, and only that one block in the file is wrong. Its margins count too — they are the space it opens. */
+    const bm=b.querySelector(".bmarks"), bmCS=bm?getComputedStyle(bm):null,
+          bmH=bm?bm.offsetHeight+(parseFloat(bmCS.marginTop||0)+parseFloat(bmCS.marginBottom||0)):0;
+    const tg=b.querySelector(".tgrid"), tgH=tg?tg.offsetHeight+parseFloat(getComputedStyle(tg).marginTop||0):0;   // the translations grid sits just above the diagram → reserve its height so it (and the diagram) stay in view (Item 6)
+    const gapHead=(dg&&shead)?Math.max(0,dg.offsetTop-(shead.offsetTop+shH)-tgH):0;   // whitespace gap above the diagram; the trans grid (if present) sits in this span → subtract its height so it isn't double-counted (it's charged once via tgH below)
+    const gapMid=(dg&&gw)?Math.max(0,gw.offsetTop-(dg.offsetTop+dg.offsetHeight)):0;   // the diagram↔grid gap, excluded
+    const addBtn=b.querySelector(".addtok"), addH=addBtn?addBtn.offsetHeight+parseFloat(getComputedStyle(addBtn).marginTop||0):0;   // the "Add token" button sits below the scrollable grid frame → reserve its height so it (and the block's bottom padding) stay in view
+    const avail=Math.max(140, cap-shH-bmH-pad-bord-gapHead-gapMid-addH-tgH);   // subtract the border ONCE so content fills to exactly the viewport, no more, no less
+    // allocate by natural content height: the diagram gets up to 2/3 and the grid up to 1/3, but if one needs
+    // less than its share the other may expand into the leftover (so neither scrolls while there's room).
+    // A wrapped stemma/hierarchy reports its wanted height (scaled tree + one token row) via data-dia-nat.
+    const wrapproj=dg&&dg.classList.contains("wrapproj");
+    // natural heights as BORDER-box (scrollHeight is padding-box): add each element's border so a cap set to the
+    // natural fully contains the content — otherwise a .5px+.5px grid border leaves it 1px scrollable (phantom)
+    const diaNat=dg?(wrapproj?(+dg.dataset.diaNat||dg.scrollHeight):(dg.scrollHeight+dg.offsetHeight-dg.clientHeight)):0, gridNat=gw?(gw.scrollHeight+gw.offsetHeight-gw.clientHeight):0;
+    const g=Math.min(gridNat, Math.max(avail/3, avail-diaNat)), d=Math.min(diaNat, avail-g);
+    if(wrapproj){ const stem=dg.querySelector(".wp-stem"), toksEl=dg.querySelector(".wp-toks"), wp=dg._wp,
+        dcs=getComputedStyle(dg), dpad=parseFloat(dcs.paddingTop||0)+parseFloat(dcs.paddingBottom||0), one=(wp&&wp.oneRowH)?wp.oneRowH:(toksEl?toksEl.offsetHeight:0),   // the true one-row height (not offsetHeight, which can't be trusted mid-layout) → the token strip is always kept to exactly one row so it stays a scroller
+        dd=Math.round(d), content=dd-dpad;                       // the diagram's content box (consistent rounding, so nothing spills)
+      const treeRoom=Math.max(24, content-one);                  // reserve the ONE token row first → its POS line never clips (grid or no grid)
+      dg.style.height=dd+"px";
+      if(stem) stem.style.height=treeRoom+"px";                  // tree fills all the room above the tokens (its own bottom level already leaves a gap over the token line); no extra "air" below the tokens → the space under the single visible token line is just the diagram's normal bottom padding, not a reserved inter-row gap
+      if(toksEl){ toksEl.style.marginBottom="0px"; toksEl.style.height=one+"px"; }   // pin the strip to one row so its N rows overflow and it scrolls, grids on or off
+    } else if(dg) dg.style.maxHeight=Math.round(d)+"px";
+    if(gw) gw.style.maxHeight=Math.round(g)+"px"; }
 
+/* THE BOOT SKELETON, DISMISSED (its markup and the reasoning are in index.html). Called from
+   renderDoc once a render has sentences in it, and unconditionally from bootBridge
+   (js/core/init.js) once the launch document has arrived — because "the document is empty"
+   is also an answer, and the skeleton must not outlive it. Idempotent: after the first call
+   there is no element and every later call is one failed lookup. */
+let BOOTSKEL_GONE=false;
+function clearBootSkeleton(){ if(BOOTSKEL_GONE) return; BOOTSKEL_GONE=true;
+  const sk=document.querySelector(".bootskel"); if(!sk) return;
+  sk.classList.add("gone"); setTimeout(()=>sk.remove(),200); }   // a fade, not a cut: when the cover is showing the LAST view of this document (the launch snapshot), the real one lands within a pixel or two of it, and a hard swap makes that near-match read as a flicker
+/* THE VIEWPORT A BLOCK IS CAPPED AGAINST, re-applied. `blocks` is the set to re-cap, or every block
+   when omitted — which is what a change in the CHROME's height needs: opening the options bar (or
+   collapsing the chrome in full screen) moves .doc's top padding, so every block's share of the
+   viewport changes at once, with no re-render to recompute it. Called from syncChrome (js/ui/wiring.js)
+   as well as from the per-block observer below. */
+function recapBlocks(blocks){
+  const host=document.querySelector(".doc"); if(!host) return;
+  const padTop=parseFloat(getComputedStyle(host).paddingTop||0);
+  const dh=Math.max(160, host.clientHeight-padTop);   // the same viewport the render pass measures (see AVAILH)
+  AVAILH=dh;   // …and keep the shared figure in step, since it is what the next render starts from
+  (blocks||document.querySelectorAll("#doc .sblock")).forEach(blk=>{ if(blk.isConnected) capBlock(blk,dh); });
+}
+/* …and the watch itself: ONE ResizeObserver for the whole document, observing each block's header
+   rows (.shead — the running sentence and its own wrap marks — .strans, and .tgrid). Re-capping is
+   cheap and touches only maxHeight on the diagram/grid, neither of which is observed, so this cannot
+   feed itself. Coalesced into one rAF so a burst (a field growing while its neighbour reflows) costs
+   one pass, and the whole thing is a no-op where ResizeObserver is missing. */
+let BLOCK_RO=null, BLOCK_RO_PEND=null;
+function observeBlockHeader(b){
+  if(typeof ResizeObserver!=="function") return;
+  if(!BLOCK_RO) BLOCK_RO=new ResizeObserver(ents=>{
+    const blocks=new Set();
+    ents.forEach(e=>{ const blk=e.target.closest&&e.target.closest(".sblock"); if(blk&&blk.isConnected)blocks.add(blk); });
+    if(!blocks.size||BLOCK_RO_PEND) return;
+    BLOCK_RO_PEND=requestAnimationFrame(()=>{ BLOCK_RO_PEND=null; recapBlocks(blocks); });
+  });
+  b.querySelectorAll(":scope > .shead, :scope > .strans, :scope > .tgrid").forEach(el=>{ try{ BLOCK_RO.observe(el); }catch(_){} });
+}

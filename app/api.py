@@ -13,15 +13,17 @@ import os
 import re
 import sys
 import threading
+import time
 from pathlib import Path
 from typing import Any
 
 import webview
 
-from . import convert, detect, io_conllu, itrans, menu_spec, model, models_registry, parse, toolbox_import
+from . import appearance, convert, detect, io_conllu, itrans, menu_spec, model, models_registry, parse, toolbox_import
 from .paths import APP_DATA
 
 _STATE_FILE = os.path.join(APP_DATA, "state.json")   # small persisted app state (recent files, …)
+_SNAP_FILE = os.path.join(APP_DATA, "launch_snapshot.jpg")   # the last view of the launch document — a FILE, not a field in state.json, which save_scroll rewrites on every scroll and would otherwise carry a few hundred kB of base64 each time
 _MAX_RECENT = 10
 
 IS_MAC = sys.platform == "darwin"
@@ -238,6 +240,32 @@ class Api:
         _save_state(state)
         self._notify_recent_changed()
 
+    # ── the document to reopen on next launch (persisted in _STATE_FILE) ─────
+    def record_last_doc(self) -> None:
+        """Remember what this window had open, so the next launch reopens it (see
+        :func:`app.__main__.main`'s startup fallback).  Called from the window's ``closed``
+        handler, which is what makes "the LAST CLOSED window" the thing recorded: every window has a
+        handler of its own and writes as it goes, so the last to close is the last to write.  That
+        holds however many windows the app has open — they share one process now (see
+        ``_new_document_window``), but they never shared one Api, and this reads `self.path`.
+
+        Writes ``None`` for a window that had no file open, so closing an empty window is how you
+        ask for an empty one next time — that is the "unless the last closed window was empty"
+        half of the rule, and it is why this records on CLOSE rather than tracking `path` as it
+        changes: a second, empty window opening would otherwise erase what the first has open.
+        An UNTITLED window with unsaved content also records ``None``, because there is no file to
+        reopen — the recovery story for that is Save, not this."""
+        state = _load_state()
+        state["last_doc"] = os.path.abspath(self.path) if self.path else None
+        _save_state(state)
+
+    @staticmethod
+    def last_doc() -> str | None:
+        """The remembered document from the last window to close, or None — filtered to one that
+        is still on disk, so a file moved or deleted between sessions just starts empty."""
+        p = _load_state().get("last_doc")
+        return p if isinstance(p, str) and p and os.path.exists(p) else None
+
     def _notify_recent_changed(self) -> None:
         """Ask __main__ to live-rebuild the native Open Recent submenu (best-effort)."""
         cb = getattr(self, "_recent_menu_refresh", None)
@@ -270,6 +298,98 @@ class Api:
         if not isinstance(fp, dict):
             return None
         return fp.get(os.path.abspath(path))
+
+    def capture_snapshot(self, chrome=0) -> dict:
+        """Remember what this document LOOKS like, for the next launch to show while it reloads.
+
+        The picture is only ever shown again for the very same view (see get_state): same file,
+        unmodified, same window size, same scroll anchor. Anything else and it is ignored rather than
+        stretched or shown against the wrong document — a placeholder that lies is worse than a blank.
+        Throttled hard: it is called on scroll-settle, and a WebKit snapshot of a full window is not
+        free. macOS only (it is WKWebView's API); a no-op elsewhere, where the cover stays plain."""
+        if sys.platform != "darwin" or self.window is None or not self.path:
+            return {"ok": False}
+        now = time.time()
+        if now - getattr(self, "_snap_t", 0.0) < 8.0:
+            return {"ok": False, "throttled": True}
+        self._snap_t = now
+        try:
+            from .mac import shell as mac_shell
+            data = mac_shell.snapshot_webview(self.window)
+            if not data:
+                return {"ok": False}
+            ap = os.path.abspath(self.path)
+            st = os.stat(ap)
+            os.makedirs(APP_DATA, exist_ok=True)
+            # ATOMIC: temp file + rename. Written in place, a process that dies mid-write (a crash, a
+            # kill, a logout) leaves a TRUNCATED jpeg — which passes every check here, is handed to the
+            # page, and decodes to nothing, so the next launch shows a blank cover for no visible
+            # reason and logs no refusal. os.replace is atomic within a filesystem.
+            tmp = _SNAP_FILE + ".part"
+            with open(tmp, "wb") as fh:
+                fh.write(data)
+            os.replace(tmp, _SNAP_FILE)
+            state = _load_state()
+            state["launch_snap"] = {
+                "path": ap, "mtime": int(st.st_mtime), "size": st.st_size,
+                "chrome": float(chrome or 0),          # …so the picture is hung from the same place the cover starts
+                "w": int(self.window.width or 0), "h": int(self.window.height or 0),
+                "scroll": self._saved_scroll(ap),      # the anchor restoreScrollPos will put the reader back at
+            }
+            _save_state(state)
+            return {"ok": True, "bytes": len(data)}
+        except Exception as exc:  # noqa: BLE001 — cosmetic; never break a scroll
+            print(f"[snapshot] capture: {exc}", file=sys.stderr)
+            return {"ok": False}
+
+    def launch_snapshot(self) -> Any:
+        """The picture of this document's last view, as a data URI, or None.
+
+        ITS OWN BRIDGE CALL, deliberately not a field in get_state: get_state returns the DOCUMENT,
+        and by the time it resolves the frontend HAS the real thing and is about to render it — a
+        picture handed over then is applied and cleared in the same turn, which is exactly what the
+        first version of this did (and why it never appeared). Asked for separately at the top of
+        bootBridge, it lands while get_state is still in flight and covers the render that follows.
+
+        Handed over ONLY for provably the same view: this file, unmodified (mtime + size), the same
+        window size, and the same scroll anchor the reader will be restored to. Any mismatch returns
+        None and the boot cover stays plain — a placeholder that lies is worse than a blank one.
+        """
+        path = self.path
+        if sys.platform != "darwin" or not path:
+            return None
+        try:
+            snap = _load_state().get("launch_snap")
+            if not isinstance(snap, dict):
+                return None
+            ap = os.path.abspath(path)
+            def _no(why):    # a refusal is normal, but a SILENT one is undiagnosable — this is the
+                print(f"[snapshot] not shown: {why}", file=sys.stderr)   # only record of which test failed
+                return None
+            if snap.get("path") != ap:
+                return _no(f"stored for {snap.get('path')!r}, opening {ap!r}")
+            if not os.path.exists(_SNAP_FILE):
+                return _no("no image file")
+            st = os.stat(ap)
+            if snap.get("mtime") != int(st.st_mtime) or snap.get("size") != st.st_size:
+                return _no("the document changed under it")   # the picture is of something else now
+            if self.window is not None and (snap.get("w") != int(self.window.width or 0)
+                                            or snap.get("h") != int(self.window.height or 0)):
+                # a differently-sized window would scale it, and a scaled screenshot of text looks broken
+                return _no(f"window is {self.window.width}x{self.window.height}, picture is {snap.get('w')}x{snap.get('h')}")
+            if snap.get("scroll") != self._saved_scroll(ap):
+                # the reader will land somewhere else; showing this one would jump
+                return _no(f"scroll anchor {snap.get('scroll')} vs {self._saved_scroll(ap)}")
+            import base64
+            with open(_SNAP_FILE, "rb") as fh:
+                uri = "data:image/jpeg;base64," + base64.b64encode(fh.read()).decode("ascii")
+            # …and the document's NAME rides along. Without it the picture of a full document sits
+            # under a title bar still reading "untitled.conllu", which is the one thing that gives
+            # the trick away. Naming the file this early is not a guess: it is the file being opened.
+            return {"uri": uri, "chrome": snap.get("chrome") or 0, "name": os.path.basename(ap), "path": ap}
+        except Exception as exc:  # noqa: BLE001
+            print(f"[snapshot] restore: {exc}", file=sys.stderr)
+            return None
 
     def save_scroll(self, pos) -> dict:
         """Persist the last scroll anchor (top-visible sentence-block index) for
@@ -457,12 +577,39 @@ class Api:
             self._apply_menu(st)
         return {"ok": True}
 
-    def _apply_menu(self, st: dict):
+    def is_key_window(self) -> bool:
+        """Is THIS window the one the menu bar currently belongs to?  True when there is no way to
+        tell (Windows, no NSWindow yet, a PyObjC hiccup): the single-window case must never be able
+        to talk itself out of applying its own state."""
+        win = getattr(self.window, "native", None)
+        if win is None:
+            return True
+        try:
+            import AppKit
+            app = AppKit.NSApp
+            key = (app.keyWindow() if app is not None else None) or (app.mainWindow() if app is not None else None)
+            if key is None:
+                return True
+            return int(key.windowNumber()) == int(win.windowNumber())
+        except Exception:  # noqa: BLE001
+            return True
+
+    def _apply_menu(self, st: dict, force: bool = False):
         """Push one selection-state report onto the live NSMenuItems.
 
         The RULES are no longer written here — ``menu_spec.visibility`` resolves them, and
         ``menu_spec.CHECK_KEYS`` names the checkmarks, so the Windows menu bar applies the identical
-        predicates rather than a hand-copied restatement of them.  What stays is the AppKit half."""
+        predicates rather than a hand-copied restatement of them.  What stays is the AppKit half.
+
+        ONE MENU BAR, SEVERAL WINDOWS: every window's frontend pushes its own selection state (a
+        render, a click, a Tab), and there is a single NSMenu for all of them — so a BACKGROUND
+        window's push would hide or show rows according to a selection the user cannot see. Only the
+        key window may write. Nothing is lost by the others returning early: each caches its state in
+        ``_last_menu_state`` (see the wrapper in mac/shell.py) and the menu delegate re-applies
+        whichever window is key at the moment a menu opens — which is also why that delegate passes
+        ``force``: it has already resolved the key window and must not be second-guessed here."""
+        if not force and not self.is_key_window():
+            return
         m = self._menu or {}
         rtl = bool(st.get("rtl"))
         for title, show in menu_spec.visibility(st).items():
@@ -575,8 +722,50 @@ class Api:
         from .win import dwm
         return {"ok": bool(dwm.caption_action(self.window, str(what or "")))}
 
+    def options_bar_state(self, shown: bool = False) -> dict:
+        """The options bar is APP-WIDE, not per document: opening it in one window opens it in every
+        other one. Broadcast rather than persisted-and-read-on-open, so the change is immediate in
+        windows that are already up; each receiving page applies it through window.__setOptionsBar,
+        which does NOT come back here (that would ping-pong between windows)."""
+        cb = getattr(self, "_broadcast", None)
+        if cb is None:
+            return {"ok": False}
+        try:
+            cb("window.__setOptionsBar && __setOptionsBar(%s)" % ("true" if shown else "false"))
+            return {"ok": True}
+        except Exception as exc:  # noqa: BLE001
+            return {"error": str(exc)}
+
+    def titlebar_reserve(self, height: float = 0) -> dict:
+        """The options bar's measured height, so the shell can reserve it INSIDE the native title-bar
+        band (macOS) — which is what puts the bar ABOVE a window-tab bar rather than below it; see
+        app.mac.shell.set_titlebar_reserve. Reported by syncChrome (js/ui/wiring.js) whenever the
+        bar's height changes, 0 when it is closed or the chrome is collapsed in full screen.
+        A no-op off macOS: Windows has no titlebar accessories and no window tabbing."""
+        if sys.platform != "darwin" or self.window is None:
+            return {"ok": False}
+        try:
+            from .mac import shell as mac_shell
+            mac_shell.set_titlebar_reserve(self.window, float(height or 0))
+            return {"ok": True}
+        except Exception as exc:  # noqa: BLE001
+            return {"error": str(exc)}
+
+    def new_tab(self) -> dict:
+        """Another document window, opened as a TAB of the current one (macOS window tabbing).  Same
+        hand-over shape as :meth:`new_window` below; on a platform without tabbing the callable is
+        absent and this reports unavailable rather than silently opening a separate window."""
+        cb = getattr(self, "_new_tab", None)
+        if cb is None:
+            return {"error": "unavailable"}
+        try:
+            cb()
+            return {"ok": True}
+        except Exception as exc:  # noqa: BLE001
+            return {"error": str(exc)}
+
     def new_window(self) -> dict:
-        """Spawn a second app process (a fresh, empty document).  The callable is handed over by
+        """Open another document window (a fresh, empty document).  The callable is handed over by
         app/__main__.py at startup — the same pattern as _recent_menu_refresh — so api.py carries no
         shell code.  The macOS menu calls that function directly; the Windows menu bar comes here."""
         cb = getattr(self, "_new_window", None)
@@ -1088,7 +1277,7 @@ class Api:
                 win = webview.create_window(
                     title, html=html, js_api=self,
                     width=width, height=height, min_size=min_size,
-                    background_color="#1e1e1e", text_select=True,
+                    background_color=appearance.window_bg(), text_select=True,   # Help / About / Model Manager, same as the document windows
                 )
                 self._child_windows[key] = win
                 try:
