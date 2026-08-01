@@ -291,6 +291,36 @@ function bezPt(P,t){ const m=1-t; return [m*m*m*P[0][0]+3*m*m*t*P[1][0]+3*m*t*t*
 function bezInDir(P,back){ const tip=P[3]; let p=P[2];
   for(let k=1;k<=24;k++){ p=bezPt(P,1-k/24); if(Math.hypot(p[0]-tip[0],p[1]-tip[1])>=back) return p; }
   return p; }
+/* ── a drawn edge as a de-collision obstacle (item 6, second clause: ghost LABEL vs REAL EDGE) ────────────────
+   A ghost is built to read as sitting BEHIND the real annotation — dashed, dimmed, and drawing no .arc-casing of
+   its own precisely so it never occludes what it crosses (see drawBump's caller and the .arc-ghost note in
+   app.css). Its LABEL contradicts that on its own: drawLabel gives every .lbl the opaque 3px paint-order casing,
+   so wherever a ghost label lands it ERASES a label-sized bite out of whatever is behind it — and when that is a
+   real arc, the ghost has occluded the very thing it is meant to defer to. Hence the ghost-label lift also has to
+   clear the real EDGES, not only the real labels.
+   The test must be against the edge's STROKE, not its bounding box: the bbox of a bump is mostly the empty room
+   UNDER the arch, which is exactly where the labels of the arcs nested inside it belong. So an edge becomes a
+   polyline flattened from the very cubic it was drawn from, and the test is segment-vs-box. A straight edge (root
+   stub, un-bowed cross-line arc) is passed as the degenerate cubic [A,A,B,B], which bezPt traces as that exact
+   segment — so there is ONE obstacle shape here, not two. */
+const EDGE_FLAT=14;                              // chords per cubic. These are shallow arcs (crown 0.75·h over a chord ≥ 2·cotθ·h wide), so 14 chords stay a fraction of a pixel off the curve at any size drawn here; and the sagitta error can only make the test slightly PERMISSIVE (chord inside the arch), never invent a collision that isn't there.
+function edgeObstacle(P){ const pts=[]; for(let k=0;k<=EDGE_FLAT;k++) pts.push(bezPt(P,k/EDGE_FLAT));
+  const [y0,y1]=bezYExtent(P), [x0,x1]=bezXExtent(P); return {pts,x0,x1,y0,y1}; }   // bbox from the curve's TRUE extents (the same extrema solve arcCtrlChord fits its S with), for the cheap reject below
+// One segment vs one axis-aligned box: Liang–Barsky parametric clip — no allocation and no trig, because this runs
+// per candidate label position per edge. p===0 is the segment running parallel to that pair of box edges: it is
+// inside iff it starts inside (q>=0), which is what makes a vertical root stub test correctly.
+function segHitsBox(ax,ay,bx,by,L,R,T,B){ let t0=0,t1=1; const dx=bx-ax, dy=by-ay;
+  const clip=(p,q)=>{ if(p===0) return q>=0;
+    const r=q/p; if(p<0){ if(r>t1) return false; if(r>t0) t0=r; } else { if(r<t0) return false; if(r<t1) t1=r; } return true; };
+  return clip(-dx,ax-L)&&clip(dx,R-ax)&&clip(-dy,ay-T)&&clip(dy,B-ay); }
+function boxHitsEdges(edges,cx,cy,hx,hy){ const L=cx-hx,R=cx+hx,T=cy-hy,B=cy+hy;
+  return edges.some(e=>{ if(e.x1<L||e.x0>R||e.y1<T||e.y0>B) return false;   // most edges are nowhere near a given label — reject on the precomputed bbox before touching a single chord
+    for(let k=1;k<e.pts.length;k++) if(segHitsBox(e.pts[k-1][0],e.pts[k-1][1],e.pts[k][0],e.pts[k][1],L,R,T,B)) return true;
+    return false; }); }
+// How far a label box must stay off an edge's CENTRELINE: the two are drawn as HALOES, not hairlines, and it is
+// the haloes that must not meet — the edge's opaque casing half-width (the same (stroke+3.5)/2 fanStep keeps
+// between two fanned arcs) plus half the label's own 3px .lbl casing stroke.
+function edgePad(){ const st=parseFloat(css("--arc-stroke"))||1.7; return (st+3.5)/2+1.5; }
 // same take-off angle θ, measured from HORIZONTAL — matching arcCtrl/arcCtrlRaised (their handles are
 // horizontal/vertical-decomposed, so a horizontal chord trivially reads θ off horizontal too) — for an
 // ARBITRARY chord A→B, used by the cross-line arcs so they curve with the identical endpoint angles as
@@ -364,6 +394,7 @@ function drawBump(g,x1,x2,arcZone,top,NR,AH,col,arrow,startY,morph,ends){
   const te=arrow?trimT(P,1,AH-AEXT):1, sl=(arrow&&te>0.001&&te<0.999)?subCurve(P,0,te):P;   // stop the line at the arrowhead base
   const dstr=`M ${sl[0][0]} ${sl[0][1]} C ${sl[1][0]} ${sl[1][1]}, ${sl[2][0]} ${sl[2][1]}, ${sl[3][0]} ${sl[3][1]}`;
   const ink=arcInk(col);   // stroke/arrowhead recede toward bg; drawBump's caller keeps col for the label
+  g.__edgeP=P;   // the UNTRIMMED control points, parked on the group for the ghost-label de-collision (edgeObstacle above). Untrimmed because `sl` stops at the arrowhead BASE while the head itself fills on to P[3] — the obstacle is the whole drawn edge, head included. Recorded rather than re-derived at the reading end, and rather than parsed back out of `d`, because an edge may be REDRAWN after this (growCrossArcs re-solves a whole band; decollide grows a root stub) and the reader must see the final geometry, not the first attempt.
   g.appendChild(E("path",{class:"arc-casing",d:dstr}));
   if(arrow) g.appendChild(E("path",{class:"ah-casing",d:arrowPath(P[2],P[3],AH,AH_OUTSET)}));
   g.appendChild(E("path",{class:"arc-path"+(morph?" morph-edge":""),d:dstr,stroke:ink}));
@@ -382,12 +413,14 @@ function drawCrossLine(g,frm,tip,col,AH,casing,gap,openTop,morph){
   const ink=arcInk(col);   // stroke/arrowhead recede toward bg (no label drawn here)
   if(Math.atan2(Math.abs(tip[1]-frm[1]),Math.abs(tip[0]-frm[0]))>=ARC_ANGLE){
     const b=backoff(tip,frm,AH), d=`M ${frm[0]} ${frm[1]} L ${b[0]} ${b[1]}`;
+    g.__edgeP=[frm,frm,tip,tip];   // same obstacle record drawBump keeps (see there): the straight branch as the degenerate cubic edgeObstacle traces as a segment — frm→TIP, not frm→b, so the arrowhead's own reach counts as edge
     if(casing){ g.appendChild(E("path",{class:"arc-casing",d})); g.appendChild(E("path",{class:"ah-casing",d:arrowPath(frm,tip,AH,AH_OUTSET)})); }
     g.appendChild(E("path",{class:"arc-path"+(morph?" morph-edge":""),d,stroke:ink}));
     g.appendChild(E("path",{class:"ah",d:arrowPath(frm,tip,AH),fill:ink}));
   } else {
     const P=arcCtrlChord(frm,tip,chordSide(frm,tip),gap,openTop);   // S-curve, angle-preservingly scaled to fit the inter-line gap; drawn to the tip so the arrowhead stays attached
     const d=`M ${P[0][0]} ${P[0][1]} C ${P[1][0]} ${P[1][1]}, ${P[2][0]} ${P[2][1]}, ${P[3][0]} ${P[3][1]}`;
+    g.__edgeP=P;   // as above — and it MATTERS that this is written on every redraw: growCrossArcs re-runs this very call on the same <g> with a raised endpoint and a widened band, so a copy taken at the first draw would describe an arc that is no longer there
     const aFrm=bezInDir(P,AH+2);   // Item 10: aim the arrowhead along the curve's REAL incoming direction near the tip — the true tangent for a bowed arc, the chord for a near-straight one — NOT the bare P[2]→P[3] end tangent, which for a nearly-straight S points off at the take-off angle θ and rotates the head wrongly
     if(casing){ g.appendChild(E("path",{class:"arc-casing",d})); g.appendChild(E("path",{class:"ah-casing",d:arrowPath(aFrm,P[3],AH,AH_OUTSET)})); }
     g.appendChild(E("path",{class:"arc-path"+(morph?" morph-edge":""),d,stroke:ink}));
@@ -603,8 +636,9 @@ function arcsWrapped(si){
       g.appendChild(E("path",{class:"ah-casing",d:arrowPath(frm,tip,AH,AH_OUTSET)}));
       const rp=E("path",{class:"arc-path",d:`M ${X} ${top} L ${b[0]} ${b[1]}`,stroke:ink}); g.appendChild(rp);
       g.appendChild(E("path",{class:"ah",d:arrowPath(frm,tip,AH),fill:ink}));
+      g.__edgeP=[frm,frm,tip,tip];   // the stub as an obstacle for the ghost labels, in drawBump's own record shape (degenerate cubic = the segment); down to TIP, so the arrowhead counts. Re-stated after decollide below, which may grow this very stub up to a lifted root label
       g.style.cursor="pointer"; g.addEventListener("click",()=>pick(si,OID(i))); svg.appendChild(g);
-      if(show.labels) rlabs.push({dep:OID(i),mx:X,apex:top,text:t[i].deprel||"root",col,level:r.maxH+100,root:true,rootPath:rp,rootBottomY:b[1]}); }
+      if(show.labels) rlabs.push({dep:OID(i),mx:X,apex:top,text:t[i].deprel||"root",col,level:r.maxH+100,root:true,rootPath:rp,rootBottomY:b[1],tip}); }
     r.arcsIn.slice().sort((a,b)=>b.h-a.h||catRank(t[a.dep].deprel)-catRank(t[b.dep].deprel)).forEach(a=>{
       const top=r.arcZone-a.h, g=E("g",{class:"arc","data-s":si,"data-dep":OID(a.dep),"data-head":OID(a.head)});
       const apex=drawBump(g,r.LX(a.head)+(a.offH||0),r.LX(a.dep)+(a.offD||0),r.arcZone,top,NR,AH,relColor(t[a.dep].deprel),true,null,isMorphRel(t[a.dep].deprel),repArcEnds(rep,r.arcZone,a.head,a.dep,a.h));   // item 11: per-endpoint baselines from the SHARED repArcEnds — the same call arcs() makes in the flat view, so a reported subtree's arcs lift with its words here too
@@ -613,6 +647,11 @@ function arcsWrapped(si){
       if(show.labels){ rlabs.push({dep:OID(a.dep),mx,apex,text:t[a.dep].deprel,col:relColor(t[a.dep].deprel),level:a.h,g}); }   // carry the arc group so a lifted label's leader draws in its z-layer
       boxes.push({x:mx,y:apex,hx:2,hy:2}); });
     if(show.labels) decollide(rlabs,boxes,svg,si);   // de-collide the whole row's labels together (matches the flat view)
+    // …and a root stub that just GREW to reach its lifted label is a taller obstacle than the one recorded at draw
+    // time. Re-state it from decollide's own condition (L.fy<L.y0 → the stub was rewritten to start at the label's
+    // bottom edge), so the ghost labels below meet the stub that is actually on screen.
+    if(show.labels) rlabs.forEach(L=>{ if(!L.root||!L.rootPath) return; const g=L.rootPath.parentNode, ty=(L.fy<L.y0-0.5)?L.fy+L.hh:L.apex;
+      if(g) g.__edgeP=[[L.mx,ty],[L.mx,ty],L.tip,L.tip]; });
     // tokens + below stack (drawn last → on top of the cross-line edges)
     r.idx.forEach(i=>{ const tk=t[i], X=r.LX(i), lw=r.lw[i-r.s], g=E("g",{class:"tok-group"+(sel.s===si&&sel.t===OID(i)?" sel":""),"data-s":si,"data-tok":OID(i)});
       const wy=repBase(rep,r.wordY,i);   // item 11: reported-speech step UP off the line — the same shared repBase the arc endpoints above went through, so word and arc leave the line together
@@ -654,6 +693,14 @@ function arcsWrapped(si){
       drawCrossLine(g,frm,tip,col,AH,false,[repBase(rep,rowOf(up).stackBot,up),repBase(rep,rowOf(lo).wordY,lo)-ASC]);   // item 11: same report-lifted band bounds crossGeom() gives the real cross-line arcs
       g.querySelectorAll(".arc-path").forEach(pp=>pp.classList.add("arc-ghost")); g.querySelectorAll(".ah").forEach(pp=>pp.classList.add("ah-ghost"));
       svg.appendChild(g); ghostG.push({g,mx:(upP[0]+loP[0])/2,apex:(upP[1]+loP[1])/2,rel,col}); } });
+  // Every REAL edge in this diagram, as the flattened obstacles the ghost-label pass below lifts off. Read off the
+  // groups themselves — the control points drawBump/drawCrossLine/the root stub recorded as they drew — and read
+  // HERE, at the end, because that is the only point at which they are all final: growCrossArcs may have re-solved
+  // a whole band of cross-line arcs and decollide may have grown a root stub, both AFTER their first draw.
+  // `g.arc` also settles which edges count, structurally: the ghosts are `.ghost-g` and so are not in this list at
+  // all, which is the intended asymmetry — a ghost label may still sit on a ghost edge, its own included. Ghosts
+  // are what defer to the real annotation; they need not defer to each other.
+  const realEdges=(show.labels&&ghostG.length)?[...svg.querySelectorAll("g.arc")].map(g=>g.__edgeP).filter(Boolean).map(edgeObstacle):[], EPAD=edgePad();   // built only where there is a ghost to place — a sentence with none (the overwhelming majority) pays nothing for this
   // ghost labels: vertical-lift decollision against `boxes` (every real label is already final by this point —
   // read, never altered) — only the ghost labels themselves move (item 6). Each ghost's OWN crown box is pushed
   // to `boxes` only AFTER its label is placed (not during the drawing loop above) — pushing it first made every
@@ -661,6 +708,14 @@ function arcsWrapped(si){
   if(show.labels) ghostG.forEach(({g,mx,apex,rel,col})=>{ const half=meas(rel,POS_F)/2+3, hh=7, y0=apex-8;
     let y=y0, guard=0;
     while(guard++<40 && boxes.some(b=>Math.abs(b.x-mx)<b.hx+half && Math.abs(b.y-y)<b.hy+hh)) y-=hh*2+3;
+    // …then keep lifting off any REAL EDGE the label would land on top of (see edgeObstacle): a ghost label carries
+    // drawLabel's opaque casing, so parked on a real arc it erases a bite out of it, which is precisely the
+    // occlusion a ghost is built never to commit. Same step, and the label-box test comes along for the ride so a
+    // higher slot can't land back on a real label. Bounded SEPARATELY from the pass above and FALLING BACK to its
+    // answer: the label pass always terminates (above every label there is open sky), but an edge pass need not —
+    // a stub or a tall bump can run the whole height of the diagram beside the label's x — and a ghost label
+    // parked a hundred pixels up on a leader reads far worse than one grazing an arc.
+    for(let k=0,ya=y;k<10;k++){ if(!(boxes.some(b=>Math.abs(b.x-mx)<b.hx+half && Math.abs(b.y-ya)<b.hy+hh) || boxHitsEdges(realEdges,mx,ya,half+EPAD,hh+EPAD))){ y=ya; break; } ya-=hh*2+3; }
     if(y<y0-0.5) g.insertBefore(E("line",{class:"leader leader-ghost",x1:mx,y1:y+hh,x2:mx,y2:apex,stroke:arcInk(col)}),g.firstChild);   // item 6   /* the drained ink, NOT the full relation colour: the ghost EDGE is stroked with arcInk(col) while this leader took `col` raw, so at the same .72 opacity the leader read as the strongest part of a ghost — the one thing it is least meant to be. arcInk is what every other ghost stroke already passes through. */
     drawLabel(g,mx,y,rel,col); const lb=g.lastElementChild; if(lb)lb.classList.add("lbl-ghost"); boxes.push({x:mx,y,hx:half,hy:hh}); boxes.push({x:mx,y:apex,hx:2,hy:2}); });
   fitTight(svg,boxes);

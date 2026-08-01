@@ -274,6 +274,7 @@ function arcs(si){
   const rTop=list.length?Math.min(...list.map(a=>a.apexY)):arcZone-26;   // peak of the tallest arc (ignore the Bézier handles)
   const svg=E("svg",{class:"tree",width:total,height:wordY+30,viewBox:`0 0 ${total} ${wordY+30}`}); const boxes=[];
   const labs=[];    // collected for vertical de-collision after all arcs are drawn
+  const realEdgeP=[];   // every REAL arc's control points, for the ghost-label pass far below (item 6, second clause — see edgeObstacle in js/diagram/diagram-wrap.js for what it is for). Kept as raw control points and flattened there, once, only if labels are on. The wrapped view has to read this back off the DOM groups because it redraws edges after the fact; here nothing touches an arc once drawn, so the geometry can simply be collected as it is computed — EXCEPT the root stub, which decollide-equivalent code below may grow, and which is therefore added at the reading end
   let rootPath=null,rootCasing=null,rootXc=0,rootBottomY=0,rootG=null,rootCol="";
   if(rootI>=0){const col=relColor("root"),ink=arcInk(col),x=c[rootI]+rootOff,tip=[x,rootY],frm=[x,rTop],b=backoff(tip,frm,AH);   // the stub reaches the node position (no circle); item 11: a reported root's stub foot lifts to rootY
     const g=E("g",{class:"arc","data-s":si,"data-dep":OID(rootI)}); rootG=g; rootCol=col;
@@ -297,6 +298,7 @@ function arcs(si){
     g.appendChild(E("path",{class:"ah",d:arrowPath(P[2],P[3],AH),fill:ink}));
     g.style.cursor="pointer"; g.addEventListener("click",()=>pick(si,OID(a.to-1))); svg.appendChild(g);
     arcG[OID(a.to-1)]=g; boxes.push({x:a.mx,y:a.apexY,hx:2,hy:2});     // arc crown in the bounding box
+    realEdgeP.push(P);   // UNTRIMMED (the drawn line stops at the arrowhead base, but the head fills on to P[3])
     if(show.labels) labs.push({dep:OID(a.to-1),mx:a.mx,y0:a.apexY-8,apex:a.apexY,text:a.dep,col:a.col,level:a.h});});
   // Shared=Yes / Subject-raising ghost arcs: dashed, dimmed, drawn at their own natural apex. The LINE draws now
   // (item 2: its crown counts toward fitTight's boxes); its LABEL is deferred until after the real labels'
@@ -321,11 +323,27 @@ function arcs(si){
     let y=L.y0, guard=0;
     while(guard++<40 && placed.some(p=>Math.abs(p.x-L.mx)<p.hx+half && Math.abs(p.y-y)<p.hy+hh)) y-=hh*2+3;   // lift until clear of all placed (shorter) labels
     L.fy=y; L.hh=hh; placed.push({x:L.mx,y,hx:half,hy:hh,level:L.level}); boxes.push({x:L.mx,y,hx:half,hy:hh}); });
+  // The real EDGES as de-collision obstacles, flattened once (edgeObstacle, js/diagram/diagram-wrap.js — where the
+  // reasoning lives: a ghost label carries drawLabel's opaque casing, so parked on a real arc it erases a bite out
+  // of it, which is the one occlusion a ghost is built never to commit). The root stub joins them only now, with
+  // its FINAL top: `labs` are placed above, so whether the stub grows to a lifted root label (the pass below) is
+  // already decided — read from decollide's own condition rather than from the `d` it will be given.
+  const realEdges=(show.labels&&ghostArcs.length)?realEdgeP.map(edgeObstacle):[], EPAD=edgePad();   // built only where there is a ghost to place — a sentence with none (the overwhelming majority) pays nothing for this
+  if(show.labels&&ghostArcs.length&&rootPath){   // the same guard as above, NOT `realEdges.length` — a sentence whose only real edge IS the root stub would otherwise contribute no obstacle at all
+    const RL=labs.find(L=>L.root), ty=(RL&&RL.fy<RL.y0-0.5)?RL.fy+RL.hh:rTop;
+    realEdges.push(edgeObstacle([[rootXc,ty],[rootXc,ty],[rootXc,rootY],[rootXc,rootY]])); }   // the stub as the degenerate cubic edgeObstacle traces as a segment; down to the arrowhead TIP (rootY), not the backed-off line end
   // ghost labels: SAME vertical-lift algorithm, run AFTER the real pass above so `placed` already holds every
   // real label's FINAL position (read, never altered) — only the ghost labels themselves ever move (item 6).
   if(show.labels) ghostArcs.forEach((a,gi)=>{ const half=meas(a.dep,POS_F)/2+3, hh=7, y0=a.apexY-8;   // item 11: hug the ghost's own (possibly report-lifted) crown, the same apexY the real labels above hug — not the un-lifted arcZone crown, which left a lifted ghost's label buried under its own arc
     let y=y0, guard=0;
     while(guard++<40 && placed.some(p=>Math.abs(p.x-a.mx)<p.hx+half && Math.abs(p.y-y)<p.hy+hh)) y-=hh*2+3;
+    // …then off the real EDGES too — same step, and the label test rides along so a higher slot can't land back on
+    // a real label. Bounded separately and falling back to the label-only answer: above every label there is open
+    // sky, so THAT pass always terminates, but an edge can run the whole height of the diagram beside this x, and
+    // a ghost label parked far up on a long leader reads worse than one grazing an arc. Ghosts are excluded from
+    // the obstacles by construction (only `list` arcs and the root stub are collected), which is deliberate: a
+    // ghost defers to the real annotation, not to another ghost — its own edge included.
+    for(let k=0,ya=y;k<10;k++){ if(!(placed.some(p=>Math.abs(p.x-a.mx)<p.hx+half && Math.abs(p.y-ya)<p.hy+hh) || boxHitsEdges(realEdges,a.mx,ya,half+EPAD,hh+EPAD))){ y=ya; break; } ya-=hh*2+3; }
     placed.push({x:a.mx,y,hx:half,hy:hh});
     const g=ghostG[gi];
     if(y<y0-0.5) g.insertBefore(E("line",{class:"leader leader-ghost",x1:a.mx,y1:y+hh,x2:a.mx,y2:a.apexY,stroke:arcInk(a.col)}),g.firstChild);   // item 6: tie a lifted ghost label back to its crown (item 11: its LIFTED crown, so the leader still lands on the arc)   /* the drained ink, NOT the full relation colour: the ghost EDGE is stroked with arcInk(col) while this leader took `col` raw, so at the same .72 opacity the leader read as the strongest part of a ghost — the one thing it is least meant to be. arcInk is what every other ghost stroke already passes through. */
