@@ -53,6 +53,19 @@ def _esc(s: str) -> str:
 _DATA_DIR = Path(__file__).parent / "data"
 
 
+# ── the POS hint carried into the romanisation engines ────────────────────────────────────────────
+# A Han character is heteronymic BY PART OF SPEECH as often as by anything else — 行 reads háng as a
+# NOUN ("row, line") and xíng as a VERB ("to walk") — so the frontend now sends each token's own UPOS
+# alongside its form. The hint REORDERS/selects among the readings an engine already has; it never
+# filters, so an unknown or absent tag must land on exactly the answer the app gave before it existed.
+# Passed straight through to app.translit, which treats an absent/empty tag as "no opinion" and returns
+# exactly the POS-blind answer — so no guard is needed here for a caller that names none. (There WAS one
+# while the two halves of this feature were landing separately: it inspected translit's signature and
+# dropped the argument against a build that predated it. Deliberately removed once both landed in the same
+# commit, because it would have gone on silently degrading to POS-blind if `upos` were ever dropped from
+# translit again — turning a regression into a behaviour nobody would think to report.)
+
+
 # a well-formed gloss-map key is a single "Feature=Value" pair (no separators/whitespace either side of "=")
 _FEAT_KEY_RE = re.compile(r"^[^=\s|]+=[^=\s|]+$")
 
@@ -885,9 +898,16 @@ class Api:
         from . import fonts
         return fonts.clear()
 
-    def transliterate(self, forms: list[str], lang: str, scheme: str = "") -> dict:
+    def transliterate(self, forms: list[str], lang: str, scheme: str = "",
+                      upos: list[str] | None = None) -> dict:
+        """``upos`` is OPTIONAL and PARALLEL to ``forms`` — the CoNLL-U tag each form was seen under, so a
+        heteronym is romanised as the part of speech it actually is (行 = háng as a NOUN, xíng as a VERB).
+        The frontend keys its own de-duplication on (form, upos) for the same reason — one entry per
+        distinct SURFACE would let whichever 行 was reached first decide the reading for all of them; a
+        batch that names no tags at all is the call this endpoint has always taken."""
         from . import translit
-        return {"translit": translit.transliterate_many(forms, lang, scheme), "lang": lang, "scheme": scheme}
+        return {"translit": translit.transliterate_many(forms, lang, scheme, upos),
+                "lang": lang, "scheme": scheme}
 
     def set_doc_language(self, lang: str = "") -> dict:
         """The frontend reports the document's language whenever it changes (js/lang/translit.js's
@@ -909,13 +929,17 @@ class Api:
         guess Sanskrit and rewrite it."""
         return itrans.convert(text or "", lang or self._doclang or "und")
 
-    def token_readings(self, form: str, lang: str, scheme: str = "") -> dict:
+    def token_readings(self, form: str, lang: str, scheme: str = "", upos: str = "") -> dict:
         """The ORDERED candidate romanisations of one token in ``scheme`` — the heteronym choices for
         the CJK languages (Han characters are heteronymic; Japanese kanji carry several on'yomi/
         kun'yomi). ``readings[0]`` is what the app is currently displaying, so the caller can tick it.
-        Empty list ⇒ only one possible reading (nothing to choose) or a language/scheme with none."""
+        Empty list ⇒ only one possible reading (nothing to choose) or a language/scheme with none.
+        ``upos`` (optional) is this token's own tag: it REORDERS the candidates so the one the flyout
+        offers first is the one its part of speech calls for (行 as a NOUN leads with háng), and drops
+        none of them — the whole point of the flyout is that every reading stays pickable."""
         from . import translit
-        return {"readings": translit.readings(form, lang, scheme), "lang": lang, "scheme": scheme}
+        return {"readings": translit.readings(form, lang, scheme, upos),
+                "lang": lang, "scheme": scheme}
 
     def translit_derive(self, forms: list[str], stored: list[str], lang: str, src: str = "", dst: str = "") -> dict:
         """Re-express each hand-corrected STORED romanisation (``stored[i]``, of surface form ``forms[i]``,
@@ -944,9 +968,15 @@ class Api:
         from . import translit
         return {"schemes": translit.orthography_schemes(lang), "lang": lang}
 
-    def orthography(self, forms: list[str], lang: str, scheme: str = "") -> dict:
+    def orthography(self, forms: list[str], lang: str, scheme: str = "",
+                    upos: list[str] | None = None) -> dict:
+        """Same optional POS hint as ``transliterate`` above, parallel to ``forms``: a script rendering can
+        be reading-dependent too (a Traditional/Simplified variant pair, a kana spell-out), so the layer
+        that picks a reading is given the same evidence.  An MWT range sends nothing — its span covers
+        several tokens and so has no one part of speech to report."""
         from . import translit
-        return {"ortho": translit.orthography_many(forms, lang, scheme), "lang": lang, "scheme": scheme}
+        return {"ortho": translit.orthography_many(forms, lang, scheme, upos),
+                "lang": lang, "scheme": scheme}
 
     def sanskrit_mwt(self, groups: list[list[str]], lang: str, scheme: str = "",
                      lemma_groups: list[list[str]] | None = None, word_sep: str = "") -> dict:

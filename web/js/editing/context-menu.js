@@ -344,6 +344,7 @@ function posMenu(x,y,si,tokId,opts){ opts=opts||{}; const s=DOC[si]; if(!s)retur
     featsSyncGloss(tok,before);
     if(posChanged) uposSyncGloss(tok,oldUpos);   // Task B: retarget the closed-class gloss prefix IN PLACE, immediately — never a wholesale MGloss rebuild (see uposSyncGloss's own note, js/io/bridge.js)
     markDirty(); preserveScroll(renderDoc);
+    if(posChanged) uposSyncTranslit(si,tokId);   // the romanisation and script glyph are asked for a form AS a part of speech, so a retag makes both stale — refreshed HERE rather than left to regenTok below, which reaches its own translit pass on only one of its paths (no model / a misaligned re-parse skip it entirely). BEFORE regenTok so the fast language-driven refresh lands first, exactly as afterFormEdit orders the same two; regenTok's trailing pass then finds every value current and rewrites what is already there
     if(posChanged) regenTok(si,tokId); };   // only a genuine POS change reparses; a same-tag "clear subtype" must not (item 10). regenSecondaries' OWN gloss-touch is now itself non-destructive in place too (Task B) — see its own note
   optionMenu(x,y,SETTINGS.upos.slice(),UPOS_CATS,r=>UPOS_INFO[r]||"",tok.upos,choose,guide,rtl,subFor,null,
     "Right-click a tag for its subtypes (PRON.Dem, NUM.Ord, …)",null,true); }   // subColSize=true → the subtype flyout is one POS column wide and as tall as the POS menu (item 3)

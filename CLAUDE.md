@@ -332,6 +332,50 @@ missing tier must surface as an offer to install, never an exception.
   character-keyed scheme such as General Chinese), and the row then falls back to romanising the form.
   A correction reopened from a file is recovered by comparison (`adoptStoredPicks`), since CoNLL-U has
   no "corrected by hand" flag.
+  **A token's UPOS reaches the romanisers**, because a Han graph is heteronymic BY WORD CLASS as often
+  as by anything else (行 = háng as a NOUN, xíng as a VERB; 數 = shù/shǔ/shuò as NOUN/VERB/ADV). It is an
+  optional trailing argument on `readings`/`transliterate(_many)`/`orthography(_many)`, threaded from
+  `Api.transliterate`/`token_readings`/`orthography` and sent by `js/lang/translit-load.js` and
+  `js/lang/readings.js`. The rule is **reorder, never filter**, on **single-Han-graph tokens only** (past
+  one graph the phrase dictionary is the authority and per-character POS is a guess) — so an absent,
+  unknown or wrong tag costs ordering and never an option. `derive_scheme` is deliberately POS-BLIND: it
+  recognises a value the user already typed, which is a different question. ⚠️ Everything on this path
+  caches, and every one of those keys had to gain the tag — `_render_one`'s `(lang, scheme, text)`,
+  `readings.js`'s `READINGS_CACHE`, and the four per-batch de-duplication maps in `translit-load.js`
+  (keyed on the surface alone, they let whichever 行 was reached first decide the reading for all of
+  them — the tag was sent and then silently discarded). Retagging a token runs `uposSyncTranslit`, which
+  drops the automatic caches AND blanks MISC `Translit` so `annotateTranslitMisc` rewrites it — clearing
+  `t.translit` alone does nothing, since `fromMisc` restores the old tag's string. It preserves `_trPick`,
+  the opposite of `afterFormEdit`, which drops it: a hand-picked reading is a statement about the FORM,
+  and a retag does not change the form. `regenTok` cannot stand in for any of this — it is a no-op with
+  no parser model, and romanisation runs without one.
+- `app/data/baxter_sagart.tsv` — Middle Chinese (Baxter) + Old Chinese (Baxter–Sagart), rebuilt by
+  **`tools/build_baxter_index.py`** from the wikitext of Wiktionary's "Appendix:Baxter-Sagart Old Chinese
+  reconstruction" (**CC BY-SA 4.0**, attribution in the file's own header). Six columns —
+  `graph · pinyin · middle_chinese · old_chinese · pos · gloss`, one row per (graph, source entry).
+  The hand vendoring it replaced had **collapsed a 4,082-entry WORD list into 4,330 characters**, keeping
+  each graph's first entry and discarding the rest, so the 547 graphs with more than one Middle Chinese
+  reading and the 312 with more than one Mandarin reading were unreachable — which is why the file grew
+  without a single graph losing a reading (MC default rendering moved for 0 of 4,330). `pos` is a UD tag
+  inferred from the English gloss and **left empty wherever the gloss licenses none** (16.9 % carry one);
+  the canonical 破音字 whose glosses are bare English words naming no class (行 "rank, row", 樂 "music")
+  are covered by `_POS_OVERRIDE`, a small hand-curated editorial dict in `app/translit.py` — kept OUT of
+  the TSV precisely because a rebuild would revert a hand edit to it. The build takes `--retrieved
+  YYYY-MM-DD` (required: reading the clock would make two builds of one input differ) and an optional
+  `--src` for a saved copy, and is byte-reproducible — a rebuild from the same input is a no-op, so
+  don't hand-edit the file. Pointed at the old 3-column file the loader yields 0 rows and
+  `_scheme_available("lzh","mc")` goes False, i.e. a version mismatch degrades to *no* Middle Chinese
+  rather than to a column-shifted wrong one.
+  ⚠️ **pypinyin's `PHRASES_DICT` is keyed in SIMPLIFIED ONLY**, so every traditional document was denied
+  the phrase-level disambiguation that dictionary exists for: 银行 read yínháng and 銀行 — the same word —
+  yínxíng, and the whole-token rule offered five readings of a word that has one. `_t2s_chars` folds
+  per CHARACTER (never `_t2s` over the string, whose phrase rules can change the length and shift every
+  reading after it) and both the chosen syllable and the CANDIDATE LISTS are re-read through the fold.
+  Two guards, because the fold is many-to-one (幹 乾 干 → 干): a folded syllable is accepted only where
+  pypinyin lists it among the ORIGINAL graph's own readings, and the fold is skipped entirely for a
+  single graph, which has no phrase to gain and is where that hazard bites. The gate is "two or more Han
+  characters", NOT "the fold is a dictionary entry" — pypinyin matches phrases as SUBSTRINGS, so 银行卡
+  reads yínhángkǎ off the 银行 inside it without being an entry itself.
 - `app/langid.py` — fastText `lid.176`, model **vendored** at `app/data/lid.176.ftz` so detection is
   fully offline. Drives the document language on open.
 - `app/sud_rules.py` — parses the vendored grew validator patterns

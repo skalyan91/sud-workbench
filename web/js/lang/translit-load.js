@@ -9,6 +9,21 @@ const INVISIBLE_RE=/[​‌‍﻿­]/g;   // zero-width space/joiners, BOM, soft
 const GLOSS_WS_RE=/[\r\n\t]/g;   // stray literal CR/LF/tab characters found in an ALREADY-STORED gloss tier (unlike INVISIBLE_RE's zero-width Cf characters, these DO have visible advance — they render as a stray gap hugging a dot-join seam, e.g. around the "." between a lexical stem and a Leipzig abbreviation). Stripped at the same read accessors as INVISIBLE_RE, below.
 function glossEnc(v){ return (v||"").replace(INVISIBLE_RE,"").replace(/[|\t\n]+/g," ").trim(); }   // keep MISC well-formed: no bar (the field delimiter), tab or newline, or invisible junk — a real tab/newline COLLAPSES to a space here (word-separator semantics for freshly-typed/committed text), unlike GLOSS_WS_RE's outright strip for already-stored data at the read accessors
 function tokGloss(o){ return o?miscGloss(o.misc):""; }
+// ── the POS hint that travels with a form to the romanisation engines ─────────────────────────────
+// A Han character is heteronymic by PART OF SPEECH as much as by anything else — 行 reads háng as a
+// NOUN ("row, line") and xíng as a VERB ("to walk") — so every form handed to app/translit.py now
+// travels with the tag of the token it came from, and the backend REORDERS that form's candidate
+// readings by it. "" = no opinion, which is exactly the POS-blind answer the app gave before the hint
+// existed, so an untagged token is unaffected. CoNLL-U spells an absent value "_"; that is the
+// column's placeholder, not a part of speech, and it must not be sent as one.
+function trUpos(t){ const u=(t&&t.upos)||""; return (u==="_")?"":u; }
+// …and the key EVERY de-duplicating pass below is rebuilt around. Those passes batch one bridge entry
+// per DISTINCT string, and the answer now depends on the tag as well — so 行 the NOUN and 行 the VERB
+// have to be two entries. Keyed on the form alone, whichever token was reached first would decide the
+// reading for every other token spelt the same way, and the hint would silently do nothing at all —
+// which is the same collapse the READINGS_CACHE key in js/lang/readings.js had to be widened against.
+// NUL joins the two halves because neither a surface form nor a UPOS tag can contain one.
+function trKey(text,upos){ return text+"\u0000"+(upos||""); }
 // ── the STORED transliteration drives the DISPLAYED one (item: click-editable Stored) ────────────
 // A hand-corrected stored value (MISC Translit, in STORED_SCHEME — marked _trPick) is authoritative, and
 // the transliteration ROW is DERIVED FROM IT rather than romanised from the surface form again: correcting
@@ -33,14 +48,14 @@ async function deriveTrPicks(){ const items=[];
 // the romanisation is deterministic and a differing MISC Translit is far likelier to be another tool's
 // romanisation system than a correction of this one. Checked once per token per scheme (_trChk).
 async function adoptStoredPicks(){ if(!TRANSLIT_AMBIG||!STORED_SCHEME) return false;
-  const items=[], need=new Set();
-  DOC.forEach(s=>s.tokens.forEach(t=>{ if(t._trPick||t._trChk||!t.form) return; const st=miscTranslit(t.misc); if(!st) return; items.push([t,st]); need.add(t.form); }));
+  const items=[], need=new Map();   // (form, upos) → [form, upos]: the comparison this pass makes is against what THIS token's tag would have produced, so the batch is keyed on the pair (see trKey)
+  DOC.forEach(s=>s.tokens.forEach(t=>{ if(t._trPick||t._trChk||!t.form) return; const st=miscTranslit(t.misc); if(!st) return; const u=trUpos(t); items.push([t,st,u]); if(!need.has(trKey(t.form,u))) need.set(trKey(t.form,u),[t.form,u]); }));
   if(!items.length) return false;
-  const forms=[...need]; let r;
-  try{ r=await window.pywebview.api.transliterate(forms,DOCLANG,STORED_SCHEME); }catch(e){ return false; }   // the STORED scheme's own rendering of each form — what an automatic pass would have written
-  const map={}; forms.forEach((f,i)=>{ map[f]=(r&&r.translit&&r.translit[i])||""; });
+  const batch=[...need.values()]; let r;
+  try{ r=await window.pywebview.api.transliterate(batch.map(x=>x[0]),DOCLANG,STORED_SCHEME,batch.map(x=>x[1])); }catch(e){ return false; }   // the STORED scheme's own rendering of each form — what an automatic pass would have written
+  const map={}; batch.forEach((x,i)=>{ map[trKey(x[0],x[1])]=(r&&r.translit&&r.translit[i])||""; });
   let any=false;
-  items.forEach(([t,st])=>{ t._trChk=1; const auto=map[t.form]||"";   // no rendering at all (an engine whose extras tier is missing) ⇒ nothing to compare against, so nothing is adopted
+  items.forEach(([t,st,u])=>{ t._trChk=1; const auto=map[trKey(t.form,u)]||"";   // no rendering at all (an engine whose extras tier is missing) ⇒ nothing to compare against, so nothing is adopted
     if(auto&&st!==auto){ t._trPick=true; t._trMisc=true; t.translit=""; any=true; } });
   return any; }
 /* THE DOCUMENT'S OWN MISC Translit IS THE SOURCE — the file already holds a romanisation for every
@@ -95,14 +110,20 @@ async function fillTranslit(){ if(!hasBridge()||!DOCLANG) return;   // translite
     DOC.forEach(s=>s.tokens.forEach(t=>{ if(!t.translitLemma&&t.lemma===t.form&&t.translit){ t.translitLemma=t.translit; any=true; } }));   // …and re-apply the identity now the forms are in: a lemma equal to its form takes whatever the form just got
   }
   if(await deriveTrPicks()) any=true;   // a hand-corrected token's row is derived from its STORED value, not from the form
-  const need=new Set();   // unique surface forms still missing a transliteration (no MISC Translit, none computed yet)
-  DOC.forEach(s=>{ s.tokens.forEach(t=>{ if(t.form&&!t.translit)need.add(t.form); if(t.lemma&&t.lemma!=="_"&&!t.translitLemma&&t.lemma!==t.form)need.add(t.lemma); }); (s.mwt||[]).forEach(m=>{ if(m.form&&!m.translit)need.add(m.form); }); });   // lemmas ride the same batch so the lemma-translit column stays automatic — minus the ones a MISC LTranslit or the lemma==form identity already answered above
+  const need=new Map();   // (surface, upos) → [surface, upos]: the surfaces still missing a transliteration (no MISC Translit, none computed yet), each paired with the tag it is to be romanised AS
+  const want=(txt,u)=>{ const k=trKey(txt,u); if(!need.has(k)) need.set(k,[txt,u]); };
+  DOC.forEach(s=>{ s.tokens.forEach(t=>{ const u=trUpos(t);
+      if(t.form&&!t.translit)want(t.form,u);
+      if(t.lemma&&t.lemma!=="_"&&!t.translitLemma&&t.lemma!==t.form)want(t.lemma,u); });   // a lemma is the SAME WORD as the token it belongs to and so carries the same part of speech — the tag that disambiguates 行 the form disambiguates 行 the lemma
+    (s.mwt||[]).forEach(m=>{ if(m.form&&!m.translit)want(m.form,""); }); });   // an MWT range spans several tokens and therefore has no ONE part of speech; no opinion is the only honest hint, and it is also exactly what this call sent before   // lemmas ride the same batch so the lemma-translit column stays automatic — minus the ones a MISC LTranslit or the lemma==form identity already answered above
   if(need.size){
-    const forms=[...need]; let r;
-    try{ r=await window.pywebview.api.transliterate(forms,DOCLANG,TRANSLIT_SCHEME); }catch(e){ if(any){ if(typeof invalidateDiaCache==="function")invalidateDiaCache(); preserveScroll(renderDoc); } return; }   // TRANSLIT_SCHEME = the scheme chosen in the status-bar menu ("" ⇒ the language's default)
-    const map={}; forms.forEach((f,i)=>{ const v=(r&&r.translit&&r.translit[i])||""; if(v)map[f]=v; });
-    DOC.forEach(s=>{ s.tokens.forEach(t=>{ if(t.form&&!t.translit&&map[t.form]){ t.translit=map[t.form]; any=true; } if(t.lemma&&t.lemma!=="_"&&!t.translitLemma&&map[t.lemma]){ t.translitLemma=map[t.lemma]; any=true; } });   // the lemma's transliteration comes from the lemma itself, never from a MISC Translit (which only governs the form)
-      (s.mwt||[]).forEach(m=>{ if(m.form&&!m.translit&&map[m.form]){ m.translit=map[m.form]; any=true; } }); });
+    const batch=[...need.values()]; let r;
+    try{ r=await window.pywebview.api.transliterate(batch.map(x=>x[0]),DOCLANG,TRANSLIT_SCHEME,batch.map(x=>x[1])); }catch(e){ if(any){ if(typeof invalidateDiaCache==="function")invalidateDiaCache(); preserveScroll(renderDoc); } return; }   // TRANSLIT_SCHEME = the scheme chosen in the status-bar menu ("" ⇒ the language's default)
+    const map={}; batch.forEach((x,i)=>{ const v=(r&&r.translit&&r.translit[i])||""; if(v)map[trKey(x[0],x[1])]=v; });
+    DOC.forEach(s=>{ s.tokens.forEach(t=>{ const u=trUpos(t);   // the SAME tag on the way out as on the way in, or the lookup misses its own entry
+        if(t.form&&!t.translit&&map[trKey(t.form,u)]){ t.translit=map[trKey(t.form,u)]; any=true; }
+        if(t.lemma&&t.lemma!=="_"&&!t.translitLemma&&map[trKey(t.lemma,u)]){ t.translitLemma=map[trKey(t.lemma,u)]; any=true; } });   // the lemma's transliteration comes from the lemma itself, never from a MISC Translit (which only governs the form) — and where lemma===form this reads back the form's own entry, which is why that case is not queued above
+      (s.mwt||[]).forEach(m=>{ if(m.form&&!m.translit&&map[trKey(m.form,"")]){ m.translit=map[trKey(m.form,"")]; any=true; } }); });
   }
   // WHOLESALE, not per-touched-sentence: this pass runs over the whole DOC (not one si), has no pushUndo/snapSent
   // of its own (it's a derived re-fill, not a user edit — see this function's own module comment), and can land
@@ -118,12 +139,13 @@ async function fillOrtho(){ if(!hasBridge()||!DOCLANG) return;
   if(!scriptOn && !skt) return;   // Original / None for a non-Sanskrit language → stored form, nothing to fetch
   let any=false;
   if(scriptOn){   // fetch the SCRIPT rendering for single tokens (and MWTs for non-Sanskrit)
-    const need=new Set();
-    DOC.forEach(s=>{ s.tokens.forEach(t=>{ if(t.form&&!t.ortho)need.add(t.form); }); if(!skt)(s.mwt||[]).forEach(m=>{ if(m.form&&!m.ortho)need.add(m.form); }); });
-    if(need.size){ const forms=[...need]; let r;
-      try{ r=await window.pywebview.api.orthography(forms,DOCLANG,ORTHO_SCHEME); }catch(e){ return; }
-      const map={}; forms.forEach((f,i)=>{ const v=(r&&r.ortho&&r.ortho[i])||""; if(v)map[f]=v; });
-      DOC.forEach(s=>{ s.tokens.forEach(t=>{ if(t.form&&!t.ortho&&map[t.form]) t.ortho=map[t.form]; }); if(!skt)(s.mwt||[]).forEach(m=>{ if(m.form&&!m.ortho&&map[m.form]) m.ortho=map[m.form]; }); });
+    const need=new Map();   // (surface, upos), same key as the transliteration passes: a script rendering can be reading-dependent too, so it must not be shared between two tokens spelt alike but tagged differently
+    const want=(txt,u)=>{ const k=trKey(txt,u); if(!need.has(k)) need.set(k,[txt,u]); };
+    DOC.forEach(s=>{ s.tokens.forEach(t=>{ if(t.form&&!t.ortho)want(t.form,trUpos(t)); }); if(!skt)(s.mwt||[]).forEach(m=>{ if(m.form&&!m.ortho)want(m.form,""); }); });   // an MWT range has no one UPOS (see fillTranslit) → no opinion
+    if(need.size){ const batch=[...need.values()]; let r;
+      try{ r=await window.pywebview.api.orthography(batch.map(x=>x[0]),DOCLANG,ORTHO_SCHEME,batch.map(x=>x[1])); }catch(e){ return; }
+      const map={}; batch.forEach((x,i)=>{ const v=(r&&r.ortho&&r.ortho[i])||""; if(v)map[trKey(x[0],x[1])]=v; });
+      DOC.forEach(s=>{ s.tokens.forEach(t=>{ const v=t.form&&!t.ortho?map[trKey(t.form,trUpos(t))]:""; if(v) t.ortho=v; }); if(!skt)(s.mwt||[]).forEach(m=>{ const v=m.form&&!m.ortho?map[trKey(m.form,"")]:""; if(v) m.ortho=v; }); });
       any=true; } }
   if(skt){   // items 9/18: fuse each Sanskrit MWT's component forms by external sandhi — scheme="" gives the fused IAST
     const scheme=scriptOn?ORTHO_SCHEME:"";   // item 18: sandhi applies even with NO script (None/Original) → fused IAST as the surface form
@@ -157,16 +179,64 @@ function setMiscKV(misc,key,val){ const empty=(!misc||misc==="_"); let parts=emp
 // and write it to MISC Translit (form) / LTranslit (lemma). Gated on a parse pass by its callers.
 async function annotateTranslitMisc(si){ if(!hasBridge()||!DOCLANG||!STORED_SCHEME) return false;
   const sents = si==null ? DOC : (DOC[si]?[DOC[si]]:[]);
-  const need=new Set();
-  sents.forEach(s=>{ s.tokens.forEach(t=>{ if(t.form)need.add(t.form); if(t.lemma&&t.lemma!=="_")need.add(t.lemma); }); });
+  const need=new Map();   // (surface, upos) — the value WRITTEN TO THE FILE is the one that most needs the POS hint, since it is what a later open reads back
+  const want=(txt,u)=>{ const k=trKey(txt,u); if(!need.has(k)) need.set(k,[txt,u]); };
+  sents.forEach(s=>{ s.tokens.forEach(t=>{ const u=trUpos(t); if(t.form)want(t.form,u); if(t.lemma&&t.lemma!=="_")want(t.lemma,u); }); });
   if(!need.size) return false;
-  const forms=[...need]; let r;
-  try{ r=await window.pywebview.api.transliterate(forms,DOCLANG,STORED_SCHEME); }catch(e){ return false; }   // item 1: MISC uses the STORED scheme (not the displayed one)
-  const map={}; forms.forEach((f,i)=>{ map[f]=(r&&r.translit&&r.translit[i])||""; });
+  const batch=[...need.values()]; let r;
+  try{ r=await window.pywebview.api.transliterate(batch.map(x=>x[0]),DOCLANG,STORED_SCHEME,batch.map(x=>x[1])); }catch(e){ return false; }   // item 1: MISC uses the STORED scheme (not the displayed one)
+  const map={}; batch.forEach((x,i)=>{ map[trKey(x[0],x[1])]=(r&&r.translit&&r.translit[i])||""; });
   let any=false;   // write MISC only; the display (t.translit) is the DISPLAYED scheme, filled separately by fillTranslit
-  sents.forEach(s=>{ s.tokens.forEach(t=>{ const tr=t._trPick?(miscTranslit(t.misc)||t.translit||""):(t.form?(map[t.form]||""):""), lt=(t.lemma&&t.lemma!=="_")?(map[t.lemma]||""):"";   // _trPick: a hand correction stands (the parse pass re-derives every OTHER token's Translit, and the lemma's LTranslit either way). It is read back from MISC, NOT from t.translit: the two are different layers now — t.translit is the DISPLAYED scheme, in general a rendering DERIVED from the stored value, and writing it here would put the wrong scheme's string into MISC (a Zhuyin row over a Pinyin store). t.translit remains the fallback for a correction made before anything was written to MISC.
+  sents.forEach(s=>{ s.tokens.forEach(t=>{ const u=trUpos(t);
+    const tr=t._trPick?(miscTranslit(t.misc)||t.translit||""):(t.form?(map[trKey(t.form,u)]||""):""), lt=(t.lemma&&t.lemma!=="_")?(map[trKey(t.lemma,u)]||""):"";   // _trPick: a hand correction stands (the parse pass re-derives every OTHER token's Translit, and the lemma's LTranslit either way). It is read back from MISC, NOT from t.translit: the two are different layers now — t.translit is the DISPLAYED scheme, in general a rendering DERIVED from the stored value, and writing it here would put the wrong scheme's string into MISC (a Zhuyin row over a Pinyin store). t.translit remains the fallback for a correction made before anything was written to MISC.
     const nm=setMiscKV(setMiscKV(t.misc,"Translit",tr),"LTranslit",lt); if(nm!==t.misc){ t.misc=nm; any=true; } }); });
   return any; }
+
+/* ── after a token is RETAGGED (its UPOS changed) ─────────────────────────────────────────────────
+   The engines are now asked to romanise a form AS a part of speech (see trUpos), so a retag leaves this
+   token's cached romanisation and script glyph answering a question no longer being asked: 行 tagged
+   VERB romanises xíng, and once the tag becomes NOUN the row goes on saying xíng until something drops
+   it. Called from the two retag sites beside uposSyncGloss — js/editing/context-menu.js's posMenu
+   `choose` and js/grid/grid.js's commitCell — the same pairing, for the same kind of reason.
+
+   WHY THIS IS NEEDED WHEN regenTok ALREADY RUNS AT BOTH SITES. regenTok's re-parse does end in
+   annotateTranslitMisc + fillTranslit, but it reaches them on only one of its paths. It is a plain
+   no-op with no parser model — and romanisation is LANGUAGE-driven, so it works with none —
+   and reparseTokenFields returns early when the parse fails or its token count no longer aligns 1:1,
+   which for a spaceless script is an ordinary outcome rather than an edge case, since it re-parses the
+   sentence's forms JOINED WITH SPACES. Even on the path that does get there, fillTranslit refills only
+   a token whose t.translit is EMPTY, so the stale string survives the very pass meant to replace it.
+   What regenTok does NOT do is fight the user: `upos` is absent from PARSE_FIELDS (js/io/bridge.js), so
+   the parser's own tag is never written back, and XPOS_MIRRORS_UPOS re-derives xpos from the tag the
+   user just chose. Nothing here needs to defend the new tag — only to refresh what it invalidates.
+
+   SHAPE AND ORDER ARE afterFormEdit's (js/io/bridge.js), deliberately: blank MISC Translit/LTranslit,
+   drop the caches, fill, write MISC back. The blanking is the load-bearing step — clearing t.translit
+   alone would let fillTranslit's own fromMisc pass restore the OLD tag's string straight out of MISC,
+   where the previous automatic pass put it, and the refresh would undo itself.
+
+   _trPick IS PRESERVED, and that is the exact OPPOSITE of afterFormEdit, which clears it. A hand-picked
+   reading or hand-corrected stored value is a statement about THIS FORM, and a retag does not change the
+   form — 行 corrected to háng is still háng whether it is tagged NOUN or VERB. A form edit does make the
+   word a different word, which is why the correction cannot survive one. Only the automatic layers move
+   here; annotateTranslitMisc already draws that same line per token, so it is simply called as it is.
+
+   _trChk IS NOT CLEARED — same as afterFormEdit, and worth one line on why, because re-arming it looks
+   harmless. It gates adoptStoredPicks, whose rule is "a stored value differing from what the engine
+   produces was put there by hand". Re-armed while MISC still held the OLD tag's automatic string, that
+   comparison would find a difference and mark the token _trPick: a phantom hand correction, over a value
+   the app wrote itself. It cannot bite on this path (the blanking below leaves nothing to compare), but
+   it is exactly what a future "just clear every flag" tidy-up would reintroduce. */
+async function uposSyncTranslit(si,tokId){ if(!hasBridge()||!DOCLANG) return;   // nothing could recompute → dropping the caches would BLANK the row instead of refreshing it
+  const s=DOC[si], t=s&&s.tokens[tokId-1]; if(!t) return;
+  if(!t._trPick){ t.translit=""; t._trMisc=false;                                 // the automatic displayed row, and the flag that says MISC held it
+    t.misc=setMiscKV(t.misc,"Translit","");   }                                   // …and the stale stored string itself, or fromMisc restores it below (rewritten by annotateTranslitMisc at the end)
+  t.translitLemma=""; t.misc=setMiscKV(t.misc,"LTranslit","");                    // the LEMMA romanisation is automatic on EVERY token: _trPick marks a corrected FORM romanisation (MISC Translit) and says nothing about LTranslit
+  t.ortho="";                                                                     // …nor about the SCRIPT glyph, which is tag-conditioned too and which nothing on the retag path refreshed before — regenTok's re-parse never calls fillOrtho at all
+  if(show.translit) await fillTranslit();                                         // romanise under the NEW tag
+  await annotateTranslitMisc(si);                                                 // write the result back to MISC Translit/LTranslit (a no-op with Stored: None, which is right — there is nothing stored to regenerate)
+  if((ORTHO_SCHEME&&ORTHO_SCHEME!=="none")||isSanskritLang()) await fillOrtho();   // re-render the script glyph under the new tag
+  preserveScroll(renderDoc); }                                                     // no markDirty of its own: the retag that called this already marked the document, and these are its consequences
 
 // ── the click-editable STORED transliteration (raised from the transliteration ROW) ───────────────
 // WHERE the edit is raised from: the very click on the very row the displayed romanisation already
@@ -183,7 +253,7 @@ function storedTranslitVal(t){ return t?miscTranslit(t.misc):""; }
 async function editStoredTransInline(si,tokId,clickXY){ const s=DOC[si]; if(!s)return; const t=s.tokens[tokId-1]; if(!t)return;
   const same=(!TRANSLIT_SCHEME||STORED_SCHEME===TRANSLIT_SCHEME), had=storedTranslitVal(t);
   let seed=had;
-  if(!seed&&!same&&hasBridge()){ try{ const r=await window.pywebview.api.transliterate([t.form],DOCLANG,STORED_SCHEME); seed=(r&&r.translit&&r.translit[0])||""; }catch(e){ seed=""; } }   // nothing stored YET and the row shows a different scheme: open the field on what the stored scheme would hold for this form, so the user corrects a value instead of filling a blank whose scheme the row doesn't show
+  if(!seed&&!same&&hasBridge()){ try{ const r=await window.pywebview.api.transliterate([t.form],DOCLANG,STORED_SCHEME,[trUpos(t)]); seed=(r&&r.translit&&r.translit[0])||""; }catch(e){ seed=""; } }   // …under THIS token's own tag, so the value the field opens on is the one the automatic pass would have stored for it, not a homograph's reading   // nothing stored YET and the row shows a different scheme: open the field on what the stored scheme would hold for this form, so the user corrects a value instead of filling a blank whose scheme the row doesn't show
   const el=transElOf(si,tokId); if(!el)return;   // re-found AFTER that await — a re-render in between would have replaced the element the field must sit over
   // the field edits MISC Translit through a proxy (as the gloss tiers edit their own MISC attribute), and
   // mirrors each keystroke into t.translit as well, so the diagram grows and shrinks with the entry.

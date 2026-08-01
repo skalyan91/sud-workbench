@@ -476,7 +476,7 @@ function renderGrid(si){
         if((key==="deps"||key==="misc")&&t[key]==="")t[key]="_";   // empty Deps/Misc round-trips as "_"
         if(key==="form"){ scheduleDoc(); afterFormEdit(si,i+1,true); }
         else if(key==="lemma"){ commitLemmaEdit(si,i+1,t); }   // NO eager scheduleDoc: nothing on screen shows a lemma, and everything that changes BECAUSE of it (MSeg, and the MGloss slots that name it) has to wait on the same await afterLemmaEdit does — see commitLemmaEdit
-        else if(key==="upos"){ scheduleDoc(); regenTok(si,i+1); }   // Task B: ONLY upos still reparses (lemma/feats/deps) — head/deprel are purely structural and must not trigger any gloss-touching regen at all
+        else if(key==="upos"){ scheduleDoc(); uposSyncTranslit(si,i+1); regenTok(si,i+1); }   // uposSyncTranslit: the romanisation/script glyph are tag-conditioned and a retag makes them stale — the same call the diagram's POS menu makes (js/editing/context-menu.js), and for the same reason it cannot be left to regenTok. Task B: ONLY upos still reparses (lemma/feats/deps) — head/deprel are purely structural and must not trigger any gloss-touching regen at all
         else if(key==="head"||key==="deprel"||key==="deep"){ scheduleDoc(); }   // re-render only — no regenTok
       };
       if(type==="upos"){ ctl=document.createElement("select"); ctl.className="csel";

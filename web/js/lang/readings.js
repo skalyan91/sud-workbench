@@ -17,13 +17,20 @@ const READING_SCRIPT_RE=/[㐀-䶿一-鿿豈-﫿぀-ゟ゠-ヿ\ud840-\ud884]/;   
 // anything to choose; admitting Hangul as well would spend a bridge round-trip on every ordinary Korean token just to
 // be told there are no alternatives, which is the one thing this test exists to prevent.
 function readingLang(lang){ return READING_LANGS.has((lang||"").split(/[-_]/)[0].toLowerCase()); }
-// Candidates are cached per (language, displayed scheme, form): the flyout is opened repeatedly on the
-// same token, and the answer only changes when one of those three does — the key carries all three, so
+// Candidates are cached per (language, displayed scheme, form, UPOS): the flyout is opened repeatedly on
+// the same token, and the answer only changes when one of those four does — the key carries all four, so
 // a scheme switch simply misses instead of needing an invalidation pass.
+// THE TAG IS PART OF THE KEY, not merely part of the request. The backend ORDERS the candidates by part
+// of speech (行 leads with háng on a NOUN, xíng on a VERB) and the flyout ticks/offers them in that order,
+// so a key without it would hand the noun's ordering to the verb — the very reuse the hint exists to
+// prevent — for every token in the document spelt the same way. Retagging a token likewise has to move
+// its flyout, and a widened key does that by missing rather than by an invalidation pass, exactly as a
+// scheme switch already does. The candidate SET is the same either way (the hint reorders, never filters),
+// so the extra entries cost one round-trip apiece and can never lose a reading.
 const READINGS_CACHE=new Map();
-function readingsKey(form){ return DOCLANG+"|"+TRANSLIT_SCHEME+"|"+form; }
-async function loadReadings(form){ const k=readingsKey(form); if(READINGS_CACHE.has(k)) return READINGS_CACHE.get(k);
-  let r; try{ r=await window.pywebview.api.token_readings(form,DOCLANG,TRANSLIT_SCHEME); }catch(e){ r=null; }
+function readingsKey(form,upos){ return DOCLANG+"|"+TRANSLIT_SCHEME+"|"+(upos||"")+"|"+form; }
+async function loadReadings(form,upos){ const k=readingsKey(form,upos); if(READINGS_CACHE.has(k)) return READINGS_CACHE.get(k);
+  let r; try{ r=await window.pywebview.api.token_readings(form,DOCLANG,TRANSLIT_SCHEME,upos||""); }catch(e){ r=null; }
   const list=(r&&r.readings)||[];   // a failed lookup caches [] too: no row, and no retry storm on every right-click
   READINGS_CACHE.set(k,list); return list; }
 // The menu row, or null when there is nothing to offer. Returned SYNCHRONOUSLY so the token menu opens
@@ -35,8 +42,9 @@ function readingsMenuItem(si,tokId,reopen){
   if(!readingLang(DOCLANG)) return null;               // outside the CJK set the automatic romanisation is the only one there is
   if(!show.translit||!TRANSLIT_SCHEME) return null;    // no romanisation on display ⇒ nothing on screen for a pick to override
   const s=DOC[si], t=s&&s.tokens[tokId-1]; if(!t||!t.form||!READING_SCRIPT_RE.test(t.form)) return null;
-  const have=READINGS_CACHE.get(readingsKey(t.form));
-  if(have===undefined){ loadReadings(t.form).then(list=>{ if(!list||list.length<2) return;
+  const u=trUpos(t);   // this token's own tag, which the backend uses to lead with the reading its part of speech calls for (js/lang/translit-load.js, loaded immediately before this file — and this runs at menu-open time, long after both are defined)
+  const have=READINGS_CACHE.get(readingsKey(t.form,u));
+  if(have===undefined){ loadReadings(t.form,u).then(list=>{ if(!list||list.length<2) return;
       if(!ctx.classList.contains("show")||sel.s!==si||sel.t!==tokId) return;   // the user has clicked on / moved elsewhere — never yank a menu out from under them
       if(typeof reopen==="function") reopen(); });
     return null; }

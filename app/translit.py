@@ -29,7 +29,7 @@ _JANOME = None
 _KKS = None
 _KO = None
 _UROMAN = None
-_CACHE: dict[tuple[str, str, str], str] = {}   # (lang, scheme, text) → transliteration
+_CACHE: dict[tuple[str, str, str, str], str] = {}   # (lang, scheme, text, upos) → transliteration ⚠ upos is in the key: see _render_one
 
 _DATA_DIR = os.path.join(os.path.dirname(__file__), "data")   # vendored, char-keyed datasets (offline)
 
@@ -99,12 +99,118 @@ def _camel_ar(text: str) -> str:
 _HAN_RE = re.compile(r"[⺀-⻿㐀-䶿一-鿿豈-﫿]")
 
 
+def _t2s_chars(text: str) -> str:
+    """Traditional → simplified ONE CHARACTER AT A TIME, so the result is the same length as its input
+    and position i still describes character i.  `_t2s` runs OpenCC over the whole string, where the
+    phrase rules may rewrite a run to a different number of characters (們 → 们 is 1:1, but 甚麼 → 什么
+    is a phrase substitution) — and every caller here aligns syllables to characters by index, so a
+    length change would silently shift every reading after it.  A character whose own fold is not a
+    single character is left alone rather than guessed at."""
+    out = []
+    for c in text:
+        if not _HAN_RE.match(c):
+            out.append(c)
+            continue
+        s = _t2s(c)
+        out.append(s if len(s) == 1 else c)
+    return "".join(out)
+
+
+def _phrase_known(text: str) -> bool:
+    """Does pypinyin hold a PHRASE entry for this token, in EITHER Chinese orthography?  Its
+    PHRASES_DICT is keyed in SIMPLIFIED only (see _mandarin_syllables), so the traditional spelling of
+    a word it knows perfectly well answers False to the bare membership test."""
+    from pypinyin.constants import PHRASES_DICT
+    if text in PHRASES_DICT:
+        return True
+    simp = _t2s_chars(text)
+    return simp != text and simp in PHRASES_DICT
+
+
+def _fold_phrase_readings(text: str, pairs: list) -> None:
+    """Re-read ``text`` through its simplified fold and carry the PHRASE reading back onto ``pairs``
+    in place, where doing so is both useful and safe (see _mandarin_syllables' own note).
+
+    Useful ⇒ the token has TWO OR MORE Han characters and at least one of them folds.  Not "the fold is
+    a PHRASES_DICT entry", which was the obvious gate and is too narrow by exactly one case: pypinyin
+    matches its phrases as SUBSTRINGS, so 银行卡 — not itself an entry — still reads yínhángkǎ off the
+    银行 inside it, and gating on whole-token membership left 銀行卡 as yínxíngkǎ.  Asking the engine is
+    the only way to find those, so the fold is attempted and its ANSWER judged.
+    Safe ⇒ per position, and only onto a Han character whose OWN readings include the folded syllable.
+    The two-character floor is part of that safety and not an optimisation: a lone graph has no phrase
+    to gain, and is the one place the many-to-one fold could do harm (幹 gàn folding to 干 gān, a reading
+    幹 does also carry, so the membership guard alone would let it through)."""
+    from pypinyin import Style, pinyin
+    from pypinyin.constants import PHRASES_DICT
+    if text in PHRASES_DICT:
+        return                       # the token IS a known phrase — pypinyin already applied it
+    simp = _t2s_chars(text)
+    if simp == text or sum(1 for c in text if _HAN_RE.match(c)) < 2:
+        return                       # nothing folded, or a single graph — see the note above
+    segs = [s[0] for s in pinyin(simp, style=Style.TONE3, neutral_tone_with_five=True)]
+    if len(segs) != len(pairs):
+        return                       # the two spellings segmented differently → alignment is a guess
+    for p, syl in zip(pairs, segs):
+        ch = p[0]
+        if ch is None or syl == p[1]:
+            continue
+        if syl in _char_heteronyms(ch):   # …the traditional graph really can be read this way
+            p[1] = syl
+
+
+def _phrase_heteronyms(text: str) -> list[list[str]]:
+    """pypinyin's per-position CANDIDATE lists for ``text``, with the same simplified fold
+    `_fold_phrase_readings` applies to the single reading — and for the same reason.
+
+    Folding the default reading alone was not enough, and the gap it left was the visible one: a phrase
+    entry does not merely pick a syllable, it also COLLAPSES the candidate list to the one reading the
+    word actually has, which is how the whole-token rule answers 银行 with "nothing to choose".  Read in
+    traditional, 銀行 missed the entry and came back with 行's full heteronym list, so the flyout offered
+    five readings of a word that has one — the rule holding for a simplified document and quietly not
+    holding for a traditional one.
+    The folded candidates are filtered through the ORIGINAL graph's own readings (the many-to-one guard
+    of _mandarin_syllables), and a position the filter would empty keeps its unfolded list rather than
+    none: a fold may not ADD a reading the traditional graph cannot take, and must not remove the only
+    one it has."""
+    from pypinyin import Style, pinyin
+    from pypinyin.constants import PHRASES_DICT
+    het = pinyin(text, style=Style.TONE3, heteronym=True, neutral_tone_with_five=True)
+    if text in PHRASES_DICT:
+        return het
+    simp = _t2s_chars(text)
+    if simp == text or sum(1 for c in text if _HAN_RE.match(c)) < 2:
+        return het   # same two conditions as _fold_phrase_readings, and for the same reasons
+    folded = pinyin(simp, style=Style.TONE3, heteronym=True, neutral_tone_with_five=True)
+    if len(folded) != len(het) or len(folded) != len(text):
+        return het   # a length mismatch means position i no longer names character i — see _t2s_chars
+    out = []
+    for i, cands in enumerate(folded):
+        own = _char_heteronyms(text[i]) if _HAN_RE.match(text[i]) else None
+        keep = [c for c in cands if c in own] if own else list(cands)
+        out.append(keep or list(het[i]))
+    return out
+
+
 def _mandarin_syllables(text: str) -> list[tuple[bool, str]]:
     """Per-character numbered pinyin (Style.TONE3) for every Han character in ``text``, non-Han
     runs passed through verbatim.  不 is corrected to the actual tone-sandhi rule (4th tone → 2nd
     tone before a following 4th-tone syllable) rather than relying on pypinyin's own sandhi, which
     only fires for phrases in its built-in dictionary (e.g. 不是/不對/不要 but not 不去).
-    Returns (is_han, numbered_syllable_or_literal_text) pairs, one per pypinyin segment."""
+    Returns (is_han, numbered_syllable_or_literal_text) pairs, one per pypinyin segment.
+
+    ⚠️ PYPINYIN'S PHRASE DICTIONARY IS SIMPLIFIED-ONLY, so a TRADITIONAL token misses it and falls back
+    to per-character citation readings: 银行 came out yínháng and 銀行 — the same word — yínxíng, because
+    only the simplified spelling reaches the 银行 entry.  Every traditional document was therefore denied
+    the phrase-level disambiguation that is the whole reason the dictionary exists.  So where the fold
+    unlocks an entry the original spelling could not reach, the phrase is re-read in simplified and the
+    syllables carried back position-by-position.
+
+    THE FOLD IS NOT TRUSTED BLINDLY, because it is MANY-TO-ONE: 幹 乾 干 all fold to 干, and 干's own
+    citation reading (gān) is not 幹's (gàn), so a fold can offer a syllable the ORIGINAL graph cannot
+    take.  A folded syllable is therefore accepted only where pypinyin itself lists it among the
+    traditional character's own readings — the same membership refusal `_POS_OVERRIDE` uses to keep an
+    Old-Chinese-only reading out of a Pinyin row.  Where it does not, the character keeps the reading
+    its own spelling gave it."""
     from pypinyin import Style, pinyin
     segs = [s[0] for s in pinyin(text, style=Style.TONE3, neutral_tone_with_five=True)]
     pairs = []
@@ -116,6 +222,7 @@ def _mandarin_syllables(text: str) -> list[tuple[bool, str]]:
         else:
             pairs.append([None, seg])
             idx += len(seg)
+    _fold_phrase_readings(text, pairs)
     for i in range(len(pairs) - 1, -1, -1):   # right-to-left so a chained 不不 sees the RESOLVED next tone
         if pairs[i][0] == "不":
             nxt = pairs[i + 1][1] if i + 1 < len(pairs) else ""
@@ -430,29 +537,147 @@ def _general_chinese(text: str) -> str:
 
 
 # ── Middle Chinese (Baxter) + Old Chinese (Baxter–Sagart) ─────────────────────
-# Both come from the same char-keyed table vendored in app/data/baxter_sagart.tsv (Wiktionary's
-# "Appendix:Baxter-Sagart Old Chinese reconstruction", Baxter & Sagart v1.00): the MC field is
-# Baxter's Middle Chinese transcription (with X/H tone letters), the OC field the Baxter–Sagart
-# Old Chinese reconstruction (leading *).  Characters absent from the table are dropped, never guessed.
+# Both come from one table vendored in app/data/baxter_sagart.tsv (Wiktionary's
+# "Appendix:Baxter-Sagart Old Chinese reconstruction", Baxter & Sagart v1.00, built by
+# tools/build_baxter_index.py): the MC field is Baxter's Middle Chinese transcription (with X/H
+# tone letters), the OC field the Baxter–Sagart Old Chinese reconstruction (leading *).
+# Characters absent from the table are dropped, never guessed.
+#
+# ⚠ IT IS A WORD LIST, NOT A CHARACTER LIST — one row per (graph, SOURCE ENTRY), six columns:
+#     graph · pinyin · middle_chinese · old_chinese · pos · gloss
+# The appendix gives 4,082 words over 4,330 graphs, and 783 of those graphs carry more than one
+# word: 547 have more than one Middle Chinese reading and 312 more than one Mandarin one, because
+# Old Chinese derived words from words by tone and voicing (數 = *s-roʔ-s "number", *s-roʔ "count",
+# *s-rok "frequently").  The file this replaced kept each graph's FIRST row and threw the rest
+# away, so every derived word in the appendix was invisible; the loaders below keep them all, and
+# `pos` — a UD tag the build script infers from the gloss, empty where the gloss licenses none —
+# is what lets a tagged token say which row is meant (see `_pos_render`).
+_BAXTER_ROWS: dict[str, list[tuple[str, str, str, str, str]]] | None = None
 _BAXTER: dict[str, tuple[str, str]] | None = None
+_BAXTER_ANNEX = re.compile(r"\s*\{[^{}]*\}")
 
 
-def _baxter_table() -> dict[str, tuple[str, str]]:
-    global _BAXTER
-    if _BAXTER is None:
-        _BAXTER = {}
+def _baxter_rows() -> dict[str, list[tuple[str, str, str, str, str]]]:
+    """graph → ``[(pinyin, mc, oc, pos, gloss), …]`` in source order — the ONE read of the vendored
+    file, which every other Baxter accessor is a view of.  The OC field is kept VERBATIM here (the
+    ``{…}`` annex, the ``~`` variants and the parenthesised editorial notes included); the display
+    view is `_baxter_display` and the variant split is `_baxter_variants`.
+
+    A row of fewer than six fields is SKIPPED rather than padded, and the reason is the file this
+    replaced: it was three columns (graph, MC, OC), so padding would read its MC as this format's
+    pinyin and its OC as the MC — every reconstruction on screen would be one column to the left and
+    nothing would look broken.  Skipping leaves the table empty instead, `_scheme_available` then
+    reports the mc/oc schemes as unavailable, and the app degrades to offering no Middle/Old Chinese
+    rather than to offering the wrong one.  (Nothing but tools/build_baxter_index.py writes this
+    file; the guard is against a stale copy surviving in an old bundle.)"""
+    global _BAXTER_ROWS
+    if _BAXTER_ROWS is None:
+        _BAXTER_ROWS = {}
         try:
             with open(os.path.join(_DATA_DIR, "baxter_sagart.tsv"), encoding="utf-8") as fh:
                 for line in fh:
-                    if line.startswith("#") or "\t" not in line:
+                    if line.startswith("#"):
                         continue
-                    parts = line.rstrip("\n").split("\t")
-                    ch = parts[0]
-                    mc = parts[1] if len(parts) > 1 else ""
-                    oc = parts[2] if len(parts) > 2 else ""
-                    _BAXTER[ch] = (mc, oc)
+                    p = line.rstrip("\n").split("\t")
+                    if len(p) < 6 or not p[0]:
+                        continue
+                    _BAXTER_ROWS.setdefault(p[0], []).append((p[1], p[2], p[3], p[4], p[5]))
         except Exception:  # noqa: BLE001
             pass
+    return _BAXTER_ROWS
+
+
+def _baxter_display(oc: str) -> str:
+    """One OC reconstruction as the transliteration ROW should show it: its ``{…}`` annex dropped.
+
+    2,347 of the appendix's 4,082 OC cells read ``*rˁawk {*[rˁ]awk}`` — the reconstruction, and
+    then the same reconstruction again with its uncertain segments bracketed.  That is ONE reading
+    written twice, so showing both fills a one-form-wide cell with two forms, and offering the
+    braced one through `readings` would offer a notational variant as if it were a choice of
+    pronunciation.  It stays in the vendored file all the same, because it is Baxter–Sagart's own
+    statement of how certain the reconstruction is and a data file is the wrong place to decide
+    that is noise (see tools/build_baxter_index.py).  Everything else the source prints — the
+    square brackets and ‹…› of a form that has no annex, the parenthesised dialect notes — is left
+    alone: it qualifies the form itself rather than restating it.
+
+    Checked against the char-keyed file this replaced: with the annex off, 4,228 of its 4,330 rows
+    reproduce byte-for-byte, and the 102 that do not are ones where the hand vendoring had also
+    dropped a parenthesised note or a second ``~`` variant.
+
+    ⚠️ A field that is NOTHING BUT an annex is UNWRAPPED, not emptied.  Five rows print only the
+    braced form (婶/嬸 "{*mʔ}", 繩/绳 "{*Cə.ləŋ}", 藉 "{*[dz]Ak-s}"), and there the braces are not
+    restating a reconstruction printed beside them — they ARE the reconstruction, and stripping them
+    took those graphs' Old Chinese away altogether."""
+    plain = " ".join(_BAXTER_ANNEX.sub("", oc).split()).strip()
+    return plain or " ".join(oc.replace("{", "").replace("}", "").split()).strip()
+
+
+def _baxter_variants(field: str) -> list[str]:
+    """One table field → its VARIANT RECONSTRUCTIONS, in source order.
+
+    ⚠️ THE TILDE IS A SECOND AXIS OF POLYPHONY, NOT THE SAME ONE AS THE MULTIPLE ROWS.  A graph's
+    several ROWS are several WORDS (數 "number" / "count" / "frequently"); a ` ~ ` INSIDE one row's
+    OC field is two competing reconstructions of THAT one word — 前 is "*dzˁen ~ *m-dzˁen", one
+    word whose pre-initial Baxter and Sagart could not settle.  Left unsplit, that pair is rendered
+    into the Displayed transliteration cell verbatim, which shows two forms where the row is one form
+    wide, and `readings` sees a single-valued field and offers nothing to choose between.  Splitting
+    here fixes both at once: _baxter_table keeps variant 0 (so the cell shows ONE reconstruction) and
+    _baxter_all lists them all (so the flyout offers the rest).
+
+    RE-CHECKED against the rebuilt word-level table, and the count went up because the collapsed
+    one had been hiding some of them on rows it discarded: 33 rows carry a tilde where 14 did, and
+    31 split where 13 did.  The 2 that do not split are the same two as before (剌, 泥), and for the
+    same reason — their tilde is inside a parenthesis.  The MC column still has no tilde in any row.
+
+    ONLY AT PAREN DEPTH 0.  69 OC rows carry a parenthesised editorial note — dialect derivations,
+    uncertainty — and one of them, 剌 "*rˁat (~ C.rˁat ?)", puts a tilde INSIDE it as "or perhaps".
+    That is a hedge about one reconstruction, not a second one; a naive split on "~" would cut it into
+    the two malformed halves "*rˁat (" and "C.rˁat ?)".  Depth-tracking is what tells the 13 real
+    separators from that 1 false one, so the note stays attached to the form it qualifies.
+
+    The leading * is re-asserted because the source omits it on the SECOND variant about half the time
+    (塘 "*m.rˁaŋ ~ mə.rˁaŋ", 戒 "*kˁrək-s ~ kˁrək", 竞 "*m-kraŋʔ-s ~ C-kraŋʔ-s").  Every OC form in this
+    table is a reconstruction and the column's convention is the star; without this the flyout would
+    list "*kˁrək-s" beside "kˁrək" and the second would read as an attestation.  MC is passed through
+    untouched — its column has no tilde in any row, and no star convention to restore."""
+    parts, depth, cur = [], 0, ""
+    for c in field:
+        if c in "([{":
+            depth += 1
+        elif c in ")]}":
+            depth = max(0, depth - 1)
+        if c == "~" and depth == 0:
+            parts.append(cur)
+            cur = ""
+            continue
+        cur += c
+    parts.append(cur)
+    out = []
+    for p in parts:
+        p = " ".join(p.split())   # the separator is spelled " ~ ", "  ~ " (舵) and "~" — collapse what that leaves
+        if not p:
+            continue
+        if len(parts) > 1 and not p.startswith("*"):
+            p = "*" + p
+        if p not in out:
+            out.append(p)
+    return out
+
+
+def _baxter_table() -> dict[str, tuple[str, str]]:
+    """graph → the ONE ``(mc, oc)`` pair the transliteration row shows: the graph's FIRST row, and
+    that row's first ``~`` variant.  The first row is the appendix's own first-listed word for the
+    graph, which is also the only one the char-keyed file this replaced ever carried — so the
+    default rendering of every graph is unchanged by the rebuild, and what the rebuild adds reaches
+    the user through `readings`, `_baxter_all` and the POS conditioning rather than by silently
+    moving what is already on screen."""
+    global _BAXTER
+    if _BAXTER is None:
+        _BAXTER = {}
+        for ch, rows in _baxter_rows().items():
+            mc, oc = rows[0][1], rows[0][2]
+            ocv = _baxter_variants(oc)
+            _BAXTER[ch] = (mc, _baxter_display(ocv[0]) if ocv else "")   # variant 0 is what the Displayed row shows; the rest reach the user through `readings` (see _baxter_variants)
     return _BAXTER
 
 
@@ -1551,25 +1776,257 @@ def _is_latin_output(scheme: str) -> bool:
     return scheme not in ("zhuyin", "simplified", "traditional", "latin", "cyrillic", "mn-traditional") and scheme not in _AKSHARA_IDS
 
 
-def _render_one(text: str, lang: str, scheme: str) -> str:
+# ── POS-conditioned reading selection (Chinese) ───────────────────────────────
+# A Han graph is heteronymic BY WORD CLASS as often as not, because Old Chinese derived words from
+# words by tone and voicing: 王 is wáng "king" (NOUN) and wàng "be king" (VERB); 數 is shù "number"
+# (NOUN), shǔ "count" (VERB) and shuò "frequently" (ADV); 好 is hǎo "good" (ADJ) and hào "love"
+# (VERB).  The vendored Baxter–Sagart table is a WORD list — one row per source entry, carrying the
+# gloss and a UPOS the build script infers from it — so where the treebank has already tagged the
+# token, the tag names which row is meant.  That is the whole of this section: `upos` is an
+# OPTIONAL hint threaded through the public entry points, and every caller that passes none behaves
+# exactly as it did before.
+#
+# ⚠ REORDER, NEVER FILTER.  A POS match promotes the reading it names to what gets rendered (and,
+# through `readings`, to index 0 of the pick list); a tag that matches no row, an unknown tag and a
+# row the build script left untagged all change NOTHING.  3,394 of the table's 4,082 entries carry
+# no tag at all and the tags that exist are inferred from an English gloss, so a tag must never be
+# able to remove an option — the cost of a wrong one has to stay bounded at "the list is in the
+# wrong order", never "the reading I wanted is gone".
+#
+# ⚠ MANDARIN IS ORDERED, NOT SOURCED.  pypinyin stays the source of Mandarin readings; the table
+# only says which of ITS candidates to prefer, and a table reading pypinyin does not hold for the
+# graph is discarded (74 of the polyphonic graphs' table readings are Old Chinese-only survivals —
+# 奧 yù, 陳 zhèn, 出 chuì — which no modern romaniser will produce and which have no business being
+# rendered as Mandarin).  For Middle/Old Chinese there is no such second source: the table IS the
+# engine, so the row is used directly.
+#
+# ⚠ SINGLE-HAN-GRAPH TOKENS ONLY — the WHOLE-TOKEN RULE (documented at length further down) applied
+# to this.  For a token of two or more graphs the phrase dictionary is the authority on the reading
+# and a per-character word class is a guess: 銀行 is yínháng whatever the tagger calls it, and a
+# NOUN tag on it must not turn its 行 into the noun's own citation reading.
+_POS_MANDARIN_LANGS = ("zh", "lzh")   # …after _canon_lang, so cmn → zh.  lzh is included because a
+#                                       classical text's Mandarin row is exactly where the appendix's
+#                                       word-class distinctions live.
+
+
+def _pos_graph(text: str) -> str:
+    """The ONE Han graph ``text`` consists of, or "" if it holds none or several.  Punctuation and
+    Latin around the graph are tolerated — they carry no reading and `_render_one` passes them
+    through — but a second graph is not (see the whole-token rule)."""
+    if _han_count(text) != 1:
+        return ""
+    return next((ch for ch in text if _is_han(ch)), "")
+
+
+# ── the EDITORIAL override on top of the inferred tags ────────────────────────
+# ⚠ EVERYTHING IN THIS TABLE IS A HAND-MADE EDITORIAL JUDGEMENT, not a fact read out of the source,
+# and it is kept separate from the vendored TSV for exactly that reason: the TSV is regenerable from
+# Wiktionary by tools/build_baxter_index.py and a hand edit to it would be silently reverted by the
+# next rebuild, whereas this dict is code and survives.  It is also where a linguist can work — one
+# line per judgement, no rebuild, no data pipeline.
+#
+# WHY IT HAS TO EXIST.  The `pos` column of the TSV is inferred FROM THE ENGLISH GLOSS, and the
+# canonical 破音字 are precisely the graphs whose glosses are bare English content words that say
+# nothing about word class: 行 "rank, row", 樂 "music", 中 "hit the center", 重 "repeat; double",
+# 為 "make, do, act as", 分 "alloted duty".  No English frame can tell a noun from a verb in those,
+# and loosening the inference until it could would mis-tag far more entries than it fixed — so the
+# inference stays conservative and honest at 16.9 %, and the handful of words that MATTER most are
+# named here instead.  (行 is the textbook example of the whole feature.)
+#
+# WHAT AN ENTRY IS: graph → {UPOS: the numbered-pinyin syllable of the ROW meant}.  The syllable is
+# an IDENTIFIER for one row of the table, not a rendering — it selects the row, and Middle Chinese,
+# Old Chinese, Zhuyin and Gwoyeu Romatzyh then all come off THAT row, so one judgement stays
+# consistent across every scheme instead of being restated four times.  It follows that an override
+# can only name a reading the appendix actually lists: a syllable no row carries selects nothing and
+# the graph falls back to its ordinary rendering, which is the safe way for a typo to fail.
+#
+# THE CONTRACTS ARE THE SOURCED TAGS' CONTRACTS, unchanged: REORDER NEVER FILTER (the other readings
+# stay in `readings`, just not first), SINGLE-HAN-GRAPH TOKENS ONLY, and for Mandarin the promoted
+# syllable must still be one PYPINYIN ITSELF holds for the graph — that refusal is what stops an
+# Old-Chinese-only reading leaking into a pinyin row, and an override does not get to bypass it.
+#
+# TO ADD ONE: write the TRADITIONAL graph (the simplified counterpart is derived below, so 樂 covers
+# 乐), the UD tag, and the numbered pinyin of the intended row — read it off the TSV, whose PY column
+# is tone-marked ("chóng" → "chong2").  Add an entry only where you would defend it in print; a
+# graph whose two readings are both, say, verbs (見 jiàn "see" / xiàn "appear", 說 shuō / shuì) has
+# nothing for a UPOS to decide and does not belong here.
+#
+# ⚠ AND NOT WHERE TWO ROWS SHARE ONE MANDARIN READING.  The key selects a row BY ITS PINYIN, so it
+# cannot tell apart rows that sound alike in Mandarin — 重 has drjowngH "weight (n.)" and drjowngX
+# "heavy", both zhòng, and an entry 重 ADJ → "zhong4" would pick the first, giving the right Mandarin
+# and the NOUN's Middle Chinese.  That is why 重 has only its ADV line here: leaving the adjective
+# with no opinion renders it the ordinary way, which is right in Mandarin and merely uncommitted in
+# Middle Chinese, whereas an entry would be right in one scheme and wrong in another.  If such a case
+# ever has to be expressed, the honest fix is a second key (the MC transcription), not a pinyin
+# entry that happens to land nearby.
+_POS_OVERRIDE: dict[str, dict[str, str]] = {
+    "行": {"NOUN": "hang2"},                      # háng "row, rank, column" — the noun sense; xíng is the verb "walk"
+    "樂": {"NOUN": "yue4"},                       # yuè "music"; lè "joy, enjoy" leans verbal/stative
+    "中": {"VERB": "zhong4"},                     # zhòng "hit the centre" (the derived departing tone); zhōng is the noun "centre"
+    "重": {"ADV": "chong2"},                      # chóng "again, repeatedly"; zhòng is "heavy" / "weight"
+    "為": {"VERB": "wei2"},                       # wéi "make, do, act as"; wèi is the adposition "for, because" (already sourced)
+    "分": {"NOUN": "fen4"},                       # fèn "allotted duty, one's lot"; fēn is the verb "divide"
+    "長": {"NOUN": "zhang3", "VERB": "zhang3"},   # zhǎng "elder, chief" and "grow"; cháng is the adjective "long" (already sourced)
+    "難": {"NOUN": "nan4"},                       # nàn "difficulty, calamity"; nán is the adjective "difficult"
+    "妻": {"VERB": "qi4"},                        # qì "give as wife" (妻之); qī is the noun "wife"
+}
+_POS_OVERRIDE_ALL: dict[str, dict[str, str]] | None = None
+
+
+def _pos_overrides() -> dict[str, dict[str, str]]:
+    """`_POS_OVERRIDE` with each traditional key's SIMPLIFIED counterpart added, so one line covers
+    both spellings of a word (樂 and 乐, 為 and 为, 長 and 长, 難 and 难).  Derived through OpenCC
+    rather than listed by hand because a hand-listed pair is a second place to forget; where OpenCC
+    is absent `_t2s` returns its input unchanged and the traditional entries simply stand alone.
+    An explicit entry for a simplified graph is never overwritten, so a genuinely spelling-specific
+    judgement can still be written directly."""
+    global _POS_OVERRIDE_ALL
+    if _POS_OVERRIDE_ALL is None:
+        out = {g: dict(v) for g, v in _POS_OVERRIDE.items()}
+        for g, v in _POS_OVERRIDE.items():
+            simp = _t2s(g)
+            if len(simp) == 1 and simp != g and simp not in out:
+                out[simp] = dict(v)
+        _POS_OVERRIDE_ALL = out
+    return _POS_OVERRIDE_ALL
+
+
+def _baxter_pos_row(graph: str, upos: str):
+    """The table row ``upos`` names for ``graph``, or None — the EDITORIAL override first, the
+    gloss-inferred ``pos`` column second.
+
+    The override, when it speaks, is FINAL: it exists to correct the inferred tags, so falling back
+    to them on a miss would reinstate exactly what it overrules (行 NOUN names the háng row and must
+    not slide back to the "action" row the gloss tagged NOUN).  A miss is therefore "no opinion" and
+    the caller renders the graph the ordinary way.
+
+    Absent an override, the FIRST row whose inferred class is ``upos`` — first and not best, because
+    the appendix lists a graph's words in its own order and where two rows share a class the earlier
+    one is the more basic word.  A row with an empty ``pos`` never matches: the build script writes
+    "" to mean "this gloss licenses no tag", not "any tag will do"."""
+    if not upos:
+        return None
+    rows = _baxter_rows().get(graph, ())
+    want = _pos_overrides().get(graph, {}).get(upos, "")
+    if want:
+        return next((row for row in rows if _py_tone3(row[0]) == want), None)
+    return next((row for row in rows if row[3] and row[3] == upos), None)
+
+
+def _py_tone3(py: str) -> str:
+    """Tone-marked pinyin → pypinyin's numbered ``Style.TONE3`` spelling ("háng" → "hang2"), through
+    pypinyin's own converter rather than a hand-written tone-mark table.  "" if it cannot be read."""
+    try:
+        from pypinyin.contrib.tone_convert import to_tone3
+        return to_tone3(py, v_to_u=False, neutral_tone_with_five=True) or ""
+    except Exception:  # noqa: BLE001 — pypinyin missing, or a PY cell it cannot parse
+        return ""
+
+
+def _mandarin_pos_syllable(graph: str, upos: str) -> str:
+    """The numbered-pinyin syllable ``upos`` licenses for ``graph``, or "".
+
+    Read off the ROW `_baxter_pos_row` selected — whether that row was chosen by the editorial
+    override or by the gloss-inferred tag — so Pinyin, Zhuyin, Gwoyeu Romatzyh, Middle Chinese and
+    Old Chinese all speak for the same word.
+
+    The syllable is then required to be one PYPINYIN ITSELF lists for the graph, and a near-miss is
+    no match.  A toneless fallback was considered and rejected: 好 is both hǎo and hào, so "hao"
+    matches both and the fallback would promote whichever pypinyin happens to list first — which is
+    the very reading the tag was trying to overrule.  33 tagged rows and several plausible override
+    readings name an Old-Chinese-only survival pypinyin has no modern reading for (奧 yù, 陳 zhèn,
+    出 chuì); every one of them is refused here, so no such form can reach a pinyin row."""
+    row = _baxter_pos_row(graph, upos)
+    if not row or not row[0]:
+        return ""
+    syl = _py_tone3(row[0])
+    return syl if syl and syl in _char_heteronyms(graph) else ""
+
+
+def _pos_render(text: str, base: str, scheme: str, upos: str) -> str:
+    """``text`` rendered in ``scheme`` under the reading the word class ``upos`` names, or "" for
+    "no opinion — render it the ordinary way".  Never the sole path to a rendering: `_render_one`
+    falls through to the normal engine on "", so everything this cannot decide is unaffected."""
+    if not upos:
+        return ""
+    graph = _pos_graph(text)
+    if not graph:
+        return ""
+    if base in _POS_MANDARIN_LANGS and scheme in _MANDARIN_JOIN:
+        syl = _mandarin_pos_syllable(graph, upos)
+        if not syl:
+            return ""
+        # Rendered through the SCHEME'S OWN JOINER over the same (is_han, syllable) pairs
+        # `_mandarin_syllables` produces, so a POS-conditioned Pinyin/Zhuyin/GR value can no more
+        # contradict its scheme than a heteronym candidate can.  Exactly one pair is Han here
+        # (that is what `_pos_graph` guaranteed), so substituting every Han position substitutes
+        # the one; the non-Han runs pass through as they always do.
+        pairs = [(is_han, syl if is_han else s) for is_han, s in _mandarin_syllables(text)]
+        return _MANDARIN_JOIN[scheme](pairs)
+    if base == "lzh" and scheme in ("mc", "oc"):
+        row = _baxter_pos_row(graph, upos)
+        if not row:
+            return ""
+        if scheme == "mc":
+            val = row[1]
+        else:
+            ocv = _baxter_variants(row[2])
+            val = _baxter_display(ocv[0]) if ocv else ""
+        if not val:
+            return ""
+        return " ".join(x for x in ((val if _is_han(ch) else ch) for ch in text) if x).strip()   # assembled exactly as _baxter does
+    return ""
+
+
+# The shapes the two public entry points take.  ``upos`` is deliberately a UNION and not an
+# overload set: every caller may omit it, one tag may stand for a whole batch, and a per-form list
+# is the batch case api.py sends — three call shapes that share one body, and `_upos_at` is the one
+# place that tells them apart.
+_Forms = str | list[str] | tuple[str, ...]
+_Rendered = str | list[str]
+_Upos = str | list[str] | tuple[str, ...] | None
+
+
+def _upos_at(upos: _Upos, i: int) -> str:
+    """The tag for position ``i``: a LIST is read positionally (one tag per form), a bare string
+    applies to every form, and anything else — None, the default "" — means no tag at all."""
+    if isinstance(upos, (list, tuple)):
+        return (upos[i] or "") if 0 <= i < len(upos) else ""
+    return upos or ""
+
+
+def _render_one(text: str, lang: str, scheme: str, upos: str = "") -> str:
     """Shared engine dispatch for BOTH transliteration and orthography — they use the same engines,
-    keyed by scheme id (scheme ids are globally unique across the two menus).  Cached per (lang, scheme)."""
+    keyed by scheme id (scheme ids are globally unique across the two menus).  Cached per
+    (lang, scheme, text, upos).
+
+    ⚠️ ``upos`` IS PART OF THE CACHE KEY, and that is not optional.  Without it the FIRST
+    POS-conditioned call for a given (lang, scheme, text) would write its answer into the entry
+    every later caller reads, and the later callers are overwhelmingly the ones that pass no tag at
+    all — the grid, the running text and the transliteration row all render the same surface forms
+    untagged, and would have been served whichever word class happened to ask first.  The failure
+    would be order-dependent and invisible: nothing errors, the value is a real reading of the
+    graph, and it is simply the wrong one.  The key is a strict superset of the old one, so every
+    untagged call still shares one entry with every other untagged call and the cache does not
+    fragment."""
     if not text or not lang:
         return ""
     base = _canon_lang(_norm(lang))
     scheme = scheme or _default_scheme(base)
-    key = (lang, scheme, text)
+    key = (lang, scheme, text, upos)
     if key in _CACHE:
         return _CACHE[key]
     try:
-        if scheme == "iast":
-            out = _iast(text)
-        elif scheme in _AKSHARA_IDS and base == "sa":
-            out = _sanskrit(text, scheme)
-        elif scheme in _ENGINES:
-            out = _ENGINES[scheme][0](text)
-        else:
-            out = _legacy(text, base, lang)   # single-scheme / legacy backends ignore `scheme`
+        out = _pos_render(text, base, scheme, upos)   # "" ⇒ no POS opinion; fall through untouched
+        if not out:
+            if scheme == "iast":
+                out = _iast(text)
+            elif scheme in _AKSHARA_IDS and base == "sa":
+                out = _sanskrit(text, scheme)
+            elif scheme in _ENGINES:
+                out = _ENGINES[scheme][0](text)
+            else:
+                out = _legacy(text, base, lang)   # single-scheme / legacy backends ignore `scheme`
         if out and _is_latin_output(scheme):
             out = _latinize_punct(out)   # a romanised output never keeps CJK/fullwidth punctuation
     except Exception:  # noqa: BLE001 — an engine hiccup must never surface as an exception
@@ -1578,30 +2035,51 @@ def _render_one(text: str, lang: str, scheme: str) -> str:
     return _CACHE[key]
 
 
-def transliterate(forms, lang: str, scheme: str = ""):
-    """Transliterate (ROMANISE) ``forms`` for ``lang`` under ``scheme`` ("" ⇒ the language's default).
-    Accepts a single string or a list; returns the same shape.  Never raises (failures → "")."""
-    if isinstance(forms, (list, tuple)):
-        return [transliterate(f, lang, scheme) for f in forms]
-    return _render_one(forms, lang, scheme)
-
-
-def orthography(forms, lang: str, scheme: str = ""):
-    """Re-render ``forms`` in the display-only ORTHOGRAPHY ``scheme`` (Zhuyin, GR, an Indic script, …).
-    "" ⇒ Original (returns "" so the caller keeps the original glyphs).  Never raises."""
-    if isinstance(forms, (list, tuple)):
-        return [orthography(f, lang, scheme) for f in forms]
+def _ortho_one(text: str, lang: str, scheme: str, upos: str) -> str:
+    """One form re-rendered in an ORTHOGRAPHY scheme.  Split out so the scalar and the vector entry
+    points below can each be typed exactly (``str`` / ``list[str]``) instead of sharing one
+    ``str | list[str]`` body that pyright then has to widen at every call site."""
     if not scheme:
         return ""   # "Original" — no re-rendering
-    return _render_one(forms, lang, scheme)
+    return _render_one(text, lang, scheme, upos)
 
 
-def transliterate_many(forms: list[str], lang: str, scheme: str = "") -> list[str]:
-    return [transliterate(f, lang, scheme) for f in forms]
+def transliterate(forms: _Forms, lang: str, scheme: str = "", upos: _Upos = "") -> _Rendered:
+    """Transliterate (ROMANISE) ``forms`` for ``lang`` under ``scheme`` ("" ⇒ the language's default).
+    Accepts a single string or a list; returns the same shape.  Never raises (failures → "").
+
+    ``upos`` is an OPTIONAL UD tag ("NOUN", "VERB", …) — a single string applying to every form, or
+    a LIST PARALLEL TO ``forms``.  Where the language and scheme support it (Chinese; see
+    `_pos_render`) it selects which reading of a one-graph token to render; everywhere else, and
+    for every caller that omits it, nothing changes."""
+    if isinstance(forms, (list, tuple)):
+        return [_render_one(f, lang, scheme, _upos_at(upos, i)) for i, f in enumerate(forms)]
+    return _render_one(forms, lang, scheme, _upos_at(upos, 0))
 
 
-def orthography_many(forms: list[str], lang: str, scheme: str = "") -> list[str]:
-    return [orthography(f, lang, scheme) for f in forms]
+def orthography(forms: _Forms, lang: str, scheme: str = "", upos: _Upos = "") -> _Rendered:
+    """Re-render ``forms`` in the display-only ORTHOGRAPHY ``scheme`` (Zhuyin, GR, an Indic script, …).
+    "" ⇒ Original (returns "" so the caller keeps the original glyphs).  ``upos`` as in
+    `transliterate` — it reaches the Mandarin orthographies (Zhuyin, Gwoyeu Romatzyh), which are
+    driven by the same numbered-pinyin syllables, and is inert for the rest.  Never raises."""
+    if isinstance(forms, (list, tuple)):
+        return [_ortho_one(f, lang, scheme, _upos_at(upos, i)) for i, f in enumerate(forms)]
+    return _ortho_one(forms, lang, scheme, _upos_at(upos, 0))
+
+
+# The two *_many entry points render the LIST case directly rather than delegating to the
+# shape-polymorphic functions above.  Runtime is identical — those functions' list branches are
+# these comprehensions — but the declared return type is `list[str]` and not `str | list[str]`, so a
+# caller (api.py's `_with_upos`) gets a list without a cast, and a `list[str]` upos never has to be
+# passed through a parameter another overload might read as a single tag.
+def transliterate_many(forms: list[str], lang: str, scheme: str = "",
+                       upos: list[str] | None = None) -> list[str]:
+    return [_render_one(f, lang, scheme, _upos_at(upos, i)) for i, f in enumerate(forms or [])]
+
+
+def orthography_many(forms: list[str], lang: str, scheme: str = "",
+                     upos: list[str] | None = None) -> list[str]:
+    return [_ortho_one(f, lang, scheme, _upos_at(upos, i)) for i, f in enumerate(forms or [])]
 
 
 # ── heteronym readings (Chinese + Japanese) ───────────────────────────────────
@@ -1613,11 +2091,52 @@ def orthography_many(forms: list[str], lang: str, scheme: str = "") -> list[str]
 # the Baxter–Sagart table, IPADIC via Janome — and rendered through that engine's own joiner, so a
 # candidate can never contradict the scheme the user picked.  Scoped to the languages whose
 # romanisation is genuinely ambiguous; every other language has nothing to choose between.
-_READINGS: dict[tuple[str, str, str], list[str]] = {}   # (lang, scheme, text) → ordered candidates
+_READINGS: dict[tuple[str, str, str, str], list[str]] = {}   # (lang, scheme, text, upos) → ordered candidates (upos reorders; see `readings`)
 _READING_LANGS = ("zh", "yue", "lzh", "ja", "ko")       # after _canon_lang: cmn→zh, jpn→ja, kor→ko
 _MAX_READINGS = 12      # a pick list, not an enumeration — a 3-character token of 5-way heteronyms is already 125 combinations
-_MAX_PER_CHAR = 6       # …and pypinyin/ToJyutping list rare dialectal readings well past the point of usefulness
+_MAX_PER_CHAR = 6       # …and pypinyin/ToJyutping list rare dialectal readings well past the point of usefulness.
+#                         Still per-CHARACTER after the whole-token rule below: what it now caps is a single
+#                         character's own readings, one position of a polyphonic phrase entry, and the wider
+#                         enumeration the derivation path keeps — never a cross-product over a word's graphs.
 _MANDARIN_JOIN = {"pinyin": _join_pinyin, "zhuyin": _join_zhuyin, "gr": _join_gr}   # the Mandarin schemes driven by numbered-pinyin syllables
+
+# ⚠ THE WHOLE-TOKEN RULE.  A MULTI-CHARACTER token is offered alternatives only where the engine's own
+# dictionary holds more than one reading OF THAT WHOLE TOKEN — never because one of its constituent
+# characters happens to be heteronymic.  A cross-product over per-character readings is almost entirely
+# noise: 行 has five Mandarin readings, so 银行 and 行李 each came back with five candidates although both
+# words have exactly one pronunciation, 重要 came back with nine and 银行卡 with ten.  A list that long and
+# that wrong is harder to find the right reading in than no list at all.  A ONE-character token is
+# unaffected — there the character IS the whole token, and its own readings ARE a whole-token lookup.
+# Where each engine's whole-token dictionary is, and what it actually holds:
+#   · Mandarin  — pypinyin's PHRASES_DICT (47,111 phrases).  A phrase entry is normally single-valued, so
+#                 the usual answer for a multi-character token is "nothing to choose"; exactly two entries
+#                 are polyphonic (朝阳 zhāo-/cháo-, 那些 nà-/nèi-) and those two do still offer.
+#   · Cantonese — ToJyutping's trie: 18,056 multi-character entries, and not one of them carries a second
+#                 reading (measured over its trie.txt).  So a Cantonese word the dictionary knows has one
+#                 pronunciation and a word it doesn't know has none to offer — either way, no alternatives.
+#   · Japanese  — IPADIC, looked up on the WHOLE surface.  `_japanese_kana` already did exactly this; it is
+#                 the engine the rule is modelled on and the only one that needed no change.
+#   · Baxter    — a per-GRAPH table with no word layer at all, so a multi-character token has nothing to
+#                 consult.  A SINGLE graph has plenty: since the table was rebuilt from the appendix's
+#                 own word list, 547 of its 4,330 graphs carry more than one Middle Chinese reading and
+#                 312 more than one Mandarin one, where the collapsed file it replaced was single-valued
+#                 throughout.  That is the axis `_pos_render` conditions on.
+#   · Korean    — the Unihan kHangul table is likewise per-GRAPH; a token of two or more hanja has no
+#                 whole-token entry, and the cross-product over 音 × 樂 offered 음락/음요 beside 음악.
+# The COST was weighed and accepted: 一行 genuinely is yīháng "a row" as often as yīxíng "a trip" and
+# pypinyin picks one of them, 音樂 is 음악 while the table's first reading of 樂 makes the automatic value
+# 음락 — and neither can be fixed from the flyout any more.  Both are still fixable by the OTHER route to
+# the same correction, because ambiguity is a property of the LANGUAGE and not of the token: the Stored
+# transliteration stays click-editable for every token of these languages (see `ambiguous` below), and
+# the DERIVATION path that carries such a correction into the other schemes is deliberately NOT narrowed
+# with the flyout — see `_mandarin_choices`'s ``whole_only`` and `_mandarin_pairs`.
+
+
+def _han_count(text: str) -> int:
+    """How many Han characters ``text`` holds — i.e. how many positions have a reading to choose at all.
+    One ⇒ the character is the whole token (see the whole-token rule above); two or more ⇒ only a
+    dictionary that knows the WORD may speak for it."""
+    return sum(1 for ch in text if _is_han(ch))
 
 
 _HET_CHAR: dict[str, list[str]] = {}
@@ -1634,30 +2153,54 @@ def _char_heteronyms(ch: str) -> list[str]:
     return _HET_CHAR[ch]
 
 
-def _mandarin_choices(text: str):
+def _mandarin_choices(text: str, whole_only: bool = False):
     """Per-position ORDERED candidate numbered-pinyin syllables: ``[(is_han, [syl, …]), …]``, one
     entry per _mandarin_syllables segment, each list headed by the syllable that engine actually
     chose (so the default reading stays first even where pypinyin's phrase dictionary or the 不
     tone-sandhi correction overrode the character's own citation reading).  None ⇒ no alternates.
 
-    A character INSIDE a word pypinyin's phrase dictionary knows comes back with that one phrase
-    reading and no heteronyms (一行 → yi1 xing2), so each such position is topped up from the
-    character's own readings — which is precisely the case this feature exists for: the phrase
-    dictionary is where the automatic romanisation goes wrong (一行 is yīháng "a row" as often as
-    yīxíng "a trip"), and it can only be overridden from a list that HAS the other reading in it."""
+    ``whole_only`` applies the WHOLE-TOKEN RULE above and is what the READINGS FLYOUT asks for: a token
+    of two or more Han characters gets alternatives only out of a PHRASES_DICT entry that ITSELF records
+    more than one reading (朝阳, 那些), and one option per position otherwise — the default reading, and
+    nothing to choose.  Membership is tested against pypinyin's own dictionary rather than inferred from
+    the heteronym pass, because that pass answers a phrase hit and an unknown word with the same shape
+    (one candidate per position for 银行, several for 银行卡) and the two must be told apart.
+
+    WITHOUT it — the DERIVATION path, `_mandarin_pairs` — the wider enumeration below is kept, and the
+    reason is the one it always had: a character INSIDE a word pypinyin's phrase dictionary knows comes
+    back with that one phrase reading and no heteronyms (一行 → yi1 xing2), so each such position is
+    topped up from the character's own readings, because the phrase dictionary is where the automatic
+    romanisation goes wrong (一行 is yīháng "a row" as often as yīxíng "a trip") and a STORED value the
+    user typed by hand to say so can only be RECOGNISED from a list that HAS the other reading in it.
+    That rationale is intact; what the whole-token rule stops is OFFERING such a list unprompted.
+    Recognising a correction somebody has already made is a different question, and its answer did not
+    change — narrowing derivation too would have made a hand-corrected 银行 stop driving the Zhuyin row
+    (`derive_scheme` would return "" and the caller would romanise the form again), which is the very
+    contract the editable Stored value exists to provide."""
     from pypinyin import Style, pinyin
     base = _mandarin_syllables(text)
-    het = pinyin(text, style=Style.TONE3, heteronym=True, neutral_tone_with_five=True)
+    het = _phrase_heteronyms(text)
     if len(het) != len(base):   # the two passes segmented differently → alignment is a guess; offer nothing rather than a wrong reading
         return None
+    # The gate, computed once: one Han character IS the whole token, and past that only a phrase pypinyin
+    # actually holds may speak for the word.  `text` and not a Han-only slice of it — PHRASES_DICT is keyed
+    # by the bare phrase, so a token carrying punctuation simply misses, which is the right answer anyway.
+    # Through `_phrase_known` and not the bare membership test, because that dictionary is SIMPLIFIED-ONLY:
+    # 銀行 is as much a known word as 银行, and testing the raw spelling would have called the traditional
+    # one an unknown compound and offered its characters' heteronyms — the very thing the rule forbids.
+    wide = (not whole_only) or sum(1 for is_han, _ in base if is_han) < 2 or _phrase_known(text)
     out, idx = [], 0
     for (is_han, syl), cands in zip(base, het):
         if not is_han:
             out.append((False, [syl]))   # a non-Han run passes through verbatim, exactly as in _mandarin_syllables
             idx += len(syl)
             continue
+        if not wide:
+            out.append((True, [syl]))    # a multi-character token no phrase entry vouches for: the default reading alone
+            idx += 1
+            continue
         opts = [syl] + [c for c in cands if c != syl]
-        if len(opts) == 1 and idx < len(text):   # phrase-dictionary hit → fall back to the character's own readings
+        if not whole_only and len(opts) == 1 and idx < len(text):   # phrase-dictionary hit → fall back to the character's own readings (derivation only — see the docstring)
             opts += [c for c in _char_heteronyms(text[idx]) if c != syl]
         out.append((True, opts[:_MAX_PER_CHAR]))
         idx += 1
@@ -1688,7 +2231,7 @@ def _combos(counts: list[int]) -> list[tuple[int, ...]]:
 
 
 def _mandarin_readings(text: str, scheme: str) -> list[str]:
-    choices = _mandarin_choices(text)
+    choices = _mandarin_choices(text, whole_only=True)   # the flyout obeys the whole-token rule; `_mandarin_pairs` deliberately does not
     if not choices:
         return []
     join = _MANDARIN_JOIN[scheme]
@@ -1700,10 +2243,20 @@ def _jyutping_readings(text: str) -> list[str]:
     """Ordered Jyutping candidates, from ToJyutping's own per-character candidate lists (the very
     table get_jyutping_text picks its single reading out of).  Restricted to an ALL-Han token: for a
     mixed token get_jyutping_text has its own spacing around the non-Han run, and re-joining the
-    candidates by hand would silently disagree with the displayed default."""
+    candidates by hand would silently disagree with the displayed default.
+
+    …and, per the WHOLE-TOKEN RULE, to a ONE-character token.  get_jyutping_candidates flattens every
+    trie entry covering a position into that position's list — word entries included, but with no record
+    of which word they came from — so for a multi-character token it can only ever yield a cross-product
+    over the characters (銀行 → 11 candidates for a word with one pronunciation).  Asking the trie for the
+    whole word instead would answer nothing: of its 18,056 multi-character entries not one carries a
+    second reading, so a word the dictionary knows is unambiguous and a word it doesn't know has nothing
+    to offer.  The gate is therefore the length test rather than a private walk over its internals."""
     import ToJyutping
     cands = ToJyutping.get_jyutping_candidates(text)
     if not cands or any(not c[1] for c in cands):
+        return []
+    if len(cands) > 1:   # one entry per character, and the all-Han test above makes that a Han count
         return []
     lists = [list(c[1])[:_MAX_PER_CHAR] for c in cands]
     return [" ".join(lists[k][i] for k, i in enumerate(pick)) for pick in _combos([len(x) for x in lists])]
@@ -1713,30 +2266,50 @@ _BAXTER_ALL: dict[str, list[tuple[str, str]]] | None = None
 
 
 def _baxter_all() -> dict[str, list[tuple[str, str]]]:
-    """Every (MC, OC) row the vendored table holds per character, in file order — the multi-reading
-    view of the same data _baxter_table() collapses to one row per graph (last wins).  A graph that
-    the source lists under several Middle Chinese readings therefore surfaces all of them here."""
+    """Every (MC, OC) reading the vendored table holds per graph, in source order — the
+    multi-reading view of the same data _baxter_table() collapses to ONE pair per graph.
+
+    TWO axes make a graph multi-valued and the table now carries both.  Its several ROWS are
+    several WORDS written with the one graph, which is what the rebuild recovered: 547 graphs have
+    more than one Middle Chinese reading (數 srjuX / srjuH / sræwk), where the collapsed file had
+    exactly one for every graph and this function could only ever return a single pair.  And ` ~ `
+    VARIANTS inside one row's OC field are two reconstructions of that one word, which
+    _baxter_variants splits — so 前 surfaces here as [("dzen", "*dzˁen"), ("dzen", "*m-dzˁen")]:
+    one MC transcription against each OC reconstruction of it.  That asymmetry is the data's, not a
+    bug — the MC column has no tilde in any row, so a variant pair differs in its reconstruction and
+    not in its Middle Chinese.
+
+    The pairs are read ROW BY ROW so an MC and an OC that appear together really are the same word's
+    (`_baxter_pairs` depends on exactly that); duplicates are dropped, which is why a graph whose
+    rows differ only in OC still lists its MC once."""
     global _BAXTER_ALL
     if _BAXTER_ALL is None:
         _BAXTER_ALL = {}
-        try:
-            with open(os.path.join(_DATA_DIR, "baxter_sagart.tsv"), encoding="utf-8") as fh:
-                for line in fh:
-                    if line.startswith("#") or "\t" not in line:
-                        continue
-                    parts = line.rstrip("\n").split("\t")
-                    rec = (parts[1] if len(parts) > 1 else "", parts[2] if len(parts) > 2 else "")
-                    _BAXTER_ALL.setdefault(parts[0], [])
-                    if rec not in _BAXTER_ALL[parts[0]]:
-                        _BAXTER_ALL[parts[0]].append(rec)
-        except Exception:  # noqa: BLE001
-            pass
+        for ch, rows in _baxter_rows().items():
+            out: list[tuple[str, str]] = []
+            for _py, mc, oc, _pos, _gloss in rows:
+                for ocv in (_baxter_variants(oc) or [""]):
+                    rec = (mc, _baxter_display(ocv))
+                    if rec not in out:
+                        out.append(rec)
+            _BAXTER_ALL[ch] = out
     return _BAXTER_ALL
 
 
 def _baxter_readings(text: str, idx: int) -> list[str]:
     """Candidate Baxter (idx 0) / Baxter–Sagart (idx 1) readings, assembled exactly as _baxter does —
-    space-joined, characters absent from the table dropped rather than guessed."""
+    space-joined, characters absent from the table dropped rather than guessed.
+
+    Per the WHOLE-TOKEN RULE a token of two or more graphs offers nothing: the vendored table is keyed by
+    GRAPH and has no word layer, so its only multi-character answer could be a cross-product.  A SINGLE
+    graph now answers on BOTH of the axes `_baxter_all` documents — the graph's several WORDS (數 offers
+    srjuX / srjuH / sræwk, 行 hang / hæng / hængH), which the rebuild recovered and the collapsed file
+    could not express at all, and the ` ~ ` VARIANTS of one word's Old Chinese reconstruction, which 31
+    rows carry.  Middle Chinese takes nothing from the second axis: that column has no tilde, so both
+    variants of a pair share one MC transcription and the deduplication leaves one.  `_baxter_pairs` is
+    left wide for the same reason `_mandarin_pairs` is."""
+    if _han_count(text) > 1:
+        return []
     table, allrec = _baxter_table(), _baxter_all()
     lists: list[list[str]] = []
     for ch in text:
@@ -1758,7 +2331,9 @@ def _japanese_readings(text: str, system: str) -> list[str]:
     surface (行く → イク / ユク), cheapest connection cost — i.e. most frequent — first, each romanised
     through the SAME cutlet system the display uses.  Only whole-surface dictionary entries count: a
     compound the dictionary doesn't hold as one word gets no alternates rather than a re-segmented
-    guess.  Janome's ``reading`` field (not ``phonetic``) is used, so the ー long-vowel mark never
+    guess — which is the WHOLE-TOKEN RULE above, written here first and since made the rule for every
+    engine, so this is the one reading path that needed no change to obey it.  Janome's ``reading``
+    field (not ``phonetic``) is used, so the ー long-vowel mark never
     reaches cutlet, which romanises it inconsistently (ギョー → gyoo but コー → kou).
 
     The reading cutlet ITSELF chose (read off its own tagger) is dropped from the list: fed a bare
@@ -1787,9 +2362,14 @@ def _korean_readings(text: str) -> list[str]:
     A Hanja is heteronymic in Korean just as it is in Chinese — 樂 is 락 "pleasure" / 악 "music" /
     요 "to like" — and only 383 of the 8,525 graphs in the table carry more than one reading, so most
     tokens fall out at the `alts` gate below without building anything.  A pure-Hangul token has no
-    Hanja to re-read at all and therefore no alternatives, which is the common case for Korean."""
+    Hanja to re-read at all and therefore no alternatives, which is the common case for Korean.
+
+    Per the WHOLE-TOKEN RULE, only ONE hanja.  kHangul is a per-GRAPH table with no word layer, so a token
+    of two or more hanja has no whole-token entry to consult, and the cross-product over 音 × 樂 offered
+    음락/음요 beside the right 음악.  A single hanja IS the whole token's readable content, whatever Hangul
+    inflection follows it (樂들), so that case is untouched."""
     tbl = _hanja_table()
-    if not tbl:
+    if not tbl or _han_count(text) > 1:
         return []
     lists: list[list[str]] = []
     alts = False
@@ -1812,18 +2392,31 @@ def _korean_readings(text: str) -> list[str]:
             for pick in _combos([len(x) for x in lists])]
 
 
-def readings(text: str, lang: str, scheme: str = "") -> list[str]:
+def readings(text: str, lang: str, scheme: str = "", upos: str = "") -> list[str]:
     """ORDERED candidate romanisations of ``text`` in ``scheme`` (best guess first), for the CJK
     languages whose romanisation is genuinely ambiguous.  The first entry is always what the app is
     currently displaying, so the caller can tick it.  Returns ``[]`` when the engine offers only one
-    reading (nothing to choose), for any other language or scheme, and on any failure — never raises."""
+    reading (nothing to choose), for any other language or scheme, and on any failure — never raises.
+
+    "The engine offers only one reading" is judged of the WHOLE TOKEN: a multi-character token answers
+    ``[]`` unless the engine's own dictionary holds a second reading of that word, however heteronymic
+    its individual characters are (see the whole-token rule above).  So a token this used to answer for
+    may now answer ``[]``; the caller shows no flyout row, which is what it already does for every
+    unambiguous token, and the language's Stored transliteration stays editable regardless.
+
+    ``upos`` is an OPTIONAL UD tag and REORDERS, it does not filter: the list is built exactly as it
+    would be without one and the reading the tag names is promoted to index 0.  It needs no code of
+    its own here, and deliberately so — the list is seeded with `_render_one`, which is where the
+    POS conditioning lives, and the dedup below then keeps that value at the front however the
+    engine ordered the rest.  A tag that names nothing leaves the order alone.  The cache key
+    carries ``upos`` for the same reason `_render_one`'s does."""
     if not text or not lang:
         return []
     base = _canon_lang(_norm(lang))
     if base not in _READING_LANGS:
         return []
     scheme = scheme or _default_scheme(base)
-    key = (lang, scheme, text)
+    key = (lang, scheme, text, upos or "")
     if key in _READINGS:
         return list(_READINGS[key])
     try:
@@ -1843,7 +2436,7 @@ def readings(text: str, lang: str, scheme: str = "") -> list[str]:
     except Exception:  # noqa: BLE001 — a missing extras tier or an engine hiccup means "no alternates", never an error
         cands = []
     out: list[str] = []
-    for c in ([_render_one(text, lang, scheme)] + cands):   # the displayed rendering heads the list, whatever the engine ordered
+    for c in ([_render_one(text, lang, scheme, upos or "")] + cands):   # the displayed rendering heads the list, whatever the engine ordered — and it is the POS-conditioned one when a tag was given
         c = _latinize_punct(c) if (c and _is_latin_output(scheme)) else c
         if c and c not in out:
             out.append(c)
@@ -1873,7 +2466,14 @@ def ambiguous(lang: str) -> bool:
     """Is ``lang``'s romanisation genuinely non-deterministic — i.e. is the machine's guess something a
     user must be able to CORRECT rather than merely read?  True for the CJK reading languages (the same
     set `readings` offers alternatives for, so the readings flyout and the editable stored value always
-    cover the same languages) and for the unvocalised abjads.  False everywhere else."""
+    cover the same languages) and for the unvocalised abjads.  False everywhere else.
+
+    A property of the LANGUAGE, not of the token, and deliberately left that way when `readings` narrowed
+    to whole-token lookups: a Chinese or Korean token that now has no flyout row is not thereby a token
+    whose romanisation is certain — 一行 and 音樂 are exactly the cases the machine gets wrong and cannot
+    enumerate its way out of — so the editable Stored value must still be there to type the answer into.
+    The frontend gates that row on this predicate alone (`storedTrEditable` in js/lang/translit.js), never
+    on `readings`, so the two narrowings are independent by construction."""
     base = _canon_lang(_norm(lang))
     return base in _READING_LANGS or base in _ABJAD_LANGS
 
@@ -1914,7 +2514,14 @@ def _japanese_kana(text: str) -> list[str]:
 
 def _mandarin_pairs(text: str, src: str, dst: str) -> list[tuple[str, str]]:
     """Every candidate reading of ``text`` rendered in BOTH Mandarin schemes, from one shared pick of
-    per-character numbered-pinyin syllables — so the two strings in a pair always spell the same reading."""
+    per-character numbered-pinyin syllables — so the two strings in a pair always spell the same reading.
+
+    Deliberately NOT passed ``whole_only``: the whole-token rule governs what is OFFERED, while this list
+    is what a stored value already typed by hand is RECOGNISED against, and a user who corrected 银行 to
+    yínxíng means it.  Narrowing here would make `derive_scheme` return "" for that correction and the
+    Displayed row romanise the surface form again — silently putting the automatic reading back, which is
+    the one thing the editable Stored value exists to prevent.  The same asymmetry `_japanese_kana` already
+    documents (it keeps the reading `_japanese_readings` drops) and for the same reason."""
     choices = _mandarin_choices(text)
     if not choices:
         return []
