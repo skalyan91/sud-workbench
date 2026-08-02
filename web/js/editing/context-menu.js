@@ -579,7 +579,26 @@ document.getElementById("doc").addEventListener("contextmenu",e=>{
     // Both rows of a tie open the SAME menu, and "Edit surface form" stays coherent under a Sanskrit script
     // because editMWTInline (not this row) decides which element the field opens over — the IAST row when the
     // glyph is derived, the glyph itself otherwise. So the menu item edits whatever the left-click would.
-    showCtx(e.clientX,e.clientY,[["Edit surface form","⏎",()=>editMWTInline(si,from)],["Remove MWT","⌫",()=>{ const s=DOC[si]; if(s){ pushUndo(si); s.mwt=(s.mwt||[]).filter(x=>x.from!==from); markDirty(); preserveScroll(renderDoc); } },true]]); return; }
+    /* THE WHOLE MWT FAMILY, ON THE RANGE THAT WAS CLICKED — not on the selection. Ungroup and Flatten
+       are in the Edit menu too, where they read `sel`/`selRange` and are hidden unless the selection
+       forms an MWT (menuState's `ungroup`/`flatmwt`); reaching them therefore meant selecting the range
+       first. A right-click already names its target unambiguously, so these resolve the MWT from
+       `data-mwtfrom` and need no selection at all.
+       Same labels and accelerators as the Edit menu, so the two cannot read as different commands.
+       "Remove MWT" was this menu's own name for Ungroup — one operation under two names, and the ⌫ hint
+       and danger styling said "delete", which it never was: dropping a RANGE leaves every token in
+       place. Flatten is the one that removes tokens, and it is not styled as a deletion in the Edit
+       menu either, because replacing n components with the word they spell is an ordinary edit. */
+    // …and they are mwtTokenItems' OWN rows, not a second pair written out here: that helper already
+    // supplies Flatten/Ungroup to the component tokens' menu, and two hand-kept copies of one pair is
+    // how the labels and the accelerators drift apart (this file already carries a post-mortem on an
+    // ⌥⌘F that outlived its binding by exactly that route). It resolves the range with mwtAtSel, so
+    // passing the range's FIRST component id asks it about this very MWT.
+    showCtx(e.clientX,e.clientY,[
+      ["Edit surface form","⏎",()=>editMWTInline(si,from)],
+      null,
+      ...mwtTokenItems(si,from),
+    ]); return; }
   // a goeswith continuation's own form field: it lives INSIDE the head's cell, so the generic resolver below would
   // hand back the head. Its right-click menu is the ordinary token menu, for the token it actually draws.
   const gwEl=e.target.closest("[data-gwtok]");
