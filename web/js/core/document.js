@@ -1363,7 +1363,11 @@ function buildBlock(i,ctx){ const s=DOC[i];
       let line;
       // cslTop FIRST: s.orthoLine is the whole sentence scripted from `# text` (fillOrtho), which for a
       // Latin script is the text itself — it would win here and the CSL line would never be reached.
-      if(cslTop) line=runningLine(s,i,u=>u.mwt?(topTransTxt(u.mwt)||u.mwt.form):(topTransTxt(u.tok)||u.tok.form)," ");
+      // bform, not topTransTxt: under cslTop the CSL IS the glyph (see bform), so topTransTxt rightly
+      // reports it as saying nothing the glyph does not and returns "" — which fell back to the plain
+      // form and put the unmarked sentence back on the line. The running line is the glyphs joined,
+      // exactly as it is for a Brahmic script; only the gap rule differs (marked junctions go apart).
+      if(cslTop) line=runningLine(s,i,u=>bform(u.mwt||u.tok)," ");
       else if(isSanskritLang() && s.orthoLine){ line=s.orthoLine; }   // item 27(b): Sanskrit's running text is the WHOLE sentence fused by external sandhi then scripted (fillOrtho → s.orthoLine), not a naive per-word join
       /* Every other language joins its own tokens, and the WHITESPACE BETWEEN THEM IS `# text`'s, not
          something to invent. Preferred source: the alignment stextSpans already computes for the
@@ -1394,7 +1398,7 @@ function buildBlock(i,ctx){ const s=DOC[i];
       // Gated on the row being HIDDEN, not on the reason it is hidden. "None" was one reason; CSL is now
       // another (it takes the visible slot — see the scriptTransLine assignment below), and without this
       // the original text became uneditable inline for as long as CSL was displayed.
-      if(isSanskritLang() && (!show.translit||cslRow)){ txt.style.cursor="text"; txt.title+=" — click to edit the transliteration";
+      if(isSanskritLang() && (!show.translit||cslRow||cslTop)){ txt.style.cursor="text"; txt.title+=" — click to edit the transliteration";
         txt.addEventListener("click",()=>{ if(!scriptTransLine)return; scriptTransLine.hidden=false; alignInlineStart(scriptTransLine,b); capTransWidth(scriptTransLine); scriptTransLine.focus(); }); } }
     else wireStext(txt);
     const ctrl=document.createElement("div"); ctrl.className="sctrl";
@@ -1465,9 +1469,14 @@ function buildBlock(i,ctx){ const s=DOC[i];
          A scheme that RESPELLS the sentence therefore gets a row of its own here (`cslRow`), and the
          editable original goes back to being collapsed-and-click-revealable, which is what it is for. */
       const tl=document.createElement("div"); tl.className="strans strans-orig"; tl.style.marginInlineStart=(idW+8)+"px"; wireStext(tl);
-      tl.hidden=!show.translit||cslRow;   // Sanskrit Displayed:"None" → collapsed by default; the script .stext click handler above reveals + focuses it on demand. Under CSL it collapses too — the visible row below is the CSL, and the original stays one click away
+      // Collapsed whenever the visible line above is NOT this row's own value: Displayed "None"
+      // (nothing to show), CSL-in-a-row under a real script, and CSL-as-the-line under a Latin one.
+      // In that last case the sentence on screen IS the CSL, so a permanently open row beneath it
+      // would be the same sentence twice — the editable original belongs one click away, which is
+      // exactly what the .stext handler above provides (and what it opens is the IAST `# text`).
+      tl.hidden=!show.translit||cslRow||cslTop;
       tl.setAttribute("data-capw","1"); if(!tl.hidden) applyTransInset(tl);   // swept with the translations grid, synchronously, so the height the caps measure is the height that is drawn   // a hidden row is unmeasurable (0-width rect) — the reveal handler re-runs this itself once it's shown
-      tl.addEventListener("blur",()=>{ if(!show.translit||cslRow) tl.hidden=true; });   // …and re-collapses on blur, still gated on Displayed:"None" — if the user changed the Displayed scheme away from None WHILE this row was open, show.translit is now true and the row stays, exactly as a fresh render would leave it
+      tl.addEventListener("blur",()=>{ if(!show.translit||cslRow||cslTop) tl.hidden=true; });   // …and re-collapses on blur, still gated on Displayed:"None" — if the user changed the Displayed scheme away from None WHILE this row was open, show.translit is now true and the row stays, exactly as a fresh render would leave it
       scriptTransLine=tl; b.appendChild(tl);
       if(cslRow){ const cl=document.createElement("div"); cl.className="strans"; cl.style.marginInlineStart=(idW+8)+"px";
         cl.textContent=runningLine(s,i,u=>u.mwt?(topTransTxt(u.mwt)||u.mwt.form):(topTransTxt(u.tok)||u.tok.form)," ");

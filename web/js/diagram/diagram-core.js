@@ -528,6 +528,12 @@ function dandaGlyph(form){   // → the script daṇḍa for a daṇḍa marker 
 // item 11: the SCRIPT drives the MAIN GLYPH. "Original" (default, ORTHO_SCHEME="") → the stored form;
 // "None" (ORTHO_SCHEME="none") → the DISPLAYED transliteration becomes the main glyph; a script id → that script.
 function bform(t){ const f=(t&&t.mform!=null)?t.mform:(t?t.form:"");
+  /* Script=Latin + Displayed=CSL name ONE Latin line, so CSL is the GLYPH itself — not a second row
+     under an IAST one saying the same word in a different notation. This is the substitution
+     Script=None already makes for Chinese three lines down, reached from the other side: there the
+     romanisation replaces a Han glyph, here a marked romanisation replaces an unmarked one.
+     trTxt then drops the transliteration row on its own, since it suppresses a value equal to bform. */
+  if(typeof saCslTop==="function" && saCslTop() && show.translit && t && t.translit) return dispScheme(t.translit,TRANSLIT_SCHEME);
   const scriptOn=!!ORTHO_SCHEME && ORTHO_SCHEME!=="none";
   if(scriptOn){ const dg=dandaGlyph(f); if(dg) return dg;   // item 17: an un-folded daṇḍa PUNCT token → the script's native daṇḍa
     return (t && t.ortho) ? dispScheme(t.ortho,ORTHO_SCHEME) : f; }
