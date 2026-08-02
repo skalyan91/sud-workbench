@@ -104,7 +104,7 @@
 37	॥	॥	PUNCT	PUNCT	_	24	punct	_	Translit=|||LTranslit=|||MSeg=‖|Unsandhied=॥
 
 # sent_id = s3d
-# text = होरेत्य् अहोरात्रविकल्पम् एके वाञ्छन्ति पूर्वापरवर्णलोपात् ।\nकर्मार्जितम् पूर्वभवे सदादि यत् तस्य पङ्क्तिं समभिव्यनक्ति ॥
+# text = होरेत्य् अहोरात्रविकल्पम् एके वाञ्छन्ति पूर्वापरवर्णलोपात् ।\nकर्मार्जितं पूर्वभवे सदादि यत् तस्य पङ्क्तिं समभिव्यनक्ति ॥
 1-2	होरेत्य्	_	_	_	_	_	_	_	_
 1	होरा	होऋ	NOUN	NOUN	Case=Voc|Gender=Masc|Number=Dual	2	comp:obj	_	Translit=horā|LTranslit=hoṛ|MSeg=horā|MGloss=VOC.DU.M
 2	इति	इति	PART	PART	_	5	subj	_	Translit=iti|LTranslit=iti|MSeg=iti
@@ -120,7 +120,7 @@
 10	वर्ण	वर्ण	NOUN	NOUN	Compound=Yes	11	mod	_	Translit=varṇa|LTranslit=varṇa|MSeg=varṇa
 11	लोपात्	लोपात्	NOUN	NOUN	Case=Nom|Gender=Masc|Number=Sing	5	mod	_	Translit=lopāt|LTranslit=lopāt|MSeg=lopāt|MGloss=NOM.SG.M
 12	।	।	PUNCT	PUNCT	_	7	punct	_	Translit=||LTranslit=|
-13-14	कर्मार्जितम्	_	_	_	_	_	_	_	_
+13-14	कर्मार्जितं	_	_	_	_	_	_	_	_
 13	कर्म	कर्मः	NOUN	ADJ	Mood=Ind|Number=Plur|Person=1|Tense=Pres	14	mod	_	Translit=karma|LTranslit=karmaḥ|MSeg=karma|MGloss=1PL.PRS.IND
 14	अर्जितम्	अर्जित	VERB	ADJ	Case=Acc|Gender=Neut|Number=Sing|Tense=Past|VerbForm=Part	19	comp:pred	_	Translit=arjitam|LTranslit=arjita|MSeg=arjitam|MGloss=ACC.SG.N.PST.PTCP
 15-16	पूर्वभवे	_	_	_	_	_	_	_	_

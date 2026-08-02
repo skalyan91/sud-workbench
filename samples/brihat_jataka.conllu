@@ -102,7 +102,7 @@
 36	||	||	PUNCT	PUNCT	Case=Acc|Gender=Masc|Number=Sing	35	punct	_	Unsandhied=‖|MSeg=‖|MGloss=ACC.SG.M
 
 # sent_id = s3
-# text = horety ahorātravikalpam eke vāñchanti pūrvāparavarṇalopāt |\nkarmārjitam pūrvabhave sadādi yat tasya paṅktiṃ samabhivyanakti ||
+# text = horety ahorātravikalpam eke vāñchanti pūrvāparavarṇalopāt |\nkarmārjitaṃ pūrvabhave sadādi yat tasya paṅktiṃ samabhivyanakti ||
 1	horety	horety	NOUN	NOUN	Case=Voc|Gender=Masc|Number=Sing	4	orphan	_	Unsandhied=horeti|MSeg=horety|MGloss=VOC.SG.M
 2-3	ahorātravikalpam	_	_	_	_	_	_	_	_
 2	ahorātra	ahorātra	NOUN	ADJ	Compound=Yes	3	mod	_	Unsandhied=ahorātra|MSeg=ahorātra
@@ -115,7 +115,7 @@
 8	varṇa	varṇa	NOUN	NOUN	Compound=Yes	9	mod	_	Unsandhied=varṇa|MSeg=varṇa
 9	lopāt	lopa	NOUN	NOUN	Case=Abl|Gender=Masc|Number=Sing	12	compound@coord	_	Unsandhied=lopāt|MSeg=lop-āt|MGloss=-ABL.SG.M
 10	|	|	PUNCT	PUNCT	_	5	punct	_	Unsandhied=
-11-12	karmārjitam	_	_	_	_	_	_	_	_
+11-12	karmārjitaṃ	_	_	_	_	_	_	_	_
 11	karma	karman	NOUN	NOUN	Compound=Yes	12	comp:obj	_	Unsandhied=karma|MSeg=karma
 12	arjitam	arjay	VERB	ADJ	Case=Nom|Gender=Neut|Number=Sing|VerbForm=Part	5	conj:coord	_	Unsandhied=arjitam|MSeg=arj-itam|MGloss=-PTCP.NOM.SG.N
 13-14	pūrvabhave	_	_	_	_	_	_	_	_
