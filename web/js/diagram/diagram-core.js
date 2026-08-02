@@ -470,7 +470,7 @@ function orthoScript(){ return !!ORTHO_SCHEME && ORTHO_SCHEME!=="none" && !TRANS
 // to the token FORM. That only works while the stored form IS the IAST — true of every Sanskrit file
 // until one could be stored in Devanagari. Two of the four cases have changed:
 //   IAST file, script displayed      → row edits the form   (as before)
-//   IAST file, Original/Latin (IAST) → the glyph IS the form, edit it
+//   IAST file, Original/Latin → the glyph IS the form, edit it
 //   DEVANAGARI file, Original        → the glyph IS the form, edit it            (new)
 //   DEVANAGARI file, another script  → the glyph is derived, but so is the IAST row — neither shows
 //                                      the stored Devanagari, so the ordinary inline form editor

@@ -1428,7 +1428,7 @@ def _iast(text: str) -> str:
     per the spec: transliteration only fires when the token isn't already in Latin script.
 
     That "" is what serves BOTH layers this scheme now feeds.  On the transliteration ROW it means
-    "nothing to add, the form already reads as IAST"; under the Script pill's Latin (IAST) row it
+    "nothing to add, the form already reads as IAST"; under the Script pill's Latin row it
     means the caller falls back to the stored form — which, for an IAST-stored file, IS the answer.
     Only a Devanagari-stored file does any work here, and it goes through `_sanskrit` so the daṇḍas
     are re-spelled ``|``/``‖`` instead of coming back as full stops."""
@@ -1784,13 +1784,19 @@ _MONG = ("mn", "mon", "khk")
 # SANSKRIT is DIGRAPHIC IN STORAGE: a file's FORM/LEMMA columns hold either IAST or Devanagari,
 # whichever the parser was fed (`sa_sud_vedic_ufal_dcs` romanises Devanagari internally and puts it
 # back in FORM/LEMMA, with the IAST in MISC Translit/LTranslit, per the UD convention).  So Sanskrit
-# needs BOTH directions from the one menu, and "Latin (IAST)" is a genuine choice here rather than
-# the "no script" it is elsewhere: for a Devanagari-stored file it romanises, for an IAST-stored one
-# it is a no-op that leaves the stored spelling showing.  With the frontend's own "Original" row in
-# front, the three cases the reader can ask for — as stored, romanised, in some Brahmic script — are
-# each reachable by name, which the old Sanskrit-only "None" row could not express once the stored
-# script stopped being IAST by definition.
-_SA_SCRIPTS = [("iast", "Latin (IAST)")] + list(_AKSHARA_SCRIPTS)
+# needs BOTH directions from the one menu, and "Latin" is a genuine choice here rather than the "no
+# script" it is elsewhere: for a Devanagari-stored file it romanises, for an IAST-stored one it is a
+# no-op that leaves the stored spelling showing.  With the frontend's own "Original" row in front,
+# the three cases the reader can ask for — as stored, romanised, in some Brahmic script — are each
+# reachable by name, which the old Sanskrit-only "None" row could not express once the stored script
+# stopped being IAST by definition.
+# ⚠ THE ROW NAMES THE SCRIPT, NOT THE NOTATION — "Latin", not "Latin (IAST)". Which Latin notation is
+# drawn is the DISPLAYED transliteration's business, and the two menus disagreed the moment CSL could
+# fill this line: picking Script "Latin (IAST)" with Displayed CSL puts CSL on it (see saCslTop in
+# js/lang/translit.js), so a row promising IAST was naming something it no longer decided. The Displayed
+# menu still names IAST and CSL, which is where that choice belongs. The ID stays `iast`: it is the
+# engine's name and what a remembered Script preference is stored under.
+_SA_SCRIPTS = [("iast", "Latin")] + list(_AKSHARA_SCRIPTS)
 _SCRIPT_SCHEMES: dict[str, list[tuple[str, str]]] = {
     "zh": _HANZI_CONV, "yue": _HANZI_CONV, "lzh": _HANZI_CONV,
     "sa": _SA_SCRIPTS,

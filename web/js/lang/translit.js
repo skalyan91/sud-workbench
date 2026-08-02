@@ -251,7 +251,7 @@ function isSanskritLang(lang){ const b=((lang!=null?lang:DOCLANG)||"").toLowerCa
    worth showing), which script a re-fused MWT form has to come back in, what ITRANS input converts
    TO, and whether the diagram's form editor edits the glyph or the row beneath it.
 
-   "" = Latin (IAST), which is also the answer for every other language, so a caller may read it
+   "" = Latin, which is also the answer for every other language, so a caller may read it
    unconditionally. Read off the FORMS (Api.doc_script), never off a preference or a comment: it is
    a property of the file, and a reader's display choice must not be able to contradict it. */
 let DOCSCRIPT="";
@@ -270,11 +270,11 @@ async function loadDocScript(){
    selected, else the document's own. "" means Latin. `saGlyphLatin` is the question every caller
    actually has — "is what the reader is looking at romanised?" — and it is NOT the same as "is a
    script selected": a Devanagari file under "Original" shows a script with none selected, and an
-   IAST file under "Latin (IAST)" shows none with one selected. */
+   IAST file under "Latin" shows none with one selected. */
 function saGlyphScript(){ if(!isSanskritLang()) return "";
   return (ORTHO_SCHEME&&ORTHO_SCHEME!=="none") ? ORTHO_SCHEME : DOCSCRIPT; }
 function saGlyphLatin(){ const g=saGlyphScript(); return !g||g==="iast"; }
-/* Is the chosen SCRIPT a no-op on this file? "Latin (IAST)" over an IAST-STORED document renders each
+/* Is the chosen SCRIPT a no-op on this file? "Latin" over an IAST-STORED document renders each
    token to the spelling it already has, so the derived top line is character-for-character `# text` —
    and drawing it displaces the real text into the row below, where it reads as the same line twice.
    That is the "unnecessary running transliteration" under Script=Latin: not a transliteration at all,
@@ -374,7 +374,7 @@ function orthoDefault(lang){ return ""; }
 // document in any language that happened to accept it (and into a language with no Script menu at all).
 function orthoResolve(lang,want){
   if(want==null) return orthoDefault(lang);            // never chose → the language default
-  if(want==="none") return isSanskritLang(lang)?"":"none";   // "None" is a SYNTHETIC menu row (never present in ORTHO_SCHEMES), so it has to be matched HERE — testing it against the scheme list is what made a remembered None fall through and never come back. Sanskrit no longer OFFERS the row (its "Latin (IAST)" scheme says the same thing and says it as a script), so a None remembered from before that change resolves to Original rather than to a row the menu can't tick.
+  if(want==="none") return isSanskritLang(lang)?"":"none";   // "None" is a SYNTHETIC menu row (never present in ORTHO_SCHEMES), so it has to be matched HERE — testing it against the scheme list is what made a remembered None fall through and never come back. Sanskrit no longer OFFERS the row (its "Latin" scheme says the same thing and says it as a script), so a None remembered from before that change resolves to Original rather than to a row the menu can't tick.
   if(want==="") return "";                             // a deliberate "Original"
   return ORTHO_SCHEMES.some(s=>s.id===want&&s.available) ? want : orthoDefault(lang); }   // a real script id, honoured only while it is actually available — an uninstalled extra falls back for THIS load without forgetting the preference (only orPick ever rewrites it), so the script returns once the extra is back
 async function loadOrthoSchemes(lang){ lang=lang||""; _orLangLoaded=lang; ORTHO_SCHEMES=[];
@@ -437,7 +437,7 @@ function orRender(){ const m=orEl(); m.innerHTML="";
   // Sanskrit gets "Original" like everyone else — its stored script is now a real question, not a
   // constant — but NOT the "None" row. "None" means "show the displayed transliteration as the main
   // glyph", and Sanskrit's only displayed transliteration is IAST, which the schemes list already
-  // offers by name as "Latin (IAST)". Two rows doing one thing, one of them naming it after the
+  // offers by name as "Latin". Two rows doing one thing, one of them naming it after the
   // absence of a script when it IS one, is worse than one.
   const off=isSanskritLang()?[{id:"",label:"Original",available:true}]
                             :[{id:"",label:"Original",available:true},{id:"none",label:"None",available:true}];
@@ -456,7 +456,7 @@ function orRender(){ const m=orEl(); m.innerHTML="";
     m.appendChild(b); }); }
 function orPick(id){ orClose(); id=id||""; if(id===ORTHO_SCHEME) return;
   ORTHO_SCHEME=id; syncSchemeAttr();
-  if(isSanskritLang()) show.translit=saTransRow();   // item 27(c): the IAST transliteration row/pill follows the GLYPH (non-Latin ⇒ show IAST beneath; Latin (IAST)/an IAST-stored Original ⇒ hide)
+  if(isSanskritLang()) show.translit=saTransRow();   // item 27(c): the IAST transliteration row/pill follows the GLYPH (non-Latin ⇒ show IAST beneath; Latin/an IAST-stored Original ⇒ hide)
   updateTranslitPill(); updateOrthoPill(); clearOrthoCache();
   if((ORTHO_SCHEME && ORTHO_SCHEME!=="none")||isSanskritLang()) fillOrtho();   // a script fetches its rendering; Sanskrit also fuses MWT sandhi under None (item 18)
   if((!ORTHO_SCHEME||ORTHO_SCHEME==="none") && DOC.length) preserveScroll(renderDoc);   // None/Original: re-render NOW to revert the glyphs (the cache was just cleared). fillOrtho only re-renders when it FETCHED something, so a script→None switch on a sentence with no MWTs would otherwise leave the stale script glyphs on screen.

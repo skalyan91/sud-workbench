@@ -470,10 +470,12 @@ missing tier must surface as an offer to install, never an exception.
   IAST row beneath is worth drawing — `saTransRow`), which script a re-fused MWT form comes back in
   (`sandhi_join`), what ITRANS input converts TO (`itrans.convert`'s `script`), and whether the
   diagram's form editor edits the glyph or the row under it (`iastFormEdit`).
-  The **Script** menu is therefore Original + **Latin (IAST)** + the 33 Brahmic scripts, with no
-  "None" row: "Latin (IAST)" says the same thing and says it as a script. `_DANDA_IAST` routes the
-  daṇḍa there rather than through aksharamukha, which renders `।` as `.` and would put a full stop
-  in the middle of a verse.
+  The **Script** menu is therefore Original + **Latin** + the 33 Brahmic scripts, with no "None" row:
+  "Latin" says the same thing and says it as a script. It names the SCRIPT and not the notation — the
+  id is still `iast`, but which Latin notation that line is drawn in belongs to the Displayed
+  transliteration, and the two menus disagreed the moment CSL could fill it (Script Latin + Displayed
+  CSL puts CSL on that line — `saCslTop`, below). `_DANDA_IAST` routes the daṇḍa there rather than
+  through aksharamukha, which renders `।` as `.` and would put a full stop in the middle of a verse.
   **CSL survives as a DISPLAY scheme and nothing else** (`app/sa_notation.py` + the vendored
   `app/_sa_sandhi_vendor.py`, upstream's own `scripts/external_sandhi.py`). It is a transliteration-ROW
   choice beside IAST: per token, how that token would be spelt with the junctions marked — `vartmā`

@@ -948,7 +948,7 @@ class Api:
 
         Read off a sample of the document's own forms, because that is where the answer is — a file
         is in whatever script the parser that made it was fed, and no preference, comment or filename
-        records it. "" means Latin (IAST), which is also the answer for every non-Sanskrit language,
+        records it. "" means Latin, which is also the answer for every non-Sanskrit language,
         so a caller can ask unconditionally. Cheap enough to ask on open and on every parse: it stops
         at the first Brahmic form."""
         from . import translit

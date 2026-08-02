@@ -1460,7 +1460,7 @@ function buildBlock(i,ctx){ const s=DOC[i];
     if(scriptTop){   // item 3: translit slot carries the EDITABLE original # text (the top line now holds the script)
       /* ⚠ THE SLOT HOLDS THE EDITABLE ORIGINAL, NOT A TRANSLITERATION, and that is why CSL appeared to do
          nothing under a script: there is no transliteration row on this branch for it to fill. Worse, with
-         "Latin (IAST)" as the script the top line IS a romanisation, so an IAST-stored sentence had the
+         "Latin" as the script the top line IS a romanisation, so an IAST-stored sentence had the
          very same string twice — the derived line above and its own `# text` below.
          A scheme that RESPELLS the sentence therefore gets a row of its own here (`cslRow`), and the
          editable original goes back to being collapsed-and-click-revealable, which is what it is for. */
