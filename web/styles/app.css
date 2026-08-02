@@ -197,6 +197,15 @@
   .np-html{position:absolute; inset-inline-end:100%; margin-inline-end:1px; top:0; white-space:pre; pointer-events:none}
   .np-grid{position:absolute; inset-inline-start:1px; top:50%; transform:translateY(-50%); font-size:12px; line-height:1; pointer-events:none}   /* the grid Form cell has 8px of inline padding, which is where this sits — inside the cell but clear of the input's own text */
   .sblock.no-grid{padding-bottom:0}   /* grids off → the diagram is the last thing in the block, so its OWN bottom gap (the .diagram's 13px padding, or the equivalent baked into .bwrap/.outline/.wrapproj) is the only space that belongs below it. The block's 14px bottom padding exists to sit BELOW the grid; with no grid it would stack on top of the diagram's own gap and read as a too-large bottom. Dropping it to 0 for EVERY notation leaves exactly one normal bottom gap under the diagram, consistent across stemma/hierarchy/arcs/brackets/outline AND the wrapped variants */
+  /* A SENTENCE RANGE (shift-click). Deliberately a WASH and nothing else — no re-tinted --occlude, no casing
+     change, none of the machinery the FOCUSED block below carries. Those exist so the diagram's halos blend
+     with the focused ground, which is a per-block rendering concern; a range is a transient selection over
+     several blocks, and giving each of them the focused block's full treatment would leave nothing to mark
+     which one the keyboard is actually on. So the range says "these are chosen" and .sel-block still says
+     "this one is current" on top of it — the two compose, in either order, because only the background stacks.
+     --block-sel is the focused block's own tint, halved: present enough to read as a group, quiet enough that
+     the focused member still reads as the focus. */
+  .sblock.rng-block{background:color-mix(in srgb,var(--block-sel) 55%,transparent)}
   .sblock.sel-block{background:var(--block-sel); --occlude:color-mix(in srgb,var(--accent) 5%,var(--content-bg)); --block-occlude:color-mix(in oklch, color-mix(in srgb,var(--accent) 5%,var(--content-bg)) 50%, var(--content-bg) 50%);
     --focus-ground:color-mix(in srgb,var(--accent) 5%,var(--content-bg));   /* the SAME colour as --occlude just above, under a second name, so a descendant that must REDECLARE --occlude can still reach the focused ground without forming a self-referential cycle — .softcase is the one such descendant (see the residue note in the .dim-* block) */
     --casing:var(--occlude)}   /* arc/leader casing (--block-occlude) = the OKLCH midpoint between the focused-block background and the plain (unfocused) background — a notch less tinted than the full focused bg. Unfocused blocks keep --block-occlude at content-bg (midpoint of content-bg with itself). */   /* focused block → the text halo IS the focused background colour (= --occlude, the opaque equivalent of content-bg + the block-sel tint), not a lifted version, so casing blends with the focused background */
@@ -956,8 +965,8 @@
      was blue text on blue. Every other view accents the text against the plain page and reads correctly, which
      is why this change stops here. --accent, not --row-sel: that token stays the old low-alpha wash for anything
      else that wants one. */
-  .oselrow{position:absolute; z-index:0; background:var(--accent); background:oklch(from var(--accent) calc(l * .827) calc(c * .915) h); border-radius:6px; pointer-events:none; display:none}   /* selected row — default, full subtree width; the SAME derivation as the grid's own selected row, and derived for the same reason (see the note beside table.grid tbody tr:is(.sel,.mwtsel)): this used to be the literal rgb(0,100,225) sampled from the system blue, which stayed blue under any other system accent while the row it mirrors followed it. Two declarations, fallback first, for the reason documented there */
-  @media (prefers-color-scheme:dark){ .oselrow{background:var(--accent); background:oklch(from var(--accent) calc(l * .827) calc(c * .915) h)} }   /* dark keeps the derived-darkening formula, unchanged */
+  .oselrow{position:absolute; z-index:0; background:var(--accent); background:oklch(from var(--accent) calc(l * .882) calc(c * .958) h); border-radius:6px; pointer-events:none; display:none}   /* selected row — default, full subtree width; the SAME derivation as the grid's own selected row, and derived for the same reason (see the note beside table.grid tbody tr:is(.sel,.mwtsel)). Two declarations, fallback first, for the reason documented there */
+  @media (prefers-color-scheme:dark){ .oselrow{background:var(--accent); background:oklch(from var(--accent) calc(l * .827) calc(c * .915) h)} }   /* dark's own step — see the note beside the grid's selected row */
   .ohovbox{position:absolute; z-index:0; background:var(--row-hover); border-radius:6px; pointer-events:none; display:none}                                 /* hover — same span as a row selection */
   .oreportbox{position:absolute; z-index:0; border:.5px solid color-mix(in srgb,var(--text) 18%,transparent); border-radius:7px; background:color-mix(in srgb,var(--content-bg) 55%,transparent); box-shadow:0 1px 4px rgba(0,0,0,.12),0 0 0 .5px rgba(0,0,0,.02); pointer-events:none}   /* item 7: a reported-speech subtree sits in a subtly drop-shadowed box (behind the rows, so it never shifts their horizontal alignment) */
   .orel{font-family:var(--token-font); font-size:11px; font-weight:545;   /* weight curve @11px, matching .lbl/.bwrel — was a flat 600 */ color:var(--dia-muted); margin-inline-end:9px; letter-spacing:.0248em;   /* tracking curve @11px, matching .lbl/.bwrel — was a flat .02em */ unicode-bidi:isolate}
@@ -1179,16 +1188,19 @@
      mac-tokens.css. Reading --accent also picks up a live system-accent override for free (js/ui/colours.js
      rewrites that property, and used to have to rewrite --row-sel's alpha separately to match).
      LAST of the four states: the focused row outranks the range wash, hover and stripe alike. */
-  /* NOT the accent itself — macOS fills a selected row with a DARKENED accent (its own
-     `selectedContentBackgroundColor`: for the #007AFF system blue, #0059D1). DERIVED FROM --accent IN BOTH
-     APPEARANCES, on request, and no longer a literal in either: in OKLCh the darkened pair is L ×.827, C ×.915,
-     hue held, which reproduces rgb(0,91,208) from #007AFF — two units off the sampled rgb(0,89,209), i.e. under
-     any perceptual threshold — and darkens ANY other accent by the same perceptual step rather than a per-hue
-     guess. Light used to be the literal rgb(0,100,225), a measured sample of the system blue's own row fill;
-     that is nine units of blue away from what the formula gives, and it was wrong in the way that matters — a
-     user on a graphite, red or purple system accent got a BLUE selected row, because a sampled literal cannot
-     follow an accent it was sampled from. Reading --accent also picks up a live system-accent override for free
-     (js/ui/colours.js rewrites that property).
+  /* NOT the accent itself — a selected row takes a DARKENED accent. DERIVED FROM --accent IN BOTH
+     APPEARANCES and never a literal, but with A DIFFERENT STEP IN EACH (see the dark note below the
+     rule): in LIGHT the pair is L ×.882, C ×.958, hue held, which lands
+     rgb(0,100,225) exactly on the default system blue rgb(0,122,255) and steps ANY other accent down by the
+     same perceptual amount rather than by a per-hue guess (graphite → rgb(128,128,132), red → rgb(223,26,40),
+     purple → rgb(150,61,194)).
+     ⚠ TUNED TO A TARGET, NOT TO A SAMPLE, and the distinction is the whole reason this is arithmetic instead of
+     a colour. An earlier pair (L ×.827, C ×.915) was fitted to AppKit's own `selectedContentBackgroundColor`
+     (#0059D1) and read too dark on the light ground; rgb(0,100,225) is the value asked for, so the coefficients
+     are solved backwards from it. What must NOT come back is the literal itself — light carried
+     `rgb(0,100,225)` hardcoded once, and a user on a graphite, red or purple system accent then got a BLUE
+     selected row, because a sampled literal cannot follow the accent it was sampled from. Reading --accent also
+     picks up a live system-accent override for free (js/ui/colours.js rewrites that property).
      A TWO-DECLARATION PAIR (`background:var(--accent)` first, a real fallback, not a duplicate): relative colour
      syntax that an engine cannot parse drops THAT DECLARATION ONLY and leaves this one standing, so the row still
      fills with the plain accent instead of nothing. It has to be written as a literal here rather than behind a
@@ -1202,7 +1214,20 @@
      every one of its component rows, toggled together by applySel (js/core/document.js). It sits BELOW .rangesel
      in source order deliberately — an MWT selection is also a range selection, and this is the more specific
      reading of the same state, so it must win. */
-  table.grid tbody tr:is(.sel,.mwtsel) td::before{background:var(--accent); background:oklch(from var(--accent) calc(l * .827) calc(c * .915) h)}   /* ONE rule for both appearances now that neither is a literal — the darkening is a perceptual step off whatever --accent currently is, and that is as true in light as in dark. The @media block that used to override this in dark is gone with it, not merely emptied */
+  table.grid tbody tr:is(.sel,.mwtsel) td::before{background:var(--accent); background:oklch(from var(--accent) calc(l * .882) calc(c * .958) h)}   /* LIGHT: the step tuned to the measured target below */
+  /* DARK TAKES ITS OWN DERIVATION, and must keep one. The step above is tuned for a LIGHT ground —
+     it darkens the accent so a saturated fill sits correctly against white. Dark inverts that
+     premise: every native toolkit moves its selection accent the OTHER way there, because the fill
+     now has to separate from a dark ground rather than from a light one. macOS already ships a
+     lighter blue for dark (--accent is #007aff light, #0a84ff dark) and the Fluent kit's --accent is
+     shade-stepped per appearance in the same way (#005a9e light = WinUI's SystemAccentColorDark1,
+     #0078d4 dark = the base accent), so applying the LIGHT ground's darkening on top of an
+     already-lightened accent double-counts and lands somewhere neither toolkit uses.
+     .827/.915 is the step dark has always used and the one it is meant to keep; the light rule's
+     .882/.958 exists only to hit its own measured target (rgb(0,100,225) on the default blue). One
+     rule for both was tried and is what this replaces — it is a tidier file and a less faithful
+     window. */
+  @media (prefers-color-scheme:dark){ table.grid tbody tr:is(.sel,.mwtsel) td::before{background:var(--accent); background:oklch(from var(--accent) calc(l * .827) calc(c * .915) h)} }
   /* …which forces INVERSE INK. The cells carry muted greys (--text-2 / --muted) that fail outright on a
      saturated fill, and unlike the old wash there is no background showing through to keep them legible.
      Scoped to where the full accent ACTUALLY paints: with focus in the diagram the row falls back to the dim
@@ -1241,7 +1266,9 @@
      the app's established low-chroma recipe (accent mixed toward --muted), so the two states are derived the
      same way and differ in chroma alone: still "selected, in the other pane", never grey. */
   #doc.zone-grid .oselrow{background:color-mix(in srgb,var(--accent) 55%,var(--muted));
-    background:oklch(from color-mix(in srgb,var(--accent) 55%,var(--muted)) calc(l * .827) calc(c * .915) h)}
+    background:oklch(from color-mix(in srgb,var(--accent) 55%,var(--muted)) calc(l * .882) calc(c * .958) h)}
+  @media (prefers-color-scheme:dark){ #doc.zone-grid .oselrow{
+    background:oklch(from color-mix(in srgb,var(--accent) 55%,var(--muted)) calc(l * .827) calc(c * .915) h)} }   /* the mirrored band follows the focused fill into dark's own step, or the two states would be derived differently in one appearance */
   html.win-inactive #doc .oselrow{background:var(--row-sel-inactive)}                       /* …and an unfocused WINDOW greys it outright, exactly as the grid's row does */
   /* INVERSE INK on that band, in BOTH of its coloured states — focused and mirrored-from-the-grid alike. Only
      the grey inactive band below keeps ordinary ink. Every child of the row is listed because every one of them

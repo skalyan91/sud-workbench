@@ -393,11 +393,21 @@
      .expand → --label-secondary), so both are restated on hover; the .subarr chevron and the .ck tick
      ride `currentColor`. :active keeps the accent rather than falling back to the shared grey press
      fill — pressing a row must not look like leaving it. */
-  .ctx button:hover{background:var(--accent); background:oklch(from var(--accent) calc(l * .827) calc(c * .915) h); color:#fff}
-  .ctx button:active{background:var(--accent); background:oklch(from var(--accent) calc(l * .74) calc(c * .915) h); color:#fff}   /* one further step down, the same way AccentFillColorTertiary sits below Default */
+  /* LIGHT vs DARK ARE DERIVED SEPARATELY, and on this platform the reason is written into the tokens:
+     WinUI resolves AccentFillColorDefaultBrush to SystemAccentColorDark1 in Light and to a LIGHTER
+     shade in Default(dark), and fluent-tokens.css follows that — --accent is #005a9e in light and
+     #0078d4 in dark. Darkening both by the light ground's step would take an already-stepped-down
+     light accent down twice and an already-stepped-UP dark one back where it started. So light gets
+     the step tuned to its own target (rgb(0,100,225) on the default blue) and dark keeps .827/.915. */
+  .ctx button:hover{background:var(--accent); background:oklch(from var(--accent) calc(l * .882) calc(c * .958) h); color:#fff}
+  .ctx button:active{background:var(--accent); background:oklch(from var(--accent) calc(l * .789) calc(c * .958) h); color:#fff}   /* one further step down, the same way AccentFillColorTertiary sits below Default. Kept as a RATIO of its own appearance's hover step (.74/.827 ≡ .789/.882), not as a fixed offset, so pressed sits the same distance below hover in either */
+  @media (prefers-color-scheme:dark){
+    .ctx button:hover{background:var(--accent); background:oklch(from var(--accent) calc(l * .827) calc(c * .915) h)}
+    .ctx button:active{background:var(--accent); background:oklch(from var(--accent) calc(l * .74) calc(c * .915) h)} }
   .ctx button:hover .kbd,.ctx button:active .kbd,.ctx button:hover .expand,.ctx button:active .expand{color:#fff; opacity:.72}   /* still the quieter half of the row — an opacity off the row's own white rather than a second hue */
   .ctx button.danger{color:var(--bad)}
-  .ctx button.danger:hover{background:var(--accent); background:oklch(from var(--accent) calc(l * .827) calc(c * .915) h); color:#fff}   /* …white too: red-on-accent reads worse than either alone */
+  .ctx button.danger:hover{background:var(--accent); background:oklch(from var(--accent) calc(l * .882) calc(c * .958) h); color:#fff}   /* …white too: red-on-accent reads worse than either alone */
+  @media (prefers-color-scheme:dark){ .ctx button.danger:hover{background:var(--accent); background:oklch(from var(--accent) calc(l * .827) calc(c * .915) h)} }
   .ctx button:disabled{color:var(--label-tertiary); pointer-events:none}   /* MenuFlyoutItemForegroundDisabled → TextFillColorDisabledBrush; the same treatment .fpitem[disabled] already gets in the menubar, stated for the context menus' own rows (the grid column chooser's obligatory ID/Form rows). pointer-events:none also drops the hover fill, which `:disabled` alone would not */
   .ctx .kbd{font-size:var(--fs-body); font-weight:var(--fw-normal); color:var(--menu-shortcut); direction:ltr; unicode-bidi:isolate}   /* MenuFlyoutItemKeyboardAcceleratorTextForeground → TextFillColorSecondaryBrush, at the row's own size */
   .ctx .mlbl{direction:ltr; unicode-bidi:isolate}

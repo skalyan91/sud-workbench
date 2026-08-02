@@ -267,13 +267,17 @@ UD** via `spacy-stanza`, post-converted UD → SUD with grew and with multi-word
 (`_reconstruct_mwt`). Model ids are engine-qualified — `sud:<package>` / `stanza:<lang>#<package>`.
 No model → whitespace tokenisation. `app/parse_sud.py` is only a back-compat shim.
 
-**MWT ranges come from three places, in this order of trust.** Stanza *has* a multi-word-token
+**MWT ranges come from FOUR places, in this order of trust.** Stanza *has* a multi-word-token
 layer (`Token.words` / `Word.parent`, the expanded words carrying `start_char = None` because they
 aren't substrings of the text), so its ranges are read straight off the pipeline. A spaCy model
 whose tokeniser is a **custom callable** can publish its own via the `doc.user_data["mwt_ranges"]`
 = `[(first, last, surface), …]` convention (+ `["source_text"]`), which `_mwt_from_doc` honours —
 `ar_sud_padt`'s CAMeL clitic tokeniser is the first, and `scripts/ar_tokenizer.py` in the
-**SUD-spaCy** repo is where it's written, so a change there needs the wheel repackaged. Only when
+**SUD-spaCy** repo is where it's written, so a change there needs the wheel repackaged. Failing
+that, a tokeniser that publishes SOURCE SPANS (`doc._.src_spans`) has its ranges DERIVED from them
+by `_src_span_layout` — an orthographic word is a run of tokens whose spans fall in one
+whitespace-delimited chunk of the raw input, which is what a multi-word token IS; that is where
+`sa_sud_vedic_ufal_dcs`'s ranges come from. Only when
 nothing is published does `_reconstruct_mwt` **infer** ranges from spacing + the tagger's PUNCT
 labels. That fallback is sound for spaCy's *rule-based* tokeniser and only there: it concatenates
 component surfaces to build the range form, which is exact because a `Tokenizer` cannot emit a
@@ -408,7 +412,8 @@ missing tier must surface as an offer to install, never an exception.
   sorts. An explicit contrary heading still excludes, so a verb-only page still answers a NOUN token
   with nothing. A lookup that matched anything strictly is untouched by all of this.
   **A headword is queried in the spelling the wiki files it under, not the one the token carries**:
-  Sanskrit in Devanagari (the app stores IAST), Chinese in **TRADITIONAL** characters. en.wiktionary
+  Sanskrit in Devanagari (which a file may already be stored in, and may not — see the Sanskrit
+  section below), Chinese in **TRADITIONAL** characters. en.wiktionary
   keeps every Chinese sense on the traditional page and gives the simplified one only a `{{zh-see}}`
   soft redirect — no senses, no POS heading — so 编程 404s from the definition endpoint while 編程
   answers, and *every* character that simplification changed was silently unglossable. OpenCC
@@ -455,31 +460,109 @@ missing tier must surface as an offer to install, never an exception.
   `Śiva`, and there is no per-entry URL for the flyout's "Open …" row. The measurements are in that
   module's docstring — read them before reopening the question.
 
-- `app/sa_csl.py` (+ vendored `app/_sa_csl_vendor.py`) — Sanskrit **CSL notation → token forms, with
-  the character offsets kept**, which is what lets the running-sentence alignment work on a Sanskrit
-  `# text`. That text is sandhied with the coalescences *marked* rather than undone
-  (`vartm" â-punar-janmanām`, `hor" êty`), so no component form is a substring of it and the
-  frontend's literal match (stage 1) cannot settle a single Sanskrit sentence. The vendored file is
-  `scripts/sa_tokenizer.py` from the **SUD-spaCy** repo (MIT, same owner) minus its spaCy class —
-  upstream's own `desandhi_csl`, the routine that built the model's training data, so the two cannot
-  drift. Two properties make the alignment exact rather than a guess: `desandhi_csl` **preserves the
-  token count**, so rewriting each element's text leaves every offset valid; and upstream's corpus
-  transform hyphen-joins the members of ONE MWT range while re-segmenting every *external*-sandhi
-  boundary into separate space-joined tokens, so **a hyphen-joined word run IS one MWT range** and
-  the unit↔chunk correspondence is 1-to-1 and positional. The result is then VERIFIED against the
-  file's own component forms before any span is emitted (`_MIN_UNIT`/`_MIN_MEAN`) — below threshold
-  the unit gets a hole and the sentence may be refused entirely, because a decoration on the wrong
-  span is a lie about the annotation. Needs no model, no spaCy and no network; `parse._tokenizer_spans`
-  routes Sanskrit here too, so the sandhi-*splitting* tokeniser (whose `doc.text != text` otherwise
-  forces an honest `[]`) now reports real spans into the original string.
-  **A tokeniser may also PUBLISH its own offsets** — `doc._.src_text` (the string it was handed) +
+- **Sanskrit is DIGRAPHIC IN STORAGE**, and that is the whole shape of its support.
+  `sa_sud_vedic_ufal_dcs` takes raw **IAST or Devanagari** and puts back whichever it was given: its
+  `sa_deva` component writes Devanagari into FORM/LEMMA with the IAST in `Token._.translit`/
+  `_.ltranslit` (the UD convention), so a file's columns are in one script or the other and nothing
+  in the file says which. `translit.sa_stored_script` reads it off the FORMS — a property of the
+  file, which no display preference may contradict — and `Api.doc_script` serves it to the frontend
+  as `DOCSCRIPT`. Four things read it: whether "Original" already shows a script (and so whether the
+  IAST row beneath is worth drawing — `saTransRow`), which script a re-fused MWT form comes back in
+  (`sandhi_join`), what ITRANS input converts TO (`itrans.convert`'s `script`), and whether the
+  diagram's form editor edits the glyph or the row under it (`iastFormEdit`).
+  The **Script** menu is therefore Original + **Latin (IAST)** + the 33 Brahmic scripts, with no
+  "None" row: "Latin (IAST)" says the same thing and says it as a script. `_DANDA_IAST` routes the
+  daṇḍa there rather than through aksharamukha, which renders `।` as `.` and would put a full stop
+  in the middle of a verse.
+  **CSL survives as a DISPLAY scheme and nothing else** (`app/sa_notation.py` + the vendored
+  `app/_sa_sandhi_vendor.py`, upstream's own `scripts/external_sandhi.py`). It is a transliteration-ROW
+  choice beside IAST: per token, how that token would be spelt with the junctions marked — `vartmā`
+  shows `vartm"`, `iti` shows `êty`. Three things make it unlike every other scheme, and each is a
+  reason it does NOT go through `_render_one`: it is computed **per SENTENCE**, because a mark records
+  what happened BETWEEN two words and the same surface reads differently beside a different
+  neighbour (so the (form, upos) deduplication every other pass uses would be actively wrong); its
+  input is the **pausa** forms, i.e. MISC `Unsandhied=` where there is one and the FORM otherwise,
+  since feeding a sandhied surface back through a sandhi generator applies the rules twice; and it is
+  **not `stored`**, because MISC `Translit` is per token and context-free and could not hold it
+  honestly. The one thing the vendored generator cannot do alone is the r-stem visarga — `punaḥ` +
+  `janmanām` is `punar-`, not `puno-`, and only the LEMMA separates an r-stem from an s-stem — so
+  `_rstem_visarga` substitutes the r-form before the junction, deferring to `translit._is_rstem` so
+  the app has one answer about which stems those are rather than two. Verified against the sample's
+  own former CSL text: identical on all four sentences.
+  **What is gone is CSL as a STORAGE format.** The old model read and wrote Clay-Sanskrit-Library text —
+  the sandhied surface with its coalescences *marked* (`vartm" â-punar-janmanām`) rather than
+  written plainly — so no token form was a substring of `# text` and the frontend's literal match
+  could not settle a single Sanskrit sentence. That cost a whole reversal engine (`app/sa_csl.py` +
+  a vendored `desandhi_csl`), a bespoke alignment stage in `parse.token_spans` with its own
+  verification thresholds, and a running-line gluing pass in `translit`. CSL is now strictly
+  internal to the model, `# text` is ordinary sandhied text, and **stage 1 settles every Sanskrit
+  sentence in both scripts** — verified over both samples. All of that machinery was deleted rather
+  than kept "just in case"; `models_registry.DEPRECATED_SUD` hides `sa_sud_vedic_ufal_csl` so the
+  app cannot offer a model whose output it can no longer read.
+  ⚠ **The DCS representation is not the CSL one, and the difference is in the columns.** A token
+  that is its own orthographic word keeps its **sandhied** surface in FORM, with the padapāṭha in
+  MISC `Unsandhied=` (`kratuś` / `Unsandhied=kratuḥ`); only a token INSIDE a multi-word token is
+  stored unsandhied. `parse._ext_misc` writes `Translit`/`LTranslit`/`Unsandhied` from the model's
+  token extensions, and `samples/brihat_jataka.conllu` was converted into that shape (its MWT ranges
+  had to be RE-DERIVED, not carried over — the file's own grouping had drifted from its own text,
+  `paṭu-dhiyāṃ` being one word in the text and two ungrouped tokens in the columns).
+- **A tokeniser may PUBLISH its own offsets** — `doc._.src_text` (the string it was handed) +
   `doc._.src_spans` (one half-open range per token), the same shape as the
-  `doc.user_data["mwt_ranges"]` convention, registered by `sa_sud_vedic_ufal_csl` from its
-  re-released 0.1.0 wheel. `parse._published_spans` honours them for any model and prefers them to
-  `token.idx`, **gated on `src_text` being the string we passed**: `# text` escapes its line breaks
-  as the two characters `\n` and `bridge.js` restores real newlines on load, so feeding the escaped
-  form would glue `\n` onto the next word and shift that token and every span after it. That gate is
-  what turns the trap into a fall-through instead of a silently wrong decoration.
+  `doc.user_data["mwt_ranges"]` convention. `parse._published_spans` honours them for any model and
+  prefers them to `token.idx`, **gated on `src_text` being the string we passed**: `# text` escapes
+  its line breaks as the two characters `\n` and `bridge.js` restores real newlines on load, so
+  feeding the escaped form would glue `\n` onto the next word and shift that token and every span
+  after it. That gate is what turns the trap into a fall-through instead of a silently wrong
+  decoration.
+  ⚠ **Published spans may OVERLAP by one character**, and both sides must tolerate it: at a vowel
+  coalescence the fused vowel of `vartmā` + `apunar-` genuinely ends one word and begins the next.
+  `paintStext`'s order guard therefore allows `sp[0] >= last - 1` rather than `>= last`; refusing it
+  would cost the second word its decoration at every coalescence in the text.
+  `parse._src_span_layout` reads the same spans for **MWT ranges and SpaceAfter**, sitting between
+  the published `mwt_ranges` and `_reconstruct_mwt`'s heuristic. Two things it gets right that the
+  heuristic cannot: the range's FORM is the RAW SUBSTRING (the components of `vartmāpunarjanmanām`
+  concatenate to `vartmaa`, which is not a word in any script), and SpaceAfter comes from the raw
+  text rather than from `doc.text`, which is the tokeniser's own reconstruction and puts spaces
+  where the input had none.
+- `app/macron.py` (+ vendored `app/_la_macron_vendor.py`) — **Latin vowel length as a Script
+  option**, `divisa` → `dīvīsa`. Restoring a macron is a display question, not an annotation one:
+  the treebanks spell Latin without them and a file must round-trip byte-identically, so it feeds
+  the Script layer exactly as the Indic scripts do — the running sentence and the diagram glyphs
+  re-render while the grid, the input fields and the file keep the bare form. Nothing reaches MISC.
+  It is why `orthography` grew `feats`/`lemmas` beside the `upos` the Chinese readings already
+  threaded: the FORM alone reaches only the morphology-blind level, where nominative `Gallia` picks
+  up an ablative macron.
+  **The data is FETCHED, not shipped** — Morpheus (CC BY-SA 3.0 US) via the `macrons.txt` Johan
+  Winge commits in latin-macronizer (GPL-3.0), ~4 MB on the wire, downloaded on demand into
+  `APP_DATA` and compiled there in ~4 s. GPL restricts DISTRIBUTION, not USE, so a file the user's
+  machine fetches from upstream and that never enters a build is not ours to license — the same
+  posture `convert.py` takes toward the grew backend. ⚠ **Committing the built table is the standing
+  temptation and is the one thing that turns a use into a distribution.** It rides `extras.TIERS`
+  as a DATA tier (`module` instead of `pip`), so it appears in Manage Models with the torch tiers
+  and shares their job/progress plumbing rather than growing a second install path.
+  ⚠ **TWO TABLES CASCADE, and neither subsumes the other.** Measured, agreement with Alatius on
+  gold morphology — the harvested SUD-spaCy LUT (if the user has built one) against Morpheus:
+
+  | | harvest has the word | it does not |
+  |---|---|---|
+  | ITTB+PROIEL test | 98.23 % (92.1 % of tokens) | 52.46 % (7.9 %) |
+  | Morpheus, same split | 93.98 % | 90.42 % |
+
+  The harvest is near-perfect on its own vocabulary and close to a coin toss off it — upstream's
+  own "OOV levels are 71 % of all errors from 8 % of tokens", stated the other way round. Morpheus
+  covers 249,659 forms against 42,817. So `macronise` takes the harvest where it has a real entry
+  (`L1`/`L2`/`L3`, never its suffix guess) and Morpheus for everything else: **97.61 %** in-domain
+  against upstream's published 94.32 %, and on Perseus (classical poetry, where the harvest's OOV
+  share goes 7.9 % → 23.8 %) **97.24 %** cascaded against 87.02 % harvest-alone and 95.75 % for
+  Morpheus alone — which is what most users get, since the harvested table cannot be distributed.
+  Morphology is matched through a nine-slot key (`_ud_key` / `_ldt_key`) that renders UPOS+FEATS and
+  the Perseus/LDT nine-position tag into one alphabet, and lookup walks a LADDER of progressively
+  blanker keys rather than demanding one exact match — the tagger is imperfect (`cano` came back
+  ADJ, `fortes` VERB on a sample), and an exact key turns every mis-tag into a total miss. Each rung
+  is precomputed at build time and only where it is decisive, so a rung never answers a question it
+  cannot settle. `_PARADIGM` still applies on top: it is a statement about Latin, not a patch for a
+  bad harvest.
+
 Optional dependencies are always isolated behind a single module façade in `app/`, as those last
 five do — follow that when adding another.
 

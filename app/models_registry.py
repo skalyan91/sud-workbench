@@ -37,6 +37,18 @@ GITHUB_API = f"https://api.github.com/repos/{SUD_REPO}/releases"
 # Wiktionary → MGloss lookup for every language, and nothing in that feature's UI would connect the
 # two, so it reads as the definition lookup having quietly broken.
 BUNDLED_SUD = {"en_sud_ewt"}
+# Models the release still carries but this app no longer supports, hidden from the Model Manager.
+# `sa_sud_vedic_ufal_csl` reads and writes Clay-Sanskrit-Library notation — a `# text` whose sandhi
+# is MARKED rather than undone, so no token form is a substring of the running sentence. Supporting
+# it meant a whole reversal engine (`app/sa_csl.py` + its vendored transform) to recover the spans
+# that notation destroys. `sa_sud_vedic_ufal_dcs` supersedes it: it takes ordinary IAST or
+# Devanagari, keeps CSL strictly internal, and publishes real source offsets, so the app aligns
+# Sanskrit by literal match like every other language. Both were listed for a while; leaving the old
+# one selectable would offer a model whose output this app can no longer read. Filtered rather than
+# deleted from the release, because an asset that exists and is unlisted is a decision we can revisit
+# — and because a user who has it INSTALLED still sees it (`list_installed` is a separate scan), so
+# it can be removed rather than silently orphaned.
+DEPRECATED_SUD = {"sa_sud_vedic_ufal_csl"}
 # Per-model UAS/LAS accuracy: SUD scores live in the repo README's scores table; Stanza (UD) scores
 # come from the official performance page.  Both are fetched + cached (TTL) and re-fetched on refresh.
 SUD_README_URL = f"https://raw.githubusercontent.com/{SUD_REPO}/main/README.md"
@@ -434,7 +446,7 @@ def list_available(refresh: bool | str = False) -> list[dict]:
     for rel in _fetch_releases(refresh):
         for asset in rel.get("assets", []):
             entry = parse_asset(asset.get("name", ""))
-            if not entry:
+            if not entry or entry["package"] in DEPRECATED_SUD:
                 continue
             entry["asset_url"] = asset.get("browser_download_url")
             entry["size"] = asset.get("size")

@@ -1,9 +1,15 @@
-"""ITRANS → IAST for typed Sanskrit input.
+"""ITRANS → IAST (or Devanagari) for typed Sanskrit input.
 
-This app STORES Sanskrit as IAST (see :mod:`app.sa_csl` and the Sanskrit branches of
-:mod:`app.translit`), but IAST needs diacritics no ordinary keyboard carries, so what a user
-actually types is **ITRANS** — ``kRiShNa``, ``raamaayaNa``, ``sha~Nkara``.  Every Sanskrit input
-field therefore runs what was typed through :func:`convert` before it is stored.
+A Sanskrit file stores its text in one of two scripts — IAST or Devanagari, whichever the parser was
+fed — and NEITHER is typeable on an ordinary keyboard: IAST needs diacritics the keyboard has no
+keys for, and Devanagari needs an IME the user may not have installed.  What a user actually types
+is **ITRANS** — ``kRiShNa``, ``raamaayaNa``, ``sha~Nkara`` — so every Sanskrit input field runs what
+was typed through :func:`convert` before it is stored, with the DOCUMENT'S OWN script as the target.
+
+The target is what makes this work for both storage modes from one gate: ``kRiShNa`` becomes
+``kṛṣṇa`` in an IAST file and ``कृष्ण`` in a Devanagari one, and the user types the same thing either
+way.  A Devanagari file also accepts plain IAST (``kṛṣṇa`` → ``कृष्ण``), which an IAST file cannot
+sensibly do — see :func:`_convertible` for why that asymmetry is safe rather than arbitrary.
 
 Three things make that safe rather than reckless:
 
@@ -24,39 +30,18 @@ Three things make that safe rather than reckless:
 WHY AKSHARAMUKHA AND NOT A HAND-WRITTEN TABLE: it is already a dependency of this very tier
 (:mod:`app.apte` converts IAST→SLP1 with it, :mod:`app.translit` drives every Indic script through
 it), it implements the whole ITRANS scheme rather than the dozen mappings one would think to write
-down, and a second table here would be one more thing to keep in step with it.  Two places where its
-ITRANS reading and the convention this app's users actually type apart are patched BEFORE it sees
-the text (:func:`_prep`), and one where the app's own notation overrides ITRANS outright
-(:data:`_CIRC_SPLIT`); each is commented where it stands.
+down, and a second table here would be one more thing to keep in step with it.  The places where its
+ITRANS reading and the convention this app's users actually type disagree are patched BEFORE it sees
+the text (:func:`_prep`), each commented where it stands.
 """
 
 from __future__ import annotations
 
 import re
 
-# ── the circumflex convention ────────────────────────────────────────────────────────────────────
-# This repo's Sanskrit text marks a sandhi COALESCENCE with a circumflex vowel — `vartm" â-punar-
-# janmanām`, `hor" êty` (see app/sa_csl.py's docstring).  ITRANS has no notation for those at all,
-# so the input convention is a leading `^`: ^a → â, ^e → ê, ^i → î, ^o → ô, ^u → û.
-#
-# `^` is NOT free for us to take, which is why this is handled by SPLITTING the word rather than by
-# pre-substituting a sentinel:
-#   · aksharamukha's ITRANS reads `^e`/`^o` as the SHORT vowels ĕ/ŏ (measured: "x^ety" → "kṣĕty"),
-#     so feeding it a `^` of ours would silently produce a different vowel;
-#   · `R^i`/`R^I` (and `L^i`) are the standard ITRANS spelling of vocalic ṛ/ṝ, so a `^` after R or L
-#     is ITRANS's and must be left alone — hence the lookbehind;
-#   · a private-use sentinel was tried first and is not viable: aksharamukha does not pass U+E000
-#     through, it drops it and inserts an inherent vowel ("ety" → "aety").
-# Splitting is exact because IAST, unlike a syllabic script, writes each consonant and vowel
-# separately: no aksharamukha mapping spans the boundary a coalesced vowel sits on.
-_CIRC_SPLIT = re.compile(r"(?<![RL])\^([aeiouAEIOU])")
-_CIRC = {"a": "â", "e": "ê", "i": "î", "o": "ô", "u": "û",
-         "A": "Â", "E": "Ê", "I": "Î", "O": "Ô", "U": "Û"}
-
 # ── the evidence test ────────────────────────────────────────────────────────────────────────────
 # Any ONE of these makes a word ITRANS.  Each is a spelling that IAST cannot produce, so a match is
 # proof the user was typing ITRANS rather than a guess about which notation they had in mind.
-#   ^V          the circumflex convention above — ours, and written nowhere else
 #   aa ii uu    the digraph long vowels (IAST writes ā ī ū, one character each)
 #   sh Sh shh   the sibilants ś / ṣ (IAST has no bare "h" after a sibilant letter)
 #   ~n ~N       the palatal / velar nasals ñ / ṅ
@@ -76,8 +61,7 @@ _CIRC = {"a": "â", "e": "ê", "i": "î", "o": "ô", "u": "û",
 #   retroflex- or long-initial word with no other cue, which leaves the text as typed — the safe
 #   direction.
 _EVIDENCE = re.compile(r"""
-      \^[aeiouAEIOU]
-    | aa | ii | uu
+      aa | ii | uu
     | sh | Sh
     | ~[nN]
     | \.[hnmaN]
@@ -90,17 +74,17 @@ _EVIDENCE = re.compile(r"""
 # the whole run and a freshly typed ITRANS member beside it goes unconverted — which is exactly the
 # case a user hits when correcting one item of a compound rather than retyping the sentence.
 # So each of these delimits a unit that is gated and converted on its OWN:
-#   -            the compound hyphen — this repo's Sanskrit writes every compound member with one
-#   |            a WORD-INTERNAL pipe, the same join (app.api.sanskrit_running strips "apostrophes/
-#                hyphens/word-internal pipes" for exactly this reason).  A bare "|" BETWEEN words is
-#                a verse daṇḍa, not a separator — but it is surrounded by whitespace, so the
-#                whitespace split has already made it a piece of its own and this pass never sees it
-#                (asserted in the harness rather than assumed).
-#   ' "          the elision / sandhi-coalescence marks (`pralay'-ôdbhava`, `vartm" â-`, `c' ânekadā`)
-#                — a seam where two words are WRITTEN as one, so the parts on either side of it were
-#                typed independently and must be judged independently.  The curly forms are included
-#                for the same reason translit._APOS_QUOTES lists them: a keyboard or an OS
-#                substitution produces them in place of the straight ones.
+#   -            the compound hyphen — a samāsa written with its members separated
+#   |            a WORD-INTERNAL pipe, the same join.  A bare "|" BETWEEN words is a verse daṇḍa,
+#                not a separator — but it is surrounded by whitespace, so the whitespace split has
+#                already made it a piece of its own and this pass never sees it (asserted in the
+#                harness rather than assumed).
+#   ' "          the avagraha and the quotation marks (`ko 'nasūyakaḥ` — the DCS representation
+#                writes an elided initial a as an avagraha attached to its word).  A seam where two
+#                words are WRITTEN as one, so the parts on either side of it were typed
+#                independently and must be judged independently.  The curly forms are included for
+#                the same reason translit._APOS_QUOTES lists them: a keyboard or an OS substitution
+#                produces them in place of the straight ones.
 # Every separator is kept verbatim in the output (the split captures them), so re-joining reproduces
 # the input exactly — the same guarantee the whitespace split gives.
 # NOTHING ELSE is a split point.  In particular a "." is not: it is part of ITRANS's own .h/.n/.m
@@ -109,8 +93,9 @@ _UNIT_SPLIT = re.compile("([-|'\"‘’“”])")
 
 
 def _prep(chunk: str) -> str:
-    """Rewrite the two spellings where aksharamukha's ITRANS and the convention users actually type
-    disagree.  Runs on one circumflex-free chunk, immediately before the transliterator."""
+    """Rewrite the spellings where aksharamukha's ITRANS and the convention users actually type
+    disagree.  Runs on one unit, immediately before the transliterator, and only for ITRANS input —
+    every rewrite here reads an ASCII letter as an ITRANS digraph, which would corrupt IAST."""
     # `R` alone is Dravidian ṟ to aksharamukha ("pitR" → "pitṟ"); vocalic ṛ is spelt `RRi` or `R^i`.
     # Sanskrit typists write plain `R` for ṛ (the task's own example is `kRiShNa`), and ṟ does not
     # occur in Sanskrit at all, so every `R` that is not already part of `RR…`/`R^…` is vocalic:
@@ -131,29 +116,27 @@ def _prep(chunk: str) -> str:
     return chunk.replace("E", "e").replace("O", "o")
 
 
-def _one_word(word: str) -> str:
-    """Convert a single evidence-bearing word.  Never raises: aksharamukha missing (or refusing the
-    input) leaves the word exactly as it came in, per the module docstring."""
+def _one_word(word: str, target: str = "IAST") -> str:
+    """Convert a single unit into ``target``.  Never raises: aksharamukha missing (or refusing the
+    input) leaves the word exactly as it came in, per the module docstring.
+
+    The SOURCE notation is decided per unit by :func:`looks_itrans` — ITRANS where there is positive
+    evidence, IAST otherwise — so a Devanagari document takes ``kRiShNa`` and ``kṛṣṇa`` alike and
+    stores both as ``कृष्ण``.  `_prep` runs only on the ITRANS branch: its rewrites read bare ASCII
+    letters as ITRANS digraphs (``R`` → ``RRi``, ``S`` → ``Sh``) and would mangle IAST."""
+    if not word:
+        return word
     try:
         from aksharamukha import transliterate as ak
     except Exception:  # noqa: BLE001 — the transliteration tier isn't installed
         return word
-    parts = _CIRC_SPLIT.split(word)   # [text, vowel, text, vowel, …]: odd indices are the captures
-    out = []
-    for i, part in enumerate(parts):
-        if i % 2:
-            out.append(_CIRC[part])
-            continue
-        if not part:
-            out.append(part)
-            continue
-        try:
-            out.append(ak.process("ITRANS", "IAST", _prep(part)))
-        except Exception:  # noqa: BLE001 — an input aksharamukha can't read: keep it verbatim
-            out.append(part)
-    # Any `^` still standing was not part of a recognised circumflex or a vocalic ṛ, and aksharamukha
-    # consumes the ones that were — so a survivor is a stray the user does not want in stored text.
-    return "".join(out).replace("^", "")
+    src = "ITRANS" if looks_itrans(word) else "IAST"
+    if src == target:
+        return word
+    try:
+        return ak.process(src, target, _prep(word) if src == "ITRANS" else word) or word
+    except Exception:  # noqa: BLE001 — an input aksharamukha can't read: keep it verbatim
+        return word
 
 
 def looks_itrans(word: str) -> bool:
@@ -182,8 +165,38 @@ def looks_itrans(word: str) -> bool:
     return bool(_EVIDENCE.search(word))
 
 
-def to_iast(text: str) -> str:
-    """Convert every ITRANS unit in ``text``, leaving the rest verbatim.
+def _convertible(unit: str, target: str) -> bool:
+    """Should this unit be rewritten at all?
+
+    ITRANS evidence always qualifies it — that is the original gate, and it is the only one when the
+    target is IAST, because a unit with no evidence reads the same under either notation and
+    rewriting it could only corrupt it.
+
+    A NATIVE-SCRIPT target takes one more class: a Latin-script unit with no ITRANS evidence, read
+    as IAST.  The asymmetry is not arbitrary.  With an IAST target the question "ITRANS or IAST?" is
+    unanswerable for ``rama`` AND the answer does not matter, since both readings give ``rama``.
+    With a Devanagari target the question still does not matter — both readings give ``रम`` — but
+    the ANSWER does: leaving it alone puts a Latin word in a Devanagari file, which is the one
+    outcome that is certainly wrong.  ALL-CAPS is excluded here as it is in :func:`looks_itrans`,
+    for the same reason: it is an abbreviation far more often than a word."""
+    if looks_itrans(unit):
+        return True
+    if not target or target == "IAST" or not unit:
+        return False
+    letters = [c for c in unit if c.isalpha()]
+    if not letters or all(c.isupper() for c in letters):
+        return False
+    return all(("A" <= c <= "Z" or "a" <= c <= "z" or ord(c) > 0x7F) for c in letters) \
+        and not _is_native(unit)
+
+
+def _is_native(text: str) -> bool:
+    """Already written in a Brahmic script — nothing for this module to do."""
+    return any("ऀ" <= c <= "෿" or "ༀ" <= c <= "࿿" for c in text)
+
+
+def to_script(text: str, target: str = "IAST") -> str:
+    """Convert every convertible unit in ``text`` into ``target``, leaving the rest verbatim.
 
     TWO levels of splitting, each with its separators captured so that re-joining reproduces the
     input byte for byte: whitespace runs first (a pasted paragraph keeps its line breaks and its
@@ -193,14 +206,41 @@ def to_iast(text: str) -> str:
     """
     if not text:
         return text
+    target = target or "IAST"
     out = []
     for i, part in enumerate(re.split(r"(\s+)", text)):
         if i % 2 or not part:            # a whitespace run (odd index), or an empty edge piece
             out.append(part)
             continue
         for j, unit in enumerate(_UNIT_SPLIT.split(part)):
-            out.append(unit if (j % 2 or not looks_itrans(unit)) else _one_word(unit))
+            if j % 2:
+                out.append(_sep_in(unit, target))
+            else:
+                out.append(_one_word(unit, target) if _convertible(unit, target) else unit)
     return "".join(out)
+
+
+_AVAGRAHA = ("'", "’", "‘")
+
+
+def _sep_in(sep: str, target: str) -> str:
+    """A unit separator in the target script.  Only the avagraha moves: romanised Sanskrit writes an
+    elided initial ``a`` as an apostrophe and Devanagari writes it ``ऽ`` (U+093D), which is how the
+    parser itself spells it (``नमोऽस्तु`` ⇄ ``namo 'stu``).  Leaving the ASCII apostrophe standing in
+    a Devanagari file would be the one thing a reader of that file could not read.  The hyphen and
+    the quotation marks are the same character in both and pass straight through."""
+    if target and target != "IAST" and sep in _AVAGRAHA:
+        try:
+            from aksharamukha import transliterate as ak
+            return ak.process("IAST", target, "'") or sep
+        except Exception:  # noqa: BLE001
+            return sep
+    return sep
+
+
+def to_iast(text: str) -> str:
+    """:func:`to_script` with the IAST target — the shape every pre-Devanagari caller used."""
+    return to_script(text, "IAST")
 
 
 def is_sanskrit(lang: str) -> bool:
@@ -208,13 +248,18 @@ def is_sanskrit(lang: str) -> bool:
     return (lang or "").lower().split("-")[0].split("_")[0] in ("sa", "san")
 
 
-def convert(text: str, lang: str = "sa") -> dict:
+def convert(text: str, lang: str = "sa", script: str = "") -> dict:
     """The one entry point the bridge exposes.  A non-Sanskrit language (or a missing engine, which
     :func:`_one_word` absorbs) is a no-op returning the input unchanged, so a call site never has to
-    ask whether conversion applies — it just calls and uses what comes back."""
+    ask whether conversion applies — it just calls and uses what comes back.
+
+    ``script`` is the DOCUMENT'S storage script as an aksharamukha target name ("Devanagari"), or ""
+    for an IAST document.  The caller reads it off the document rather than off a preference: which
+    script a file is written in is a fact about the file, and typing into it must not depend on what
+    the reader happens to be displaying."""
     if lang and not is_sanskrit(lang):
         return {"converted": text, "changed": False}
-    out = to_iast(text or "")
+    out = to_script(text or "", script or "IAST")
     return {"converted": out, "changed": out != (text or "")}
 
 

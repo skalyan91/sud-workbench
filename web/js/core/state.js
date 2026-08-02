@@ -52,7 +52,7 @@ function setLang(l){ DOCLANG=l||"en"; const p=document.getElementById("tokInfo")
   p.classList.add("pickable");   // the pill always opens the ISO 639-3 language picker
   p.title="Click to set the document language (any ISO 639-3 language)";
   const lbl=document.getElementById("tokInfoLabel"); if(lbl)lbl.textContent="Language: "+langName(DOCLANG);   // the label span only — the trailing chevron svg is a persistent sibling
-  loadTranslitSchemes(DOCLANG); loadOrthoSchemes(DOCLANG); }   // refresh the status-bar transliteration + orthography menus for the new language
+  loadTranslitSchemes(DOCLANG); loadOrthoSchemes(DOCLANG); loadDocScript(); }   // refresh the status-bar transliteration + orthography menus for the new language — and re-read which script the DOCUMENT stores its text in (DOCSCRIPT), which the two menus' Sanskrit gates and every ITRANS conversion read
 // "Transliteration necessary" = the language's primary script is NON-Latin, so romanising is meaningful.
 // Signal: a set of non-Latin languages by canonical UD code, mirroring app/translit.py's routing — its
 // explicit non-Latin backends (Arabic/CJK/Persian/Hebrew), every RTL language, and the wiktra-romanisable

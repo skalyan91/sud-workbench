@@ -10,6 +10,15 @@ Tiers (each behind a lazy ``try: import`` in ``translit`` / ``parse``):
   * ``stanza``   — Stanza UD parsers (pulls torch + transformers), ~1.1 GB
   * ``japanese`` — cutlet/fugashi/unidic-lite romanisation dictionaries, ~0.45 GB
   * ``arabic``   — CAMeL Tools Arabic morphology, ~0.3 GB
+  * ``la_macron`` — Latin vowel lengths (a DATA tier, not a pip one — see below), ~4 MB
+
+NOT EVERY TIER IS A PIP INSTALL. ``la_macron`` fetches a data file and compiles it, because what it
+needs is not a package: the Morpheus vowel-length table cannot be bundled with this app for
+licensing reasons and is not on PyPI in any form (see :mod:`app.macron`). A tier therefore declares
+EITHER ``pip`` + ``probe`` or ``module`` — the name of a module supplying its own
+``available()``/``install(progress)``/``status()`` — and :func:`install` dispatches on which. The
+alternative was a second parallel install/progress/UI path for one row in the same list, which is
+how two ways to do the same thing get built.
 """
 
 from __future__ import annotations
@@ -50,6 +59,11 @@ TIERS: dict[str, dict] = {
         "probe": "camel_tools",
         "note": "CAMeL Tools Arabic morphology (~0.3 GB)",
     },
+    "la_macron": {
+        "label": "Latin macrons",
+        "module": "macron",     # a DATA tier: app/macron.py owns its own fetch/build/status
+        "note": "Morpheus vowel lengths, fetched from latin-macronizer (~4 MB)",
+    },
 }
 
 def _stanza_platform_pins() -> list[str]:
@@ -87,14 +101,25 @@ def activate() -> None:
     _activated = True
 
 
+def _data_module(tier: dict):
+    """The module backing a DATA tier, or None for an ordinary pip tier."""
+    name = tier.get("module")
+    if not name:
+        return None
+    return importlib.import_module("." + name, __package__)
+
+
 def available(feature: str) -> bool:
-    """Is the tier importable right now — either bundled in the app or installed into extras?"""
+    """Is the tier present right now — either bundled in the app or installed into extras?"""
     tier = TIERS.get(feature)
     if not tier:
         return False
     if not _activated:
         activate()
     try:
+        mod = _data_module(tier)
+        if mod is not None:
+            return bool(mod.available())     # a data tier answers for itself
         importlib.import_module(tier["probe"])
         return True
     except Exception:  # noqa: BLE001 — ImportError, or a broken/partial install
@@ -118,6 +143,22 @@ def install(feature: str, progress=None) -> dict:
     def note(pct, msg):
         if progress:
             progress(pct, msg)
+
+    mod = _data_module(tier)
+    if mod is not None:
+        r = mod.install(progress=progress)      # a data tier fetches and builds its own asset
+        # …and a loaded spaCy model may be holding the ABSENCE of that asset. The released Latin
+        # model's `la_macronise` reads the Morpheus table once, in its own __init__ (see
+        # `parse._share_macron_table`), so a model loaded before the table existed keeps
+        # macronising nothing until the process restarts. Dropping the model cache is what makes
+        # "install the tier, then parse" work in one session. Cheap: the next parse reloads.
+        if r.get("ok"):
+            try:
+                from . import parse
+                parse.invalidate_cache()
+            except Exception:  # noqa: BLE001 — spaCy may not even be importable in a trimmed build
+                pass
+        return r
 
     note(None, f"Installing {tier['label']}…")
     extra_pins = _stanza_platform_pins() if feature == "stanza" else []

@@ -427,6 +427,28 @@ let selRange=null;   // {s, from, to} — a continuous token range shift-selecte
    reads it can ever land out of range. */
 let CURBLOCK=-1;
 function curBlock(){ return (CURBLOCK>=0&&typeof DOC!=="undefined"&&CURBLOCK<DOC.length)?CURBLOCK:sel.s; }
+/* ── A RANGE OF SENTENCES, for the operations that act on more than one ───────────────────────────────────────
+   Anchored, not a free set: shift-click and shift-arrow both extend FROM the block focus TO the one clicked, the
+   way a list selection works everywhere else, so the state is two indices and not a collection. `BLOCKANCHOR`
+   is where the range started; `curBlock()` is its other end, which means the range follows the focus for free
+   and there is no second cursor to keep in step with the first.
+   -1 is "no range", and that is a different state from "a range of one": a lone block is selected all the time,
+   simply by being read, and the sentence commands must not start acting on several until a range is asked for. */
+let BLOCKANCHOR=-1;
+function blockRange(){ if(BLOCKANCHOR<0) return null; const b=curBlock(); if(b<0) return null;
+  const lo=Math.min(BLOCKANCHOR,b), hi=Math.max(BLOCKANCHOR,b);
+  return hi>lo ? {lo,hi} : null; }                      // a range that collapsed onto one block is no range
+function clearBlockRange(){ if(BLOCKANCHOR<0) return; BLOCKANCHOR=-1; paintBlockRange(); }
+/* Extend the range to `i` and make it the focus. The anchor is planted on the FIRST shift-click, so an
+   ordinary click (which clears it) followed by a shift-click selects exactly the span between the two. */
+function extendBlockRange(i){ if(i<0||typeof DOC==="undefined"||i>=DOC.length) return;
+  if(BLOCKANCHOR<0) BLOCKANCHOR=curBlock()>=0?curBlock():i;
+  setCurBlock(i); paintBlockRange(); if(typeof updateFileBlock==="function") updateFileBlock(); }
+/* Class only, no re-render: the range is a selection, and a selection must not cost a repaint of the document
+   (the same reasoning applySel already follows for tokens). */
+function paintBlockRange(){ const r=blockRange();
+  document.querySelectorAll("#doc .sblock").forEach(b=>{ const i=+b.dataset.i;
+    b.classList.toggle("rng-block", !!r && i>=r.lo && i<=r.hi); }); }
 /* ── ESCAPE DISMISSES THE NARROWEST OPEN THING ────────────────────────────────────────────────────────────────
    Overlays in this app each wired their own Escape, bound to their own element — which works only while focus is
    INSIDE them. Open the find bar, click into the document, press Escape: nothing had the key. This is the
@@ -447,6 +469,7 @@ document.addEventListener("keydown",e=>{
   try{ open[0].close(); }catch(_){} });
 function setCurBlock(i){ if(i===curBlock()) return; CURBLOCK=i;   // scroll-spy entry point: block focus WITHOUT touching the token selection
   document.querySelectorAll("#doc .sblock").forEach(b=>b.classList.toggle("sel-block",+b.dataset.i===i));
+  paintBlockRange();   // the range's far end IS the focus, so moving the focus redraws the range
   if(typeof updateFileBlock==="function") updateFileBlock(); }   // keep the "Sentence X of Y" subtitle on the sentence being read
 const isStemma=()=>conv.indexOf("stemma")===0;
 const arrowsOK=()=>isStemma()||conv==="tree";   // semantic arrows apply to stemmas and hierarchies

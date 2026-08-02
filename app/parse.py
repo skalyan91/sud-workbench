@@ -16,9 +16,9 @@ Legacy bare ids (``"en"``) resolve to a default SUD package via the registry.
 from __future__ import annotations
 
 import difflib
+import os
 
 from . import convert
-from . import sa_csl          # pure-text CSL sandhi reversal; no spaCy/model/network, so a top-level import
 from .paths import STANZA_DIR
 
 
@@ -56,7 +56,26 @@ def invalidate_cache() -> None:
     _STANZA_TOK_PIPES.clear()
 
 
-# ── SUD spaCy engine ─────────────────────────────────────────────────────────
+def _share_macron_table() -> None:
+    """Point the Latin model's own `la_macronise` at the table THIS APP manages.
+
+    The released Latin wheel carries `la_macronise` in its pipeline but ships no vowel-length data
+    (Morpheus is CC BY-SA, the model CC BY-NC-SA — see the SUD-spaCy repo's NOTICE.md), and looks
+    for a table in `~/.cache/sud-spacy/`. `app/macron.py` fetches and compiles exactly that table
+    into `paths.APP_DATA`, as the `la_macron` extras tier. Without this the two would want the same
+    4 MB download twice, in two places, and the component would sit in the pipeline warning that it
+    has no data while the app's copy of the same data was on disk a directory away.
+
+    `$LA_MORPHEUS_TABLE` is the component's own documented override, so this asks for nothing the
+    component does not already offer. Set unconditionally, and BEFORE the model is constructed
+    (`Morpheus.load` runs in the component's `__init__`): pointing at a table that does not exist
+    yet is the no-data case, which the component passes through unchanged, and the tier installing
+    later drops the model cache anyway (`invalidate_cache`), so the next load picks it up.
+    """
+    from . import macron   # local: keeps the import off every parse.py consumer's start-up path
+    os.environ.setdefault("LA_MORPHEUS_TABLE", macron.morpheus_table_path())
+
+
 def _load_spacy(package: str):
     if package in _SPACY_MODELS:
         return _SPACY_MODELS[package]
@@ -64,6 +83,7 @@ def _load_spacy(package: str):
         import spacy
     except ImportError as exc:
         raise ParserUnavailable("spaCy is not installed") from exc
+    _share_macron_table()
     try:
         nlp = spacy.load(package)
     except Exception as exc:  # OSError / model-not-found
@@ -84,11 +104,19 @@ def _spacy_doc_to_sud(doc) -> tuple[list[dict], list[dict]]:
         head = "0" if is_root else str(index[t.head.i] + 1)
         deprel = "root" if is_root else (t.dep_ or "")
         out.append(_tok(t.text, t.lemma_ or "", t.pos_ or "", t.tag_ or "",
-                        str(t.morph) if t.morph else "", head, deprel))
+                        str(t.morph) if t.morph else "", head, deprel,
+                        misc=_ext_misc(t)))
         space_after.append(t.whitespace_ != "")
     if not out:
         return [], []
-    mwt = _mwt_from_doc(doc, out)          # a tokeniser that KNOWS its MWTs wins over the heuristic
+    # Three answers about the MWT ranges, most authoritative first: the ranges the tokeniser
+    # PUBLISHED, the ranges its published source spans IMPLY, and — for a tokeniser that says
+    # nothing at all — the whitespace/PUNCT heuristic. Only the last is a guess.
+    mwt = _mwt_from_doc(doc, out)
+    if mwt is None:
+        layout = _src_span_layout(doc, out)
+        if layout is not None:
+            mwt, space_after = layout        # the RAW text's spacing, not the reconstruction's
     if mwt is None:
         mwt = _reconstruct_mwt(out, space_after)
     else:
@@ -112,11 +140,11 @@ def _spacy_tokenize(text: str, package: str) -> tuple[list[dict], list[bool], li
     parse, so the tokens (and their transliterations) appear before the heavy parse runs. The
     SpaceAfter flags are handed back so the follow-up parse can rebuild the very same Doc.
 
-    Also returns any MWT ranges the tokeniser published (`_mwt_from_doc`), so a morphologically
-    tokenised language shows its ranges in the preview rather than having them pop in when the
-    parse lands. `_reconstruct_mwt` is NOT run here: nothing has tagged yet, so its PUNCT test
-    has no input — published ranges are the only ones available this early, which is why the
-    preview used to return none at all."""
+    Also returns any MWT ranges the tokeniser published (`_mwt_from_doc`) or that its published
+    source spans imply (`_src_span_layout`), so a morphologically tokenised language shows its
+    ranges in the preview rather than having them pop in when the parse lands. `_reconstruct_mwt` is
+    NOT run here: nothing has tagged yet, so its PUNCT test has no input — the two published answers
+    are the only ones available this early, which is why the preview used to return none at all."""
     nlp = _load_spacy(package)
     try:
         doc = nlp.tokenizer(text)
@@ -128,10 +156,15 @@ def _spacy_tokenize(text: str, package: str) -> tuple[list[dict], list[bool], li
         return whitespace_tokens(text), [], []
     toks = [_tok(f, head="0" if j == 0 else "1", deprel="root" if j == 0 else "")
             for j, f in enumerate(forms)]
+    mwt = _mwt_from_doc(doc, toks)
+    if mwt is None:
+        layout = _src_span_layout(doc, toks)
+        if layout is not None:
+            mwt, spaces = layout      # a rewriting tokeniser's own text has the wrong spacing
     for i, sa in enumerate(spaces):   # keep a spaceless join (clitics, CJK) visible in the preview
         if not sa and i < len(toks) - 1:
             toks[i]["misc"] = "SpaceAfter=No"
-    return toks, spaces, _mwt_from_doc(doc, toks) or []
+    return toks, spaces, mwt or []
 
 
 def _mwt_from_doc(doc, tokens: list[dict]) -> list[dict] | None:
@@ -167,6 +200,152 @@ def _mwt_from_doc(doc, tokens: list[dict]) -> list[dict] | None:
                     "_cols": [f"{a}-{b}", form, "_", "_", "_", "_", "_", "_", "_", "_"]})
     mwt.sort(key=lambda m: m["from"])
     return mwt
+
+
+def _is_punct_form(form: str) -> bool:
+    """A token made of nothing but punctuation. Used where `_reconstruct_mwt`'s UPOS test can't be:
+    the tokenise-only path has no tagger output yet, and a daṇḍa run glued to the word before it
+    (``raviḥ‖``) has to be kept out of that word's range all the same."""
+    return bool(form) and not any(ch.isalnum() for ch in form)
+
+
+def _src_span_layout(doc, tokens: list[dict]) -> tuple[list[dict], list[bool]] | None:
+    """MWT ranges and SpaceAfter flags read off a tokeniser's PUBLISHED source spans, or ``None``.
+
+    Sits between the two existing answers (`_mwt_from_doc`'s explicit ``mwt_ranges`` and
+    `_reconstruct_mwt`'s heuristic) and is better than the heuristic for the same reason the
+    explicit list is: it is not a guess. A tokeniser that publishes ``doc._.src_text`` +
+    ``doc._.src_spans`` has told us where every token came from in the RAW input, and an
+    orthographic word is just a run of tokens whose spans fall in one whitespace-delimited chunk of
+    that input — which is precisely what a multi-word token is. `sa_sud_vedic_ufal_dcs` is the case
+    this exists for; any future splitter that publishes spans gets it for nothing.
+
+    Two things it gets right that `_reconstruct_mwt` cannot:
+
+    · **The range's FORM is the raw substring**, not the concatenation of the components. Those
+      differ exactly where a sandhi splitter earns its keep — ``vartmā`` + ``punar-`` is stored as
+      the two words ``vartma`` and ``a``, whose concatenation ``vartmaa`` is not a word in any
+      script. Taking the substring instead is what lets the frontend's literal-match alignment
+      settle the sentence with no bridge call at all.
+    · **SpaceAfter comes from the RAW text.** ``doc.text`` here is the tokeniser's RECONSTRUCTION,
+      and it puts spaces where the input had none (the CSLiser splits ``vartmāpunarjanmanām`` into
+      three space-separated pieces), so ``token.whitespace_`` would report gluing that the file must
+      not record. Two tokens are glued iff their spans meet or overlap in the input.
+
+    A token the tokeniser could not place (a ``None`` span) inherits its neighbour's chunk rather
+    than breaking the run: it is a gap in the OFFSETS, not evidence of a word boundary — the
+    Devanagari path produces one on the coalesced particle of every ``vartmā``-type junction, and
+    treating it as a boundary would split the orthographic word in half."""
+    try:
+        from spacy.tokens import Doc
+        if not (Doc.has_extension("src_text") and Doc.has_extension("src_spans")):
+            return None
+        text = doc._.src_text
+        spans = doc._.src_spans
+        if not text or not spans or len(spans) != len(doc) or len(doc) != len(tokens):
+            return None
+        # chunk id per character of the raw input; -1 on whitespace, so a span start names its word
+        chunk_at, cid, prev_ws = [], -1, True
+        for ch in text:
+            if ch.isspace():
+                chunk_at.append(-1)
+                prev_ws = True
+            else:
+                if prev_ws:
+                    cid += 1
+                chunk_at.append(cid)
+                prev_ws = False
+        norm: list[tuple[int, int] | None] = []
+        for sp in spans:
+            try:
+                a, b = int(sp[0]), int(sp[1])
+            except (TypeError, ValueError, IndexError):
+                norm.append(None)
+                continue
+            norm.append((a, b) if 0 <= a < b <= len(text) else None)
+        if not any(norm):
+            return None
+        # each token's chunk, with an unplaced token borrowing from the nearest placed neighbour
+        chunk_of: list[int] = [chunk_at[sp[0]] if sp else -1 for sp in norm]
+        for i, sp in enumerate(norm):
+            if sp:
+                continue
+            # only borrow when BOTH sides agree, or only one side exists: a hole between two
+            # different words is a boundary we cannot see, and guessing either way invents a range
+            left = next((chunk_of[t] for t in range(i - 1, -1, -1) if norm[t]), -1)
+            right = next((chunk_of[t] for t in range(i + 1, len(norm)) if norm[t]), -1)
+            chunk_of[i] = left if right < 0 else (right if left < 0 else
+                                                  (left if left == right else -1))
+        # glued-to-next: the spans meet or overlap (they overlap by one character at a coalescence)
+        space_after = []
+        for i in range(len(norm)):
+            a, b = norm[i], (norm[i + 1] if i + 1 < len(norm) else None)
+            space_after.append(True if not a or not b else b[0] > a[1])
+        if space_after:
+            space_after[-1] = False
+        mwt: list[dict] = []
+        i = 0
+        while i < len(tokens):
+            j = i
+            while (j + 1 < len(tokens) and chunk_of[j + 1] >= 0
+                   and chunk_of[j + 1] == chunk_of[i]):
+                j += 1
+            if chunk_of[i] >= 0:      # one orthographic word: split it on punctuation runs
+                k = i
+                while k <= j:
+                    if _is_punct_form(tokens[k]["form"]):
+                        k += 1
+                        continue
+                    e = k
+                    while e + 1 <= j and not _is_punct_form(tokens[e + 1]["form"]):
+                        e += 1
+                    if e > k:
+                        placed: list[tuple[int, int]] = [sp for sp in norm[k:e + 1] if sp is not None]
+                        a = placed[0][0] if placed else -1
+                        b = placed[-1][1] if placed else -1
+                        form = text[a:b] if b > a >= 0 else \
+                            "".join(tokens[t]["form"] for t in range(k, e + 1))
+                        mwt.append({"from": k + 1, "to": e + 1, "form": form,
+                                    "_cols": [f"{k + 1}-{e + 1}", form,
+                                              "_", "_", "_", "_", "_", "_", "_", "_"]})
+                    k = e + 1
+            i = j + 1
+        return mwt, space_after
+    except Exception:  # noqa: BLE001 — an unexpected extension shape falls through to the heuristic
+        return None
+
+
+# The spaCy extensions a SUD model may set on a token beyond the ten CoNLL-U columns, and the MISC
+# key each rides in.  All three are UD conventions rather than inventions of ours: a non-Latin-script
+# treebank puts the native script in FORM/LEMMA and the romanisation in `Translit`/`LTranslit`
+# (`sa_sud_vedic_ufal_dcs`'s `sa_deva` component does exactly that for a Devanagari input), and the
+# Vedic treebank records the padapāṭha in `Unsandhied` on 100 % of its tokens — the DCS
+# representation leaves a standalone word SANDHIED in FORM, so without this key the unsandhied
+# analysis the model predicts would simply be discarded.  MISC is the right home for all three: they
+# are annotation layers on a token, they round-trip through the file untouched, and none of them is
+# the FORM.
+_TOKEN_MISC_EXT = (("translit", "Translit"), ("ltranslit", "LTranslit"),
+                   ("unsandhied", "Unsandhied"))
+
+
+def _ext_misc(tok, misc: str = "_") -> str:
+    """``misc`` with whatever `_TOKEN_MISC_EXT` values this token carries folded in.
+
+    Silent about extensions that are not registered (every model but the Sanskrit one) and about
+    empty values, so a model that publishes none leaves MISC exactly as it was."""
+    parts = [p for p in (misc or "").split("|") if p and p != "_"]
+    have = {p.split("=", 1)[0] for p in parts}
+    try:
+        from spacy.tokens import Token
+        for attr, key in _TOKEN_MISC_EXT:
+            if key in have or not Token.has_extension(attr):
+                continue
+            val = getattr(tok._, attr, "") or ""
+            if val:
+                parts.append(f"{key}={val}")
+    except Exception:  # noqa: BLE001
+        pass
+    return "|".join(parts) if parts else "_"
 
 
 def _add_space_after_no(misc: str | None) -> str:
@@ -299,8 +478,8 @@ def _reconstruct_mwt(tokens: list[dict], space_after: list[bool]) -> list[dict]:
 
 
 # ── Stanza UD engine (→ SUD via grew) ────────────────────────────────────────
-def _load_stanza(lang: str, package: str = "default"):
-    key = f"{lang}#{package}"
+def _load_stanza(lang: str, package: str = "default", pretokenized: bool = False):
+    key = f"{lang}#{package}" + ("#pretok" if pretokenized else "")
     if key in _STANZA_PIPES:
         return _STANZA_PIPES[key]
     try:
@@ -308,10 +487,13 @@ def _load_stanza(lang: str, package: str = "default"):
     except ImportError as exc:
         raise ParserUnavailable("spacy-stanza is not installed") from exc
     def _load(procs: str):
+        # `tokenize_pretokenized` tells Stanza the sentence is ALREADY segmented — it then splits on
+        # whitespace and nothing else, which is the promise `parse_pretokenized` needs. Cached under
+        # its own key so a document does not share a pipeline between the two modes.
         return spacy_stanza.load_pipeline(
             lang, processors=procs,
             download_method="none", dir=STANZA_DIR, package=package, use_gpu=False,
-            logging_level="ERROR",
+            logging_level="ERROR", tokenize_pretokenized=pretokenized,
         )
     # Try the full pipeline, then progressively drop the OPTIONAL processors some languages lack:
     # `mwt` (no multi-word-token model) and `lemma` (an identity no-op with no model, e.g. Telugu).
@@ -332,12 +514,15 @@ def _load_stanza(lang: str, package: str = "default"):
     return pipe
 
 
-def _stanza_ud(text: str, lang: str, package: str) -> tuple[list[dict], list[dict]]:
+def _stanza_ud(text, lang: str, package: str, pretokenized: bool = False) -> tuple[list[dict], list[dict]]:
     """Run Stanza and extract UD tokens + MWT ranges from the stanza Document.
 
     Multiple detected sentences are flattened into one token table (the app treats
-    each parse as a single sentence); heads are made positional across the whole text."""
-    pipe = _load_stanza(lang, package)
+    each parse as a single sentence); heads are made positional across the whole text.
+
+    ``pretokenized`` takes ``text`` as a list of sentences, each a list of word strings, and holds
+    Stanza to that segmentation — see :func:`parse_pretokenized`."""
+    pipe = _load_stanza(lang, package, pretokenized)
     sdoc = pipe(text)
     pos_of: dict[tuple[int, int], int] = {}
     gpos = 0
@@ -472,6 +657,71 @@ def parse(text: str, model_id: str = "") -> dict:
                 "reason": str(exc)}
 
 
+def parse_pretokenized(forms: list[str], model_id: str = "") -> dict:
+    """Parse a sentence whose TOKENISATION IS ALREADY DECIDED — one token per entry of ``forms``.
+
+    This is what "re-derive the model-derived fields for these tokens" needs, and it is not the same
+    request as :func:`parse`. The caller (the frontend's `reparseTokenFields`, after a form or UPOS
+    edit) has a token table it must keep: the heads, the relations and the annotation tiers hang off
+    those exact tokens, so an answer with a different token count is not a worse answer, it is an
+    unusable one.
+
+    It used to be asked as `parse(" ".join(forms))`, and that quietly failed whenever the tokeniser
+    disagreed with the join — which is routine in a SPACELESS SCRIPT, where the tokeniser is a
+    segmenter and the spaces are not evidence it is obliged to respect. Editing 苹果 to 苹果汁 in
+    ``我 喜欢 吃 苹果 。`` comes back as SIX tokens (苹果 + 汁), the count check fails, and the
+    caller's `return false` meant the lemma, XPOS, FEATS and MISC of the edited token were simply
+    never refreshed — silently, and with no way for the user to ask again.
+
+    Bypassing the tokeniser removes the failure mode rather than detecting it: the alignment is 1-to-1
+    by construction. spaCy supports this directly (build the ``Doc`` from a word list and run the
+    pipeline components over it), and the SUD models are built for it — `sa_compound` exists
+    specifically to supply its input feature "to a caller who hands the pipeline TOKENS rather than
+    raw text". Stanza has ``tokenize_pretokenized``, which takes the same promise.
+
+    Returns the same shape as :func:`parse` minus ``mwt``: the ranges belong to the caller's own
+    table, and a re-parse that was forbidden to re-tokenise has nothing new to say about them."""
+    forms = [str(f or "") for f in (forms or []) if str(f or "")]
+    if not forms:
+        return {"tokens": [], "parsed": False, "reason": "nothing to parse"}
+    engine, _, name = (model_id or "").partition(":")
+    if not model_id:
+        return {"tokens": whitespace_tokens(" ".join(forms)), "parsed": False}
+    try:
+        if engine == "stanza":
+            lang, _, package = name.partition("#")
+            tokens, _mwt = _stanza_ud([forms], lang, package or "default", pretokenized=True)
+            if len(tokens) != len(forms):
+                raise ParserUnavailable("the model re-tokenised a pre-tokenised sentence")
+            ud_sent = {"sid": None, "text": " ".join(forms), "comments": [],
+                       "tokens": tokens, "mwt": [], "empties": []}
+            try:
+                tokens = convert.ud_to_sud([ud_sent])[0]["tokens"]
+            except (convert.ConversionUnavailable, convert.ConversionError) as exc:
+                raise ParserUnavailable(str(exc)) from exc
+            return {"tokens": tokens, "parsed": True, "engine": "stanza", "model": name}
+        if engine != "sud":
+            from . import models_registry
+            name = models_registry.resolve_default_package(model_id) or ""
+            if not name:
+                raise ParserUnavailable(f"unknown model {model_id!r}")
+        nlp = _load_spacy(name)
+        from spacy.tokens import Doc
+        doc = Doc(nlp.vocab, words=forms)
+        for _pname, proc in nlp.pipeline:
+            doc = proc(doc)
+        tokens, _mwt = _spacy_doc_to_sud(doc)
+        if len(tokens) != len(forms):
+            # A component may still rebuild the Doc (clause_parser does); if one ever changes the
+            # count the caller must be told, not handed a table it cannot align.
+            raise ParserUnavailable("the pipeline changed the token count")
+        return {"tokens": tokens, "parsed": True, "engine": "sud", "model": name}
+    except ParserUnavailable as exc:
+        return {"tokens": [], "parsed": False, "reason": str(exc)}
+    except Exception as exc:  # noqa: BLE001 — a pipeline that refuses pre-tokenised input must degrade
+        return {"tokens": [], "parsed": False, "reason": str(exc)}
+
+
 def tokenize(text: str, model_id: str = "") -> dict:
     """The FAST first step of the tokenise → transliterate → parse sequence: tokenise ONLY (no
     tagging or parsing), so the tokens — and their transliterations — paint before the heavy
@@ -522,10 +772,9 @@ def _tokenizer_spans(text: str, model_id: str) -> list[tuple[int, int, str]]:
     rewrites what it reads (Sanskrit's sandhi splitter) those differ, and it is the form that the
     caller's own forms are comparable with.
 
-    Three sources of offsets, in order of authority: the tokeniser's PUBLISHED spans
-    (``_published_spans``), ``token.idx`` where the tokeniser left the text alone, and — Sanskrit
-    only — the CSL transform redone from the text (:mod:`app.sa_csl`). Returns ``[]`` (rather than
-    raising) whenever none of the three yields an honest answer: no model, or a tokeniser whose
+    Two sources of offsets, in order of authority: the tokeniser's PUBLISHED spans
+    (``_published_spans``) and ``token.idx`` where the tokeniser left the text alone. Returns ``[]``
+    (rather than raising) whenever neither yields an honest answer: no model, or a tokeniser whose
     ``doc.text`` differs from the input, which means it RECONSTRUCTED the text (a sandhi/clitic
     splitter building its Doc from a word list) and its ``token.idx`` no longer indexes ``text``."""
     engine, _, name = (model_id or "").partition(":")
@@ -548,37 +797,18 @@ def _tokenizer_spans(text: str, model_id: str) -> list[tuple[int, int, str]]:
         name = models_registry.resolve_default_package(model_id) or ""
         if not name:
             return []
-    # SANSKRIT, no model: the CSL transform redone from the text alone (see `_sa_units`). An
-    # uninstalled model is fatal for every other language — the caller surfaces the exception as its
-    # `reason` — but not for this one, because the transform IS derivable without the wheel.
-    try:
-        nlp = _load_spacy(name)
-    except ParserUnavailable:
-        if name.startswith("sa_") and sa_csl.available():
-            return _sa_units(text)
-        raise                   # …but with the vendored transform gone too there is nothing to say
-                                # but "not installed", which is what the caller reports as `reason`
+    nlp = _load_spacy(name)     # an uninstalled model is fatal; the caller surfaces it as `reason`
     doc = nlp.tokenizer(text)
     pub = _published_spans(doc, text)
     if pub is not None:
         return pub
     if doc.text != text:
-        # The tokeniser RECONSTRUCTED the text and published nothing. Sanskrit is still derivable
-        # (and this is the pre-`src_spans` `sa_sud_vedic_ufal_csl` wheel's path); anything else has
-        # no honest offsets, and a guess here would be a silently wrong decoration.
-        return _sa_units(text) if name.startswith("sa_") else []
-    return [(t.idx, t.idx + len(t.text), t.text) for t in doc]
-
-
-def _sa_units(text: str) -> list[tuple[int, int, str]]:
-    """Sanskrit surface units WITHOUT the model: `sa_sud_vedic_ufal_csl`'s input front-end SPLITS
-    SANDHI — it builds its Doc from a word list, so its text is not the input's — but that front-end
-    is a deterministic, lexicon-free rewriting of CSL notation, so :mod:`app.sa_csl` re-runs it with
-    the offsets attached. Same units the model would produce, addressed in the ORIGINAL string; this
-    is the conversion direction built into the tokenise path, and it needs no wheel installed."""
-    if not sa_csl.available():
+        # The tokeniser RECONSTRUCTED the text and published nothing: no honest offsets exist, and a
+        # guess here would be a silently wrong decoration. (Sanskrit used to be rescued here by
+        # re-running the CSL transform from the text; `sa_sud_vedic_ufal_dcs` publishes `src_spans`,
+        # so it never reaches this line, and the CSL notation it needed is gone from the app.)
         return []
-    return [(a, b, "".join(comp)) for a, b, comp in sa_csl.surface_units(text)]
+    return [(t.idx, t.idx + len(t.text), t.text) for t in doc]
 
 
 def _published_spans(doc, text: str) -> list[tuple[int, int, str]] | None:
@@ -623,37 +853,30 @@ def token_spans(text: str, forms: list[str], model_id: str = "",
     """Character spans in ``text`` for each of ``forms`` (the file's surface units, in order).
 
     ``spans[i]`` is ``[start, end]`` or ``None`` where no honest span could be found — a hole,
-    not a guess, so the caller decorates what aligned and leaves the rest alone. ``parts[i]``, when
-    the caller supplies it, is unit *i*'s component forms (a multi-word token's own tokens), which
-    only the Sanskrit stage uses — and uses to VERIFY, not to search.
+    not a guess, so the caller decorates what aligned and leaves the rest alone.
 
-    Two stages here, behind the frontend's own literal-match stage:
+    ONE stage here, behind the frontend's own literal-match stage: **THE TOKENISER'S OWN OFFSETS**,
+    mirroring :func:`sentencize`'s. The two unit SEQUENCES are diffed (``difflib``) so every run they
+    agree on maps 1-to-1 onto the tokeniser's real offsets, and each DIVERGENT run is then aligned
+    CHARACTER-wise inside the window its neighbours pin down, by the same :func:`_align_map` that
+    maps a model sentence boundary back onto the original text. A file unit the tokeniser has no
+    counterpart for (a token that isn't in the text at all) simply keeps its ``None``.
 
-     2. **SANSKRIT CSL** (:mod:`app.sa_csl`) — deterministic, offline, and needing NO model, so it
-        is tried first: the `# text` is in Clay-Sanskrit-Library notation, whose sandhi marking is
-        a reversible rewriting, and reversing it recovers each token together with its span. It
-        answers or it refuses; it never approximates.
-     3. **THE TOKENISER'S OWN OFFSETS** — the general fallback, mirroring :func:`sentencize`'s: the
-        two unit SEQUENCES are diffed (``difflib``) so every run they agree on maps 1-to-1 onto the
-        tokeniser's real offsets, and each DIVERGENT run is then aligned CHARACTER-wise inside the
-        window its neighbours pin down, by the same :func:`_align_map` that maps a model sentence
-        boundary back onto the original text. That character alignment is a best effort, which is
-        why stage 2 goes first where it applies: over ``samples/brihat_jataka.conllu`` this stage —
-        fed the re-released Sanskrit wheel's own published per-token spans — also reaches 88/88
-        units, but one of them comes back a character wide (a trailing space swept into
-        ``aneka-kiraṇas``) because two adjacent divergent units shared one diff window, whereas
-        stage 2's spans are exact. A file unit the tokeniser has no counterpart for (a token that
-        isn't in the text at all) simply keeps its ``None``."""
+    ``parts`` — unit *i*'s component forms — and ``lang`` are accepted and unused. Both fed the
+    Sanskrit CSL stage that used to sit in front of this one: ``lang`` selected it and ``parts``
+    verified its reversed-sandhi alignment against the file's own components.
+    `sa_sud_vedic_ufal_dcs` publishes real ``src_spans`` and needs no such reconstruction, so the
+    stage is gone. The parameters stay because the frontend computes them anyway and dropping them
+    from the bridge signature would break an older frontend against a newer shell for nothing.
+
+    ⚠ SPANS MAY OVERLAP BY A CHARACTER, and the caller must tolerate it rather than treat it as
+    corruption. A sandhi-splitting tokeniser reports the truth about a vowel coalescence: in
+    ``vartmāpunar-``, the ``ā`` is simultaneously the end of ``vartma`` and the start of ``a``, so
+    the two spans share it. A tiling invariant would have to answer that with a hole on one of the
+    two words, which is less true and less useful than the overlap."""
     forms = [str(f or "") for f in (forms or [])]
     if not text or not forms:
         return {"spans": [], "reason": "nothing to align"}
-    if sa_csl.is_sanskrit(lang, model_id):
-        try:
-            sa = sa_csl.align(text, forms, parts)
-        except Exception:  # noqa: BLE001 — the fallback below is still worth trying
-            sa = None
-        if sa:
-            return {"spans": sa, "source": "csl"}
     try:
         units = _tokenizer_spans(text, model_id or "")
     except Exception as exc:  # noqa: BLE001 — an unavailable model must degrade, never raise at the bridge

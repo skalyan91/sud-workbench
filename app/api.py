@@ -842,6 +842,15 @@ class Api:
         ``reason`` when the requested model/engine can't run."""
         return parse.parse(text, model_id)
 
+    def parse_tokens(self, forms: list[str], model_id: str = "") -> dict:
+        """Re-parse a sentence whose TOKENISATION IS FIXED — one token per entry of ``forms``.
+
+        What the frontend needs after a Form or UPOS edit, where the heads, relations and annotation
+        tiers hang off the existing tokens and an answer with a different token count is unusable.
+        Asking `parse_text(" ".join(forms))` instead silently produced exactly that in any spaceless
+        script — see `parse.parse_pretokenized`, which explains the failure it removes."""
+        return parse.parse_pretokenized(forms or [], model_id)
+
     def tokenize(self, text: str, model_id: str = "") -> dict:
         """FAST first step of the interactive parse sequence (tokenise → transliterate → parse):
         tokenise ONLY, so the tokens and their transliterations paint before the heavy parse. The
@@ -916,18 +925,37 @@ class Api:
         self._doclang = str(lang or "")
         return {"ok": True}
 
-    def itrans_to_iast(self, text: str, lang: str = "") -> dict:
-        """The ONE entry point for typed-Sanskrit input: ITRANS in, IAST out.  Every input field that
-        can receive a Sanskrit word routes through this, so the notation gate is decided in exactly one
-        place (app.itrans.looks_itrans) and can never drift between call sites.
+    def itrans_to_iast(self, text: str, lang: str = "", script: str = "") -> dict:
+        """The ONE entry point for typed-Sanskrit input: ITRANS in, the DOCUMENT'S script out.  Every
+        input field that can receive a Sanskrit word routes through this, so the notation gate is
+        decided in exactly one place (app.itrans.looks_itrans) and can never drift between call sites.
 
         Returns ``{"converted", "changed"}``.  A non-Sanskrit ``lang``, a word with no ITRANS-only
         spelling in it, or a missing aksharamukha all come back unchanged rather than raising — the
         caller can commit the result unconditionally.  ``lang`` empty ⇒ the language the frontend last
         reported (set_doc_language), which is what a caller with no DOCLANG of its own falls back on;
         with neither known the answer is "not Sanskrit" — an unknown language must leave the text as typed, never
-        guess Sanskrit and rewrite it."""
-        return itrans.convert(text or "", lang or self._doclang or "und")
+        guess Sanskrit and rewrite it.
+
+        ``script`` is the document's own storage script ("Devanagari", or "" for an IAST document) —
+        see `doc_script` for where the frontend gets it. The method keeps its old name because it is
+        the bridge's published surface and every call site passes through it; what it converts TO is
+        now the file's business rather than a constant."""
+        return itrans.convert(text or "", lang or self._doclang or "und", script or "")
+
+    def doc_script(self, forms: list[str], lang: str = "") -> dict:
+        """Which script a Sanskrit document STORES its text in: ``{"script": "Devanagari"|""}``.
+
+        Read off a sample of the document's own forms, because that is where the answer is — a file
+        is in whatever script the parser that made it was fed, and no preference, comment or filename
+        records it. "" means Latin (IAST), which is also the answer for every non-Sanskrit language,
+        so a caller can ask unconditionally. Cheap enough to ask on open and on every parse: it stops
+        at the first Brahmic form."""
+        from . import translit
+        base = (lang or self._doclang or "").lower().split("-")[0].split("_")[0]
+        if base not in ("sa", "san"):
+            return {"script": ""}
+        return {"script": translit.sa_stored_script(forms or [])}
 
     def token_readings(self, form: str, lang: str, scheme: str = "", upos: str = "") -> dict:
         """The ORDERED candidate romanisations of one token in ``scheme`` — the heteronym choices for
@@ -969,13 +997,20 @@ class Api:
         return {"schemes": translit.orthography_schemes(lang), "lang": lang}
 
     def orthography(self, forms: list[str], lang: str, scheme: str = "",
-                    upos: list[str] | None = None) -> dict:
+                    upos: list[str] | None = None, feats: list[str] | None = None,
+                    lemmas: list[str] | None = None) -> dict:
         """Same optional POS hint as ``transliterate`` above, parallel to ``forms``: a script rendering can
         be reading-dependent too (a Traditional/Simplified variant pair, a kana spell-out), so the layer
         that picks a reading is given the same evidence.  An MWT range sends nothing — its span covers
-        several tokens and so has no one part of speech to report."""
+        several tokens and so has no one part of speech to report.
+
+        ``feats``/``lemmas`` are parallel too, and exist for Latin macronisation, which needs the whole
+        morphological analysis rather than just the class: the lookup is keyed on (form, upos, feats),
+        and the lemma's ending supplies the declension wherever FEATS carries no ``InflClass``.  Sending
+        the form alone reaches only the morphology-blind level of the table, which is how nominative
+        ``Gallia`` acquires an ablative macron.  Every other language ignores both."""
         from . import translit
-        return {"ortho": translit.orthography_many(forms, lang, scheme, upos),
+        return {"ortho": translit.orthography_many(forms, lang, scheme, upos, feats, lemmas),
                 "lang": lang, "scheme": scheme}
 
     def sanskrit_mwt(self, groups: list[list[str]], lang: str, scheme: str = "",
@@ -984,26 +1019,33 @@ class Api:
         fusing the joins by external sandhi, then render the fused form in ``scheme`` (a script).
         ``groups`` = one component-form list per MWT; ``lemma_groups`` (optional, parallel) supplies
         each component's CoNLL-U lemma as an r-stem signal for visarga sandhi.  ``word_sep`` = the
-        separator kept at a NON-fusing junction: "" for a spaceless MWT (the default), " " for the
-        block-initial running line so an un-coalescing junction (e.g. ``eke vāñchanti``) stays two
-        words.  Returns the scripted forms + the fused IAST."""
+        separator kept at a NON-fusing junction: "" for a spaceless MWT (the default), " " for a
+        running stretch so an un-coalescing junction (e.g. ``eke vāñchanti``) stays two words.
+
+        Returns ``{"form", "ortho"}``: ``form`` is the fused surface IN THE DOCUMENT'S OWN SCRIPT —
+        what belongs in the range's FORM column, Devanagari for a Devanagari file and IAST for an
+        IAST one — and ``ortho`` is the same fusion rendered in the reader's chosen script.  (It was
+        ``iast`` until a file could be stored in Devanagari, at which point the name would have been
+        a lie half the time.)  A parse never needs this: the tokeniser reports the range's surface
+        as the raw substring it came from.  It is for an EDIT — retyping a component means the
+        orthographic word above it has to be re-derived, and only sandhi can say what it becomes."""
         from . import translit
         groups = groups or []
         lg = lemma_groups or []
-        iast = [translit.sandhi_join(g, lang, lg[i] if i < len(lg) else None, word_sep) for i, g in enumerate(groups)]
+        form = [translit.sandhi_join(g, lang, lg[i] if i < len(lg) else None, word_sep) for i, g in enumerate(groups)]
         ortho = [translit.sandhi_to_script(g, lang, scheme, lg[i] if i < len(lg) else None, word_sep) for i, g in enumerate(groups)]
-        return {"ortho": ortho, "iast": iast, "lang": lang, "scheme": scheme}
+        return {"ortho": ortho, "form": form, "lang": lang, "scheme": scheme}
 
-    def sanskrit_running(self, texts: list[str], lang: str, scheme: str = "") -> dict:
-        """Item 6 (rev): the block-initial Sanskrit running line, built from each sentence's RAW
-        ``# text`` (not the token forms) by the gluing algorithm — strip apostrophes/hyphens/word-
-        internal pipes (so hyphen-/pipe-separated compound members fuse), glue every consonant-final
-        word onto the next, then render in ``scheme`` (a script).  Operating on the raw text is what
-        makes the hyphen/pipe gluing work: the tokeniser has already dropped those markers from the
-        forms.  Returns one scripted running line per input text."""
-        from . import translit
-        ortho = [translit.sanskrit_running_line(t or "", lang, scheme) for t in (texts or [])]
-        return {"ortho": ortho, "lang": lang, "scheme": scheme}
+    def sanskrit_csl(self, sents: list[dict]) -> dict:
+        """Each sentence's tokens spelt in Clay-Sanskrit-Library notation → ``{"csl": [[…], …]}``.
+
+        A SENTENCE at a time, unlike every other transliteration call, because a CSL mark records
+        what happened BETWEEN two words: ``vartmā`` is only ``vartm"`` because ``apunar`` follows it,
+        so no per-form batch can answer it. Each entry is
+        ``{forms, unsandhied, feats, lemmas, mwt}`` — see :mod:`app.sa_notation` for why the pausa
+        forms rather than the stored ones are the input, and what the lemma is read for."""
+        from . import sa_notation
+        return {"csl": sa_notation.csl_many(sents or [])}
 
     def translit_available(self) -> dict:
         from . import translit
@@ -1016,13 +1058,55 @@ class Api:
         for Sanskrit, Wiktionary for everything else.  Both modules return the same dict — the
         frontend reads `definitions`/`page_url`/`error` identically either way, and names the source
         it is showing from `source`/`page_label` rather than assuming Wiktionary."""
-        from . import apte, wiktionary
+        from . import apte, appledict, wiktionary
+        # THE USER'S OWN DICTIONARIES FIRST, where macOS has one that indexes this language and
+        # defines in English. They are already installed, professionally edited (Oxford, Duden,
+        # Sanseido), need no network, and were chosen by the user — so on the languages they cover
+        # they beat both sources below. Nothing is removed behind them: this is macOS-only and nobody
+        # has a dictionary for every language, so a miss falls through to exactly what answered
+        # before, and a machine with none behaves as it always did.
+        try:
+            if appledict.available():
+                appledict.set_overrides(_load_state().get("apple_dict_langs") or {})
+                got = appledict.lookup(word, language)
+                if got.get("entry"):
+                    return appledict.as_senses(got, word, upos)
+        except Exception:  # noqa: BLE001 — an unreadable bundle must never cost the flyout its answer
+            pass
         if apte.is_sanskrit(language):
             return apte.lookup(word, language, upos)
         r = wiktionary.lookup(word, language, upos)
         r.setdefault("source", "Wiktionary")
         r.setdefault("page_label", "Open on Wiktionary")
         return r
+
+    def apple_dictionaries(self, lang: str = "") -> dict:
+        """Every macOS dictionary this machine has, with what it indexes and what it defines in
+        English — for a settings list where the user can label the ones that declare nothing.
+
+        ``needsLanguage`` marks exactly those: a bundle whose Info.plist names no languages and whose
+        entry ids carry no direction, which is common for a hand-installed one. There is no honest
+        way to infer it (see `appledict._OVERRIDES`), so the UI asks. Empty list off macOS."""
+        from . import appledict
+        if not appledict.available():
+            return {"dictionaries": [], "available": False}
+        appledict.set_overrides(_load_state().get("apple_dict_langs") or {})
+        return {"dictionaries": appledict.dictionaries(lang), "available": True}
+
+    def set_apple_dictionary_language(self, key: str, lang: str = "") -> dict:
+        """Assign (or, with an empty ``lang``, clear) the headword language of one dictionary.
+        Keyed on its CFBundleIdentifier, or its name when it has none. Persisted in state.json."""
+        from . import appledict
+        state = _load_state()
+        m = dict(state.get("apple_dict_langs") or {})
+        if lang:
+            m[str(key)] = str(lang)
+        else:
+            m.pop(str(key), None)
+        state["apple_dict_langs"] = m
+        _save_state(state)
+        appledict.set_overrides(m)
+        return {"ok": True, "languages": m}
 
     def wiktionary_lookup(self, word: str, language: str = "", upos: str = "") -> dict:
         """Back-compat alias — the flyout is no longer Wiktionary-only (see definition_lookup)."""

@@ -465,7 +465,18 @@ const TRANSFORM_ORTHO=new Set(["simplified","traditional","latin","cyrillic"]); 
 const LATIN_ORTHO=new Set(["gr","generalchinese","generalchinese_yue","jyutping"]);
 function orthoLatin(){ return !!ORTHO_SCHEME && LATIN_ORTHO.has(ORTHO_SCHEME); }
 function orthoScript(){ return !!ORTHO_SCHEME && ORTHO_SCHEME!=="none" && !TRANSFORM_ORTHO.has(ORTHO_SCHEME) && !LATIN_ORTHO.has(ORTHO_SCHEME); }   // "none" is not a script (no top-line displacement)
-function iastFormEdit(){ return isSanskritLang() && orthoScript(); }   // Item 10: Sanskrit with a real script displayed → the script glyph is a DERIVED, display-only rendering of the stored IAST form, so the IAST transliteration ROW beneath is the editable field that writes back to the token FORM (never the script glyph directly)
+// Item 10: where the glyph on screen is a DERIVED rendering, editing it would be editing the
+// rendering, so the editable field moves to the IAST transliteration ROW beneath, which writes back
+// to the token FORM. That only works while the stored form IS the IAST — true of every Sanskrit file
+// until one could be stored in Devanagari. Two of the four cases have changed:
+//   IAST file, script displayed      → row edits the form   (as before)
+//   IAST file, Original/Latin (IAST) → the glyph IS the form, edit it
+//   DEVANAGARI file, Original        → the glyph IS the form, edit it            (new)
+//   DEVANAGARI file, another script  → the glyph is derived, but so is the IAST row — neither shows
+//                                      the stored Devanagari, so the ordinary inline form editor
+//                                      opens on it instead. Honest rather than clever: the field
+//                                      says what the file says.                  (new)
+function iastFormEdit(){ return isSanskritLang() && !DOCSCRIPT && orthoScript(); }
 // BCP-47 tag for the rendered content, from the document language + the selected same-language script swap.
 // Han unification (zh-Hans vs zh-Hant vs ja) and locale Cyrillic (Bulgarian, Serbian) render correct
 // regional glyphs only when the element carries this tag → it drives the OpenType `locl` feature and the
@@ -497,12 +508,22 @@ function dispScheme(text,scheme){ if(!text) return text||"";
 // romanised Sanskrit as "|"/"/" and a double daṇḍa as "||"/"//"; most Brahmic scripts share the
 // Devanagari daṇḍa ।/॥, but a few have their own. When a real Indic SCRIPT is selected, a punctuation
 // TOKEN that is a daṇḍa marker shows the script's native glyph instead of the ASCII pipe/slash.
-const SCRIPT_DANDA={Tibetan:["།","༎"],Sharada:["𑇅","𑇆"],Siddham:["𑗂","𑗃"]}, DANDA_DEFAULT=["।","॥"];
-function dandaGlyph(form){   // → the script daṇḍa for a "|"/"||"/"/"/"//" marker under an active Indic script, else null
+// This table MIRRORS translit._DANDA and had drifted to three of its entries, so under Newa, Khmer,
+// Balinese, Javanese, Burmese, Soyombo, Cham, Kawi, Zanabazar Square or Bhaiksuki a daṇḍa PUNCT
+// token drew the shared ।/॥ while the running line above it drew the script's own mark. Completed
+// here; add to both when a script with its own daṇḍa is added to either.
+// "iast" is in it because romanised Sanskrit is now a SCRIPT choice rather than the absence of one:
+// a Devanagari-stored file asked for in Latin has to spell its ।/॥ tokens |/‖, which is what this
+// app's own romanised convention writes.
+const SCRIPT_DANDA={iast:["|","‖"],Tibetan:["།","༎"],Sharada:["𑇅","𑇆"],Siddham:["𑗂","𑗃"],
+  Newa:["𑑋","𑑌"],Bhaiksuki:["𑱁","𑱂"],Cham:["꩝","꩞"],Kawi:["𑽃","𑽄"],Khmer:["។","៕"],
+  Balinese:["᭞","᭟"],Javanese:["꧈","꧉"],Burmese:["၊","။"],Soyombo:["𑪛","𑪜"],ZanabazarSquare:["𑩂","𑩃"]},
+  DANDA_DEFAULT=["।","॥"];
+function dandaGlyph(form){   // → the script daṇḍa for a daṇḍa marker under an active script, else null
   if(!isSanskritLang()||!orthoScript()) return null;
   const d=SCRIPT_DANDA[ORTHO_SCHEME]||DANDA_DEFAULT;
-  if(form==="||"||form==="//"||form==="‖") return d[1];   // feature 17: "‖" (U+2016) is the double-daṇḍa DISPLAY glyph the store folds "||"/"//" into (the token FORM in the sample IS "‖"); match it so the double daṇḍa converts to the script glyph like the single one — the diagram folds daṇḍa PUNCT into hanging satellites drawn via hangForm=dandaGlyph||p.form (never t.ortho), so without this a "‖" showed raw instead of ॥/༎
-  if(form==="|"||form==="/") return d[0];
+  if(form==="||"||form==="//"||form==="‖"||form==="॥") return d[1];   // feature 17: "‖" (U+2016) is the double-daṇḍa DISPLAY glyph the store folds "||"/"//" into (the token FORM in an IAST sample IS "‖"); match it so the double daṇḍa converts to the script glyph like the single one — the diagram folds daṇḍa PUNCT into hanging satellites drawn via hangForm=dandaGlyph||p.form (never t.ortho), so without this a "‖" showed raw instead of ॥/༎. "॥"/"।" are the same tokens as a DEVANAGARI-stored file spells them.
+  if(form==="|"||form==="/"||form==="।") return d[0];
   return null; }
 // item 11: the SCRIPT drives the MAIN GLYPH. "Original" (default, ORTHO_SCHEME="") → the stored form;
 // "None" (ORTHO_SCHEME="none") → the DISPLAYED transliteration becomes the main glyph; a script id → that script.

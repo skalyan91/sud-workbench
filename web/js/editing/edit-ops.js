@@ -59,6 +59,95 @@ function moveSent(from,to){ if(to<0||to>DOC.length)return; pushUndo(); if(from<t
   if(typeof invalidateColW==="function") invalidateColW();   // reordering shifts the margin numbering of everything between the old and new position
   if(typeof invalidateDiaCache==="function") invalidateDiaCache();   // …and every si between the old and new position now names a different sentence — see doInsert's own note on why this cache can't tolerate that the way colW does
   refresh(); }
+/* ── SENTENCE-RANGE OPERATIONS ────────────────────────────────────────────────────────────────────────────────
+   Delete and merge both act on the shift-selected range (js/core/prefs.js's blockRange) when there is one, and
+   on the focused sentence alone when there is not — so the same ⌘⌫ that always deleted one sentence deletes six
+   when six are selected, and no second command had to be invented for it. */
+function delSents(lo,hi){ pushUndo();
+  const sids=[]; for(let k=lo;k<=hi;k++) if(DOC[k]) sids.push(DOC[k].sid);
+  DOC.splice(lo,hi-lo+1);
+  // Renumber ONCE, from the first hole, rather than per sentence: renumberAfterDelete walks everything after
+  // the index it is given, so calling it in a loop would walk the tail of the document once per deletion.
+  if(AUTONUM) renumberAfterDelete(lo,sids[0]);
+  clearBlockRange();
+  sel=DOC.length?{s:Math.min(lo,DOC.length-1),t:1}:{s:-1,t:0};
+  if(typeof setCurBlock==="function") setCurBlock(sel.s);
+  if(typeof invalidateColW==="function") invalidateColW();
+  if(typeof invalidateDiaCache==="function") invalidateDiaCache();
+  refresh(); }
+/* Join DOC[lo..hi] into one sentence.
+   THE LATER ROOTS BECOME `parataxis`, not a second `root`. CoNLL-U allows exactly one root per sentence, so
+   simply concatenating would produce a file the app's own validator rejects — and `parataxis` is what SUD (and
+   UD before it) uses for clauses set side by side without one governing the other, which is precisely what two
+   sentences pushed together are. The relation is a real one in DEPREL_DEFAULT, so it round-trips and can be
+   re-labelled by hand afterwards if the annotator wants something else.
+   Everything that carries a token id moves with the tokens: heads, the enhanced DEPS graph, multi-word-token
+   ranges (and the range string in their raw `_cols`), and empty nodes with their own decimal ids. That list is
+   the same one remapTokenRefs documents for the within-sentence case; here the shift is uniform, so it is done
+   directly rather than through a map.
+   ⚠ NOT called `mergeSents`, which is the bridge-level command in js/io/bridge.js. These files share ONE global
+   scope, so a `function mergeSents` here and a `window.mergeSents=` there are the same binding — the assignment
+   wins (it runs later) and the command's own `mergeSents(r.lo,r.hi)` call would have recursed into itself
+   forever. `delSents`/`window.deleteSent` escaped it only by accident of naming. */
+function mergeSentRange(lo,hi){
+  if(hi<=lo||!DOC[lo]||!DOC[hi]) return;
+  pushUndo();
+  const first=DOC[lo];
+  const rootOf=s=>{ const k=(s.tokens||[]).findIndex(t=>String(t.head)==="0"); return k<0?0:k+1; };
+  const firstRoot=rootOf(first);
+  for(let n=hi-lo;n>0;n--){
+    const s=DOC[lo+1]; if(!s){ break; }
+    const off=first.tokens.length;
+    (s.tokens||[]).forEach(t=>{
+      const h=parseInt(t.head,10);
+      if(!isNaN(h)&&h>0) t.head=String(h+off);
+      else { t.head=String(firstRoot||1); if(!t.deprel||t.deprel==="root") t.deprel="parataxis"; }
+      if(t.deps&&t.deps!=="_") t.deps=shiftDeps(t.deps,off,firstRoot||1);
+    });
+    (s.mwt||[]).forEach(m=>{ m.from+=off; m.to+=off;
+      if(m._cols) m._cols[0]=m.from+"-"+m.to; });
+    (s.empties||[]).forEach(e=>{ e.after=(e.after||0)+off;
+      if(e.id!=null){ const parts=String(e.id).split("."); parts[0]=String((parseInt(parts[0],10)||0)+off); e.id=parts.join("."); }
+      // An empty node is a full ten-column row kept verbatim: its ID is column 0 and its edges are column 8
+      // (HEAD, column 6, is "_" for an empty node — it exists only in the enhanced graph). Shifting the id and
+      // leaving the edges behind would have left every empty node pointing at whatever token now holds its old
+      // head's number, which after a merge is a different word in a different clause.
+      if(e._cols){ e._cols[0]=String(e.id);
+        if(e._cols[8]&&e._cols[8]!=="_") e._cols[8]=shiftDeps(e._cols[8],off,firstRoot||1); } });
+    first.tokens=first.tokens.concat(s.tokens||[]);
+    first.mwt=(first.mwt||[]).concat(s.mwt||[]);
+    first.empties=(first.empties||[]).concat(s.empties||[]);
+    const a=(first.text||"").trim(), b=(s.text||"").trim();
+    first.text=a&&b?(a+" "+b):(a||b);
+    // The first sentence keeps its own id, comments and translations: it is the one that survives, and a merge
+    // is not a new sentence. The absorbed sentence's `# text` is the only thing that has to come across.
+    DOC.splice(lo+1,1);
+  }
+  delete first._tsp; delete first._stxWB; delete first.orthoLine;   // every cached alignment/rendering is about the OLD text
+  clearBlockRange();
+  sel={s:lo,t:1};
+  if(typeof setCurBlock==="function") setCurBlock(lo);
+  if(typeof invalidateColW==="function") invalidateColW();
+  if(typeof invalidateDiaCache==="function") invalidateDiaCache();
+  markDirty(); refresh();
+  if(typeof toast==="function") toast("Merged "+(hi-lo+1)+" sentences"); }
+/* Shift every token id inside an enhanced-DEPS string ("3:nsubj|5.1:comp:obj") by `off`. Empty-node ids carry a
+   decimal part, which shifts on its integer half only — the same rule the empty nodes themselves take above.
+   `newRoot` re-points head 0, which does NOT shift and must not simply survive: the enhanced graph allows one
+   root per sentence exactly as the basic layer does, so an absorbed sentence's `0:root` has to become the same
+   `parataxis` on the first sentence's root that its basic head became — otherwise a merge produces a file whose
+   basic layer validates and whose DEPS column carries two roots. Omit it (as delSents' callers do) to leave
+   head 0 alone. */
+function shiftDeps(deps,off,newRoot){
+  return String(deps).split("|").map(p=>{
+    const i=p.indexOf(":"); if(i<0) return p;
+    const id=p.slice(0,i), rel=p.slice(i+1), parts=id.split(".");
+    const head=parseInt(parts[0],10);
+    if(isNaN(head)) return p;
+    if(head===0 && newRoot) return String(newRoot)+":"+(rel==="root"?"parataxis":rel);
+    parts[0]=String(head>0?head+off:head);
+    return parts.join(".")+":"+rel;
+  }).join("|"); }
 function delSent(i){ pushUndo(); const delSid=DOC[i]&&DOC[i].sid; DOC.splice(i,1);
   if(AUTONUM) renumberAfterDelete(i,delSid);   // keep the numbering continuous across the deletion
   sel=DOC.length?{s:Math.min(i,DOC.length-1),t:1}:{s:-1,t:0};
@@ -74,7 +163,51 @@ function insertToken(si,pos){ pushUndo(si); if(typeof touchColW==="function") to
   toks.splice(pos,0,tok("","","X","","",0,"root"));   // sensible defaults (UPOS X, head 0 = root, so deprel "root" to match)
   remapMWT(s,toks);   // renumber onto the original components → an edge insert stays outside the MWT
   remapTokenRefs(s,idMapAfter(oldIds,toks));   // every token survives an insert, so nothing is dropped — the ids after `pos` simply move up, and DEPS / empty-node anchors move with them
-  sel={s:si,t:pos+1}; refresh(); }
+  sel={s:si,t:pos+1}; refresh(); focusNewToken(si,pos+1); }
+/* PUT THE CARET IN THE NEW TOKEN'S FORM FIELD. An inserted token is empty by construction — that is
+   what makes it an insert rather than a copy — so there is exactly one thing the user can do next,
+   and leaving them to hunt for a zero-width glyph to click is the app declining to do it for them.
+   AFTER the render, not before: `refresh()` rebuilds the block, so a field focused first is detached
+   by the time the user types into it. One frame is enough — `refresh` is synchronous, and the rAF
+   simply lets the layout it triggered settle before `makeEditable` measures the element.
+   `editNodeInline` rather than a bare `.focus()`, because it is the one entry point that knows WHICH
+   element is the form field in the current notation (a goeswith continuation has its own; under a
+   Sanskrit script the editable field is the row beneath the glyph) and it wires up the tier
+   navigation, the ITRANS conversion and `afterFormEdit` on commit — none of which a raw focus does.
+   It falls back to the grid cell by itself when no node is drawn, so the outline and grid views are
+   covered without a second path here.
+   IT WAITS FOR THE RENDER RATHER THAN ASSUMING A FRAME. `refresh()` does not necessarily paint
+   synchronously — a rAF-scheduled rebuild is the normal path — so a single rAF here opened the
+   editor over the PRE-INSERT diagram and the rebuild that followed took the focus straight back. The
+   loop below waits for the new token's own element to exist before touching anything, and gives up
+   after a few frames rather than spinning: failing to focus is a small disappointment, and holding a
+   callback alive against a document the user has moved on from is not. */
+function focusNewToken(si,tokId){
+  if(typeof editNodeInline!=="function") return;
+  let tries=0;
+  const attempt=()=>{ const s=DOC[si];
+    if(!s||tokId<1||tokId>s.tokens.length) return;
+    if(s.tokens[tokId-1].form) return;   // not the empty token we just made (an intervening edit) → leave the user alone
+    const drawn=(typeof formElOf==="function") ? formElOf(si,tokId) : null;
+    if(!drawn && ++tries<8){ requestAnimationFrame(attempt); return; }   // the rebuild hasn't landed yet
+    if(document.querySelector(".nodeedit")) return;   // an editor is already open (the user got there first)
+    /* SCROLL TO IT FIRST, and this is load-bearing rather than a courtesy. `makeEditable` hides its
+       field outright when the token it covers is clipped out of view (elClippedOut → visibility:
+       hidden), and focus() on a hidden element is a no-op in every browser — so inserting a token
+       below the fold opened an editor that was invisible AND unfocused, which is worse than not
+       opening one. Revealing the token first means the field is visible by the time it is focused.
+       revealTok is the same call the tier navigation uses when arrow-keying onto an off-screen
+       token, so an inserted token arrives the way a navigated-to one does — and the editor opens a
+       FRAME LATER, because `place()` measures the token's position and the scroll revealTok asks for
+       has not been applied yet when it returns. Measured: an inserted token's form element sat 5px
+       above the .diagram scroller's top edge, which is enough for the containment test to call it
+       clipped, and opening the editor in the same turn read that stale position. */
+    if(typeof revealTok==="function") revealTok(si,tokId);
+    requestAnimationFrame(()=>{ const s2=DOC[si];
+      if(!s2||tokId<1||tokId>s2.tokens.length||s2.tokens[tokId-1].form) return;
+      if(document.querySelector(".nodeedit")) return;
+      editNodeInline(si,tokId); }); };
+  requestAnimationFrame(attempt); }
 /* ── RE-INDEXING WHAT THE HEAD COLUMN ISN'T ────────────────────────────────────────────────────────────────────
    Three things carry token ids besides `head`, and no structural edit used to touch any of them:
      · a token's DEPS — the enhanced graph, "3:nsubj|5.1:comp:obj". Authoritative whenever it came from a file:

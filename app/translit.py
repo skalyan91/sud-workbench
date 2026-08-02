@@ -29,7 +29,7 @@ _JANOME = None
 _KKS = None
 _KO = None
 _UROMAN = None
-_CACHE: dict[tuple[str, str, str, str], str] = {}   # (lang, scheme, text, upos) → transliteration ⚠ upos is in the key: see _render_one
+_CACHE: dict[tuple[str, str, str, str, str, str], str] = {}   # (lang, scheme, text, upos, feats, lemma) → transliteration ⚠ the three hints are in the key: see _render_one
 
 _DATA_DIR = os.path.join(os.path.dirname(__file__), "data")   # vendored, char-keyed datasets (offline)
 
@@ -1086,23 +1086,54 @@ def _glue_consonant_runs(text: str, sep: str) -> str:
     return out
 
 
+def sa_stored_script(forms) -> str:
+    """The Brahmic script ``forms`` are WRITTEN in, as an aksharamukha target name, or "" for IAST.
+
+    A Sanskrit file stores its FORM/LEMMA columns in one of two scripts — the model romanises
+    Devanagari input internally but puts Devanagari back in FORM, per the UD convention — and the
+    sandhi engine below is written in IAST and only in IAST.  So the fold has to romanise on the way
+    in and write back on the way out, and this is the one place that names the script to write back
+    to.  Read off the FORMS themselves rather than passed in: which script a word is written in is
+    a property of the word, so no caller can get it wrong and no parameter can go stale."""
+    for f in forms or []:
+        if f and _is_indic(f):
+            try:
+                from aksharamukha import transliterate as ak
+                src = ak.auto_detect(f) if hasattr(ak, "auto_detect") else ""
+                if src and src not in ("IAST", "HK", "Zyyy"):
+                    return src
+            except Exception:  # noqa: BLE001
+                return "Devanagari"   # it IS Indic; Devanagari is the only script the parser emits
+            return "Devanagari"
+    return ""
+
+
 def sandhi_join(forms, lang: str = "sa", lemmas=None, word_sep: str = "") -> str:
-    """Assemble ``forms`` (component IAST words) into one surface string, fusing the joins by
-    external sandhi for Sanskrit.  Non-Sanskrit ⇒ naive concatenation.  Left-folded pairwise.
+    """Assemble ``forms`` (a multi-word token's component words) into one surface string, fusing the
+    joins by external sandhi for Sanskrit.  Non-Sanskrit ⇒ naive concatenation.  Left-folded pairwise.
     ``lemmas`` (optional, parallel to ``forms``) supplies each word's CoNLL-U lemma as an r-stem
     signal for visarga sandhi.  ``word_sep`` is what a NON-fusing junction keeps: "" glues the words
-    (an MWT is one spaceless token — the default), while the block-initial running line passes " " so
+    (an MWT is one spaceless token — the default), while a running line passes " " so
     a genuinely un-coalescing junction (e.g. a vowel-final word before a consonant, ``eke vāñchanti``)
     stays two words rather than merging into one.  A newline in the stream is a hard break (see
     _iast_join_pair): sandhi never fires across it, newlines are kept (so multi-line input stays
     multi-line), and no word_sep is added around it.  Item 18: the words are PREPROCESSED
-    (circumflex/apostrophe/hyphen/pipe cleanup + consonant-final gluing) before the sandhi fold."""
+    (circumflex/apostrophe/hyphen/pipe cleanup + consonant-final gluing) before the sandhi fold.
+
+    The result comes back IN THE SCRIPT THE FORMS WERE GIVEN IN (`sa_stored_script`), because it is
+    the multi-word token's own FORM column and must match the rest of the file: fusing a Devanagari
+    document's components into IAST would put two scripts in one document.  Devanagari in, sandhi
+    reckoned in IAST, Devanagari out."""
     pairs = [(f, (lemmas[i] if lemmas and i < len(lemmas) else None))
              for i, f in enumerate(forms or []) if f]
     if not pairs:
         return ""
     if _canon_lang(_norm(lang)) != "sa":
         return "".join(f for f, _ in pairs)
+    script = sa_stored_script([f for f, _ in pairs])
+    if script:   # romanise on the way in — the fold below reads IAST letters and nothing else
+        pairs = [(_render_one(f, lang, "iast") or f,
+                  (_render_one(lm, lang, "iast") or lm) if lm else lm) for f, lm in pairs]
     pairs = _sandhi_preprocess(pairs)   # item 18: clean + glue consonant-final words, then fuse
     if not pairs:
         return ""
@@ -1111,19 +1142,21 @@ def sandhi_join(forms, lang: str = "sa", lemmas=None, word_sep: str = "") -> str
     for nxt, lm in pairs[1:]:
         out = _iast_join_pair(out, nxt, out_lemma, out_form, word_sep)   # out_lemma/out_form = the word contributing out's final visarga
         out_lemma, out_form = lm, nxt
-    return _ud.normalize("NFC", _glue_consonant_runs(out, word_sep))   # LAST step: glue any (now) consonant-final words
+    fused = _ud.normalize("NFC", _glue_consonant_runs(out, word_sep))   # LAST step: glue any (now) consonant-final words
+    return (_render_one(fused, lang, script) or fused) if script else fused
 
 
 def sandhi_to_script(forms, lang: str, scheme: str = "", lemmas=None, word_sep: str = "") -> str:
-    """Sanskrit MWT display form: fuse the component IAST forms by sandhi, THEN convert the fused
-    string to the chosen script (scheme).  Empty scheme ⇒ the fused IAST itself.  Newlines in the
-    fused string are preserved through the script conversion (multi-line input stays multi-line).
-    ``word_sep`` (see sandhi_join) keeps a word separation at non-coalescing junctions for the running
+    """Sanskrit MWT DISPLAY form: fuse the component forms by sandhi, THEN convert the fused string
+    to the chosen script (scheme).  Empty scheme ⇒ the fused form in the document's own script (i.e.
+    exactly `sandhi_join`), which is what "Script: Original" asks for.  Newlines in the fused string
+    are preserved through the script conversion (multi-line input stays multi-line).
+    ``word_sep`` (see sandhi_join) keeps a word separation at non-coalescing junctions for a running
     line ("" for a spaceless MWT); aksharamukha preserves the space through the script conversion."""
     fused = sandhi_join(forms, lang, lemmas, word_sep)
     if not fused or not scheme:
         return fused
-    return _render_one(fused, lang, scheme)
+    return _render_one(fused, lang, scheme) or fused
 
 
 # Item 15: word-final voiceless stop → its voiced counterpart before a following voiced sound.
@@ -1148,108 +1181,6 @@ def _lengthen_final_vowel(s: str) -> str:
     if fv in _LONG:
         return s[:-1] + _LONG[fv]
     return s
-
-
-def _glue_running_iast(text: str) -> str:
-    """Item 6 (rev) + item 15: fuse the RAW (CSL-encoded) sentence ``text`` into one IAST running
-    string by the GLUING algorithm — consonant-final concatenation plus the small, deterministic set
-    of external-sandhi phenomena that a spaceless running line needs:
-      1. take the raw text one hard line at a time (``\\n`` is a non-gluing hard break, preserved);
-      2. per whitespace word, strip the apostrophes/quotes ``'`` ``"`` ``”``, hyphens ``-`` and
-         WORD-INTERNAL pipes ``|`` — a bare daṇḍa token ``|``/``||`` survives as punctuation — and
-         fold the CSL circumflex vowels (â→ā, ê→e, ô→o, î→ī, û→ū).  (All via _sandhi_preclean.)
-         Hyphen-/pipe-separated compound members thus glue into a single word;
-      3. glue a word ENDING IN A CONSONANT onto the following word (no space); a word ending in a
-         vowel, visarga ``ḥ`` or anusvāra ``ṃ`` keeps a separating space.  NASAL ASSIMILATION: a
-         word-final ``-m`` before a following CONSONANT becomes anusvāra ``ṃ`` and the word boundary
-         (space) is kept — ``arjitam pūrva-`` → ``arjitaṃ pūrva…`` (कर्मार्जितं पूर्वभवे).  A word-final
-         ``-m`` before a VOWEL keeps the ``m`` and glues (it joins the vowel: ``tam a-`` → ``tama…``),
-         and before a daṇḍa / pause it stays ``m`` (म्).
-      4. VOICING (item 15): a word-final voiceless stop k/c/ṭ/t/p voices to g/j/ḍ/d/b before a voiced
-         onset (vowel or voiced consonant), then glues as usual — ``sat ādi`` → ``sadādi``.
-      5. VISARGA (item 15): the visarga ``ḥ`` is resolved before a voiced onset —
-           · ``-aḥ`` + voiced consonant → ``-o`` + (glue): ``ahaḥ rātra`` → ``ahorātra``;
-           · ``-aḥ`` + ``a-`` → ``-o`` + (glue, the following ``a`` elided — the avagraha this line
-             would otherwise carry is stripped): ``ahaḥ atra`` → ``ahotra``;
-           · ``-aḥ`` + other vowel → ``-a`` + that vowel, a hiatus that keeps the word separation;
-           · ``-āḥ`` + voiced consonant → ``-ā`` + (glue); ``-āḥ`` + vowel → ``-ā`` + space (hiatus);
-           · ``-Xḥ`` (X = i/ī/u/ū/…) + voiced onset → ``-Xr`` + (glue); but before ``r-`` the visarga's
-             r is dropped and X lengthens (``-iḥ r-`` → ``-ī r-``), keeping the word separation.
-         Before a VOICELESS sound or a pause the visarga is left intact (with its word separation).
-    The fused string is handed to the script converter (_render_one → _sanskrit), which splits on the
-    daṇḍa markers and transliterates each segment.  Operating on the RAW text (not the already-split
-    token forms) is what makes the hyphen/pipe gluing work — the tokeniser drops those markers."""
-    def _is_danda(x):   # a bare daṇḍa token (| || / // ‖) is punctuation, never a glue TARGET
-        return bool(x) and all(c in "|/‖" for c in x)
-
-    def _visarga(buf, w):
-        """Resolve a visarga-final ``buf`` against the next word ``w`` (both cleaned IAST)."""
-        pre = buf[:-1]                       # buf without its ḥ
-        fv = _final_vowel(pre)               # the vowel before the visarga
-        iv = _initial_vowel(w)
-        if not _starts_voiced(w):            # before a voiceless onset → visarga kept, word separated
-            return buf + " " + w
-        if fv == "a":
-            if iv == "a":                    # -aḥ + a- → -o + (a elided) glue
-                return pre[:-1] + "o" + w[1:]
-            if iv is not None:               # -aḥ + other vowel → -a + vowel (hiatus, keep separation)
-                return pre + " " + w
-            return pre[:-1] + "o" + w        # -aḥ + voiced consonant → -o + glue  (ahaḥ rātra → ahorātra)
-        if fv == "ā":
-            if iv is None:                   # -āḥ + voiced consonant → -ā + glue
-                return pre + w
-            return pre + " " + w             # -āḥ + vowel → -ā + vowel (hiatus, keep separation)
-        # -iḥ/-uḥ/-eḥ/-oḥ/… (any other vowel + visarga) before a voiced onset → rutva (-r)
-        if w and w[0] != "r":
-            return pre + "r" + w             # -Xr + glue
-        return _lengthen_final_vowel(pre) + " " + w   # before r-: drop visarga-r, lengthen X, separate
-
-    lines = []
-    for line in (text or "").split("\n"):
-        buf = ""
-        elided = False   # True ⇒ buf's OWN trailing consonant came from _sandhi_preclean stripping an
-        # apostrophe/quote off the word that produced it (e.g. "c'" → "c", marking that word's OWN final
-        # vowel as elided before the next word's vowel — see _sandhi_preclean's (a)). That "c" is NOT a
-        # genuine word-final consonant in the source text, so it must NOT then feed the item-15 VOICING
-        # rule below (voiceless stop → voiced before a voiced onset, "sat ādi" → "sadādi"): voicing a
-        # stop that already lost its vowel to elision is a category error, not a real sandhi context —
-        # cleaning "c'" to "c" and then treating it exactly like a genuinely bare word-final "c" (as in
-        # "vāc") glued "vibhuś" + "c'" + "ânekadā" into "vibhuśjānekadā" (voicing c→j) instead of the
-        # correct "vibhuścānekadā" (bug found live: "vibhuḥ ca" rendered as विभुश्ज instead of विभुश्च).
-        for raw in line.split():
-            w = _sandhi_preclean(raw)
-            if not w:
-                continue
-            new_elided = bool(raw) and raw[-1] in _APOS_QUOTES   # this word's OWN apostrophe, not buf's carried-over one
-            if not buf:
-                buf = w
-            elif _is_danda(w):
-                buf += " " + w      # a daṇḍa target → keep a space (never a glue target)
-            elif buf.endswith("ḥ"):
-                buf = _visarga(buf, w)   # item 15: visarga sandhi
-            elif not _ends_in_consonant(buf):
-                buf += " " + w      # vowel / anusvāra final → keep a space
-            elif buf.endswith("m") and _starts_with_consonant(w):
-                buf = buf[:-1] + "ṃ " + w   # word-final m + consonant → anusvāra, boundary kept
-            elif buf[-1] in _VOICE_FINAL and _starts_voiced(w) and not elided:
-                buf = buf[:-1] + _VOICE_FINAL[buf[-1]] + w   # item 15: voice final stop, then glue
-            else:
-                buf += w            # other consonant (or m before a vowel) → glue (no space)
-            elided = new_elided     # buf's new trailing text always ends with (a possibly-truncated) w, in every branch above
-        lines.append(buf)
-    return "\n".join(lines)
-
-
-def sanskrit_running_line(text: str, lang: str = "sa", scheme: str = "") -> str:
-    """The block-initial running text for Sanskrit: glue the RAW sentence ``text`` per the gluing
-    algorithm (see _glue_running_iast), then render the fused string in ``scheme`` (a script).
-    Non-Sanskrit ⇒ the text unchanged; empty scheme ⇒ the fused IAST itself (no script conversion)."""
-    if _canon_lang(_norm(lang)) != "sa":
-        return text or ""
-    fused = _glue_running_iast(text)
-    if not fused or not scheme:
-        return fused
-    return _render_one(fused, lang, scheme)
 
 
 _AKSHARA_SCRIPTS = [   # (scheme id = aksharamukha target name, display label); Devanagari first (the
@@ -1369,7 +1300,14 @@ _DANDA = {
     "Soyombo": ("𑪛", "𑪜"), "ZanabazarSquare": ("𑩂", "𑩃"),
 }
 _DANDA_DEFAULT = ("।", "॥")   # the shared Indic daṇḍa, used by every script without its own
-_DANDA_SPLIT = re.compile(r"(//|\|\||‖|/|\||\n)")   # double markers first so "//"/"||"/"‖" aren't split into singles; "‖" (U+2016) is the double-daṇḍa DISPLAY glyph; item 20: a newline is captured too so it rides THROUGH the script conversion as a hard break (no sandhi/aksharamukha collapse across it)
+# ROMANISED Sanskrit is a target too, now that a file may be STORED in Devanagari and asked for in
+# Latin.  Its "daṇḍa" is the app's own romanised spelling — "|" and the display glyph "‖" (U+2016) —
+# and routing IAST through this table rather than through aksharamukha is not cosmetic: aksharamukha
+# renders । as "." and ॥ as "..", which would put a sentence-final full stop in the middle of a verse
+# and read as a pause the text does not have.  (`sa_sud_vedic_ufal_dcs` refuses aksharamukha for its
+# own input normalisation over exactly this difference.)
+_DANDA_IAST = ("|", "‖")
+_DANDA_SPLIT = re.compile(r"(//|\|\||‖|/|\||॥|।|\n)")   # double markers first so "//"/"||"/"‖"/"॥" aren't split into singles; "‖" (U+2016) is the double-daṇḍa DISPLAY glyph; the native ।/॥ are captured too so a DEVANAGARI-stored text's daṇḍas are re-spelled rather than transliterated; item 20: a newline is captured too so it rides THROUGH the script conversion as a hard break (no sandhi/aksharamukha collapse across it)
 
 
 def _sanskrit(text: str, target: str) -> str:
@@ -1380,16 +1318,21 @@ def _sanskrit(text: str, target: str) -> str:
             if not seg:
                 return seg
             src = ak.auto_detect(seg) if hasattr(ak, "auto_detect") else "autodetect"
-            if not src or src == target or src == "Zyyy":   # Zyyy = "common" (punctuation/whitespace only) → treat as IAST
+            if src and src == target:
+                return seg      # already in the target script — identity, NOT a re-reading.  Re-reading
+                                # is what the old `src = "IAST"` here did, and once forms could be stored
+                                # in Devanagari it meant asking for Devanagari on a Devanagari file ran
+                                # ak.process("IAST", "Devanagari", "मूर्ति") and returned mojibake.
+            if not src or src == "Zyyy":   # Zyyy = "common" (punctuation/whitespace only) → treat as IAST
                 src = "IAST"   # UD Sanskrit forms are usually IAST romanisation
             return ak.process(src, target, seg) or ""
 
-        d1, d2 = _DANDA.get(target, _DANDA_DEFAULT)
+        d1, d2 = _DANDA_IAST if target == "IAST" else _DANDA.get(target, _DANDA_DEFAULT)
         out = []
         for piece in _DANDA_SPLIT.split(text):   # word-segments interleaved with daṇḍa markers + newlines
-            if piece in ("//", "||", "‖"):        # "‖" (U+2016) = the double-daṇḍa display glyph → script's double daṇḍa
+            if piece in ("//", "||", "‖", "॥"):   # "‖" (U+2016) = the double-daṇḍa display glyph → script's double daṇḍa
                 out.append(d2)
-            elif piece in ("/", "|"):
+            elif piece in ("/", "|", "।"):
                 out.append(d1)
             elif piece == "\n":
                 out.append("\n")   # item 20: keep the hard line break verbatim (multi-line verse stays multi-line)
@@ -1407,15 +1350,17 @@ def _is_indic(text: str) -> bool:
 
 def _iast(text: str) -> str:
     """Sanskrit → IAST romanisation.  A no-op ("") when the source is ALREADY romanised (Latin/IAST),
-    per the spec: transliteration only fires when the token isn't already in Latin script."""
+    per the spec: transliteration only fires when the token isn't already in Latin script.
+
+    That "" is what serves BOTH layers this scheme now feeds.  On the transliteration ROW it means
+    "nothing to add, the form already reads as IAST"; under the Script pill's Latin (IAST) row it
+    means the caller falls back to the stored form — which, for an IAST-stored file, IS the answer.
+    Only a Devanagari-stored file does any work here, and it goes through `_sanskrit` so the daṇḍas
+    are re-spelled ``|``/``‖`` instead of coming back as full stops."""
     if not _is_indic(text):
         return ""   # already Latin (IAST/ISO) → nothing to romanise
     try:
-        from aksharamukha import transliterate as ak
-        src = ak.auto_detect(text) if hasattr(ak, "auto_detect") else "Devanagari"
-        if not src:
-            src = "Devanagari"
-        return ak.process(src, "IAST", text) or ""
+        return _sanskrit(text, "IAST")
     except Exception:  # noqa: BLE001
         return ""
 
@@ -1705,6 +1650,12 @@ def _canon_lang(base: str) -> str:
 
 
 def _scheme_available(base: str, sid: str) -> bool:
+    if sid == "csl":                      # pure Python, no engine — only the vendored sandhi generator
+        from . import sa_notation as _sa_notation
+        return _sa_notation.available()
+    if sid == "macron":                   # Latin vowel length needs a lookup table this repo can't ship
+        from . import macron as _macron
+        return _macron.available()
     if sid == "iast" or (base == "sa"):   # IAST + all Indic scripts ride aksharamukha
         return _pkg("aksharamukha")
     eng = _ENGINES.get(sid)
@@ -1722,9 +1673,25 @@ def _schemes_for(registry: dict, base: str) -> list[dict]:
 #  · STORED  = the subset of DISPLAY marked stored=True, written to MISC Translit/LTranslit on a parse pass.
 _SERB = ("sr", "srp", "hbs", "bs", "bos")
 _MONG = ("mn", "mon", "khk")
+# SANSKRIT is DIGRAPHIC IN STORAGE: a file's FORM/LEMMA columns hold either IAST or Devanagari,
+# whichever the parser was fed (`sa_sud_vedic_ufal_dcs` romanises Devanagari internally and puts it
+# back in FORM/LEMMA, with the IAST in MISC Translit/LTranslit, per the UD convention).  So Sanskrit
+# needs BOTH directions from the one menu, and "Latin (IAST)" is a genuine choice here rather than
+# the "no script" it is elsewhere: for a Devanagari-stored file it romanises, for an IAST-stored one
+# it is a no-op that leaves the stored spelling showing.  With the frontend's own "Original" row in
+# front, the three cases the reader can ask for — as stored, romanised, in some Brahmic script — are
+# each reachable by name, which the old Sanskrit-only "None" row could not express once the stored
+# script stopped being IAST by definition.
+_SA_SCRIPTS = [("iast", "Latin (IAST)")] + list(_AKSHARA_SCRIPTS)
 _SCRIPT_SCHEMES: dict[str, list[tuple[str, str]]] = {
     "zh": _HANZI_CONV, "yue": _HANZI_CONV, "lzh": _HANZI_CONV,
-    "sa": list(_AKSHARA_SCRIPTS),
+    "sa": _SA_SCRIPTS,
+    # LATIN: not another writing system but another SPELLING of the one it has — vowel length, which
+    # classical orthography leaves unwritten and every teaching edition restores.  It belongs to the
+    # Script layer for the reason the Indic scripts do: it re-renders the glyphs a reader reads while
+    # the FORM column, the grid and the editors keep what the file says.  See `app/macron.py` for why
+    # it can list unavailable.
+    "la": [("macron", "Latin (macronised)")],
     **{c: list(_SERBIAN_CONV) for c in _SERB},
     **{c: [("mn-traditional", "Mongolian (traditional)")] for c in _MONG},
 }
@@ -1735,7 +1702,11 @@ _DISPLAY_SCHEMES: dict[str, list[tuple[str, str, bool]]] = {
     "yue": [("jyutping", "Jyutping", True), ("generalchinese", "General Chinese", False)],
     "lzh": _MANDARIN_DISPLAY + [("jyutping", "Cantonese Jyutping", False),
                                 ("mc", "Baxter Middle Chinese", True), ("oc", "Baxter–Sagart Old Chinese", True)],
-    "sa": [("iast", "IAST", True)],
+    # CSL is DISPLAY-ONLY and deliberately not `stored`: it is not a romanisation of a token but a
+    # spelling of the JUNCTION it stands in, so the same word reads differently beside a different
+    # neighbour and MISC Translit — which is per token and context-free — could not hold it honestly.
+    # It is also the one scheme `_render_one` never sees: see app/sa_notation.py.
+    "sa": [("iast", "IAST", True), ("csl", "CSL", False)],
     "ja": [("kunrei", "Kunrei", True), ("hepburn", "Modified Hepburn", True)],
     **{c: [("latin", "Latin (Gajica)", True)] for c in _SERB},
 }
@@ -2012,22 +1983,29 @@ def _pos_render(text: str, base: str, scheme: str, upos: str) -> str:
 
 # The shapes the two public entry points take.  ``upos`` is deliberately a UNION and not an
 # overload set: every caller may omit it, one tag may stand for a whole batch, and a per-form list
-# is the batch case api.py sends — three call shapes that share one body, and `_upos_at` is the one
-# place that tells them apart.
+# is the batch case api.py sends — three call shapes that share one body, and `_hint_at` is the one
+# place that tells them apart.  ``feats`` and ``lemmas`` are the same shape and read the same way.
 _Forms = str | list[str] | tuple[str, ...]
 _Rendered = str | list[str]
 _Upos = str | list[str] | tuple[str, ...] | None
+_Hint = _Upos
 
 
-def _upos_at(upos: _Upos, i: int) -> str:
-    """The tag for position ``i``: a LIST is read positionally (one tag per form), a bare string
-    applies to every form, and anything else — None, the default "" — means no tag at all."""
-    if isinstance(upos, (list, tuple)):
-        return (upos[i] or "") if 0 <= i < len(upos) else ""
-    return upos or ""
+def _hint_at(hint: _Hint, i: int) -> str:
+    """The per-token hint for position ``i``: a LIST is read positionally (one value per form), a
+    bare string applies to every form, and anything else — None, the default "" — means none at all.
+
+    Three hints now ride this shape, because three engines want different things about the token
+    beyond its surface: ``upos`` picks a Han graph's reading, and ``feats``/``lemma`` pick a Latin
+    word's vowel lengths (`macron`).  One helper rather than three, since the broadcast/positional
+    question is identical and only the payload differs."""
+    if isinstance(hint, (list, tuple)):
+        return (hint[i] or "") if 0 <= i < len(hint) else ""
+    return hint or ""
 
 
-def _render_one(text: str, lang: str, scheme: str, upos: str = "") -> str:
+def _render_one(text: str, lang: str, scheme: str, upos: str = "",
+                feats: str = "", lemma: str = "") -> str:
     """Shared engine dispatch for BOTH transliteration and orthography — they use the same engines,
     keyed by scheme id (scheme ids are globally unique across the two menus).  Cached per
     (lang, scheme, text, upos).
@@ -2040,12 +2018,14 @@ def _render_one(text: str, lang: str, scheme: str, upos: str = "") -> str:
     would be order-dependent and invisible: nothing errors, the value is a real reading of the
     graph, and it is simply the wrong one.  The key is a strict superset of the old one, so every
     untagged call still shares one entry with every other untagged call and the cache does not
-    fragment."""
+    fragment.  ``feats``/``lemma`` join the key on exactly the same argument — they change a Latin
+    word's macrons (`Gallia` Nom vs `Galliā` Abl), and every caller that omits them keeps sharing
+    one entry."""
     if not text or not lang:
         return ""
     base = _canon_lang(_norm(lang))
     scheme = scheme or _default_scheme(base)
-    key = (lang, scheme, text, upos)
+    key = (lang, scheme, text, upos, feats, lemma)
     if key in _CACHE:
         return _CACHE[key]
     try:
@@ -2055,6 +2035,13 @@ def _render_one(text: str, lang: str, scheme: str, upos: str = "") -> str:
                 out = _iast(text)
             elif scheme in _AKSHARA_IDS and base == "sa":
                 out = _sanskrit(text, scheme)
+            elif scheme == "macron" and base == "la":
+                # Latin vowel length.  Branched here rather than registered in `_ENGINES` because
+                # its engine is the only one that reads more than the surface: the table is keyed
+                # on (form, upos, feats), and the lemma supplies the declension where FEATS carries
+                # no InflClass.  An `_ENGINES` entry is a bare (text) → str and cannot say that.
+                from . import macron as _macron
+                out = _macron.macronise(text, upos, feats, lemma)
             elif scheme in _ENGINES:
                 out = _ENGINES[scheme][0](text)
             else:
@@ -2067,13 +2054,14 @@ def _render_one(text: str, lang: str, scheme: str, upos: str = "") -> str:
     return _CACHE[key]
 
 
-def _ortho_one(text: str, lang: str, scheme: str, upos: str) -> str:
+def _ortho_one(text: str, lang: str, scheme: str, upos: str,
+               feats: str = "", lemma: str = "") -> str:
     """One form re-rendered in an ORTHOGRAPHY scheme.  Split out so the scalar and the vector entry
     points below can each be typed exactly (``str`` / ``list[str]``) instead of sharing one
     ``str | list[str]`` body that pyright then has to widen at every call site."""
     if not scheme:
         return ""   # "Original" — no re-rendering
-    return _render_one(text, lang, scheme, upos)
+    return _render_one(text, lang, scheme, upos, feats, lemma)
 
 
 def transliterate(forms: _Forms, lang: str, scheme: str = "", upos: _Upos = "") -> _Rendered:
@@ -2083,20 +2071,29 @@ def transliterate(forms: _Forms, lang: str, scheme: str = "", upos: _Upos = "") 
     ``upos`` is an OPTIONAL UD tag ("NOUN", "VERB", …) — a single string applying to every form, or
     a LIST PARALLEL TO ``forms``.  Where the language and scheme support it (Chinese; see
     `_pos_render`) it selects which reading of a one-graph token to render; everywhere else, and
-    for every caller that omits it, nothing changes."""
+    for every caller that omits it, nothing changes.
+
+    No ``feats``/``lemma`` here, deliberately: the only engine that reads them is `macron`, which is
+    a SCRIPT and never a romanisation — Latin has nothing to romanise from."""
     if isinstance(forms, (list, tuple)):
-        return [_render_one(f, lang, scheme, _upos_at(upos, i)) for i, f in enumerate(forms)]
-    return _render_one(forms, lang, scheme, _upos_at(upos, 0))
+        return [_render_one(f, lang, scheme, _hint_at(upos, i)) for i, f in enumerate(forms)]
+    return _render_one(forms, lang, scheme, _hint_at(upos, 0))
 
 
-def orthography(forms: _Forms, lang: str, scheme: str = "", upos: _Upos = "") -> _Rendered:
+def orthography(forms: _Forms, lang: str, scheme: str = "", upos: _Upos = "",
+                feats: _Hint = "", lemmas: _Hint = "") -> _Rendered:
     """Re-render ``forms`` in the display-only ORTHOGRAPHY ``scheme`` (Zhuyin, GR, an Indic script, …).
     "" ⇒ Original (returns "" so the caller keeps the original glyphs).  ``upos`` as in
     `transliterate` — it reaches the Mandarin orthographies (Zhuyin, Gwoyeu Romatzyh), which are
-    driven by the same numbered-pinyin syllables, and is inert for the rest.  Never raises."""
+    driven by the same numbered-pinyin syllables, and is inert for the rest.  Never raises.
+
+    ``feats``/``lemmas`` are the same shape as ``upos`` and reach the Latin `macron` scheme alone,
+    where they are what separate ``Gallia`` (Nom) from ``Galliā`` (Abl).  Every other scheme ignores
+    them, and a caller that sends only forms still gets the table's form-only levels."""
     if isinstance(forms, (list, tuple)):
-        return [_ortho_one(f, lang, scheme, _upos_at(upos, i)) for i, f in enumerate(forms)]
-    return _ortho_one(forms, lang, scheme, _upos_at(upos, 0))
+        return [_ortho_one(f, lang, scheme, _hint_at(upos, i), _hint_at(feats, i), _hint_at(lemmas, i))
+                for i, f in enumerate(forms)]
+    return _ortho_one(forms, lang, scheme, _hint_at(upos, 0), _hint_at(feats, 0), _hint_at(lemmas, 0))
 
 
 # The two *_many entry points render the LIST case directly rather than delegating to the
@@ -2106,12 +2103,14 @@ def orthography(forms: _Forms, lang: str, scheme: str = "", upos: _Upos = "") ->
 # passed through a parameter another overload might read as a single tag.
 def transliterate_many(forms: list[str], lang: str, scheme: str = "",
                        upos: list[str] | None = None) -> list[str]:
-    return [_render_one(f, lang, scheme, _upos_at(upos, i)) for i, f in enumerate(forms or [])]
+    return [_render_one(f, lang, scheme, _hint_at(upos, i)) for i, f in enumerate(forms or [])]
 
 
 def orthography_many(forms: list[str], lang: str, scheme: str = "",
-                     upos: list[str] | None = None) -> list[str]:
-    return [_ortho_one(f, lang, scheme, _upos_at(upos, i)) for i, f in enumerate(forms or [])]
+                     upos: list[str] | None = None, feats: list[str] | None = None,
+                     lemmas: list[str] | None = None) -> list[str]:
+    return [_ortho_one(f, lang, scheme, _hint_at(upos, i), _hint_at(feats, i), _hint_at(lemmas, i))
+            for i, f in enumerate(forms or [])]
 
 
 # ── heteronym readings (Chinese + Japanese) ───────────────────────────────────

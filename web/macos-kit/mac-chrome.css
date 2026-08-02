@@ -576,10 +576,13 @@
     color:var(--label-primary,var(--text)); font:inherit; font-weight:510; font-size:13px; line-height:16px; padding:4px 7px; border-radius:6px; cursor:pointer; text-align:left; white-space:nowrap}   /* 24px row: 16 line + 2×4 pad. The row's own box is widened 7px past the container's 12px inset on each side (Figma's Submenu "BG" layer: inset -7px) so the hover fill reaches 5px from the menu edge, while its OWN 7px padding pulls the TEXT back in to the container's 12px inset — net text position unchanged from a plain 12px inset, only the hover hit/fill area is wider */
   /* A HOVERED ROW TAKES THE SELECTED-GRID-ROW ACCENT, on request — the same fill, by the same
      derivation, as `table.grid tbody tr:is(.sel,.mwtsel) td::before` in styles/app.css: a perceptual
-     step off whatever --accent currently is (oklch l×.827, c×.915), which is why it needs no light/
-     dark branch — the grid row dropped its own @media override when it moved to this recipe, and the
-     accent itself already differs per mode. Two declarations, fallback first, for the reason stated
-     there: a browser without relative-colour oklch() takes the plain accent rather than nothing.
+     step off whatever --accent currently is. TWO STEPS, ONE PER APPEARANCE, exactly as that rule has
+     — light oklch l×.882 c×.958 (tuned so the default system blue lands on rgb(0,100,225)), dark
+     l×.827 c×.915. Sharing one step across both was tried and reverted: the light step darkens the
+     accent to sit on a white ground, and macOS already hands dark a LIGHTER blue (#0a84ff against
+     #007aff), so applying it there darkens an already-lightened accent and stops looking like a
+     native menu. Two declarations per rule, fallback first: a browser without relative-colour
+     oklch() takes the plain accent rather than nothing.
      This DEPARTS from the platform, deliberately and knowingly: a native macOS context-menu row
      highlights in a neutral vibrant gray (Figma's "Clean Up By" row keeps its dark label over that
      fill), which is what this was. The app's own selection register won out over matching AppKit —
@@ -589,9 +592,11 @@
      its own: the label, the .subarr chevron (background-color:currentColor), the .ck tick, and
      .expand (which dims by OPACITY, not by a colour of its own, so it stays a fraction of whatever
      ink the row carries). Only .kbd names an explicit colour, so only it is restated below. */
-  .ctx button:hover{background:var(--accent); background:oklch(from var(--accent) calc(l * .827) calc(c * .915) h); color:#fff}
+  .ctx button:hover{background:var(--accent); background:oklch(from var(--accent) calc(l * .882) calc(c * .958) h); color:#fff}
+  @media (prefers-color-scheme:dark){ .ctx button:hover{background:var(--accent); background:oklch(from var(--accent) calc(l * .827) calc(c * .915) h)} }   /* dark's own step — see the note above */
   .ctx button:hover .kbd{color:#fff; opacity:.72}   /* the shortcut stays the quieter half of the row — an opacity off the row's own white, not a second colour, so it dims by the same rule on a .danger row */
-  .ctx button.danger{color:var(--bad)} .ctx button.danger:hover{background:var(--accent); background:oklch(from var(--accent) calc(l * .827) calc(c * .915) h); color:#fff}   /* …white too: red-on-accent is the one pairing that reads worse than either alone, and AppKit whitens a destructive item's label under a highlight for the same reason */
+  .ctx button.danger{color:var(--bad)} .ctx button.danger:hover{background:var(--accent); background:oklch(from var(--accent) calc(l * .882) calc(c * .958) h); color:#fff}
+  @media (prefers-color-scheme:dark){ .ctx button.danger:hover{background:var(--accent); background:oklch(from var(--accent) calc(l * .827) calc(c * .915) h)} }   /* …and the destructive row takes the same per-appearance step as its ordinary twin */   /* …white too: red-on-accent is the one pairing that reads worse than either alone, and AppKit whitens a destructive item's label under a highlight for the same reason */
   .ctx button:disabled{color:var(--label-tertiary); pointer-events:none}   /* a row that is shown but inert (e.g. the grid column chooser's obligatory ID/Form rows, which still carry their checkmark). Labels-Vibrant/Tertiary, the same ink AppKit dims a disabled menu item to — an explicit colour rather than an opacity on the whole row, so the leading .ck tick dims WITH the label instead of a second time on top of it. pointer-events:none also drops the hover fill, which `:disabled` alone would not */
   .ctx button:disabled .ck{opacity:1}   /* …and the tick is already the dimmed ink above; the base .ck's own .9 would compound it */
   .ctx .kbd{font-size:13px; font-weight:510; color:var(--menu-shortcut); direction:ltr; unicode-bidi:isolate}   /* Figma macOS 26 kit, pulled live from the file: 13px/510 (SAME size/weight as the row label, not smaller), Labels-Vibrant/Tertiary — an explicit dim color rather than an opacity fraction of the row's own ink, so it reads the same neutral gray even on a .danger (red) row, matching native macOS. Keep ⌘/arrow shortcuts in LTR order even under an RTL menu */

@@ -1677,11 +1677,20 @@ async function reparseTokenFields(si,tokIds,opts){
   opts=opts||{};
   if(!(hasBridge()&&model)) return false;
   const s=DOC[si]; if(!s)return false;
-  const text=s.tokens.map(t=>t.form).join(" ").trim()||(s.text||"").trim();   // current forms → a Form edit is reflected in the re-parse
-  if(!text) return false;
+  /* PRE-TOKENISED, and that is the whole point of this call. The tokens are the annotation — the
+     heads, the relations and every tier hang off these exact ones — so the parser is asked to fill
+     the fields ON them, not to have its own opinion about where they are. This used to send
+     `forms.join(" ")` to the ordinary parse endpoint and check the count afterwards, which is a
+     detector rather than a fix, and in a SPACELESS SCRIPT it fired constantly: the tokeniser is a
+     segmenter there and a space is not evidence it must respect, so editing 苹果 to 苹果汁 came back
+     as 苹果 + 汁, the count check failed, and the token's lemma/XPOS/FEATS were never refreshed at
+     all — silently, with no way to ask again. Bypassing the tokeniser makes the alignment 1-to-1 by
+     construction (app/parse.py's parse_pretokenized). */
+  const forms=s.tokens.map(t=>t.form||"");
+  if(!forms.some(f=>f)) return false;
   showBusy("Parsing…"); let r;
-  try{ r=await window.pywebview.api.parse_text(text,model); }catch(e){ return false; }finally{ hideBusy(); }
-  if(!r||!r.parsed||!r.tokens||r.tokens.length!==s.tokens.length) return false;   // no real parse, or token count changed → can't align, leave as-is
+  try{ r=await window.pywebview.api.parse_tokens(forms,model); }catch(e){ return false; }finally{ hideBusy(); }
+  if(!r||!r.parsed||!r.tokens||r.tokens.length!==s.tokens.length) return false;   // belt and braces: a pipeline that rebuilt the Doc anyway must not be aligned against
   const targets=tokIds?new Set(tokIds):null;
   s.tokens.forEach((t,i)=>{ if(targets && !targets.has(i+1)) return; const p=r.tokens[i]; if(!p)return;
     const oldFeatsStr=t.feats;   // captured BEFORE PARSE_FIELDS overwrites it below — Task B needs the pre-regen value to retarget MGloss in place, same shape featsSyncGloss's caller already supplies for a live FEATS-cell edit
@@ -1752,7 +1761,9 @@ async function afterLemmaEdit(si,tokId){ const s=DOC[si], t=s&&s.tokens[tokId-1]
   preserveScroll(renderDoc); }
 // item 8: for Sanskrit, an MWT's STORED surface form (grid Form cell + the file) is its component forms fused by external
 // sandhi (ahaḥ+rātra → ahorātra, sat+ādi → sadādi), NOT a naive concatenation. Recompute it via the backend and write it
-// to m.form (Sanskrit's stored form IS the IAST → scheme=""). `froms` limits the recompute to specific MWTs (null ⇒ all).
+// to m.form. scheme="" asks for the fusion in the DOCUMENT'S OWN script — Devanagari for a Devanagari file, IAST for an
+// IAST one — which is what belongs in a FORM column; `r.ortho` (the scripted display form) is fillOrtho's business, not
+// this function's. `froms` limits the recompute to specific MWTs (null ⇒ all).
 async function sandhiMwtForms(si,froms){ if(!isSanskritLang()||!hasBridge()||!DOCLANG) return false;
   const s=DOC[si]; if(!s||!s.mwt) return false;
   const lemOf=t=>((t.lemma&&t.lemma!=="_")?t.lemma:"");   // the CoNLL-U lemma is an r-stem signal for visarga sandhi
@@ -1761,7 +1772,7 @@ async function sandhiMwtForms(si,froms){ if(!isSanskritLang()||!hasBridge()||!DO
   if(!groups.length) return false;
   let r; try{ r=await window.pywebview.api.sanskrit_mwt(groups,DOCLANG,"",lgroups); }catch(e){ return false; }
   let any=false; refs.forEach((m,i)=>{ delete m._kept;   // an EDIT (or a parse) asked for this re-fuse, which is new evidence — it overrides an undo-restored form (see applySnap)
-    const f=r&&r.iast&&r.iast[i]; if(f&&f!==m.form){ m.form=f; m.ortho=""; m.miast=""; any=true; } });   // clear the cached display forms so fillOrtho re-renders them from the new fused form
+    const f=r&&r.form&&r.form[i]; if(f&&f!==m.form){ m.form=f; m.ortho=""; m.miast=""; any=true; } });   // clear the cached display forms so fillOrtho re-renders them from the new fused form
   if(any){ markDirty(); if((ORTHO_SCHEME&&ORTHO_SCHEME!=="none")||isSanskritLang()) fillOrtho(); else preserveScroll(renderDoc); }
   return any; }
 
@@ -1802,9 +1813,9 @@ const _STX_BUSY=new Set();   // one write-back per sentence at a time: afterForm
    AND IT IS REFUSED WHEN IT WOULD WELD WORDS TOGETHER. app/translit.py's fuser glues every consonant-final
    word onto the next, which is right for the block-initial RUNNING LINE it was written for and wrong for
    `# text`: regenerating samples/brihat_jataka.conllu's first sentence that way turns
-   "ātma-vidāṃ kratuś ca yajatāṃ" into "ātmavidāmkratuścayajatām" — and sa_csl.align, asked to align the
-   result against the file's own forms, then refuses the whole sentence, so the line loses its decorations,
-   its badge goes up and no further write-back is possible. The word count of the fused stretch is exactly
+   "ātma-vidāṃ kratuś ca yajatāṃ" into "ātmavidāmkratuścayajatām" — after which no unit's form is a substring
+   of the line any more, the literal alignment refuses the whole sentence, the decorations go with it, the
+   badge goes up and no further write-back is possible. The word count of the fused stretch is exactly
    the test for that: equal to the number of units in it ⇒ sandhi changed spellings at the junctions and
    nothing else, which is what we want; fewer ⇒ it welded, and we fall back to rewriting the unit alone. */
 async function sanskritStretch(s,units,spans,text,k,tokId,kind){
@@ -1834,14 +1845,14 @@ async function sanskritStretch(s,units,spans,text,k,tokId,kind){
     const sep=mwtSepOf(e.m); (bySep[sep]||(bySep[sep]=[])).push(e); });
   for(const sep of Object.keys(bySep)){ const g=bySep[sep];
     let r; try{ r=await window.pywebview.api.sanskrit_mwt(g.map(e=>e.forms),DOCLANG,"",g.map(e=>e.lemmas),_STX_PH[sep]||sep); }catch(_){ return null; }
-    const ia=r&&r.iast; if(!ia||ia.length!==g.length) return null;
+    const ia=r&&r.form; if(!ia||ia.length!==g.length) return null;
     g.forEach((e,n)=>{ e.inner=ia[n]; }); }
   if(elems.some(e=>!e.inner)) return null;
   let out=elems.find(e=>e.i===k).inner, parts=null;
   if(elems.length>1){
     let r; try{ r=await window.pywebview.api.sanskrit_mwt([elems.map(e=>e.inner)],DOCLANG,"",
       [elems.map(e=>e.lemmas[e.lemmas.length-1])]," "); }catch(_){ r=null; }                 // each element's lemma is its LAST word's — that is the one contributing the trailing visarga sandhi_join reads it for
-    const fused=r&&r.iast&&r.iast[0];
+    const fused=r&&r.form&&r.form[0];
     const words=fused?fused.split(/\s+/).filter(Boolean):[];
     if(fused&&words.length===elems.length){ out=fused;                                       // the guard: junctions re-spelled, nothing welded
       parts=[]; const re=/\S+/g; let mm; while((mm=re.exec(out))) parts.push([mm.index,mm.index+mm[0].length]);
@@ -1922,7 +1933,23 @@ window.resetParse=()=>{ const i=curBlock(); if(i>=0)reparse(i); };
 window.moveSentUp=()=>{ const i=curBlock(); if(i>=0)moveSent(i,i-1); };
 window.moveSentDown=()=>{ const i=curBlock(); if(i>=0)moveSent(i,i+2); };
 window.exportSentSVG=()=>{ const i=curBlock(); if(i>=0)exportSVG(i); };
-window.deleteSent=()=>{ const i=curBlock(); if(i>=0)delSent(i); };
+/* RANGE-AWARE, so ⌘⌫ needs no twin. With several sentences shift-selected it deletes all of them; with
+   none it deletes the one being read, exactly as before. The confirmation is only raised for the range
+   case — deleting one sentence has always been a plain undoable edit, and asking every time would be a
+   new friction on an old command. */
+window.deleteSent=async()=>{ const r=(typeof blockRange==="function")?blockRange():null;
+  if(r){ const n=r.hi-r.lo+1;
+    if(typeof askConfirm==="function" && !(await askConfirm(`Delete ${n} sentences?`,{okLabel:"Delete",danger:true}))) return;
+    delSents(r.lo,r.hi); return; }
+  const i=curBlock(); if(i>=0)delSent(i); };
+window.mergeSents=async()=>{ const r=(typeof blockRange==="function")?blockRange():null;
+  if(!r) return toast("Shift-click a second sentence to choose a range to merge");
+  const n=r.hi-r.lo+1;
+  if(typeof askConfirm==="function" && !(await askConfirm(
+      `Merge ${n} sentences into one? The later sentences' roots become parataxis dependents of the first, and their sentence ids and comments are dropped.`,
+      {okLabel:"Merge"}))) return;
+  mergeSentRange(r.lo,r.hi); };
+window.editSentUrl=()=>{ const i=curBlock(); if(i>=0 && typeof editURL==="function") editURL(i); };
 
 // any real edit marks the document dirty (view-only toggles call renderDoc directly, so they don't)
 const _refresh=refresh;

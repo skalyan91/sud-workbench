@@ -137,8 +137,13 @@ are disabled (surfaced as a toast). The conversion grammars are vendored from
   (**Displayed**), and the scheme written to MISC `Translit`/`LTranslit` (**Stored**).
   Backends are routed per language: wiktra by default, with dedicated engines for the
   context-dependent scripts (Arabic and Persian DIN 31635, Hebrew ISO 259, Pīnyīn,
-  Jyutping, Japanese kana → Hepburn, Korean) and uroman as a fallback. Sanskrit can
-  be converted into Indic scripts per token.
+  Jyutping, Japanese kana → Hepburn, Korean) and uroman as a fallback. Sanskrit can be
+  read in either of the two scripts a file may be stored in — IAST or Devanagari — and
+  displayed in any of 33 Brahmic scripts or romanised, whichever it is stored in. Latin
+  adds a **macronised** Script option, which restores the vowel lengths classical
+  orthography leaves unwritten (`divisa` → `dīvīsa`) in the running sentence and the
+  diagrams while the grid, the editors and the file keep the bare spelling. The vowel-length
+  data is Morpheus's, downloaded on first use (~4 MB) rather than bundled.
 - **Correcting a stored transliteration** — where the romanisation is genuinely
   non-deterministic (Han heteronyms, Japanese kanji readings, and the unvocalised
   scripts such as Arabic and Hebrew, whose short vowels are not written), clicking the
@@ -197,6 +202,7 @@ app/  __main__.py       pywebview bootstrap, application menu, and the AppKit/Py
       models_registry.py  available/installed models, GitHub-release + Stanza download
       extras.py         on-demand install of the heavy optional stacks (Stanza/JP/Arabic)
       translit.py       Latin transliteration, routed to a backend per language
+      macron.py         Latin vowel-length macronisation (display only; fetches Morpheus on demand)
       langid.py         offline language identification (vendored fastText lid.176)
       wiktionary.py     Wiktionary definition lookup (MediaWiki REST API)
       apte.py           Apte Sanskrit-English dictionary lookup (vendored index; C-SALT fallback)

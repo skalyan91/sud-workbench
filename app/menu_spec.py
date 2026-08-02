@@ -264,9 +264,22 @@ MENUS: list[dict] = [
         item("Move Sentence Down", "window.moveSentDown && moveSentDown()",
              key=DOWN, mods=("ctrl", "cmd"), win_mods=("shift", "cmd"),
              sf="arrow.down", fluent="ArrowDown", vis="blockOnly"),   # ⌃⌘↓
+        item("Merge Sentences", "window.mergeSents && mergeSents()",
+             key="m", mods=("alt", "cmd"), sf="arrow.triangle.merge", fluent="Merge",
+             vis="blockOnly"),   # ⌥⌘M — needs a shift-selected RANGE; with one sentence it says so rather than acting.
+        # ⌥⌘M reads as Merge Tokens' ⌃⌘M one scope up, and on Windows the two ARE one chord: ⌥⌘ and ⌃⌘
+        # both land on Ctrl+Alt (see the module docstring), so Ctrl+Alt+M has to serve both. That is
+        # allowed here and nowhere near it, because the pair is disjoint BY CONSTRUCTION rather than by
+        # a mode argument: "merge" needs `multi`, a token RANGE, which only setRange builds and which
+        # always leaves sel.t at a real token id; "blockOnly" is sel.t<=0. No selection satisfies both.
+        # Hence the fifth entry in _DISJOINT_VIS rather than a `win_mods` override — an override would
+        # have had to invent a fourth-modifier chord (⇧⌘M is Manage Models, ⇧⌘ is spent on the sentence
+        # arrows) for a collision the selection rules already resolve.
         item("Delete Sentence", "window.deleteSent && deleteSent()",
-             key=BACKSPACE, mods=("cmd",), sf="trash", fluent="Delete", vis="blockOnly"),   # ⌘⌫ — same context-delete as tokens
+             key=BACKSPACE, mods=("cmd",), sf="trash", fluent="Delete", vis="blockOnly"),   # ⌘⌫ — same context-delete as tokens; deletes the whole shift-selected RANGE when there is one, which is why no second item exists for it
         SEP,
+        item("Sentence URL…", "window.editSentUrl && editSentUrl()",
+             key="u", mods=("cmd",), sf="link", fluent="Link"),   # ⌘U — the block-control icon's twin; always available, since every sentence can carry a source URL
         item("Reset Parse", "window.resetParse && resetParse()",
              key="r", mods=("cmd",), sf="arrow.clockwise", fluent="ArrowClockwise"),   # ⌘R (always enabled → intercepts before the web view's reload)
         item("Export Diagram as SVG…", "window.exportSentSVG && exportSentSVG()",
@@ -484,14 +497,18 @@ def toggle_fs_toolbar_mirror() -> bool:
 # Windows after ⌘→Ctrl and ⌃/⌥ BOTH → Alt (js/core/platform.js `_MOD_WIN`; the ⌥⌘/⌃⌘ collapse is
 # forced — five ⌘-families over there, four here).
 #
-# A shared chord is only reported where BOTH rows can be visible at once.  FOUR pairs share one on
-# purpose (the same four on each platform): a sentence command and a token command that take
-# mutually exclusive selections — a block with no token vs a token — i.e. Move Sentence Up/Down
-# against Move Token Up/Down on ⌃⌘↑↓, and Insert Sentence Before/After against Insert Token
-# Above/Below on ⌥⌘↑↓.  Those are the pairs whose `vis` rules are disjoint by construction, and
-# nothing else is excused: a clash between two rows that a wrapping "they're different modes"
-# argument would cover is exactly the clash that goes unnoticed for months.
-_DISJOINT_VIS = {frozenset(("blockOnly", "grid")), frozenset(("blockOnly", "diagram"))}
+# A shared chord is only reported where BOTH rows can be visible at once.  FIVE pairs share one on
+# purpose: a sentence command and a token command that take mutually exclusive selections — a block
+# with no token vs a token — i.e. Move Sentence Up/Down against Move Token Up/Down on ⌃⌘↑↓, Insert
+# Sentence Before/After against Insert Token Above/Below on ⌥⌘↑↓ (those four on both platforms), and
+# Merge Sentences against Merge Tokens, which is a separate chord here (⌥⌘M / ⌃⌘M) and one over there.
+# Those are the pairs whose `vis` rules are disjoint by construction, and nothing else is excused: a
+# clash between two rows that a wrapping "they're different modes" argument would cover is exactly the
+# clash that goes unnoticed for months.  Read `menuState()` in js/editing/edit-ops.js before adding a
+# sixth — the test is whether ONE selection can set both flags, not whether the two commands feel
+# unrelated.
+_DISJOINT_VIS = {frozenset(("blockOnly", "grid")), frozenset(("blockOnly", "diagram")),
+                 frozenset(("blockOnly", "merge"))}
 _WIN_MOD = {"cmd": "ctrl", "ctrl": "alt", "alt": "alt", "shift": "shift"}   # ⌃ and ⌥ both land on Alt
 
 

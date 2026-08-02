@@ -154,7 +154,8 @@ function reHit(re,text){ re.lastIndex=0; return re.test(text||""); }   // the /g
    search, the bar's plain ⌘F included, is untouched.
    A sentence field with NO tokGet ("Sentence ID", "Sentence text") keeps filtering the SENTENCE, and
    that is the honest reading rather than a loose end: a sid is not a property of a token, and `# text`
-   is a single sandhied string no token is reliably a substring of (see app/sa_csl.py on why). So a
+   is a single string a token need not be a substring of at all (a sandhied Sanskrit line, a Typo=Yes
+   word spelt as written). So a
    mixed query of that kind returns the tokens the token criteria select, inside the sentences the
    sentence criteria match — an intersection of the two, each at the level where it means something. */
 function scanFind(){ const crits=compileCrits();

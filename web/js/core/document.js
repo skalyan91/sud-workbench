@@ -17,28 +17,27 @@
    where it does not verify we decorate NOTHING rather than decorate the wrong span.
 
    THREE STAGES, in this order of trust (measured over samples/: 14 of 20 sentences settle at stage
-   1, the 4 Sanskrit sentences of brihat_jataka.conllu at stage 2, and 2 more at stage 3):
+   1, including every Sanskrit sentence, and 2 at stage 2):
     1. DETERMINISTIC RECONSTRUCTION (alignUnitsToText, below) — match each unit's form literally at
        the next non-whitespace position. Needs no model, no bridge and no network, is exact wherever
        the forms really are substrings of the text, and is self-verifying: a literal match at the
        computed offset cannot be a mis-assignment. SpaceAfter=No is deliberately NOT consulted —
        skipping *optional* whitespace subsumes it and additionally survives a `# text` whose spacing
        the flags don't describe (the Chinese sample's "我 没有 问题。" against six spaceless tokens).
-    2. SANSKRIT CSL SANDHI REVERSAL (Api.token_spans → app/sa_csl.py). A Sanskrit `# text` is written
-       in Clay-Sanskrit-Library notation, i.e. the sandhied surface with the coalescences MARKED
-       ('/" on the left element, a circumflex/macron on the right) rather than undone — so
-       `śaśa-bhṛto` holds `śaśa`+`bhṛtaḥ` and `hor" êty` holds `horā`+`iti`, and stage 1 cannot find
-       one form of it. That marking is a reversible rewriting, so undoing it with the offsets kept
-       recovers each token's real span. It ranks ABOVE stage 3 because it is exact where it applies
-       (and it is what the Sanskrit tokeniser itself does, so a model would only reproduce it), and
-       BELOW stage 1 because it needs the bridge. It does NOT need a model.
-    3. THE TOKENISER'S OWN OFFSETS (same bridge call) — the general fallback. The tokeniser produced
+       (There was a stage 2 here: a Sanskrit `# text` used to be written in Clay-Sanskrit-Library
+       notation — the sandhied surface with its coalescences MARKED rather than undone, so that
+       `śaśa-bhṛto` held `śaśa`+`bhṛtaḥ` and no unit's form appeared in the line at all — and
+       reversing that marking with the offsets kept was the only way to align it. The Sanskrit model
+       now writes ordinary sandhied text and reports each multi-word token's range as the
+       orthographic word it came from, so every unit IS a substring of the line and stage 1 settles
+       it, in Devanagari as in IAST. The reversal engine went with the notation.)
+    2. THE TOKENISER'S OWN OFFSETS (a bridge call) — the general fallback. The tokeniser produced
        its units FROM this very text, so each carries a real character span (read off token.idx, or
        PUBLISHED as doc._.src_spans by a tokeniser that rewrites what it reads); the file's units are
        ALIGNED TO those, never replaced by them, because the file's tokenisation is the annotation
        and the model's is a second opinion about the same string. Needs an installed model, and the
        character-level alignment inside a divergent run is a best effort rather than a proof.
-   Stages 2 and 3 share one bridge call and are therefore both ASYNC — see requestTokenSpans. */
+   Stage 2 needs the bridge and is therefore ASYNC — see requestTokenSpans. */
 const _STX_WS=/\s/;   // JS \s already covers NBSP, the U+2000–200A spaces, U+202F/205F and the ideographic space U+3000 — every gap `# text` can hold between two units
 /* the sentence's SURFACE units in reading order: {form, ids:[1-based token ids], mwt}
    The FORM is the only surface a unit wears in `# text`. UD defines `# text` as the sentence as it was
@@ -242,11 +241,11 @@ function stxWriteSpans(s,k){ if(!s||typeof s.text!=="string"||!s.text) return nu
   learnDanda(s); learnMwtSeps(s,units,spans,text);
   return {units,spans,text}; }
 /* WHICH SEPARATOR THIS COMPOUND IS WRITTEN WITH, remembered per MWT.
-   A Sanskrit `# text` spells a compound's members apart with EITHER a hyphen or a pipe, and the app treats
-   the two as interchangeable — Api.sanskrit_running strips "apostrophes/hyphens/word-internal pipes" alike
-   so that either spelling fuses. That is right for reading and wrong for writing: regenerating a stretch
-   has to give it back in the annotator's own convention, not in whichever one we happen to prefer. So the
-   mark is read off the text the first time the unit is located, and kept.
+   An orthographic word is written SOLID — that is what makes it one word, and it is what the parser's own
+   ranges are: `vartmāpunarjanmanām`, not `vartmā-punar-janmanām`. So the default is no separator at all.
+   But an edition may still spell a samāsa's members apart with a hyphen or a pipe as a reading aid, and
+   regenerating a stretch has to give it back in the annotator's own convention rather than in whichever one
+   we happen to prefer. So the mark is read off the text the first time the unit is located, and kept.
    COMPOUND-INTERNAL ONLY, which is what tells the two `|`s of a Sanskrit line apart: a bare `|` between two
    words is a verse daṇḍa (and a PUNCT token of its own, hence a unit of its own), so a mark counts only
    INSIDE one MWT's own span with no whitespace on either side of it — `śaśa-bhṛto` yes, `… janmanām |
@@ -262,7 +261,7 @@ function mwtSepIn(slice){ for(let i=1;i<slice.length-1;i++){ const c=slice[i];
     if(_STX_WS.test(slice[i-1])||_STX_WS.test(slice[i+1])) continue;              // whitespace beside it ⇒ a word separator or a daṇḍa, not a compound seam
     return c; }
   return ""; }
-function mwtSepOf(m){ return (m&&m.sep)||"-"; }                                   // the default is the hyphen: it is what every compound in samples/brihat_jataka.conllu and what upstream's own corpus transform (see app/sa_csl.py) writes
+function mwtSepOf(m){ return (m&&m.sep)||""; }                                    // no separator unless the line itself showed one: an orthographic word is written solid, which is the whole reason it is ONE multi-word token. (It defaulted to the hyphen while `# text` was in CSL notation, where every compound member carried one.)
 function learnMwtSeps(s,units,spans,text){ const mwt=(s&&s.mwt)||[]; if(!mwt.length) return;
   units.forEach((u,i)=>{ if(!u.mwt||!spans[i]) return;
     const m=mwt.find(x=>x.from===u.ids[0]); if(!m||m.sep) return;                 // first sighting only (see above)
@@ -401,8 +400,15 @@ function paintStext(el,si,disp,editing){
   setStextWarn(el,A.state==="bad");   // the badge rides on the SAME walk that decides the decorations — one answer, two consumers, so the two can never disagree about whether this line aligns
   if(!A.spans) return;
   const spans=A.spans.slice();
-  for(let i=0,last=0;i<spans.length;i++){ const sp=spans[i];   // monotonicity guard: stage 2's difflib windows are monotonic by construction, but a decoration drawn over an overlapping span would be drawn over the wrong words, so drop rather than trust
-    if(!sp||!(sp[0]>=last)||!(sp[1]>sp[0])||sp[1]>disp.length){ spans[i]=null; continue; } last=sp[1]; }
+  /* ORDER GUARD: a decoration drawn over a span that runs BACKWARDS from its neighbour is drawn over the
+     wrong words, so drop rather than trust. A span that starts ONE CHARACTER before the previous one ended
+     is allowed through, because that is not disorder but a fact about sandhi: a tokeniser that publishes
+     source spans reports a vowel COALESCENCE as an overlap, the fused vowel of `vartmā` + `apunar-` being
+     genuinely the last character of one word and the first of the next. Refusing it would cost the second
+     word its decoration at every coalescence in the text, and the alternative — a hole on one side — is
+     less true than letting both claim the character they share. Anything further back is still dropped. */
+  for(let i=0,last=0;i<spans.length;i++){ const sp=spans[i];
+    if(!sp||!(sp[0]>=last-1)||!(sp[1]>sp[0])||sp[1]>disp.length){ spans[i]=null; continue; } last=sp[1]; }
   /* A GOESWITH SEAM IS SET THIN. The unit is ONE word a stray space broke in two, so at rest the running
      sentence draws that space as U+2009 THIN SPACE: the halves read as the word they are, the slur in the
      diagram gets a typographic echo in the line, and the character is still a character — it can be selected
@@ -1239,7 +1245,8 @@ function buildBlock(i,ctx){ const s=DOC[i];
     const heads=[];
     if(hasNewdoc(s)) heads.push(boundHeading(s,"newdoc",NEWDOC_MARK,"document",ctx.NUM[i].newdoc));   // a `# newdoc` ALWAYS gets its heading; boundNumbers decides only whether a § goes in front of the title
     if(hasNewpar(s)) heads.push(boundHeading(s,"newpar",NEWPAR_MARK,"paragraph",ctx.NUM[i].newpar));   // document first, paragraph under it — the order the two rows stack in
-    const b=document.createElement("div"); b.className="sblock"+(curBlock()===i?" sel-block":"")+(show.grids?"":" no-grid")+(hasNewpar(s)?" nd-par":"")+(hasNewdoc(s)?" nd-doc":""); b.dataset.i=i;   // curBlock(), not sel.s: the focused-block tint marks the sentence being READ, which scrolling moves on its own without disturbing the selection (see the CURBLOCK note in js/core/prefs.js)
+    const _r=(typeof blockRange==="function")?blockRange():null;
+    const b=document.createElement("div"); b.className="sblock"+(curBlock()===i?" sel-block":"")+((_r&&i>=_r.lo&&i<=_r.hi)?" rng-block":"")+(show.grids?"":" no-grid")+(hasNewpar(s)?" nd-par":"")+(hasNewdoc(s)?" nd-doc":""); b.dataset.i=i;   // curBlock(), not sel.s: the focused-block tint marks the sentence being READ, which scrolling moves on its own without disturbing the selection (see the CURBLOCK note in js/core/prefs.js)
     b.dir=sentRTL(s)?"rtl":"ltr";   // RTL sentence → mirror the whole block: number, controls, grid columns
     const head=document.createElement("div"); head.className="shead";
     const num=document.createElement("span"); num.className="snum"; num.textContent=ctx.SNUM[i]; num.style.width=idW+"px";   // item 4: numbered within its paragraph / document / the file — see sentNumbers.   // match the grid ID column → diagram aligns with Form
@@ -1365,6 +1372,11 @@ function buildBlock(i,ctx){ const s=DOC[i];
       e.preventDefault(); });
     b.addEventListener("click",e=>{ if(e.target.closest(".sctrl")||e.target.closest("input")||e.target.closest("select")||e.target.closest(".gridbox")||e.target.closest(".sid-in"))return;   // .sid-in: a contenteditable span, not an <input> — its own mousedown/click stopPropagation already keeps events from reaching here (see buildBlock), but excluded here too for anything that reaches this handler by another path
       if(e.target.closest(".node,.tok-group,.arc,.edge-g,.oline,.brk,.bwtok,.bwbr,.mwt-form"))return;   // a token/bracket/MWT-tie handles its own selection
+      /* SHIFT EXTENDS A SENTENCE RANGE instead of deselecting. It is checked before pick() because pick
+         clears the range (an ordinary click starts a new selection, as it does in every list), and because
+         a shift-click must not also deselect the token — the range is a selection OF SENTENCES and leaving
+         the token selection alone is what lets ⌘⌫ tell the two apart. */
+      if(e.shiftKey && typeof extendBlockRange==="function"){ e.preventDefault(); extendBlockRange(i); return; }
       pick(i,0,false); });   // clicked empty diagram space → deselect any node
     b.addEventListener("contextmenu",e=>{ if(e.target.closest(".gridbox")||e.target.closest(".sctrl")||e.target.closest("input")||e.target.closest("select")||e.target.closest(".sid-in"))return;   // grid/controls have their own menus; .sid-in gets the browser's own contenteditable context menu, same as an <input> would have
       if(e.target.closest(".lbl,.orel,.tok-pos,.node-cat,.opos,.node,.tok-group,.oline,.bwtok,.mwt-form,.mwt-tr"))return;   // labels + nodes handled at the doc level   /* .mwt-form/.mwt-tr joined the list: the delegated handler on #doc raises the MWT's own menu for both rows, but THIS listener is on the .sblock and therefore runs FIRST (bubbling reaches the block before the document), so without the exclusion every right-click on a multi-word token built the whole sentence menu and threw it away a moment later — and, while sentMenu was broken, threw a TypeError on the way */
@@ -1984,6 +1996,7 @@ function scrollNearest(el){ if(!el) return;
 }
 function setRange(s,anchor,focus){ selRange={s,anchor,focus,from:Math.min(anchor,focus),to:Math.max(anchor,focus)}; }
 function pick(s,t,scroll=true,reflow=true){ sel={s,t}; CURBLOCK=s;   // selecting a token IS arriving at its block, so the two stay in step here; only the scroll spy moves one without the other (see the CURBLOCK note in js/core/prefs.js)
+  if(typeof clearBlockRange==="function") clearBlockRange();   // an ordinary click starts a new selection, so it drops any sentence range — the same rule every list follows
   if(typeof updateFileBlock==="function")updateFileBlock();   // keep the "Sentence X of Y" subtitle in step with the selection
   if(s<0||s>=DOC.length){ sel={s:-1,t:0}; selRange=null; syncMenu(); return; }   // empty document / no selection
   if(selRange && (s!==selRange.s || t<selRange.from || t>selRange.to)) selRange=null;   // a click outside the multi-selection clears it

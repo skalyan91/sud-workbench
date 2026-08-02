@@ -703,7 +703,27 @@ function caretIndexForX(text,fontStr,localX){ if(localX<=0) return 0;
 // that tracks `el` via getBoundingClientRect() (position:fixed, re-placed on scroll) but isn't itself inside that
 // scroller, so it would otherwise keep floating over the block/grid/titlebar instead of clipping away with the
 // token underneath it.
-function elClippedOut(el){ if(!el||!el.isConnected)return true; const r=el.getBoundingClientRect(); if(!r.width&&!r.height)return true;
+/* IS THIS ELEMENT SCROLLED OUT OF ITS CONTAINER? Drives `place()`'s visibility toggle: an inline
+   editor is position:fixed and appended to <body>, outside the diagram's own scroller, so it must
+   hide itself when the token it covers scrolls away rather than float over unrelated content.
+   ⚠ A ZERO-SIZE RECT IS NOT EVIDENCE OF THAT, and treating it as such was a real bug. An EMPTY
+   token's form element has no text and therefore no extent — and that is precisely the element an
+   INSERTED token's editor has to anchor to. Reporting it clipped hid the field (visibility:hidden),
+   and `focus()` on a hidden element is a no-op in every browser, so the editor opened invisible and
+   unfocused and a newly inserted token could not be typed into at all. Detachment is already
+   covered by `isConnected` above, and an element inside a display:none subtree is still caught by
+   the ancestor test below — its container's rect is zero too, so the containment test fails.
+   A zero-size rect is therefore INFLATED to a caret-sized box before the containment test rather
+   than tested as a point. The containment test is exclusive at the edges (`r.bottom <= nr.top`), so
+   a point sitting anywhere on its container's boundary reads as outside it — and an empty token's
+   insertion point sits exactly there whenever the diagram is scrolled to it. Measured: the inserted
+   token's element came out at y=96 against a `.diagram` scroller starting at y=101, a five-pixel
+   miss that hid the editor for a token plainly on screen. A real token's 16px box clears it; a point
+   never can, which is why the fix belongs to the rect and not to the caller. */
+const _CARET_BOX=9;   // half a line — enough to clear the boundary case above, small enough that a genuinely scrolled-away point still reads as clipped
+function elClippedOut(el){ if(!el||!el.isConnected)return true; let r=el.getBoundingClientRect();
+  if(!r.width&&!r.height) r={top:r.top-_CARET_BOX, bottom:r.bottom+_CARET_BOX,
+                              left:r.left-_CARET_BOX, right:r.right+_CARET_BOX};
   for(let n=el.parentElement;n;n=n.parentElement){ const cs=getComputedStyle(n);
     if(!/(auto|scroll|hidden|clip)/.test(cs.overflowY)&&!/(auto|scroll|hidden|clip)/.test(cs.overflowX))continue;
     const nr=n.getBoundingClientRect();
@@ -1206,7 +1226,7 @@ function SCTRL(i){ return [
   ["movedown","Move down","⌃⌘↓",()=>moveSent(i,i+2)],
   ["newdoc","Document boundary","⇧⌘D",()=>toggleBound(i,"newdoc")],   // replaced Duplicate (⌘D), which is gone: a treebank is edited by inserting and re-parsing, not by cloning a sentence with its whole annotation and a "-copy" id
   ["newpar","Paragraph boundary","⇧⌘P",()=>toggleBound(i,"newpar")],   // both TOGGLE — the same gesture removes the boundary it added, which is why the pair sits in the block controls rather than only in the menu
-  ["url","Sentence URL","",()=>editURL(i)],   // item 14: a link icon → set/edit a source URL for the sentence (blue when set)
+  ["url","Sentence URL","⌘U",()=>editURL(i)],   // item 14: a link icon → set/edit a source URL for the sentence (blue when set)
   ["reenter","Reset parse","⌘R",()=>reparse(i)],
   ["export","Export diagram as SVG","⌥⌘E",()=>exportSVG(i)],
   ["delete","Delete sentence","⌘⌫",()=>delSent(i),true],
@@ -1227,7 +1247,17 @@ function sentMenu(x,y,i){ const by={}; SCTRL(i).forEach(e=>by[e[0]]=e); const mk
   items.push(null,
     {label:"Document boundary", kbd:"⇧⌘D", check:hasNewdoc(bs), fn:()=>toggleBound(i,"newdoc")},
     {label:"Paragraph boundary", kbd:"⇧⌘P", check:hasNewpar(bs), fn:()=>toggleBound(i,"newpar")});
-  items.push(null,mk(by.delete));
+  /* A shift-selected RANGE that covers this block retitles the two commands that act on the range and adds the
+     one that only exists for it. The count goes in the label rather than being left to the painted wash: the
+     wash says WHICH sentences, and a number is what makes an accidental extension obvious before ⌘⌫ takes six.
+     Both rows delegate to the bridge-level commands (js/io/bridge.js) rather than calling delSents/mergeSentRange
+     directly, so the confirmation the keyboard path raises is the same one the menu path raises. */
+  const rng=(typeof blockRange==="function")?blockRange():null;
+  const nsel=(rng&&i>=rng.lo&&i<=rng.hi)?rng.hi-rng.lo+1:0;
+  if(nsel>1) items.push(null,["Merge "+nsel+" sentences","⌥⌘M",()=>window.mergeSents&&window.mergeSents()]);
+  items.push(null, nsel>1
+    ? ["Delete "+nsel+" sentences","⌘⌫",()=>window.deleteSent&&window.deleteSent(),true]
+    : mk(by.delete));
   showCtx(x,y,items); }
 // items 14/5: set/edit/clear a sentence's source URL via a LOCAL popover anchored to the link icon → the
 // `# url = …` comment (round-trips via io_conllu). Enter commits, Esc cancels; blank clears; icon blue when set.

@@ -70,6 +70,7 @@ addEventListener("keydown",e=>{
      Escape with nothing selected and nothing open really is a no-op, and macOS beeps at those on purpose. */
   if(e.key==="Escape"){ const ae=document.activeElement;   // ⌘F / ⌘G / ⇧⌘G / ⌘Z live on the native Edit menu
     if(ae&&(ae.classList.contains("cin")||ae.classList.contains("csel")||ae.classList.contains("sid-in"))){ e.preventDefault(); ae.blur(); return; }   // defocus the input but KEEP the row/node selected
+    if(typeof blockRange==="function" && blockRange()){ e.preventDefault(); clearBlockRange(); return; }   // a shift-selected sentence range is narrower than the selection under it: give up the RANGE first, and only on a second press the selection itself
     if(selRange||sel.t>0){ e.preventDefault(); selRange=null; pick(sel.s,0,false,false); }   // a token is selected → deselect it (keep the block)
     else if(sel.s>=0){ e.preventDefault(); deselectAll(); }   // only the block is selected → clear the block too
     return; }
@@ -95,6 +96,15 @@ addEventListener("keydown",e=>{
     }
     if(sel.t===0){   // a block (no token) is selected → move to the adjacent block
       e.preventDefault();
+      /* SHIFT EXTENDS A SENTENCE RANGE rather than moving the block focus — the sentence-level twin of the
+         Shift+Arrow token extension two branches above, and of shift-clicking a block (js/core/document.js).
+         It steps from curBlock(), NOT sel.s: extendBlockRange moves the focus and leaves the token selection
+         alone (the range's far end IS the focus — see js/core/prefs.js), so sel.s stays where the range
+         started and stepping from it would extend to the same block on every press. */
+      if(e.shiftKey && typeof extendBlockRange==="function"){
+        const b=curBlock()>=0?curBlock():sel.s;
+        const nb=e.key==="ArrowDown"?Math.min(DOC.length-1,b+1):Math.max(0,b-1);
+        extendBlockRange(nb); scrollNearest(document.querySelector(`.sblock[data-i="${nb}"]`)); return; }
       const ns=e.key==="ArrowDown"?Math.min(DOC.length-1,sel.s+1):Math.max(0,sel.s-1);
       pick(ns,0,false,false); scrollNearest(document.querySelector(`.sblock[data-i="${ns}"]`)); return;
     }

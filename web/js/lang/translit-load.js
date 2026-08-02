@@ -69,7 +69,34 @@ async function adoptStoredPicks(){ if(!TRANSLIT_AMBIG||!STORED_SCHEME) return fa
    Where a pair cannot be related at all it comes back "" and the automatic pass romanises the form,
    exactly as before, so nothing that used to be filled is left blank.
    The same-scheme case now costs NOTHING: no engine call, no bridge round-trip, no waiting render. */
+/* CSL takes the whole sentence, so it takes its own path and returns before any of the machinery
+   below runs. That machinery is built on one assumption this scheme breaks: that a token's
+   romanisation is a function of its surface, so identical surfaces share one answer and the batch
+   can be deduplicated on (form, upos). A CSL mark is a fact about the JUNCTION — the same `vartmā`
+   is `vartm"` before a vowel and `vartmā` before a pause — so deduplicating by surface would let
+   whichever one was reached first answer for all of them, which is exactly the bug the (form, upos)
+   key was introduced to fix for Han heteronyms. Nothing here touches MISC: CSL is display-only and
+   is not offered as a Stored scheme (see app/sa_notation.py). */
+async function fillTranslitCSL(){
+  const sents=[], refs=[];
+  DOC.forEach(s=>{ const T=s.tokens||[]; if(!T.length) return;
+    sents.push({forms:T.map(t=>t.form||""), unsandhied:T.map(t=>miscKV(t.misc,"Unsandhied")||""),
+                feats:T.map(t=>t.feats||""), lemmas:T.map(t=>(t.lemma&&t.lemma!=="_")?t.lemma:""),
+                mwt:(s.mwt||[]).map(m=>[m.from,m.to])});
+    refs.push(s); });
+  if(!sents.length) return false;
+  let r; try{ r=await window.pywebview.api.sanskrit_csl(sents); }catch(e){ return false; }
+  const rows=r&&r.csl; if(!rows||rows.length!==refs.length) return false;
+  let any=false;
+  refs.forEach((s,i)=>{ const got=rows[i]||[];
+    s.tokens.forEach((t,j)=>{ const v=got[j]||"";
+      if(t.translit!==v){ t.translit=v; any=true; }
+      // the lemma has no junction to stand in, so it keeps its ordinary romanisation
+      if(!t.translitLemma&&t.lemma&&t.lemma!=="_"&&t.lemma===t.form) t.translitLemma=v; }); });
+  if(any){ if(typeof invalidateDiaCache==="function") invalidateDiaCache(); preserveScroll(renderDoc); }
+  return any; }
 async function fillTranslit(){ if(!hasBridge()||!DOCLANG) return;   // transliteration is enabled only when a model sets the language
+  if(TRANSLIT_SCHEME==="csl"&&isSanskritLang()) return void await fillTranslitCSL();
   let any=false;
   const same=(!TRANSLIT_SCHEME||!STORED_SCHEME||STORED_SCHEME===TRANSLIT_SCHEME);   // is the row showing the scheme the file stores?
   // …and only THEN is a hand correction worth detecting: adoptStoredPicks exists so a corrected value
@@ -140,10 +167,18 @@ async function fillOrtho(){ if(!hasBridge()||!DOCLANG) return;
   let any=false;
   if(scriptOn){   // fetch the SCRIPT rendering for single tokens (and MWTs for non-Sanskrit)
     const need=new Map();   // (surface, upos), same key as the transliteration passes: a script rendering can be reading-dependent too, so it must not be shared between two tokens spelt alike but tagged differently
-    const want=(txt,u)=>{ const k=trKey(txt,u); if(!need.has(k)) need.set(k,[txt,u]); };
-    DOC.forEach(s=>{ s.tokens.forEach(t=>{ if(t.form&&!t.ortho)want(t.form,trUpos(t)); }); if(!skt)(s.mwt||[]).forEach(m=>{ if(m.form&&!m.ortho)want(m.form,""); }); });   // an MWT range has no one UPOS (see fillTranslit) → no opinion
+    const want=(txt,u,fe,le)=>{ const k=trKey(txt,u); if(!need.has(k)) need.set(k,[txt,u,fe||"",le||""]); };
+    const lemOf1=t=>((t.lemma&&t.lemma!=="_")?t.lemma:"");
+    DOC.forEach(s=>{ s.tokens.forEach(t=>{ if(t.form&&!t.ortho)want(t.form,trUpos(t),t.feats,lemOf1(t)); }); if(!skt)(s.mwt||[]).forEach(m=>{ if(m.form&&!m.ortho)want(m.form,""); }); });   // an MWT range has no one UPOS (see fillTranslit) → no opinion, and no FEATS or lemma either
     if(need.size){ const batch=[...need.values()]; let r;
-      try{ r=await window.pywebview.api.orthography(batch.map(x=>x[0]),DOCLANG,ORTHO_SCHEME,batch.map(x=>x[1])); }catch(e){ return; }
+      // feats/lemma ride along beside upos for the Latin `macron` scheme, which is keyed on the whole
+      // morphological analysis rather than on the class: the form alone reaches only the
+      // morphology-blind level of the lookup, where nominative `Gallia` picks up an ablative macron.
+      // Batched on (surface, upos) as before, so the extra two are taken from the FIRST token that
+      // asked for that key — which is exactly right, since two tokens sharing a surface and a tag
+      // that disagree on FEATS are a homograph the table cannot separate anyway.
+      try{ r=await window.pywebview.api.orthography(batch.map(x=>x[0]),DOCLANG,ORTHO_SCHEME,batch.map(x=>x[1]),
+                                                    batch.map(x=>x[2]||""),batch.map(x=>x[3]||"")); }catch(e){ return; }
       const map={}; batch.forEach((x,i)=>{ const v=(r&&r.ortho&&r.ortho[i])||""; if(v)map[trKey(x[0],x[1])]=v; });
       DOC.forEach(s=>{ s.tokens.forEach(t=>{ const v=t.form&&!t.ortho?map[trKey(t.form,trUpos(t))]:""; if(v) t.ortho=v; }); if(!skt)(s.mwt||[]).forEach(m=>{ const v=m.form&&!m.ortho?map[trKey(m.form,"")]:""; if(v) m.ortho=v; }); });
       any=true; } }
@@ -155,17 +190,26 @@ async function fillOrtho(){ if(!hasBridge()||!DOCLANG) return;
     if(groups.length){ let r; let dirtyForm=false;
       try{ r=await window.pywebview.api.sanskrit_mwt(groups,DOCLANG,scheme,lgroups); }catch(e){ r=null; }
       if(r&&r.ortho){ refs.forEach((m,i)=>{ if(r.ortho[i]){ m.ortho=r.ortho[i]; any=true; }
-        if(r.iast&&r.iast[i]){ m.miast=r.iast[i];
-          // item 3: the STORED surface form (grid + file) should BE the sandhi-fused IAST, not the naive
+        if(r.form&&r.form[i]){ m.miast=r.form[i];
+          // item 3: the STORED surface form (grid + file) should BE the sandhi-fused word, not the naive
           // concatenation. Rewrite it only where m.form is still the raw component glue (never clobber a
           // user-customised form), and flag the doc dirty so the correction is offered for saving.
-          if(!m._kept && m.form===naive[i] && r.iast[i]!==m.form){ m.form=r.iast[i]; dirtyForm=true; } } }); }   // _kept: a form restored by undo/redo is the document's own, never re-derived (see applySnap)
-      if(dirtyForm) markDirty(); }   // NO undo entry of its own: this correction is a consequence of the component edit that triggered the re-fuse, so it belongs to THAT edit's snapshot (undoing the edit restores the components, and the fused form recomputes from them). At load time there is no such edit, and no history — the correction then counts as normalisation and leaves the document clean, like the other derived passes   // stash the sandhi-fused IAST alongside the scripted form so the MWT romanisation row (trTxt) reads the fused form
-    if(scriptOn){   // item 6 (rev): the block-initial running text — glue the RAW # text (strip apostrophes/hyphens/word-internal pipes so compound members fuse; glue every consonant-final word onto the next), then render in the script. Built from s.text, NOT the token forms — the tokeniser has already dropped the hyphen/pipe glue markers, so token-based gluing left compound members (e.g. śaśa-bhṛto) spuriously spaced.
+          if(!m._kept && m.form===naive[i] && r.form[i]!==m.form){ m.form=r.form[i]; dirtyForm=true; } } }); }   // _kept: a form restored by undo/redo is the document's own, never re-derived (see applySnap)
+      if(dirtyForm) markDirty(); }   // NO undo entry of its own: this correction is a consequence of the component edit that triggered the re-fuse, so it belongs to THAT edit's snapshot (undoing the edit restores the components, and the fused form recomputes from them). At load time there is no such edit, and no history — the correction then counts as normalisation and leaves the document clean, like the other derived passes   // stash the fused form alongside the scripted one so the MWT romanisation row (trTxt) reads it
+    if(scriptOn){
+      /* The block-initial running line: the sentence's own `# text`, re-rendered in the chosen script.
+         It used to be GLUED first — the `# text` was in Clay-Sanskrit-Library notation, whose marked
+         sandhi (`vartm" â-punar-`) is not a readable sentence, so a whole reconstruction pass
+         (translit._glue_running_iast) stood between the file and the line. `sa_sud_vedic_ufal_dcs`
+         writes ordinary sandhied text, so there is nothing to reconstruct: the line IS the text, and
+         the only question left is which script to draw it in. That is `Api.orthography`, the same
+         call every other language's script rendering goes through — one code path instead of a
+         Sanskrit-only endpoint. Newlines and daṇḍas ride through it (translit._sanskrit splits on
+         them), so multi-line verse stays multi-line. */
       const texts=[], srefs=[];
-      DOC.forEach(s=>{ if(!s.orthoLine && (s.text||"").trim()){ texts.push(s.text); srefs.push(s); } });   // s.text keeps its real \n hard breaks (multi-line verse); sanskrit_running preserves them
+      DOC.forEach(s=>{ if(!s.orthoLine && (s.text||"").trim()){ texts.push(s.text); srefs.push(s); } });   // s.text keeps its real \n hard breaks (multi-line verse)
       if(texts.length){ let r2;
-        try{ r2=await window.pywebview.api.sanskrit_running(texts,DOCLANG,ORTHO_SCHEME); }catch(e){ r2=null; }
+        try{ r2=await window.pywebview.api.orthography(texts,DOCLANG,ORTHO_SCHEME); }catch(e){ r2=null; }
         if(r2&&r2.ortho){ srefs.forEach((s,i)=>{ if(r2.ortho[i]){ s.orthoLine=r2.ortho[i]; any=true; } }); } } } }
   if(any){ if(typeof invalidateDiaCache==="function") invalidateDiaCache(); preserveScroll(renderDoc); syncDocFonts(); } }   // wholesale, same reasoning as fillTranslit's own invalidateDiaCache call above: t.ortho/m.ortho/s.orthoLine feed bform()'s glyph directly, and this pass runs over the whole DOC asynchronously with no si of its own — BUG FIX: switching the Script picker (orPick) or loading a language whose remembered Script preference is a real script (loadOrthoSchemes) populates t.ortho/m.ortho/s.orthoLine with a script this document never used before — but until now nothing then asked fontload.js to fetch that script's face. syncDocFonts() is normally only called from the document-load paths (bridge.js/formats.js/init.js), all of which run BEFORE a script is ever picked, so docScripts()'s scan (which reads t.ortho, among other fields) saw no non-Latin text yet and the newly-chosen script's Noto face was NEVER requested this session. The page just fell through the CSS font stack to whatever the browser could resolve for those codepoints — on a machine with no native coverage for the script (the common case for anything rarer than Devanagari), that is either a patchwork of per-glyph system substitutes or the missing-glyph box, and canvas measureText() (meas(), used for every diagram width) does NOT do the same per-glyph fallback substitution DOM/SVG text painting does, so the measured slot and the painted glyphs disagree → clipped token forms. Calling syncDocFonts() here (AFTER t.ortho/m.ortho/s.orthoLine are populated, so the scan actually sees the new script) fetches the face if needed; ensureScriptFont() already re-renders via preserveScroll(renderDoc) once the face lands (see fontload.js), so this self-corrects without a special-cased second render pass here.
 
