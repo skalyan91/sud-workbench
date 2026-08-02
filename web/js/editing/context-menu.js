@@ -1512,8 +1512,24 @@ function flattenMWT(si,m){ const s=DOC[si], toks=s.tokens; if(!m)return; pushUnd
      recompute. MISC Translit/LTranslit go, being the component's — annotateTranslitMisc rewrites them. */
   const survivor={...head, form:m.form, ortho:m.ortho||"", translit:m.translit||"", translitLemma:""};
   survivor._ht=head._ht; survivor._trMisc=false; survivor._trPick=false;
+  /* ⚠ EVERY PER-WORD FIELD IS CONCATENATED, not inherited from the head component. Flatten makes one
+     word out of n, so the analysis of that word is the analyses of its parts in order — taking only the
+     head's silently DISCARDED the rest: `ātma`+`vidām` flattened to lemma `vid`, losing `ātman`, and
+     the same for the transliteration and the glossing tiers, which is a whole morpheme's annotation gone.
+     ‣ lemma / transliteration are joined SOLID: they are word-shaped, and the word is written solid.
+     ‣ the glossing tiers join on "-", because that is already the morpheme separator INSIDE each of
+       them (`MSeg=vid-ām`), and the components become morphemes of the flattened word — so
+       `ātma` + `vid-ām` reads `ātma-vid-ām` and its MGloss `self-know-GEN.PL`, which is what the tier
+       means. Seam marks are stripped first (msegStrip): they marked the MWT boundary that has just
+       ceased to exist. A component contributing nothing to a tier is skipped rather than leaving an
+       empty slot, so one unglossed part cannot produce a stray "-". */
+  const tierJoin=k=>{ const parts=comps.map(t=>msegStrip(tierText(t,k))).filter(Boolean); return parts.join("-"); };
+  survivor.lemma=comps.map(t=>(t.lemma&&t.lemma!=="_")?t.lemma:"").join("")||survivor.form;
+  survivor.translit=m.translit||comps.map(t=>t.translit||"").join("");
+  survivor.translitLemma=comps.map(t=>t.translitLemma||"").join("");
   survivor.misc=setMiscKV(setMiscKV(survivor.misc,"Translit",""),"LTranslit","");
-  if(head.lemma===head.form) survivor.lemma=survivor.form;   // the same rule mergeTokens applies: a lemma that merely echoed the component's form said nothing, so it follows the new form; a real lemma is analysis and stays
+  ["gloss","mseg","mgloss"].forEach(k=>{ const v=tierJoin(k); survivor.misc=setMiscKV(survivor.misc,TIER_MISC[k],v); });
+  if(comps.every(t=>t.lemma===t.form)) survivor.lemma=survivor.form;   // the rule mergeTokens applies: lemmas that merely echoed their forms said nothing, so the result follows the new form rather than gluing the same string twice
   toks.forEach(t=>{ if(compSet.has(t._ht)) t._ht=survivor; });            // dependents of any removed component re-point to the survivor
   (s.mwt||[]).forEach(mm=>{ mm._toks=toks.slice(mm.from-1,mm.to); });
   toks.splice(from-1, to-from+1, survivor);
