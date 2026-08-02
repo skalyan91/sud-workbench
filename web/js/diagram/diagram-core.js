@@ -476,7 +476,13 @@ function orthoScript(){ return !!ORTHO_SCHEME && ORTHO_SCHEME!=="none" && !TRANS
 //                                      the stored Devanagari, so the ordinary inline form editor
 //                                      opens on it instead. Honest rather than clever: the field
 //                                      says what the file says.                  (new)
-function iastFormEdit(){ return isSanskritLang() && !DOCSCRIPT && orthoScript(); }
+/* The glyph is a DERIVED rendering, so a click on it must open the field on the IAST row it was rendered
+   from. That holds only while such a row is drawn — and under Script=Latin + Displayed=CSL it is not:
+   there the CSL IS the glyph (bform) and trTxt therefore suppresses the row as redundant, so this would
+   have sent the editor to an element that no longer exists. In that arrangement the field opens on the
+   glyph's own slot instead and carries the FORM, exactly as it does under "Original". */
+function iastFormEdit(){ return isSanskritLang() && !DOCSCRIPT && orthoScript()
+  && !(typeof saCslTop==="function" && saCslTop()); }
 // BCP-47 tag for the rendered content, from the document language + the selected same-language script swap.
 // Han unification (zh-Hans vs zh-Hant vs ja) and locale Cyrillic (Bulgarian, Serbian) render correct
 // regional glyphs only when the element carries this tag → it drives the OpenType `locl` feature and the
