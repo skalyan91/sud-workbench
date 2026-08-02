@@ -92,7 +92,17 @@ async function fillTranslitCSL(){
     s.tokens.forEach((t,j)=>{ const v=got[j]||"";
       if(t.translit!==v){ t.translit=v; any=true; }
       // the lemma has no junction to stand in, so it keeps its ordinary romanisation
-      if(!t.translitLemma&&t.lemma&&t.lemma!=="_"&&t.lemma===t.form) t.translitLemma=v; }); });
+      if(!t.translitLemma&&t.lemma&&t.lemma!=="_"&&t.lemma===t.form) t.translitLemma=v; });
+    /* …AND THE MWT RANGES, which is what was missing from the running line. Every row that draws a
+       sentence shows an MWT ONCE, by its range, not as its component tokens — so with `m.translit`
+       unset the line fell back to `m.form`, the plain sandhied word, and the CSL markers the whole
+       scheme exists for were nowhere on it. A range's CSL is simply its components' joined: the
+       marks record what happened BETWEEN words, so the seams INSIDE an orthographic word are exactly
+       the ones a reader wants shown (`vartm'` + `â` + `punarjanmanām` → `vartm'âpunarjanmanām`). */
+    (s.mwt||[]).forEach(m=>{ const parts=[];
+      for(let k=m.from;k<=Math.min(m.to,s.tokens.length);k++) parts.push(got[k-1]||s.tokens[k-1].form||"");
+      const v=parts.join("");
+      if(v && m.translit!==v){ m.translit=v; any=true; } }); });
   if(any){ if(typeof invalidateDiaCache==="function") invalidateDiaCache(); preserveScroll(renderDoc); }
   return any; }
 async function fillTranslit(){ if(!hasBridge()||!DOCLANG) return;   // transliteration is enabled only when a model sets the language
@@ -185,10 +195,19 @@ async function fillOrtho(){ if(!hasBridge()||!DOCLANG) return;
   if(skt){   // items 9/18: fuse each Sanskrit MWT's component forms by external sandhi — scheme="" gives the fused IAST
     const scheme=scriptOn?ORTHO_SCHEME:"";   // item 18: sandhi applies even with NO script (None/Original) → fused IAST as the surface form
     const lemOf=t=>((t.lemma&&t.lemma!=="_")?t.lemma:"");   // the CoNLL-U lemma is an r-stem signal for visarga sandhi (punar, antar, …)
-    const groups=[], lgroups=[], refs=[], naive=[];
-    DOC.forEach(s=>(s.mwt||[]).forEach(m=>{ if(!m.ortho){ const cts=s.tokens.slice(m.from-1,m.to).filter(t=>t.form); if(cts.length){ groups.push(cts.map(t=>t.form)); lgroups.push(cts.map(lemOf)); refs.push(m); naive.push(cts.map(t=>t.form).join("")); } } }));
+    const groups=[], lgroups=[], refs=[], naive=[], prevs=[], nexts=[], pauses=[];
+    /* THE NEIGHBOURS GO WITH IT — the same `saMwtContext` (js/lang/translit.js) sandhiMwtForms uses.
+       Without them this pass fused a range's own components and nothing else, so it produced the PAUSA
+       spelling of both edges while the stored FORM (which sandhiMwtForms had built WITH the context)
+       carried the real ones. The glyph over a multi-word token therefore disagreed with the form under
+       it — `…bhṛtaḥ` drawn above `…bhṛto` — and no edit could ever reconcile them, because each pass
+       was answering a different question. One helper, one answer. */
+    DOC.forEach(s=>(s.mwt||[]).forEach(m=>{ if(!m.ortho){ const cts=s.tokens.slice(m.from-1,m.to).filter(t=>t.form); if(cts.length){
+      const cx=saMwtContext(s,m);
+      groups.push(cts.map(t=>t.form)); lgroups.push(cts.map(lemOf)); refs.push(m); naive.push(cts.map(t=>t.form).join(""));
+      prevs.push(cx.prev); nexts.push(cx.next); pauses.push(cx.pause); } } }));
     if(groups.length){ let r; let dirtyForm=false;
-      try{ r=await window.pywebview.api.sanskrit_mwt(groups,DOCLANG,scheme,lgroups); }catch(e){ r=null; }
+      try{ r=await window.pywebview.api.sanskrit_mwt(groups,DOCLANG,scheme,lgroups,"",prevs,nexts,pauses); }catch(e){ r=null; }
       if(r&&r.ortho){ refs.forEach((m,i)=>{ if(r.ortho[i]){ m.ortho=r.ortho[i]; any=true; }
         if(r.form&&r.form[i]){ m.miast=r.form[i];
           // item 3: the STORED surface form (grid + file) should BE the sandhi-fused word, not the naive

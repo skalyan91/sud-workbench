@@ -47,6 +47,28 @@ const _STX_WS=/\s/;   // JS \s already covers NBSP, the U+2000–200A spaces, U+
    unaligned: decorating it would mean trusting offsets the file has already contradicted. (An earlier
    pass did accept the CorrectForm here, on the strength of samples/english.conllu s6 — but that sample
    was simply wrong, and has been fixed rather than accommodated.) */
+/* ONE ROW OF THE RUNNING SENTENCE, re-spelt unit by unit and spaced as `# text` spaces it.
+   `pick(unit)` says what to draw for an orthographic word — the SCRIPT rendering for the top line, the
+   transliteration for the row beneath — and everything else is shared, because the two rows differ only
+   in that choice and must not differ in anything else.
+   The whitespace is `# text`'s, never invented. Preferred source is the alignment stextSpans already
+   computes for the decoration pass: with a span per unit, the gap between two units is a literal slice
+   of the text, so a line break, a run of spaces and a SpaceAfter=No seam all come across without any of
+   them being reasoned about. Fallback, for a sentence with no spans (no bridge, or a text its tokens
+   cannot be aligned to): MISC SpaceAfter=No, as io_conllu rebuilds `# text`. A flat join(" ") — which is
+   what both rows used to do — put a space before every full stop, dropped the line breaks of a verse,
+   and made an unchanged romanisation LOOK different from the text it romanises, which is what kept the
+   duplicate transliteration row on screen (see trLayer's caller).
+   The unit walk matches sentUnits' exactly, and has to: stextSpans indexes its answer by that order. */
+function runningLine(s,si,pick){
+  const units=[]; let k=0; while(k<((s&&s.tokens)||[]).length){ const m=(s.mwt||[]).find(x=>x.from===k+1);
+    if(m){ units.push({mwt:m,last:Math.min(m.to,s.tokens.length)-1}); k=m.to; } else { units.push({tok:s.tokens[k],last:k}); k++; } }
+  if(!units.length) return "";
+  const al=(typeof stextSpans==="function")?stextSpans(s,si,s.text||""):null;
+  const gaps=(al&&al.spans&&al.spans.length===units.length&&al.spans.every(Boolean))
+    ? units.map((_u,n)=>n<units.length-1 ? (s.text||"").slice(al.spans[n][1],al.spans[n+1][0]) : "")
+    : units.map((u,n)=>n<units.length-1 ? (spaceAfterNo(s.tokens[u.last])?"":" ") : "");
+  return units.map((u,n)=>(pick(u)||"")+gaps[n]).join(""); }
 function sentUnits(s){ const t=(s&&s.tokens)||[], mwt=(s&&s.mwt)||[], out=[]; let i=0;
   while(i<t.length){ const m=mwt.find(x=>x.from===i+1);
     if(m){ const ids=[]; for(let k=m.from;k<=Math.min(m.to,t.length);k++) ids.push(k); out.push({form:m.form||"",ids,mwt:true}); i=m.to; }   // an MWT is ONE unit: the text holds its surface form, not its components
@@ -1328,14 +1350,7 @@ function buildBlock(i,ctx){ const s=DOC[i];
          MWT is its LAST component's, the rule edit-ops.js's flattenMWT already states.
          `spaceAfterNo` lives in js/diagram/diagram-core.js, which loads BEFORE this file — and this is
          render-time code besides, so the classic-script forward-reference hazard does not apply. */
-      else { const disp=u=>dispScheme((u.mwt?(u.mwt.ortho||u.mwt.form):(u.tok.ortho||u.tok.form))||"",ORTHO_SCHEME);
-        const units=[]; let k=0; while(k<s.tokens.length){ const m=(s.mwt||[]).find(x=>x.from===k+1);
-          if(m){ units.push({mwt:m,last:m.to-1}); k=m.to; } else { units.push({tok:s.tokens[k],last:k}); k++; } }
-        const al=(typeof stextSpans==="function")?stextSpans(s,i,s.text||""):null;
-        const gaps=(al&&al.spans&&al.spans.length===units.length&&al.spans.every(Boolean))
-          ? units.map((_u,n)=>n<units.length-1 ? (s.text||"").slice(al.spans[n][1], al.spans[n+1][0]) : "")
-          : units.map((u,n)=>n<units.length-1 ? (spaceAfterNo(s.tokens[u.last])?"":" ") : "");
-        line=units.map((u,n)=>disp(u)+gaps[n]).join(""); }
+      else line=runningLine(s,i,u=>dispScheme((u.mwt?(u.mwt.ortho||u.mwt.form):(u.tok.ortho||u.tok.form))||"",ORTHO_SCHEME));
       txt.textContent=line||s.text||"(empty)"; txt.title="Sentence in "+orSchemeLabel(ORTHO_SCHEME)+" (display)";
       txt.classList.add("stext-script");   // item 20: the script top line's text left edge is aligned to the transliteration input below it (see .stext.stext-script CSS)
       if(ORTHO_SCHEME==="Grantha"||ORTHO_SCHEME==="Javanese"||ORTHO_SCHEME==="Balinese"||ORTHO_SCHEME==="Kawi"||ORTHO_SCHEME==="ZanabazarSquare") txt.classList.add("stext-stacked");   // item 18: Grantha's stacked vowel marks need extra vertical room → double-spaced (see .stext.stext-stacked CSS); Javanese and Balinese share the same stacked-diacritic problem, so they get the same treatment. Kawi too (added alongside its _AKSHARA_SCRIPTS reinstatement): verified by rendering a real 4-line Sanskrit verse (samples/brihat_jataka.conllu s1) at line-height:1.4 — a stacked/subjoined conjunct cluster on one line visibly overlapped the line below it, which line-height:2 clears. Zanabazar Square joined the set on user report from the real app (a synthetic @font-face CDP test during its own reinstatement read as clean at normal spacing, but the shipping WKWebView face disagreed) — trust the live report over that synthetic result. Tibetan is NOT in this set: it briefly rendered via TibetanMachineUnicode (a stacked-subjoined-consonant face needing the same double-spacing), but that font is never fetched by fontload.js's on-demand mechanism — Tibetan now goes through the SAME "Noto Sans <Script>" pipeline every other script does (see FONT_SCRIPTS, fontload.js), whose ordinary composed glyphs need no extra vertical room. ONLY the top script line; the editable translit/original below keeps normal spacing
@@ -1416,10 +1431,16 @@ function buildBlock(i,ctx){ const s=DOC[i];
       tl.addEventListener("blur",()=>{ if(!show.translit) tl.hidden=true; });   // …and re-collapses on blur, still gated on Displayed:"None" — if the user changed the Displayed scheme away from None WHILE this row was open, show.translit is now true and the row stays, exactly as a fresh render would leave it
       scriptTransLine=tl; b.appendChild(tl); }
     else if(trLayer()){   // romanisation OR a Latin-output orthography → a plain whole-sentence line under the text (no displacement)
-      const parts=[]; let k=0; while(k<s.tokens.length){ const m=(s.mwt||[]).find(x=>x.from===k+1);   // show each multi-word token once, not its component words
-        if(m){ parts.push(topTransTxt(m)||m.form); k=m.to; } else { parts.push(topTransTxt(s.tokens[k])||s.tokens[k].form); k++; } }
-      const line=parts.join(" ").trim(), base=(s.text||s.tokens.map(t=>t.form).join(" ")).trim();
-      if(line && line!==base){ const tl=document.createElement("div"); tl.className="strans"; tl.style.marginInlineStart=(idW+8)+"px"; tl.textContent=line; capTransWidth(tl); b.appendChild(tl); } }
+      /* NO ROW WHERE IT WOULD ONLY REPEAT THE LINE ABOVE IT — an IAST romanisation of an IAST-stored
+         Sanskrit file says nothing the running text has not already said, and neither does "Original"
+         over a Latin original. That was always the intent of the `line!==base` test; it could not work
+         while the two strings were built by different rules, because a join(" ") of the very same words
+         differs from `# text` at every full stop and every line break of a verse. Built the same way,
+         an unchanged romanisation now compares EQUAL and the row is correctly dropped — while CSL, which
+         genuinely respells the sentence (`vartm'âpunarjanmanām`), still differs and still shows. */
+      const line=runningLine(s,i,u=>u.mwt?(topTransTxt(u.mwt)||u.mwt.form):(topTransTxt(u.tok)||u.tok.form));
+      const base=(s.text||s.tokens.map(t=>t.form).join(" "));
+      if(line.trim() && line.trim()!==base.trim()){ const tl=document.createElement("div"); tl.className="strans"; tl.style.marginInlineStart=(idW+8)+"px"; tl.textContent=line; capTransWidth(tl); b.appendChild(tl); } }
     if(TRANS_LANGS.size) b.appendChild(renderBlockTrans(i));   // item 13: a field per enabled translation language, just above the diagram
     if(show.graphs) b.appendChild(diaSentence(i,ctx));   // notation-switch cache: same node reused (and re-highlighted by applySel below) if THIS sentence, under THIS conv + view-state, was already built — see the "NOTATION-SWITCH DIAGRAM CACHE" note above computeWindow
     if(show.grids) b.appendChild(renderGrid(i));

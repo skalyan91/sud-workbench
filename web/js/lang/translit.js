@@ -171,7 +171,15 @@ function trRender(){ const m=trEl(); m.innerHTML="";
 function trPick(id){ trClose();
   if(!id){ if(show.translit||TRANSLIT_SCHEME){ show.translit=false; TRANSLIT_SCHEME=""; updateTranslitPill(); if(DOC.length)preserveScroll(renderDoc); } if(DOCLANG)PREFS.translit[DOCLANG]=""; savePrefs(); toast("Displayed transliteration off"); return; }   // RECORD the off-state as "", don't delete the key: turning the row off is a deliberate choice (this row is Sanskrit-only — see trRender), and deleting made it indistinguishable from "never chose", so the next open silently turned the row back on. prefTranslit reads key-presence for exactly this distinction.
   if(show.translit&&TRANSLIT_SCHEME===id) return;   // no change → no-op
-  TRANSLIT_SCHEME=id; show.translit=true; updateTranslitPill(); clearTranslitCache(); fillTranslit(); if(DOC.length)preserveScroll(renderDoc);
+  TRANSLIT_SCHEME=id;
+  /* …and whether the ROW is drawn is saTransRow's call for Sanskrit, not an unconditional yes. Forcing
+     it on here is what put a second line under an IAST-stored sentence whose glyph is already Latin —
+     the same words twice, which is precisely what saTransRow exists to prevent and what every OTHER
+     entry point (loadTranslitSchemes, setLang, orPick) already asks it. Picking a plain romanisation
+     under a Latin glyph therefore draws no row, by design; picking CSL does, because CSL respells the
+     sentence rather than repeating it. */
+  show.translit=isSanskritLang()?saTransRow():true;
+  updateTranslitPill(); clearTranslitCache(); fillTranslit(); if(DOC.length)preserveScroll(renderDoc);
   if(DOCLANG){ PREFS.translit[DOCLANG]=id; savePrefs(); }
   toast("Displayed transliteration: "+trSchemeLabel(id)); }
 function openTranslitMenu(x,y){ const m=trEl(); trRender(); m.classList.add("show"); setPillMenuOpen("translitPill",true);
@@ -278,6 +286,31 @@ function saGlyphLatin(){ const g=saGlyphScript(); return !g||g==="iast"; }
    the only visible effect of choosing CSL was the toast. Ask what the ROW would show, not what
    script the glyph is in. */
 function saTransRow(){ return isSanskritLang() && (TRANSLIT_SCHEME==="csl" || !saGlyphLatin()); }
+/* ── A SANSKRIT MWT'S NEIGHBOURS ────────────────────────────────────────────────────────────────
+   An orthographic word's first and last segments are shaped by the words either side of it, so
+   fusing a range's own components spells both ends in pausa — the one way a running text never
+   spells them. Every caller that re-fuses a range needs the same three facts, and they must agree:
+   sandhiMwtForms (js/io/bridge.js) rewrites the stored FORM, fillOrtho (js/lang/translit-load.js)
+   the SCRIPT rendering of the same word, and the two disagreeing is visible as a glyph that does
+   not match the form under it. Hence one helper, here, in the module both load after.
+   A neighbour is an ORTHOGRAPHIC word — the containing MWT's form where the adjacent token is
+   inside one — since that is the unit sandhi applies between. A daṇḍa is stepped OVER rather than
+   stopping the search, because visarga sandhi crosses it (`…hṛtkroḍavāsobhṛto |⏎bastir…` takes its
+   -o from `bastir`); `pause` reports that one stood in the way, which is what -m → -ṃ needs, since
+   that assimilation does NOT cross a pause (`…arajyotiṣām |` keeps its -m). See app/translit.py's
+   _boundary_sandhi for the rules the two flags feed. */
+const SA_DANDA=["|","||","।","॥","‖","।।"];
+function saMwtContext(s,m){
+  const mwtAt=k=>(s.mwt||[]).find(x=>k>=x.from&&k<=x.to);
+  const walk=(k,step)=>{ let pause=false;
+    for(let n=0;n<8;n++){ if(k<1||k>s.tokens.length) return ["",pause];
+      const g=mwtAt(k), w=g?(g.form||""):((s.tokens[k-1]||{}).form||"");
+      if(!w) return ["",pause];
+      if(SA_DANDA.indexOf(w)<0) return [w,pause];
+      pause=true; k=(g?(step>0?g.to:g.from):k)+step; }
+    return ["",pause]; };
+  const nx=walk(m.to+1,+1);
+  return {prev:walk(m.from-1,-1)[0], next:nx[0], pause:nx[1]}; }
 /* ── ITRANS → the document's script, for typed Sanskrit (item 1) ──────────────────────────────────
    Neither storage script is typeable on an ordinary keyboard — IAST needs diacritics with no keys,
    Devanagari needs an IME — so what gets typed is ITRANS: kRiShNa, raamaayaNa, sha~Nkara. Every

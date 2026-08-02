@@ -488,8 +488,14 @@ doInsert=async function(index,text){
     renderDiagramIncremental(index);   // as in applySentText's parsed branch — the freshly parsed block converges on its tree instead of sitting blank
     markDirty(); renderDoc(); pick(index,1,true);
     toast(r.parsed?`Parsed · ${MODELINFO[model]||model}`:(r.reason?`Whitespace tokeniser (no parse: ${r.reason})`:"Whitespace tokeniser"));
-    if(show.translit)fillTranslit(); if((ORTHO_SCHEME&&ORTHO_SCHEME!=="none")||isSanskritLang())fillOrtho();   // item 2: re-apply the SCRIPT (and Sanskrit MWT sandhi) now the parse's tokens are in
-    if(isSanskritLang())autoGroupSanskritMWTs(index,!!(r.mwt&&r.mwt.length));   // Sanskrit: keep the TOKENISER's MWT ranges (r.mwt) and fuse their forms; only fall back to Compound=Yes grouping when the parse published none
+    // ⚠ THE MWT PASS RUNS FIRST, AND IS AWAITED. Both it and fillOrtho re-fuse every range through
+    // Api.sanskrit_mwt, and firing them together raced: fillOrtho set m.ortho from its own answer while
+    // sandhiMwtForms was clearing m.ortho to force a re-render, so whichever landed second decided what
+    // was drawn. The visible symptom was a re-parse leaving the OLD surface form in place while the very
+    // same edit applied by hand updated it — the edit path calls sandhiMwtForms alone, with nothing to
+    // race. Settling the forms before anything renders from them removes the race rather than ordering it.
+    if(isSanskritLang())await autoGroupSanskritMWTs(index,!!(r.mwt&&r.mwt.length));   // keep the TOKENISER's ranges (r.mwt); Compound=Yes only when the parse published none
+    if(show.translit)fillTranslit(); if((ORTHO_SCHEME&&ORTHO_SCHEME!=="none")||isSanskritLang())fillOrtho();   // item 2: re-apply the SCRIPT now the parse's tokens (and its MWT forms) are in
     annotateTranslitMisc(index).then(ch=>{ if(ch)preserveScroll(renderDoc); });   // parse pass → write MISC Translit/LTranslit
     const el=document.querySelector(`.sblock[data-i="${index}"]`); if(el)el.scrollIntoView({block:"center",behavior:"smooth"}); return;
   }
@@ -825,8 +831,9 @@ async function applySentText(i,newText,opts){ const s=DOC[i]; if(!s)return; opts
     morphAfterReparse(s);   // the new tokens carry no MSeg/MGloss — re-seed both tiers from the FEATS this parse just produced (inside the same undo entry: it is part of the re-parse, not a second edit)
     renderDiagramIncremental(i);   // js/core/document.js: this sentence was just parsed → let the render on the next line draw its tree breadth-first by depth and converge on the real one, rather than leaving the row blank for the whole layout pass. ARMS the sequence; the render below IS its first stage
     markDirty(); preserveScroll(renderDoc); clearSelToBlock(i,scroll);   // item 9, as above: the parse's tokens land with nothing selected
-    toast(r.parsed?`Re-parsed · ${MODELINFO[model]||model}`:`Re-tokenised on whitespace${r.reason?" (no parse: "+r.reason+")":""}`); if(show.translit)fillTranslit(); if((ORTHO_SCHEME&&ORTHO_SCHEME!=="none")||isSanskritLang())fillOrtho();   // item 19: re-apply the SCRIPT now the parse's tokens are in
-    if(isSanskritLang())autoGroupSanskritMWTs(i,!!(r.mwt&&r.mwt.length));   // Sanskrit: as above — the parse's own ranges win over a Compound=Yes re-derivation
+    toast(r.parsed?`Re-parsed · ${MODELINFO[model]||model}`:`Re-tokenised on whitespace${r.reason?" (no parse: "+r.reason+")":""}`);
+    if(isSanskritLang())await autoGroupSanskritMWTs(i,!!(r.mwt&&r.mwt.length));   // FIRST, and awaited — see the note at the insert path above on the race this removes
+    if(show.translit)fillTranslit(); if((ORTHO_SCHEME&&ORTHO_SCHEME!=="none")||isSanskritLang())fillOrtho();   // item 19: re-apply the SCRIPT now the parse's tokens (and its MWT forms) are in
     annotateTranslitMisc(i).then(ch=>{ if(ch)preserveScroll(renderDoc); }); return;
   }
   pushUndo(i);
@@ -1779,22 +1786,11 @@ async function sandhiMwtForms(si,froms){ if(!isSanskritLang()||!hasBridge()||!DO
      `…uro hṛtkroḍavāsobhṛto |⏎bastir…`, where `bhṛtaḥ` became `bhṛto` because `bastir` — the next real
      word, one daṇḍa and one newline away — begins with a voiced consonant. Stopping at the daṇḍa left
      that edge in pausa and was the one junction this pass still got wrong. */
-  const _DANDA=["|","||","।","॥","‖","।।"];
-  const mwtAt=k=>(s.mwt||[]).find(x=>k>=x.from&&k<=x.to);
-  // → [neighbouring word, did a daṇḍa stand in the way]. The second half matters because the two rule
-  // families disagree about a pause: visarga sandhi crosses it, -m → -ṃ does not (see _boundary_sandhi).
-  const wordAt=(k,step)=>{ let pause=false;
-    for(let n=0;n<8;n++){ if(k<1||k>s.tokens.length) return ["",pause];
-      const g=mwtAt(k), w=g?(g.form||""):((s.tokens[k-1]||{}).form||"");
-      if(!w) return ["",pause];
-      if(_DANDA.indexOf(w)<0) return [w,pause];             // a real word → this is the neighbour
-      pause=true; k=(g?(step>0?g.to:g.from):k)+step; }      // a daṇḍa → step over it and keep looking
-    return ["",pause]; };
   const groups=[],lgroups=[],refs=[],prevs=[],nexts=[],pauses=[];
   s.mwt.forEach(m=>{ if(froms&&froms.indexOf(m.from)<0) return; const cts=s.tokens.slice(m.from-1,m.to).filter(t=>t.form); if(cts.length){
-    const nx=wordAt(m.to+1,+1);
+    const cx=saMwtContext(s,m);   // js/lang/translit.js — shared with fillOrtho so the FORM and its GLYPH agree
     groups.push(cts.map(t=>t.form)); lgroups.push(cts.map(lemOf)); refs.push(m);
-    prevs.push(wordAt(m.from-1,-1)[0]); nexts.push(nx[0]); pauses.push(nx[1]); } });
+    prevs.push(cx.prev); nexts.push(cx.next); pauses.push(cx.pause); } });
   if(!groups.length) return false;
   let r; try{ r=await window.pywebview.api.sanskrit_mwt(groups,DOCLANG,"",lgroups,"",prevs,nexts,pauses); }catch(e){ return false; }
   let any=false; refs.forEach((m,i)=>{ delete m._kept;   // an EDIT (or a parse) asked for this re-fuse, which is new evidence — it overrides an undo-restored form (see applySnap)
