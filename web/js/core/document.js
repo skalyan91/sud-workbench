@@ -64,14 +64,21 @@ function runningLine(s,si,pick,fixedGap){
   const units=[]; let k=0; while(k<((s&&s.tokens)||[]).length){ const m=(s.mwt||[]).find(x=>x.from===k+1);
     if(m){ units.push({mwt:m,last:Math.min(m.to,s.tokens.length)-1}); k=m.to; } else { units.push({tok:s.tokens[k],last:k}); k++; } }
   if(!units.length) return "";
-  /* `fixedGap` overrides the text's own spacing with one separator between every unit, and CSL is why it
-     exists: a scheme that MARKS a junction writes the two pieces apart, so its line must not inherit the
-     spacing of a text that shows them fused. Taking the gaps from `# text` there produced
-     `vartm'âpunarjanmanām` — the mark welded to the next word, indistinguishable from a letter — where the
-     notation asks for `vartm" â-punar-janmanām`. Every other row still takes the text's spacing, which is
-     what makes a verse keep its line breaks and a full stop keep its lack of a preceding space. */
-  if(fixedGap!=null) return units.map(u=>pick(u)||"").join(fixedGap);
-  const al=(typeof stextSpans==="function")?stextSpans(s,si,s.text||""):null;
+  /* `fixedGap` replaces a FUSED junction with one separator, and CSL is why it exists: a scheme that MARKS
+     a junction writes the two pieces apart, so its line must not inherit the spacing of a text that shows
+     them run together. Taking the gaps verbatim produced `vartm'âpunarjanmanām` — the mark welded to the
+     next word, indistinguishable from a letter — where the notation asks for `vartm" â-punar-janmanām`.
+     ⚠ IT REPLACES THE GAP, IT DOES NOT FLATTEN IT. A gap carrying a NEWLINE is a verse line break, which
+     is a fact about the poem and not about sandhi, so it survives verbatim; only a gap with no line break
+     in it becomes the separator. Joining every unit with a plain space collapsed the four pādas of each
+     stanza onto one line. */
+  const al0=(typeof stextSpans==="function")?stextSpans(s,si,s.text||""):null;
+  if(fixedGap!=null){
+    const ok=al0&&al0.spans&&al0.spans.length===units.length&&al0.spans.every(Boolean);
+    return units.map((u,n)=>{ if(n>=units.length-1) return pick(u)||"";
+      const raw=ok?(s.text||"").slice(al0.spans[n][1],al0.spans[n+1][0]):"";
+      return (pick(u)||"")+(/\n/.test(raw)?raw:fixedGap); }).join(""); }
+  const al=al0;
   const gaps=(al&&al.spans&&al.spans.length===units.length&&al.spans.every(Boolean))
     ? units.map((_u,n)=>n<units.length-1 ? (s.text||"").slice(al.spans[n][1],al.spans[n+1][0]) : "")
     : units.map((u,n)=>n<units.length-1 ? (spaceAfterNo(s.tokens[u.last])?"":" ") : "");
@@ -1300,7 +1307,10 @@ function buildBlock(i,ctx){ const s=DOC[i];
     // editable sentence text (# text): commit on blur/Enter re-tokenises or re-parses the sentence (Item 4).
     // Item 3: under a SCRIPT orthography the top line shows the sentence in that script (read-only) and this
     // editable original moves DOWN into the transliteration slot (mirroring the per-token original-in-row rule).
-    const scriptTop=orthoScript();
+    // …except where that rendering could not change anything — see saScriptNoop (js/lang/translit.js).
+    // Then the block renders exactly as under "Original": `# text` stays put and editable, and any
+    // transliteration row goes beneath it instead of taking its place.
+    const scriptTop=orthoScript() && !(typeof saScriptNoop==="function" && saScriptNoop());
     /* A displayed scheme that RESPELLS the sentence rather than romanising it — CSL marks the junctions
        (`vartm'âpunarjanmanām`), so it says something the glyph above does not, whatever script that glyph
        is in. Under `scriptTop` it takes the visible row and the editable original collapses behind it;

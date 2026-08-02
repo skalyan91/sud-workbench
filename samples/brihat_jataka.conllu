@@ -50,7 +50,7 @@
 36	trailokya	trailokya	NOUN	NOUN	Compound=Yes	37	mod	_	Unsandhied=trailokya|MSeg=trailokya
 37	dīpaḥ	dīpa	NOUN	NOUN	Case=Nom|Gender=Masc|Number=Sing	38	mod	_	Unsandhied=dīpaḥ|MSeg=dīpa-ḥ|MGloss=-NOM.SG.M
 38	raviḥ	ravi	NOUN	NOUN	Case=Nom|Gender=Masc|Number=Sing	26	mod@relcl	_	Unsandhied=raviḥ|MSeg=ravi-ḥ|MGloss=-NOM.SG.M
-39	‖	‖	PUNCT	PUNCT	Case=Acc|Gender=Neut|Number=Sing	26	punct	_	Unsandhied=‖|MSeg=‖|MGloss=ACC.SG.N
+39	||	||	PUNCT	PUNCT	Case=Acc|Gender=Neut|Number=Sing	26	punct	_	Unsandhied=‖|MSeg=‖|MGloss=ACC.SG.N
 
 # sent_id = s2
 # text = bhūyobhiḥ paṭubuddhibhiḥ paṭudhiyāṃ horāphalajñāptaye |\nśabdanyāyasamanviteṣu bahuśaḥ śāstreṣu dṛṣṭeṣv api |\nhorātantramahārṇavaprataraṇe bhagnodyamānām aham |\nsvalpaṃ vṛttavicitram arthabahulaṃ śāstraplavaṃ prārabhe ||
@@ -99,7 +99,7 @@
 33	śāstra	śāstra	NOUN	NOUN	Compound=Yes	35	compound@coord	_	Unsandhied=śāstra|MSeg=śāstra
 34	plavam	plava	NOUN	NOUN	Case=Acc|Gender=Masc|Number=Sing	33	conj:coord	_	Unsandhied=plavam|MSeg=plava-m|MGloss=-ACC.SG.M
 35	prārabhe	prārabh	VERB	NOUN	Mood=Ind|Number=Sing|Person=1|Tense=Pres	0	root	_	Unsandhied=prārabhe|MSeg=prārabh-e|MGloss=-1SG.PRS.IND
-36	‖	‖	PUNCT	PUNCT	Case=Acc|Gender=Masc|Number=Sing	35	punct	_	Unsandhied=‖|MSeg=‖|MGloss=ACC.SG.M
+36	||	||	PUNCT	PUNCT	Case=Acc|Gender=Masc|Number=Sing	35	punct	_	Unsandhied=‖|MSeg=‖|MGloss=ACC.SG.M
 
 # sent_id = s3
 # text = horety ahorātravikalpam eke vāñchanti pūrvāparavarṇalopāt |\nkarmārjitam pūrvabhave sadādi yat tasya paṅktiṃ samabhivyanakti ||
@@ -115,7 +115,7 @@
 8	varṇa	varṇa	NOUN	NOUN	Compound=Yes	9	mod	_	Unsandhied=varṇa|MSeg=varṇa
 9	lopāt	lopa	NOUN	NOUN	Case=Abl|Gender=Masc|Number=Sing	12	compound@coord	_	Unsandhied=lopāt|MSeg=lop-āt|MGloss=-ABL.SG.M
 10	|	|	PUNCT	PUNCT	_	5	punct	_	Unsandhied=
-11-12	karmārjitaṃ	_	_	_	_	_	_	_	_
+11-12	karmārjitam	_	_	_	_	_	_	_	_
 11	karma	karman	NOUN	NOUN	Compound=Yes	12	comp:obj	_	Unsandhied=karma|MSeg=karma
 12	arjitam	arjay	VERB	ADJ	Case=Nom|Gender=Neut|Number=Sing|VerbForm=Part	5	conj:coord	_	Unsandhied=arjitam|MSeg=arj-itam|MGloss=-PTCP.NOM.SG.N
 13-14	pūrvabhave	_	_	_	_	_	_	_	_
@@ -128,7 +128,7 @@
 18	tasya	tad	PRON	PRON	Case=Gen|Gender=Masc|Number=Sing	19	mod	_	Unsandhied=tasya|MSeg=ta-sya|MGloss=-GEN.SG.M
 19	paṅktiṃ	paṅkti	NOUN	NOUN	Case=Acc|Gender=Fem|Number=Sing	20	comp:obj	_	Unsandhied=paṅktim|MSeg=paṅkti-ṃ|MGloss=-ACC.SG.F
 20	samabhivyanakti	samabhivyañj	VERB	VERB	Mood=Ind|Number=Sing|Person=3|Tense=Pres	0	root	_	Unsandhied=samabhivyanakti|MSeg=samabhivya-nakti|MGloss=-3SG.PRS.IND
-21	‖	‖	PUNCT	PUNCT	Case=Acc|Gender=Masc|Number=Sing	20	punct	_	Unsandhied=‖|MSeg=‖|MGloss=ACC.SG.M
+21	||	||	PUNCT	PUNCT	Case=Acc|Gender=Masc|Number=Sing	20	punct	_	Unsandhied=‖|MSeg=‖|MGloss=ACC.SG.M
 
 # sent_id = s4
 # text = kālāṅgāni varāṅgam ānanam uro hṛtkroḍavāsobhṛto |\nbastir vyañjanam ūrujānuyugule jaṅghe tato 'ṅghridvayam |\nmeṣāśviprathamā navarkṣacaraṇāś cakrasthitā rāśayo |\nrāśikṣetragṛharkṣabhānibhavanaṃ caikārthasaṃpratyayāḥ ||
@@ -181,4 +181,4 @@
 38	caika	caika	ADJ	NOUN	Compound=Yes	39	mod@poss	_	Unsandhied=caika|MSeg=caika
 39	artha	artha	NOUN	NOUN	Compound=Yes	40	compound@coord	_	Unsandhied=artha|MSeg=artha
 40	saṃpratyayāḥ	saṃpratyaya	ADJ	NOUN	Case=Nom|Gender=Masc|Number=Plur	37	mod	_	Unsandhied=saṃpratyayāḥ|MSeg=saṃprat-yayāḥ|MGloss=-NOM.PL.M
-41	‖	‖	PUNCT	PUNCT	Case=Acc|Gender=Masc|Number=Sing	16	punct	_	Unsandhied=‖|MSeg=‖|MGloss=ACC.SG.M
+41	||	||	PUNCT	PUNCT	Case=Acc|Gender=Masc|Number=Sing	16	punct	_	Unsandhied=‖|MSeg=‖|MGloss=ACC.SG.M

@@ -274,6 +274,14 @@ async function loadDocScript(){
 function saGlyphScript(){ if(!isSanskritLang()) return "";
   return (ORTHO_SCHEME&&ORTHO_SCHEME!=="none") ? ORTHO_SCHEME : DOCSCRIPT; }
 function saGlyphLatin(){ const g=saGlyphScript(); return !g||g==="iast"; }
+/* Is the chosen SCRIPT a no-op on this file? "Latin (IAST)" over an IAST-STORED document renders each
+   token to the spelling it already has, so the derived top line is character-for-character `# text` —
+   and drawing it displaces the real text into the row below, where it reads as the same line twice.
+   That is the "unnecessary running transliteration" under Script=Latin: not a transliteration at all,
+   just the text copied. A DEVANAGARI-stored file is untouched by this — there IAST genuinely romanises,
+   so the displacement earns its place. Nothing else is affected: every Brahmic script changes the
+   glyphs, and "Original" never displaced anything. */
+function saScriptNoop(){ return isSanskritLang() && ORTHO_SCHEME==="iast" && !DOCSCRIPT; }
 /* Does the Sanskrit transliteration row belong under the glyph?  Only where it would SAY SOMETHING
    the glyph does not already say. For IAST that means a non-Latin glyph above it, or the row merely
    repeats the word — the test this replaced was "is a script selected", right only while every

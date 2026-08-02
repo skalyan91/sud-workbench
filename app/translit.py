@@ -827,12 +827,23 @@ def _vowel_join(v1: str, v2: str):
             return "ai"
         if v2 in ("o", "au"):
             return "au"
+    # ── the SEPARABLE outcomes ──────────────────────────────────────────────────────────────────
+    # Everything above merges two vowels into ONE, which belongs to both words and cannot be split, so
+    # those are written solid (`vartma` + `apunar…` → `vartmāpunar…`).  The three below do NOT merge:
+    # each leaves a segment on word A and a segment on word B, and standard IAST keeps the word space
+    # between them.  `_SEP_AFTER` marks the split point — the caller puts `word_sep` there.
+    #   yaṇ / ayādi: the semivowel CLOSES word A     → `dadātv anekakiraṇas`, `ātmety ātmavidāṃ`
+    #   avagraha:    the mark OPENS word B           → `tato 'ṅghridvayam`
+    # Written solid these read as one word (`ātmetyātmavidāṃ`, `dadātvanekakiraṇas`), which is what
+    # this used to produce — and, for the running line, exactly the fault the user reported: yaṇ was
+    # being spelt inconsistently against a text that spells it apart.  All three appear that way in
+    # this repository's own samples, which is the evidence for the convention.
     if v1 in _YAN:                           # yaṇ: i/u/ṛ/ḷ + dissimilar vowel → semivowel + vowel  [6.1.77]
-        return _YAN[v1] + v2                 #   (like-vowel cases already handled by savarṇa above)
+        return (_YAN[v1], v2)                #   (like-vowel cases already handled by savarṇa above)
     if v1 in ("e", "o") and v2 == "a":       # eṅaḥ padāntād ati: e/o + a → e'/o' (a elided)  [6.1.109]
-        return v1 + _AVAGRAHA
+        return (v1, _AVAGRAHA)
     if v1 in _AYADI:                          # ayādi: e→ay, o→av, ai→āy, au→āv before a vowel  [eco'yavāyāvaḥ 6.1.78]
-        return _AYADI[v1] + v2                #   (the optional śākalya y/v-elision, 8.3.19, is NOT applied)
+        return (_AYADI[v1], v2)               #   (the optional śākalya y/v-elision, 8.3.19, is NOT applied)
     return None
 
 
@@ -941,6 +952,8 @@ def _iast_join_pair(a: str, b: str, a_lemma=None, a_form=None, word_sep: str = "
     fv, iv = _final_vowel(a), _initial_vowel(b)
     if fv and iv:
         repl = _vowel_join(fv, iv)
+        if isinstance(repl, tuple):          # a SEPARABLE outcome — the word boundary survives it
+            return a[:-len(fv)] + repl[0] + sep + repl[1] + b[len(iv):]
         if repl is not None:
             return a[:-len(fv)] + repl + b[len(iv):]
     return a + sep + b
