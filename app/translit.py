@@ -1109,7 +1109,7 @@ def sa_stored_script(forms) -> str:
 
 
 def sandhi_join(forms, lang: str = "sa", lemmas=None, word_sep: str = "",
-                prev: str = "", nxt_word: str = "") -> str:
+                prev: str = "", nxt_word: str = "", pause_after: bool = False) -> str:
     """Assemble ``forms`` (a multi-word token's component words) into one surface string, fusing the
     joins by external sandhi for Sanskrit.  Non-Sanskrit ⇒ naive concatenation.  Left-folded pairwise.
     ``lemmas`` (optional, parallel to ``forms``) supplies each word's CoNLL-U lemma as an r-stem
@@ -1148,11 +1148,12 @@ def sandhi_join(forms, lang: str = "sa", lemmas=None, word_sep: str = "",
     # context words are romanised on the way in exactly as its components were.
     lo = (_render_one(prev, lang, "iast") or prev) if (prev and script) else prev
     ro = (_render_one(nxt_word, lang, "iast") or nxt_word) if (nxt_word and script) else nxt_word
-    fused = _boundary_sandhi(fused, lo, ro, out_lemma, out_form)
+    fused = _boundary_sandhi(fused, lo, ro, out_lemma, out_form, pause_after)
     return (_render_one(fused, lang, script) or fused) if script else fused
 
 
-def _boundary_sandhi(inner: str, prev: str, nxt: str, last_lemma, last_form) -> str:
+def _boundary_sandhi(inner: str, prev: str, nxt: str, last_lemma, last_form,
+                     pause_after: bool = False) -> str:
     """Apply the NON-COALESCENT external sandhi at a multi-word token's OUTER edges.
 
     An MWT is one orthographic word inside a running line, and a word's first and last segments are
@@ -1190,8 +1191,13 @@ def _boundary_sandhi(inner: str, prev: str, nxt: str, last_lemma, last_form) -> 
         # docstring lists final -m→ṃ among the junctions it never fuses, because inside the fold it
         # would fire between an MWT's own components, where the word has not ended).  At the RANGE's
         # outer edge the word HAS ended, and this is the commonest visible junction of the lot:
-        # `…bhavanam` is written `…bhavanaṃ` before a following consonant, as the sample does.
-        if inner.endswith("m") and _starts_with_consonant(rn):
+        # `…bhavanam` is written `…bhavanaṃ` before a following consonant.
+        # ⚠ NOT ACROSS A PAUSE, and that is the one place it parts company with the visarga rules
+        # above.  A daṇḍa is transparent to visarga sandhi in this data — `…hṛtkroḍavāsobhṛto |⏎bastir`
+        # takes its -o from `bastir`, a daṇḍa and a line break away — but -m before a pause simply
+        # stays -m: `…arajyotiṣām |`, `…'ṅghridvayam |`.  Assimilation needs the consonant to actually
+        # follow; a visarga is being voiced by the phrase, which a written pause does not interrupt.
+        if inner.endswith("m") and not pause_after and _starts_with_consonant(rn):
             inner = inner[:-1] + "ṃ"
     if prev:
         lp = _ud.normalize("NFC", prev)
@@ -1202,14 +1208,14 @@ def _boundary_sandhi(inner: str, prev: str, nxt: str, last_lemma, last_form) -> 
 
 
 def sandhi_to_script(forms, lang: str, scheme: str = "", lemmas=None, word_sep: str = "",
-                     prev: str = "", nxt_word: str = "") -> str:
+                     prev: str = "", nxt_word: str = "", pause_after: bool = False) -> str:
     """Sanskrit MWT DISPLAY form: fuse the component forms by sandhi, THEN convert the fused string
     to the chosen script (scheme).  Empty scheme ⇒ the fused form in the document's own script (i.e.
     exactly `sandhi_join`), which is what "Script: Original" asks for.  Newlines in the fused string
     are preserved through the script conversion (multi-line input stays multi-line).
     ``word_sep`` (see sandhi_join) keeps a word separation at non-coalescing junctions for a running
     line ("" for a spaceless MWT); aksharamukha preserves the space through the script conversion."""
-    fused = sandhi_join(forms, lang, lemmas, word_sep, prev, nxt_word)
+    fused = sandhi_join(forms, lang, lemmas, word_sep, prev, nxt_word, pause_after)
     if not fused or not scheme:
         return fused
     return _render_one(fused, lang, scheme) or fused

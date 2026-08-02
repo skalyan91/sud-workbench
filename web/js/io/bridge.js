@@ -1773,18 +1773,30 @@ async function sandhiMwtForms(si,froms){ if(!isSanskritLang()||!hasBridge()||!DO
      `caraṇāḥ` → `caraṇāś` before c-, `iti` → `ity` before a vowel. Fusing the components alone spells
      both ends in pausa, which is the one place a running text never spells them that way.
      A neighbour is an ORTHOGRAPHIC word — the containing MWT's surface form where the adjacent token is
-     inside one, its own form otherwise — because that is the unit sandhi applies between. A daṇḍa is not
-     a word and stops the junction (`_DANDA_STOP`), which is also what keeps a verse line's last word out
-     of sandhi with the next line's first. */
-  const _DANDA_STOP=["|","||","।","॥",".","।।"];
+     inside one, its own form otherwise — because that is the unit sandhi applies between.
+     ⚠ A DAṆḌA IS SKIPPED, NOT TREATED AS A STOP. It is punctuation, not a word, and in this data the
+     junction fires straight across it (and across the line break that follows): the sample writes
+     `…uro hṛtkroḍavāsobhṛto |⏎bastir…`, where `bhṛtaḥ` became `bhṛto` because `bastir` — the next real
+     word, one daṇḍa and one newline away — begins with a voiced consonant. Stopping at the daṇḍa left
+     that edge in pausa and was the one junction this pass still got wrong. */
+  const _DANDA=["|","||","।","॥","‖","।।"];
   const mwtAt=k=>(s.mwt||[]).find(x=>k>=x.from&&k<=x.to);
-  const wordAt=k=>{ if(k<1||k>s.tokens.length) return ""; const g=mwtAt(k);
-    const w=g?(g.form||""):((s.tokens[k-1]||{}).form||"");
-    return _DANDA_STOP.indexOf(w)>=0?"":w; };
-  const groups=[],lgroups=[],refs=[],prevs=[],nexts=[];
-  s.mwt.forEach(m=>{ if(froms&&froms.indexOf(m.from)<0) return; const cts=s.tokens.slice(m.from-1,m.to).filter(t=>t.form); if(cts.length){ groups.push(cts.map(t=>t.form)); lgroups.push(cts.map(lemOf)); refs.push(m); prevs.push(wordAt(m.from-1)); nexts.push(wordAt(m.to+1)); } });
+  // → [neighbouring word, did a daṇḍa stand in the way]. The second half matters because the two rule
+  // families disagree about a pause: visarga sandhi crosses it, -m → -ṃ does not (see _boundary_sandhi).
+  const wordAt=(k,step)=>{ let pause=false;
+    for(let n=0;n<8;n++){ if(k<1||k>s.tokens.length) return ["",pause];
+      const g=mwtAt(k), w=g?(g.form||""):((s.tokens[k-1]||{}).form||"");
+      if(!w) return ["",pause];
+      if(_DANDA.indexOf(w)<0) return [w,pause];             // a real word → this is the neighbour
+      pause=true; k=(g?(step>0?g.to:g.from):k)+step; }      // a daṇḍa → step over it and keep looking
+    return ["",pause]; };
+  const groups=[],lgroups=[],refs=[],prevs=[],nexts=[],pauses=[];
+  s.mwt.forEach(m=>{ if(froms&&froms.indexOf(m.from)<0) return; const cts=s.tokens.slice(m.from-1,m.to).filter(t=>t.form); if(cts.length){
+    const nx=wordAt(m.to+1,+1);
+    groups.push(cts.map(t=>t.form)); lgroups.push(cts.map(lemOf)); refs.push(m);
+    prevs.push(wordAt(m.from-1,-1)[0]); nexts.push(nx[0]); pauses.push(nx[1]); } });
   if(!groups.length) return false;
-  let r; try{ r=await window.pywebview.api.sanskrit_mwt(groups,DOCLANG,"",lgroups,"",prevs,nexts); }catch(e){ return false; }
+  let r; try{ r=await window.pywebview.api.sanskrit_mwt(groups,DOCLANG,"",lgroups,"",prevs,nexts,pauses); }catch(e){ return false; }
   let any=false; refs.forEach((m,i)=>{ delete m._kept;   // an EDIT (or a parse) asked for this re-fuse, which is new evidence — it overrides an undo-restored form (see applySnap)
     const f=r&&r.form&&r.form[i]; if(f&&f!==m.form){ m.form=f; m.ortho=""; m.miast=""; any=true; } });   // clear the cached display forms so fillOrtho re-renders them from the new fused form
   if(any){ markDirty(); if((ORTHO_SCHEME&&ORTHO_SCHEME!=="none")||isSanskritLang()) fillOrtho(); else preserveScroll(renderDoc); }
@@ -1932,28 +1944,24 @@ function sanskritCompoundGroups(tokens){ const comp=tokens.map(t=>isCompoundFeat
    across a compound's members, and external sandhi coalescing separate words. Re-deriving the grouping from
    FEATS Compound=Yes threw that away and kept only the compounds, which is the bug this fixes — the parse handed
    back correct ranges and they were overwritten a few lines later.
-   ⚠ AND ITS FORMS SURVIVE UNTOUCHED — re-fusing them would DESTROY the very thing they are wanted for. The
-   tokeniser's range form is the RAW SUBSTRING of the input, so it already carries the sandhi that fired at the
-   junction with the NEIGHBOURING word, which is precisely the non-coalescent kind: `vāsaḥ bhṛtaḥ` ends the range
-   as `…bhṛto` because a voiced consonant follows it, `aṅghri…` opens as `'ṅghri…` because the word before ends
-   in -o, `caraṇāḥ` → `caraṇāś` before a following c-, `bhavanam` → `bhavanaṃ` before a following consonant.
-   `sandhi_join` sees a range's own components and NOTHING outside it, so it cannot know any of that: measured
-   over samples/brihat_jataka.conllu it disagrees with the file on 5 of 32 ranges, and in all five the raw form
-   is right and the re-fusion has flattened a junction back to its pausa spelling (`horety`→`horeti`,
-   `hṛtkroḍavāsobhṛto`→`…bhṛtaḥ`, `'ṅghridvayam`→`aṅghridvayam`). Editing a component still re-fuses that ONE
-   range, through the targeted sandhiMwtForms calls afterFormEdit/regenTok already make.
-   `parsed` says the ranges in s.mwt came from THIS parse (the caller has just assigned r.mwt). Without them —
-   an older model, the whitespace tokeniser, no bridge — fall back to the Compound=Yes grouping and generate its
-   forms, which is still better than nothing and is what every Sanskrit file got before. Nothing hand-authored is
-   lost either way: a re-parse replaces the tokens the ranges are keyed to. */
+   THE FORMS ARE ALWAYS REGENERATED, the tokeniser's ranges included. Now that sandhiMwtForms passes each range
+   its NEIGHBOURING words, the fusion can finish the outer edges too, and what it produces is the DCS spelling —
+   verified against the sample's own `# text`, which is the authentic sandhied running line: 29 of 32 ranges
+   regenerate to a string that occurs in it verbatim. The three that do not are not failures of the rules:
+   `apunarjanmanām`'s left edge COALESCED with the word before it (the text reads `vartmāpunarjanmanām`), which
+   belongs to neither word alone and is deliberately refused; and `karmārjitam` is one of five -m junctions in
+   the same environment that this text spells four ways with -ṃ and once without.
+   Regenerating is what the ranges' forms are FOR. The sample's stored forms had drifted from its own text in 8
+   of 32 ranges (`ātmavidām` for `ātmavidāṃ`, `…vibhuḥ` for `…vibhuś`, `anekakiraṇaḥ` for `anekakiraṇas`), so
+   keeping them would have preserved a file's disagreement with itself rather than a convention.
+   `parsed` therefore now selects only the RANGES, not the forms: with it the tokeniser's grouping stands, and
+   without it — an older model, the whitespace tokeniser, no bridge — the Compound=Yes fallback derives one. */
 async function autoGroupSanskritMWTs(si,parsed){ if(!isSanskritLang()||!DOCLANG) return;
   const s=DOC[si]; if(!s||!s.tokens||s.tokens.length<2){ if(s&&s.mwt){ delete s.mwt; markDirty(); } return; }
-  if(parsed&&s.mwt&&s.mwt.length){ preserveScroll(renderDoc); return; }   // …and its FORMS: the raw substring is the text's own, see below
-  const groups=sanskritCompoundGroups(s.tokens);
-  if(groups.length){ s.mwt=groups.map(([a,b])=>({from:a+1,to:b+1,form:s.tokens.slice(a,b+1).map(t=>t.form).join("")})); markDirty(); }
-  else if(s.mwt){ delete s.mwt; markDirty(); }
-  // Only a grouping WE derived gets its forms generated. sandhi_join fuses a range's own components and can see
-  // nothing outside it, which is exactly the information the surface form needs.
+  if(!(parsed&&s.mwt&&s.mwt.length)){
+    const groups=sanskritCompoundGroups(s.tokens);
+    if(groups.length){ s.mwt=groups.map(([a,b])=>({from:a+1,to:b+1,form:s.tokens.slice(a,b+1).map(t=>t.form).join("")})); markDirty(); }
+    else if(s.mwt){ delete s.mwt; markDirty(); } }
   if(s.mwt&&s.mwt.length&&hasBridge()) await sandhiMwtForms(si,null);
   else preserveScroll(renderDoc); }
 // (item 12) the per-column-header "Regenerate this column" right-click affordance was removed; regenColumn()/REGEN_COLS

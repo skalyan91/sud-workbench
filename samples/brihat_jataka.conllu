@@ -13,7 +13,7 @@
 7	|	|	PUNCT	PUNCT	_	1	punct	_	_
 8	ātmā	ātman	NOUN	NOUN	Case=Nom|Gender=Masc|Number=Sing	10	comp:obj	_	MSeg=ātm-ā|MGloss=-NOM.SG.M
 9	iti	iti	PART	PART	_	8	cc	_	MSeg=iti
-10-11	ātmavidām	_	_	_	_	_	_	_	_
+10-11	ātmavidāṃ	_	_	_	_	_	_	_	_
 10	ātma	ātman	NOUN	NOUN	Compound=Yes	1	conj:coord	_	MSeg=ātma
 11	vidām	vid	ADJ	NOUN	Case=Gen|Gender=Masc|Number=Plur	15	subj	_	MSeg=vid-ām|MGloss=-GEN.PL.M
 12	kratuś	kratu	NOUN	NOUN	Case=Nom|Gender=Masc|Number=Sing	11	flat	_	MSeg=kratu-ś|MGloss=-NOM.SG.M
@@ -25,7 +25,7 @@
 17	jyotiṣām	jyotis	NOUN	NOUN	Case=Gen|Gender=Neut|Number=Plur	20	mod	_	MSeg=jyoti-ṣām|MGloss=-GEN.PL.N
 18	|	|	PUNCT	PUNCT	_	10	punct	_	_
 19	lokānāṃ	loka	NOUN	NOUN	Case=Gen|Gender=Masc|Number=Plur	17	mod	_	MSeg=lok-ānāṃ|MGloss=-GEN.PL.M
-20-23	pralayodbhavasthitivibhuḥ	_	_	_	_	_	_	_	_
+20-23	pralayodbhavasthitivibhuś	_	_	_	_	_	_	_	_
 20	pralaya	pralaya	NOUN	VERB	Compound=Yes	15	parataxis	_	MSeg=pralaya
 21	udbhava	udbhava	NOUN	VERB	Compound=Yes	20	parataxis	_	MSeg=udbhava
 22	sthiti	sthiti	NOUN	VERB	Compound=Yes	21	parataxis	_	MSeg=sthiti
@@ -40,10 +40,10 @@
 30	naḥ	mad	PRON	PRON	Case=Gen|Number=Plur	29	mod	_	MSeg=n-a-ḥ|MGloss=-GEN.PL-
 31	sa	tad	PRON	PRON	Case=Nom|Gender=Masc|Number=Sing	32	subj	_	MSeg=sa|MGloss=NOM.SG.M
 32	dadātv	dā	VERB	VERB	Mood=Imp|Number=Sing|Person=3|Tense=Pres	1	mod	_	MSeg=da-dā-tv|MGloss=-3SG.PRS.IMP-
-33-34	anekakiraṇaḥ	_	_	_	_	_	_	_	_
+33-34	anekakiraṇas	_	_	_	_	_	_	_	_
 33	aneka	aneka	PRON	ADJ	Compound=Yes	32	flat	_	MSeg=aneka
 34	kiraṇaḥ	kiraṇa	NOUN	NOUN	Case=Nom|Gender=Masc|Number=Sing	1	subj	_	MSeg=kiraṇa-ḥ|MGloss=-NOM.SG.M
-35-36	trailokyadīpaḥ	_	_	_	_	_	_	_	_
+35-36	trailokyadīpo	_	_	_	_	_	_	_	_
 35	trailokya	trailokya	NOUN	NOUN	Compound=Yes	1	subj	_	MSeg=trailokya
 36	dīpaḥ	dīpa	NOUN	NOUN	Case=Nom|Gender=Masc|Number=Sing	1	comp:pred	_	MSeg=dīpa-ḥ|MGloss=-NOM.SG.M
 37	raviḥ	ravi	NOUN	NOUN	Case=Nom|Gender=Masc|Number=Sing	1	subj	_	MSeg=ravi-ḥ|MGloss=-NOM.SG.M
@@ -55,7 +55,7 @@
 2-3	paṭubuddhibhiḥ	_	_	_	_	_	_	_	_
 2	paṭu	paṭu	ADJ	VERB	Compound=Yes	0	root	_	MSeg=paṭu
 3	buddhibhiḥ	buddhi	NOUN	NOUN	Case=Ins|Gender=Masc|Number=Plur	2	udep@instr	_	MSeg=buddhi-bhiḥ|MGloss=-INS.PL.M
-4-5	paṭudhiyām	_	_	_	_	_	_	_	_
+4-5	paṭudhiyāṃ	_	_	_	_	_	_	_	_
 4	paṭu	paṭu	ADJ	VERB	Compound=Yes	2	conj:coord	_	MSeg=paṭu
 5	dhiyām	dhī	NOUN	NOUN	Case=Loc|Gender=Fem|Number=Sing	6	udep	_	MSeg=dhiyām|MGloss=LOC.SG.F
 6-9	horāphalajñāptaye	_	_	_	_	_	_	_	_
@@ -88,10 +88,10 @@
 29-30	vṛttavicitram	_	_	_	_	_	_	_	_
 29	vṛtta	vṛtta	NOUN	NOUN	Compound=Yes	28	conj:coord	_	MSeg=vṛtta
 30	vicitram	vicitra	ADJ	NOUN	Case=Acc|Gender=Neut|Number=Sing	28	conj:coord	_	MSeg=vicitra-m|MGloss=-ACC.SG.N
-31-32	arthabahulam	_	_	_	_	_	_	_	_
+31-32	arthabahulaṃ	_	_	_	_	_	_	_	_
 31	artha	artha	NOUN	VERB	Compound=Yes	23	conj:coord	_	MSeg=artha
 32	bahulam	bahula	ADJ	ADJ	Case=Acc|Gender=Neut|Number=Sing	33	mod	_	MSeg=bahula-m|MGloss=-ACC.SG.N
-33-34	śāstraplavam	_	_	_	_	_	_	_	_
+33-34	śāstraplavaṃ	_	_	_	_	_	_	_	_
 33	śāstra	śāstra	NOUN	NOUN	Compound=Yes	31	conj:coord	_	MSeg=śāstra
 34	plavam	plava	NOUN	NOUN	Case=Acc|Gender=Masc|Number=Sing	33	conj:coord	_	MSeg=plava-m|MGloss=-ACC.SG.M
 35	prārabhe	prārabh	VERB	VERB	Mood=Ind|Number=Sing|Person=1|Tense=Pres	34	conj:coord	_	MSeg=prārabh-e|MGloss=-1SG.PRS.IND
