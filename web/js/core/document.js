@@ -1316,7 +1316,10 @@ function buildBlock(i,ctx){ const s=DOC[i];
        is in. Under `scriptTop` it takes the visible row and the editable original collapses behind it;
        computed here because both halves of that decision (the click-to-reveal wiring on the script line,
        and the rows themselves) are in different blocks below and must not disagree. */
-    const cslRow=isSanskritLang() && TRANSLIT_SCHEME==="csl" && show.translit;
+    // CSL fills the TOP line when the chosen script is Latin (saCslTop) — the two choices name one line.
+    // Otherwise, under a real script, it takes a row of its own beneath the glyph.
+    const cslTop=(typeof saCslTop==="function") && saCslTop() && show.translit;
+    const cslRow=isSanskritLang() && TRANSLIT_SCHEME==="csl" && show.translit && !cslTop;
     let scriptTransLine=null;   // set below, IF scriptTop: the .strans-orig editable line this block's script .stext reveals+focuses when Displayed transliteration is "None" (assigned before either element's listeners can fire — both are wired synchronously within this same DOC.forEach iteration)
     // item 30's daṇḍa DISPLAY transform now lives at module level (dandaDisp, top of this file) so the
     // late stage-2 alignment repaint can reproduce exactly what this render drew.
@@ -1358,7 +1361,10 @@ function buildBlock(i,ctx){ const s=DOC[i];
     // wireStext → paintStext and IS decorated (bar the above-the-line correction mark — see app.css).
     if(scriptTop){   // top = the sentence re-rendered in the orthography (read-only)
       let line;
-      if(isSanskritLang() && s.orthoLine){ line=s.orthoLine; }   // item 27(b): Sanskrit's running text is the WHOLE sentence fused by external sandhi then scripted (fillOrtho → s.orthoLine), not a naive per-word join
+      // cslTop FIRST: s.orthoLine is the whole sentence scripted from `# text` (fillOrtho), which for a
+      // Latin script is the text itself — it would win here and the CSL line would never be reached.
+      if(cslTop) line=runningLine(s,i,u=>u.mwt?(topTransTxt(u.mwt)||u.mwt.form):(topTransTxt(u.tok)||u.tok.form)," ");
+      else if(isSanskritLang() && s.orthoLine){ line=s.orthoLine; }   // item 27(b): Sanskrit's running text is the WHOLE sentence fused by external sandhi then scripted (fillOrtho → s.orthoLine), not a naive per-word join
       /* Every other language joins its own tokens, and the WHITESPACE BETWEEN THEM IS `# text`'s, not
          something to invent. Preferred source: the alignment stextSpans already computes for the
          decoration pass — with a span per unit, the gap between two units is a literal slice of
@@ -1374,7 +1380,8 @@ function buildBlock(i,ctx){ const s=DOC[i];
          `spaceAfterNo` lives in js/diagram/diagram-core.js, which loads BEFORE this file — and this is
          render-time code besides, so the classic-script forward-reference hazard does not apply. */
       else line=runningLine(s,i,u=>dispScheme((u.mwt?(u.mwt.ortho||u.mwt.form):(u.tok.ortho||u.tok.form))||"",ORTHO_SCHEME));
-      txt.textContent=line||s.text||"(empty)"; txt.title="Sentence in "+orSchemeLabel(ORTHO_SCHEME)+" (display)";
+      txt.textContent=line||s.text||"(empty)";
+      txt.title="Sentence in "+(cslTop?trSchemeLabel(TRANSLIT_SCHEME):orSchemeLabel(ORTHO_SCHEME))+" (display)";
       txt.classList.add("stext-script");   // item 20: the script top line's text left edge is aligned to the transliteration input below it (see .stext.stext-script CSS)
       if(ORTHO_SCHEME==="Grantha"||ORTHO_SCHEME==="Javanese"||ORTHO_SCHEME==="Balinese"||ORTHO_SCHEME==="Kawi"||ORTHO_SCHEME==="ZanabazarSquare") txt.classList.add("stext-stacked");   // item 18: Grantha's stacked vowel marks need extra vertical room → double-spaced (see .stext.stext-stacked CSS); Javanese and Balinese share the same stacked-diacritic problem, so they get the same treatment. Kawi too (added alongside its _AKSHARA_SCRIPTS reinstatement): verified by rendering a real 4-line Sanskrit verse (samples/brihat_jataka.conllu s1) at line-height:1.4 — a stacked/subjoined conjunct cluster on one line visibly overlapped the line below it, which line-height:2 clears. Zanabazar Square joined the set on user report from the real app (a synthetic @font-face CDP test during its own reinstatement read as clean at normal spacing, but the shipping WKWebView face disagreed) — trust the live report over that synthetic result. Tibetan is NOT in this set: it briefly rendered via TibetanMachineUnicode (a stacked-subjoined-consonant face needing the same double-spacing), but that font is never fetched by fontload.js's on-demand mechanism — Tibetan now goes through the SAME "Noto Sans <Script>" pipeline every other script does (see FONT_SCRIPTS, fontload.js), whose ordinary composed glyphs need no extra vertical room. ONLY the top script line; the editable translit/original below keeps normal spacing
       txt.addEventListener("mousedown",e=>e.stopPropagation());

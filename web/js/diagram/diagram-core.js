@@ -766,7 +766,13 @@ function formCursor(){ return iastFormEdit()?"pointer":"text"; }
 function trRowEdit(){ return !ORTHO_SCHEME || iastFormEdit() || (typeof storedTrEditable==="function" && storedTrEditable()); }
 // row content = the selected DISPLAYED transliteration (display-transformed); skipped if it would duplicate the main glyph
 function trTxt(o){ if(!o||!show.translit) return "";
-  if(isSanskritLang() && orthoScript()){   // feature 7: Sanskrit's stored form IS the IAST — show it as the romanisation ROW beneath the script glyph (bform rendered that glyph FROM this very IAST). fillTranslit leaves o.translit empty here (IAST→IAST is a no-op in _iast()), so read the stored surface form directly.
+  /* ⚠ The shortcut below is about IAST specifically, so it must not swallow a scheme that says something
+     ELSE about the token. CSL respells the form with its junctions marked (`vartm'`, `êty`), and that
+     value is in o.translit like any other scheme's — but this branch returned the STORED form instead,
+     so under any script the diagram's transliteration slots showed plain IAST and CSL never appeared in
+     them at all. Gated on the displayed scheme being the plain romanisation now; anything else falls
+     through to the ordinary o.translit path below. */
+  if(isSanskritLang() && orthoScript() && TRANSLIT_SCHEME!=="csl"){   // feature 7: Sanskrit's stored form IS the IAST — show it as the romanisation ROW beneath the script glyph (bform rendered that glyph FROM this very IAST). fillTranslit leaves o.translit empty here (IAST→IAST is a no-op in _iast()), so read the stored surface form directly.
     if(dandaGlyph((o.mform!=null)?o.mform:o.form)) return "";   // a daṇḍa punct mark: its script glyph needs no "|"/"‖" romanisation beneath it
     const iast=(o.miast!=null&&o.miast!=="")?o.miast:((o.mform!=null)?o.mform:o.form); return (iast && iast!==bform(o)) ? iast : ""; }   // an MWT carries its sandhi-fused IAST in o.miast (fillOrtho ← sanskrit_mwt.iast); prefer it so the romanisation ROW reads the fused form (ahorātra), not the naive concatenation stored in m.form (ahaḥrātra). Single tokens have no miast → fall back to the stored surface form as before.
   const r=dispScheme(o.translit||"",TRANSLIT_SCHEME); return (r && r!==bform(o)) ? r : ""; }
