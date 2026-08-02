@@ -266,10 +266,18 @@ async function loadDocScript(){
 function saGlyphScript(){ if(!isSanskritLang()) return "";
   return (ORTHO_SCHEME&&ORTHO_SCHEME!=="none") ? ORTHO_SCHEME : DOCSCRIPT; }
 function saGlyphLatin(){ const g=saGlyphScript(); return !g||g==="iast"; }
-/* Does the IAST transliteration row belong under the glyph?  Only where the glyph is NOT already
-   romanised — otherwise the row would repeat the word directly above it. This replaced a plain
-   "is a script selected" test, which was right only while every Sanskrit file was stored in IAST. */
-function saTransRow(){ return isSanskritLang() && !saGlyphLatin(); }
+/* Does the Sanskrit transliteration row belong under the glyph?  Only where it would SAY SOMETHING
+   the glyph does not already say. For IAST that means a non-Latin glyph above it, or the row merely
+   repeats the word — the test this replaced was "is a script selected", right only while every
+   Sanskrit file was stored in IAST.
+   ⚠ CSL IS THE EXCEPTION, and leaving it out is what made picking CSL appear to do nothing at all.
+   CSL is not a romanisation of the glyph, it is the SAME text with its junctions written: `vartma`
+   shows `vartm"`, `iti` shows `êty`, and a compound's seams come apart. Under a Latin glyph that is
+   a different string, not a repetition — so on an IAST-stored file (where the glyph IS Latin and the
+   gate below is false) the row was hidden, the scheme was filled into a row nobody could see, and
+   the only visible effect of choosing CSL was the toast. Ask what the ROW would show, not what
+   script the glyph is in. */
+function saTransRow(){ return isSanskritLang() && (TRANSLIT_SCHEME==="csl" || !saGlyphLatin()); }
 /* ── ITRANS → the document's script, for typed Sanskrit (item 1) ──────────────────────────────────
    Neither storage script is typeable on an ordinary keyboard — IAST needs diacritics with no keys,
    Devanagari needs an IME — so what gets typed is ITRANS: kRiShNa, raamaayaNa, sha~Nkara. Every

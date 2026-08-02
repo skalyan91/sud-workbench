@@ -489,7 +489,7 @@ doInsert=async function(index,text){
     markDirty(); renderDoc(); pick(index,1,true);
     toast(r.parsed?`Parsed · ${MODELINFO[model]||model}`:(r.reason?`Whitespace tokeniser (no parse: ${r.reason})`:"Whitespace tokeniser"));
     if(show.translit)fillTranslit(); if((ORTHO_SCHEME&&ORTHO_SCHEME!=="none")||isSanskritLang())fillOrtho();   // item 2: re-apply the SCRIPT (and Sanskrit MWT sandhi) now the parse's tokens are in
-    if(isSanskritLang())autoGroupSanskritMWTs(index);   // Sanskrit: (re)group the parsed tokens into MWTs by Compound=Yes
+    if(isSanskritLang())autoGroupSanskritMWTs(index,!!(r.mwt&&r.mwt.length));   // Sanskrit: keep the TOKENISER's MWT ranges (r.mwt) and fuse their forms; only fall back to Compound=Yes grouping when the parse published none
     annotateTranslitMisc(index).then(ch=>{ if(ch)preserveScroll(renderDoc); });   // parse pass → write MISC Translit/LTranslit
     const el=document.querySelector(`.sblock[data-i="${index}"]`); if(el)el.scrollIntoView({block:"center",behavior:"smooth"}); return;
   }
@@ -826,7 +826,7 @@ async function applySentText(i,newText,opts){ const s=DOC[i]; if(!s)return; opts
     renderDiagramIncremental(i);   // js/core/document.js: this sentence was just parsed → let the render on the next line draw its tree breadth-first by depth and converge on the real one, rather than leaving the row blank for the whole layout pass. ARMS the sequence; the render below IS its first stage
     markDirty(); preserveScroll(renderDoc); clearSelToBlock(i,scroll);   // item 9, as above: the parse's tokens land with nothing selected
     toast(r.parsed?`Re-parsed · ${MODELINFO[model]||model}`:`Re-tokenised on whitespace${r.reason?" (no parse: "+r.reason+")":""}`); if(show.translit)fillTranslit(); if((ORTHO_SCHEME&&ORTHO_SCHEME!=="none")||isSanskritLang())fillOrtho();   // item 19: re-apply the SCRIPT now the parse's tokens are in
-    if(isSanskritLang())autoGroupSanskritMWTs(i);   // Sanskrit: (re)group the parsed tokens into MWTs by Compound=Yes
+    if(isSanskritLang())autoGroupSanskritMWTs(i,!!(r.mwt&&r.mwt.length));   // Sanskrit: as above — the parse's own ranges win over a Compound=Yes re-derivation
     annotateTranslitMisc(i).then(ch=>{ if(ch)preserveScroll(renderDoc); }); return;
   }
   pushUndo(i);
@@ -1903,19 +1903,44 @@ window.afterMwtFormEdit=afterMwtFormEdit;
 // field, and it fired per keystroke rather than on commit.
 // maximal runs of consecutive compound members (FEATS Compound=Yes) → MWT ranges (0-based inclusive, size >= 2).
 // A run extends while the current member glues to the next (Compound=Yes on the member); the head (last token) need
-// not carry it. External sandhi is NOT used here — separate written words stay separate MWTs (it only drives the
-// running-line display); a written word (samāsa) is fused internally.
+// not carry it.
+// ⚠ THIS IS THE FALLBACK NOW, not the rule — see autoGroupSanskritMWTs. Compound=Yes describes samāsa and nothing
+// else, so it can only ever find the MWTs that are compounds; an orthographic word made by COALESCENT EXTERNAL
+// SANDHI (vartmā́punarjanmanām — three words whose vowels merged) carries the feature on none of its members and
+// was invisible to it.
 function sanskritCompoundGroups(tokens){ const comp=tokens.map(t=>isCompoundFeat(t.feats)), out=[]; const n=tokens.length; let i=0;
   while(i<n){ let j=i; while(j<n-1&&comp[j]) j++; if(j>i) out.push([i,j]); i=j+1; } return out; }
-// After a Sanskrit PARSE, (re)group the tokens into MWTs by Compound=Yes and fuse each MWT's surface form by
-// INTERNAL sandhi. The parse just produced these tokens, so replacing s.mwt is safe (nothing hand-authored, keyed to
-// the old tokens, survives a re-parse anyway). No model feature ⇒ no MWTs, so an existing grouping is cleared.
-async function autoGroupSanskritMWTs(si){ if(!isSanskritLang()||!DOCLANG) return;
+/* After a Sanskrit PARSE: settle the MWT ranges and fuse each one's surface form by sandhi.
+   THE TOKENISER'S OWN RANGES WIN. `sa_sud_vedic_ufal_dcs` publishes source spans, and app/parse.py's
+   _src_span_layout turns them into MWT ranges — an orthographic word is a run of tokens whose spans fall in one
+   whitespace-delimited chunk of the raw input, which is exactly what a multi-word token IS in this language.
+   That answer is the segmenter's own and covers BOTH ways a Sanskrit orthographic word is built: internal sandhi
+   across a compound's members, and external sandhi coalescing separate words. Re-deriving the grouping from
+   FEATS Compound=Yes threw that away and kept only the compounds, which is the bug this fixes — the parse handed
+   back correct ranges and they were overwritten a few lines later.
+   ⚠ AND ITS FORMS SURVIVE UNTOUCHED — re-fusing them would DESTROY the very thing they are wanted for. The
+   tokeniser's range form is the RAW SUBSTRING of the input, so it already carries the sandhi that fired at the
+   junction with the NEIGHBOURING word, which is precisely the non-coalescent kind: `vāsaḥ bhṛtaḥ` ends the range
+   as `…bhṛto` because a voiced consonant follows it, `aṅghri…` opens as `'ṅghri…` because the word before ends
+   in -o, `caraṇāḥ` → `caraṇāś` before a following c-, `bhavanam` → `bhavanaṃ` before a following consonant.
+   `sandhi_join` sees a range's own components and NOTHING outside it, so it cannot know any of that: measured
+   over samples/brihat_jataka.conllu it disagrees with the file on 5 of 32 ranges, and in all five the raw form
+   is right and the re-fusion has flattened a junction back to its pausa spelling (`horety`→`horeti`,
+   `hṛtkroḍavāsobhṛto`→`…bhṛtaḥ`, `'ṅghridvayam`→`aṅghridvayam`). Editing a component still re-fuses that ONE
+   range, through the targeted sandhiMwtForms calls afterFormEdit/regenTok already make.
+   `parsed` says the ranges in s.mwt came from THIS parse (the caller has just assigned r.mwt). Without them —
+   an older model, the whitespace tokeniser, no bridge — fall back to the Compound=Yes grouping and generate its
+   forms, which is still better than nothing and is what every Sanskrit file got before. Nothing hand-authored is
+   lost either way: a re-parse replaces the tokens the ranges are keyed to. */
+async function autoGroupSanskritMWTs(si,parsed){ if(!isSanskritLang()||!DOCLANG) return;
   const s=DOC[si]; if(!s||!s.tokens||s.tokens.length<2){ if(s&&s.mwt){ delete s.mwt; markDirty(); } return; }
+  if(parsed&&s.mwt&&s.mwt.length){ preserveScroll(renderDoc); return; }   // …and its FORMS too — see below
   const groups=sanskritCompoundGroups(s.tokens);
   if(groups.length){ s.mwt=groups.map(([a,b])=>({from:a+1,to:b+1,form:s.tokens.slice(a,b+1).map(t=>t.form).join("")})); markDirty(); }
   else if(s.mwt){ delete s.mwt; markDirty(); }
-  if(s.mwt&&s.mwt.length&&hasBridge()) await sandhiMwtForms(si,null);   // fuse each MWT surface form (internal sandhi) + re-render
+  // Only a grouping WE derived gets its forms generated. sandhi_join fuses a range's own components and can see
+  // nothing outside it, which is exactly the information the surface form needs.
+  if(s.mwt&&s.mwt.length&&hasBridge()) await sandhiMwtForms(si,null);
   else preserveScroll(renderDoc); }
 // (item 12) the per-column-header "Regenerate this column" right-click affordance was removed; regenColumn()/REGEN_COLS
 // went with it. The whole-sentence manual "Regenerate Annotations" control (and with it the blanket primary/

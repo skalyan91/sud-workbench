@@ -1314,19 +1314,28 @@ function buildBlock(i,ctx){ const s=DOC[i];
     if(scriptTop){   // top = the sentence re-rendered in the orthography (read-only)
       let line;
       if(isSanskritLang() && s.orthoLine){ line=s.orthoLine; }   // item 27(b): Sanskrit's running text is the WHOLE sentence fused by external sandhi then scripted (fillOrtho → s.orthoLine), not a naive per-word join
-      /* Every other language joins its own tokens — and MUST consult MISC `SpaceAfter=No` doing it,
-         exactly as io_conllu rebuilds `# text`. A flat join(" ") put a space before every full stop
-         and comma in the Latin macronised line ("partēs trēs ."), and would have done the same to
-         any clitic or contraction the treebank glues to its host. The gap after an MWT comes from
-         its LAST component, which is the rule edit-ops.js's flattenMWT already states: SpaceAfter
-         is a fact about the gap AFTER a token, so a range's gap is its final token's.
-         `spaceAfterNo` lives in js/diagram/diagram-core.js, which loads BEFORE this file — and this
-         is render-time code besides, so the classic-script forward-reference hazard does not apply. */
-      else { const parts=[]; let k=0; while(k<s.tokens.length){ const m=(s.mwt||[]).find(x=>x.from===k+1);
-        const last=m?m.to-1:k;   // the token whose SpaceAfter describes the gap after what we just pushed
-        if(m){ parts.push(dispScheme(m.ortho||m.form,ORTHO_SCHEME)); k=m.to; } else { parts.push(dispScheme(s.tokens[k].ortho||s.tokens[k].form,ORTHO_SCHEME)); k++; }
-        if(k<s.tokens.length && !spaceAfterNo(s.tokens[last])) parts.push(" "); }
-        line=parts.join(""); }
+      /* Every other language joins its own tokens, and the WHITESPACE BETWEEN THEM IS `# text`'s, not
+         something to invent. Preferred source: the alignment stextSpans already computes for the
+         decoration pass — with a span per unit, the gap between two units is a literal slice of
+         s.text, so a line break, a run of spaces and a SpaceAfter=No seam all come out right without
+         any of them being reasoned about separately. THAT IS WHAT PUTS THE VERSE BACK ON FOUR LINES:
+         `# text` carries real newlines (bridge.js restores them from the file's escaped "\n") and
+         .stext is white-space:pre-wrap, so the break renders — but a join can only ever emit what it
+         is told to, and it was told " ".
+         Fallback, when the sentence has no spans (no bridge, or a text its tokens cannot be aligned
+         to): MISC `SpaceAfter=No`, exactly as io_conllu rebuilds `# text`. A flat join(" ") put a
+         space before every full stop in the Latin macronised line ("partēs trēs ."). The gap after an
+         MWT is its LAST component's, the rule edit-ops.js's flattenMWT already states.
+         `spaceAfterNo` lives in js/diagram/diagram-core.js, which loads BEFORE this file — and this is
+         render-time code besides, so the classic-script forward-reference hazard does not apply. */
+      else { const disp=u=>dispScheme((u.mwt?(u.mwt.ortho||u.mwt.form):(u.tok.ortho||u.tok.form))||"",ORTHO_SCHEME);
+        const units=[]; let k=0; while(k<s.tokens.length){ const m=(s.mwt||[]).find(x=>x.from===k+1);
+          if(m){ units.push({mwt:m,last:m.to-1}); k=m.to; } else { units.push({tok:s.tokens[k],last:k}); k++; } }
+        const al=(typeof stextSpans==="function")?stextSpans(s,i,s.text||""):null;
+        const gaps=(al&&al.spans&&al.spans.length===units.length&&al.spans.every(Boolean))
+          ? units.map((_u,n)=>n<units.length-1 ? (s.text||"").slice(al.spans[n][1], al.spans[n+1][0]) : "")
+          : units.map((u,n)=>n<units.length-1 ? (spaceAfterNo(s.tokens[u.last])?"":" ") : "");
+        line=units.map((u,n)=>disp(u)+gaps[n]).join(""); }
       txt.textContent=line||s.text||"(empty)"; txt.title="Sentence in "+orSchemeLabel(ORTHO_SCHEME)+" (display)";
       txt.classList.add("stext-script");   // item 20: the script top line's text left edge is aligned to the transliteration input below it (see .stext.stext-script CSS)
       if(ORTHO_SCHEME==="Grantha"||ORTHO_SCHEME==="Javanese"||ORTHO_SCHEME==="Balinese"||ORTHO_SCHEME==="Kawi"||ORTHO_SCHEME==="ZanabazarSquare") txt.classList.add("stext-stacked");   // item 18: Grantha's stacked vowel marks need extra vertical room → double-spaced (see .stext.stext-stacked CSS); Javanese and Balinese share the same stacked-diacritic problem, so they get the same treatment. Kawi too (added alongside its _AKSHARA_SCRIPTS reinstatement): verified by rendering a real 4-line Sanskrit verse (samples/brihat_jataka.conllu s1) at line-height:1.4 — a stacked/subjoined conjunct cluster on one line visibly overlapped the line below it, which line-height:2 clears. Zanabazar Square joined the set on user report from the real app (a synthetic @font-face CDP test during its own reinstatement read as clean at normal spacing, but the shipping WKWebView face disagreed) — trust the live report over that synthetic result. Tibetan is NOT in this set: it briefly rendered via TibetanMachineUnicode (a stacked-subjoined-consonant face needing the same double-spacing), but that font is never fetched by fontload.js's on-demand mechanism — Tibetan now goes through the SAME "Noto Sans <Script>" pipeline every other script does (see FONT_SCRIPTS, fontload.js), whose ordinary composed glyphs need no extra vertical room. ONLY the top script line; the editable translit/original below keeps normal spacing

@@ -1,17 +1,29 @@
-"""The dictionaries installed in macOS's Dictionary.app, read straight out of their bundles.
+"""The dictionaries **Apple ships** for macOS's Dictionary.app, read straight out of their bundles.
 
 The Definitions flyout has two sources already — Wiktionary over the network, and the vendored Apte
-for Sanskrit. This is a third, and where it applies it is the best of them: the dictionaries are
-already on the machine, they are professionally edited, they need no network, and the user chose
-which ones to install. It is tried FIRST and the others stay exactly where they are behind it,
-because it is macOS-only and no machine has a dictionary for every language.
+for Sanskrit. This is a third, and on the languages it covers it is the best of them: the
+dictionaries are already on the machine, professionally edited, and need no network. It is tried
+FIRST and the others stay exactly where they are behind it, because it is macOS-only and Apple has
+no dictionary for most of the languages a treebank is written in.
 
-⚠ **NOTHING HERE KNOWS ANY PARTICULAR DICTIONARY.** The set is discovered, its languages are read
-off each bundle, and a bundle that says nothing about itself is handed to the user to label rather
-than guessed at. Apple ships dictionaries as on-demand assets and users add their own, so what is
-installed differs on every machine and no list of titles would survive contact with a second one.
-The worked examples in the comments below are evidence from one machine's shelf, cited to show a
-rule being tested — never a rule in themselves.
+⚠ **APPLE'S OWN ONLY — hand-installed dictionaries are deliberately NOT read** (see `_ROOTS` and
+`_APPLE_ID` for the two tests that enforce it, and why either alone would let the wrong ones in).
+A bundle under `~/Library/Dictionaries` is somebody's conversion of somebody's data: its markup,
+its headword spelling and its sense structure are whatever the converting script emitted, and this
+module's reading of them is a guess that happens to work on the one that was tested. Apple's are
+edited to one house format.
+
+⚠ **SANSKRIT DOES NOT COME HERE AT ALL**, even though Apple ships `com.apple.dictionary.sa-en.oup`.
+`app/apte.py` — Apte's 1957 revised edition, vendored, 77.5 k entries indexed in SLP1 — is the
+Sanskrit source, by user decision: it is a scholarly dictionary of the classical language, keyed to
+the spellings a treebank actually holds. The routing is in `Api.definition_lookup`, which asks Apte
+BEFORE it asks this module. So the restriction to Apple bundles does not by itself get Sanskrit
+right; that is a separate rule and it is written down separately.
+
+⚠ **NOTHING HERE KNOWS ANY PARTICULAR DICTIONARY.** The set is discovered and its languages are read
+off each bundle. Which dictionaries Apple has downloaded differs on every machine, so no list of
+titles would survive contact with a second one. The worked examples in the comments below are
+evidence from one machine's shelf, cited to show a rule being tested — never a rule in themselves.
 
 THE BUNDLE FORMAT, which is undocumented and was read off the files:
 
@@ -51,14 +63,23 @@ import zlib
 
 from . import paths
 
-# Where Dictionary.app looks. The AssetsV2 path is where Apple's own on-demand downloads land and is
-# by far the biggest source; the two Library paths are for dictionaries installed by hand.
+# APPLE'S OWN DICTIONARIES ONLY — the MobileAsset paths its on-demand downloads land in. The two
+# `Dictionaries/` folders are gone from this list ON PURPOSE (user decision): `/Library/Dictionaries`
+# and `~/Library/Dictionaries` are where a dictionary installed BY HAND goes, and a hand-installed
+# bundle is a conversion of somebody's data by somebody's script — its entry markup, its headword
+# spelling and its sense structure are whatever the converter did, and this module's parse of them is
+# a guess that happens to work. Apple's are edited to one house format we can actually rely on.
 _ROOTS = (
     "/System/Library/AssetsV2/com_apple_MobileAsset_DictionaryServices_dictionary*/*/AssetData/*.dictionary",
     "/System/Library/Assets/com_apple_MobileAsset_DictionaryServices_dictionary*/*/AssetData/*.dictionary",
-    "/Library/Dictionaries/*.dictionary",
-    "~/Library/Dictionaries/*.dictionary",
 )
+# …and the location is not enough on its own, so the identifier has to agree with it.
+# ⚠ THE CONVERSE IS EMPHATICALLY NOT TRUE: a `com.apple.dictionary.*` id does NOT mean Apple made it.
+# Measured on one shelf, three hand-installed bundles claim that prefix — `com.apple.dictionary.Latin`
+# in /Library, `com.apple.dictionary.apte-bi` and `com.apple.dictionary.mw-itrans-dev` in ~/Library —
+# because the conversion tools copy Apple's namespace. Identifier alone would have admitted all three.
+# Both tests together admit exactly the AssetsV2 shelf, which is the set Apple ships.
+_APPLE_ID = "com.apple.dictionary."
 _INDEX_DIR = os.path.join(paths.APP_DATA, "appledict")
 _INDEX_FORMAT = 1
 _ZLIB_HEADS = (b"\x78\x9c", b"\x78\xda", b"\x78\x01", b"\x78\x5e")
@@ -104,8 +125,11 @@ def _bundles() -> list[str]:
     out = []
     for pat in _ROOTS:
         for d in glob.glob(os.path.expanduser(pat)):
-            if _body_path(d) and os.path.isfile(os.path.join(d, "Contents", "Info.plist")):
-                out.append(d)
+            if not (_body_path(d) and os.path.isfile(os.path.join(d, "Contents", "Info.plist"))):
+                continue
+            if not str(_info(d).get("CFBundleIdentifier") or "").startswith(_APPLE_ID):
+                continue   # in Apple's asset folder but not Apple's own — see _APPLE_ID
+            out.append(d)
     return sorted(set(out))
 
 

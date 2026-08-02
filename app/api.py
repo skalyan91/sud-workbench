@@ -1059,12 +1059,19 @@ class Api:
         frontend reads `definitions`/`page_url`/`error` identically either way, and names the source
         it is showing from `source`/`page_label` rather than assuming Wiktionary."""
         from . import apte, appledict, wiktionary
-        # THE USER'S OWN DICTIONARIES FIRST, where macOS has one that indexes this language and
-        # defines in English. They are already installed, professionally edited (Oxford, Duden,
-        # Sanseido), need no network, and were chosen by the user — so on the languages they cover
-        # they beat both sources below. Nothing is removed behind them: this is macOS-only and nobody
-        # has a dictionary for every language, so a miss falls through to exactly what answered
-        # before, and a machine with none behaves as it always did.
+        # SANSKRIT IS APTE'S, FIRST AND UNCONDITIONALLY. Apple does ship a Sanskrit–English OUP
+        # dictionary, so this is NOT a consequence of the Apple-only restriction in appledict — it is
+        # its own rule, by user decision: Apte's 1957 revised edition is a scholarly dictionary of the
+        # classical language, vendored, offline, and indexed in SLP1 against the spellings this app
+        # stores. Asking macOS first would have quietly displaced it wherever the OUP dictionary
+        # happened to have the headword.
+        if apte.is_sanskrit(language):
+            return apte.lookup(word, language, upos)
+        # THEN APPLE'S OWN DICTIONARIES, where macOS has one that indexes this language and defines in
+        # English. They are already installed, professionally edited (Oxford, Duden, Sanseido) and need
+        # no network, so on the languages they cover they beat Wiktionary below. Nothing is removed
+        # behind them: this is macOS-only and Apple has a dictionary for very few of the languages a
+        # treebank is written in, so a miss falls through to exactly what answered before.
         try:
             if appledict.available():
                 appledict.set_overrides(_load_state().get("apple_dict_langs") or {})
@@ -1073,8 +1080,6 @@ class Api:
                     return appledict.as_senses(got, word, upos)
         except Exception:  # noqa: BLE001 — an unreadable bundle must never cost the flyout its answer
             pass
-        if apte.is_sanskrit(language):
-            return apte.lookup(word, language, upos)
         r = wiktionary.lookup(word, language, upos)
         r.setdefault("source", "Wiktionary")
         r.setdefault("page_label", "Open on Wiktionary")
