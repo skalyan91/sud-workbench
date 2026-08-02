@@ -1108,7 +1108,8 @@ def sa_stored_script(forms) -> str:
     return ""
 
 
-def sandhi_join(forms, lang: str = "sa", lemmas=None, word_sep: str = "") -> str:
+def sandhi_join(forms, lang: str = "sa", lemmas=None, word_sep: str = "",
+                prev: str = "", nxt_word: str = "") -> str:
     """Assemble ``forms`` (a multi-word token's component words) into one surface string, fusing the
     joins by external sandhi for Sanskrit.  Non-Sanskrit ⇒ naive concatenation.  Left-folded pairwise.
     ``lemmas`` (optional, parallel to ``forms``) supplies each word's CoNLL-U lemma as an r-stem
@@ -1143,17 +1144,72 @@ def sandhi_join(forms, lang: str = "sa", lemmas=None, word_sep: str = "") -> str
         out = _iast_join_pair(out, nxt, out_lemma, out_form, word_sep)   # out_lemma/out_form = the word contributing out's final visarga
         out_lemma, out_form = lm, nxt
     fused = _ud.normalize("NFC", _glue_consonant_runs(out, word_sep))   # LAST step: glue any (now) consonant-final words
+    # The neighbours are reckoned in IAST like everything else in this fold, so a Devanagari document's
+    # context words are romanised on the way in exactly as its components were.
+    lo = (_render_one(prev, lang, "iast") or prev) if (prev and script) else prev
+    ro = (_render_one(nxt_word, lang, "iast") or nxt_word) if (nxt_word and script) else nxt_word
+    fused = _boundary_sandhi(fused, lo, ro, out_lemma, out_form)
     return (_render_one(fused, lang, script) or fused) if script else fused
 
 
-def sandhi_to_script(forms, lang: str, scheme: str = "", lemmas=None, word_sep: str = "") -> str:
+def _boundary_sandhi(inner: str, prev: str, nxt: str, last_lemma, last_form) -> str:
+    """Apply the NON-COALESCENT external sandhi at a multi-word token's OUTER edges.
+
+    An MWT is one orthographic word inside a running line, and a word's first and last segments are
+    shaped by the words either side of it — not only by its own components.  Fusing the components
+    alone therefore spells the two ends in PAUSA, which is the one place they are never spelt that
+    way in a real text: measured over `samples/brihat_jataka.conllu`, that is 5 of 32 ranges, and
+    every one of them is an edge (`vāsaḥ bhṛtaḥ` ends `…bhṛto` before a voiced consonant, `aṅghri…`
+    opens `'ṅghri…` after an -o, `caraṇāḥ` → `caraṇāś` before c-, `bhavanam` → `bhavanaṃ` before a
+    consonant, `iti` → `ity` before a vowel).
+
+    ⚠ NON-COALESCENT ONLY, and the test for that is STRUCTURAL rather than a list of rules to keep in
+    step with `_iast_join_pair`: run the ordinary pairwise join against the neighbour and accept the
+    result only where THE NEIGHBOUR COMES BACK WHOLE — still a substring of the join, at the end (for
+    a right neighbour) or the start (for a left one).  That is exactly what "did not coalesce" means:
+    the two words are still two, so whatever changed changed on OUR side and is ours to write down.
+    Where they merged (a vowel coalescence — `vartma` + `apunar…` → `vartmāpunar…`, in which `apunar`
+    no longer occurs) the boundary belongs to neither word alone and there is nothing to put in ONE
+    range's form; the components stay as they are and the merge shows in `# text`, which is where a
+    fact about two words belongs.  `app/sa_notation.py` draws the same line for CSL from the other side.
+
+    Testing for a surviving word SEPARATOR would not do, and that is the trap here: `_iast_join_pair`
+    drops the separator on any junction it transforms, so `horeti`+`ahorātravikalpam` comes back as
+    `horetyahorātravikalpam` — one string, but with the neighbour plainly intact inside it.  Keying on
+    the separator called that a coalescence and refused precisely the yaṇ and avagraha junctions this
+    function exists to apply.
+    """
+    if not inner:
+        return inner
+    if nxt:
+        rn = _ud.normalize("NFC", nxt)
+        joined = _ud.normalize("NFC", _iast_join_pair(inner, nxt, last_lemma, last_form, ""))
+        if rn and joined.endswith(rn) and len(joined) > len(rn):
+            inner = joined[:-len(rn)]
+        # …plus the ONE non-coalescent rule `_iast_join_pair` deliberately leaves out (its own
+        # docstring lists final -m→ṃ among the junctions it never fuses, because inside the fold it
+        # would fire between an MWT's own components, where the word has not ended).  At the RANGE's
+        # outer edge the word HAS ended, and this is the commonest visible junction of the lot:
+        # `…bhavanam` is written `…bhavanaṃ` before a following consonant, as the sample does.
+        if inner.endswith("m") and _starts_with_consonant(rn):
+            inner = inner[:-1] + "ṃ"
+    if prev:
+        lp = _ud.normalize("NFC", prev)
+        joined = _ud.normalize("NFC", _iast_join_pair(prev, inner, None, prev, ""))
+        if lp and joined.startswith(lp) and len(joined) > len(lp):
+            inner = joined[len(lp):]
+    return inner
+
+
+def sandhi_to_script(forms, lang: str, scheme: str = "", lemmas=None, word_sep: str = "",
+                     prev: str = "", nxt_word: str = "") -> str:
     """Sanskrit MWT DISPLAY form: fuse the component forms by sandhi, THEN convert the fused string
     to the chosen script (scheme).  Empty scheme ⇒ the fused form in the document's own script (i.e.
     exactly `sandhi_join`), which is what "Script: Original" asks for.  Newlines in the fused string
     are preserved through the script conversion (multi-line input stays multi-line).
     ``word_sep`` (see sandhi_join) keeps a word separation at non-coalescing junctions for a running
     line ("" for a spaceless MWT); aksharamukha preserves the space through the script conversion."""
-    fused = sandhi_join(forms, lang, lemmas, word_sep)
+    fused = sandhi_join(forms, lang, lemmas, word_sep, prev, nxt_word)
     if not fused or not scheme:
         return fused
     return _render_one(fused, lang, scheme) or fused

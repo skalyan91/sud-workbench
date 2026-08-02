@@ -1014,7 +1014,8 @@ class Api:
                 "lang": lang, "scheme": scheme}
 
     def sanskrit_mwt(self, groups: list[list[str]], lang: str, scheme: str = "",
-                     lemma_groups: list[list[str]] | None = None, word_sep: str = "") -> dict:
+                     lemma_groups: list[list[str]] | None = None, word_sep: str = "",
+                     prevs: list[str] | None = None, nexts: list[str] | None = None) -> dict:
         """Reconstruct each Sanskrit multi-word token's surface form from its component words,
         fusing the joins by external sandhi, then render the fused form in ``scheme`` (a script).
         ``groups`` = one component-form list per MWT; ``lemma_groups`` (optional, parallel) supplies
@@ -1032,8 +1033,17 @@ class Api:
         from . import translit
         groups = groups or []
         lg = lemma_groups or []
-        form = [translit.sandhi_join(g, lang, lg[i] if i < len(lg) else None, word_sep) for i, g in enumerate(groups)]
-        ortho = [translit.sandhi_to_script(g, lang, scheme, lg[i] if i < len(lg) else None, word_sep) for i, g in enumerate(groups)]
+        # ``prevs``/``nexts`` are the neighbouring ORTHOGRAPHIC words, one per group — what lets the
+        # fusion finish the range's outer edges by non-coalescent external sandhi instead of leaving
+        # them in pausa (see translit._boundary_sandhi). Absent ⇒ "", i.e. exactly the old behaviour,
+        # so an older caller and the running-line path are unaffected.
+        pv, nx = prevs or [], nexts or []
+        form = [translit.sandhi_join(g, lang, lg[i] if i < len(lg) else None, word_sep,
+                                     pv[i] if i < len(pv) else "", nx[i] if i < len(nx) else "")
+                for i, g in enumerate(groups)]
+        ortho = [translit.sandhi_to_script(g, lang, scheme, lg[i] if i < len(lg) else None, word_sep,
+                                           pv[i] if i < len(pv) else "", nx[i] if i < len(nx) else "")
+                 for i, g in enumerate(groups)]
         return {"ortho": ortho, "form": form, "lang": lang, "scheme": scheme}
 
     def sanskrit_csl(self, sents: list[dict]) -> dict:

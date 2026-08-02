@@ -1767,10 +1767,24 @@ async function afterLemmaEdit(si,tokId){ const s=DOC[si], t=s&&s.tokens[tokId-1]
 async function sandhiMwtForms(si,froms){ if(!isSanskritLang()||!hasBridge()||!DOCLANG) return false;
   const s=DOC[si]; if(!s||!s.mwt) return false;
   const lemOf=t=>((t.lemma&&t.lemma!=="_")?t.lemma:"");   // the CoNLL-U lemma is an r-stem signal for visarga sandhi
-  const groups=[],lgroups=[],refs=[];
-  s.mwt.forEach(m=>{ if(froms&&froms.indexOf(m.from)<0) return; const cts=s.tokens.slice(m.from-1,m.to).filter(t=>t.form); if(cts.length){ groups.push(cts.map(t=>t.form)); lgroups.push(cts.map(lemOf)); refs.push(m); } });
+  /* THE NEIGHBOURING ORTHOGRAPHIC WORDS, so the fusion can finish the range's OUTER edges. A word's
+     first and last segments are shaped by the words either side of it, not only by its own components:
+     `…bhṛtaḥ` is written `…bhṛto` before a voiced consonant, `aṅghri…` opens `'ṅghri…` after an -o,
+     `caraṇāḥ` → `caraṇāś` before c-, `iti` → `ity` before a vowel. Fusing the components alone spells
+     both ends in pausa, which is the one place a running text never spells them that way.
+     A neighbour is an ORTHOGRAPHIC word — the containing MWT's surface form where the adjacent token is
+     inside one, its own form otherwise — because that is the unit sandhi applies between. A daṇḍa is not
+     a word and stops the junction (`_DANDA_STOP`), which is also what keeps a verse line's last word out
+     of sandhi with the next line's first. */
+  const _DANDA_STOP=["|","||","।","॥",".","।।"];
+  const mwtAt=k=>(s.mwt||[]).find(x=>k>=x.from&&k<=x.to);
+  const wordAt=k=>{ if(k<1||k>s.tokens.length) return ""; const g=mwtAt(k);
+    const w=g?(g.form||""):((s.tokens[k-1]||{}).form||"");
+    return _DANDA_STOP.indexOf(w)>=0?"":w; };
+  const groups=[],lgroups=[],refs=[],prevs=[],nexts=[];
+  s.mwt.forEach(m=>{ if(froms&&froms.indexOf(m.from)<0) return; const cts=s.tokens.slice(m.from-1,m.to).filter(t=>t.form); if(cts.length){ groups.push(cts.map(t=>t.form)); lgroups.push(cts.map(lemOf)); refs.push(m); prevs.push(wordAt(m.from-1)); nexts.push(wordAt(m.to+1)); } });
   if(!groups.length) return false;
-  let r; try{ r=await window.pywebview.api.sanskrit_mwt(groups,DOCLANG,"",lgroups); }catch(e){ return false; }
+  let r; try{ r=await window.pywebview.api.sanskrit_mwt(groups,DOCLANG,"",lgroups,"",prevs,nexts); }catch(e){ return false; }
   let any=false; refs.forEach((m,i)=>{ delete m._kept;   // an EDIT (or a parse) asked for this re-fuse, which is new evidence — it overrides an undo-restored form (see applySnap)
     const f=r&&r.form&&r.form[i]; if(f&&f!==m.form){ m.form=f; m.ortho=""; m.miast=""; any=true; } });   // clear the cached display forms so fillOrtho re-renders them from the new fused form
   if(any){ markDirty(); if((ORTHO_SCHEME&&ORTHO_SCHEME!=="none")||isSanskritLang()) fillOrtho(); else preserveScroll(renderDoc); }
@@ -1934,7 +1948,7 @@ function sanskritCompoundGroups(tokens){ const comp=tokens.map(t=>isCompoundFeat
    lost either way: a re-parse replaces the tokens the ranges are keyed to. */
 async function autoGroupSanskritMWTs(si,parsed){ if(!isSanskritLang()||!DOCLANG) return;
   const s=DOC[si]; if(!s||!s.tokens||s.tokens.length<2){ if(s&&s.mwt){ delete s.mwt; markDirty(); } return; }
-  if(parsed&&s.mwt&&s.mwt.length){ preserveScroll(renderDoc); return; }   // …and its FORMS too — see below
+  if(parsed&&s.mwt&&s.mwt.length){ preserveScroll(renderDoc); return; }   // …and its FORMS: the raw substring is the text's own, see below
   const groups=sanskritCompoundGroups(s.tokens);
   if(groups.length){ s.mwt=groups.map(([a,b])=>({from:a+1,to:b+1,form:s.tokens.slice(a,b+1).map(t=>t.form).join("")})); markDirty(); }
   else if(s.mwt){ delete s.mwt; markDirty(); }
