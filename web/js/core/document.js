@@ -60,10 +60,17 @@ const _STX_WS=/\s/;   // JS \s already covers NBSP, the U+2000–200A spaces, U+
    and made an unchanged romanisation LOOK different from the text it romanises, which is what kept the
    duplicate transliteration row on screen (see trLayer's caller).
    The unit walk matches sentUnits' exactly, and has to: stextSpans indexes its answer by that order. */
-function runningLine(s,si,pick){
+function runningLine(s,si,pick,fixedGap){
   const units=[]; let k=0; while(k<((s&&s.tokens)||[]).length){ const m=(s.mwt||[]).find(x=>x.from===k+1);
     if(m){ units.push({mwt:m,last:Math.min(m.to,s.tokens.length)-1}); k=m.to; } else { units.push({tok:s.tokens[k],last:k}); k++; } }
   if(!units.length) return "";
+  /* `fixedGap` overrides the text's own spacing with one separator between every unit, and CSL is why it
+     exists: a scheme that MARKS a junction writes the two pieces apart, so its line must not inherit the
+     spacing of a text that shows them fused. Taking the gaps from `# text` there produced
+     `vartm'âpunarjanmanām` — the mark welded to the next word, indistinguishable from a letter — where the
+     notation asks for `vartm" â-punar-janmanām`. Every other row still takes the text's spacing, which is
+     what makes a verse keep its line breaks and a full stop keep its lack of a preceding space. */
+  if(fixedGap!=null) return units.map(u=>pick(u)||"").join(fixedGap);
   const al=(typeof stextSpans==="function")?stextSpans(s,si,s.text||""):null;
   const gaps=(al&&al.spans&&al.spans.length===units.length&&al.spans.every(Boolean))
     ? units.map((_u,n)=>n<units.length-1 ? (s.text||"").slice(al.spans[n][1],al.spans[n+1][0]) : "")
@@ -1446,7 +1453,7 @@ function buildBlock(i,ctx){ const s=DOC[i];
       tl.addEventListener("blur",()=>{ if(!show.translit||cslRow) tl.hidden=true; });   // …and re-collapses on blur, still gated on Displayed:"None" — if the user changed the Displayed scheme away from None WHILE this row was open, show.translit is now true and the row stays, exactly as a fresh render would leave it
       scriptTransLine=tl; b.appendChild(tl);
       if(cslRow){ const cl=document.createElement("div"); cl.className="strans"; cl.style.marginInlineStart=(idW+8)+"px";
-        cl.textContent=runningLine(s,i,u=>u.mwt?(topTransTxt(u.mwt)||u.mwt.form):(topTransTxt(u.tok)||u.tok.form));
+        cl.textContent=runningLine(s,i,u=>u.mwt?(topTransTxt(u.mwt)||u.mwt.form):(topTransTxt(u.tok)||u.tok.form)," ");
         cl.title="Sentence in "+trSchemeLabel(TRANSLIT_SCHEME)+" (display)";
         capTransWidth(cl); b.appendChild(cl); } }
     else if(trLayer()){   // romanisation OR a Latin-output orthography → a plain whole-sentence line under the text (no displacement)
@@ -1457,7 +1464,8 @@ function buildBlock(i,ctx){ const s=DOC[i];
          differs from `# text` at every full stop and every line break of a verse. Built the same way,
          an unchanged romanisation now compares EQUAL and the row is correctly dropped — while CSL, which
          genuinely respells the sentence (`vartm'âpunarjanmanām`), still differs and still shows. */
-      const line=runningLine(s,i,u=>u.mwt?(topTransTxt(u.mwt)||u.mwt.form):(topTransTxt(u.tok)||u.tok.form));
+      const csl=isSanskritLang()&&TRANSLIT_SCHEME==="csl";
+      const line=runningLine(s,i,u=>u.mwt?(topTransTxt(u.mwt)||u.mwt.form):(topTransTxt(u.tok)||u.tok.form), csl?" ":null);
       const base=(s.text||s.tokens.map(t=>t.form).join(" "));
       if(line.trim() && line.trim()!==base.trim()){ const tl=document.createElement("div"); tl.className="strans"; tl.style.marginInlineStart=(idW+8)+"px"; tl.textContent=line; capTransWidth(tl); b.appendChild(tl); } }
     if(TRANS_LANGS.size) b.appendChild(renderBlockTrans(i));   // item 13: a field per enabled translation language, just above the diagram

@@ -93,15 +93,26 @@ async function fillTranslitCSL(){
       if(t.translit!==v){ t.translit=v; any=true; }
       // the lemma has no junction to stand in, so it keeps its ordinary romanisation
       if(!t.translitLemma&&t.lemma&&t.lemma!=="_"&&t.lemma===t.form) t.translitLemma=v; });
-    /* …AND THE MWT RANGES, which is what was missing from the running line. Every row that draws a
-       sentence shows an MWT ONCE, by its range, not as its component tokens — so with `m.translit`
-       unset the line fell back to `m.form`, the plain sandhied word, and the CSL markers the whole
-       scheme exists for were nowhere on it. A range's CSL is simply its components' joined: the
-       marks record what happened BETWEEN words, so the seams INSIDE an orthographic word are exactly
-       the ones a reader wants shown (`vartm'` + `â` + `punarjanmanām` → `vartm'âpunarjanmanām`). */
-    (s.mwt||[]).forEach(m=>{ const parts=[];
-      for(let k=m.from;k<=Math.min(m.to,s.tokens.length);k++) parts.push(got[k-1]||s.tokens[k-1].form||"");
-      const v=parts.join("");
+    /* …AND THE MWT RANGES. Every row that draws a sentence shows an MWT ONCE, by its range, not as its
+       component tokens — so with `m.translit` unset the line fell back to `m.form`, the plain sandhied
+       word, and the markers the scheme exists for were nowhere on it.
+       ⚠ THE SEPARATOR IS PER JUNCTION, NOT PER RANGE, and `Compound=Yes` on the LEFT member is what
+       chooses it. An MWT is one written word, but its members need not all belong to one GRAMMATICAL
+       word: DCS groups `vartma | a | punarjanmanām` into `vartmāpunarjanmanām` because the text writes
+       it solid, and only the first junction there is external sandhi between two words — the second is
+       inside a compound. CSL distinguishes them, which is the whole reason it marks junctions:
+         · left member has Compound=Yes → a compound seam  → `-`   (`mūrti-tve`, `ātma-vidām`)
+         · it does not                  → external sandhi  → a space (`vartm' â-…`, `ātm" êty`)
+       Read off this repository's own pre-DCS CSL text (`git show 7c60890:samples/brihat_jataka.conllu`),
+       which spells exactly those four: `vartm" â-punar-janmanām`, `ātm" êty`, `ātma-vidāṃ`. Joining the
+       range with one separator throughout got `vartm'-â-punarjanmanām`, which asserts a compound that
+       is not there. See saCslSep in js/lang/translit.js on why the seam is `-`.
+       `isCompoundFeat` is js/io/bridge.js's, which loads before this file. */
+    const seam=(sc)=>(typeof saCslSep==="function")?saCslSep(sc):"-";
+    (s.mwt||[]).forEach(m=>{ const hi=Math.min(m.to,s.tokens.length); let v="";
+      for(let k=m.from;k<=hi;k++){ const t=s.tokens[k-1]; const piece=got[k-1]||t.form||"";
+        if(k>m.from) v+=((typeof isCompoundFeat==="function"&&isCompoundFeat(s.tokens[k-2].feats))?seam(m):" ");
+        v+=piece; }
       if(v && m.translit!==v){ m.translit=v; any=true; } }); });
   if(any){ if(typeof invalidateDiaCache==="function") invalidateDiaCache(); preserveScroll(renderDoc); }
   return any; }

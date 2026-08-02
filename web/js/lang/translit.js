@@ -300,6 +300,24 @@ function saTransRow(){ return isSanskritLang() && (TRANSLIT_SCHEME==="csl" || !s
    that assimilation does NOT cross a pause (`…arajyotiṣām |` keeps its -m). See app/translit.py's
    _boundary_sandhi for the rules the two flags feed. */
 const SA_DANDA=["|","||","।","॥","‖","।।"];
+/* ── CSL JOINS ITS PIECES DIFFERENTLY FROM EVERY OTHER SCHEME ──────────────────────────────────
+   CSL exists to write the junctions rather than the fusion, and once a junction is MARKED the pieces
+   either side of it are written apart — that is the whole point of the marks. So a CSL line does not
+   take its spacing from `# text` (which shows the fusion) the way the script line and every ordinary
+   romanisation do. Read straight off this repository's own pre-DCS CSL text, which is what the sample
+   used to carry (`git show 7c60890:samples/brihat_jataka.conllu`):
+       mūrtitve parikalpitaḥ śaśa-bhṛto vartm" â-punar-janmanām |
+       lokānāṃ pralay'-ôdbhava-sthiti-vibhuś c' ânekadā yaḥ śrutau |
+   · between two WORDS — a space, even where the text fused them: `vartm" â-punar-…`, `c' ânekadā`,
+     `ātm" êty`. Written solid (`vartm'âpunar…`) the mark cannot be told from a letter.
+   · between COMPOUND MEMBERS of one word — a hyphen: `śaśa-bhṛto`, `ātma-vidāṃ`, `aneka-kiraṇas`,
+     and `pralay'-ôdbhava-sthiti-vibhuś`, which shows both marks meeting.
+   `mwtSepOf` is preferred where the file itself showed a separator; DCS text writes its orthographic
+   words solid, so it usually has none and this default supplies CSL's own. `-` NOT `|`, on that
+   evidence — and `|` is this text's daṇḍa besides, so a compound seam spelt with one would read as a
+   verse break. `_STX_PH` in js/io/bridge.js treats both as separators, so switching is one character. */
+const SA_CSL_SEP="-";
+function saCslSep(m){ return (typeof mwtSepOf==="function"?mwtSepOf(m):(m&&m.sep))||SA_CSL_SEP; }
 function saMwtContext(s,m){
   const mwtAt=k=>(s.mwt||[]).find(x=>k>=x.from&&k<=x.to);
   const walk=(k,step)=>{ let pause=false;
