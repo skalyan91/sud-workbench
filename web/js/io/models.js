@@ -17,7 +17,18 @@ async function populateModels(){ if(!hasBridge())return;
     arr.forEach(e=>{ const o=document.createElement("option"); o.value=e.id; o.textContent=e.label||e.id; og.appendChild(o); }); selEl.appendChild(og); };
   addGroup("SUD · spaCy",groups.sud); addGroup("UD · Stanza",groups.stanza);
   if([...selEl.options].some(o=>o.value===cur)) selEl.value=cur; else { model=""; selEl.value=""; } }
-function manageModels(){ if(hasBridge()){ try{ window.pywebview.api.open_models_window(); return; }catch(e){} } openSheet(sheetModels()); }   // item 23: real window in the desktop app; in-page sheet is the headless fallback
+/* `focus` names an extras tier to scroll to and flash on arrival — how the Script and transliteration
+   menus' "install" link on an unavailable scheme leads to the row that answers it rather than to the
+   top of a list with every model in it. Optional: the menu-bar command passes nothing. */
+function manageModels(focus){ if(hasBridge()){ try{ window.pywebview.api.open_models_window(focus||""); return; }catch(e){} }
+  openSheet(sheetModels()); if(focus) revealExtraRow(focus); }   // item 23: real window in the desktop app; in-page sheet is the headless fallback
+// The sheet fallback's own reveal. It runs after openSheet because drawModels fills the list
+// synchronously for the rows already known and asynchronously for the rest — so try now, and once
+// more on the next frame for the pass that populated EXTRAS_LIST.
+function revealExtraRow(tier){ const hit=()=>{ const el=document.querySelector(`#mlist .modelrow[data-tier="${CSS.escape(tier)}"]`);
+    if(!el) return false; try{ el.scrollIntoView({block:"nearest"}); }catch(_){ el.scrollIntoView(); }
+    el.classList.add("flash"); return true; };
+  if(!hit()) requestAnimationFrame(()=>{ hit(); }); }
 let MODELS_AVAIL=[], EXTRAS_LIST=[], MODELS_TRAIN={};   // MODELS_TRAIN: model id → training-set sentences
 // The bridge resolves the training-set sizes on a background thread (one UD stats.xml per treebank),
 // handing back what it has so far plus `pending`; poll until it settles and patch the rows in place
@@ -63,7 +74,7 @@ function drawModelList(host,query){ if(!host)return; const q=(query||"").trim().
     const h=document.createElement("div"); h.className="mgroup-h"; h.textContent="Optional language support"; host.appendChild(h);
     EXTRAS_LIST.forEach(t=>host.appendChild(extraRow(t))); }
   if(!host.children.length) host.textContent=q?"No matches.":"No models found (offline?). Try Refresh."; }
-function extraRow(t){ const row=document.createElement("div"); row.className="modelrow";
+function extraRow(t){ const row=document.createElement("div"); row.className="modelrow"; row.dataset.tier=t.id;   // what revealExtraRow looks the focused tier up by
   const info=document.createElement("div"); info.className="mi";
   info.innerHTML=`<span>${esc(t.label||t.id)}</span>${t.note?`<small>${esc(t.note)}</small>`:""}`;
   const right=document.createElement("div"); right.style.display="flex"; right.style.alignItems="center"; right.style.gap="8px";

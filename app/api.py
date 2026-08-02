@@ -1462,10 +1462,15 @@ class Api:
         return self._open_window("about", "About SUD Workbench",
                                  self._about_html(version), 380, 380, (340, 400))
 
-    def open_models_window(self) -> dict:
-        """Open the Model Manager as a real window (item 23)."""
+    def open_models_window(self, focus: str = "") -> dict:
+        """Open the Model Manager as a real window (item 23).
+
+        ``focus`` names an extras tier to scroll to and flash on arrival.  It is what makes the
+        Script/transliteration menus' "install" link on an unavailable scheme lead somewhere: the
+        tiers sit under every model in a scrolling list, so opening the window on its own would
+        leave the reader to find the row that answers the thing they just clicked."""
         return self._open_window("models", "Manage Models",
-                                 self._models_html(), 660, 580, (420, 400))
+                                 self._models_html(focus), 660, 580, (420, 400))
 
     def open_glossmap_window(self) -> dict:
         """Open the gloss↔FEATS mapping editor as a real window (item 12): mirrors
@@ -1920,9 +1925,14 @@ class Api:
     <script>document.addEventListener('keydown',function(e){if(e.key==='Escape'){e.preventDefault();try{window.pywebview.api.close_child_window('about');}catch(_){}}});</script>
     </body></html>""")
 
-    def _models_html(self) -> str:
+    def _models_html(self, focus: str = "") -> str:
+        # `focus` is an extras tier KEY, and it is JSON-encoded into the page rather than
+        # interpolated raw: it arrives from the frontend (translit.js's `needs`), and this page is
+        # built by string concatenation, so a quote in it would otherwise break out of the literal.
         return (
-            "<!DOCTYPE html><html><head><meta charset=\"utf-8\"><script>" + self._confirm_js() + "</script><style>" + self._base_css() + """
+            "<!DOCTYPE html><html><head><meta charset=\"utf-8\"><script>" + self._confirm_js()
+            + "var FOCUS=" + json.dumps(str(focus or "")) + ";"
+            + "</script><style>" + self._base_css() + """
     body{display:flex;flex-direction:column;padding:16px;gap:11px}
     .sub{font-size:12.5px;color:var(--muted)}
     .bar{display:flex;gap:8px;align-items:center}
@@ -1953,6 +1963,14 @@ class Api:
     .row + .row{box-shadow:inset 0 1px 0 0 transparent}
     .row + .row::before{content:"";position:absolute;inset-inline:10px;top:0;height:1px;background:var(--label-quinary);pointer-events:none}
     .row:hover{background:var(--hover)}
+    /* The row a Script/transliteration menu sent the reader here to find. A brief accent wash rather
+       than a persistent highlight: it answers "which of these?" and then gets out of the way, and
+       nothing in this list is selectable, so a lasting mark would claim a state the list has not got.
+       Reduced motion gets the same wash held still — the point is WHICH ROW, and a pulse is only one
+       way of saying it. */
+    @keyframes rowflash{0%{background:transparent}18%{background:color-mix(in srgb,var(--accent) 22%,transparent)}100%{background:transparent}}
+    .row.flash{animation:rowflash 1.9s ease-out 1}
+    @media (prefers-reduced-motion: reduce){.row.flash{animation:none;background:color-mix(in srgb,var(--accent) 14%,transparent)}}
     .mi{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}   /* Leading Accessory: Title over Subtitle, gap 2 — the kit's own value, confirmed against node 2302:6718 */
     .mi .nm{font-size:13.5px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
     /* the Row's SUBTITLE, straight off the kit: SF Pro Medium 11 / line-height 14, filled Labels/Secondary.
@@ -2025,7 +2043,16 @@ class Api:
         var eh=document.createElement('div');eh.className='gh';eh.textContent='Optional language support';host.appendChild(eh);
         EXTRAS.forEach(function(t){host.appendChild(extraRow(t));});}
       host.scrollTop=keep;   // restore the pre-render scroll offset (item 17)
-      if(!host.children.length) host.textContent=q?'No matches.':'No models found (offline?). Try Refresh.';}
+      if(!host.children.length) host.textContent=q?'No matches.':'No models found (offline?). Try Refresh.';
+      revealFocus();}
+    // A tier named by open_models_window(focus) — the row a Script/transliteration menu's "install"
+    // link was pointing at. Consumed ONCE: this list re-draws after every install and on Refresh, and
+    // a flash that fired again each time would be pointing at a row the reader has already dealt with.
+    // The scroll is `nearest`, so a row already on screen does not move under the pointer.
+    function revealFocus(){if(!FOCUS)return; var el=document.querySelector('#list .row[data-tier="'+FOCUS+'"]');
+      FOCUS=''; if(!el)return;
+      try{el.scrollIntoView({block:'nearest'});}catch(_){el.scrollIntoView();}
+      el.classList.add('flash');}
     function row(e){var row=document.createElement('div');row.className='row';row.setAttribute('data-mid',e.id);
       var info=document.createElement('div');info.className='mi';
       var meta=[e.version?('v'+e.version):null,e.size?(Math.round(e.size/1e6)+' MB'):null].filter(Boolean).join(' · ');
@@ -2058,6 +2085,7 @@ class Api:
       var r; try{r=await api().remove_model(e.id);}catch(err){return;}
       if(r.error)return; try{api().child_refresh_models();}catch(_){} load(false);}
     function extraRow(t){var row=document.createElement('div');row.className='row';
+      row.setAttribute('data-tier',t.id);   // what revealFocus() looks the focused tier up by
       var info=document.createElement('div');info.className='mi';
       info.innerHTML='<span class="nm">'+esc(t.label||t.id)+'</span>'+(t.note?'<small>'+esc(t.note)+'</small>':'');
       var right=document.createElement('div');right.className='right';

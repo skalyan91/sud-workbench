@@ -137,6 +137,20 @@ function trCell(kind,sc,offered){
   r.setAttribute("aria-label",(kind==="d"?"Displayed":"Stored")+": "+sc.label);   // the ACCESSIBLE name stays unabbreviated — the visual header is short for layout, which is no reason for a screen reader to hear "Disp."
   r.addEventListener("change",()=>{ if(kind==="d") trPick(sc.id); else storedPick(sc.id); });
   cell.appendChild(r); return cell; }
+/* The tag on an unavailable scheme, shared by BOTH menus (the transliteration grid below and the
+   Script list in orRender). `needs` — from app/translit.py's _scheme_needs — names the extras tier
+   that would supply the missing engine or table, and where there is one the tag becomes a LINK to
+   that tier's row in Manage Models. A scheme the user can have is a different thing from one nobody
+   can have, and a flat "unavailable" said both. Where `needs` is empty the tag stays inert text, and
+   that is right: Mongolian (traditional) is off because no correct converter exists, so a link
+   offering to install one would be a lie. Python decides which is which; this only draws it.
+   A <button>, not a styled span: it is a control, and the keyboard has to be able to reach it. */
+function naTag(sc){ if(!sc.needs){ const s=document.createElement("span"); s.className="trna"; s.textContent="unavailable"; return s; }
+  const b=document.createElement("button"); b.type="button"; b.className="trna trna-link"; b.textContent="install";
+  b.title="Install the support this needs — opens Manage Models";
+  b.addEventListener("click",e=>{ e.preventDefault(); e.stopPropagation(); trClose(); orClose();
+    if(typeof manageModels==="function") manageModels(sc.needs); });
+  return b; }
 function trRender(){ const m=trEl(); m.innerHTML="";
   const grid=document.createElement("div"); grid.className="trgrid";
   const head=t=>{ const h=document.createElement("span"); h.className="trghead"; h.textContent=t; grid.appendChild(h); };
@@ -147,7 +161,7 @@ function trRender(){ const m=trEl(); m.innerHTML="";
      mean "off". A rule drawn across a table that already answers the question is one more thing to read. */
   rows.forEach(sc=>{
     const nm=document.createElement("span"); nm.className="trname"; nm.textContent=sc.label;
-    if(sc.id&&!sc.available){ nm.classList.add("trdim"); const na=document.createElement("span"); na.className="trna"; na.textContent="unavailable"; nm.appendChild(na); }
+    if(sc.id&&!sc.available){ nm.classList.add("trdim"); nm.appendChild(naTag(sc)); }
     grid.appendChild(nm);
     const ok=!sc.id||sc.available;
     grid.appendChild(trCell("d",sc, ok && (sc.id ? true : isSanskritLang())));
@@ -360,7 +374,11 @@ function orRender(){ const m=orEl(); m.innerHTML="";
     const b=document.createElement("button"); b.type="button"; b.className="trrow";
     const ck=document.createElement("span"); ck.className="ck"; ck.textContent=(s.id===ORTHO_SCHEME)?"✓":""; b.appendChild(ck);
     const nm=document.createElement("span"); nm.className="trname"; nm.textContent=s.label; b.appendChild(nm);
-    if(s.id&&!s.available){ b.disabled=true; const na=document.createElement("span"); na.className="trna"; na.textContent="unavailable"; b.appendChild(na); }
+    /* An unavailable row that an install WOULD fix stays enabled, so its "install" tag can be clicked
+       and reached by keyboard — the row itself does nothing (picking a scheme with no engine behind it
+       would show the bare forms and say nothing about why), the tag inside it is the only live target.
+       One with no `needs` is disabled as before: there is nothing to click. */
+    if(s.id&&!s.available){ b.classList.add("trdim"); b.appendChild(naTag(s)); if(!s.needs) b.disabled=true; }
     else b.addEventListener("click",()=>orPick(s.id));
     m.appendChild(b); }); }
 function orPick(id){ orClose(); id=id||""; if(id===ORTHO_SCHEME) return;

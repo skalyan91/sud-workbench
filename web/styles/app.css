@@ -1388,6 +1388,19 @@
   .trmenu .trcell{display:flex; align-items:center; justify-content:center; min-width:16px}
   .trmenu .trradio{margin:0; accent-color:var(--accent); cursor:pointer}   /* accent-color: the platform control, tinted to the app accent — nothing hand-drawn to keep in step with the OS */
   .trmenu .trna{flex:none; font-size:10.5px; color:var(--muted); font-style:italic}   /* "unavailable" tag on a scheme with no data */
+  /* …and its LIVE form, on a scheme an extras tier would supply (translit.js's naTag): the accent and
+     the underline say it is a target, which the italic grey deliberately does not. Not italic — this
+     one is a verb the user can act on, not a note about the row's state. `button` resets, because a
+     <button> was chosen for keyboard reach and brings a control's whole appearance with it. */
+  .trmenu .trna-link{appearance:none; -webkit-appearance:none; background:none; border:0; padding:0; margin:0;
+    font:inherit; font-size:10.5px; font-style:normal; color:var(--accent); text-decoration:underline;
+    text-underline-offset:2px; cursor:pointer}
+  .trmenu .trna-link:hover{opacity:.75}
+  .trmenu .trna-link:focus-visible{outline:2px solid var(--accent); outline-offset:2px; border-radius:3px}
+  /* On a HIGHLIGHTED script row the accent becomes the row's own fill, so an accent-coloured link on
+     top of it would vanish; the row's foreground is white there, as .trstored above already handles. */
+  .trmenu .trrow:hover .trna-link,.trmenu .trrow.hi .trna-link{color:#fff}
+  .trmenu .trrow.trdim{opacity:.7}   /* the Script list's unavailable rows dim as the grid's names do */
   .trmenu .trstored{flex:none; font-size:9.5px; font-weight:640; letter-spacing:.03em; text-transform:uppercase; color:var(--accent)}   /* item 1: a scheme that may be stored to MISC */
   .trmenu .trrow:hover .trstored,.trmenu .trrow.hi .trstored{color:#fff}
   .trmenu .trsep{height:.5px; background:var(--hairline-strong); margin:4px 8px; flex:none}   /* thin hairline between the menu's logical groups (off-rows vs schemes / stored-capable vs the rest), theme-aware like the titlebar group menu */
@@ -1544,6 +1557,11 @@
      real symbols here. */
   /* Manage Models sheet */
   .modelrow{display:flex; align-items:center; justify-content:space-between; gap:12px; padding:8px 2px; border-bottom:.5px solid var(--hairline)}
+  /* The row a Script/transliteration menu's "install" link sent the reader to find (revealExtraRow).
+     Same brief accent wash the native Manage Models window uses, for the sheet fallback. */
+  @keyframes mdlflash{0%{background:transparent} 18%{background:color-mix(in srgb,var(--accent) 22%,transparent)} 100%{background:transparent}}
+  .modelrow.flash{animation:mdlflash 1.9s ease-out 1}
+  @media (prefers-reduced-motion: reduce){ .modelrow.flash{animation:none; background:color-mix(in srgb,var(--accent) 14%,transparent)} }
   .modelrow .mi{display:flex; flex-direction:column; gap:2px; min-width:0}
   .modelrow .mi small{color:var(--muted); font-size:11px}
   .modelrow .mi .mts{font-variant-numeric:tabular-nums}   /* training-set size; empty until the background sweep resolves it */

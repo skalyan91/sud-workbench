@@ -1662,9 +1662,42 @@ def _scheme_available(base: str, sid: str) -> bool:
     return bool(eng and eng[1]())
 
 
-def _schemes_for(registry: dict, base: str) -> list[dict]:
-    return [{"id": sid, "label": label, "available": _scheme_available(base, sid)}
-            for sid, label in registry.get(base, [])]
+# Scheme id → the ``extras`` tier that would make it available.  ONLY the schemes an INSTALL can
+# fix belong here, because the frontend turns a `needs` into a live "install" link and a link that
+# cannot lead anywhere is worse than the flat "unavailable" it replaces:
+#   · `mn-traditional` is disabled ON PURPOSE (no correct converter exists — see _ENGINES), so it
+#     stays inert for ever and must never be listed here;
+#   · pypinyin / aksharamukha / ToJyutping / opencc / hangul-romanize are in requirements-core, so
+#     their absence means a broken install, not a missing option, and no tier repairs it;
+#   · the vendored data tables (Baxter–Sagart, General Chinese) ship in `app/data/`, same reasoning.
+# Checked against extras.TIERS at import (`_check_scheme_tiers`) so a renamed tier cannot silently
+# leave a dead link behind — the one failure mode this table can have.
+_SCHEME_TIER: dict[str, str] = {
+    "macron": "la_macron",     # Morpheus vowel lengths, fetched not shipped (app/macron.py)
+    "kunrei": "japanese",      # cutlet + its dictionaries
+    "hepburn": "japanese",
+}
+
+
+def _check_scheme_tiers() -> None:
+    from . import extras
+    unknown = sorted(set(_SCHEME_TIER.values()) - set(extras.TIERS))
+    if unknown:   # a programming error, and one that would only show as a link that does nothing
+        raise RuntimeError(f"_SCHEME_TIER names no such extras tier(s): {unknown}")
+
+
+_check_scheme_tiers()   # at import: a dead link is invisible in use, so fail where it is introduced
+
+
+def _scheme_needs(base: str, sid: str) -> str:
+    """The extras tier that would make `sid` available, or "" when nothing installable would.
+
+    Answered in PYTHON rather than guessed in the menu: which engine backs a scheme, and which tier
+    carries that engine, are both facts this module owns."""
+    if _scheme_available(base, sid):
+        return ""
+    return _SCHEME_TIER.get(sid, "")
+
 
 
 # ── three-way scheme model (item 1) ───────────────────────────────────────────
@@ -1716,19 +1749,23 @@ def script_schemes(lang: str) -> list[dict]:
     """NON-LATIN SCRIPT options for ``lang`` (re-render the main glyph). The frontend prepends 'Original'.
     Empty ⇒ no script menu."""
     base = _canon_lang(_norm(lang))
-    return [{"id": sid, "label": label, "available": _scheme_available(base, sid)}
+    return [{"id": sid, "label": label, "available": _scheme_available(base, sid),
+             "needs": _scheme_needs(base, sid)}
             for sid, label in _SCRIPT_SCHEMES.get(base, [])]
 
 
 def translit_schemes(lang: str) -> list[dict]:
-    """DISPLAYED transliteration schemes (the row) → ``[{"id","label","stored","available"}]`` (a superset).
-    ``stored`` marks the subset written to MISC Translit/LTranslit.  Empty ⇒ no transliteration menu."""
+    """DISPLAYED transliteration schemes (the row) → ``[{"id","label","stored","available","needs"}]``
+    (a superset).  ``stored`` marks the subset written to MISC Translit/LTranslit; ``needs`` names the
+    extras tier that would make an unavailable one work.  Empty ⇒ no transliteration menu."""
     base = _canon_lang(_norm(lang))
     if base in _DISPLAY_SCHEMES:
-        return [{"id": sid, "label": label, "stored": st, "available": _scheme_available(base, sid)}
+        return [{"id": sid, "label": label, "stored": st, "available": _scheme_available(base, sid),
+                 "needs": _scheme_needs(base, sid)}
                 for sid, label, st in _DISPLAY_SCHEMES[base]]
     if base in _SINGLE_LANGS:
-        return [{"id": "default", "label": _SINGLE_LABEL.get(base, "Romanization"), "stored": True, "available": True}]
+        return [{"id": "default", "label": _SINGLE_LABEL.get(base, "Romanization"), "stored": True,
+                 "available": True, "needs": ""}]
     return []
 
 
