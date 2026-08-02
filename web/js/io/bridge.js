@@ -618,6 +618,12 @@ window.__applyInsertPayload=async function(p){ p=p||{};
      pushes an entry of its own, both of which the depth counter neutralises (js/core/undo.js). */
   beginUndoBatch(); beginRenderHold();
   try{
+  /* A BRAHMIC INSERT ALSO SETS THE SCRIPT. The text is STORED as Devanagari — the one script the model
+     reads — but somebody who pastes Kannada wants to read Kannada, so the script they typed in becomes
+     the display choice. Before the insert, so the first render already draws it and the reader never
+     sees their own paste come back in another script. orPick records the choice per language like any
+     other, and does nothing when the pill is already on that script. */
+  if(p.showScript && typeof orPick==="function" && ORTHO_SCHEME!==p.showScript) orPick(p.showScript);
   if(main.enabled&&(main.text||"").trim()){
     // An empty document adopts the language the dialog chose (and the parser that goes with it) BEFORE the
     // first sentence is inserted — doInsert parses with whatever `model` is set at that moment, so adopting

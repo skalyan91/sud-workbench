@@ -1573,12 +1573,48 @@ class Api:
         # document's own language as the frontend last reported it (set_doc_language). This is also the
         # language the document ADOPTS — see __applyInsertPayload on the other side.
         main_lang = str(m.get("lang") or "").strip() or self._doclang or ""
-        # ITRANS → IAST BEFORE the text crosses to the main window, which is where it is sentencised,
-        # tokenised and parsed: the tokeniser (and any Sanskrit model behind it) must see the notation
-        # the document is stored in, and a re-conversion after tokenisation would have to be applied
-        # to every token separately and could no longer see the word boundaries the typist wrote.
-        # A no-op for every non-Sanskrit document — see itrans_to_iast.
-        main_text = itrans.convert(str(m.get("text") or ""), main_lang or "und")["converted"] if main_on else ""
+        # ── WHICH SCRIPT THE TYPED SANSKRIT IS STORED IN ────────────────────────────────────────
+        # A Sanskrit file stores its text in ONE script (translit.sa_stored_script reads it off the
+        # forms), and text typed into it has to land in that script.  Three inputs, and only one of
+        # them is convertible both ways:
+        #   a Brahmic script  → storable only as Devanagari, which is the script the model reads.
+        #                       The script the user TYPED becomes what the reader sees, since that is
+        #                       plainly the script they want the document displayed in.
+        #   IAST (diacritics) → storable only as IAST.
+        #   plain ASCII       → ITRANS, which `convert` turns into EITHER; never refused.
+        # A mismatch is REFUSED rather than silently converted: turning a Devanagari paste into IAST
+        # (or the reverse) rewrites the user's text into a notation they did not choose, and doing it
+        # to a whole insert is not something a toast afterwards can undo.
+        # An EMPTY document has no storage script yet, so it takes whichever the first insert brings.
+        raw_main = str(m.get("text") or "")
+        stored = str(payload.get("docScript") or "")          # "" ⇒ IAST; the frontend's DOCSCRIPT
+        empty = bool(payload.get("docEmpty"))
+        target, show_script, refusal = stored, "", ""
+        if main_on and raw_main.strip() and itrans.is_sanskrit(main_lang):
+            typed = itrans.detect_script(raw_main)
+            if typed and typed != "IAST":                     # a Brahmic script
+                if not empty and stored != "Devanagari":
+                    refusal = ("This document stores its text in IAST, so " + typed + " cannot be "
+                               "inserted into it. Type in ITRANS or IAST, or start a new document.")
+                target, show_script = "Devanagari", typed
+                # …and the text itself is transliterated INTO Devanagari here, because `convert` below
+                # only ever converts ITRANS and would pass Kannada or Thai through untouched — leaving
+                # storage in the typed script, which is the one thing the model cannot read.
+                raw_main = itrans.to_devanagari(raw_main, typed)
+            elif typed == "IAST":
+                if not empty and stored == "Devanagari":
+                    refusal = ("This document stores its text in Devanagari, so IAST cannot be "
+                               "inserted into it. Type in ITRANS (it converts) or in a Brahmic script.")
+                target = ""
+            # plain ASCII (ITRANS) falls through on `target = stored`, convertible either way
+        if refusal:
+            return {"ok": False, "error": refusal}
+        # ITRANS → the document's script BEFORE the text crosses to the main window, which is where it
+        # is sentencised, tokenised and parsed: the tokeniser (and any Sanskrit model behind it) must
+        # see the notation the document is stored in, and a re-conversion after tokenisation would have
+        # to be applied to every token separately and could no longer see the word boundaries the
+        # typist wrote.  A no-op for every non-Sanskrit document — see itrans.convert.
+        main_text = itrans.convert(raw_main, main_lang or "und", target)["converted"] if main_on else ""
 
         raw_pars = [p for p in (payload.get("parallels") or []) if isinstance(p, dict)]
         try:                          # where the new blocks land; None (or unusable) ⇒ append, which is
@@ -1633,6 +1669,11 @@ class Api:
                          # document was EMPTY and this dialog chose its language (see best_installed_model)
                          "model": self._model_for_language(main_lang, groups) if main_on else ""},
                 "parallels": parallels, "adoptLang": adopt, "naive": naive,
+                # The script the user TYPED IN, when that was a Brahmic one. The text itself is stored
+                # as Devanagari (the only script the model reads), so this is the DISPLAY choice the
+                # insert implies: somebody who pastes Kannada wants to read Kannada, not Devanagari.
+                # "" for every other case, and the frontend then leaves the Script pill alone.
+                "showScript": show_script,
             }
             self._eval_quiet(main, "window.__applyInsertPayload && window.__applyInsertPayload(%s)"
                              % json.dumps(data))

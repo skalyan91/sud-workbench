@@ -365,7 +365,15 @@ function sheetInsert(index){
        has sentences must keep its own language and parser. */
     if(adopt&&mainEnabled&&payload.main.lang) adoptInsertLang(payload.main.lang,mainInfo.model||"");
     closeSheet();   // every value is already read off the fields the close tears down
-    if(hasBridge()){ try{ window.pywebview.api.child_insert_text(payload); }catch(e){ toast("Insert failed: "+e); } return; }
+    /* The document's storage script and whether it HAS one yet travel with the payload: Python decides
+       whether the typed notation can be stored (Api.child_insert_text), and only this side knows both.
+       A refusal comes back as {ok:false,error} and is the one thing the caller has to say out loud —
+       the sheet has already closed, so silence would read as an insert that simply did nothing. */
+    payload.docScript=(typeof DOCSCRIPT!=="undefined")?(DOCSCRIPT||""):"";
+    payload.docEmpty=!DOC.length;
+    if(hasBridge()){ try{ Promise.resolve(window.pywebview.api.child_insert_text(payload))
+        .then(r=>{ if(r&&r.error) toast(r.error); })
+        .catch(e=>toast("Insert failed: "+e)); }catch(e){ toast("Insert failed: "+e); } return; }
     /* NO BRIDGE (browser design mode): do here the little that the Python worker would have done — the
        ITRANS conversion (itransFix is itself a no-op without a bridge) and the paragraph+sentence split of
        each parallel text — and then hand the SAME __applyInsertPayload the worker drives, so the two paths

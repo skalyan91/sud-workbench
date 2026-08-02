@@ -271,3 +271,76 @@ def available() -> bool:
     except Exception:  # noqa: BLE001
         return False
     return True
+
+
+# ── which notation did the user actually type? ──────────────────────────────────────────────────
+# Three answers, because Insert Text has three cases to tell apart and only two of them are a choice:
+#   a Brahmic script name — the text is written in that script; it can only be STORED as Devanagari
+#                           (the one script `sa_sud_vedic_ufal_dcs` reads), with the typed script
+#                           becoming what the reader SEES.
+#   "IAST"                — Latin with diacritics.  Already a storage notation, and not convertible
+#                           by `to_script`, which converts ITRANS; it can only be stored as IAST.
+#   ""                    — plain ASCII, i.e. ITRANS (or a word that reads the same either way).
+#                           The only input convertible to EITHER storage, so it is never refused.
+# The script is read off the CHARACTERS, by their Unicode names: a Devanagari letter is named
+# "DEVANAGARI LETTER KA", a Bengali one "BENGALI LETTER KA", and aksharamukha's own script ids match
+# those prefixes for 23 of the 27 this app offers.  _UNI_ALIAS carries the four that do not.
+# ⚠ RANJANA IS NOT DETECTABLE and reports Devanagari: aksharamukha renders it into the Devanagari
+# block, so nothing in the codepoints distinguishes the two.  Harmless here — Devanagari is what
+# either one is stored as, and the display script is the reader's to change.
+_UNI_ALIAS = {"MYANMAR": "Burmese", "TAI": "TaiTham", "ZANABAZAR": "ZanabazarSquare"}
+_uni_prefix: dict[str, str] = {}
+
+
+def _prefix_map() -> dict[str, str]:
+    global _uni_prefix
+    if not _uni_prefix:
+        from . import translit
+        m = {n.upper(): n for n, _label in translit._AKSHARA_SCRIPTS}
+        m.update(_UNI_ALIAS)
+        _uni_prefix = m
+    return _uni_prefix
+
+
+def detect_script(text: str) -> str:
+    """The notation ``text`` is written in: an aksharamukha script name, ``"IAST"``, or ``""``.
+
+    Majority vote over the letters, so one stray character cannot decide a paragraph — a Sanskrit
+    text quoting a Latin word is still Devanagari, and an IAST text with one Devanagari gloss in it
+    is still IAST."""
+    import unicodedata as _u
+    counts: dict[str, int] = {}
+    pre = _prefix_map()
+    for ch in text or "":
+        if not ch.isalpha():
+            continue
+        try:
+            head = _u.name(ch).split(" ")[0]
+        except ValueError:      # unnamed codepoint — says nothing either way
+            continue
+        sid = pre.get(head)
+        if sid:
+            counts[sid] = counts.get(sid, 0) + 1
+        elif head == "LATIN":
+            # a NON-ASCII Latin letter is a diacritic, and a diacritic is IAST; plain ASCII is ITRANS
+            # (or a word that reads the same in both), which is what the "" answer means.
+            if ord(ch) > 127:
+                counts["IAST"] = counts.get("IAST", 0) + 1
+    return max(counts, key=lambda k: counts[k]) if counts else ""
+
+
+def to_devanagari(text: str, src: str) -> str:
+    """Convert Brahmic ``src`` text into Devanagari — the one script the Sanskrit model reads.
+
+    :func:`convert` cannot do this: it converts ITRANS, and gates every unit on ITRANS evidence, so
+    Kannada or Thai input passes straight through it unchanged.  Storage would then hold the typed
+    script rather than Devanagari, which is the one thing the model cannot read.  A no-op when the
+    text is already Devanagari, and — like everything else here — when aksharamukha is not installed.
+    """
+    if not text or not src or src in ("Devanagari", "IAST"):
+        return text
+    try:
+        from aksharamukha import transliterate
+        return transliterate.process(src, "Devanagari", text)
+    except Exception:  # noqa: BLE001 — a missing/failing engine leaves the text as typed
+        return text
