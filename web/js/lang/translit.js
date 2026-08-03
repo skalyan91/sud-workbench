@@ -87,10 +87,24 @@ function sizePill(p, strings){ if(!_pillGauge){ _pillGauge=document.createElemen
    label states both, in that order, so the answer is on the status bar without opening anything. */
 function updateTranslitPill(){ const p=document.getElementById("translitPill"); if(!p)return;
   if(!TRANSLIT_SCHEMES.length){ p.hidden=true; return; }   // no transliteration schemes at all → no pill
-  const dis=isSanskritLang() && !saTransRow();   // item 6: Sanskrit already showing romanised glyphs → the IAST row would repeat them, so it can't show; KEEP the pill visible (disabled), don't remove it
-  p.hidden=false; p.classList.toggle("disabled",dis); p.classList.toggle("pickable",!dis);
-  p.title=dis?"Transliteration — select a script to show the IAST row":"Transliteration — displayed row and stored Misc value";
-  const d=(show.translit&&TRANSLIT_SCHEME)?trSchemeLabel(TRANSLIT_SCHEME):"None",
+  /* ⚠ THE PILL IS NEVER DISABLED while there are schemes to pick. It used to go dead whenever the ROW
+     could not be drawn (`isSanskritLang() && !saTransRow()`), which was defensible when IAST was
+     Sanskrit's only displayed scheme: no row, nothing to choose. CSL made that false — and worse,
+     self-locking, since Script=Latin + Displayed=IAST hides the row, disables the pill, and leaves no
+     way back to the menu that offers CSL. The Stored column is a live choice in that state too, and it
+     has nothing to do with whether the row is drawn.
+     Whether the row APPEARS stays saTransRow()'s business; whether a CHOICE EXISTS is this pill's, and
+     the answer is yes as long as TRANSLIT_SCHEMES is non-empty — which line 89 has already established. */
+  const noRow=isSanskritLang() && !saTransRow();
+  p.hidden=false; p.classList.remove("disabled"); p.classList.add("pickable");
+  p.title=noRow?"Transliteration — the row is hidden here (it would repeat the line above); pick CSL to show one"
+               :"Transliteration — displayed row and stored Misc value";
+  /* …and the label names the scheme that is CHOSEN, not the one that is DRAWN. Reading it off
+     show.translit made the pill say "None" for a scheme the user had just picked, because the row
+     happened to be redundant — which reads as the choice not having taken. TRANSLIT_SCHEME==="" is the
+     real off-state (trPick's own off-row writes both, as do loadTranslitSchemes' two paths), so it is
+     the honest thing to test. */
+  const d=TRANSLIT_SCHEME?trSchemeLabel(TRANSLIT_SCHEME):"None",
         st=(typeof STORED_SCHEME!=="undefined"&&STORED_SCHEME)?storedLabel(STORED_SCHEME):"None",
         lbl=p.querySelector("#translitPillLabel");
   if(lbl)lbl.textContent = d===st ? "Translit: "+d : "Translit: "+d+" · "+st;   // displayed · stored, the same order as the menu's two columns — but when they name the SAME scheme (the common case: Displayed defaults TO Stored — see the "Displayed IS Stored" note in translit-load.js), say it once rather than "X · X". The label span only — the trailing chevron svg is a persistent sibling.
