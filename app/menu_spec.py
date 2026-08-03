@@ -181,7 +181,7 @@ MENUS: list[dict] = [
         item("Ungroup Multi-word Token", "window.ungroupMWTShortcut && ungroupMWTShortcut()",
              key="g", mods=("cmd", "shift"), sf="arrow.left.and.line.vertical.and.arrow.right",
              fluent="ArrowMaximize", vis="ungroup"),
-        item("Split into Multi-word Token…", "window.convertTokenMWT && convertTokenMWT()",
+        item("Split into Multi-word Token", "window.convertTokenMWT && convertTokenMWT()",   # no ellipsis: a form carrying "=" divides on it directly, so this does not always open the count prompt
              key="s", mods=("cmd", "alt"), sf="square.split.2x1", fluent="SplitHorizontal", vis="convmwt"),   # ⌥⌘S — "split"
         # MOVED off ⌥⌘F, which Find and Replace above now holds. The collision was not survivable:
         # AppKit matches a key equivalent against the FIRST eligible item in menu order, and Find and

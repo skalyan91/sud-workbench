@@ -1832,10 +1832,16 @@ function mwtTokenItems(si,tokId){ const m=mwtAtSel(DOC[si],tokId);
   if(m) return [
     ["Flatten MWT","⌥⌘G",()=>flattenMWT(si,m)],   // ⌥⌘G, matching app/menu_spec.py's "Flatten Multi-word Token" — this row still read ⌥⌘F, the binding that item moved OFF when Find and Replace took ⌥⌘F (menu_spec records why: AppKit matches a key equivalent against the first eligible item in menu order, and Find and Replace sits above Flatten in the Edit menu, so ⌥⌘F here would have flattened nothing). The keystroke has been ⌥⌘G since; only this label was left behind
     ["Ungroup MWT","⇧⌘G",()=>{ const s=DOC[si]; pushUndo(si); s.mwt=(s.mwt||[]).filter(x=>x!==m); if(!s.mwt.length)delete s.mwt; markDirty(); preserveScroll(renderDoc); toast("Multi-word token removed"); }],
-  ];
-  return [["Split into MWT","⌥⌘S",()=>openConvertMWT(si,tokId-1)]]; }   // no ellipsis: a form carrying "=" divides on it directly (openConvertMWT), so the row does not always lead to a prompt — and the Edit menu's own row keeps its own wording
+  ].concat(SPLIT_ROW(si,tokId));   // …AND Split, which inside a range divides the COMPONENT in place and grows the range around it (convertTokenToMWT's `host` branch) rather than nesting a second multi-word token. A component is as splittable as a free token: the range says these tokens are one orthographic word, and says nothing about how finely they are analysed
+  return SPLIT_ROW(si,tokId); }
+// One definition, offered in both states — see mwtTokenItems on why a component gets it too.
+function SPLIT_ROW(si,tokId){ return [["Split into MWT","⌥⌘S",()=>openConvertMWT(si,tokId-1)]]; }   // no ellipsis: a form carrying "=" divides on it directly (openConvertMWT), so the row does not always lead to a prompt   // no ellipsis: a form carrying "=" divides on it directly (openConvertMWT), so the row does not always lead to a prompt — and the Edit menu's own row keeps its own wording
 window.convertTokenMWT=function(){ if(sel.s<0||sel.t<1)return toast("Select a token to convert");
-  if(mwtAtSel(DOC[sel.s],sel.t))return toast("This token is already part of a multi-word token"); openConvertMWT(sel.s,sel.t-1); };
+  /* A COMPONENT IS SPLITTABLE TOO, and this used to refuse it — "already part of a multi-word token" answered a
+     question nobody asked. A range asserts that its tokens spell ONE orthographic word; it says nothing about how
+     finely that word is analysed underneath, and dividing a component is a statement about the analysis. The split
+     grows the host range around the new pieces rather than nesting a second range inside it (convertTokenToMWT). */
+  openConvertMWT(sel.s,sel.t-1); };
 window.flattenTokenMWT=function(){ if(sel.s<0||sel.t<1)return toast("Select a token inside a multi-word token");
   const m=mwtAtSel(DOC[sel.s],sel.t); if(!m)return toast("The selected token is not part of a multi-word token"); flattenMWT(sel.s,m); };
 
