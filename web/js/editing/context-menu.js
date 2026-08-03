@@ -1593,7 +1593,21 @@ function convertTokenToMWT(si,idx,n,parts){ const s=DOC[si], toks=s.tokens; cons
        `punar=janmanām` leaves `punar` standing before a voiced sound, where the pausa is `punaḥ`. The pass
        walks the whole range and declines wherever there is nothing to undo, so running it over an existing
        range costs the components that did not move nothing at all. */
-    if(isSanskritLang() && typeof sandhiSplitPausa==="function") sandhiSplitPausa(si,host?host.from:from);   // the HOST's id where there is one: that is the range the components belong to
+    /* ⚠ RE-PARSE THE PIECES FIRST, because the reversal READS THEIR TAGS and a fresh split has none worth
+       reading. The head keeps the analysis of the WHOLE word it used to be — `punarjanmanām` is an ADJ
+       with lemma `punarjanman`, and neither describes the `punar` just cut out of it — while every other
+       piece is born bare (upos "X", no lemma). desandhi_final asks the UPOS whether this word's pausa
+       column takes a citation form or an inflected one, and the lemma IS the answer for an indeclinable
+       (bdc7333), so running it on inherited tags gets `punaḥ` for a word cited `punar`: the right rule
+       reading the wrong evidence.
+       reparseTokenFields fills lemma/UPOS/FEATS on the tokens that now exist without re-tokenising, so
+       the reversal then reads what the pieces ARE. Chained rather than awaited — the split itself stays
+       synchronous — and it degrades: with no model the reversal still runs, on whatever tags are there. */
+    if(isSanskritLang() && typeof sandhiSplitPausa==="function"){
+      const ids=[]; for(let k=from;k<=to;k++) ids.push(k);
+      const tagged=(hasBridge()&&model&&typeof reparseTokenFields==="function")
+        ? reparseTokenFields(si,ids,{upos:true}).catch(()=>false) : Promise.resolve(false);   // …UPOS included: see the opt in reparseTokenFields — a split piece has no chosen word class to protect, and the reversal's answer turns on it
+      tagged.then(()=>sandhiSplitPausa(si,host?host.from:from)); }   // the HOST's id where there is one: that is the range the components belong to
     if(show.translit) fillTranslit();
     if((ORTHO_SCHEME&&ORTHO_SCHEME!=="none")||isSanskritLang()) fillOrtho();
     toast(`Split into ${n} components at “=”`); }

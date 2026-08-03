@@ -1769,7 +1769,12 @@ async function reparseTokenFields(si,tokIds,opts){
     if(t._trPick){ const tv=miscKV(t.misc,"Translit"); if(tv) keep.Translit=tv; }   // …and a HAND-CORRECTED stored transliteration is the user's in exactly the same way (a Han heteronym, a kanji reading, an unwritten short vowel): it belongs to the annotator, not to the parser. Only conditional because every OTHER token's Translit is derived and SHOULD be regenerated — annotateTranslitMisc, at the end of this function, does that. It also reads a _trPick token's value back FROM MISC, so without this line the correction would be lost here and then replaced by whatever the displayed row happens to hold (a different scheme in general)
     const spAfter=miscKV(t.misc,"SpaceAfter");   // SpaceAfter survives a re-parse VERBATIM — its absence as much as its value (hence the restore below, not a `keep` entry). This function re-parses the sentence's forms JOINED WITH SPACES and never re-tokenises, so the parser has nothing to say about spacing here: taking its answer would silently drop every SpaceAfter=No in the sentence. Only a full re-parse (doInsert/reparse/commitSentText — they replace s.tokens wholesale, from the real text) may regenerate it
     const keepFeats={}; GESTURE_FEATS.forEach(kk=>{ const vv=getFeat(t.feats,kk); if(vv) keepFeats[kk]=vv; });   // Shared/Subj are set by drag gestures, not the parser — a per-token regen must not silently clear them; only a full re-parse (doInsert/reparse/commitSentText, which replace s.tokens wholesale) may do that
-    PARSE_FIELDS.forEach(k=>{ if(k==="xpos"&&XPOS_MIRRORS_UPOS){ t.xpos=t.upos; return; }   // this doc's XPOS just mirrors UPOS → the parser's own xpos guess must never win; keep it downstream of (this token's current) UPOS on every regen, not just at the moment UPOS was edited
+    /* `opts.upos` — TAKE THE PARSER'S WORD CLASS TOO. Off by default, and that default is load-bearing:
+       this function also runs right after a UPOS edit (regenTok), where overwriting UPOS would undo the
+       very edit that called it. A freshly SPLIT token is the case where there is no choice to protect —
+       the head carries the analysis of the whole word it used to be, the other pieces carry a placeholder,
+       and neither was ever chosen for the piece it now sits on. */
+    (opts.upos?PARSE_FIELDS.concat("upos"):PARSE_FIELDS).forEach(k=>{ if(k==="xpos"&&XPOS_MIRRORS_UPOS){ t.xpos=t.upos; return; }   // this doc's XPOS just mirrors UPOS → the parser's own xpos guess must never win; keep it downstream of (this token's current) UPOS on every regen, not just at the moment UPOS was edited
       if(p[k]!=null){ const v=p[k]; t[k]=(v===""&&(k==="deps"||k==="misc"))?"_":v; } });
     Object.keys(keepFeats).forEach(kk=>{ t.feats=setFeat(t.feats,kk,keepFeats[kk]); });
     Object.keys(keep).forEach(kk=>{ t.misc=setMiscKV(t.misc,kk,keep[kk]); });
@@ -1944,6 +1949,13 @@ async function sandhiSplitPausa(si,from){
     let r=null;
     try{ r=await window.pywebview.api.sanskrit_desandhi(c.form,DOCLANG,(c.lemma&&c.lemma!=="_")?c.lemma:"",nxt,pause,c.upos||""); }catch(e){ continue; }   // …and the UPOS, which decides whether the pausa column takes the citation form or the inflected one (Api.sanskrit_desandhi)
     const p=r&&r.form;
+    /* THE PAUSA SPELLING IS RECORDED EITHER WAY, because after this pass a component's form IS its pausa —
+       that is the whole point of the pass — and a token the reversal had nothing to do to is no less
+       entitled to the column than one it changed. One that already HAS a value keeps it: the split divides
+       the head's own Unsandhied where it carries seams, and that is the annotator's. Punctuation is skipped
+       rather than given its own glyph, matching saSyncUnsandhied — a daṇḍa has no citation form. */
+    if(/\p{L}/u.test(c.form) && !miscKV(c.misc,"Unsandhied"))
+      c.misc=setMiscKV(c.misc,"Unsandhied",p||c.form);
     if(!p||p===c.form) continue;                        // ambiguous, or nothing to undo — desandhi_final declines rather than guesses
     c.form=p; any=true;
     c.translit=""; c.translitLemma=""; c.ortho=""; c._trMisc=false; c._trPick=false;   // every derived field spelt the sandhied form
@@ -1953,9 +1965,13 @@ async function sandhiSplitPausa(si,from){
        edit refills it — a hand-typed segmentation is the annotator's and is left alone; the split's own
        division marks itself as ours (see convertTokenToMWT) so that this can replace it. */
     if(typeof msegRefill==="function") msegRefill(c);
-    if(!miscKV(c.misc,"Unsandhied")) c.misc=setMiscKV(c.misc,"Unsandhied",p); }   // …and the pausa spelling is now known for a token that had none recorded; one that DOES keeps it, being the annotator's own
-  if(!any) return false;
-  markDirty();
+  }
+  /* …AND THE RANGE IS RE-FUSED WHETHER OR NOT ANY COMPONENT MOVED. Returning early when nothing needed
+     reverting left the range holding `origForm` — which convertTokenToMWT sets from the form as TYPED,
+     seam and all — so a split whose pieces were already in pausa published `punar=janmanām` as the
+     orthographic word. The fusion is what takes the seam out (translit._sandhi_preclean) and it must run
+     on every split, not only on the ones that happened to change something. */
+  if(any) markDirty();
   await sandhiMwtForms(si,[from]);                      // re-fuse: the range's surface must still be what the text spells
   if(typeof fillTranslit==="function") await fillTranslit();
   if(typeof fillOrtho==="function") await fillOrtho(); else preserveScroll(renderDoc);
