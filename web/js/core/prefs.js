@@ -425,6 +425,14 @@ function sentRTL(sent){ if(sent.rtl!==undefined) return sent.rtl;   // explicit 
 function flipX(c,total){ return RTL ? c.map(x=>total-x) : c; }   // mirror a set of x-centres when right-to-left
 let sel={s:-1,t:0};   // item 9: {s:-1,t:0} IS "nothing selected", and it is the state a document starts in — opening a file (or re-parsing a sentence) no longer jumps the selection to token 1. It used to seed {s:0,t:2}, the sample document's second token, which the boot render then made real before any load path had spoken. Everything that reads a selection already guards for s<0 (selEmphasis returns null → nothing dims, menuState reports has:false, pick() short-circuits), so the empty state renders as a complete document with no accent anywhere; what a LOAD sets instead is the reading focus — see clearSelToBlock in js/io/bridge.js.
 let selRange=null;   // {s, from, to} — a continuous token range shift-selected in a grid, for grouping into an MWT
+/* IS AN INLINE EDITOR OPEN? makeEditable's field (js/editing/context-menu.js) is a bare `<input class="nodeedit">`
+   created over whatever it edits — a diagram node, a transliteration row, an MWT tie — and it carries none of the
+   data-si/ti/col attributes preserveScroll uses to put focus back after a render. So any re-render while it is
+   open destroys it and drops the caret, and the background re-parse a form edit kicks off lands seconds later,
+   typically while the reader has moved on to the next field and is mid-word. Renders that are a CONSEQUENCE of
+   the edit (makeEditable's own, on commit) must still run — hence a flag consulted by the background paths
+   (renderUnlessEditing, js/ui/wiring.js) rather than a block inside preserveScroll itself. */
+let INLINE_EDIT_OPEN=false;
 /* THE CURRENT BLOCK is not the same thing as the selection, and scrolling moves only the first.
    `sel` answers "what is selected" — the token every edit, menu action and keyboard command operates on, and what
    the three-level subtree dimming is computed from (selEmphasis). CURBLOCK answers "which sentence is the reader

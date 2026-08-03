@@ -479,14 +479,19 @@ doInsert=async function(index,text){
     pushUndo();
     const sid=autoInsertSid(index);
     DOC.splice(index,0,{sid,text:(text||"").trim(),tokens:tk.tokens.map(t=>({...t,head:String(t.head)})),mwt:tk.mwt||[]});
-    cascadeSids(index); sel={s:index,t:1}; markDirty(); renderDoc(); pick(index,1,true);
+    /* THE BLOCK, NOT ITS FIRST TOKEN. A sentence that has just appeared is not a token the reader chose —
+       selecting one for them puts the subtree dimming over a tree nobody has looked at yet, and points every
+       sentence-level command (insert, move, delete, the boundary toggles) at a token instead of at the block
+       they just made. `t:0` is the state a block is in when it is merely being read (see the CURBLOCK note in
+       js/core/prefs.js), which is exactly what a fresh parse leaves behind. */
+    cascadeSids(index); sel={s:index,t:0}; markDirty(); renderDoc(); pick(index,0,true);
     await paintTr();                                                                 // transliterate the tokeniser's tokens BEFORE the parse
     const bt=document.getElementById("busyText"); if(bt)bt.textContent="Parsing…"; let r;
     try{ r=await window.pywebview.api.parse_text(text,model); }catch(e){ hideBusy(); return toast("Parse failed: "+e); }finally{ hideBusy(); }
     const b=DOC[index]; b.tokens=r.tokens.map(t=>({...t,head:String(t.head)})); b.mwt=r.mwt||[]; if(!b.mwt.length)delete b.mwt;
     morphAfterReparse(b);   // an inserted sentence's tokens carry no MSeg/MGloss either — seed both tiers from the FEATS this parse produced, so a new block doesn't sit tierless among sentences that all have them (same undo entry as the insert)
     renderDiagramIncremental(index);   // as in applySentText's parsed branch — the freshly parsed block converges on its tree instead of sitting blank
-    markDirty(); renderDoc(); pick(index,1,true);
+    markDirty(); renderDoc(); pick(index,0,true);   // …and again once the parse lands: the block stays the selection (see above)
     toast(r.parsed?`Parsed · ${MODELINFO[model]||model}`:(r.reason?`Whitespace tokeniser (no parse: ${r.reason})`:"Whitespace tokeniser"));
     // ⚠ THE MWT PASS RUNS FIRST, AND IS AWAITED. Both it and fillOrtho re-fuse every range through
     // Api.sanskrit_mwt, and firing them together raced: fillOrtho set m.ortho from its own answer while
@@ -1778,10 +1783,14 @@ async function afterFormEdit(si,tokId,changed){ const s=DOC[si], t=s&&s.tokens[t
     if(isSanskritLang()){ await saSyncUnsandhied(si,tokId);   // …and the pausa spelling, which is a spelling OF the form and so cannot outlive it (see saSyncUnsandhied). BEFORE the re-fuse below: a range's CSL is built from its components' Unsandhied values, so fusing first would rebuild it from the one this edit just invalidated
       const m=(s.mwt||[]).find(x=>tokId>=x.from&&tokId<=x.to); if(m) sandhiMwtForms(si,[m.from]); }   // item 8: re-fuse a containing MWT
   }catch(err){ console.error("afterFormEdit: a derived field failed to refresh",err); }
-  finally{ preserveScroll(renderDoc); }
+  /* …and the redraw itself steps aside for an OPEN EDITOR. Six awaited bridge calls stand between the commit
+     and here, which is ample time for the reader to have clicked into the next field — and this render would
+     then destroy the field they are typing in, to show refreshes of the token they have already left. The
+     edit itself is on screen regardless: makeEditable's own `finish` rendered before calling this. */
+  finally{ renderUnlessEditing(); }
   // item A: THEN re-run the parser in the BACKGROUND for the model-derived fields (lemma/feats/deps); the
   // transliteration is already on screen, so it never waits on the parse.
-  if(hasBridge()&&model) reparseTokenFields(si,[tokId]).then(ok=>{ if(ok)preserveScroll(renderDoc); }); }
+  if(hasBridge()&&model) reparseTokenFields(si,[tokId]).then(ok=>{ if(ok)renderUnlessEditing(); }); }   // …and NOT over an open inline editor: this lands seconds later, by which time the reader is usually typing in the next field (renderUnlessEditing, js/ui/wiring.js)
 // After a token's LEMMA changes, its cached lemma-romanisation (translitLemma) / MISC LTranslit are stale, and so
 // is the morpheme segmentation, which is computed FROM the lemma. Mirrors afterFormEdit's Translit refresh, scoped
 // to the lemma-derived half — the form's own Translit and ortho are untouched, and there's no re-parse (the lemma

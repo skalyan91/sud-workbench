@@ -22,6 +22,14 @@ function preserveScroll(fn){ const doc=document.getElementById("doc");
     innerTops.forEach((p,k)=>{ if(inners[k]){inners[k].scrollTop=p[0]; inners[k].scrollLeft=p[1];} }); }
   if(fd){ const nc=doc.querySelector(`[data-si="${fd.si}"][data-ti="${fd.ti}"][data-col="${fd.col}"]`);
     if(nc){ nc.focus(); if(/INPUT|TEXTAREA/.test(nc.tagName)&&fd.ss!=null){ try{nc.setSelectionRange(fd.ss,fd.se);}catch(e){} } } } }
+/* A RE-RENDER THAT MUST NOT INTERRUPT TYPING. For the background passes — the re-parse a form edit kicks off,
+   which lands seconds after the edit — the render is a nicety, while the caret it would destroy is the reader's
+   place in the next field. makeEditable's own field carries none of the attributes preserveScroll restores focus
+   by (see INLINE_EDIT_OPEN in js/core/prefs.js), so the only way to keep it is not to render over it. Skipped
+   rather than queued: whatever the pass wanted shown, the editor's own commit re-renders on close, and a queued
+   render would fire at the one moment the reader has just started typing somewhere else. */
+function renderUnlessEditing(){ if(typeof INLINE_EDIT_OPEN!=="undefined"&&INLINE_EDIT_OPEN) return false;
+  preserveScroll(renderDoc); return true; }
 let raf=false; function scheduleDoc(){if(raf)return; raf=true; requestAnimationFrame(()=>{raf=false; preserveScroll(renderDoc);});}
 function refresh(){ preserveScroll(renderDoc); if((ORTHO_SCHEME&&ORTHO_SCHEME!=="none")||isSanskritLang()) fillOrtho(); }   // routine re-renders keep the scroll position; item 17: a newly-added/duplicated block picks up the active SCRIPT (and Sanskrit MWT sandhi) right away — fillOrtho only re-renders if it filled something
 function updateViewOptions(){

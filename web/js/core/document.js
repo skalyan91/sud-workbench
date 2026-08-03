@@ -1492,8 +1492,14 @@ function buildBlock(i,ctx){ const s=DOC[i];
       else if(isSanskritLang()){ txt.style.cursor="text"; txt.title+=" — click to edit the transliteration";
         // …onto whichever row is HOSTING the field — the editable `# text` where it is shown, the CSL row
         // where that has taken its place. `fieldHost` is assigned as each is built, below.
-        txt.addEventListener("click",()=>{ const h=fieldHost||scriptTransLine; if(!h)return;
-          if(h.hidden){ h.hidden=false; alignInlineStart(h,b); capTransWidth(h); }
+        /* ⚠ ONLY WHEN THE ROW IS HIDDEN. This affordance exists because a collapsed row is the only inline
+           surface for editing `# text` in script mode and there is otherwise no way to reach it — "click the
+           shown row to get at the value that isn't shown". Once the row IS shown it can be clicked directly,
+           and moving the caret out of the line under the pointer and into a different one is not what a click
+           on a read-only display line asks for: it steals a click the reader may have meant as a plain
+           deselect, and it does so precisely when the thing it would reveal is already in front of them. */
+        txt.addEventListener("click",()=>{ const h=fieldHost||scriptTransLine; if(!h||!h.hidden) return;
+          h.hidden=false; alignInlineStart(h,b); capTransWidth(h);
           h.focus(); }); } }
     else wireStext(txt);
     const ctrl=document.createElement("div"); ctrl.className="sctrl";

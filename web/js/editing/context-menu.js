@@ -797,6 +797,7 @@ document.addEventListener("pointerdown",e=>{ window.LAST_POINTER_EL=e.target; wi
 function hideOrig(el){ if(el.namespaceURI===SVGNS){ el.style.fill="transparent"; el.style.stroke="transparent"; } else el.style.color="transparent";
   const blk=el.closest&&el.closest(".sblock[data-i]"); if(blk&&typeof invalidateDiaSentence==="function") invalidateDiaSentence(+blk.getAttribute("data-i")); }
 function makeEditable(el,obj,key,after,rtl,relocate,nav,allowEmpty,caretHint){ if(!el)return; const orig=obj[key]||"", pre=snap();
+  INLINE_EDIT_OPEN=true;   // …and cleared in `finish` below, so a background re-render cannot pull the caret out of this field (see the flag in js/core/prefs.js)
   const inp=document.createElement("input"); inp.className="nodeedit"+(key==="form"?formDeco(obj):""); inp.value=orig;   // item 4: while editing a token FORM, keep its Typo strikethrough on the edit field so the marker doesn't blink off mid-edit (the Foreign italics come across via applyFont, which copies the form's computed font-style)
   let fontStr; const applyFont=e=>{ const cs=getComputedStyle(e);   // `e` lives inside .sblock{zoom:var(--fs)} but `inp` is appended to <body>, OUTSIDE that zoomed context — getComputedStyle reports the AUTHORED font-size (zoom doesn't rewrite it), so it must be scaled by FS by hand or the field renders at the un-zoomed size while the diagram text it's covering renders at size×FS
     const sizePx=(parseFloat(cs.fontSize)||0)*FS+"px";
@@ -844,6 +845,7 @@ function makeEditable(el,obj,key,after,rtl,relocate,nav,allowEmpty,caretHint){ i
   const finish=save=>{ if(inp._closed)return; inp._closed=true; const v=inp.value.trim(), changed=save&&(v||allowEmpty)&&v!==orig;   // item 2: gloss/morphemic tiers pass allowEmpty → an emptied value COMMITS (clears the tier) instead of reverting; the Form editor keeps allowEmpty falsy, so a form can't be blanked
     obj[key]=changed?v:orig;   // commit the trimmed value, or revert the live edits on cancel/no-op
     if(changed){ UNDO.push(pre); if(UNDO.length>80)UNDO.shift(); REDO.length=0; updateUndoUI(); markDirty(); }   // one undo step for the whole edit (the snapshot from before it began)
+    INLINE_EDIT_OPEN=false;   // BEFORE the render below: that one is this edit's own consequence and must run
     document.removeEventListener("scroll",place,{capture:true}); inp.remove(); preserveScroll(renderDoc); if(after)after(changed); };   // pass `changed` so a commit-only hook (e.g. MGloss→FEATS back-fill) can distinguish a real commit from a cancel/no-op
   inp.addEventListener("input",reflow);
   inp.addEventListener("keydown",ev=>{
