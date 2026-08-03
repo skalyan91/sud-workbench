@@ -91,12 +91,19 @@ def csl_forms(forms, unsandhied=None, feats=None, mwt=None, lemmas=None) -> list
     n = len(forms or [])
     if not n or _V is None:
         return [""] * n
-    # pausa in, per the module docstring — with the CLITIC SEAM taken out first. "=" is written into a
-    # component's FORM as a note to the splitter (openConvertMWT reads it to divide the token without
-    # asking how many pieces), not as a letter of the word, so a CSL line built from a form still carrying
-    # it read `vartm' â-punar=janmanām`. translit._sandhi_preclean strips it on the fusion path for the
-    # same reason; this is the display path's half of that.
-    out = [str((unsandhied[i] if unsandhied and i < len(unsandhied) and unsandhied[i] else forms[i]) or "").replace("=", "")
+    # pausa in, per the module docstring — with an EDGE seam taken out, and an interior one KEPT.
+    # "=" is written into a form as a note to the splitter (openConvertMWT reads it to divide the token
+    # without asking how many pieces) rather than as a letter of the word, so it must not survive into
+    # anything that speaks for the whole FUSED word: translit._sandhi_preclean drops it entirely on the
+    # fusion path, which is what keeps it out of the range's form, its script rendering and `# text`.
+    # ⚠ THAT IS NOT THE SAME QUESTION AS WHAT ONE TOKEN'S OWN LINE SHOWS. A seam INSIDE a token is a mark
+    # on that token, and its CSL is that token's own rendering — stripping it there hid the very mark the
+    # user had just typed the moment the display was converted, with nothing to say where it had gone.
+    # Only the edges come off, because those are the positions the junction logic reads: join_pair looks
+    # for the LAST vowel of the left word and the FIRST of the right, so a leading or trailing "=" would
+    # stand between two words and be read as a letter of one of them, while an interior one sits where
+    # neither ever looks and passes through untouched.
+    out = [str((unsandhied[i] if unsandhied and i < len(unsandhied) and unsandhied[i] else forms[i]) or "").strip("=")
            for i in range(n)]
     same = {}                          # token id → the range it belongs to, for the `internal` flag
     for a, b in (mwt or []):

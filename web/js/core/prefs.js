@@ -371,7 +371,19 @@ function msegStrip(txt,post,pre){ let v=(txt||"").replace(/[꞊=⹀]+$/,"");
   if(post) v=v.replace(/-+$/,"");
   if(pre) v=v.replace(/^[꞊=⹀-]+/,"");
   return v; }
-function tierText(o,tier){ return o?miscKV(o.misc,TIER_MISC[tier]).replace(INVISIBLE_RE,"").replace(GLOSS_WS_RE,""):""; }   // strip invisible/stray-whitespace chars at the shared read accessor, not just at render/encode time — every direct miscKV(...,"MGloss"/"MSeg") read used to bypass glossEnc/glossAbbrSegments' stripping (e.g. retargetGlossAbbrev reading+rewriting raw MISC on a FEATS-driven sync), letting a stray invisible/CR-LF-tab char from old data persist across edits that never touch the field itself
+/* TWO ADJACENT MORPHEME BOUNDARIES ARE ONE BOUNDARY. `-` separates morphemes in MSeg and MGloss, so `--`
+   states the same division twice and lines the two tiers up one slot apart from the form they gloss. It is
+   generated rather than typed — a flatten whose left piece already ended in `-` met a joiner that adds one
+   (`x-` + `y` → `x--y`), and the abbreviation reassignment on a split can put a `-GEN` beside a piece that
+   carries its own trailing mark — so the fix belongs where every consumer reads, and is applied at the WRITE
+   sites too so the file does not keep a doubled mark the display has quietly stopped showing.
+   ⚠ NOT for `gloss`. That tier is free-running translation prose, where `--` is a perfectly ordinary way to
+   type a dash and merging it would silently edit the user's words. The morphemic tiers are the ones in which
+   `-` is a piece of notation rather than a character. */
+// Takes the tier id ("mgloss") or the MISC key ("MGloss") — the write sites have one, the read accessor the
+// other, and a normaliser that only recognised one of them would have covered only half of them.
+function tierDashFix(v,tier){ return /^gloss$/i.test(tier||"")?String(v||""):String(v||"").replace(/-{2,}/g,"-"); }
+function tierText(o,tier){ return o?tierDashFix(miscKV(o.misc,TIER_MISC[tier]).replace(INVISIBLE_RE,"").replace(GLOSS_WS_RE,""),tier):""; }   // strip invisible/stray-whitespace chars at the shared read accessor, not just at render/encode time — every direct miscKV(...,"MGloss"/"MSeg") read used to bypass glossEnc/glossAbbrSegments' stripping (e.g. retargetGlossAbbrev reading+rewriting raw MISC on a FEATS-driven sync), letting a stray invisible/CR-LF-tab char from old data persist across edits that never touch the field itself
 // a Leipzig glossing abbreviation: a run of [A-Z0-9]+ bounded on BOTH sides by a punctuation mark or the edge of
 // the string (so "PST" in "run.PST", and "3SG" itself in "PST-3SG", both qualify; "St" or a bare word doesn't).
 // Small-capped via c2sc. The SAME pattern (as a whole-token test) also decides which already-split MGloss tokens

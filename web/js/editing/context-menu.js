@@ -1540,7 +1540,7 @@ function convertTokenToMWT(si,idx,n,parts){ const s=DOC[si], toks=s.tokens; cons
       if(v.indexOf("=")<0){ if(key!=="MGloss"||!mglossAbbrOnly(v)) return;
         const last=all.length-1, to=/^[-.]/.test(v)?last:(/[-.]$/.test(v)?0:-1);
         if(to<=0) return;                                   // no mark, or already on the first component
-        all[0].misc=setMiscKV(all[0].misc,key,""); all[to].misc=setMiscKV(all[to].misc,key,v); return; }
+        all[0].misc=setMiscKV(all[0].misc,key,""); all[to].misc=setMiscKV(all[to].misc,key,tierDashFix(v,key)); return; }
       const bits=v.split("="); if(bits.length!==all.length) return;
       /* AN ABBREVIATION-ONLY PIECE BELONGS TO THE MORPHEME ITS HYPHEN POINTS AT, not to the component it
          happens to sit opposite. `-LOC` is the categories of the word BEFORE it and `DEF-` those of the
@@ -1553,7 +1553,10 @@ function convertTokenToMWT(si,idx,n,parts){ const s=DOC[si], toks=s.tokens; cons
         if(!mglossAbbrOnly(bit)) continue;
         if(/^[-.]/.test(bit) && k>0){ bits[k-1]+=bit; bits[k]=""; }          // leads with its mark → attaches leftward
         else if(/[-.]$/.test(bit) && k<bits.length-1){ bits[k+1]=bit+bits[k+1]; bits[k]=""; } } }   // trails → attaches rightward
-      all.forEach((c,k)=>{ c.misc=setMiscKV(c.misc,key,bits[k]); }); });
+      // …and the two marks meeting COLLAPSE: the piece being moved carries the boundary it points across, and
+      // the piece it lands on may already carry one (`janman-` taking `-GEN.PL.M` → `janman--GEN.PL.M`). One
+      // boundary, written once — see tierDashFix, which also catches whatever reaches MISC by another route.
+      all.forEach((c,k)=>{ c.misc=setMiscKV(c.misc,key,tierDashFix(bits[k],key)); }); });
     /* …and everything DERIVED FROM A FORM is now stale: the head's script glyph and romanisation render
        the WHOLE `pra=kāśa` it no longer is, and the new components have none at all. Clearing them is
        what makes the fills recompute — the same move afterFormEdit makes when a form changes under it —
@@ -1636,9 +1639,12 @@ function flattenMWT(si,m){ const s=DOC[si], toks=s.tokens; if(!m)return; pushUnd
   const tierJoin=k=>{ let out="";
     comps.forEach(t=>{ const v=msegStrip(tierText(t,k)); if(!v) return;
       const lead=/^[-.]/.test(v);
-      if(out) out += lead ? v : "-"+v;
+      /* …and no separator where ONE IS ALREADY THERE, on either side. The `lead` test caught a piece that
+         brings its own mark; a piece whose PREDECESSOR ends in one was the other half of the same rule and
+         was missing, so `x-` + `y` came out `x--y`. tierDashFix normalises what still slips through. */
+      if(out) out += (lead||/-$/.test(out)) ? v : "-"+v;
       else out = (!lead && k==="mgloss" && mglossAbbrOnly(v)) ? "-"+v : v; });
-    return out; };
+    return tierDashFix(out,k); };
   survivor.lemma=comps.map(t=>(t.lemma&&t.lemma!=="_")?t.lemma:"").join("")||survivor.form;
   /* ⚠ THE COMPONENTS' OWN VALUES FIRST, not the RANGE's. `m.translit` is a rendering of a RANGE, and a
      range's rendering marks the seams between its members — under CSL that is literally what it is for
