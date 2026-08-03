@@ -1505,11 +1505,30 @@ function convertTokenToMWT(si,idx,n,parts){ const s=DOC[si], toks=s.tokens; cons
      pieces is describing something else, and slicing it on a count that does not match would scatter one
      morpheme's gloss across two tokens. It is left whole on the head instead, where it was. */
   if(parts){ const all=[head].concat(comps);
+    // THE LEMMA DIVIDES TOO, on the same terms: a lemma written `pra=kāśa` states the same boundary the
+    // form does, and leaving it whole on the head would give the first component the whole word's lemma
+    // and the rest none. Guarded on the piece count exactly as the tiers are — a lemma that splits into
+    // a different number is not describing this division, and stays where it was.
+    const lem=(head.lemma&&head.lemma!=="_")?head.lemma:"";
+    if(lem.indexOf("=")>=0){ const lb=lem.split("=");
+      if(lb.length===all.length && lb.every(x=>x)) all.forEach((c,k)=>{ c.lemma=lb[k]; }); }
     ["MSeg","MGloss"].forEach(key=>{ const v=miscKV(head.misc,key); if(!v||v.indexOf("=")<0) return;
       const bits=v.split("="); if(bits.length!==all.length) return;
-      all.forEach((c,k)=>{ c.misc=setMiscKV(c.misc,key,bits[k]); }); }); }
+      all.forEach((c,k)=>{ c.misc=setMiscKV(c.misc,key,bits[k]); }); });
+    /* …and everything DERIVED FROM A FORM is now stale: the head's script glyph and romanisation render
+       the WHOLE `pra=kāśa` it no longer is, and the new components have none at all. Clearing them is
+       what makes the fills recompute — the same move afterFormEdit makes when a form changes under it —
+       and the range's own cached renderings go with them, being renderings of a surface that has only
+       just come into existence. */
+    all.forEach(c=>{ c.ortho=""; c.translit=""; c.translitLemma=""; c._trMisc=false; c._trPick=false;
+      c.misc=setMiscKV(setMiscKV(c.misc,"Translit",""),"LTranslit",""); });
+    const rng=(s.mwt||[]).find(x=>x.from===from); if(rng){ rng.ortho=""; rng.translit=""; rng.miast=""; } }
   markDirty(); selRange=null; sel={s:si,t:from}; preserveScroll(renderDoc); pick(si,from,false);
-  toast(`Token split into a ${n}-part multi-word token — fill in the component words`); }
+  if(parts){   // the components are already spelt, so the only thing left to refresh is what is derived from them
+    if(show.translit) fillTranslit();
+    if((ORTHO_SCHEME&&ORTHO_SCHEME!=="none")||isSanskritLang()) fillOrtho();
+    toast(`Split into ${n} components at “=”`); }
+  else toast(`Token split into a ${n}-part multi-word token — fill in the component words`); }
 
 // flatten a multi-word token back to a single token: its form = the MWT's surface form, its POS/deprel/
 // head/other attributes = those of the MWT's head component (the one whose head lies outside the range)
@@ -1661,8 +1680,7 @@ function openConvertMWT(si,idx){ pick(si,idx+1,false); const rtl=sentRTL(DOC[si]
      not a division anybody meant, so those fall through to the prompt rather than producing a blank token. */
   const t0=(DOC[si]&&DOC[si].tokens[idx])||null, raw=(t0&&t0.form)||"";
   if(raw.indexOf("=")>=0){ const parts=raw.split("=");
-    if(parts.length>1 && parts.every(x=>x)){ convertTokenToMWT(si,idx,parts.length,parts);
-      toast(`Split into ${parts.length} components at “=”`); return; } }
+    if(parts.length>1 && parts.every(x=>x)){ convertTokenToMWT(si,idx,parts.length,parts); return; } }   // it announces the split itself
   countPrompt(x,y,{rtl, title:`Split token ${idx+1}`, min:2, value:2,
     hint:"Component tokens<br>(2 or more).", ok:n=>convertTokenToMWT(si,idx,n)}); }   // explicit <br> → the parenthetical always drops to its own line
 // the MWT entries for a token menu (grid or diagram): flatten + ungroup when the token is in an MWT, else split
