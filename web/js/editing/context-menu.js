@@ -1567,6 +1567,13 @@ function convertTokenToMWT(si,idx,n,parts){ const s=DOC[si], toks=s.tokens; cons
     const rng=(s.mwt||[]).find(x=>x.from===from); if(rng){ rng.ortho=""; rng.translit=""; rng.miast=""; } }
   markDirty(); selRange=null; sel={s:si,t:from}; preserveScroll(renderDoc); pick(si,from,false);
   if(parts){   // the components are already spelt, so the only thing left to refresh is what is derived from them
+    /* …EXCEPT THE LAST ONE'S ENDING. The token being split was its own orthographic word and so carried
+       the external sandhi the FOLLOWING word imposed; its components are stored in pausa. Only the last
+       piece is affected — the interior junctions are compound-internal — and only the backend can undo it,
+       so this goes on the bridge and is deliberately not awaited, exactly as sandhiFlattenLemma is: a split
+       is a synchronous editing command and must not hold the selection while a call is out. It re-fuses the
+       range afterwards, so the surface the text spells is unchanged either way. */
+    if(isSanskritLang() && typeof sandhiSplitLast==="function") sandhiSplitLast(si,from);
     if(show.translit) fillTranslit();
     if((ORTHO_SCHEME&&ORTHO_SCHEME!=="none")||isSanskritLang()) fillOrtho();
     toast(`Split into ${n} components at “=”`); }

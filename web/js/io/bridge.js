@@ -1823,6 +1823,37 @@ async function sandhiMwtForms(si,froms){ if(!isSanskritLang()||!hasBridge()||!DO
   if(any){ markDirty(); if((ORTHO_SCHEME&&ORTHO_SCHEME!=="none")||isSanskritLang()) fillOrtho(); else preserveScroll(renderDoc); }
   return any; }
 
+/* THE LAST COMPONENT OF A FRESHLY SPLIT SANSKRIT RANGE, PUT BACK INTO PAUSA.
+   A token that is its own orthographic word carries its SANDHIED surface in FORM; a token inside a
+   multi-word token is stored UNSANDHIED (the DCS convention — CLAUDE.md). So the moment a split turns one
+   into the other, the piece holding the end of the word is still spelt as the FOLLOWING word made it spell
+   itself, and only that piece is: the interior junctions are compound-internal, and whatever the preceding
+   word did is written on the preceding word. `janmanāṃ` becomes `janmanām`, `bhṛto` becomes `bhṛtaḥ`.
+   Nothing is lost by it — the range's own form still spells what the text spells, because sandhiMwtForms
+   re-fuses it from the components and the reversal is exactly what that fusion undoes (measured: 68 of 68
+   ranges in both samples reproduce their original surface after a revert-and-re-fuse).
+   The neighbour and the pause come from saMwtContext, the same reading sandhiMwtForms fuses against, so the
+   two cannot disagree about which word follows this one or whether a daṇḍa stands between them. */
+async function sandhiSplitLast(si,from){
+  if(!isSanskritLang()||!hasBridge()||!DOCLANG) return false;
+  const s=DOC[si]; if(!s) return false;
+  const m=(s.mwt||[]).find(x=>x.from===from); if(!m) return false;
+  const comps=s.tokens.slice(m.from-1,m.to).filter(t=>t.form); if(comps.length<2) return false;
+  const last=comps[comps.length-1], cx=saMwtContext(s,m);
+  let r=null;
+  try{ r=await window.pywebview.api.sanskrit_desandhi(last.form,DOCLANG,(last.lemma&&last.lemma!=="_")?last.lemma:"",cx.next,cx.pause); }catch(e){ return false; }
+  const p=r&&r.form;
+  if(!p||p===last.form) return false;                 // ambiguous, or nothing to undo — desandhi_final declines rather than guesses
+  last.form=p;
+  last.translit=""; last.translitLemma=""; last.ortho=""; last._trMisc=false; last._trPick=false;   // every derived field spelt the sandhied form
+  last.misc=setMiscKV(setMiscKV(last.misc,"Translit",""),"LTranslit","");
+  if(!miscKV(last.misc,"Unsandhied")) last.misc=setMiscKV(last.misc,"Unsandhied",p);   // …and the pausa spelling is now known for a token that had none recorded; one that DOES keeps it, being the annotator's own
+  markDirty();
+  await sandhiMwtForms(si,[from]);                    // re-fuse: the range's surface must still be what the text spells
+  if(typeof fillTranslit==="function") await fillTranslit();
+  if(typeof fillOrtho==="function") await fillOrtho(); else preserveScroll(renderDoc);
+  return true; }
+
 /* THE LEMMA OF A FLATTENED SANSKRIT MULTI-WORD TOKEN — its components' lemmas FUSED BY SANDHI.
    Flatten makes one word out of n, so its lemma is the n lemmas made one word, and in Sanskrit that is a
    sandhi question rather than a concatenation: `ātman`+`vid` is `ātmavid`, `manas`+`ratha` is

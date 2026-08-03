@@ -1244,6 +1244,102 @@ def _boundary_sandhi(inner: str, prev: str, nxt: str, last_lemma, last_form,
     return inner
 
 
+# The pausa endings a word-final sandhi can have come FROM, as (observed final, pausa final) pairs.
+# Not a rule set of its own — each candidate is a GUESS that `desandhi_final` then puts back through
+# `_boundary_sandhi` and keeps only if it reproduces the surface exactly, so this list cannot drift out
+# of step with the forward transform the way a hand-written inverse would.  Ordered longest-first per
+# observed final so a two-character ending is tried before its own last character.
+_DESANDHI_FINALS = [
+    ("o", "aḥ"),                       # -aḥ + voiced  → -o        (the commonest of the lot)
+    ("ā", "āḥ"),                       # -āḥ + voiced  → -ā
+    ("r", "ḥ"),                        # rutva: -Vḥ + voiced → -Vr  (…and `punar` really ends in -r: _is_rstem)
+    ("ś", "ḥ"), ("ṣ", "ḥ"), ("s", "ḥ"),   # visarga before a voiceless c/ṭ/t → the matching sibilant
+    ("ṃ", "m"),                        # -m + consonant → -ṃ
+    ("y", "i"), ("y", "ī"),            # yaṇ: iti + vowel → ity
+    ("v", "u"), ("v", "ū"),
+    ("r", "ṛ"),
+]
+# The endings NO Sanskrit word carries in pausa.  This is what settles the reversal, because the forward
+# transform is idempotent and so leaves identity looking like a valid answer for every input: a word
+# ending `-o`, `-ś`, `-ṣ`, `-s`, `-ṃ`, `-y` or `-v` in a running text has DEFINITELY been altered by what
+# follows it (a citation form ends in a vowel, a visarga, `-m`, or one of the stops/nasals), so identity
+# is inadmissible there and the verified candidate wins.  Everything else — `-ā`, `-r`, `-m`, a stop — can
+# stand as it is, and is left alone unless the lemma positively says otherwise.
+_PAUSA_IMPOSSIBLE = frozenset("ośṣsṃyv")
+
+
+def desandhi_final(form: str, lang: str = "sa", lemma=None, nxt_word: str = "",
+                   pause_after: bool = False) -> str:
+    """Undo the non-coalescent external sandhi at a word's RIGHT edge — the inverse of the right-hand
+    half of `_boundary_sandhi`, and used when a token is SPLIT into a multi-word token.
+
+    A token that is its own orthographic word is stored with its SANDHIED surface in FORM (the DCS
+    convention — see CLAUDE.md), but a token INSIDE a multi-word token is stored in PAUSA.  So dividing
+    one into components has to give the LAST of them back the ending the following word imposed on it:
+    `janmanāṃ` before a consonant is `janmanām` in pausa, `bhṛto` before a voiced sound is `bhṛtaḥ`.
+    Only the last: the interior junctions are compound-internal and the pieces are already written as
+    the annotator typed them, and the left edge's sandhi is written on the word BEFORE this one.
+
+    ⚠ VERIFIED, NEVER GUESSED, and it declines rather than invents.  Each candidate ending is put back
+    through `_boundary_sandhi` against the same neighbour, and accepted only where that reproduces the
+    observed surface EXACTLY.  Where two candidates both reproduce it the reversal is genuinely
+    ambiguous — `-o` before a voiced consonant is either an original `-o` or a sandhied `-aḥ`, and only
+    the stem tells them apart — so the LEMMA is asked to settle it, and where it cannot the form is
+    returned untouched.  Leaving a word in its sandhied spelling is a visible, correctable annotation;
+    silently rewriting the wrong one is neither.
+
+    Returns the form IN THE SCRIPT IT WAS GIVEN IN, exactly as `sandhi_join` does."""
+    f = _ud.normalize("NFC", form or "")
+    if not f or _canon_lang(_norm(lang)) != "sa":
+        return form
+    script = sa_stored_script([f])
+    if script:                                     # reckon in IAST, hand back what we were given
+        f = _render_one(f, lang, "iast") or f
+    lm = lemma or None
+    if lm and script:
+        lm = _render_one(lm, lang, "iast") or lm
+    nx = nxt_word or ""
+    if nx and script:
+        nx = _render_one(nx, lang, "iast") or nx
+
+    def forward(p: str) -> str:
+        return _ud.normalize("NFC", _boundary_sandhi(p, "", nx, lm, p, pause_after))
+
+    # ⚠ THE FORWARD TRANSFORM IS IDEMPOTENT, so `forward(f) == f` proves NOTHING: re-applying sandhi to
+    # an already-sandhied surface changes nothing, and testing for that rejected every real reversal in
+    # both samples.  Identity is therefore always a candidate, and what decides between it and a genuine
+    # reversal is which endings a word can actually HAVE in pausa.
+    hits = []
+    for seen, pausa in _DESANDHI_FINALS:
+        if not f.endswith(seen):
+            continue
+        cand = f[: -len(seen)] + pausa
+        if forward(cand) == f and cand not in hits:
+            hits.append(cand)
+    if not hits:
+        return form
+    tail = f[-1]
+    if tail not in _PAUSA_IMPOSSIBLE:
+        # The surface could be the pausa form as it stands — `-ā` ends countless words in citation, and
+        # `-r` ends every r-stem.  Depart from it only where the LEMMA licenses the departure: an r-stem
+        # keeps its -r (`punar`), an s-stem's -r came from a visarga (`punaḥ`).  _is_rstem is the same
+        # helper app/sa_notation.py defers to, so the app has ONE answer about which stems those are.
+        if tail == "r" and lm is not None and not _is_rstem(f[:-1], lm):
+            hits = [h for h in hits if h.endswith("ḥ")] or []
+        else:
+            return form
+    if len(hits) > 1:
+        # i/ī and u/ū: the yaṇ semivowel remembers no length, so ask the lemma how the word ends and
+        # fall back to the SHORT vowel, which is much the commoner of each pair.
+        lv = (lm or "")[-1:]
+        pick = [h for h in hits if h[-1:] == lv]
+        hits = pick or [h for h in hits if h[-1:] in ("i", "u", "aḥ"[-1])] or hits
+    if len(hits) != 1:
+        return form                                # still undecided → say nothing
+    out = hits[0]
+    return (_render_one(out, lang, script) or out) if script else out
+
+
 def sandhi_to_script(forms, lang: str, scheme: str = "", lemmas=None, word_sep: str = "",
                      prev: str = "", nxt_word: str = "", pause_after: bool = False, bound=None) -> str:
     """Sanskrit MWT DISPLAY form: fuse the component forms by sandhi, THEN convert the fused string
