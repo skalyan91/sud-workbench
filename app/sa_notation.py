@@ -91,8 +91,12 @@ def csl_forms(forms, unsandhied=None, feats=None, mwt=None, lemmas=None) -> list
     n = len(forms or [])
     if not n or _V is None:
         return [""] * n
-    # pausa in, per the module docstring
-    out = [str((unsandhied[i] if unsandhied and i < len(unsandhied) and unsandhied[i] else forms[i]) or "")
+    # pausa in, per the module docstring — with the CLITIC SEAM taken out first. "=" is written into a
+    # component's FORM as a note to the splitter (openConvertMWT reads it to divide the token without
+    # asking how many pieces), not as a letter of the word, so a CSL line built from a form still carrying
+    # it read `vartm' â-punar=janmanām`. translit._sandhi_preclean strips it on the fusion path for the
+    # same reason; this is the display path's half of that.
+    out = [str((unsandhied[i] if unsandhied and i < len(unsandhied) and unsandhied[i] else forms[i]) or "").replace("=", "")
            for i in range(n)]
     same = {}                          # token id → the range it belongs to, for the `internal` flag
     for a, b in (mwt or []):

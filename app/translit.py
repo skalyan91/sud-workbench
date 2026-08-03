@@ -989,6 +989,14 @@ def _sandhi_preclean(w: str) -> str:
     for q in _APOS_QUOTES:                                    # (a) single/double apostrophes (elision marks), ASCII + curly —
         w = w.replace(q, "")                                  #     DELETED before gluing, so an elided vowel-final word (vartm”)
     w = w.replace("-", "")                                    #     surfaces consonant-final and glues on (vartm → vartmāpunar…)
+    # …and "=", the CLITIC seam, for the same reason the hyphen goes: it marks a boundary INSIDE a word, so
+    # it is not a letter of the word and must not reach the fused surface.  It is written into a component's
+    # FORM on purpose — openConvertMWT reads it to split the token without asking how many pieces — and while
+    # it sits there everything derived from that form used to carry it: the range fused to
+    # `vartmāpunar=janmanām`, its Devanagari rendering to `वर्त्मापुनर्=जन्मनाम्`, and `# text` with them.
+    # The three marks now come out together, which is what makes typing a seam a note to the SPLITTER rather
+    # than an edit to the word.
+    w = w.replace("=", "")
     if any(c != "|" for c in w):                             # (a) word-INTERNAL pipes; keep a bare "|"/"||" daṇḍa
         w = w.replace("|", "")
     return w
