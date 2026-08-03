@@ -1398,9 +1398,22 @@ function buildBlock(i,ctx){ const s=DOC[i];
          instead of a second editing path beside it. The blur listener restores the CSL after an edit that
          did NOT commit (wireStext's own blur repaints dataset.orig, which is the raw text, not the CSL);
          a commit re-renders the block and recomputes the line anyway, so it needs no restoring. */
-      if(cslTop){ wireStext(txt); txt.textContent=line||s.text||"(empty)";
-        txt.addEventListener("blur",()=>{ const again=runningLine(s,i,u=>bform(u.mwt||u.tok)," ");
-          if(again) txt.textContent=again; }); }
+      /* WHERE THE FIELD OPENS, in one rule: exactly where the value being edited is already shown.
+         `.strans-orig` is the editable `# text`; it is hidden whenever something else has taken the
+         slot (Displayed "None", or CSL — see its own `hidden` assignment below). So:
+           · row SHOWN  → the transliteration is on screen and the field belongs ON it. Clicking the
+                          script line just puts the caret there; the row is contenteditable in place,
+                          so nothing new is drawn and nothing appears BETWEEN the two lines.
+           · row HIDDEN → there is no transliteration to overlay, so the script line becomes the field
+                          itself — wireStext paints the derived line at rest and the raw `# text` on
+                          focus, which is the same mechanism the CSL line already uses and the same
+                          contract a token has (read the derived string, edit the underlying one).
+         One predicate for both halves, so they cannot disagree about which row is live. */
+      const inPlace=isSanskritLang() && (cslTop||cslRow||!show.translit);
+      if(inPlace){ const resting=line||s.text||"(empty)";
+        wireStext(txt); txt.textContent=resting;
+        txt.addEventListener("blur",()=>{ txt.textContent=resting; });   // a COMMIT re-renders the block and recomputes the line; this is the cancelled/unchanged case, which wireStext would otherwise leave showing the raw text
+        txt.style.cursor="text"; }
       // Sanskrit-only: Displayed transliteration "None" (trPick("")) collapses the .strans-orig edit line below
       // (see the scriptTransLine.hidden assignment further down) — the row the user asked to hide is also the
       // ONLY inline surface for editing `# text` in script mode (the script line itself is read-only, undecorated
@@ -1410,8 +1423,10 @@ function buildBlock(i,ctx){ const s=DOC[i];
       // Gated on the row being HIDDEN, not on the reason it is hidden. "None" was one reason; CSL is now
       // another (it takes the visible slot — see the scriptTransLine assignment below), and without this
       // the original text became uneditable inline for as long as CSL was displayed.
-      if(isSanskritLang() && !cslTop && (!show.translit||cslRow)){ txt.style.cursor="text"; txt.title+=" — click to edit the transliteration";
-        txt.addEventListener("click",()=>{ if(!scriptTransLine)return; scriptTransLine.hidden=false; alignInlineStart(scriptTransLine,b); capTransWidth(scriptTransLine); scriptTransLine.focus(); }); } }
+      else if(isSanskritLang()){ txt.style.cursor="text"; txt.title+=" — click to edit the transliteration";
+        txt.addEventListener("click",()=>{ if(!scriptTransLine)return;
+          if(scriptTransLine.hidden){ scriptTransLine.hidden=false; alignInlineStart(scriptTransLine,b); capTransWidth(scriptTransLine); }
+          scriptTransLine.focus(); }); } }
     else wireStext(txt);
     const ctrl=document.createElement("div"); ctrl.className="sctrl";
     SCTRL(i).forEach(([g,ti,kbd,fn,d])=>{

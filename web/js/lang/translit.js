@@ -295,7 +295,13 @@ function saGlyphLatin(){ const g=saGlyphScript(); return !g||g==="iast"; }
    just the text copied. A DEVANAGARI-stored file is untouched by this — there IAST genuinely romanises,
    so the displacement earns its place. Nothing else is affected: every Brahmic script changes the
    glyphs, and "Original" never displaced anything. */
-function saScriptNoop(){ return isSanskritLang() && ORTHO_SCHEME==="iast" && !DOCSCRIPT && !saCslTop(); }
+function saScriptNoop(){ if(!isSanskritLang() || saCslTop()) return false;
+  // A rendering into the script the file is ALREADY WRITTEN IN changes nothing, whichever script that is:
+  // "Latin" over an IAST-stored file, Devanagari over a Devanagari-stored one. Both drew a derived top
+  // line identical to `# text` and pushed the real text into the row beneath, where it read as the same
+  // line twice — measured on samples/brihat_jataka_devanagari.conllu, whose row beneath the Devanagari
+  // was character-for-character the Devanagari above it. "" storage means IAST, hence the default.
+  return ORTHO_SCHEME === (DOCSCRIPT || "iast"); }
 /* …unless CSL is what would fill it. Asking for Latin as the SCRIPT and CSL as the transliteration is
    asking for the sentence itself in CSL — the two choices name one Latin line, and drawing plain IAST
    above a CSL row would be the same sentence twice in two spellings. So the derived top line comes back
