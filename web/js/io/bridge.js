@@ -2014,7 +2014,14 @@ async function sanskritStretch(s,units,spans,text,k,tokId,kind){
          when it takes its gaps as literal slices of `# text` rather than joining with " ". Splicing them
          back verbatim also means this path CANNOT lose a space however the fusion comes out, which is
          worth having on a rewrite that reaches into the running text. */
-      const gaps=[]; for(let i=lo;i<hi;i++) gaps.push(text.slice(spans[i][1],spans[i+1][0]));
+      /* …and a gap that does not read as whitespace is not usable AS a gap. `usable()` proved each junction
+         in this stretch was whitespace-only when it grew it, so this can only differ if the spans it read
+         and the spans here disagree — published Sanskrit spans may legitimately ABUT or overlap by one
+         character at a vowel coalescence (see paintStext's order guard) — and taking such a "gap" verbatim
+         would weld two orthographic words into one. A single space is the honest fallback: the stretch
+         treated them as two words, so two words is what goes back. */
+      const gaps=[]; for(let i=lo;i<hi;i++){ const g=text.slice(spans[i][1],spans[i+1][0]);
+        gaps.push(/^\s+$/.test(g)?g:" "); }
       out=words.map((w,n)=>n?gaps[n-1]+w:w).join("");
       parts=[]; let at=0;
       words.forEach((w,n)=>{ if(n) at+=gaps[n-1].length; parts.push([at,at+w.length]); at+=w.length; });
@@ -2042,6 +2049,16 @@ async function sanskritStretch(s,units,spans,text,k,tokId,kind){
      can route around it — and Sanskrit-only, this whole function being on the `skt` side. */
   out=out.replace(/[꞊=⹀]/g,"");
   if(!out.trim()) return null;                                                               // a form that was NOTHING BUT seams leaves no word to write — say nothing rather than blank the stretch
+  /* ⚠ THE LAST WORD ON WELDING, and it is a count rather than a rule: this replaces a stretch of `hi-lo+1`
+     ORTHOGRAPHIC WORDS, so whatever goes back must be that many words. Anything fewer has run two of them
+     together and taken the space between them out of the running text — the reported fault, and the one
+     thing this operation must never do, since a lost space cannot be recovered from the file afterwards.
+     Checked HERE, past every branch, so it holds however `out` was arrived at — the fused path, the gap
+     reassembly above, the single-unit path, and any future one. Failing it, `# text` is left alone: the
+     tokenisation-mismatch badge then says the file disagrees with itself, which is recoverable, and a
+     welded line is not. Deliberately NOT counting a stretch that legitimately coalesces into one word —
+     that case never reaches here, the words.length guard above having already sent it to `return null`. */
+  if(out.split(/\s+/).filter(Boolean).length !== (hi-lo+1)) return null;
   if(_STX_CTRL.test(out)) return null;                                                       // belt and braces on the placeholder scheme: whatever the backend hands back, a control character must never be spliced into `# text` — it would be invisible on screen, survive the save, and make the file's own alignment unreproducible
   return {out,a:spans[lo][0],b:spans[hi][1],lo,hi,parts}; }
 /* Splice one unit's stretch of `# text`. Returns true when the string actually changed. */
