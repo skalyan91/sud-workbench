@@ -705,6 +705,23 @@ function editTier(si,tokId,tier,clickXY){ const s=DOC[si]; if(!s||tokId<1||tokId
   // instead — see msegFlagSent.
   const after=changed=>{ if(!changed){ preserveScroll(renderDoc); return; }   // item 1: opening a gloss field and leaving it as it was changes nothing, so it dirties nothing
     if(tier==="mgloss") mglossSyncFeats(tk);
+    /* AN MSeg EDIT IS ALSO A STATEMENT ABOUT THE WORD, not only about where its morphemes divide: strip
+       the boundary hyphens and what is left is the word itself. Writing that back is the inverse of
+       msegPrefillParts, which is what DERIVES the segmentation — so the same test decides the target.
+       That function segments the TRANSLITERATION where the language has one (translitNeeded) and the FORM
+       otherwise, so an edit lands on whichever of the two it was segmenting; anything else would correct
+       a string the tier was never describing.
+       Writing a FORM goes through afterFormEdit, because a form is not a private field: `# text` spells
+       this word and everything derived from it is now stale. No loop — msegRefill declines to re-derive a
+       hand-edited MSeg (its `cur!==t._msegPre` guard), and this edit has just made it one.
+       "=" is left alone: it is the CLITIC seam, a character the form legitimately carries (openConvertMWT
+       reads it), so stripping it would rewrite the word rather than un-segment it. Only "-" goes. */
+    if(tier==="mseg"){ const bare=tierText(tk,"mseg").replace(/-/g,"");
+      if(bare){
+        if(typeof translitNeeded==="function" && translitNeeded(DOCLANG)){
+          if((tk.translit||"")!==bare){ tk.translit=bare; tk.misc=setMiscKV(tk.misc,"Translit",bare); tk._trMisc=true; markDirty(); }
+        } else if((tk.form||"")!==bare){ tk.form=bare; markDirty();
+          if(typeof afterFormEdit==="function") afterFormEdit(si,tokId,true); } } }
     markDirty(); preserveScroll(renderDoc); };
   if(tier!=="mseg") makeGlossEditableSC(el, proxy, "v", after, sentRTL(s), ()=>tierElOf(si,tokId,tier), d=>tierNav(si,tokId,tier,d), clickXY, tier==="mgloss"?tk:null);   // live c2sc small-caps on its Leipzig abbreviations as the user types — on BOTH gloss tiers, matching how both now render (setGlossText); MSeg is word text, not a gloss, so it keeps the plain <input> editor. Task C: the trailing token is the MGloss abbreviation-autocomplete's UPOS context (AMBIG_UPOS) — passed ONLY for "mgloss" (a lexical Gloss definition isn't built from Leipzig abbreviations, so it gets no dropdown)
   else makeEditable(el, proxy, "v", after, sentRTL(s), ()=>tierElOf(si,tokId,tier), d=>tierNav(si,tokId,tier,d), true, clickXY); }   // item 2: allowEmpty → a gloss/MSeg value can be deleted (cleared), unlike a Form
@@ -1512,7 +1529,18 @@ function convertTokenToMWT(si,idx,n,parts){ const s=DOC[si], toks=s.tokens; cons
     const lem=(head.lemma&&head.lemma!=="_")?head.lemma:"";
     if(lem.indexOf("=")>=0){ const lb=lem.split("=");
       if(lb.length===all.length && lb.every(x=>x)) all.forEach((c,k)=>{ c.lemma=lb[k]; }); }
-    ["MSeg","MGloss"].forEach(key=>{ const v=miscKV(head.misc,key); if(!v||v.indexOf("=")<0) return;
+    ["MSeg","MGloss"].forEach(key=>{ const v=miscKV(head.misc,key); if(!v) return;
+      /* A GLOSS NEED NOT CARRY THE "=" TO BE PLACED. Splitting `punarjanman-ām` as `punar=janman-ām`
+         leaves the MGloss a single undivided `-GEN.PL.M` — and that leading hyphen already says where it
+         belongs: it glosses a SUFFIX, so it goes to the component holding the end of the word, not to the
+         head it happened to be stored on. A trailing mark says the opposite, prefix categories, so the
+         FIRST component. Only for a gloss that is entirely abbreviations: a lexical gloss with no "=" is
+         a gloss of the whole word and there is nothing in it to say which part it describes, so it stays
+         where it was rather than being guessed at. */
+      if(v.indexOf("=")<0){ if(key!=="MGloss"||!mglossAbbrOnly(v)) return;
+        const last=all.length-1, to=/^[-.]/.test(v)?last:(/[-.]$/.test(v)?0:-1);
+        if(to<=0) return;                                   // no mark, or already on the first component
+        all[0].misc=setMiscKV(all[0].misc,key,""); all[to].misc=setMiscKV(all[to].misc,key,v); return; }
       const bits=v.split("="); if(bits.length!==all.length) return;
       /* AN ABBREVIATION-ONLY PIECE BELONGS TO THE MORPHEME ITS HYPHEN POINTS AT, not to the component it
          happens to sit opposite. `-LOC` is the categories of the word BEFORE it and `DEF-` those of the
