@@ -188,9 +188,25 @@ function tspKey(text,units){ return text+"\u0000"+units.map(u=>u.form).join("\u0
 function requestTokenSpans(si,key,text,units,s){
   if(!tspEligible()) return;                                             // see tspEligible: no bridge, or no stage that could answer here
   const tag=si+"\u0000"+key; if(_TSP_INFLIGHT.has(tag)) return; _TSP_INFLIGHT.add(tag);
+  /* ⚠ A UNIT'S SPAN NEVER INCLUDES THE WHITESPACE AROUND IT, and stages 2/3 can hand back one that does.
+     They locate a unit by its FORM, so a form the line does not spell — the moment the annotator types a
+     clitic seam into it, `śaśabhṛto` becoming `śaśa=bhṛto` — comes back one character longer than the word
+     it was matched against, and that extra character is the SPACE after it. Everything downstream then
+     reads the gap between two units as `text.slice(spans[n][1], spans[n+1][0])` and gets "", so the two
+     words are drawn welded: measured on the real sentence, span [22,31] became [22,32] and the CSL row
+     lost the separator between `śaśa=bhṛto` and `vartm'` while `# text` stayed perfectly intact — which is
+     why the file never showed it and why this took so long to corner.
+     Trimmed here, where the bridge's answer ENTERS, so every consumer is covered by one rule rather than
+     each having to distrust its own spans. WHITESPACE ONLY: a span that overlaps its neighbour by a LETTER
+     is the legitimate vowel-coalescence overlap paintStext's order guard already allows, and must survive
+     untouched. A span left empty by the trim becomes a hole, which is already a "we don't know". */
+  const trimSpans=sp=>Array.isArray(sp)?sp.map(x=>{ if(!x) return x; let a=x[0], b=x[1];
+    while(b>a && /\s/.test(text[b-1])) b--;
+    while(a<b && /\s/.test(text[a])) a++;
+    return b>a?[a,b]:null; }):sp;
   const done=spans=>{ _TSP_INFLIGHT.delete(tag); const st=DOC[si]; if(!st) return;
     if(!st._tsp||Object.keys(st._tsp).length>=_TSP_MAX) st._tsp={};   // cap: an edited sentence mints a new key each time, and a stale key can never be asked for again
-    st._tsp[key]=spans;
+    st._tsp[key]=trimSpans(spans);
     repaintStext(si);
     /* …AND THE ROWS DERIVED FROM THOSE SPANS, which repaintStext does not touch. runningLine takes the
        gap between two units from `# text` when spans exist and falls back to SpaceAfter when they do
