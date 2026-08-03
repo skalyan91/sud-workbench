@@ -1830,7 +1830,10 @@ _SCRIPT_SCHEMES: dict[str, list[tuple[str, str]]] = {
     # Script layer for the reason the Indic scripts do: it re-renders the glyphs a reader reads while
     # the FORM column, the grid and the editors keep what the file says.  See `app/macron.py` for why
     # it can list unavailable.
-    "la": [("macron", "Latin (macronised)")],
+    # …and it is LABELLED as the two-state choice it is, not as a script name: the menu's other row is
+    # "Without macrons" (js/lang/translit.js's orthoOffLabel, which also suppresses the "None" row for
+    # Latin), so "Latin (macronised)" beside it would have named the language rather than the choice.
+    "la": [("macron", "With macrons")],
     **{c: list(_SERBIAN_CONV) for c in _SERB},
     **{c: [("mn-traditional", "Mongolian (traditional)")] for c in _MONG},
 }

@@ -74,10 +74,18 @@ function runningLine(s,si,pick,fixedGap){
      stanza onto one line. */
   const al0=(typeof stextSpans==="function")?stextSpans(s,si,s.text||""):null;
   if(fixedGap!=null){
+    /* `fixedGap` may be a FUNCTION of the next unit's rendered text rather than a plain separator, which is
+       what a spaceless script needs: a romanisation of Chinese has to be spaced (the source has no gaps to
+       inherit, so taking them verbatim ran the whole line together — `yǐnyánwǒzài…`), but pinyin still writes
+       its punctuation tight against the word before it. Deciding per junction from the FOLLOWING piece gets
+       both: no space before a comma, a space after it. The units' text is picked once here rather than twice
+       per junction — pick() can be a script conversion, and this is on the render path. */
     const ok=al0&&al0.spans&&al0.spans.length===units.length&&al0.spans.every(Boolean);
-    return units.map((u,n)=>{ if(n>=units.length-1) return pick(u)||"";
+    const txt=units.map(u=>pick(u)||"");
+    const sepOf=(next,prev)=>(typeof fixedGap==="function")?(fixedGap(next,prev)||""):fixedGap;
+    return txt.map((t,n)=>{ if(n>=units.length-1) return t;
       const raw=ok?(s.text||"").slice(al0.spans[n][1],al0.spans[n+1][0]):"";
-      return (pick(u)||"")+(/\n/.test(raw)?raw:fixedGap); }).join(""); }
+      return t+(/\n/.test(raw)?raw:sepOf(txt[n+1],t)); }).join(""); }
   const al=al0;
   const gaps=(al&&al.spans&&al.spans.length===units.length&&al.spans.every(Boolean))
     ? units.map((_u,n)=>n<units.length-1 ? (s.text||"").slice(al.spans[n][1],al.spans[n+1][0]) : "")
@@ -109,13 +117,30 @@ function _stxSkipF(text,j){ while(j<text.length){ if(_STX_WS.test(text[j])) j++;
 function _stxSkipB(text,j){ while(j>0){ if(_STX_WS.test(text[j-1])) j--;
     else if(j>=2&&text[j-2]==="\\"&&text[j-1]==="n") j-=2;
     else break; } return j; }
+/* HOW A UNIT'S FORM IS MATCHED AGAINST THE LINE, and the one place the two may legitimately be spelt
+   differently: the DAṆḌA. These walks are handed whichever string the caller is painting — the RESTING
+   line is dandaDisp(text), where `||` and `//` have each been collapsed to the single character `‖` (and
+   `/` to `|`), while the line being EDITED is the raw text. A form column spelling that mark `||` therefore
+   matches the raw line and NOT the resting one, so the whole sentence failed stage 1, the bridge was asked,
+   and its "no" raised the tokenisation-mismatch badge — on a file that agrees with itself perfectly, and
+   which no amount of re-parsing could fix, since the tokeniser reproduces the same two characters.
+   Both spellings are admissible surfaces for the same mark, so try the collapsed one when the literal form
+   does not match. Strictly a WIDENING — a unit that matched before still matches first, and by its own
+   spelling — and the span is measured in whichever string was matched, so the offsets stay offsets into the
+   line the caller handed us. dandaDisp is a no-op outside Sanskrit (dandaScan returns null), so no other
+   language pays for this or can be affected by it. */
+function _stxMatchAt(text,form,j){                                        // → the matched length at j, or 0
+  if(text.lastIndexOf(form,j)===j) return form.length;                    // lastIndexOf(…,j)===j is startsWith-at-j without allocating
+  const d=(typeof dandaDisp==="function")?dandaDisp(form):form;
+  return (d!==form && text.lastIndexOf(d,j)===j) ? d.length : 0; }
 function alignUnitsToText(text,units){ if(!text||!units.length) return null;
   const skip=j=>_stxSkipF(text,j);
   let pos=0; const spans=[];
   for(const u of units){ if(!u.form) return null;                        // a formless unit can't be located → the whole walk is unverified
-    const j=skip(pos);                                                   // lastIndexOf(…,j)===j is startsWith-at-j without allocating
-    if(text.lastIndexOf(u.form,j)!==j) return null;                      // the FORM, and nothing else — see sentUnits on why a CorrectForm is not an admissible surface here
-    spans.push([j,j+u.form.length]); pos=j+u.form.length; }
+    const j=skip(pos);
+    const w=_stxMatchAt(text,u.form,j);                                  // the FORM, and nothing else — see sentUnits on why a CorrectForm is not an admissible surface here
+    if(!w) return null;
+    spans.push([j,j+w]); pos=j+w; }
   if(skip(pos)<text.length) return null;                                 // text left over past the last token → the two disagree; say so rather than decorate a prefix
   return spans; }
 /* THE WALK AROUND ONE UNIT — the same proof, with a hole in it where the edit is.
@@ -133,13 +158,18 @@ function alignUnitsAround(text,units,k){ if(!text||!units.length||k<0||k>=units.
   const spans=new Array(units.length);
   let pos=0;
   for(let i=0;i<k;i++){ const u=units[i]; if(!u.form) return null;
-    const j=_stxSkipF(text,pos); if(text.lastIndexOf(u.form,j)!==j) return null;
-    spans[i]=[j,j+u.form.length]; pos=j+u.form.length; }
+    const j=_stxSkipF(text,pos); const w=_stxMatchAt(text,u.form,j); if(!w) return null;   // daṇḍa-tolerant, exactly as the plain walk above — see _stxMatchAt
+    spans[i]=[j,j+w]; pos=j+w; }
   let end=text.length;
   for(let i=units.length-1;i>k;i--){ const u=units[i]; if(!u.form) return null;
-    const j=_stxSkipB(text,end), st=j-u.form.length;
-    if(st<pos||text.lastIndexOf(u.form,st)!==st) return null;
-    spans[i]=[st,j]; end=st; }
+    const j=_stxSkipB(text,end);
+    /* the BACKWARD walk has to know the length before it knows the start, so it tries each admissible
+       spelling's own length rather than assuming the form's — the same widening, read right to left. */
+    let st=-1,w=0;
+    for(const f of [u.form,(typeof dandaDisp==="function")?dandaDisp(u.form):u.form]){
+      const c=j-f.length; if(c>=pos&&text.lastIndexOf(f,c)===c){ st=c; w=f.length; break; } }
+    if(st<0) return null;
+    spans[i]=[st,st+w]; end=st; }
   const lo=_stxSkipF(text,pos), hi=_stxSkipB(text,end);
   if(hi<=lo) return null;                                                // nothing but whitespace where unit k should be → see above
   spans[k]=[lo,hi];
@@ -1422,7 +1452,14 @@ function buildBlock(i,ctx){ const s=DOC[i];
       /* ⚠ `cslRow` does NOT belong in this test, and putting it here was the bug: a CSL row IS a
          transliteration on screen, so the field belongs on IT, not on the script line above it. The
          script line hosts the field only when NOTHING else is displayed to host it. */
-      const inPlace=isSanskritLang() && (cslTop||!show.translit);
+      /* ⚠ NOT GATED ON SANSKRIT. The rule above is about which ROW is on screen, not about which language
+         this is, and gating it left every other scripted language with no way to edit its own sentence:
+         Latin under "With macrons" shows the derived line here, has no transliteration row (so the
+         `.strans-orig` slot below is hidden), and the click-to-reveal affordance in the `else` branch is
+         Sanskrit-only — three things that each assumed one of the others would provide the field, and
+         between them provided none. Where a transliteration row IS shown it stays the host, in every
+         language, because `show.translit` is what the test turns on. */
+      const inPlace=cslTop||!show.translit;
       if(inPlace){ const resting=line||s.text||"(empty)";
         wireStext(txt); txt.textContent=resting;
         txt.addEventListener("blur",()=>{ txt.textContent=resting; });   // a COMMIT re-renders the block and recomputes the line; this is the cancelled/unchanged case, which wireStext would otherwise leave showing the raw text
@@ -1539,7 +1576,28 @@ function buildBlock(i,ctx){ const s=DOC[i];
          an unchanged romanisation now compares EQUAL and the row is correctly dropped — while CSL, which
          genuinely respells the sentence (`vartm'âpunarjanmanām`), still differs and still shows. */
       const csl=isSanskritLang()&&TRANSLIT_SCHEME==="csl";
-      const line=runningLine(s,i,u=>u.mwt?(topTransTxt(u.mwt)||u.mwt.form):(topTransTxt(u.tok)||u.tok.form), csl?" ":null);
+      /* A SPACELESS SCRIPT'S ROMANISATION HAS TO BE SPACED, and the line above it cannot say where. The gaps
+         are otherwise taken verbatim from `# text`, which is right for every language that writes word
+         breaks — the romanisation then lines up with the sentence above it, break for break — but Chinese,
+         Japanese, Thai and the rest have no gaps to inherit, so the pinyin ran together into one unreadable
+         string (`yǐnyán` + `wǒ` + … with nothing between them). The SpaceAfter fallback could not have saved
+         it either: in those languages nearly every token carries SpaceAfter=No, which is true of the source
+         and says nothing about its romanisation.
+         isSpacelessLang (js/core/state.js) is a LANGUAGE test, not the per-run character test app/parse.py
+         uses, and that is the right one here: this is a document-wide display convention, not a judgement
+         about one stretch of text. */
+      const spaceless=(typeof isSpacelessLang==="function")&&isSpacelessLang();
+      /* …and the separator is decided by BOTH sides, because punctuation takes its space on one side only and
+         which side depends on the mark: a comma or a closing bracket hugs the word BEFORE it, an opening
+         bracket or quote hugs the word AFTER it. Keying on the following piece alone put the space on the
+         wrong side of every opening mark (`túlíng« AI Agent»` for `túlíng «AI Agent»`). Ps/Pi are the opening
+         and initial-quote categories, Pe/Pf their closing partners — so an opening mark is the one kind of
+         punctuation that still takes a space in front of it. */
+      const gap = csl ? " " : (spaceless ? ((next,prev)=>
+        /[\p{Ps}\p{Pi}]$/u.test(prev||"") ? ""                                   // just opened a bracket/quote → the next word hugs it
+        : (/^[\p{P}\p{S}]/u.test(next||"") && !/^[\p{Ps}\p{Pi}]/u.test(next||"")) ? ""   // a closing or ordinary mark hugs the word before it
+        : " ") : null);
+      const line=runningLine(s,i,u=>u.mwt?(topTransTxt(u.mwt)||u.mwt.form):(topTransTxt(u.tok)||u.tok.form), gap);
       const base=(s.text||s.tokens.map(t=>t.form).join(" "));
       if(line.trim() && line.trim()!==base.trim()){ const tl=document.createElement("div"); tl.className="strans"; tl.style.marginInlineStart=(idW+8)+"px"; tl.textContent=line; capTransWidth(tl); b.appendChild(tl); } }
     if(TRANS_LANGS.size) b.appendChild(renderBlockTrans(i));   // item 13: a field per enabled translation language, just above the diagram
