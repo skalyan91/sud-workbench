@@ -43,6 +43,38 @@ addEventListener("keydown",e=>{
   if(cmdOptKey(e)&&(e.key==="ArrowLeft"||e.key==="ArrowRight")){ e.preventDefault();   // ⌥⌘←/→ insert a token before/after (reading-order, RTL-aware)
     if(sel.s<0||sel.t<=0)return; const after=(e.key==="ArrowRight")!==sentRTL(DOC[sel.s]); insertToken(sel.s, after?sel.t:sel.t-1); return; }
   if(cmdKey(e)&&(e.key==="Backspace"||e.key==="Delete")){ if(inField)return; e.preventDefault(); deleteSel(); return; }   // ⌘⌫ delete (token when a token is selected, else the sentence)
+  /* ⇧⌘Arrow and ⌘A — EXTEND-TO-END and SELECT-ALL, at whichever level the selection already sits on.
+     Shift+Arrow (further down) steps a range by one at BOTH levels — a token range inside a sentence when
+     a token is selected, a sentence range when only a block is — so these are those same two levels
+     reached in a single press, which is what ⇧⌘Arrow means everywhere else on the platform, and ⌘A is
+     the same gesture with no direction: everything at this level. Escape drops a level (the ladder at the
+     top of this handler), so ⌘A over a token selects that sentence's tokens and Escape-then-⌘A selects
+     every sentence — both levels without a second chord to remember.
+     ⌘A IS ALSO A NATIVE MENU ITEM (Select All, the nil-target selectAll: in app/menu_spec.py's
+     NATIVE_MAC) and that row stays: it is what makes ⌘A select the text inside an input, which WebKit
+     implements and this must not steal — hence the field guard, which is doing real work here rather than
+     being defensive boilerplate. The web view gets first refusal on a key equivalent (the reason a web app
+     can bind ⌘A at all under Safari's own Select All), so outside a field this branch is reached; and
+     preventDefault is wanted there regardless, since WebKit's selectAll: would otherwise drag a text
+     highlight across the whole document. */
+  if(cmdKey(e)&&e.shiftKey&&!e.altKey&&(e.key==="ArrowUp"||e.key==="ArrowDown"||e.key==="ArrowLeft"||e.key==="ArrowRight")){
+    const ae=document.activeElement; if(inField||(ae&&ae.isContentEditable)||sel.s<0) return;
+    const vert=(e.key==="ArrowUp"||e.key==="ArrowDown");
+    if(sel.t>0){   // token level → extend to the first/last token of THIS sentence, in READING order (⇧⌘→ is the last token of an RTL sentence's line, which is token 1)
+      e.preventDefault(); const n=DOC[sel.s].tokens.length;
+      const fwd = vert ? (e.key==="ArrowDown") : ((e.key==="ArrowRight")!==sentRTL(DOC[sel.s]));
+      if(!selRange||selRange.s!==sel.s) setRange(sel.s,sel.t,sel.t);   // no range yet → the current token is the anchor, exactly as Shift+Arrow starts one
+      const focus=fwd?n:1;
+      setRange(sel.s,selRange.anchor,focus); sel.t=focus; preserveScroll(renderDoc); revealTok(sel.s,focus); return; }
+    if(!vert) return;   // ←/→ have no sentence-level reading: blocks stack vertically, so leave the chord alone rather than inventing a meaning for it
+    e.preventDefault();   // block level → extend the sentence range to the top/bottom of the document
+    const nb=e.key==="ArrowDown"?DOC.length-1:0;
+    extendBlockRange(nb); scrollNearest(document.querySelector(`.sblock[data-i="${nb}"]`)); return; }
+  if(cmdKey(e)&&!e.shiftKey&&!e.altKey&&(e.key==="a"||e.key==="A")){
+    const ae=document.activeElement; if(inField||(ae&&ae.isContentEditable)||!DOC.length) return;
+    e.preventDefault();
+    if(sel.s>=0&&sel.t>0){ const n=DOC[sel.s].tokens.length; setRange(sel.s,1,n); sel.t=n; preserveScroll(renderDoc); revealTok(sel.s,n); return; }
+    selectAllBlocks(); return; }
   // items 2/3 — ⌘/ marks the selection Typo=Yes (strikethrough), ⌘I marks it Foreign=Yes (italics);
   // both toggle. ⇧⌘I opens "Import UD…". The native menu items carry the same key-equivalents and usually
   // intercept first — this is the in-page fallback (and covers a run with no native menu wired), guarded against typing in a field.

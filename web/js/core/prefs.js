@@ -439,6 +439,14 @@ function blockRange(){ if(BLOCKANCHOR<0) return null; const b=curBlock(); if(b<0
   const lo=Math.min(BLOCKANCHOR,b), hi=Math.max(BLOCKANCHOR,b);
   return hi>lo ? {lo,hi} : null; }                      // a range that collapsed onto one block is no range
 function clearBlockRange(){ if(BLOCKANCHOR<0) return; BLOCKANCHOR=-1; paintBlockRange(); }
+/* Every sentence at once (⌘A at block level). Plants the anchor on the first block OUTRIGHT rather than
+   letting extendBlockRange adopt curBlock() as it does for a shift-click — "select all" is not an
+   extension of where the reader happens to be, it is a range with both ends named. Note a single-sentence
+   document ends with no range: blockRange() calls a span of one no range at all, deliberately, and the
+   whole point of that rule is that one sentence is selected all the time simply by being read. */
+function selectAllBlocks(){ if(typeof DOC==="undefined"||!DOC.length) return;
+  BLOCKANCHOR=0; setCurBlock(DOC.length-1); paintBlockRange();
+  if(typeof updateFileBlock==="function") updateFileBlock(); }
 /* Extend the range to `i` and make it the focus. The anchor is planted on the FIRST shift-click, so an
    ordinary click (which clears it) followed by a shift-click selects exactly the span between the two. */
 function extendBlockRange(i){ if(i<0||typeof DOC==="undefined"||i>=DOC.length) return;
