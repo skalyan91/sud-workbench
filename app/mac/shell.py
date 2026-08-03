@@ -1638,6 +1638,13 @@ def _unify_titlebar_on_show(window, api=None):
             # / `rectangle.portrait.inset` both resolve to nil — so the filled pair it is.)
             _file_icon["sf_paged"] = _compute_symbol_icon(AppKit, "rectangle.portrait.center.inset.filled")
             _file_icon["sf_unpaged"] = _compute_symbol_icon(AppKit, "rectangle.portrait.inset.filled")
+            # …and the Options toggle, which had only the hand-drawn approximation in mac-tokens.css:
+            # three tracks with stadium knobs, traced from `slider.horizontal.3` rather than rendered
+            # from it. `app/menu_spec.py` has always named that symbol for the matching MENU row, so the
+            # button and the menu item were drawing the same glyph two different ways — this makes the
+            # button use the real one, and leaves the CSS mask as the browser-design-mode fallback
+            # exactly as the pair above does.
+            _file_icon["sf_options"] = _compute_symbol_icon(AppKit, "slider.horizontal.3")
         except Exception as exc:  # noqa: BLE001 — an app with no native icons is still a working app
             print(f"[titlebar] icons: {exc}", file=sys.stderr)
         # …and hand them to the page from a WORKER thread: evaluate_js parks on a completion the main
@@ -1676,11 +1683,13 @@ def _unify_titlebar_on_show(window, api=None):
         # upgrades every element that reads them, and leaves the hand-drawn masks in mac-tokens.css as the browser-design-mode
         # fallback exactly as before — same fall-through as __setSfSymbol's, one level up.
         sf_paged, sf_unpaged = _file_icon.get("sf_paged"), _file_icon.get("sf_unpaged")
-        if sf_paged or sf_unpaged:
+        sf_options = _file_icon.get("sf_options")
+        if sf_paged or sf_unpaged or sf_options:
             try:
                 setvar = "document.documentElement.style.setProperty('--sf-%s','url(\"'+%s+'\")')"   # string-concat the URI in JS, as bridge.js's own applySfSymbol does, so no quoting of the base64 payload is needed
                 window.evaluate_js(";".join(
-                    setvar % (k, json.dumps(uri)) for k, uri in (("paged", sf_paged), ("unpaged", sf_unpaged)) if uri))
+                    setvar % (k, json.dumps(uri)) for k, uri in
+                    (("paged", sf_paged), ("unpaged", sf_unpaged), ("options", sf_options)) if uri))
             except Exception as exc:  # noqa: BLE001
                 print(f"[titlebar] layout symbol inject: {exc}", file=sys.stderr)
 
