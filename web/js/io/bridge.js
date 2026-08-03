@@ -1804,17 +1804,52 @@ async function sandhiMwtForms(si,froms){ if(!isSanskritLang()||!hasBridge()||!DO
      `…uro hṛtkroḍavāsobhṛto |⏎bastir…`, where `bhṛtaḥ` became `bhṛto` because `bastir` — the next real
      word, one daṇḍa and one newline away — begins with a voiced consonant. Stopping at the daṇḍa left
      that edge in pausa and was the one junction this pass still got wrong. */
-  const groups=[],lgroups=[],refs=[],prevs=[],nexts=[],pauses=[];
+  /* …and WHICH SANDHI each inner junction takes, which is not uniform across a range: FEATS
+     `Compound=Yes` marks a BOUND member, so the junction after it is compound-INTERNAL rather than one
+     between two words. Only the -n gemination tells the two apart (`asmin`+`eva` → `asminneva` between
+     words; `an`+`anta` → `ananta`, not `annanta`, inside a compound) — see app/translit.py's
+     _sandhi_preprocess. An MWT formed by coalescent external sandhi has the flag on none of its members
+     and is fused exactly as before. */
+  const compOf=t=>/(?:^|\|)Compound=Yes(?:\||$)/.test(t.feats||"");
+  const groups=[],lgroups=[],refs=[],prevs=[],nexts=[],pauses=[],bounds=[];
   s.mwt.forEach(m=>{ if(froms&&froms.indexOf(m.from)<0) return; const cts=s.tokens.slice(m.from-1,m.to).filter(t=>t.form); if(cts.length){
     const cx=saMwtContext(s,m);   // js/lang/translit.js — shared with fillOrtho so the FORM and its GLYPH agree
-    groups.push(cts.map(t=>t.form)); lgroups.push(cts.map(lemOf)); refs.push(m);
+    groups.push(cts.map(t=>t.form)); lgroups.push(cts.map(lemOf)); refs.push(m); bounds.push(cts.map(compOf));
     prevs.push(cx.prev); nexts.push(cx.next); pauses.push(cx.pause); } });
   if(!groups.length) return false;
-  let r; try{ r=await window.pywebview.api.sanskrit_mwt(groups,DOCLANG,"",lgroups,"",prevs,nexts,pauses); }catch(e){ return false; }
+  let r; try{ r=await window.pywebview.api.sanskrit_mwt(groups,DOCLANG,"",lgroups,"",prevs,nexts,pauses,bounds); }catch(e){ return false; }
   let any=false; refs.forEach((m,i)=>{ delete m._kept;   // an EDIT (or a parse) asked for this re-fuse, which is new evidence — it overrides an undo-restored form (see applySnap)
     const f=r&&r.form&&r.form[i]; if(f&&f!==m.form){ m.form=f; m.ortho=""; m.miast=""; any=true; } });   // clear the cached display forms so fillOrtho re-renders them from the new fused form
   if(any){ markDirty(); if((ORTHO_SCHEME&&ORTHO_SCHEME!=="none")||isSanskritLang()) fillOrtho(); else preserveScroll(renderDoc); }
   return any; }
+
+/* THE LEMMA OF A FLATTENED SANSKRIT MULTI-WORD TOKEN — its components' lemmas FUSED BY SANDHI.
+   Flatten makes one word out of n, so its lemma is the n lemmas made one word, and in Sanskrit that is a
+   sandhi question rather than a concatenation: `ātman`+`vid` is `ātmavid`, `manas`+`ratha` is
+   `manoratha`. `bound` carries FEATS Compound=Yes per component, which is what tells sandhi_join that
+   the junction after that member is compound-internal (see flattenMWT's note, and _sandhi_preprocess).
+   ⚠ NO NEIGHBOUR CONTEXT and `pause_after` TRUE, unlike sandhiMwtForms: a lemma is a citation form, not
+   a word standing in a running line, so its two edges are spelt in PAUSA — finishing them against the
+   words either side would put this token's sentence position into a dictionary form.
+   The fused string comes back in the document's own script (sandhi_join romanises in and renders out),
+   so it can go straight into the LEMMA column beside a Devanagari form. */
+async function sandhiFlattenLemma(si,tokId,fu){
+  if(!isSanskritLang()||!hasBridge()||!DOCLANG||!fu) return false;
+  const s=DOC[si], t=s&&s.tokens&&s.tokens[tokId-1]; if(!t) return false;
+  let changed=false;
+  const lems=(fu.lemmas||[]).filter(Boolean);
+  if(lems.length>=2){   // one lemma (or none) is already the answer the placeholder gave — nothing to fuse
+    let r=null; try{ r=await window.pywebview.api.sanskrit_mwt([fu.lemmas],DOCLANG,"",[fu.lemmas],"",[""],[""],[true],[fu.bound]); }catch(e){}
+    const fused=r&&r.form&&r.form[0];
+    if(fused&&fused!==t.lemma){ t.lemma=fused; t.translitLemma=""; changed=true; } }
+  /* …and THE DERIVED ROWS, WHICH RUN WHETHER OR NOT THE LEMMA MOVED. flattenMWT blanked translit/ortho
+     precisely so they would be re-derived from the fused form, and this is the only thing that re-derives
+     them — an early return on an unchanged lemma left the transliteration row EMPTY, which is worse than
+     the wrong value it replaced (measured on the Devanagari sample: every one of its 35 ranges). */
+  if(typeof fillTranslit==="function") await fillTranslit();
+  if(typeof fillOrtho==="function") await fillOrtho();
+  if(changed) markDirty();
+  return changed; }
 
 /* ── A FORM EDIT REACHES THE RUNNING SENTENCE ───────────────────────────────────────────────────────────
    The rule about WHICH edits reach `# text`, and why, is written out once over stxWriteSpans in

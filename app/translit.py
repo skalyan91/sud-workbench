@@ -1049,32 +1049,40 @@ def _glue_before(raw: str) -> bool:
 
 
 def _sandhi_preprocess(pairs):
-    """Item 18: clean each (form, lemma) pair, then chain-glue consonant-final words onto the following
-    word (never across a newline).  The merged unit keeps the LAST component's lemma (it drives the
-    trailing-boundary visarga/r-stem behaviour).  Item 6: a word originally separated from the next by
+    """Item 18: clean each (form, lemma[, bound]) tuple, then chain-glue consonant-final words onto the
+    following word (never across a newline).  The merged unit keeps the LAST component's lemma (it drives
+    the trailing-boundary visarga/r-stem behaviour).  Item 6: a word originally separated from the next by
     a HYPHEN or PIPE (a trailing marker on it, or a leading marker on the next) is ALSO glued on
-    unconditionally — even when vowel-final — so a compound member never keeps a word_sep space."""
+    unconditionally — even when vowel-final — so a compound member never keeps a word_sep space.
+
+    ``bound`` (optional third element, from FEATS ``Compound=Yes``) says the word is a BOUND member, so
+    the junction AFTER it is compound-INTERNAL rather than a junction between two words — see the
+    gemination note below, which is the one rule in this fold that the two boundaries answer differently."""
     # cleaned entries carry the boundary markers read off the ORIGINAL form (before hyphen/pipe stripping)
     cleaned = []
-    for f, lm in pairs:
+    for p in pairs:
+        f, lm = p[0], p[1]
+        bd = bool(p[2]) if len(p) > 2 else False
         cw = _sandhi_preclean(f)
         if cw:
             raw = _ud.normalize("NFC", f or "")
-            cleaned.append((cw, lm, _glue_after(raw), _glue_before(raw)))
+            cleaned.append((cw, lm, _glue_after(raw), _glue_before(raw), bd))
     merged, i, n = [], 0, len(cleaned)
     while i < n:
-        w, lm, glue_after, _ = cleaned[i]
+        w, lm, glue_after, _, bound = cleaned[i]
         while (i + 1 < n and "\n" not in cleaned[i + 1][0]
                and (_ends_in_consonant(w) or glue_after or cleaned[i + 1][3])):
-            nw, lm, glue_after, _ = cleaned[i + 1]   # item 6: adopt the newly-glued component's trailing marker
+            nw, lm, glue_after, _, nbd = cleaned[i + 1]   # item 6: adopt the newly-glued component's trailing marker
             if w and w[-1] in _VOICE_FINAL and _starts_voiced(nw):
-                w = w[:-1] + _VOICE_FINAL[w[-1]] + nw   # item 15: word-final voiceless stop → voiced before a voiced onset (sat+ādi → sadādi)
-            elif w and w[-1] == "n" and _final_vowel(w[:-1]) in ("a", "i", "u", "ṛ", "ḷ") and _initial_vowel(nw) is not None:
-                w = w[:-1] + "nn" + nw                  # -n after a SHORT vowel + V → -nn V (asmin + eva → asminn eva)
+                w = w[:-1] + _VOICE_FINAL[w[-1]] + nw   # item 15: word-final voiceless stop → voiced before a voiced onset (sat+ādi → sadādi) — and it fires at BOTH boundaries (sat+asat → sadasat inside a compound just as tat+eva does between words), so `bound` does not gate it
+            elif (w and w[-1] == "n" and not bound   # ⚠ EXTERNAL ONLY. A word-final -n doubles before a vowel (asmin + eva → asminn eva), but a BOUND member's -n does not: an + anta is ananta, not annanta — and an-/a- before a vowel is the commonest -n-final bound member there is (an+ādi, an+eka). The vendored generator draws exactly this line and names only this rule as external-only (_sa_sandhi_vendor.join_pair's `internal`), so the two engines agree about where a compound differs from a phrase. `bound` is the flag of the word contributing that final -n — it rides the accumulator below, not cleaned[i], because a glue may have changed which component that is.
+                  and _final_vowel(w[:-1]) in ("a", "i", "u", "ṛ", "ḷ") and _initial_vowel(nw) is not None):
+                w = w[:-1] + "nn" + nw                  # -n after a SHORT vowel + V → -nn V
             else:
                 w += nw
+            bound = nbd                                 # the accumulated word now ends in the component just glued on, so ITS boundedness governs the next junction
             i += 1
-        merged.append((w, lm))
+        merged.append((w, lm, bound))
         i += 1
     return merged
 
@@ -1130,7 +1138,7 @@ def sa_stored_script(forms) -> str:
 
 
 def sandhi_join(forms, lang: str = "sa", lemmas=None, word_sep: str = "",
-                prev: str = "", nxt_word: str = "", pause_after: bool = False) -> str:
+                prev: str = "", nxt_word: str = "", pause_after: bool = False, bound=None) -> str:
     """Assemble ``forms`` (a multi-word token's component words) into one surface string, fusing the
     joins by external sandhi for Sanskrit.  Non-Sanskrit ⇒ naive concatenation.  Left-folded pairwise.
     ``lemmas`` (optional, parallel to ``forms``) supplies each word's CoNLL-U lemma as an r-stem
@@ -1145,23 +1153,31 @@ def sandhi_join(forms, lang: str = "sa", lemmas=None, word_sep: str = "",
     The result comes back IN THE SCRIPT THE FORMS WERE GIVEN IN (`sa_stored_script`), because it is
     the multi-word token's own FORM column and must match the rest of the file: fusing a Devanagari
     document's components into IAST would put two scripts in one document.  Devanagari in, sandhi
-    reckoned in IAST, Devanagari out."""
-    pairs = [(f, (lemmas[i] if lemmas and i < len(lemmas) else None))
+    reckoned in IAST, Devanagari out.
+
+    ``bound`` (optional, parallel to ``forms``) marks each component as a BOUND compound member — FEATS
+    ``Compound=Yes`` — which makes the junction AFTER it compound-INTERNAL.  Almost every rule here fires
+    at both boundaries (a compound is fused by sandhi exactly as a phrase is: manaḥ+ratha → manoratha
+    just as tat+eva → tadeva); the one that does not is the -n gemination, and _sandhi_preprocess is
+    where that is written down.  Omitting ``bound`` therefore reckons every junction as external, which
+    is right for a running line — its units ARE separate words."""
+    pairs = [(f, (lemmas[i] if lemmas and i < len(lemmas) else None),
+              bool(bound[i]) if bound and i < len(bound) else False)
              for i, f in enumerate(forms or []) if f]
     if not pairs:
         return ""
     if _canon_lang(_norm(lang)) != "sa":
-        return "".join(f for f, _ in pairs)
-    script = sa_stored_script([f for f, _ in pairs])
+        return "".join(f for f, _, _ in pairs)
+    script = sa_stored_script([f for f, _, _ in pairs])
     if script:   # romanise on the way in — the fold below reads IAST letters and nothing else
         pairs = [(_render_one(f, lang, "iast") or f,
-                  (_render_one(lm, lang, "iast") or lm) if lm else lm) for f, lm in pairs]
+                  (_render_one(lm, lang, "iast") or lm) if lm else lm, bd) for f, lm, bd in pairs]
     pairs = _sandhi_preprocess(pairs)   # item 18: clean + glue consonant-final words, then fuse
     if not pairs:
         return ""
-    out, out_lemma = pairs[0]
+    out, out_lemma = pairs[0][0], pairs[0][1]
     out_form = pairs[0][0]   # the surface form of the word contributing out's trailing visarga (ignores glued prefixes)
-    for nxt, lm in pairs[1:]:
+    for nxt, lm, _bd in pairs[1:]:   # `bound` has already done its work in the preprocessing above: every rule left in this fold (vowel coalescence, visarga) fires inside a compound exactly as it does between words
         out = _iast_join_pair(out, nxt, out_lemma, out_form, word_sep)   # out_lemma/out_form = the word contributing out's final visarga
         out_lemma, out_form = lm, nxt
     fused = _ud.normalize("NFC", _glue_consonant_runs(out, word_sep))   # LAST step: glue any (now) consonant-final words
@@ -1229,14 +1245,15 @@ def _boundary_sandhi(inner: str, prev: str, nxt: str, last_lemma, last_form,
 
 
 def sandhi_to_script(forms, lang: str, scheme: str = "", lemmas=None, word_sep: str = "",
-                     prev: str = "", nxt_word: str = "", pause_after: bool = False) -> str:
+                     prev: str = "", nxt_word: str = "", pause_after: bool = False, bound=None) -> str:
     """Sanskrit MWT DISPLAY form: fuse the component forms by sandhi, THEN convert the fused string
     to the chosen script (scheme).  Empty scheme ⇒ the fused form in the document's own script (i.e.
     exactly `sandhi_join`), which is what "Script: Original" asks for.  Newlines in the fused string
     are preserved through the script conversion (multi-line input stays multi-line).
     ``word_sep`` (see sandhi_join) keeps a word separation at non-coalescing junctions for a running
-    line ("" for a spaceless MWT); aksharamukha preserves the space through the script conversion."""
-    fused = sandhi_join(forms, lang, lemmas, word_sep, prev, nxt_word, pause_after)
+    line ("" for a spaceless MWT); aksharamukha preserves the space through the script conversion.
+    ``bound`` (see sandhi_join) marks the components that are bound compound members."""
+    fused = sandhi_join(forms, lang, lemmas, word_sep, prev, nxt_word, pause_after, bound)
     if not fused or not scheme:
         return fused
     return _render_one(fused, lang, scheme) or fused

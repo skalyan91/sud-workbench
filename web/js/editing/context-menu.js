@@ -1592,6 +1592,27 @@ function flattenMWT(si,m){ const s=DOC[si], toks=s.tokens; if(!m)return; pushUnd
      recompute. MISC Translit/LTranslit go, being the component's — annotateTranslitMisc rewrites them. */
   const survivor={...head, form:m.form, ortho:m.ortho||"", translit:m.translit||"", translitLemma:""};
   survivor._ht=head._ht; survivor._trMisc=false; survivor._trPick=false;
+  /* ⚠ SANSKRIT FUSES; IT DOES NOT CONCATENATE. Inside a multi-word token the components are stored in
+     PAUSA (the DCS convention — see CLAUDE.md), so running them together spells a word that Sanskrit
+     never writes: `manaḥ`+`ratha` is `manoratha`, not `manaḥratha`; `ātman`+`vid` is `ātmavid`, not
+     `ātmanvid`. Every junction has to go back through sandhi, and WHICH sandhi depends on the junction:
+     a member marked FEATS `Compound=Yes` is BOUND, so what follows it is compound-INTERNAL. Almost
+     every rule fires at both boundaries; the one that does not is the -n gemination, which is external
+     only — `asmin`+`eva` → `asminneva` between words, but `an`+`anta` → `ananta` (NOT `annanta`) inside
+     a compound, and a- / an- before a vowel is much the commonest bound member there is. That flag
+     rides the fusion as `bounds`; app/translit.py's _sandhi_preprocess is where it is spent.
+     The FORM is exempt because it is not being derived at all: `m.form` is the orthographic word as it
+     already stands in `# text`, fused when the tokeniser read it or when sandhiMwtForms last re-fused
+     it, and re-deriving it here could only contradict the running text. Everything else the flattened
+     token carries is derived FROM that fused word rather than assembled from the pieces.
+     ⚠ GATED ON THE BRIDGE, because the derived rows below are BLANKED for it to refill and only the
+     backend can romanise: with no bridge (a browser design session) blanking them would leave them
+     blank for good, so there flatten keeps its naive join — which is the best answer available when
+     nothing can transliterate anything anyway. */
+  const saFuse=(typeof isSanskritLang==="function" && isSanskritLang()
+                && typeof hasBridge==="function" && hasBridge() && DOCLANG) ? {
+    lemmas: comps.map(t=>(t.lemma&&t.lemma!=="_")?t.lemma:""),
+    bound:  comps.map(t=>/(?:^|\|)Compound=Yes(?:\||$)/.test(t.feats||"")) } : null;
   /* ⚠ EVERY PER-WORD FIELD IS CONCATENATED, not inherited from the head component. Flatten makes one
      word out of n, so the analysis of that word is the analyses of its parts in order — taking only the
      head's silently DISCARDED the rest: `ātma`+`vidām` flattened to lemma `vid`, losing `ātman`, and
@@ -1627,8 +1648,16 @@ function flattenMWT(si,m){ const s=DOC[si], toks=s.tokens; if(!m)return; pushUnd
      gives the word's romanisation with no seam in it. `m.translit` survives only as the fallback for a
      range whose components have none, which is where it was doing useful work before. */
   const trJoined=comps.map(t=>t.translit||"").join("");
-  survivor.translit=trJoined||m.translit||"";
-  survivor.translitLemma=comps.map(t=>t.translitLemma||"").join("");
+  /* SANSKRIT TAKES NEITHER OF THOSE. A component's transliteration romanises its PAUSA form, so joining
+     them reproduces the unfused spelling one letter for one letter — `ātma`+`vidām` romanised and run
+     together is `ātmavidām` only by luck, and `manaḥ`+`ratha` comes out `manaḥratha` beside a form that
+     says `manoratha`: the romanisation would contradict the very glyph it sits under. Blanking both
+     makes fillTranslit/fillOrtho re-derive them from `survivor.form`, which IS the fused word — so the
+     two rows cannot disagree, and no seam can survive into them either (m.translit marks the seams of a
+     RANGE; see the note above). The lemma has no such row to fall back on and is fused outright, below. */
+  survivor.translit=saFuse?"":(trJoined||m.translit||"");
+  survivor.translitLemma=saFuse?"":comps.map(t=>t.translitLemma||"").join("");
+  if(saFuse) survivor.ortho="";
   survivor.misc=setMiscKV(setMiscKV(survivor.misc,"Translit",""),"LTranslit","");
   /* ⚠ Unsandhied MERGES TOO, and leaving it on the head's value is what made a flattened `mūrti`+`tve`
      read as `tve`: MISC `Unsandhied` is the token's PAUSA spelling, and app/sa_notation.py's csl_forms
@@ -1652,6 +1681,12 @@ function flattenMWT(si,m){ const s=DOC[si], toks=s.tokens; if(!m)return; pushUnd
   if(sv&&sv.deps&&sv.deps!=="_"){ const kept=sv.deps.split("|").filter(p=>{ const i=p.indexOf(":"); return i<0||p.slice(0,i)!==String(from); });
     sv.deps=kept.length?kept.join("|"):"_"; }   // …which can leave a self-loop where one component had an enhanced arc to another
   markDirty(); selRange=null; sel={s:si,t:from}; preserveScroll(renderDoc); pick(si,from,false);
+  /* …and THEN the sandhi, because only the backend can fuse: the concatenated lemma above stands as a
+     placeholder for the one paint before the bridge answers (and as the whole answer when there is no
+     bridge — a browser design session still flattens, it just spells the lemma naively). Deliberately
+     not awaited: flatten is a synchronous editing command and must not leave the selection unmoved
+     while a call is in flight — sandhiMwtForms is fire-and-forget for the same reason. */
+  if(saFuse && typeof sandhiFlattenLemma==="function") sandhiFlattenLemma(si,from,saFuse);
   toast("Multi-word token flattened to a single token"); }
 
 // small floating prompt with a numeric input (used by Convert-to-MWT to ask for the component count)
