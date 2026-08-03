@@ -1986,8 +1986,19 @@ async function sanskritStretch(s,units,spans,text,k,tokId,kind){
       [elems.map(e=>e.lemmas[e.lemmas.length-1])]," "); }catch(_){ r=null; }                 // each element's lemma is its LAST word's — that is the one contributing the trailing visarga sandhi_join reads it for
     const fused=r&&r.form&&r.form[0];
     const words=fused?fused.split(/\s+/).filter(Boolean):[];
-    if(fused&&words.length===elems.length){ out=fused;                                       // the guard: junctions re-spelled, nothing welded
-      parts=[]; const re=/\S+/g; let mm; while((mm=re.exec(out))) parts.push([mm.index,mm.index+mm[0].length]);
+    if(fused&&words.length===elems.length){                                                  // the guard: junctions re-spelled, nothing welded
+      /* ⚠ THE WORDS COME FROM THE FUSION, THE WHITESPACE FROM `# text`. The stretch being replaced spans
+         two or three units AND the gaps between them, so whatever this writes decides that whitespace —
+         and the fusion is asked with a plain " " as its separator, so taking its output verbatim would
+         re-spell the gaps as single spaces. A gap is a fact about the line (its width, and whether it is a
+         space at all), not something a sandhi generator has any view on; the same rule runningLine follows
+         when it takes its gaps as literal slices of `# text` rather than joining with " ". Splicing them
+         back verbatim also means this path CANNOT lose a space however the fusion comes out, which is
+         worth having on a rewrite that reaches into the running text. */
+      const gaps=[]; for(let i=lo;i<hi;i++) gaps.push(text.slice(spans[i][1],spans[i+1][0]));
+      out=words.map((w,n)=>n?gaps[n-1]+w:w).join("");
+      parts=[]; let at=0;
+      words.forEach((w,n)=>{ if(n) at+=gaps[n-1].length; parts.push([at,at+w.length]); at+=w.length; });
       if(parts.length!==elems.length) parts=null; }
     else { lo=hi=k; }                                                                        // it welded (or the call failed) → rewrite the unit alone, which is always safe
   }
