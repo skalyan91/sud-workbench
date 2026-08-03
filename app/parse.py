@@ -86,8 +86,16 @@ def _load_spacy(package: str):
     _share_macron_table()
     try:
         nlp = spacy.load(package)
-    except Exception as exc:  # OSError / model-not-found
-        raise ParserUnavailable(f"model {package!r} is not installed") from exc
+    except Exception as exc:  # noqa: BLE001
+        # …AND THE REASON TRAVELS WITH IT, exactly as in `_load_stanza`. `spacy.load` raises OSError
+        # for a genuinely absent model, but every failure inside the pipeline's OWN code lands here
+        # too — and the commonest is a bundled tokeniser whose dependency is missing, which raises
+        # ModuleNotFoundError (`zh_sud_gsd_simp_trad` imports jieba). Reporting that as "not
+        # installed" sends the reader hunting for a model that is sitting on disk, correctly
+        # installed; the one thing they need to know is the name of the module that was absent.
+        why = f"{type(exc).__name__}: {exc}".strip(": ")
+        raise ParserUnavailable(
+            f"model {package!r} could not be loaded (is it installed?) — {why}") from exc
     _SPACY_MODELS[package] = nlp
     return nlp
 
