@@ -945,7 +945,15 @@ function wpDrawProj(box){ const wp=box._wp, px=box._px; if(!wp||!px) return;
     const el=rowSvg.querySelector(`.edge-g[data-dep="${oid}"] text.lbl`)||rowSvg.querySelector(`.tok-group[data-tok="${oid}"] .tok-word`);
     if(!el) return px.bh; let by; try{ by=el.getBBox().y; }catch(e){ return px.bh; }
     return Math.max(px.bh, px.bh+by+3); };   // 3px past the glyph top = the same small overlap y1=px.bh gives a bare token
-  wp.rows[ri].forEach(({i,x})=>{ const x0=NXp[i], y0=NYp[i], y1=capOf(wp.oid[i]), yhit=treeY(x), D=Math.max(2, y1-(yhit>-Infinity?yhit:y0)),
+  /* ⚠ EVERY MEASUREMENT FIRST, THEN EVERY APPEND — never interleaved. capOf() calls getBBox(), which forces a
+     synchronous layout of everything invalidated since the last one; appending a path invalidates. Done in one
+     loop that did both, each token's getBBox re-laid-out the WHOLE document, so the cost was one full layout PER
+     TOKEN of the visible row rather than one for the row. MEASURED on a 40-sentence Chinese file (long sentences,
+     so every stemma wraps and this path runs for all 16 windowed blocks): getBBox alone was 9.6 s of an 18.9 s
+     profile — 51 % of a renderDoc that took 7–9 SECONDS — and every one of those calls came from here. Splitting
+     the loop is the whole fix; the arithmetic below is unchanged. */
+  const caps=wp.rows[ri].map(({i})=>capOf(wp.oid[i]));
+  wp.rows[ri].forEach(({i,x},ci)=>{ const x0=NXp[i], y0=NYp[i], y1=caps[ci], yhit=treeY(x), D=Math.max(2, y1-(yhit>-Infinity?yhit:y0)),
       k=Math.min((y1-y0)/2, D/2);
     pg.appendChild(E("path",{class:"proj",d:`M ${x} ${y1} C ${x} ${y1-k}, ${x0} ${y0+k}, ${x0} ${y0}`})); }); }   // drawn word→node (bottom to top): identical curve, but the dash pattern now anchors at the baseline word so a dot sits cleanly on it (partial dash lands at the node), matching the icon and the unwrapped stemma
 // selecting a token in a wrapped stemma/hierarchy scrolls its (possibly off-screen) token row into view
