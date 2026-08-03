@@ -1389,6 +1389,18 @@ function buildBlock(i,ctx){ const s=DOC[i];
       txt.classList.add("stext-script");   // item 20: the script top line's text left edge is aligned to the transliteration input below it (see .stext.stext-script CSS)
       if(ORTHO_SCHEME==="Grantha"||ORTHO_SCHEME==="Javanese"||ORTHO_SCHEME==="Balinese"||ORTHO_SCHEME==="Kawi"||ORTHO_SCHEME==="ZanabazarSquare") txt.classList.add("stext-stacked");   // item 18: Grantha's stacked vowel marks need extra vertical room → double-spaced (see .stext.stext-stacked CSS); Javanese and Balinese share the same stacked-diacritic problem, so they get the same treatment. Kawi too (added alongside its _AKSHARA_SCRIPTS reinstatement): verified by rendering a real 4-line Sanskrit verse (samples/brihat_jataka.conllu s1) at line-height:1.4 — a stacked/subjoined conjunct cluster on one line visibly overlapped the line below it, which line-height:2 clears. Zanabazar Square joined the set on user report from the real app (a synthetic @font-face CDP test during its own reinstatement read as clean at normal spacing, but the shipping WKWebView face disagreed) — trust the live report over that synthetic result. Tibetan is NOT in this set: it briefly rendered via TibetanMachineUnicode (a stacked-subjoined-consonant face needing the same double-spacing), but that font is never fetched by fontload.js's on-demand mechanism — Tibetan now goes through the SAME "Noto Sans <Script>" pipeline every other script does (see FONT_SCRIPTS, fontload.js), whose ordinary composed glyphs need no extra vertical room. ONLY the top script line; the editable translit/original below keeps normal spacing
       txt.addEventListener("mousedown",e=>e.stopPropagation());
+      /* ⚠ CSL EDITS IN PLACE, on the very line it is drawn on — the same contract a token has, where the
+         CSL glyph opens a field carrying the FORM. `.stext` already does exactly this dance in the
+         NON-script case: wireStext makes it contenteditable, paints a DISPLAY string at rest (the daṇḍa
+         substitution, item 30) and repaints the raw `# text` on focus, so what you edit is the file's own
+         string while what you read is the derived one. Wiring it here and then overwriting the resting
+         paint with the CSL reuses that whole mechanism — commit, Enter/Escape, undo, the re-tokenise —
+         instead of a second editing path beside it. The blur listener restores the CSL after an edit that
+         did NOT commit (wireStext's own blur repaints dataset.orig, which is the raw text, not the CSL);
+         a commit re-renders the block and recomputes the line anyway, so it needs no restoring. */
+      if(cslTop){ wireStext(txt); txt.textContent=line||s.text||"(empty)";
+        txt.addEventListener("blur",()=>{ const again=runningLine(s,i,u=>bform(u.mwt||u.tok)," ");
+          if(again) txt.textContent=again; }); }
       // Sanskrit-only: Displayed transliteration "None" (trPick("")) collapses the .strans-orig edit line below
       // (see the scriptTransLine.hidden assignment further down) — the row the user asked to hide is also the
       // ONLY inline surface for editing `# text` in script mode (the script line itself is read-only, undecorated
@@ -1398,7 +1410,7 @@ function buildBlock(i,ctx){ const s=DOC[i];
       // Gated on the row being HIDDEN, not on the reason it is hidden. "None" was one reason; CSL is now
       // another (it takes the visible slot — see the scriptTransLine assignment below), and without this
       // the original text became uneditable inline for as long as CSL was displayed.
-      if(isSanskritLang() && (!show.translit||cslRow||cslTop)){ txt.style.cursor="text"; txt.title+=" — click to edit the transliteration";
+      if(isSanskritLang() && !cslTop && (!show.translit||cslRow)){ txt.style.cursor="text"; txt.title+=" — click to edit the transliteration";
         txt.addEventListener("click",()=>{ if(!scriptTransLine)return; scriptTransLine.hidden=false; alignInlineStart(scriptTransLine,b); capTransWidth(scriptTransLine); scriptTransLine.focus(); }); } }
     else wireStext(txt);
     const ctrl=document.createElement("div"); ctrl.className="sctrl";
