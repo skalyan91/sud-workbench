@@ -1540,7 +1540,15 @@ function flattenMWT(si,m){ const s=DOC[si], toks=s.tokens; if(!m)return; pushUnd
        empty slot, so one unglossed part cannot produce a stray "-". */
   const tierJoin=k=>{ const parts=comps.map(t=>msegStrip(tierText(t,k))).filter(Boolean); return parts.join("-"); };
   survivor.lemma=comps.map(t=>(t.lemma&&t.lemma!=="_")?t.lemma:"").join("")||survivor.form;
-  survivor.translit=m.translit||comps.map(t=>t.translit||"").join("");
+  /* ⚠ THE COMPONENTS' OWN VALUES FIRST, not the RANGE's. `m.translit` is a rendering of a RANGE, and a
+     range's rendering marks the seams between its members — under CSL that is literally what it is for
+     (`ātma-vidāṃ`, see fillTranslitCSL). Flatten abolishes those seams: what comes out is ONE word, whose
+     form is written solid, so a transliteration still carrying a hyphen describes a division the token no
+     longer has and disagrees with the form beside it. Joining the components' own transliterations solid
+     gives the word's romanisation with no seam in it. `m.translit` survives only as the fallback for a
+     range whose components have none, which is where it was doing useful work before. */
+  const trJoined=comps.map(t=>t.translit||"").join("");
+  survivor.translit=trJoined||m.translit||"";
   survivor.translitLemma=comps.map(t=>t.translitLemma||"").join("");
   survivor.misc=setMiscKV(setMiscKV(survivor.misc,"Translit",""),"LTranslit","");
   ["gloss","mseg","mgloss"].forEach(k=>{ const v=tierJoin(k); survivor.misc=setMiscKV(survivor.misc,TIER_MISC[k],v); });
