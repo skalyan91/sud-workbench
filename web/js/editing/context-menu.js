@@ -1529,7 +1529,7 @@ function convertTokenToMWT(si,idx,n,parts){ const s=DOC[si], toks=s.tokens; cons
     const lem=(head.lemma&&head.lemma!=="_")?head.lemma:"";
     if(lem.indexOf("=")>=0){ const lb=lem.split("=");
       if(lb.length===all.length && lb.every(x=>x)) all.forEach((c,k)=>{ c.lemma=lb[k]; }); }
-    ["MSeg","MGloss"].forEach(key=>{ const v=miscKV(head.misc,key); if(!v) return;
+    ["MSeg","MGloss","Unsandhied"].forEach(key=>{ const v=miscKV(head.misc,key); if(!v) return;   // Unsandhied divides with the rest: it is a per-token pausa spelling, so a token that has become several needs one each
       /* A GLOSS NEED NOT CARRY THE "=" TO BE PLACED. Splitting `punarjanman-ām` as `punar=janman-ām`
          leaves the MGloss a single undivided `-GEN.PL.M` — and that leading hyphen already says where it
          belongs: it glosses a SUFFIX, so it goes to the component holding the end of the word, not to the
@@ -1630,6 +1630,16 @@ function flattenMWT(si,m){ const s=DOC[si], toks=s.tokens; if(!m)return; pushUnd
   survivor.translit=trJoined||m.translit||"";
   survivor.translitLemma=comps.map(t=>t.translitLemma||"").join("");
   survivor.misc=setMiscKV(setMiscKV(survivor.misc,"Translit",""),"LTranslit","");
+  /* ⚠ Unsandhied MERGES TOO, and leaving it on the head's value is what made a flattened `mūrti`+`tve`
+     read as `tve`: MISC `Unsandhied` is the token's PAUSA spelling, and app/sa_notation.py's csl_forms
+     prefers it over the form (that is the whole point of it — feeding a sandhied surface back through a
+     sandhi generator would apply the rules twice). So the survivor said `mūrtitve` in its form and
+     `-tve` in its pausa, and every CSL rendering believed the pausa.
+     Joined SOLID like the lemma and the transliteration, with each piece's seam marks taken off first:
+     a continuation mark records a boundary between components, and flatten has just removed the
+     boundary it recorded. */
+  { const un=comps.map(c=>String(miscKV(c.misc,"Unsandhied")||"").replace(/^[-꞊=⹀]+|[-꞊=⹀]+$/g,"")).filter(Boolean).join("");
+    survivor.misc=setMiscKV(survivor.misc,"Unsandhied",un); }
   ["gloss","mseg","mgloss"].forEach(k=>{ const v=tierJoin(k); survivor.misc=setMiscKV(survivor.misc,TIER_MISC[k],v); });
   if(comps.every(t=>t.lemma===t.form)) survivor.lemma=survivor.form;   // the rule mergeTokens applies: lemmas that merely echoed their forms said nothing, so the result follows the new form rather than gluing the same string twice
   toks.forEach(t=>{ if(compSet.has(t._ht)) t._ht=survivor; });            // dependents of any removed component re-point to the survivor
