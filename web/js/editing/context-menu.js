@@ -1481,18 +1481,33 @@ function ungroupMWTShortcut(){ const s=DOC[sel.s]; if(!s||!s.mwt||!s.mwt.length)
 // the original token stays as the head component (keeps its POS/deprel/head/feats); the extra
 // components are inserted after it as blank words hanging off it; the MWT's surface form = the
 // original form. Flatten (below) is the exact inverse.
-function convertTokenToMWT(si,idx,n){ const s=DOC[si], toks=s.tokens; const head=toks[idx]; if(!head)return; pushUndo(si);
+/* `parts`, when given, are the component FORMS — the split is already known and the components are born
+   spelt rather than blank. That is the "=" path (see openConvertMWT): a form written `pra=kāśa` states its
+   own division, so asking how many pieces it has and then leaving them empty asks twice for what the token
+   already says. Without `parts` this is the count-prompt path exactly as before: n blank components. */
+function convertTokenToMWT(si,idx,n,parts){ const s=DOC[si], toks=s.tokens; const head=toks[idx]; if(!head)return; pushUndo(si);
+  const origForm=head.form;   // the MWT's surface form: what the text actually spells, "=" and all
   const oldIds=new Map(); toks.forEach((t,i)=>oldIds.set(t,i+1));
   toks.forEach(t=>{const h=parseInt(t.head,10); t._ht=(h>=1&&h<=toks.length)?toks[h-1]:0;});   // heads by identity, so the coming splice renumbers cleanly
   (s.mwt||[]).forEach(m=>{ m._toks=toks.slice(m.from-1,m.to); });                                // existing MWT ranges by identity
-  const comps=[]; for(let k=1;k<n;k++){ const c=tok("","","X","","",0,"udep"); c._ht=head; comps.push(c); }   // blank components attach to the head component
+  const comps=[]; for(let k=1;k<n;k++){ const c=tok(parts?(parts[k]||""):"","","X","","",0,"udep"); c._ht=head; comps.push(c); }
+  if(parts) head.form=parts[0]||head.form;   // blank components attach to the head component
   toks.splice(idx+1,0,...comps);
   toks.forEach(t=>{ t.head=t._ht===0?"0":String(toks.indexOf(t._ht)+1); delete t._ht; });
   remapMWT(s,toks);
   remapTokenRefs(s,idMapAfter(oldIds,toks));   // the original token survives as the head component and the new ones are blank, so nothing is dropped — this only shifts the ids after it, and DEPS / empty-node anchors with them
   const from=idx+1, to=idx+n;
   s.mwt=(s.mwt||[]).filter(m=>!(m.from<=to&&m.to>=from));   // drop any overlapping range
-  s.mwt.push({from,to,form:head.form}); s.mwt.sort((a,b)=>a.from-b.from);
+  s.mwt.push({from,to,form:origForm}); s.mwt.sort((a,b)=>a.from-b.from);   // the range spells the ORIGINAL, not the head component
+  /* …and the morpheme tiers divide with it, where they mark the SAME division. `=` is this app's clitic
+     seam in MSeg (msegStrip strips ꞊/=/⹀), so a form and an MSeg that both carry it are describing one
+     boundary and the pieces line up one-for-one. Only then — a tier that splits into a different number of
+     pieces is describing something else, and slicing it on a count that does not match would scatter one
+     morpheme's gloss across two tokens. It is left whole on the head instead, where it was. */
+  if(parts){ const all=[head].concat(comps);
+    ["MSeg","MGloss"].forEach(key=>{ const v=miscKV(head.misc,key); if(!v||v.indexOf("=")<0) return;
+      const bits=v.split("="); if(bits.length!==all.length) return;
+      all.forEach((c,k)=>{ c.misc=setMiscKV(c.misc,key,bits[k]); }); }); }
   markDirty(); selRange=null; sel={s:si,t:from}; preserveScroll(renderDoc); pick(si,from,false);
   toast(`Token split into a ${n}-part multi-word token — fill in the component words`); }
 
@@ -1613,6 +1628,15 @@ function openConvertMWT(si,idx){ pick(si,idx+1,false); const rtl=sentRTL(DOC[si]
   let x,y;
   if(el){ const b=el.getBoundingClientRect(); y=b.bottom+4; x=rtl?b.right:Math.max(12,b.left+20); }   // RTL → anchor at the token's right edge, opening leftward
   else { y=innerHeight/2-60; x=rtl?innerWidth/2+105:innerWidth/2-105; }
+  /* A FORM THAT SPELLS ITS OWN DIVISION NEEDS NO PROMPT. `=` is the clitic seam this app already reads in
+     the MSeg tier, so `pra=kāśa` has said both how many components it has and what they are — asking for a
+     count and then handing back empty fields makes the user type what the token already told us.
+     Every piece must be non-empty: a leading, trailing or doubled `=` gives an empty component, which is
+     not a division anybody meant, so those fall through to the prompt rather than producing a blank token. */
+  const t0=(DOC[si]&&DOC[si].tokens[idx])||null, raw=(t0&&t0.form)||"";
+  if(raw.indexOf("=")>=0){ const parts=raw.split("=");
+    if(parts.length>1 && parts.every(x=>x)){ convertTokenToMWT(si,idx,parts.length,parts);
+      toast(`Split into ${parts.length} components at “=”`); return; } }
   countPrompt(x,y,{rtl, title:`Split token ${idx+1}`, min:2, value:2,
     hint:"Component tokens<br>(2 or more).", ok:n=>convertTokenToMWT(si,idx,n)}); }   // explicit <br> → the parenthetical always drops to its own line
 // the MWT entries for a token menu (grid or diagram): flatten + ungroup when the token is in an MWT, else split
