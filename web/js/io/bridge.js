@@ -1890,6 +1890,11 @@ async function sandhiSplitLast(si,from){
   last.form=p;
   last.translit=""; last.translitLemma=""; last.ortho=""; last._trMisc=false; last._trPick=false;   // every derived field spelt the sandhied form
   last.misc=setMiscKV(setMiscKV(last.misc,"Translit",""),"LTranslit","");
+  /* …and MSeg, which SEGMENTS the form and so cannot outlive it: this just respelt `bhṛto` as `bhṛtaḥ`, and a
+     segmentation of the old spelling now names morphemes the token no longer has. Unforced, exactly as a form
+     edit refills it — a hand-typed segmentation is the annotator's and is left alone; the split's own
+     division marks itself as ours (see convertTokenToMWT) so that this can replace it. */
+  if(typeof msegRefill==="function") msegRefill(last);
   if(!miscKV(last.misc,"Unsandhied")) last.misc=setMiscKV(last.misc,"Unsandhied",p);   // …and the pausa spelling is now known for a token that had none recorded; one that DOES keeps it, being the annotator's own
   markDirty();
   await sandhiMwtForms(si,[from]);                    // re-fuse: the range's surface must still be what the text spells

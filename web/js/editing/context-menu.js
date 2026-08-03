@@ -1569,7 +1569,14 @@ function convertTokenToMWT(si,idx,n,parts){ const s=DOC[si], toks=s.tokens; cons
       // …and the two marks meeting COLLAPSE: the piece being moved carries the boundary it points across, and
       // the piece it lands on may already carry one (`janman-` taking `-GEN.PL.M` → `janman--GEN.PL.M`). One
       // boundary, written once — see tierDashFix, which also catches whatever reaches MISC by another route.
-      all.forEach((c,k)=>{ c.misc=setMiscKV(c.misc,key,tierDashFix(bits[k],key)); }); });
+      /* …and a DIVIDED MSeg is marked as ours (`_msegPre`), not as a hand edit. It is a derivation — this
+         function cut it out of the head's own value — and msegRefill declines to touch a segmentation whose
+         stored value differs from the one it last prefilled, on the reasoning that the difference is the
+         annotator's. Without this the piece would be frozen against a form that is about to change under it
+         (sandhiSplitLast puts the last component back into pausa moments later), leaving `MSeg=bhṛ-to`
+         segmenting a token now spelt `bhṛtaḥ`. A genuinely typed MSeg still differs and is still left alone. */
+      all.forEach((c,k)=>{ const val=tierDashFix(bits[k],key); c.misc=setMiscKV(c.misc,key,val);
+        if(key==="MSeg") c._msegPre=val; }); });
     /* …and everything DERIVED FROM A FORM is now stale: the head's script glyph and romanisation render
        the WHOLE `pra=kāśa` it no longer is, and the new components have none at all. Clearing them is
        what makes the fills recompute — the same move afterFormEdit makes when a form changes under it —
