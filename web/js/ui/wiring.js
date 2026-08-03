@@ -28,7 +28,9 @@ function preserveScroll(fn){ const doc=document.getElementById("doc");
    by (see INLINE_EDIT_OPEN in js/core/prefs.js), so the only way to keep it is not to render over it. Skipped
    rather than queued: whatever the pass wanted shown, the editor's own commit re-renders on close, and a queued
    render would fire at the one moment the reader has just started typing somewhere else. */
-function renderUnlessEditing(){ if(typeof INLINE_EDIT_OPEN!=="undefined"&&INLINE_EDIT_OPEN) return false;
+function renderUnlessEditing(){ if(typeof INLINE_EDIT_OPEN!=="undefined"&&INLINE_EDIT_OPEN){
+    if(typeof INLINE_EDIT_SYNC==="function") INLINE_EDIT_SYNC();   // …but the field still learns what the skipped render would have shown it (js/core/prefs.js)
+    return false; }
   preserveScroll(renderDoc); return true; }
 let raf=false; function scheduleDoc(){if(raf)return; raf=true; requestAnimationFrame(()=>{raf=false; preserveScroll(renderDoc);});}
 function refresh(){ preserveScroll(renderDoc); if((ORTHO_SCHEME&&ORTHO_SCHEME!=="none")||isSanskritLang()) fillOrtho(); }   // routine re-renders keep the scroll position; item 17: a newly-added/duplicated block picks up the active SCRIPT (and Sanskrit MWT sandhi) right away — fillOrtho only re-renders if it filled something

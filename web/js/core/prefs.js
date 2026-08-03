@@ -433,6 +433,11 @@ let selRange=null;   // {s, from, to} — a continuous token range shift-selecte
    the edit (makeEditable's own, on commit) must still run — hence a flag consulted by the background paths
    (renderUnlessEditing, js/ui/wiring.js) rather than a block inside preserveScroll itself. */
 let INLINE_EDIT_OPEN=false;
+/* …and how to bring that field up to date without redrawing it. A skipped render is the right call for the
+   caret and the wrong one for the VALUE: if the pass we just declined to draw is what changed the very field
+   under the cursor, the reader is left looking at a stale string in a live editor. This closure re-reads the
+   model into the open input, and makeEditable sets it (and the flag) together. */
+let INLINE_EDIT_SYNC=null;
 /* THE CURRENT BLOCK is not the same thing as the selection, and scrolling moves only the first.
    `sel` answers "what is selected" — the token every edit, menu action and keyboard command operates on, and what
    the three-level subtree dimming is computed from (selEmphasis). CURBLOCK answers "which sentence is the reader

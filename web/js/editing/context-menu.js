@@ -796,8 +796,25 @@ document.addEventListener("pointerdown",e=>{ window.LAST_POINTER_EL=e.target; wi
 // actually changing anything: a CANCELLED edit still ran hideOrig, so its cached node is just as stale.
 function hideOrig(el){ if(el.namespaceURI===SVGNS){ el.style.fill="transparent"; el.style.stroke="transparent"; } else el.style.color="transparent";
   const blk=el.closest&&el.closest(".sblock[data-i]"); if(blk&&typeof invalidateDiaSentence==="function") invalidateDiaSentence(+blk.getAttribute("data-i")); }
-function makeEditable(el,obj,key,after,rtl,relocate,nav,allowEmpty,caretHint){ if(!el)return; const orig=obj[key]||"", pre=snap();
+function makeEditable(el,obj,key,after,rtl,relocate,nav,allowEmpty,caretHint){ if(!el)return; let orig=obj[key]||""; const pre=snap();
   INLINE_EDIT_OPEN=true;   // …and cleared in `finish` below, so a background re-render cannot pull the caret out of this field (see the flag in js/core/prefs.js)
+  /* THE FIELD UPDATES UNDER THE CARET when the value beneath it moves — a background pass changing the very
+     thing being edited (the re-parse revising a lemma, a Sanskrit re-fuse respelling a form) would otherwise
+     leave a live editor showing a string the document no longer holds, and committing it would write the
+     stale one back.
+     ⚠ ONLY WHILE THE READER HAS NOT TYPED. `base` is the last value WE put in the field; once inp.value has
+     moved away from it the reader is mid-word, and their text is the newer statement about this field — a
+     background pass must not take the keyboard out from under them. `orig` follows too, or the commit's
+     changed-test would compare against a value that has not been on screen since the field opened. */
+  let base=orig;
+  INLINE_EDIT_SYNC=()=>{ const v=obj[key]||""; if(inp.value!==base||v===base) return false;
+    /* …and the caret stays put. Writing .value drops it to the end, which would be a visible jump in a field
+       the reader has not touched — the one state this branch runs in. Clamped, since the new value may be
+       shorter than where they were sitting. */
+    const ss=inp.selectionStart, se=inp.selectionEnd;
+    inp.value=base=orig=v;
+    if(ss!=null){ try{ inp.setSelectionRange(Math.min(ss,v.length),Math.min(se==null?ss:se,v.length)); }catch(e){} }
+    if(typeof reflow==="function") reflow(); return true; };
   const inp=document.createElement("input"); inp.className="nodeedit"+(key==="form"?formDeco(obj):""); inp.value=orig;   // item 4: while editing a token FORM, keep its Typo strikethrough on the edit field so the marker doesn't blink off mid-edit (the Foreign italics come across via applyFont, which copies the form's computed font-style)
   let fontStr; const applyFont=e=>{ const cs=getComputedStyle(e);   // `e` lives inside .sblock{zoom:var(--fs)} but `inp` is appended to <body>, OUTSIDE that zoomed context — getComputedStyle reports the AUTHORED font-size (zoom doesn't rewrite it), so it must be scaled by FS by hand or the field renders at the un-zoomed size while the diagram text it's covering renders at size×FS
     const sizePx=(parseFloat(cs.fontSize)||0)*FS+"px";
@@ -845,7 +862,7 @@ function makeEditable(el,obj,key,after,rtl,relocate,nav,allowEmpty,caretHint){ i
   const finish=save=>{ if(inp._closed)return; inp._closed=true; const v=inp.value.trim(), changed=save&&(v||allowEmpty)&&v!==orig;   // item 2: gloss/morphemic tiers pass allowEmpty → an emptied value COMMITS (clears the tier) instead of reverting; the Form editor keeps allowEmpty falsy, so a form can't be blanked
     obj[key]=changed?v:orig;   // commit the trimmed value, or revert the live edits on cancel/no-op
     if(changed){ UNDO.push(pre); if(UNDO.length>80)UNDO.shift(); REDO.length=0; updateUndoUI(); markDirty(); }   // one undo step for the whole edit (the snapshot from before it began)
-    INLINE_EDIT_OPEN=false;   // BEFORE the render below: that one is this edit's own consequence and must run
+    INLINE_EDIT_OPEN=false; INLINE_EDIT_SYNC=null;   // BEFORE the render below: that one is this edit's own consequence and must run
     document.removeEventListener("scroll",place,{capture:true}); inp.remove(); preserveScroll(renderDoc); if(after)after(changed); };   // pass `changed` so a commit-only hook (e.g. MGloss→FEATS back-fill) can distinguish a real commit from a cancel/no-op
   inp.addEventListener("input",reflow);
   inp.addEventListener("keydown",ev=>{
