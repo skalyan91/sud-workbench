@@ -161,7 +161,17 @@ function requestTokenSpans(si,key,text,units,s){
   const done=spans=>{ _TSP_INFLIGHT.delete(tag); const st=DOC[si]; if(!st) return;
     if(!st._tsp||Object.keys(st._tsp).length>=_TSP_MAX) st._tsp={};   // cap: an edited sentence mints a new key each time, and a stale key can never be asked for again
     st._tsp[key]=spans;
-    repaintStext(si); };                                               // decorate LATE rather than block the first render — the same shape as the readings flyout's late-arriving data. Repaint on FAILURE too (it used to return early): a settled "no" is what raises the tokenisation-mismatch badge, and without this repaint the badge waited for some unrelated render to put it up. Cannot loop — the key is now cached, so the next paint reads the answer instead of asking again
+    repaintStext(si);
+    /* …AND THE ROWS DERIVED FROM THOSE SPANS, which repaintStext does not touch. runningLine takes the
+       gap between two units from `# text` when spans exist and falls back to SpaceAfter when they do
+       not — and SpaceAfter cannot express a VERSE LINE BREAK. So a sentence whose spans arrive late
+       draws its CSL (or script) line with plain spaces and no breaks, and keeps them until some
+       unrelated render happens to rebuild the block: the "the linebreaks only appear once I flip to a
+       different transliteration" shape, where flipping is simply the first thing that re-renders.
+       Only on a real answer — a settled failure leaves those rows exactly as they already are, since
+       the fallback is what they are already showing. scheduleDoc is rAF-debounced (js/ui/wiring.js),
+       so a document whose sentences all answer at once costs ONE render, not one per sentence. */
+    if(spans && typeof scheduleDoc==="function") scheduleDoc(); };                                               // decorate LATE rather than block the first render — the same shape as the readings flyout's late-arriving data. Repaint on FAILURE too (it used to return early): a settled "no" is what raises the tokenisation-mismatch badge, and without this repaint the badge waited for some unrelated render to put it up. Cannot loop — the key is now cached, so the next paint reads the answer instead of asking again
   Promise.resolve(window.pywebview.api.token_spans(text,units.map(u=>u.form),model||"",unitParts(s,units),DOCLANG||""))   // parts + language are stage 2's; stage 3 ignores both
     .then(r=>{ const sp=(r&&Array.isArray(r.spans)&&r.spans.length===units.length&&r.spans.some(Boolean))?r.spans:null; done(sp); })
     .catch(()=>done(null)); }
