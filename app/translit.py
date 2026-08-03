@@ -1274,8 +1274,24 @@ _DESANDHI_FINALS = [
 _PAUSA_IMPOSSIBLE = frozenset("ośṣsṃyvr")
 
 
+# The UD classes that do not inflect.  DCS records an indeclinable's `Unsandhied` as its CITATION form and
+# an inflected word's as its PAUSA form, and the sample bears that out with no exceptions: every NOUN there
+# reverts to the visarga (kratuś→kratuḥ, uro→uraḥ, bastir→bastiḥ, rāśayo→rāśayaḥ) while both ADVs revert to
+# -s (tato→tatas, bahuśaḥ→bahuśas) — and for those two, and only those two, the LEMMA equals the answer.
+# That is not a coincidence to exploit but the definition: a word that does not inflect has one form, so its
+# citation form IS its lemma, whereas a nominal's lemma is a STEM (kratu, basti, rāśi) and no help at all.
+_INDECLINABLE_UPOS = frozenset({"ADV", "PART", "CCONJ", "SCONJ", "ADP", "INTJ"})
+
+
+def _indecl_key(w: str) -> str:
+    """A word stripped of whatever final sandhi could have changed — enough to ask whether two spellings are
+    the SAME word.  `tato`, `tatas` and `tataḥ` all reduce to `tat`; `punar` and `punaḥ` to `pun`."""
+    w = _ud.normalize("NFC", w or "").rstrip("oḥsśṣr")
+    return w[:-1] if w.endswith(("a", "ā")) else w
+
+
 def desandhi_final(form: str, lang: str = "sa", lemma=None, nxt_word: str = "",
-                   pause_after: bool = False) -> str:
+                   pause_after: bool = False, upos: str = "") -> str:
     """Undo the non-coalescent external sandhi at a word's RIGHT edge — the inverse of the right-hand
     half of `_boundary_sandhi`, and used when a token is SPLIT into a multi-word token.
 
@@ -1311,6 +1327,27 @@ def desandhi_final(form: str, lang: str = "sa", lemma=None, nxt_word: str = "",
     def forward(p: str) -> str:
         return _ud.normalize("NFC", _boundary_sandhi(p, "", nx, lm, p, pause_after))
 
+    def give(w: str) -> str:
+        return (_render_one(w, lang, script) or w) if script else w
+
+    # ── AN INDECLINABLE IS ITS OWN CITATION FORM ────────────────────────────────────────────────────
+    # …so there is nothing to reconstruct: the lemma IS the answer, and no forward transform need agree
+    # with it.  It could not, in fact — `_iast_join_pair` keys visarga sandhi on a final `ḥ`, so it has
+    # nothing to say about the `-s` and `-r` these words are cited with, and demanding verification here
+    # would reject every correct answer.  What IS checked is that the lemma is a spelling of THIS word
+    # (_indecl_key), which is what stops a wrong or absent lemma putting an unrelated string in the
+    # column.  Where it cannot be checked, the form stands: `-s` and `-r` are an indeclinable's own
+    # endings, and reverting them to a visarga would be inventing an inflection it does not have.
+    if str(upos or "").upper() in _INDECLINABLE_UPOS:
+        # Two ways to recognise the lemma as a spelling of this word, because one of them cannot see the
+        # semivowel alternation: `su` before a vowel is `sv` (svalpaṃ), and no amount of stripping final
+        # sandhi letters relates `sv` to `su` — but the forward transform reproduces it exactly, yaṇ being
+        # one of the junctions it does model.  Either signal is enough; both are checks on the LEMMA, not
+        # reconstructions of an answer.
+        if lm and (_indecl_key(lm) == _indecl_key(f) or forward(lm) == f):
+            return give(lm)
+        return form
+
     # ⚠ THE FORWARD TRANSFORM IS IDEMPOTENT, so `forward(f) == f` proves NOTHING: re-applying sandhi to
     # an already-sandhied surface changes nothing, and testing for that rejected every real reversal in
     # both samples.  Identity is therefore always a candidate, and what decides between it and a genuine
@@ -1337,8 +1374,7 @@ def desandhi_final(form: str, lang: str = "sa", lemma=None, nxt_word: str = "",
         hits = pick or [h for h in hits if h[-1:] in ("i", "u", "aḥ"[-1])] or hits
     if len(hits) != 1:
         return form                                # still undecided → say nothing
-    out = hits[0]
-    return (_render_one(out, lang, script) or out) if script else out
+    return give(hits[0])
 
 
 def sandhi_to_script(forms, lang: str, scheme: str = "", lemmas=None, word_sep: str = "",

@@ -1906,7 +1906,7 @@ async function saSyncUnsandhied(si,tokId){
   else if((s.mwt||[]).some(x=>tokId>=x.from&&tokId<=x.to)) un=t.form;    // a component is stored in pausa already
   else if(!hasBridge()) return false;                                    // only the backend can undo sandhi — leave the old value rather than write a wrong one
   else { const cx=saMwtContext(s,{from:tokId,to:tokId});                 // …the same neighbour/pause reading a range gets, with the token standing as its own range
-    let r=null; try{ r=await window.pywebview.api.sanskrit_desandhi(t.form,DOCLANG,(t.lemma&&t.lemma!=="_")?t.lemma:"",cx.next,cx.pause); }catch(e){ return false; }
+    let r=null; try{ r=await window.pywebview.api.sanskrit_desandhi(t.form,DOCLANG,(t.lemma&&t.lemma!=="_")?t.lemma:"",cx.next,cx.pause,t.upos||""); }catch(e){ return false; }
     un=(r&&r.form)||t.form; }
   if(miscKV(t.misc,"Unsandhied")===un) return false;
   t.misc=setMiscKV(t.misc,"Unsandhied",un); markDirty(); return true; }
@@ -1942,7 +1942,7 @@ async function sandhiSplitPausa(si,from){
   for(let i=comps.length-1;i>=0;i--){ const c=comps[i], lastOne=(i===comps.length-1);
     const nxt=lastOne?cx.next:(comps[i+1].form||""), pause=lastOne?cx.pause:false;
     let r=null;
-    try{ r=await window.pywebview.api.sanskrit_desandhi(c.form,DOCLANG,(c.lemma&&c.lemma!=="_")?c.lemma:"",nxt,pause); }catch(e){ continue; }
+    try{ r=await window.pywebview.api.sanskrit_desandhi(c.form,DOCLANG,(c.lemma&&c.lemma!=="_")?c.lemma:"",nxt,pause,c.upos||""); }catch(e){ continue; }   // …and the UPOS, which decides whether the pausa column takes the citation form or the inflected one (Api.sanskrit_desandhi)
     const p=r&&r.form;
     if(!p||p===c.form) continue;                        // ambiguous, or nothing to undo — desandhi_final declines rather than guesses
     c.form=p; any=true;

@@ -1057,7 +1057,7 @@ class Api:
         return {"ortho": ortho, "form": form, "lang": lang, "scheme": scheme}
 
     def sanskrit_desandhi(self, form: str, lang: str = "", lemma: str = "",
-                          nxt_word: str = "", pause_after: bool = False) -> dict:
+                          nxt_word: str = "", pause_after: bool = False, upos: str = "") -> dict:
         """The pausa spelling of ``form`` — its non-coalescent external sandhi with ``nxt_word`` undone.
 
         The mirror image of ``sanskrit_mwt``, and wanted at the opposite moment: that one FUSES a range's
@@ -1068,13 +1068,18 @@ class Api:
         (`janmanāṃ` → `janmanām`, `bhṛto` → `bhṛtaḥ`).  Only the last: the interior junctions are
         compound-internal, and the left edge's sandhi is written on the word before this one.
 
+        ``upos`` decides WHICH form that is, and the two answers are different: DCS records an
+        INDECLINABLE's pausa column as its citation form (tato → tatas, punar → punar) and an INFLECTED
+        word's as its pausa spelling (kratuś → kratuḥ, bastir → bastiḥ).  Both are visible in
+        samples/brihat_jataka.conllu, which is where the rule came from.
+
         Declines rather than guesses — see translit.desandhi_final, which verifies every candidate against
         the forward transform and returns the form untouched where the reversal is ambiguous.  Measured on
         both Sanskrit samples: reverting the ending and re-fusing it reproduces the original surface for
         68 of 68 ranges, 28 of which it actually changes."""
         from . import translit
         return {"form": translit.desandhi_final(form or "", lang or "sa", lemma or None,
-                                                nxt_word or "", bool(pause_after))}
+                                                nxt_word or "", bool(pause_after), upos or "")}
 
     def sanskrit_csl(self, sents: list[dict]) -> dict:
         """Each sentence's tokens spelt in Clay-Sanskrit-Library notation → ``{"csl": [[…], …]}``.
