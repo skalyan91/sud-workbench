@@ -1567,7 +1567,7 @@ function convertTokenToMWT(si,idx,n,parts){ const s=DOC[si], toks=s.tokens; cons
          function cut it out of the head's own value — and msegRefill declines to touch a segmentation whose
          stored value differs from the one it last prefilled, on the reasoning that the difference is the
          annotator's. Without this the piece would be frozen against a form that is about to change under it
-         (sandhiSplitLast puts the last component back into pausa moments later), leaving `MSeg=bhṛ-to`
+         (sandhiSplitPausa puts the components back into pausa moments later), leaving `MSeg=bhṛ-to`
          segmenting a token now spelt `bhṛtaḥ`. A genuinely typed MSeg still differs and is still left alone. */
       all.forEach((c,k)=>{ const val=tierDashFix(bits[k],key); c.misc=setMiscKV(c.misc,key,val);
         if(key==="MSeg") c._msegPre=val; }); });
@@ -1587,7 +1587,13 @@ function convertTokenToMWT(si,idx,n,parts){ const s=DOC[si], toks=s.tokens; cons
        so this goes on the bridge and is deliberately not awaited, exactly as sandhiFlattenLemma is: a split
        is a synchronous editing command and must not hold the selection while a call is out. It re-fuses the
        range afterwards, so the surface the text spells is unchanged either way. */
-    if(isSanskritLang() && !host && typeof sandhiSplitLast==="function") sandhiSplitLast(si,from);   // …but NOT when the split happened inside an existing range: the token divided was already a component, so it was already stored in pausa and there is no external sandhi on it to undo
+    /* ⚠ A NESTED SPLIT NEEDS THIS TOO, and skipping it was wrong. The reasoning was that a component is
+       already stored in pausa — true of its EDGES, and only of those. Dividing one exposes an INTERIOR
+       junction that never was in pausa, because it was inside a fused word: `punarjanmanām` cut as
+       `punar=janmanām` leaves `punar` standing before a voiced sound, where the pausa is `punaḥ`. The pass
+       walks the whole range and declines wherever there is nothing to undo, so running it over an existing
+       range costs the components that did not move nothing at all. */
+    if(isSanskritLang() && typeof sandhiSplitPausa==="function") sandhiSplitPausa(si,host?host.from:from);   // the HOST's id where there is one: that is the range the components belong to
     if(show.translit) fillTranslit();
     if((ORTHO_SCHEME&&ORTHO_SCHEME!=="none")||isSanskritLang()) fillOrtho();
     toast(`Split into ${n} components at “=”`); }

@@ -1911,7 +1911,7 @@ async function saSyncUnsandhied(si,tokId){
   if(miscKV(t.misc,"Unsandhied")===un) return false;
   t.misc=setMiscKV(t.misc,"Unsandhied",un); markDirty(); return true; }
 
-/* THE LAST COMPONENT OF A FRESHLY SPLIT SANSKRIT RANGE, PUT BACK INTO PAUSA.
+/* THE COMPONENTS OF A FRESHLY SPLIT SANSKRIT RANGE, PUT BACK INTO PAUSA.
    A token that is its own orthographic word carries its SANDHIED surface in FORM; a token inside a
    multi-word token is stored UNSANDHIED (the DCS convention — CLAUDE.md). So the moment a split turns one
    into the other, the piece holding the end of the word is still spelt as the FOLLOWING word made it spell
@@ -1922,7 +1922,7 @@ async function saSyncUnsandhied(si,tokId){
    ranges in both samples reproduce their original surface after a revert-and-re-fuse).
    The neighbour and the pause come from saMwtContext, the same reading sandhiMwtForms fuses against, so the
    two cannot disagree about which word follows this one or whether a daṇḍa stands between them. */
-async function sandhiSplitLast(si,from){
+async function sandhiSplitPausa(si,from){
   if(!isSanskritLang()||!hasBridge()||!DOCLANG) return false;
   const s=DOC[si]; if(!s) return false;
   const m=(s.mwt||[]).find(x=>x.from===from); if(!m) return false;
