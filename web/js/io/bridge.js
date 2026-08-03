@@ -1975,8 +1975,19 @@ async function sanskritStretch(s,units,spans,text,k,tokId,kind){
   const bySep={};
   elems.forEach(e=>{ if(e.forms.length<2){ e.inner=dandaSpell(e.forms[0],s); return; }   // item 10: a daṇḍa goes back in the spelling THIS line uses (`|` or `/`), which the form column need not agree with — brihat_jataka writes `‖` in the form and `||` in the text. dandaSpell is inert on everything else, and on a sentence whose daṇḍa spelling was never read off the line
     const sep=mwtSepOf(e.m); (bySep[sep]||(bySep[sep]=[])).push(e); });
+  /* ⚠ AN INNER FUSION IS IN PAUSA AT ITS EDGES, because it is asked without neighbours. That is right while
+     an OUTER fusion is still to come — that pass is what reconciles the two ends against the words either
+     side. It is wrong when this unit is the whole stretch, because then nothing reconciles anything and the
+     pausa spelling is what gets spliced into a running line: `paṭudhiyāṃ`, whose -ṃ the following
+     `horāphalajñāptaye` puts there, went into `# text` as `paṭudhiyām`. So the single-element case is given
+     the same neighbour reading sandhiMwtForms fuses the range's own form against — one answer about what
+     word follows this one, not two. */
+  const solo=(()=>{ if(elems.length!==1) return null; const ids=units[elems[0].i].ids;   // token ids, not the unit index — saMwtContext walks the token list
+    return saMwtContext(s,{from:ids[0],to:ids[ids.length-1]}); })();
   for(const sep of Object.keys(bySep)){ const g=bySep[sep];
-    let r; try{ r=await window.pywebview.api.sanskrit_mwt(g.map(e=>e.forms),DOCLANG,"",g.map(e=>e.lemmas),_STX_PH[sep]||sep); }catch(_){ return null; }
+    const cx=solo&&g.length===1;
+    let r; try{ r=await window.pywebview.api.sanskrit_mwt(g.map(e=>e.forms),DOCLANG,"",g.map(e=>e.lemmas),_STX_PH[sep]||sep,
+      cx?[solo.prev]:null, cx?[solo.next]:null, cx?[solo.pause]:null); }catch(_){ return null; }
     const ia=r&&r.form; if(!ia||ia.length!==g.length) return null;
     g.forEach((e,n)=>{ e.inner=ia[n]; }); }
   if(elems.some(e=>!e.inner)) return null;
