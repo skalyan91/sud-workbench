@@ -1548,8 +1548,45 @@ function msegRefill(t,force){ if(!MORPH_ON||!t) return false;
   const pv=glossEnc(msegPrefillParts(t).seg);
   if(!pv||pv===cur) return false;
   t.misc=setMiscKV(t.misc,"MSeg",pv); t._msegPre=pv;
+  /* …and the SEAM goes back on, because a refill cannot derive it: msegSegment segments against the lemma,
+     and a clitic boundary is the annotator's assertion. Every refill path ends here — the form edit, the
+     forced lemma-edit one, and the background re-parse's, which is what silently dropped a just-mirrored
+     seam by refilling over it a second later. */
+  msegMirrorSeams(t);
   mglossReslot(t,cur,pv);   // MSeg's hyphen slots just moved, and MGloss names those slots one for one — keep the two rows in step (js/editing/edit-ops.js). Placed HERE, at the single point every MSeg re-derivation passes through, so the form-edit and background-re-parse callers are covered too, not only the lemma edit. A no-op when the two are already in step, which is what lets the grid's own lemma-commit call for the same edit not double-apply it
   return true; }
+/* A SEAM TYPED INTO A FORM IS A SEAM IN ITS SEGMENTATION TOO. `=` marks where a token should divide, and
+   openConvertMWT reads it off the FORM to split without asking how many pieces — but the split also divides
+   MSeg on `=`, and only when the piece counts agree. So a form that says `śaśa=bhṛto` beside an MSeg that
+   says `śaśabhṛ-to` describes ONE boundary in two places and states it in only one of them: the split then
+   leaves the whole segmentation on the head, because it has no way to know where to cut it.
+   Nothing can DERIVE it either — msegSegment segments the form against the lemma, and a clitic boundary is
+   an assertion the annotator makes, not something a lemma implies. So it is carried across rather than
+   inferred, and only where the carry is unambiguous: MSeg with its separators removed must equal the form
+   with its seams removed, i.e. the two must already be spelling the same string. Where they are not (an MSeg
+   in the transliteration of a non-Latin script, a hand-rewritten segmentation) this says nothing at all.
+   A seam landing where MSeg already has a morpheme `-` REPLACES it: they mark the same division, and `=-`
+   would read as two boundaries where the annotator drew one — the seam being the stronger claim, since it
+   says the pieces are separate TOKENS rather than separate morphemes. */
+const _SEAM_RE=/[꞊=⹀]/g, _SEP_RE=/[-꞊=⹀]/;
+function msegMirrorSeams(t){ if(!t) return false;
+  const form=String(t.form||""); if(!_SEAM_RE.test(form)) { _SEAM_RE.lastIndex=0; return false; }
+  _SEAM_RE.lastIndex=0;
+  const cur=miscKV(t.misc,"MSeg"); if(!cur||cur.indexOf("=")>=0) return false;
+  if(cur.replace(/[-꞊=⹀]/g,"")!==form.replace(/[꞊=⹀]/g,"")) return false;   // not the same string → no honest mapping
+  const marks=[]; let k=0;
+  for(const ch of form){ if(/[꞊=⹀]/.test(ch)) marks.push(k); else k++; }    // how many LETTERS precede each seam
+  let out="", seen=0, mi=0;
+  for(const ch of cur){ while(mi<marks.length&&marks[mi]===seen){ out+="="; mi++; }
+    out+=ch; if(!_SEP_RE.test(ch)) seen++; }
+  while(mi<marks.length){ out+="="; mi++; }
+  out=out.replace(/-+=/g,"=").replace(/=-+/g,"=");                          // one boundary, written once
+  if(out===cur) return false;
+  /* ⚠ `_msegPre` IS DELIBERATELY NOT SET. It marks a value as OURS, which licenses a later unforced refill
+     to overwrite it — and this value is not ours: the seam in it is the annotator's assertion, carried over
+     from a form they typed. Setting it let the background re-parse refill straight over the mirrored seam a
+     second later, taking the morpheme hyphens with it. Leaving it alone is what makes msegRefill decline. */
+  t.misc=setMiscKV(t.misc,"MSeg",out); return true; }
 // Seed one sentence's morphemic tiers wherever they're EMPTY, leaving anything already there untouched:
 //  · MSeg  (item 11b) — the TRANSLITERATION for non-Latin-script languages, else the surface form, SEGMENTED
 //    against the lemma by msegSegment above (unsegmented where the lemma is missing or says nothing).
@@ -1779,7 +1816,7 @@ async function afterFormEdit(si,tokId,changed){ const s=DOC[si], t=s&&s.tokens[t
     if(show.translit) await fillTranslit();                                             // romanisation of the new form
     await annotateTranslitMisc(si);                                                     // rewrite MISC Translit/LTranslit
     if((ORTHO_SCHEME&&ORTHO_SCHEME!=="none")||isSanskritLang()) fillOrtho();            // re-render the script glyph from the new form
-    if(msegRefill(t)) markDirty();   // MSeg re-seeds from the NEW form (its transliteration for non-Latin scripts), re-segmented against the lemma — which the background re-parse below may then revise again once it hands this token a lemma of its own (item 3)
+    if(msegRefill(t)|msegMirrorSeams(t)) markDirty();   // …and a seam typed into the form is carried into MSeg (msegMirrorSeams), AFTER the refill, which segments against the lemma and cannot know about a clitic boundary   // MSeg re-seeds from the NEW form (its transliteration for non-Latin scripts), re-segmented against the lemma — which the background re-parse below may then revise again once it hands this token a lemma of its own (item 3)
     if(isSanskritLang()){ await saSyncUnsandhied(si,tokId);   // …and the pausa spelling, which is a spelling OF the form and so cannot outlive it (see saSyncUnsandhied). BEFORE the re-fuse below: a range's CSL is built from its components' Unsandhied values, so fusing first would rebuild it from the one this edit just invalidated
       const m=(s.mwt||[]).find(x=>tokId>=x.from&&tokId<=x.to); if(m) sandhiMwtForms(si,[m.from]); }   // item 8: re-fuse a containing MWT
   }catch(err){ console.error("afterFormEdit: a derived field failed to refresh",err); }
