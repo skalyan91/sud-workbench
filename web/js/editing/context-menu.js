@@ -1538,7 +1538,25 @@ function flattenMWT(si,m){ const s=DOC[si], toks=s.tokens; if(!m)return; pushUnd
        means. Seam marks are stripped first (msegStrip): they marked the MWT boundary that has just
        ceased to exist. A component contributing nothing to a tier is skipped rather than leaving an
        empty slot, so one unglossed part cannot produce a stray "-". */
-  const tierJoin=k=>{ const parts=comps.map(t=>msegStrip(tierText(t,k))).filter(Boolean); return parts.join("-"); };
+  /* A gloss made ONLY of Leipzig abbreviations is not a gloss of its own morpheme — it is the categories
+     that attach to the one before it, so it keeps its hyphen on the side it attaches to EVEN WHERE THE
+     NEIGHBOUR CONTRIBUTES NOTHING: `` + `GEN.PL.M` is `-GEN.PL.M`, not `GEN.PL.M`, because the morpheme it
+     qualifies is still there in MSeg and in the form. Dropping empty pieces and joining what was left —
+     which is what this did — silently promoted a suffix's categories to a word-level gloss.
+     A lexical gloss beside an empty one keeps no hyphen (`` + `shining` → `shining`): there the empty
+     piece really is nothing to attach to.
+     A value that ALREADY leads with "-" or "." carries its own mark and is joined as-is, so nothing is
+     doubled — which also fixes a plain `x` + `-ām` running together as `x--ām`. */
+  const abbrOnly=v=>{ if(typeof glossAbbrSegments!=="function") return false; let any=false;
+    for(const seg of glossAbbrSegments(v||"")){ const t=String(seg[0]||"").replace(/[-.\s]/g,"");
+      if(!t) continue; if(!seg[1]) return false; any=true; }
+    return any; };
+  const tierJoin=k=>{ let out="";
+    comps.forEach(t=>{ const v=msegStrip(tierText(t,k)); if(!v) return;
+      const lead=/^[-.]/.test(v);
+      if(out) out += lead ? v : "-"+v;
+      else out = (!lead && k==="mgloss" && abbrOnly(v)) ? "-"+v : v; });
+    return out; };
   survivor.lemma=comps.map(t=>(t.lemma&&t.lemma!=="_")?t.lemma:"").join("")||survivor.form;
   /* ⚠ THE COMPONENTS' OWN VALUES FIRST, not the RANGE's. `m.translit` is a rendering of a RANGE, and a
      range's rendering marks the seams between its members — under CSL that is literally what it is for
