@@ -1568,14 +1568,22 @@ function msegRefill(t,force){ if(!MORPH_ON||!t) return false;
    A seam landing where MSeg already has a morpheme `-` REPLACES it: they mark the same division, and `=-`
    would read as two boundaries where the annotator drew one — the seam being the stronger claim, since it
    says the pieces are separate TOKENS rather than separate morphemes. */
-const _SEAM_RE=/[꞊=⹀]/g, _SEP_RE=/[-꞊=⹀]/;
+const _SEP_RE=/[-꞊=⹀]/;
 function msegMirrorSeams(t){ if(!t) return false;
-  const form=String(t.form||""); if(!_SEAM_RE.test(form)) { _SEAM_RE.lastIndex=0; return false; }
-  _SEAM_RE.lastIndex=0;
   const cur=miscKV(t.misc,"MSeg"); if(!cur||cur.indexOf("=")>=0) return false;
-  if(cur.replace(/[-꞊=⹀]/g,"")!==form.replace(/[꞊=⹀]/g,"")) return false;   // not the same string → no honest mapping
+  /* WHICH STRING THE SEAM COMES FROM is the same question as which string MSeg is a segmentation OF, and
+     msegPrefillParts has already answered it: the TRANSLITERATION in a document whose script needs one, the
+     surface form otherwise. So a Devanagari file's seam is read off the IAST — which is where it is typed in
+     that file anyway, the transliteration row being the editable one under a script (iastFormEdit) — and
+     mapping it off the Devanagari could not work regardless, the two spellings having no character-for-
+     character correspondence to count along. A seam typed into the FORM still arrives: the romanisation is
+     re-derived from it before this runs (afterFormEdit) and `=` survives that conversion. */
+  const tr=(typeof translitNeeded==="function"&&translitNeeded(DOCLANG))?(miscTranslit(t.misc)||t.translit||""):"";
+  const src=String(tr||t.form||"");
+  if(!src||src.indexOf("=")<0&&!/[꞊⹀]/.test(src)) return false;
+  if(cur.replace(/[-꞊=⹀]/g,"")!==src.replace(/[꞊=⹀]/g,"")) return false;   // not the same string → no honest mapping
   const marks=[]; let k=0;
-  for(const ch of form){ if(/[꞊=⹀]/.test(ch)) marks.push(k); else k++; }    // how many LETTERS precede each seam
+  for(const ch of src){ if(/[꞊=⹀]/.test(ch)) marks.push(k); else k++; }    // how many LETTERS precede each seam
   let out="", seen=0, mi=0;
   for(const ch of cur){ while(mi<marks.length&&marks[mi]===seen){ out+="="; mi++; }
     out+=ch; if(!_SEP_RE.test(ch)) seen++; }
