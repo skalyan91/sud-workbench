@@ -1320,7 +1320,7 @@ function buildBlock(i,ctx){ const s=DOC[i];
     // Otherwise, under a real script, it takes a row of its own beneath the glyph.
     const cslTop=(typeof saCslTop==="function") && saCslTop() && show.translit;
     const cslRow=isSanskritLang() && TRANSLIT_SCHEME==="csl" && show.translit && !cslTop;
-    let scriptTransLine=null;   // set below, IF scriptTop: the .strans-orig editable line this block's script .stext reveals+focuses when Displayed transliteration is "None" (assigned before either element's listeners can fire — both are wired synchronously within this same DOC.forEach iteration)
+    let scriptTransLine=null, fieldHost=null;   // fieldHost: the row the sentence field opens on — see the click handler on the script line   // set below, IF scriptTop: the .strans-orig editable line this block's script .stext reveals+focuses when Displayed transliteration is "None" (assigned before either element's listeners can fire — both are wired synchronously within this same DOC.forEach iteration)
     // item 30's daṇḍa DISPLAY transform now lives at module level (dandaDisp, top of this file) so the
     // late stage-2 alignment repaint can reproduce exactly what this render drew.
     const wireStext=el=>{ const raw=s.text||s.tokens.map(t=>t.form).join(" ")||"(empty)";
@@ -1409,7 +1409,10 @@ function buildBlock(i,ctx){ const s=DOC[i];
                           focus, which is the same mechanism the CSL line already uses and the same
                           contract a token has (read the derived string, edit the underlying one).
          One predicate for both halves, so they cannot disagree about which row is live. */
-      const inPlace=isSanskritLang() && (cslTop||cslRow||!show.translit);
+      /* ⚠ `cslRow` does NOT belong in this test, and putting it here was the bug: a CSL row IS a
+         transliteration on screen, so the field belongs on IT, not on the script line above it. The
+         script line hosts the field only when NOTHING else is displayed to host it. */
+      const inPlace=isSanskritLang() && (cslTop||!show.translit);
       if(inPlace){ const resting=line||s.text||"(empty)";
         wireStext(txt); txt.textContent=resting;
         txt.addEventListener("blur",()=>{ txt.textContent=resting; });   // a COMMIT re-renders the block and recomputes the line; this is the cancelled/unchanged case, which wireStext would otherwise leave showing the raw text
@@ -1424,9 +1427,11 @@ function buildBlock(i,ctx){ const s=DOC[i];
       // another (it takes the visible slot — see the scriptTransLine assignment below), and without this
       // the original text became uneditable inline for as long as CSL was displayed.
       else if(isSanskritLang()){ txt.style.cursor="text"; txt.title+=" — click to edit the transliteration";
-        txt.addEventListener("click",()=>{ if(!scriptTransLine)return;
-          if(scriptTransLine.hidden){ scriptTransLine.hidden=false; alignInlineStart(scriptTransLine,b); capTransWidth(scriptTransLine); }
-          scriptTransLine.focus(); }); } }
+        // …onto whichever row is HOSTING the field — the editable `# text` where it is shown, the CSL row
+        // where that has taken its place. `fieldHost` is assigned as each is built, below.
+        txt.addEventListener("click",()=>{ const h=fieldHost||scriptTransLine; if(!h)return;
+          if(h.hidden){ h.hidden=false; alignInlineStart(h,b); capTransWidth(h); }
+          h.focus(); }); } }
     else wireStext(txt);
     const ctrl=document.createElement("div"); ctrl.className="sctrl";
     SCTRL(i).forEach(([g,ti,kbd,fn,d])=>{
@@ -1504,10 +1509,16 @@ function buildBlock(i,ctx){ const s=DOC[i];
       tl.hidden=!show.translit||cslRow||cslTop;
       tl.setAttribute("data-capw","1"); if(!tl.hidden) applyTransInset(tl);   // swept with the translations grid, synchronously, so the height the caps measure is the height that is drawn   // a hidden row is unmeasurable (0-width rect) — the reveal handler re-runs this itself once it's shown
       tl.addEventListener("blur",()=>{ if(!show.translit||cslRow||cslTop) tl.hidden=true; });   // …and re-collapses on blur, still gated on Displayed:"None" — if the user changed the Displayed scheme away from None WHILE this row was open, show.translit is now true and the row stays, exactly as a fresh render would leave it
-      scriptTransLine=tl; b.appendChild(tl);
+      scriptTransLine=tl; if(!tl.hidden) fieldHost=tl; b.appendChild(tl);
       if(cslRow){ const cl=document.createElement("div"); cl.className="strans"; cl.style.marginInlineStart=(idW+8)+"px";
-        cl.textContent=runningLine(s,i,u=>u.mwt?(topTransTxt(u.mwt)||u.mwt.form):(topTransTxt(u.tok)||u.tok.form)," ");
-        cl.title="Sentence in "+trSchemeLabel(TRANSLIT_SCHEME)+" (display)";
+        const cslResting=runningLine(s,i,u=>u.mwt?(topTransTxt(u.mwt)||u.mwt.form):(topTransTxt(u.tok)||u.tok.form)," ");
+        /* THE CSL ROW IS THE FIELD when it is the transliteration on screen — same contract as everywhere
+           else: it reads as CSL and edits the raw `# text` beneath it. Without this the row was inert and
+           the field fell back to the script line above, which is what the report was about. */
+        wireStext(cl); cl.textContent=cslResting;
+        cl.addEventListener("blur",()=>{ cl.textContent=cslResting; });   // a commit re-renders and recomputes; this is the cancelled case
+        cl.title="Sentence in "+trSchemeLabel(TRANSLIT_SCHEME)+" (display) — click to edit the text";
+        cl.style.cursor="text"; fieldHost=cl;
         capTransWidth(cl); b.appendChild(cl); } }
     else if(trLayer()){   // romanisation OR a Latin-output orthography → a plain whole-sentence line under the text (no displacement)
       /* NO ROW WHERE IT WOULD ONLY REPEAT THE LINE ABOVE IT — an IAST romanisation of an IAST-stored
