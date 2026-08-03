@@ -2000,9 +2000,29 @@ async function sanskritStretch(s,units,spans,text,k,tokId,kind){
       parts=[]; let at=0;
       words.forEach((w,n)=>{ if(n) at+=gaps[n-1].length; parts.push([at,at+w.length]); at+=w.length; });
       if(parts.length!==elems.length) parts=null; }
-    else { lo=hi=k; }                                                                        // it welded (or the call failed) → rewrite the unit alone, which is always safe
+    /* ⚠ IT IS NOT SAFE TO REWRITE THE UNIT ALONE HERE, and this used to. A stretch was grown precisely
+       BECAUSE this unit has a neighbour its spelling depends on, so the unit's own form is its PAUSA form —
+       and splicing that into a running line writes a word the sentence does not contain: `śaśabhṛto`, whose
+       -o the following `vartmā` puts there, came back as `śaśabhṛtaḥ`. That is the reported corruption's
+       content exactly, and it fires when the fusion is unavailable or comes back welded, which is when
+       nobody is watching. Where a fusion was ATTEMPTED and did not come back usable, the honest answer is
+       to leave `# text` alone: the file then disagrees with itself visibly, which is what the
+       tokenisation-mismatch badge is for, rather than invisibly in the running text.
+       A unit with NO usable neighbour never gets here — elems.length is 1, no fusion is attempted, and its
+       own form is the whole truth about its stretch. That case still writes, as it always did. */
+    else return null;
   }
   out=out.replace(_STX_UNPH,c=>_STX_PH_BACK[c]);
+  /* ⚠ THE CLITIC SEAM NEVER REACHES `# text`, on ANY path out of here. It is a note to the splitter and not
+     a letter of the word (b354a8b), and the backend takes it out of everything it fuses —
+     translit._sandhi_preclean — so the fused paths were already safe. The SINGLE-UNIT path is not fused at
+     all: `e.inner` for a one-token unit is that token's raw form, so the moment a seam was typed into a form
+     the write-back spliced it straight into the running sentence (`śaśabhṛto` → `śaśa=bhṛtaḥ` in `# text`,
+     reproduced). That path is reached whenever the multi-unit fusion is unavailable or comes back welded,
+     which is exactly when nobody is watching. Stripped HERE rather than at each `inner`, so no future branch
+     can route around it — and Sanskrit-only, this whole function being on the `skt` side. */
+  out=out.replace(/[꞊=⹀]/g,"");
+  if(!out.trim()) return null;                                                               // a form that was NOTHING BUT seams leaves no word to write — say nothing rather than blank the stretch
   if(_STX_CTRL.test(out)) return null;                                                       // belt and braces on the placeholder scheme: whatever the backend hands back, a control character must never be spliced into `# text` — it would be invisible on screen, survive the save, and make the file's own alignment unreproducible
   return {out,a:spans[lo][0],b:spans[hi][1],lo,hi,parts}; }
 /* Splice one unit's stretch of `# text`. Returns true when the string actually changed. */
