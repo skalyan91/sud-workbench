@@ -3,15 +3,12 @@
    Stemma + arcs only for now (other notations get their own patterns later). Tokens and edges already carry
    data-s / data-tok / data-dep / data-head, so one delegated pointer handler on #doc covers every block. */
 let DDRAG=null, DSUPPRESS=false, DGHOST=null, DCARET=null;
-let DTAP=null;   // item 4: the last plain tap on a token FORM {si,tok,t} — a second one on the same token inside 450 ms is the double-click that opens the lemma editor (see the pointerup tap branch for why this isn't a native "dblclick" listener)
-/* THE ONE WAY IN to the lemma editor from a double-click gesture, so the two gestures that mean it can't
-   drift apart: the DTAP double-tap below (no field open — the taps land on the token itself), and a native
-   dblclick INSIDE the inline form editor once that field IS open (bindLemmaDblclick in
-   js/editing/context-menu.js — an open .nodeedit covers the very glyph DTAP would need to see the second
-   tap on, so without it the commonest double-click in the diagram reached nothing at all).
-   The pick() is what the editor anchors and titles itself from; reflow=false because editLemmaPrompt only
-   measures the token to place its popover and a re-render would move the very thing it just measured. */
-function openLemmaEditor(si,tokId,clickXY,anchor){ pick(si,tokId,false,false); editLemmaPrompt(si,tokId,clickXY,anchor); }   // `anchor`: the row the box should hang under, when the caller knows it (see bindLemmaDblclick) — DTAP, which fires on the form glyph, passes none and gets the form row
+/* The lemma editor is reached by ⌘L (Edit Lemma, app/menu_spec.py → editLemmaShortcut) and by the token
+   context menu's own row. It was ALSO reachable by two double-click gestures — a double-tap on the token
+   and a native dblclick inside the open form editor — which are gone: between them they needed a 450 ms
+   timer, a suppression flag and a note explaining why one could not see the tap the other could, all to
+   support a gesture nothing on screen announced. openLemmaEditor went with them; editLemmaPrompt is the
+   entry point, and the two remaining callers pick their own token first. */
 const ddNode=el=>el&&el.closest?el.closest("#doc .node, #doc .tok-group, #doc .bwtok"):null;   // brackets draw each word as a .bwtok — draggable like a stemma node
 const ddEdge=el=>el&&el.closest?el.closest("#doc .edge-g, #doc .arc"):null;
 const DNODE_Q=`.node[data-s="{s}"], .tok-group[data-s="{s}"], .bwtok[data-s="{s}"]`;   // every drawn token in a sentence, across the draggable notations
@@ -305,21 +302,11 @@ async function attachAsSharedConjunct(si,depId,conjDepId){ const s=DOC[si]; if(!
       pick(d.si,tapId,false,false);
       scrollNearest(document.querySelector(`#doc tr[data-s="${d.si}"][data-tok="${tapId}"]`));
       if(d.kind==="node"){ DSUPPRESS=true; setTimeout(()=>DSUPPRESS=false,0);
-        /* item 4 — DOUBLE-CLICKING A TOKEN OPENS ITS LEMMA EDITOR. Detected here, from the taps this
-           handler already sees, rather than from a native "dblclick" event: the first tap opens the form
-           editor, and committing that on the second tap's pointerdown rebuilds the whole of #doc, so the
-           element the browser would have to report a dblclick ON is detached before the second click
-           completes and the event either never fires or fires on a node that resolves to no token.
-           Bound to the token's FORM/node only — a second tap on the transliteration row or a gloss tier
-           keeps meaning "edit that row", which is what those rows already do on a single tap.
-           This path only ever sees the second tap when it lands on the token but OUTSIDE the field the
-           first tap opened (the field is small and centred on the glyph, so that means its margins). A
-           second tap ON the field is a plain native dblclick inside an input, and is handled there —
-           see openLemmaEditor above and bindLemmaDblclick in js/editing/context-menu.js. */
-        const tapTok=tapId, now=Date.now();   // = gwEl's own part where one was tapped, else d.tok — the id the pick above already used
-        if(!trEl && !glEl && DTAP && DTAP.si===d.si && DTAP.tok===tapTok && now-DTAP.t<450){
-          DTAP=null; openLemmaEditor(d.si,tapTok,{x:e.clientX,y:e.clientY}); return; }   // the first tap's form editor is already closed — the pointerdown above blurs (and commits) it
-        DTAP=(trEl||glEl)?null:{si:d.si,tok:tapTok,t:now};
+        /* THE DOUBLE-TAP-FOR-LEMMA GESTURE WAS REMOVED. It opened the lemma editor on a second tap
+           within 450 ms, which meant every ordinary re-click on a token you were already editing had to
+           be told apart from it by a timer — and a gesture nothing on screen announces is one nobody
+           discovers and everybody triggers by accident. ⌘L (Edit Lemma, app/menu_spec.py) does the
+           same thing, says so in the menu, and needs no timer. */
         if(gwEl){ editNodeInline(d.si,tapTok,{x:e.clientX,y:e.clientY}); }   // a goeswith CONTINUATION's own form field, drawn inside the head's group — so d.tok (the group's data-tok) names the head, not the part actually tapped. Same shape as the .tr-edit/.gl-edit routing above: the group owns the drag, the tapped element decides which editor opens. The shared rows (translit/gloss/POS) carry no data-gwtok and so still edit the head, which is where the guideline puts every annotation anyway   (its own pick() is gone — the tap-branch pick above already resolved this id)
         else if(trEl) editTransInline(d.si,d.tok,{x:e.clientX,y:e.clientY});
         else if(glEl) editTier(d.si,d.tok,glEl.dataset.tier||"gloss",{x:e.clientX,y:e.clientY});

@@ -573,11 +573,9 @@ function renderGrid(si){
          the lemma editor, and it was wrong twice over. It cost the cell the browser's native
          "select the word under the pointer" — the one gesture a text field owes the user — and the
          lemma editor was never meant for the grid at all, which already shows the lemma in a column
-         you can simply type in. The double-click-to-edit-the-lemma gesture belongs to the DIAGRAM,
-         where the lemma is drawn in no notation and so has no field of its own: on a plain token tap
-         (the DTAP route in js/diagram/diagram-edit.js) and, once the inline form editor is open over
-         the token, on a double-click inside that field (bindLemmaDblclick in
-         js/editing/context-menu.js). Don't re-add it here. */
+         you can simply type in. Both diagram double-click routes to that editor have since gone the
+         same way, for the second reason: the gesture was never announced anywhere. ⌘L (Edit Lemma)
+         reaches it from the keyboard and the token context menu names it. Don't re-add it here. */
       /* item 7 — THE WHOLE CELL IS THE FIELD. A grid cell is padded, and its control does not fill it, so a click
          a few pixels off the text landed on the <td> and did nothing at all — the user had to aim at the glyphs.
          A click anywhere in the cell now puts the caret in the control, at the END for a text field (clicking

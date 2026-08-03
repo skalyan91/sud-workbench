@@ -373,7 +373,7 @@ function headItems(si,tokId){ return [["Select previous head","⌃⌘[",()=>step
 function nodeTokenMenu(x,y,si,tokId){ const s=DOC[si]; if(!s)return; const rtl=sentRTL(s);
   const items=[
     ["Edit token","↩",()=>editNodeInline(si,tokId)],
-    ["Edit lemma…","",()=>editLemmaPrompt(si,tokId)],   // item 4: the same editor a double-click on the token opens — that gesture has nothing on screen to advertise it, so the command needs a menu row of its own. Ellipsis, unlike "Edit token" above: this one opens a popover rather than editing in place, which is what the ellipsis means on macOS
+    ["Edit lemma…","⌘L",()=>editLemmaPrompt(si,tokId)],   // the accelerator is named now that ⌘L is the ONLY gesture besides this row — the double-click that used to open it is gone   // item 4: the same editor a double-click on the token opens — that gesture has nothing on screen to advertise it, so the command needs a menu row of its own. Ellipsis, unlike "Edit token" above: this one opens a popover rather than editing in place, which is what the ellipsis means on macOS
     null, ...moveItems(si,tokId,false),
     null, ...insertItems(si,tokId,false),
     null, ...headItems(si,tokId),
@@ -664,7 +664,7 @@ async function afterDiagramFormEdit(si,tokId,changed){ pick(si,tokId,false);
   afterFormEdit(si,tokId,changed); }
 function editTransInline(si,tokId,clickXY){ const s=DOC[si]; if(!s||tokId<1||tokId>s.tokens.length)return; const el=transElOf(si,tokId); if(!el)return;
   if(iastFormEdit()){   // Item 10: Sanskrit + real script → this IAST row IS the editable form field. Bind the edit to the token FORM (the stored IAST); on commit regenTok re-derives the script glyph above from the new IAST. Mirrors editNodeInline's form binding, and joins the same form-row Tab/arrow navigation.
-    bindLemmaDblclick(makeEditable(el, s.tokens[tokId-1], "form", changed=>afterDiagramFormEdit(si,tokId,changed), sentRTL(s), ()=>transElOf(si,tokId), d=>tierNav(si,tokId,"form",d), false, clickXY), si, tokId, ()=>transElOf(si,tokId));   // item 9: anchor the lemma box under THIS row (the IAST), which is the one being edited   // …including the lemma double-click: this row IS the form field here, so it carries the form field's gesture
+    makeEditable(el, s.tokens[tokId-1], "form", changed=>afterDiagramFormEdit(si,tokId,changed), sentRTL(s), ()=>transElOf(si,tokId), d=>tierNav(si,tokId,"form",d), false, clickXY);   // item 9: anchor the lemma box under THIS row (the IAST), which is the one being edited   // …including the lemma double-click: this row IS the form field here, so it carries the form field's gesture
     return; }
   if(typeof storedTrEditable==="function" && storedTrEditable()){ editStoredTransInline(si,tokId,clickXY); return; }   // non-deterministic romanisation → this row edits the STORED transliteration (MISC Translit, in the stored scheme), and the displayed row is re-derived from it. Ahead of the ORTHO_SCHEME guard below: a Chinese document displayed in Traditional glyphs still stores a romanisation, so it must still be correctable
   if(ORTHO_SCHEME)return;   // any OTHER re-rendering scheme (a non-Sanskrit script / Latin / transform) → the romanisation row is not editable
@@ -927,34 +927,11 @@ function makeEditable(el,obj,key,after,rtl,relocate,nav,allowEmpty,caretHint){ i
   // commit the edit first, then open it for the token being edited (the current selection).
   inp.addEventListener("contextmenu",ev=>{ ev.preventDefault(); ev.stopPropagation(); const cs=sel.s, ct=sel.t; finish(true);
     if(cs>=0&&ct>0) nodeTokenMenu(ev.clientX,ev.clientY,cs,ct); });
-  return inp; }   // the field itself, so a caller that knows WHICH token it opened over can bind a gesture to it — see bindLemmaDblclick
-/* DOUBLE-CLICKING INSIDE AN OPEN FORM FIELD OPENS THE LEMMA EDITOR — the same thing double-clicking the
-   token itself does when no field is open (the DTAP double-tap in js/diagram/diagram-edit.js), routed
-   through that gesture's own openLemmaEditor so the two can't drift.
-   IT HAS TO LIVE ON THE FIELD, and that is the whole point: the first click opens this field OVER the
-   glyph, so the second click of the user's double-click lands on an <input> in <body>, not on the token
-   — #doc's pointerdown/pointerup never fire and DTAP never sees a second tap. A native "dblclick" is
-   what works here and a native "dblclick" is exactly what does NOT work on the token (see DTAP's own
-   note: pointerdown rebuilds #doc, so the element the browser would report the dblclick on is
-   detached). The two mechanisms are complementary, not redundant. Verified by instrumentation: with
-   the field open, the browser delivers click, click, dblclick to the input itself.
-   BOUND ONLY WHERE THE FIELD IS A TOKEN'S FORM (editNodeInline, and the IAST row that IS the form
-   field under a Sanskrit script) — the same restriction DTAP documents. A gloss/transliteration/MSeg
-   field keeps the browser's own "select the word under the pointer", which is what a double-click owes
-   a field you are typing prose into.
-   inp.blur() first, not finish(): finish() is closed over inside makeEditable, and blur reaches it
-   through the same path every click-away already uses (committing the edit, re-rendering, and leaving
-   the selection alone — the recorded pointer element is this input, which resolves to no token and no
-   block, so its "what was clicked becomes the selection" pass does nothing). The prompt then opens over
-   a settled token rather than one with an edit still pending underneath it. */
-/* `anchorFn` names the ROW the lemma box should hang under — the row this field is editing, not always the form
-   row. Under a Sanskrit script the editable surface form lives on the TRANSLITERATION row (iastFormEdit; the
-   script glyph above it is derived and read-only), so a double-click there must drop the box under the IAST it
-   was aimed at, rather than under the Devanagari two rows up with the IAST stranded between them. */
-function bindLemmaDblclick(inp,si,tokId,anchorFn){ if(!inp) return;
-  inp.addEventListener("dblclick",e=>{ if(typeof openLemmaEditor!=="function") return;   // guarded: openLemmaEditor lives in js/diagram/diagram-edit.js, which loads AFTER this module
-    e.preventDefault(); e.stopPropagation(); inp.blur();
-    openLemmaEditor(si,tokId,{x:e.clientX,y:e.clientY}, (typeof anchorFn==="function")?anchorFn():null); }); }
+  return inp; }   // the field itself, for a caller that wants to reach it after openingblclick
+/* bindLemmaDblclick WAS HERE — a native dblclick inside an open form field opened the lemma editor,
+   the counterpart to a double-tap on the token itself. Both gestures are gone: ⌘L reaches the same
+   editor from the keyboard and the token context menu names it, neither of which needs the reader to
+   discover that double-clicking a word means something other than selecting it. */
 // caret position, as a plain character count into `el`'s textContent (ignoring the internal .glabbr span
 // boundaries) — how far to walk back in after a rebuild that just replaced those spans.
 function caretOffset(el){ const sel=window.getSelection(); if(!sel||!sel.rangeCount) return el.textContent.length;
@@ -1153,7 +1130,7 @@ function editNodeInline(si,tokId,clickXY){ const s=DOC[si]; if(!s||tokId<1||tokI
   if(iastFormEdit() && transElOf(si,tokId)){ editTransInline(si,tokId,clickXY); return; }   // Item 10: the script glyph is display-only — route form editing onto the IAST transliteration row (which is bound to the token form). Only when that row is actually present; otherwise fall through to the plain form editor below.
   const el=formElOf(si,tokId);
   if(!el){ const c=document.querySelector(`[data-si="${si}"][data-ti="${tokId-1}"][data-col="form"]`); if(c)c.focus(); return; }   // no visible node → fall back to the grid cell
-  bindLemmaDblclick(makeEditable(el, s.tokens[tokId-1], "form", changed=>afterDiagramFormEdit(si,tokId,changed), sentRTL(s), ()=>formElOf(si,tokId), d=>tierNav(si,tokId,"form",d), false, clickXY), si, tokId); }   // item 4: the form row joins the gloss-tier arrow/Tab navigation. afterDiagramFormEdit = pick + the ITRANS→IAST pass + afterFormEdit, shared with the IAST-row route above
+  makeEditable(el, s.tokens[tokId-1], "form", changed=>afterDiagramFormEdit(si,tokId,changed), sentRTL(s), ()=>formElOf(si,tokId), d=>tierNav(si,tokId,"form",d), false, clickXY); }   // item 4: the form row joins the gloss-tier arrow/Tab navigation. afterDiagramFormEdit = pick + the ITRANS→IAST pass + afterFormEdit, shared with the IAST-row route above
 // ── inline-editing a multi-word token's surface form on a diagram ───────────────────────────────────────────
 // Reached by a plain left-click on a drawn tie row (the delegated handler above) or by the tie's right-click
 // menu. `fromId` is always the ORIGINAL token id, which is what data-mwtfrom carries even in a display-folded

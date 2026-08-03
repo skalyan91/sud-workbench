@@ -626,13 +626,19 @@ function selMWTof(s){ if(!s)return null; const multi=selRange&&selRange.s===sel.
 function menuState(){ const has=sel.s>=0&&sel.t>0, s=has?DOC[sel.s]:null;
   const multi=!!(selRange&&selRange.s===sel.s&&selRange.to>selRange.from);
   const formsMWT=!!selMWTof(s);            // the selected tokens already form / sit inside an MWT
+  const isRange=multi&&!!(s&&(s.mwt||[]).some(m=>m.from===selRange.from&&m.to===selRange.to));   // …and they ARE one, exactly
   return {has, zone:has?UIZONE:"", rtl:!!(s&&sentRTL(s)),
           group:multi&&!formsMWT,          // Group: only a fresh multi-token selection that isn't already an MWT
           // …or a selection lying wholly INSIDE one range: there the components are pieces of a single
           // orthographic word with no space between them, so the "a wrong split is a stray space" argument
           // that narrows Merge to spaceless languages does not apply (see mergeTokens' own note).
           merge:multi&&!formsMWT&&(isSpacelessLang()||!!(s&&(s.mwt||[]).some(m=>selRange.from>=m.from&&selRange.to<=m.to))),   // Merge: Group's selection, narrowed to the languages a segmenter can mis-split (SPACELESS_LANGS in js/core/state.js) — elsewhere a wrongly split word is a stray space in the file, which `goeswith` annotates rather than destroys. A selection that already forms an MWT has Flatten instead, the same collapse with the range's own surface form
-          ungroup:formsMWT, flatmwt:formsMWT,   // Ungroup / Flatten: only when the selection forms (or sits in) an MWT
+          /* …and Flatten / Ungroup need the selection to BE the range, not merely to sit inside one — matching
+             the context menu, where those two are the multi-word token's OWN controls and a component's menu
+             carries none of them (mwtTokenItems). They act on the range, so what has to be selected is the
+             range: shift-select its tokens, or right-click its form. `formsMWT` was the looser test, true for
+             any single component, which is what put the range's controls on a token's menu in the first place. */
+          ungroup:isRange, flatmwt:isRange,
           convmwt:has&&!multi,              // Split: a single token — INCLUDING one already inside a range, which divides that component in place and grows the range around it (convertTokenToMWT's `host` branch) rather than being a second, nested multi-word token
 
           foreign:has&&selHasFeat("Foreign"), typo:has&&selHasFeat("Typo"),
