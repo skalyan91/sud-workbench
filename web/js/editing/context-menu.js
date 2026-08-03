@@ -1514,6 +1514,17 @@ function convertTokenToMWT(si,idx,n,parts){ const s=DOC[si], toks=s.tokens; cons
       if(lb.length===all.length && lb.every(x=>x)) all.forEach((c,k)=>{ c.lemma=lb[k]; }); }
     ["MSeg","MGloss"].forEach(key=>{ const v=miscKV(head.misc,key); if(!v||v.indexOf("=")<0) return;
       const bits=v.split("="); if(bits.length!==all.length) return;
+      /* AN ABBREVIATION-ONLY PIECE BELONGS TO THE MORPHEME ITS HYPHEN POINTS AT, not to the component it
+         happens to sit opposite. `-LOC` is the categories of the word BEFORE it and `DEF-` those of the
+         word after, so a positional hand-out would give one component a gloss that is entirely about its
+         neighbour — and leave that neighbour's own gloss looking complete when it is not. The piece is
+         moved onto the indicated side and its own slot left empty; the merge rule (mglossAbbrOnly in
+         tierJoin) reads the same hyphens the other way round, so a split and a re-flatten agree.
+         Only MGloss: MSeg holds segmented word text, where a capital is just a capital. */
+      if(key==="MGloss"){ for(let k=0;k<bits.length;k++){ const bit=bits[k];
+        if(!mglossAbbrOnly(bit)) continue;
+        if(/^[-.]/.test(bit) && k>0){ bits[k-1]+=bit; bits[k]=""; }          // leads with its mark → attaches leftward
+        else if(/[-.]$/.test(bit) && k<bits.length-1){ bits[k+1]=bit+bits[k+1]; bits[k]=""; } } }   // trails → attaches rightward
       all.forEach((c,k)=>{ c.misc=setMiscKV(c.misc,key,bits[k]); }); });
     /* …and everything DERIVED FROM A FORM is now stale: the head's script glyph and romanisation render
        the WHOLE `pra=kāśa` it no longer is, and the new components have none at all. Clearing them is
@@ -1532,6 +1543,13 @@ function convertTokenToMWT(si,idx,n,parts){ const s=DOC[si], toks=s.tokens; cons
 
 // flatten a multi-word token back to a single token: its form = the MWT's surface form, its POS/deprel/
 // head/other attributes = those of the MWT's head component (the one whose head lies outside the range)
+/* Is this MGloss made ONLY of Leipzig abbreviations — i.e. grammatical categories rather than a gloss of
+   its own morpheme? Both the split and the flatten need the same answer, and glossAbbrSegments is already
+   the app's ruling on which runs of a gloss are abbreviations, so neither re-decides it. */
+function mglossAbbrOnly(v){ if(typeof glossAbbrSegments!=="function") return false; let any=false;
+  for(const seg of glossAbbrSegments(v||"")){ const t=String(seg[0]||"").replace(/[-.\s]/g,"");
+    if(!t) continue; if(!seg[1]) return false; any=true; }
+  return any; }
 function flattenMWT(si,m){ const s=DOC[si], toks=s.tokens; if(!m)return; pushUndo(si);
   const from=m.from, to=m.to;
   const oldIds=new Map(); toks.forEach((t,i)=>oldIds.set(t,i+1));
@@ -1566,15 +1584,11 @@ function flattenMWT(si,m){ const s=DOC[si], toks=s.tokens; if(!m)return; pushUnd
      piece really is nothing to attach to.
      A value that ALREADY leads with "-" or "." carries its own mark and is joined as-is, so nothing is
      doubled — which also fixes a plain `x` + `-ām` running together as `x--ām`. */
-  const abbrOnly=v=>{ if(typeof glossAbbrSegments!=="function") return false; let any=false;
-    for(const seg of glossAbbrSegments(v||"")){ const t=String(seg[0]||"").replace(/[-.\s]/g,"");
-      if(!t) continue; if(!seg[1]) return false; any=true; }
-    return any; };
   const tierJoin=k=>{ let out="";
     comps.forEach(t=>{ const v=msegStrip(tierText(t,k)); if(!v) return;
       const lead=/^[-.]/.test(v);
       if(out) out += lead ? v : "-"+v;
-      else out = (!lead && k==="mgloss" && abbrOnly(v)) ? "-"+v : v; });
+      else out = (!lead && k==="mgloss" && mglossAbbrOnly(v)) ? "-"+v : v; });
     return out; };
   survivor.lemma=comps.map(t=>(t.lemma&&t.lemma!=="_")?t.lemma:"").join("")||survivor.form;
   /* ⚠ THE COMPONENTS' OWN VALUES FIRST, not the RANGE's. `m.translit` is a rendering of a RANGE, and a
