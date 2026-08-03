@@ -1927,22 +1927,36 @@ async function sandhiSplitLast(si,from){
   const s=DOC[si]; if(!s) return false;
   const m=(s.mwt||[]).find(x=>x.from===from); if(!m) return false;
   const comps=s.tokens.slice(m.from-1,m.to).filter(t=>t.form); if(comps.length<2) return false;
-  const last=comps[comps.length-1], cx=saMwtContext(s,m);
-  let r=null;
-  try{ r=await window.pywebview.api.sanskrit_desandhi(last.form,DOCLANG,(last.lemma&&last.lemma!=="_")?last.lemma:"",cx.next,cx.pause); }catch(e){ return false; }
-  const p=r&&r.form;
-  if(!p||p===last.form) return false;                 // ambiguous, or nothing to undo — desandhi_final declines rather than guesses
-  last.form=p;
-  last.translit=""; last.translitLemma=""; last.ortho=""; last._trMisc=false; last._trPick=false;   // every derived field spelt the sandhied form
-  last.misc=setMiscKV(setMiscKV(last.misc,"Translit",""),"LTranslit","");
-  /* …and MSeg, which SEGMENTS the form and so cannot outlive it: this just respelt `bhṛto` as `bhṛtaḥ`, and a
-     segmentation of the old spelling now names morphemes the token no longer has. Unforced, exactly as a form
-     edit refills it — a hand-typed segmentation is the annotator's and is left alone; the split's own
-     division marks itself as ours (see convertTokenToMWT) so that this can replace it. */
-  if(typeof msegRefill==="function") msegRefill(last);
-  if(!miscKV(last.misc,"Unsandhied")) last.misc=setMiscKV(last.misc,"Unsandhied",p);   // …and the pausa spelling is now known for a token that had none recorded; one that DOES keeps it, being the annotator's own
+  const cx=saMwtContext(s,m);
+  /* EVERY COMPONENT, not just the last. A component is stored in pausa, and a form's ending is shaped by
+     whatever FOLLOWS it — which for the last component is the next orthographic word, and for every other
+     is the next COMPONENT. So `manoratha` divided as `mano=ratha` wants `manaḥ` + `ratha`, and reverting
+     only the outer edge would have left the interior junction spelt as the compound spells it.
+     Each is asked against its own right-hand neighbour, and `pause_after` is the range's only at the outer
+     edge — a pause can only follow the WORD, never sit between two pieces of one.
+     Right to left, so a component is measured against the neighbour as it will finally be stored rather
+     than against a spelling that is itself about to change. Each answer is independent (desandhi_final
+     verifies a candidate against the forward transform for THAT junction), but the order costs nothing and
+     removes the question. */
+  let any=false;
+  for(let i=comps.length-1;i>=0;i--){ const c=comps[i], lastOne=(i===comps.length-1);
+    const nxt=lastOne?cx.next:(comps[i+1].form||""), pause=lastOne?cx.pause:false;
+    let r=null;
+    try{ r=await window.pywebview.api.sanskrit_desandhi(c.form,DOCLANG,(c.lemma&&c.lemma!=="_")?c.lemma:"",nxt,pause); }catch(e){ continue; }
+    const p=r&&r.form;
+    if(!p||p===c.form) continue;                        // ambiguous, or nothing to undo — desandhi_final declines rather than guesses
+    c.form=p; any=true;
+    c.translit=""; c.translitLemma=""; c.ortho=""; c._trMisc=false; c._trPick=false;   // every derived field spelt the sandhied form
+    c.misc=setMiscKV(setMiscKV(c.misc,"Translit",""),"LTranslit","");
+    /* …and MSeg, which SEGMENTS the form and so cannot outlive it: this just respelt `bhṛto` as `bhṛtaḥ`, and a
+       segmentation of the old spelling now names morphemes the token no longer has. Unforced, exactly as a form
+       edit refills it — a hand-typed segmentation is the annotator's and is left alone; the split's own
+       division marks itself as ours (see convertTokenToMWT) so that this can replace it. */
+    if(typeof msegRefill==="function") msegRefill(c);
+    if(!miscKV(c.misc,"Unsandhied")) c.misc=setMiscKV(c.misc,"Unsandhied",p); }   // …and the pausa spelling is now known for a token that had none recorded; one that DOES keeps it, being the annotator's own
+  if(!any) return false;
   markDirty();
-  await sandhiMwtForms(si,[from]);                    // re-fuse: the range's surface must still be what the text spells
+  await sandhiMwtForms(si,[from]);                      // re-fuse: the range's surface must still be what the text spells
   if(typeof fillTranslit==="function") await fillTranslit();
   if(typeof fillOrtho==="function") await fillOrtho(); else preserveScroll(renderDoc);
   return true; }
