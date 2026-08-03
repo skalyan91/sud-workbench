@@ -1261,11 +1261,17 @@ _DESANDHI_FINALS = [
 ]
 # The endings NO Sanskrit word carries in pausa.  This is what settles the reversal, because the forward
 # transform is idempotent and so leaves identity looking like a valid answer for every input: a word
-# ending `-o`, `-ś`, `-ṣ`, `-s`, `-ṃ`, `-y` or `-v` in a running text has DEFINITELY been altered by what
-# follows it (a citation form ends in a vowel, a visarga, `-m`, or one of the stops/nasals), so identity
-# is inadmissible there and the verified candidate wins.  Everything else — `-ā`, `-r`, `-m`, a stop — can
-# stand as it is, and is left alone unless the lemma positively says otherwise.
-_PAUSA_IMPOSSIBLE = frozenset("ośṣsṃyv")
+# ending `-o`, `-ś`, `-ṣ`, `-s`, `-ṃ`, `-y`, `-v` or `-r` in a running text has DEFINITELY been altered by
+# what follows it (a citation form ends in a vowel, a visarga, `-m`, or one of the stops/nasals), so
+# identity is inadmissible there and the verified candidate wins.  Everything else — `-ā`, `-m`, a stop —
+# can stand as it is and is left alone.
+# ⚠ `-r` IS ON THIS LIST, and reading _is_rstem the other way round is what kept it off.  That helper does
+# not say "this word's -r is original"; it says "this word's VISARGA restores to -r before a voiced sound"
+# — so an r-stem's pausa form is precisely the one with the visarga.  No Sanskrit word ends in -r in
+# pausa: `punar`, `prātar`, `antar` are cited that way but spoken `punaḥ`, `prātaḥ`, `antaḥ`.  Which of
+# `-o` and `-ar` a given `-aḥ` becomes is the forward transform's business, and it already asks _is_rstem;
+# nothing here needs to ask it a second time.
+_PAUSA_IMPOSSIBLE = frozenset("ośṣsṃyvr")
 
 
 def desandhi_final(form: str, lang: str = "sa", lemma=None, nxt_word: str = "",
@@ -1320,14 +1326,9 @@ def desandhi_final(form: str, lang: str = "sa", lemma=None, nxt_word: str = "",
         return form
     tail = f[-1]
     if tail not in _PAUSA_IMPOSSIBLE:
-        # The surface could be the pausa form as it stands — `-ā` ends countless words in citation, and
-        # `-r` ends every r-stem.  Depart from it only where the LEMMA licenses the departure: an r-stem
-        # keeps its -r (`punar`), an s-stem's -r came from a visarga (`punaḥ`).  _is_rstem is the same
-        # helper app/sa_notation.py defers to, so the app has ONE answer about which stems those are.
-        if tail == "r" and lm is not None and not _is_rstem(f[:-1], lm):
-            hits = [h for h in hits if h.endswith("ḥ")] or []
-        else:
-            return form
+        # The surface could be the pausa form as it stands — `-ā` ends countless words in citation, `-m`
+        # every accusative singular — so leave it be.
+        return form
     if len(hits) > 1:
         # i/ī and u/ū: the yaṇ semivowel remembers no length, so ask the lemma how the word ends and
         # fall back to the SHORT vowel, which is much the commoner of each pair.
