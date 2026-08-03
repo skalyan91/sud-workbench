@@ -597,7 +597,7 @@ document.getElementById("doc").addEventListener("contextmenu",e=>{
     showCtx(e.clientX,e.clientY,[
       ["Edit surface form","⏎",()=>editMWTInline(si,from)],
       null,
-      ...mwtTokenItems(si,from),
+      ...mwtTokenItems(si,from,true),   // the RANGE's own menu: Flatten and Ungroup, but no Split — see mwtTokenItems
     ]); return; }
   // a goeswith continuation's own form field: it lives INSIDE the head's cell, so the generic resolver below would
   // hand back the head. Its right-click menu is the ordinary token menu, for the token it actually draws.
@@ -1828,11 +1828,15 @@ function markFeatRow(si,tokId){ const items=markFeatItems(si,tokId);
 function extPosMenuAtSel(si,tokId){ const el=tokGroupOf(si,tokId)||document.querySelector(`#doc tr[data-s="${si}"][data-tok="${tokId}"]`);
   const b=el?el.getBoundingClientRect():null, rtl=sentRTL(DOC[si]);
   extPosMenu(b?(rtl?b.right:b.left+20):innerWidth/2, b?b.bottom+4:innerHeight/2, si, tokId); }
-function mwtTokenItems(si,tokId){ const m=mwtAtSel(DOC[si],tokId);
+/* `forRange` — this menu belongs to the MULTI-WORD TOKEN ITSELF (its tie, its grid range row), not to one of
+   its component tokens. The two share Flatten and Ungroup, which act on the range either way, and part company
+   over Split: splitting divides a TOKEN, and a range is not one. Offered there the row would silently act on
+   whichever component happens to be first — an operation on a different object from the one right-clicked. */
+function mwtTokenItems(si,tokId,forRange){ const m=mwtAtSel(DOC[si],tokId);
   if(m) return [
     ["Flatten MWT","⌥⌘G",()=>flattenMWT(si,m)],   // ⌥⌘G, matching app/menu_spec.py's "Flatten Multi-word Token" — this row still read ⌥⌘F, the binding that item moved OFF when Find and Replace took ⌥⌘F (menu_spec records why: AppKit matches a key equivalent against the first eligible item in menu order, and Find and Replace sits above Flatten in the Edit menu, so ⌥⌘F here would have flattened nothing). The keystroke has been ⌥⌘G since; only this label was left behind
     ["Ungroup MWT","⇧⌘G",()=>{ const s=DOC[si]; pushUndo(si); s.mwt=(s.mwt||[]).filter(x=>x!==m); if(!s.mwt.length)delete s.mwt; markDirty(); preserveScroll(renderDoc); toast("Multi-word token removed"); }],
-  ].concat(SPLIT_ROW(si,tokId));   // …AND Split, which inside a range divides the COMPONENT in place and grows the range around it (convertTokenToMWT's `host` branch) rather than nesting a second multi-word token. A component is as splittable as a free token: the range says these tokens are one orthographic word, and says nothing about how finely they are analysed
+  ].concat(forRange?[]:SPLIT_ROW(si,tokId));   // …AND Split, for a COMPONENT: inside a range it divides that component in place and grows the range around it (convertTokenToMWT's `host` branch) rather than nesting a second multi-word token. A component is as splittable as a free token: the range says these tokens are one orthographic word, and says nothing about how finely they are analysed
   return SPLIT_ROW(si,tokId); }
 // One definition, offered in both states — see mwtTokenItems on why a component gets it too.
 function SPLIT_ROW(si,tokId){ return [["Split into MWT","⌥⌘S",()=>openConvertMWT(si,tokId-1)]]; }   // no ellipsis: a form carrying "=" divides on it directly (openConvertMWT), so the row does not always lead to a prompt   // no ellipsis: a form carrying "=" divides on it directly (openConvertMWT), so the row does not always lead to a prompt — and the Edit menu's own row keeps its own wording
