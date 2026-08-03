@@ -1767,7 +1767,8 @@ async function afterFormEdit(si,tokId,changed){ const s=DOC[si], t=s&&s.tokens[t
     await annotateTranslitMisc(si);                                                     // rewrite MISC Translit/LTranslit
     if((ORTHO_SCHEME&&ORTHO_SCHEME!=="none")||isSanskritLang()) fillOrtho();            // re-render the script glyph from the new form
     if(msegRefill(t)) markDirty();   // MSeg re-seeds from the NEW form (its transliteration for non-Latin scripts), re-segmented against the lemma — which the background re-parse below may then revise again once it hands this token a lemma of its own (item 3)
-    if(isSanskritLang()){ const m=(s.mwt||[]).find(x=>tokId>=x.from&&tokId<=x.to); if(m) sandhiMwtForms(si,[m.from]); }   // item 8: re-fuse a containing MWT
+    if(isSanskritLang()){ await saSyncUnsandhied(si,tokId);   // …and the pausa spelling, which is a spelling OF the form and so cannot outlive it (see saSyncUnsandhied). BEFORE the re-fuse below: a range's CSL is built from its components' Unsandhied values, so fusing first would rebuild it from the one this edit just invalidated
+      const m=(s.mwt||[]).find(x=>tokId>=x.from&&tokId<=x.to); if(m) sandhiMwtForms(si,[m.from]); }   // item 8: re-fuse a containing MWT
   }catch(err){ console.error("afterFormEdit: a derived field failed to refresh",err); }
   finally{ preserveScroll(renderDoc); }
   // item A: THEN re-run the parser in the BACKGROUND for the model-derived fields (lemma/feats/deps); the
@@ -1822,6 +1823,31 @@ async function sandhiMwtForms(si,froms){ if(!isSanskritLang()||!hasBridge()||!DO
     const f=r&&r.form&&r.form[i]; if(f&&f!==m.form){ m.form=f; m.ortho=""; m.miast=""; any=true; } });   // clear the cached display forms so fillOrtho re-renders them from the new fused form
   if(any){ markDirty(); if((ORTHO_SCHEME&&ORTHO_SCHEME!=="none")||isSanskritLang()) fillOrtho(); else preserveScroll(renderDoc); }
   return any; }
+
+/* MISC `Unsandhied` FOLLOWS THE FORM, because it is a spelling OF the form — the padapāṭha, the word as
+   it stands in citation. Edit the form and the old pausa describes a word that is no longer there, which
+   is not a harmless staleness: app/sa_notation.py's csl_forms PREFERS Unsandhied over the form (feeding
+   a sandhied surface back through a sandhi generator would apply the rules twice), so every CSL rendering
+   goes on believing the value the edit invalidated. That is the same trap the flatten had, where a
+   left-behind `Unsandhied=-tve` made a whole `mūrtitve` read as `tve`.
+   WHICH VALUE depends on where the token sits, and the two cases are the DCS convention read straight off:
+     · inside a multi-word token — the component is ALREADY stored unsandhied, so its pausa is its form;
+     · on its own — the form carries the external sandhi of the word after it, so the pausa is that undone
+       (sanskrit_desandhi, which declines wherever the reversal is ambiguous and hands the form back).
+   Punctuation is written as an EMPTY value rather than as itself, which is what the shipped samples do
+   (`8 | | PUNCT … Unsandhied=`): a daṇḍa has no citation form to give. */
+async function saSyncUnsandhied(si,tokId){
+  if(!isSanskritLang()||!DOCLANG) return false;
+  const s=DOC[si], t=s&&s.tokens&&s.tokens[tokId-1]; if(!t||!t.form) return false;
+  let un;
+  if(!/\p{L}/u.test(t.form)) un="";                                      // a daṇḍa or other mark — no citation form
+  else if((s.mwt||[]).some(x=>tokId>=x.from&&tokId<=x.to)) un=t.form;    // a component is stored in pausa already
+  else if(!hasBridge()) return false;                                    // only the backend can undo sandhi — leave the old value rather than write a wrong one
+  else { const cx=saMwtContext(s,{from:tokId,to:tokId});                 // …the same neighbour/pause reading a range gets, with the token standing as its own range
+    let r=null; try{ r=await window.pywebview.api.sanskrit_desandhi(t.form,DOCLANG,(t.lemma&&t.lemma!=="_")?t.lemma:"",cx.next,cx.pause); }catch(e){ return false; }
+    un=(r&&r.form)||t.form; }
+  if(miscKV(t.misc,"Unsandhied")===un) return false;
+  t.misc=setMiscKV(t.misc,"Unsandhied",un); markDirty(); return true; }
 
 /* THE LAST COMPONENT OF A FRESHLY SPLIT SANSKRIT RANGE, PUT BACK INTO PAUSA.
    A token that is its own orthographic word carries its SANDHIED surface in FORM; a token inside a

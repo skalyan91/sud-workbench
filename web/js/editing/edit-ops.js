@@ -278,7 +278,15 @@ function deleteToken(si,idx){ const s=DOC[si]; if(s.tokens.length<=1)return toas
    them, so an enhanced arc into one of them still has somewhere to land. */
 function mergeTokens(si,from,to){ const s=DOC[si]; if(!s)return; const toks=s.tokens;
   if(!(to>from)||from<1||to>toks.length) return toast("Select two or more adjacent tokens to merge");
-  if(!isSpacelessLang()) return toast("Merging is for languages written without spaces — use a goeswith relation instead");   // guarded HERE too, not just on the menu rows: this is the one entry point every caller shares
+  /* …UNLESS THE TOKENS ARE INSIDE ONE MULTI-WORD TOKEN, where the guard's own reasoning points the other
+     way. It refuses a merge in a spaced language because a wrongly split word there is a stray SPACE in the
+     file, which `goeswith` annotates without destroying anything. Inside a range there is no space to be
+     stray: the components are pieces of ONE orthographic word, whose surface the range already spells, so a
+     division between two of them is an analysis and a wrong one is simply wrong. Merging them changes no
+     character of the text — remapMWT shrinks the range around the survivor (and drops it if only one piece
+     is left), which is why the bookkeeping below needed nothing added for this. */
+  const inOneMWT=(s.mwt||[]).some(m=>from>=m.from&&to<=m.to);
+  if(!isSpacelessLang() && !inOneMWT) return toast("Merging is for languages written without spaces — use a goeswith relation instead");   // guarded HERE too, not just on the menu rows: this is the one entry point every caller shares
   pushUndo(si); if(typeof touchColW==="function") touchColW(si,si+1);
   const oldIds=new Map(); toks.forEach((t,i)=>oldIds.set(t,i+1));
   toks.forEach(t=>{const h=parseInt(t.head,10); t._ht=(h>=1&&h<=toks.length)?toks[h-1]:0;});   // heads by identity
@@ -618,12 +626,15 @@ function selMWTof(s){ if(!s)return null; const multi=selRange&&selRange.s===sel.
 function menuState(){ const has=sel.s>=0&&sel.t>0, s=has?DOC[sel.s]:null;
   const multi=!!(selRange&&selRange.s===sel.s&&selRange.to>selRange.from);
   const formsMWT=!!selMWTof(s);            // the selected tokens already form / sit inside an MWT
-  const inmwt=has&&!!mwtAtSel(s,sel.t);
   return {has, zone:has?UIZONE:"", rtl:!!(s&&sentRTL(s)),
           group:multi&&!formsMWT,          // Group: only a fresh multi-token selection that isn't already an MWT
-          merge:multi&&!formsMWT&&isSpacelessLang(),   // Merge: Group's selection, narrowed to the languages a segmenter can mis-split (SPACELESS_LANGS in js/core/state.js) — elsewhere a wrongly split word is a stray space in the file, which `goeswith` annotates rather than destroys. A selection that already forms an MWT has Flatten instead, the same collapse with the range's own surface form
+          // …or a selection lying wholly INSIDE one range: there the components are pieces of a single
+          // orthographic word with no space between them, so the "a wrong split is a stray space" argument
+          // that narrows Merge to spaceless languages does not apply (see mergeTokens' own note).
+          merge:multi&&!formsMWT&&(isSpacelessLang()||!!(s&&(s.mwt||[]).some(m=>selRange.from>=m.from&&selRange.to<=m.to))),   // Merge: Group's selection, narrowed to the languages a segmenter can mis-split (SPACELESS_LANGS in js/core/state.js) — elsewhere a wrongly split word is a stray space in the file, which `goeswith` annotates rather than destroys. A selection that already forms an MWT has Flatten instead, the same collapse with the range's own surface form
           ungroup:formsMWT, flatmwt:formsMWT,   // Ungroup / Flatten: only when the selection forms (or sits in) an MWT
-          convmwt:has&&!multi&&!inmwt,      // Split: only a single, un-grouped token
+          convmwt:has&&!multi,              // Split: a single token — INCLUDING one already inside a range, which divides that component in place and grows the range around it (convertTokenToMWT's `host` branch) rather than being a second, nested multi-word token
+
           foreign:has&&selHasFeat("Foreign"), typo:has&&selHasFeat("Typo"),
           reported:has&&isReported(s.tokens[(selRange&&selRange.s===sel.s&&selRange.to>selRange.from?rangeHead(s,selRange.from,selRange.to):sel.t)-1]),   // item 7: the checkmark reflects the node the command would actually write to — the head of the selection
    // items 2/3: the native Edit-menu rows are checkable — the checkmark mirrors the selection's current marker FEATS

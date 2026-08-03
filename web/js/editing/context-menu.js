@@ -1514,8 +1514,19 @@ function convertTokenToMWT(si,idx,n,parts){ const s=DOC[si], toks=s.tokens; cons
   remapMWT(s,toks);
   remapTokenRefs(s,idMapAfter(oldIds,toks));   // the original token survives as the head component and the new ones are blank, so nothing is dropped — this only shifts the ids after it, and DEPS / empty-node anchors with them
   const from=idx+1, to=idx+n;
-  s.mwt=(s.mwt||[]).filter(m=>!(m.from<=to&&m.to>=from));   // drop any overlapping range
-  s.mwt.push({from,to,form:origForm}); s.mwt.sort((a,b)=>a.from-b.from);   // the range spells the ORIGINAL, not the head component
+  /* SPLITTING A TOKEN THAT IS ALREADY A COMPONENT divides it INSIDE its range, rather than carving a new
+     range out of the middle of one. The filter below drops every overlapping range, which is right when a
+     free-standing token becomes a multi-word token and destructive when the token was already inside one —
+     the orthographic word above it would simply vanish, taking its surface form with it.
+     The host range only has to GROW: remapMWT above rebuilt it from its members' identities, so it already
+     spans the new pieces wherever the token split was not its LAST member (the pieces land between two
+     members, and from/to are the min and max). Where it was the last, they land past the end and `to` has
+     to take them. Its FORM is deliberately untouched — the word still spells what it spelt; only the
+     analysis underneath it has become finer. */
+  const host=(s.mwt||[]).find(m=>from>=m.from&&from<=m.to);
+  if(host){ if(host.to<to) host.to=to; }
+  else { s.mwt=(s.mwt||[]).filter(m=>!(m.from<=to&&m.to>=from));   // drop any overlapping range
+    s.mwt.push({from,to,form:origForm}); s.mwt.sort((a,b)=>a.from-b.from); }   // the range spells the ORIGINAL, not the head component
   /* …and the morpheme tiers divide with it, where they mark the SAME division. `=` is this app's clitic
      seam in MSeg (msegStrip strips ꞊/=/⹀), so a form and an MSeg that both carry it are describing one
      boundary and the pieces line up one-for-one. Only then — a tier that splits into a different number of
@@ -1573,7 +1584,7 @@ function convertTokenToMWT(si,idx,n,parts){ const s=DOC[si], toks=s.tokens; cons
        so this goes on the bridge and is deliberately not awaited, exactly as sandhiFlattenLemma is: a split
        is a synchronous editing command and must not hold the selection while a call is out. It re-fuses the
        range afterwards, so the surface the text spells is unchanged either way. */
-    if(isSanskritLang() && typeof sandhiSplitLast==="function") sandhiSplitLast(si,from);
+    if(isSanskritLang() && !host && typeof sandhiSplitLast==="function") sandhiSplitLast(si,from);   // …but NOT when the split happened inside an existing range: the token divided was already a component, so it was already stored in pausa and there is no external sandhi on it to undo
     if(show.translit) fillTranslit();
     if((ORTHO_SCHEME&&ORTHO_SCHEME!=="none")||isSanskritLang()) fillOrtho();
     toast(`Split into ${n} components at “=”`); }
