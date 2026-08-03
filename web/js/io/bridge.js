@@ -1752,12 +1752,24 @@ async function afterFormEdit(si,tokId,changed){ const s=DOC[si], t=s&&s.tokens[t
   // item A: refresh the LANGUAGE-driven secondaries IMMEDIATELY — a single-token form edit doesn't change the
   // token count, so no re-tokenisation is needed; the transliteration / script / MSeg update at once instead of
   // after the (slower) parser round-trip.
-  if(show.translit) await fillTranslit();                                               // romanisation of the new form
-  await annotateTranslitMisc(si);                                                       // rewrite MISC Translit/LTranslit
-  if((ORTHO_SCHEME&&ORTHO_SCHEME!=="none")||isSanskritLang()) fillOrtho();              // re-render the script glyph from the new form
-  if(msegRefill(t)) markDirty();   // MSeg re-seeds from the NEW form (its transliteration for non-Latin scripts), re-segmented against the lemma — which the background re-parse below may then revise again once it hands this token a lemma of its own (item 3)
-  if(isSanskritLang()){ const m=(s.mwt||[]).find(x=>tokId>=x.from&&tokId<=x.to); if(m) sandhiMwtForms(si,[m.from]); }   // item 8: re-fuse a containing MWT
-  preserveScroll(renderDoc);
+  /* ⚠ THE RE-RENDER IS IN A `finally`, and that is the whole point of the block. Six awaited bridge
+     calls stand between the edit and the redraw, every one of which can fail for a reason that has
+     nothing to do with the edit — an engine whose extras tier is not installed, a model that is not
+     there, a Sanskrit path that throws on one odd token. Any of them throwing used to skip the
+     `preserveScroll(renderDoc)` below, and then the MODEL held the new form while the GRID still
+     showed the old one: the reported symptom exactly, an IAST correction that reaches the diagram
+     (where the editor wrote it in place) and never reaches the Form column.
+     The redraw is not part of the refresh — it is how the user sees the edit they already made, so it
+     has to survive the refresh failing. Each derived field is separately best-effort inside; what is
+     NOT optional is drawing the document as it now stands. */
+  try{
+    if(show.translit) await fillTranslit();                                             // romanisation of the new form
+    await annotateTranslitMisc(si);                                                     // rewrite MISC Translit/LTranslit
+    if((ORTHO_SCHEME&&ORTHO_SCHEME!=="none")||isSanskritLang()) fillOrtho();            // re-render the script glyph from the new form
+    if(msegRefill(t)) markDirty();   // MSeg re-seeds from the NEW form (its transliteration for non-Latin scripts), re-segmented against the lemma — which the background re-parse below may then revise again once it hands this token a lemma of its own (item 3)
+    if(isSanskritLang()){ const m=(s.mwt||[]).find(x=>tokId>=x.from&&tokId<=x.to); if(m) sandhiMwtForms(si,[m.from]); }   // item 8: re-fuse a containing MWT
+  }catch(err){ console.error("afterFormEdit: a derived field failed to refresh",err); }
+  finally{ preserveScroll(renderDoc); }
   // item A: THEN re-run the parser in the BACKGROUND for the model-derived fields (lemma/feats/deps); the
   // transliteration is already on screen, so it never waits on the parse.
   if(hasBridge()&&model) reparseTokenFields(si,[tokId]).then(ok=>{ if(ok)preserveScroll(renderDoc); }); }

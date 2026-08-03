@@ -3,11 +3,11 @@
 # sent_id = s1
 # text = mūrtitve parikalpitaḥ śaśabhṛto vartmāpunarjanmanām |\nātmety ātmavidāṃ kratuś ca yajatāṃ bhartāmarajyotiṣām |\nlokānāṃ pralayodbhavasthitivibhuś cānekadā yaḥ śrutau |\nvācaṃ naḥ sa dadātv anekakiraṇas trailokyadīpo raviḥ ||
 # translit_scheme = iast
-1	mūrtitve	tva	NOUN	NOUN	Case=Loc|Gender=Neut|Number=Sing	8	orphan	_	Unsandhied=tve|MSeg=tve|MGloss=LOC.SG.N
+1	mūrtitve	mūrtitva	NOUN	NOUN	Case=Loc|Gender=Neut|Number=Sing	8	orphan	_	Unsandhied=tve|MSeg=mūrti-tve|MGloss=LOC.SG.N
 2	parikalpitaḥ	parikalpay	VERB	NOUN	Case=Nom|Gender=Masc|Number=Sing|VerbForm=Part	1	subj	_	Unsandhied=parikalpitaḥ|MSeg=parikalp-itaḥ|MGloss=-PTCP.NOM.SG.M
 3	śaśabhṛto	śaśabhṛ	NOUN	VERB	Case=Abl|Gender=Masc|Number=Sing	4	mod	_	Unsandhied=śaśabhṛtaḥ|MSeg=śaśabhṛ-to|MGloss=-ABL.SG.M
-4	vartmā	vartman	NOUN	NOUN	Case=Nom|Gender=Masc|Number=Sing	6	compound@coord	_	MSeg=vartmā|MGloss=NOM.SG.M
-5-6	apunarjanmanām	_	_	_	_	_	_	_	_
+4-6	vartmāpunarjanmanām	_	_	_	_	_	_	_	_
+4	vartma	vartman	NOUN	NOUN	Case=Acc|Gender=Neut|Number=Sing	6	compound@coord	_	Unsandhied=vartma|MSeg=vartma|MGloss=ACC.SG.N
 5	a	a	PART	PART	Compound=Yes	6	mod	_	Unsandhied=a|MSeg=a
 6	punarjanmanām	punarjanman	ADJ	VERB	Case=Gen|Gender=Masc|Number=Plur	8	mod	_	Unsandhied=punarjanmanām|MSeg=punarjanman-ām|MGloss=-GEN.PL.M
 7	|	|	PUNCT	PUNCT	_	1	punct	_	Unsandhied=
@@ -48,7 +48,7 @@
 35	trailokya	trailokya	NOUN	NOUN	Compound=Yes	36	mod	_	Unsandhied=trailokya|MSeg=trailokya
 36	dīpaḥ	dīpa	NOUN	NOUN	Case=Nom|Gender=Masc|Number=Sing	37	mod	_	Unsandhied=dīpaḥ|MSeg=dīpa-ḥ|MGloss=-NOM.SG.M
 37	raviḥ	ravi	NOUN	NOUN	Case=Nom|Gender=Masc|Number=Sing	25	mod@relcl	_	Unsandhied=raviḥ|MSeg=ravi-ḥ|MGloss=-NOM.SG.M
-38	||	||	PUNCT	PUNCT	Case=Acc|Gender=Neut|Number=Sing	25	punct	_	Unsandhied=‖|MSeg=‖|MGloss=ACC.SG.N
+38	‖	‖	PUNCT	PUNCT	Case=Acc|Gender=Neut|Number=Sing	25	punct	_	Unsandhied=‖|MSeg=‖|MGloss=ACC.SG.N
 
 # sent_id = s2
 # text = bhūyobhiḥ paṭubuddhibhiḥ paṭudhiyāṃ horāphalajñāptaye |\nśabdanyāyasamanviteṣu bahuśaḥ śāstreṣu dṛṣṭeṣv api |\nhorātantramahārṇavaprataraṇe bhagnodyamānām aham |\nsvalpaṃ vṛttavicitram arthabahulaṃ śāstraplavaṃ prārabhe ||
