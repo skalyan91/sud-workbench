@@ -1546,15 +1546,43 @@ function msegRefill(t,force){ if(!MORPH_ON||!t) return false;
   const cur=miscKV(t.misc,"MSeg");
   if(!force && cur && cur!==(t._msegPre||"")) return false;   // hand-edited → the user's, not ours — UNLESS force: a direct lemma edit (afterLemmaEdit's own call) is new evidence about what the word IS, strong enough to supersede a hand correction that was made against the OLD lemma, so it always re-derives; the background-reparse and form-edit callers below stay unforced (weaker evidence: a parser guess, or a form change that hasn't touched the lemma at all)
   const pv=glossEnc(msegPrefillParts(t).seg);
-  if(!pv||pv===cur) return false;
+  /* ⚠ THE GLOSS IS REFRESHED EVEN WHERE THE SEGMENTATION DID NOT MOVE, and this call sits above the
+     unchanged-value return for that reason. The two rows go stale on overlapping but different evidence:
+     MSeg on (form, lemma), MGloss on (FEATS, UPOS) as well — so a re-parse that revises only the FEATS
+     leaves `amic-is` correct and `-DAT.PL` wrong, and a refill that gave up as soon as MSeg came back
+     identical would never look at the gloss at all. */
+  const mgChanged=mglossRefill(t);
+  if(!pv||pv===cur) return mgChanged;
   t.misc=setMiscKV(t.misc,"MSeg",pv); t._msegPre=pv;
   /* …and the SEAM goes back on, because a refill cannot derive it: msegSegment segments against the lemma,
      and a clitic boundary is the annotator's assertion. Every refill path ends here — the form edit, the
      forced lemma-edit one, and the background re-parse's, which is what silently dropped a just-mirrored
      seam by refilling over it a second later. */
   msegMirrorSeams(t);
-  mglossReslot(t,cur,pv);   // MSeg's hyphen slots just moved, and MGloss names those slots one for one — keep the two rows in step (js/editing/edit-ops.js). Placed HERE, at the single point every MSeg re-derivation passes through, so the form-edit and background-re-parse callers are covered too, not only the lemma edit. A no-op when the two are already in step, which is what lets the grid's own lemma-commit call for the same edit not double-apply it
+  /* …AND MGLOSS IS RE-DERIVED WITH IT. The two rows are one analysis seen twice — MSeg names the morphemes,
+     MGloss names what each of them does — and both are computed from the same (form, lemma, FEATS, UPOS).
+     So anything that makes MSeg stale makes MGloss stale in the same breath, and re-slotting alone only ever
+     MOVED the old gloss's hyphens: after a re-parse revised the FEATS, the marks lined up while the
+     categories underneath them were the previous analysis's.
+     Reslot is still the fallback, and does the work the refill declines to: a HAND-WRITTEN MGloss is the
+     annotator's and is never re-derived over, but its hyphens must still follow the segmentation that just
+     moved beneath it. So — refill what is ours, re-slot what is theirs. */
+  if(!mgChanged) mglossReslot(t,cur,pv);   // …refill what is ours, re-slot what is theirs (see above)
   return true; }
+/* Item 3's counterpart for the gloss row — MGloss re-derived from FEATS, with the attachment hyphens the
+   CURRENT segmentation implies. Same provenance rule as msegRefill and the same marker (`_mglossPre`,
+   which morphEdited already reads as "the annotator has not been here"): a value that differs from the one
+   we last prefilled is theirs, and is left alone. Unforced from msegRefill even where THAT was forced — a
+   lemma edit re-derives the segmentation but says nothing about the grammatical categories, so there is no
+   reason for it to overwrite a gloss someone wrote. */
+function mglossRefill(t,force){ if(!MORPH_ON||!t) return false;
+  const cur=miscKV(t.misc,"MGloss");
+  if(!force && cur && cur!==(t._mglossPre||"")) return false;   // hand-written → the annotator's, not ours
+  const seg=msegPrefillParts(t);
+  const lex=(GLOSS_ON&&!UPOS_LEIPZIG_ABBR[t.upos])?miscKV(t.misc,"Gloss").replace(/-/g,"_"):"";   // the same cross-tier prefill morphPrefillSent applies
+  const pv=glossEnc(mglossMarks(composeMGloss(lex,t.feats,t.upos),seg));
+  if(!pv||pv===cur) return false;
+  t.misc=setMiscKV(t.misc,"MGloss",pv); t._mglossPre=pv; return true; }
 /* A SEAM TYPED INTO A FORM IS A SEAM IN ITS SEGMENTATION TOO. `=` marks where a token should divide, and
    openConvertMWT reads it off the FORM to split without asking how many pieces — but the split also divides
    MSeg on `=`, and only when the piece counts agree. So a form that says `śaśa=bhṛto` beside an MSeg that
