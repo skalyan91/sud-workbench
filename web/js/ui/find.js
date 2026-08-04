@@ -344,7 +344,7 @@ function openFieldMenu(anchor,fields,current,onPick){ closeFieldMenu();
   document.body.appendChild(m);
   const r=anchor.getBoundingClientRect(), mw=m.offsetWidth, mh=m.offsetHeight;
   m.style.left=Math.max(6,Math.min(r.left,innerWidth-mw-8))+"px";
-  m.style.top=Math.max(6,Math.min(r.bottom+4,innerHeight-mh-8))+"px";
+  m.style.top=Math.max(menuTopBound(),Math.min(r.bottom+4,innerHeight-mh-8))+"px";
   setTimeout(()=>{ document.addEventListener("mousedown",_ffOutside,true); document.addEventListener("keydown",_ffKey,true); },0); }
 // The chevron is the SAME inline SVG every other pull-down in the app draws (.drawer-btn's, verbatim) —
 // not the "⌄" text glyph this used to carry. Measured, at this button's 12px label: that glyph's INK is

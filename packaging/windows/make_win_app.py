@@ -51,6 +51,17 @@ APP_NAME = "SUD Workbench"
 
 # Source trees copied into appsrc/. samples/ is deliberately absent — it is repo-only test data and
 # nothing under app/ or web/ reads it at runtime, exactly as on macOS.
+#
+# ⚠ vendor/ IS ABSENT HERE AND THE MAC BUILDS SHIP IT, and the difference is not an oversight.
+# vendor/grew/bin/grewpy_backend is a Mach-O arm64 executable with a rewritten macOS dylib closure
+# (tools/bundle_grew.sh); copying it into a Windows bundle would ship dead weight that
+# app/convert.py would then find on PATH and fail to spawn — worse than finding nothing, which it
+# already degrades from cleanly. A Windows build needs a WINDOWS grewpy_backend, which nothing in
+# this repository produces yet, so until one exists this platform has no grew: UD import/export and
+# format conversion stay disabled, and — the consequence that is easy to miss — every STANZA model is
+# inert too, because Stanza emits UD and this app stores SUD. Manage Models says so at the top of the
+# Stanza group when the backend is missing (js/io/models.js), which is the same warning a macOS user
+# without one sees.
 SRC_TREES = ("app", "web", "grammars")
 
 # Ship the CORE Noto faces only; every other script's face is fetched on first need at runtime

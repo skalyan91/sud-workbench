@@ -476,7 +476,7 @@ function renderGrid(si){
         if((key==="deps"||key==="misc")&&t[key]==="")t[key]="_";   // empty Deps/Misc round-trips as "_"
         if(key==="form"){ scheduleDoc(); afterFormEdit(si,i+1,true); }
         else if(key==="lemma"){ commitLemmaEdit(si,i+1,t); }   // NO eager scheduleDoc: nothing on screen shows a lemma, and everything that changes BECAUSE of it (MSeg, and the MGloss slots that name it) has to wait on the same await afterLemmaEdit does — see commitLemmaEdit
-        else if(key==="upos"){ scheduleDoc(); uposSyncTranslit(si,i+1); regenTok(si,i+1); }   // uposSyncTranslit: the romanisation/script glyph are tag-conditioned and a retag makes them stale — the same call the diagram's POS menu makes (js/editing/context-menu.js), and for the same reason it cannot be left to regenTok. Task B: ONLY upos still reparses (lemma/feats/deps) — head/deprel are purely structural and must not trigger any gloss-touching regen at all
+        else if(key==="upos"){ scheduleDoc(); uposSyncTranslit(si,i+1); regenTok(si,i+1,{regloss:true}); }   // regloss: the same full MGloss refresh the diagram's POS menu asks for — the re-parse re-derives the FEATS for the chosen class, so the gloss must gain that class's categories and not only lose the old one's (mglossFillFromFeats, js/io/bridge.js).   // uposSyncTranslit: the romanisation/script glyph are tag-conditioned and a retag makes them stale — the same call the diagram's POS menu makes (js/editing/context-menu.js), and for the same reason it cannot be left to regenTok. Task B: ONLY upos still reparses (lemma/feats/deps) — head/deprel are purely structural and must not trigger any gloss-touching regen at all
         else if(key==="head"||key==="deprel"||key==="deep"){ scheduleDoc(); }   // re-render only — no regenTok
       };
       if(type==="upos"){ ctl=document.createElement("select"); ctl.className="csel";
@@ -710,8 +710,8 @@ const FEATS_GLOSS={"Case=Nom":"NOM","Case=Acc":"ACC","Case=Gen":"GEN","Case=Dat"
      · DX1/DX2 (DeixisRef) name the deictic anchor the way Person's own 1/2 name the participant.
      Shared=Yes/No and every Subject value is still deliberately absent: they are SUD-internal bookkeeping, not morphological categories a gloss line would ever carry (and Subject is not even in FEATS any more — see UD_MISC_KEYS below). So are Foreign=Yes and Typo=Yes, which get their own rendering (underline / strikethrough) instead of a gloss abbreviation.
      NOTE: a handful of entries still reuse one abbreviation across two Feat=Val pairs — DISTR: Case=Dis/NumType=Dist; EQU: Case=Equ/Degree=Equ; INV: Number=Inv/Voice=Inv; RECP: Voice=Rcp/PronType=Rcp; INDF: Definite=Ind/PronType=Ind; NEG: Polarity=Neg/PronType=Neg — AMBIG_UPOS (below) resolves each from the token's own UPOS wherever the two candidates' realistic UPOS ranges don't overlap. Item 5's additions introduce no NEW collision. */
-const UD_MISC_KEYS=["SpaceAfter","SpacesAfter","SpacesBefore","Translit","LTranslit","Gloss","MSeg","MGloss","Lang","CorrectForm","CorrectSpaceAfter","Entity","NER","Cxn","Reported","Subject","ToDo"];   /* Subject/Object MOVED HERE FROM UD_FEATS: they are SUD raising annotation, not morphology, and belong in MISC (see raiseGet/raiseSet, js/core/prefs.js, which is where that decision is recorded). They were the only two SUD-specific entries in the UD feature inventory above. */   // item 7: Reported joins the offered keys so the MISC cell autocompletes it like any other
-const UD_MISC_VALS={SpaceAfter:["No"],CorrectSpaceAfter:["Yes","No"],Reported:["Yes"],
+const UD_MISC_KEYS=["SpaceAfter","SpacesAfter","SpacesBefore","Translit","LTranslit","Gloss","MSeg","MGloss","Lang","CorrectForm","CorrectSpaceAfter","Entity","NER","Cxn","Idiom","InIdiom","Reported","Subject","ToDo"];   /* Subject/Object MOVED HERE FROM UD_FEATS: they are SUD raising annotation, not morphology, and belong in MISC (see raiseGet/raiseSet, js/core/prefs.js, which is where that decision is recorded). They were the only two SUD-specific entries in the UD feature inventory above. */   // item 7: Reported joins the offered keys so the MISC cell autocompletes it like any other. Idiom/InIdiom joined them when the SUD parsers began PREDICTING the whole SUD MISC layer (app/parse.py's _SUD_MISC_KEYS): SUD marks an idiom with features rather than a `fixed` relation — the head takes Idiom=Yes alongside its ExtPos, every other member InIdiom=Yes, and the unanalysable members attach by `unk`
+const UD_MISC_VALS={SpaceAfter:["No"],CorrectSpaceAfter:["Yes","No"],Reported:["Yes"],Idiom:["Yes"],InIdiom:["Yes"],
   Subject:["SubjRaising","ObjRaising","OblRaising","Generic","Instantiated","NoRaising"]};   // most MISC keys are free-text → doc-mined values carry the rest
 function docPairKeys(col){ const set=new Set(); try{ DOC.forEach(s=>s.tokens.forEach(t=>{ const raw=t[col]; if(!raw||raw==="_")return;
     raw.split("|").forEach(seg=>{ const eq=seg.indexOf("="); if(eq>0)set.add(seg.slice(0,eq)); }); })); }catch(_){} return set; }   // attribute names already used anywhere in the doc
@@ -753,6 +753,44 @@ function acShowGrouped(inp,groups,onPick,descFn){ _acInput=inp; _acIdx=-1; _acOn
       b.addEventListener("mousedown",()=>acFill(v)); b.addEventListener("mouseenter",()=>acHi(k)); m.appendChild(b); }); });
   acPos(); m.classList.add("show"); }
 
+/* ⚠ A CONTENTEDITABLE HAS NO selectionStart, AND THAT IS WHY MINTING A CHIP THREW THE CARET TO THE
+   START OF THE CELL. Committing a segment (`|`, comma, space, Enter, or an accepted autocomplete
+   row followed by any of them) calls serialize(), which writes t.feats/t.misc and re-renders — and
+   preserveScroll (js/ui/wiring.js) puts the focus back with a bare `nc.focus()`, then restores the
+   caret with setSelectionRange, which exists on INPUT/TEXTAREA and on nothing else. Focusing a
+   contenteditable DIV collapses the caret to its first position, so every chip the reader minted
+   mid-field dumped them back at the head of the cell to type the next one.
+   The caret cannot be carried as a character offset either: the field is a mixed run of atomic
+   `.fpill` chips and zero-width anchors, and the chips are rebuilt from the model. What survives a
+   rebuild is the CHIP COUNT before the caret plus the offset within the text run it sits in — both
+   facts about the serialised value, which is exactly what the re-render reproduces. Any un-minted
+   text is carried too, on the same terms as preserveScroll's `fd.val` for a plain cell: the model
+   does not hold it yet, so a render underneath a half-typed segment would otherwise eat it. */
+const PILL_ZW="​";
+function pillCaretGet(box){ try{
+    const s=window.getSelection(); if(!s||!s.rangeCount) return null;
+    const r=s.getRangeAt(0); if(!box.contains(r.startContainer)) return null;
+    let chips=0;
+    box.querySelectorAll(".fpill").forEach(p=>{ const rr=document.createRange(); rr.selectNode(p);
+      if(rr.compareBoundaryPoints(Range.START_TO_START,r)<0) chips++; });   // chips whose own start precedes the caret — a count, so it survives the rebuild that replaces every one of them
+    const nd=r.startContainer;
+    if(nd.nodeType!==3) return {chips,off:0,txt:""};   // caret between two chips (an element-level position) → the chip count alone places it
+    const before=nd.data.slice(0,r.startOffset).split(PILL_ZW).join("");
+    return {chips, off:before.length, txt:nd.data.split(PILL_ZW).join("")};
+  }catch(e){ return null; } }
+function pillCaretSet(box,c){ try{
+    if(!c) return;
+    const pills=[...box.querySelectorAll(".fpill")];
+    let node=null;
+    if(c.chips>0){ const p=pills[Math.min(c.chips,pills.length)-1]; if(p&&p.nextSibling&&p.nextSibling.nodeType===3) node=p.nextSibling; }
+    if(!node) node=[...box.childNodes].find(n=>n.nodeType===3)||null;
+    if(!node) return;
+    if(c.txt && node.data.split(PILL_ZW).join("")!==c.txt) node.data=PILL_ZW+c.txt;   // the pending segment the model does not hold — put it back BEFORE indexing into it, or the offset below counts a string the reader never saw
+    let dom=node.data.length, seen=0;   // character offset → DOM offset, the zero-width anchors passed over as the skeleton they are
+    for(let i=0;i<node.data.length;i++){ if(node.data[i]===PILL_ZW) continue; if(seen===c.off){ dom=i; break; } seen++; }
+    const r=document.createRange(); r.setStart(node,dom); r.collapse(true);
+    const s=window.getSelection(); s.removeAllRanges(); s.addRange(r);
+  }catch(e){} }
 /* FEATS / MISC pill editor: ONE editable, wrapping `contenteditable` field that holds the `Key=Value` chips
    INLINE with the text caret (Gmail "To"-style) and serialises them back to the token's `|`-joined field on
    every mutation, using the same undo/round-trip path as a `.cin` cell. New chips are minted on the fly, at

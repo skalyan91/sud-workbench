@@ -48,7 +48,12 @@ echo "▶ installing CORE deps into the bundle (torch-free)…"
 echo "▶ copying app source…"
 # samples/ is deliberately NOT bundled — it is repo-only test data (see README). Nothing in app/ or
 # web/ reads from it at runtime, so the shipped app carries no sample datasets.
-for d in app web grammars; do
+# `vendor/` rides along for the reason make_bootstrap_app.sh states at length: it carries the
+# self-contained grew backend, and without one every Stanza model is inert (Stanza emits UD, this app
+# stores SUD, so the conversion grammar runs on every Stanza parse). It matters MORE here than in the
+# bootstrap bundle — this build exists to need nothing from the user's machine, and an opam install is
+# the largest thing it was still quietly assuming.
+for d in app web grammars vendor; do
   [ -e "$PROJECT/$d" ] && cp -R "$PROJECT/$d" "$RES/appsrc/$d"
 done
 # don't ship the caches

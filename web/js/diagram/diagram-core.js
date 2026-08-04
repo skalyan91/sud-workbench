@@ -188,7 +188,12 @@ Object.defineProperty(window,"MONO_STACK",{configurable:true,
 function _lazyFont(name,derive){ let v; Object.defineProperty(window,name,{configurable:true,
   get(){ return v!==undefined?v:(v=derive()); }, set(x){ v=x; } }); }
 _lazyFont("LIVE_TOKEN_STACK",()=>TOKEN_STACK); _lazyFont("LIVE_MONO_STACK",()=>MONO_STACK);
-_lazyFont("WORD_F",()=>'15px '+LIVE_TOKEN_STACK); _lazyFont("NODE_F",()=>'14px '+LIVE_TOKEN_STACK);
+/* THE GLYPH MAGNIFICATION, mirrored off CSS `--script-mag` by refreshFontStacks (see its own note for
+   why a canvas font string cannot read the property itself). 1 everywhere except the ornamental Sanskrit
+   scripts. It multiplies the TOKEN-FORM faces only — WORD_F/NODE_F/MWT_F and the goeswith tie — never the
+   POS, transliteration or gloss rows, which are Latin annotation drawn at the app's own body size. */
+let TOK_MAG=1;
+_lazyFont("WORD_F",()=>(15*TOK_MAG)+'px '+LIVE_TOKEN_STACK); _lazyFont("NODE_F",()=>(14*TOK_MAG)+'px '+LIVE_TOKEN_STACK);
 _lazyFont("WORD_F_BOLD",()=>'640 '+WORD_F); _lazyFont("NODE_F_BOLD",()=>'640 '+NODE_F);   // the weight .sel USED to bold a selected token's form to — stemma/tree/arcs reserve width to the WIDER of the two so a token's hit/wash box never needs to change size on selection (no reflow-on-select trigger exists for these views, unlike brackets). Selection no longer changes weight at all (see the "selected token text" note in app.css beside .node.sel .node-lbl: the wrapped/HTML views had no such reserve, so the bump shifted and clipped their layout). The reserves are kept rather than removed — they cost a couple of px of slot width and dropping them would re-space every diagram — so this pair now buys headroom, not a bold state
 _lazyFont("POS_F",()=>'15px '+LIVE_TOKEN_STACK); _lazyFont("GRID_F",()=>'462 13px '+LIVE_MONO_STACK); _lazyFont("HEAD_F",()=>'500 11px '+uiFont()); _lazyFont("HEAD_F_REQ",()=>'700 11px '+uiFont());   // TWO heading faces now, because the band is drawn in two weights: HEAD_F is the OPTIONAL columns' SF Pro Medium (500) and HEAD_F_REQ the obligatory ID/Form columns' Bold (700) — see `table.grid th` / `table.grid th.th-req` in styles/app.css. scanColW/pillColW pick per column; measuring every heading with one weight under-sized ID and Form by the Medium→Bold width difference   // HEAD_F is the GRID HEADING face, and its only consumers are scanColW/pillColW (js/grid/grid.js). It must match `table.grid th` in styles/app.css exactly, which is now title case in the UI font at 11px/590 — NOT --token-font, so it is the one string here built off uiFont() (js/core/platform.js, which resolves --ui-font to a plain family list; a canvas font string can't carry a var()) rather than off LIVE_TOKEN_STACK, and refreshFontStacks' token/mono-stack invalidation therefore doesn't apply to it. uiFont() caches its own DOM read, so calling it from a lazy getter costs nothing after the first   // POS tags: same size + weight (normal, i.e. no weight token here) as the transliteration (TRANS_F) — upright rather than italic; c2sc small-caps do the visual "tag" styling now, not a bumped weight/shrunk size. GRID_F: weight curve @12.65px (matches table.grid's own CSS weight — was unweighted/400, measuring narrower than the grid actually renders)
 _lazyFont("TRANS_F",()=>'italic 15px '+LIVE_TOKEN_STACK); _lazyFont("TRANS_UP_F",()=>'15px '+LIVE_TOKEN_STACK); _lazyFont("MWT_F",()=>WORD_F);   /* the MWT surface form measures/renders exactly like a normal token form (WORD_F, 15px). TRANS_UP_F: the same row set UPRIGHT — what a Foreign=Yes token's transliteration renders in (see trFont/.frn-up) */
@@ -283,26 +288,35 @@ function measGloss(s,f){ const segs=glossAbbrSegments(s);
 // re-renders — see orPick/loadOrthoSchemes). Every font string below is a cheap string concat off the cached
 // LIVE_TOKEN_STACK/LIVE_MONO_STACK, not a fresh DOM read.
 function refreshFontStacks(){
-  const d=document.getElementById("doc"), prevT=LIVE_TOKEN_STACK, prevM=LIVE_MONO_STACK;
+  const d=document.getElementById("doc"), prevT=LIVE_TOKEN_STACK, prevM=LIVE_MONO_STACK, prevG=TOK_MAG;
   if(d){ const cs=getComputedStyle(d);
     const t=cs.getPropertyValue("--token-font").trim(), m=cs.getPropertyValue("--mono-font").trim();
-    if(t) LIVE_TOKEN_STACK=t; if(m) LIVE_MONO_STACK=m; }   // empty (no #doc, or the property somehow unset) → keep whatever was last live, which starts as the static base
+    if(t) LIVE_TOKEN_STACK=t; if(m) LIVE_MONO_STACK=m;
+    /* …AND HOW BIG THE GLYPHS ARE. `--script-mag` is the ornamental-script magnification (2 for
+       Rañjanā/Soyombo/Zanabazar Square — see ORNAMENTAL_SCRIPTS, js/lang/translit.js), published on #doc
+       by syncSchemeAttr. Read back HERE, off the same element and in the same breath as the font stacks,
+       because a canvas `font` string cannot carry a var(): every slot width in every notation comes from
+       meas() against these strings, so a paint that scaled without the measurement following it would lay
+       out 15px boxes and draw 30px letters in them. Read, never assumed — the CSS is the authority and
+       this is its mirror. */
+    const g=parseFloat(cs.getPropertyValue("--script-mag")); if(g>0) TOK_MAG=g; }   // empty (no #doc, or the property somehow unset) → keep whatever was last live, which starts as the static base
   // a font-stack change is the ONE non-content thing that can change what meas() returns (js/grid/grid.js's
   // computeColW/pillColW measure against GRID_F/HEAD_F, both built from LIVE_MONO_STACK/LIVE_TOKEN_STACK below)
   // → the column-width cache's every cached measurement is now stale, so force a full rescan rather than trust
   // the (now wrong) cached widths forward.
-  if((LIVE_TOKEN_STACK!==prevT||LIVE_MONO_STACK!==prevM)) clearMeasCache();   // …and every cached text width, for the same reason: they were measured in the OLD families
-  if((LIVE_TOKEN_STACK!==prevT||LIVE_MONO_STACK!==prevM) && typeof invalidateColW==="function") invalidateColW();
+  const fchg=(LIVE_TOKEN_STACK!==prevT||LIVE_MONO_STACK!==prevM||TOK_MAG!==prevG);   // a size change invalidates exactly what a family change does, and for the identical reason
+  if(fchg) clearMeasCache();   // …and every cached text width, for the same reason: they were measured in the OLD families
+  if(fchg && typeof invalidateColW==="function") invalidateColW();
   // …and every renderer's own cached diagram (js/core/document.js's notation-switch cache): stemma/arcs/tree/
   // brackets/outline all measure through this same meas()/WORD_F/NODE_F/POS_F/… family, so a font-stack change
   // invalidates their output exactly as it invalidates colW's, for the same reason.
-  if((LIVE_TOKEN_STACK!==prevT||LIVE_MONO_STACK!==prevM) && typeof invalidateDiaCache==="function") invalidateDiaCache();
-  WORD_F='15px '+LIVE_TOKEN_STACK; NODE_F='14px '+LIVE_TOKEN_STACK; WORD_F_BOLD='640 '+WORD_F; NODE_F_BOLD='640 '+NODE_F;
+  if(fchg && typeof invalidateDiaCache==="function") invalidateDiaCache();
+  WORD_F=(15*TOK_MAG)+'px '+LIVE_TOKEN_STACK; NODE_F=(14*TOK_MAG)+'px '+LIVE_TOKEN_STACK; WORD_F_BOLD='640 '+WORD_F; NODE_F_BOLD='640 '+NODE_F;
   POS_F='15px '+LIVE_TOKEN_STACK; GRID_F='462 13px '+LIVE_MONO_STACK; HEAD_F='500 11px '+uiFont(); HEAD_F_REQ='700 11px '+uiFont();   // HEAD_F/HEAD_F_REQ ride along on this refresh only for uniformity — it is built off --ui-font, not off either LIVE_ stack (see its lazy definition above), so nothing this function reacts to can actually change it
   TRANS_F='italic 15px '+LIVE_TOKEN_STACK; TRANS_UP_F='15px '+LIVE_TOKEN_STACK; MWT_F=WORD_F;
   GRID_ITAL_F='italic 462 13px '+LIVE_MONO_STACK;
   GLOSS_F=weightCurve(13.2)+' 13.2px '+LIVE_TOKEN_STACK; MSEG_F='italic 15px '+LIVE_TOKEN_STACK; MSEG_UP_F='15px '+LIVE_TOKEN_STACK; MGLOSS_F=weightCurve(13.2)+' 13.2px '+LIVE_TOKEN_STACK;
-  GW_TIE_F='26px '+LIVE_TOKEN_STACK;
+  GW_TIE_F=(26*TOK_MAG)+'px '+LIVE_TOKEN_STACK;
 }
 // THE SEAM MARK (seamMark — "=" at a multi-word-token seam, "-" at an mSUD "/m" morpheme seam; see prefs.js) as
 // drawn. Two rules hold at every site, in SVG and HTML alike:
@@ -645,7 +659,7 @@ const GW_TIE="‿";        // U+203F UNDERTIE
        word rather than as a hairline someone left there.
    It is deliberately NOT tied to WORD_F: this is a mark's size, not a text size, and it must stay put while the
    width varies. */
-_lazyFont("GW_TIE_F",()=>'26px '+LIVE_TOKEN_STACK);   // reassigned by refreshFontStacks() alongside every other measurement font, so this stays in step with a live scheme override too
+_lazyFont("GW_TIE_F",()=>(26*TOK_MAG)+'px '+LIVE_TOKEN_STACK);   // reassigned by refreshFontStacks() alongside every other measurement font, so this stays in step with a live scheme override too
 // The glyph's own ink box at GW_TIE_F, measured rather than assumed — the mark is seated and the tie layer's
 // depth reserved from these, so a font substitution can't leave the reserve and the drawing disagreeing.
 // `asc` is the ink's rise above the baseline (NEGATIVE for U+203F, whose ink lies wholly below it).
@@ -878,6 +892,18 @@ function appendHangHTML(container,t,si,cls,oid){ const show=correctFormShown(t,s
     s.dataset.s=si; s.dataset.tok=oid; s.dataset.host=host; s.style.cursor="pointer";
     s.addEventListener("click",ev=>{ ev.stopPropagation(); pick(si,oid); }); container.appendChild(s); }); }
 function descent(f){_cv.font=f; const m=_cv.measureText("gjpqy"); return m.actualBoundingBoxDescent||3;}   // how far tokens hang below the baseline
+/* ⚠ THE STEP FROM ONE BELOW-TOKEN ROW TO THE NEXT, WRITTEN ONCE.
+   It was the literal expression `belowGap()` in fifteen places — every renderer's draw AND every
+   renderer's reserve (stackH / belowH / stackBot / --undpad / tieLead / mwtDepth) — which is exactly the
+   arrangement that has to stay in lockstep or a row is drawn where nothing was reserved for it.
+   The 18 is a constant calibrated against a 15px form, and it has only ~1.6px of slack: measured on the
+   fixture, the form's ink bottom sits at 166.0 and the POS row's top at 167.6. So a form drawn at DOUBLE
+   size (the ornamental Sanskrit scripts — see TOK_MAG) eats that slack and overruns the row below by a
+   couple of pixels. The magnification's own extra descent is therefore added back here, at the one
+   expression every consumer shares, so the draws and the reserves grow together and neither clipping nor
+   misalignment is possible. Exactly `belowGap()` whenever TOK_MAG is 1, which is every document
+   but those. */
+function belowGap(){ return 18+descent(POS_F)+(TOK_MAG>1?descent(WORD_F)*(1-1/TOK_MAG):0); }
 function xHeight(f){_cv.font=f; const m=_cv.measureText("x"); return m.actualBoundingBoxAscent||6;}   // the x-height of a (POS) glyph — subtracted from the inter-tier step to seat the MWT bracket (POS tags now render via c2sc small caps, whose visual height sits at x-height, not full cap height)
 // sizeSid() — the JS width-measurement this comment described — is GONE: .sid-in is a contenteditable
 // span now (js/core/document.js's buildBlock), not an <input>, and a span with no explicit width simply
@@ -1207,10 +1233,10 @@ function mirror(c,total){ if(RTL) for(let i=0;i<c.length;i++) c[i]=total-c[i]; }
 function hasTr(toks){ return trLayer() && toks.some(x=>trTxt(x)); }   // the transliteration row is active (romanisation, or originals under an orthography) → reserve it for every token (keeps POS aligned)
 function belowStack(g,x,y0,tk,boxes,trRow){ let y=y0;   // trRow: reserve the transliteration row even for a token that has none (so POS stays aligned across the sentence)
   const showTr = trRow!=null ? trRow : (trLayer() && !!trTxt(tk));
-  if(showTr){ y+=18+descent(POS_F); const rt=trTxt(tk); if(rt){ const e=E("text",{class:"translit"+frnUp(tk),x:x,y:y,"text-anchor":"middle"}); e.textContent=rt; if(trRowEdit())e.classList.add("tr-edit"); g.appendChild(e); boxes&&boxes.push({x,y:y-4,hx:meas(rt,trFont(tk))/2,hy:7}); svgSeamMark(g,tk,x,y,meas(rt,trFont(tk))/2,trFont(tk),boxes,null,"translit"); } }   // Item 8: the translit row gains the SAME descender-matched top gap the POS row carries (+descent(POS_F), the label-font descender) so the row above's descenders don't crowd it; .tr-edit → click-to-edit the romanisation, or the STORED transliteration behind it (see trRowEdit). The romanisation is a WORD-LIKE row, so it carries the seam mark too — a word broken across tokens reads as broken on every row that spells it out
-  belowTiers().forEach(tier=>{ y+=18+descent(POS_F); const txt=tierText(tk,tier), dtxt=txt||"…"; const e=E("text",{class:"gloss gl-edit"+frnUp(tk),x:x,y:y,"text-anchor":"middle","data-tier":tier,tabindex:"0"}); setGlossText(e,tier,dtxt); if(!txt)e.classList.add("gl-empty"); g.appendChild(e); boxes&&boxes.push({x,y:y-4,hx:meas(dtxt,trFont(tk))/2,hy:7});
+  if(showTr){ y+=belowGap(); const rt=trTxt(tk); if(rt){ const e=E("text",{class:"translit"+frnUp(tk),x:x,y:y,"text-anchor":"middle"}); e.textContent=rt; if(trRowEdit())e.classList.add("tr-edit"); g.appendChild(e); boxes&&boxes.push({x,y:y-4,hx:meas(rt,trFont(tk))/2,hy:7}); svgSeamMark(g,tk,x,y,meas(rt,trFont(tk))/2,trFont(tk),boxes,null,"translit"); } }   // Item 8: the translit row gains the SAME descender-matched top gap the POS row carries (+descent(POS_F), the label-font descender) so the row above's descenders don't crowd it; .tr-edit → click-to-edit the romanisation, or the STORED transliteration behind it (see trRowEdit). The romanisation is a WORD-LIKE row, so it carries the seam mark too — a word broken across tokens reads as broken on every row that spells it out
+  belowTiers().forEach(tier=>{ y+=belowGap(); const txt=tierText(tk,tier), dtxt=txt||"…"; const e=E("text",{class:"gloss gl-edit"+frnUp(tk),x:x,y:y,"text-anchor":"middle","data-tier":tier,tabindex:"0"}); setGlossText(e,tier,dtxt); if(!txt)e.classList.add("gl-empty"); g.appendChild(e); boxes&&boxes.push({x,y:y-4,hx:meas(dtxt,trFont(tk))/2,hy:7});
     if(tier==="mseg"||tier==="mgloss") svgSeamMark(g,tk,x,y,(tier==="mgloss"?measGloss(dtxt,tierFont(tier,tk)):meas(dtxt,tierFont(tier,tk)))/2,tierFont(tier,tk),boxes,null,tier); });   // Item 8: each gloss / morphemic-gloss tier gains the SAME +descent(POS_F) top gap as the POS row, so all sub-token tiers share the descender-based breathing room; BELOW the transliteration and ABOVE the POS row; double-click or Enter to edit → MISC. The SEGMENTATION tier (mseg) and the MORPHEMIC GLOSS tier (mgloss) both take a seam mark — a mark drawn regardless of whether THIS tier happens to be annotated for this token (measured off the "…" placeholder's own width when it isn't), because the seam it decorates is a fact about the SEGMENTATION, not about this tier's own annotation coverage. Gating on `txt` used to silently drop the mark wherever MGloss was sparser than MSeg (a common, unremarkable state for hand-glossed data) — the row still shows a "…" cell there, so a boundary that MSeg draws cleanly would vanish from MGloss for that one seam while surviving on the very next one, reading as the mark randomly relocating/centring rather than a coverage gap. Both are PER-MORPHEME rows that a word-break genuinely interrupts; the lexical GLOSS tier (a single whole-word meaning, on request unchanged) does not
-  if(show.pos && tk.upos){ y+=18+descent(POS_F); const pd=posDisp(tk); const e=E("text",{class:"tok-pos",x:x,y:y,"text-anchor":"middle"}); e.textContent=pd; svgTip(e,posTitle(tk.upos)); g.appendChild(e); boxes&&boxes.push({x,y,hx:meas(pd,POS_F)/2,hy:6}); }   // POS hover tooltip (Item 2). Item 1: +descent(POS_F) extra top gap on the POS step — the label font's (POS_F) descender depth, mirroring how the above-token rows fold in descent(WORD_F) — so the POS row isn't crowded by the descenders of the row above it. Every below-reserve that feeds a row height (stackH / belowH / stackBot / --undpad) folds in the SAME descent(POS_F), so POS stays aligned across renderers and nothing clips.
+  if(show.pos && tk.upos){ y+=belowGap(); const pd=posDisp(tk); const e=E("text",{class:"tok-pos",x:x,y:y,"text-anchor":"middle"}); e.textContent=pd; svgTip(e,posTitle(tk.upos)); g.appendChild(e); boxes&&boxes.push({x,y,hx:meas(pd,POS_F)/2,hy:6}); }   // POS hover tooltip (Item 2). Item 1: +descent(POS_F) extra top gap on the POS step — the label font's (POS_F) descender depth, mirroring how the above-token rows fold in descent(WORD_F) — so the POS row isn't crowded by the descenders of the row above it. Every below-reserve that feeds a row height (stackH / belowH / stackBot / --undpad) folds in the SAME descent(POS_F), so POS stays aligned across renderers and nothing clips.
   return y;
 }
 /* multi-word tokens: a rounded tie under the baseline spanning the fused words, carrying the surface form.
@@ -1244,9 +1270,9 @@ function tieRows(D){ const gw=(D.gw||[]).map(g=>({from:g.at,to:g.at,ids:g.ids,ki
 // the gap that seats the first tie body one POS-descender below the POS baseline, factored out so the two
 // notations with NO tie layer of their own (the hierarchy's tree nodes, the outline's inline rows) can seat a
 // goeswith slur by the same rule the ties use rather than inventing a second constant
-function tieLead(){ const PIN=5; return show.pos ? 18+descent(POS_F)-xHeight(POS_F)-5-PIN : 8; }
+function tieLead(){ const PIN=5; return show.pos ? belowGap()-xHeight(POS_F)-5-PIN : 8; }
 function tieLayout(D){ const rows=tieRows(D); if(!rows.length) return {rows:[],depth:0,lead:0};
-  const PIN=5, STEP=18+descent(POS_F), lead=tieLead();
+  const PIN=5, STEP=belowGap(), lead=tieLead();
   let top=0, deepest=0;
   for(let tier=0;;tier++){ const inTier=rows.filter(r=>r.tier===tier); if(!inTier.length) break;
     let bot=top;
@@ -1394,11 +1420,11 @@ function rowTies(D,s0,e0){ const reb=o=>({...o,from:o.from-s0,to:o.to-s0});
 // same tie — .bwrap.hasmwt's bottom padding (diagram-wrap.js) and the inter-line growth that keeps a wrapped
 // tie from colliding with the next line (reserveBracketArcRoom, document.js) — and both would under-reserve if
 // they didn't count the same lead the draw site spends.
-function htmlTieBottom(r){ const PIN=6, STEP=18+descent(POS_F), lead=5+tieLead();
+function htmlTieBottom(r){ const PIN=6, STEP=belowGap(), lead=5+tieLead();
   if(r.kind==="gw") return lead+r.dy+gwDepth();                            // the tie has no label under it — it reaches only as far as the glyph's own ink
   if(r.kind==="xpos") return lead+r.dy+PIN+20;                             // the ExtPos value IS the label
   return lead+r.dy+PIN+20+((trLayer()&&trTxt(r))?STEP:0)+(r.pos?STEP:0); } // MWT surface form, then its transliteration row, then any ExtPos annotation
-function mwtDepth(D){ return tieLayout(D).depth; }   // extra vertical room the bracket stack needs below the below-stack bottom. Item 1 made this tier-aware — one entry per bracket TIER, each as deep as the deepest label that tier carries (an MWT surface form, plus its transliteration row and/or an ExtPos annotation) — so an ExtPos bracket that pushes an overlapping MWT tie down a tier also grows every reserve that folds in mwtDepth (arcsWrapped's per-row tieBot, projWrapped, belowH) in lockstep. With a single plain MWT tie and no ExtPos it returns exactly the former fixed 39+descent(POS_F)−xHeight(POS_F) (39 with no POS row), +18+descent(POS_F) for a transliteration row — the seating those constants were tuned for is unchanged.
+function mwtDepth(D){ return tieLayout(D).depth; }   // extra vertical room the bracket stack needs below the below-stack bottom. Item 1 made this tier-aware — one entry per bracket TIER, each as deep as the deepest label that tier carries (an MWT surface form, plus its transliteration row and/or an ExtPos annotation) — so an ExtPos bracket that pushes an overlapping MWT tie down a tier also grows every reserve that folds in mwtDepth (arcsWrapped's per-row tieBot, projWrapped, belowH) in lockstep. With a single plain MWT tie and no ExtPos it returns exactly the former fixed 39+descent(POS_F)−xHeight(POS_F) (39 with no POS row), +belowGap() for a transliteration row — the seating those constants were tuned for is unchanged.
 
 /* labels are always horizontal and centred on their edge (x-height middle); collision avoidance is
    done ONLY by widening horizontal gaps between nodes so every label fits without overlap. */

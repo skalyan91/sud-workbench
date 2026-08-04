@@ -307,6 +307,11 @@ def _setup_window(window, api) -> None:
     api._new_window = _new_document_window   # the bridge's "New Window", same call the menu makes
     api._new_tab = lambda: _new_document_window(as_tab=True)   # …and its "New Tab" twin
     api._broadcast = lambda code, api_self=api: _broadcast_js(code, exclude=api_self.window)   # app-wide UI state → every OTHER window
+    # …and the same call with NOTHING excluded, for a fact about the INSTALL rather than about a
+    # window's UI state: a tier that has just appeared on disk changes what every document window may
+    # offer, this one included.  The Model Manager shares its opener's `Api`, so `api.window` is the
+    # very document window that must hear about it — the exclusion above is exactly wrong there.
+    api._broadcast_all = lambda code: _broadcast_js(code)
     _warn_on_unsaved_close(window, api)
     _inject_path_info(window, api)           # window.__pathInfo — portable, both platforms
 

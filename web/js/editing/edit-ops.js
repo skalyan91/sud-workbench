@@ -278,15 +278,28 @@ function deleteToken(si,idx){ const s=DOC[si]; if(s.tokens.length<=1)return toas
    them, so an enhanced arc into one of them still has somewhere to land. */
 function mergeTokens(si,from,to){ const s=DOC[si]; if(!s)return; const toks=s.tokens;
   if(!(to>from)||from<1||to>toks.length) return toast("Select two or more adjacent tokens to merge");
-  /* …UNLESS THE TOKENS ARE INSIDE ONE MULTI-WORD TOKEN, where the guard's own reasoning points the other
-     way. It refuses a merge in a spaced language because a wrongly split word there is a stray SPACE in the
-     file, which `goeswith` annotates without destroying anything. Inside a range there is no space to be
-     stray: the components are pieces of ONE orthographic word, whose surface the range already spells, so a
-     division between two of them is an analysis and a wrong one is simply wrong. Merging them changes no
-     character of the text — remapMWT shrinks the range around the survivor (and drops it if only one piece
-     is left), which is why the bookkeeping below needed nothing added for this. */
+  /* ⚠ THE GATE IS "NO INTERVENING SPACE", NOT "A SPACELESS LANGUAGE" — the condition itself rather than a
+     proxy for it. It used to refuse outside `SPACELESS_LANGS`, which asked the wrong question in both
+     directions: it forbade merging `do`+`n't` in English, where the two are written solid and a merge takes
+     nothing away, and it would have allowed one across a real space in Chinese. What actually matters is
+     whether the sentence puts a space between the tokens, which every file states per token — MISC
+     `SpaceAfter=No` — so the test is that, per adjacent pair, and no language list is consulted at all.
+     WHAT THE TEST BUYS is the invariant the old restriction bought by accident: a merge changes no CHARACTER
+     of the sentence. With the components written solid their concatenation is the substring `# text` already
+     holds, so the running line needs nothing spliced and cannot come to disagree with the tokens. Across a
+     space it would, which is the real reason to decline there — `goeswith` annotates that split without
+     destroying anything, and it is what UD asks for.
+     …AND INSIDE ONE MULTI-WORD TOKEN the pairs are solid by construction: the components are pieces of ONE
+     orthographic word whose surface the RANGE spells, so the line never spelt them apart to begin with.
+     remapMWT shrinks the range around the survivor (and drops it if only one piece is left). */
+  if(!mergeIsSolid(s,from,to)) return toast("Only tokens written with no space between them can be merged — use a goeswith relation across a space");   // guarded HERE too, not just on the menu rows: this is the one entry point every caller shares
   const inOneMWT=(s.mwt||[]).some(m=>from>=m.from&&to<=m.to);
-  if(!isSpacelessLang() && !inOneMWT) return toast("Merging is for languages written without spaces — use a goeswith relation instead");   // guarded HERE too, not just on the menu rows: this is the one entry point every caller shares
+  /* The components' PAUSA forms, for the Sanskrit fusion below — MISC `Unsandhied` where there is one, the
+     form otherwise, which is the rule app/sa_notation.py's csl_forms follows for the same reason: feeding a
+     sandhied surface back through a sandhi generator applies the rules twice. Read BEFORE the splice, while
+     the components still exist. */
+  const saPausa=(inOneMWT&&isSanskritLang())?toks.slice(from-1,to).map(t=>miscKV(t.misc,"Unsandhied")||t.form||""):null;
+  const saLemmas=saPausa?toks.slice(from-1,to).map(t=>((t.lemma&&t.lemma!=="_")?t.lemma:"")):null;
   pushUndo(si); if(typeof touchColW==="function") touchColW(si,si+1);
   const oldIds=new Map(); toks.forEach((t,i)=>oldIds.set(t,i+1));
   toks.forEach(t=>{const h=parseInt(t.head,10); t._ht=(h>=1&&h<=toks.length)?toks[h-1]:0;});   // heads by identity
@@ -306,17 +319,36 @@ function mergeTokens(si,from,to){ const s=DOC[si]; if(!s)return; const toks=s.to
   remapTokenRefs(s,idMapAfter(oldIds,toks,from));   // `from` is the survivor's id: every consumed component's DEPS references and empty-node anchors fold onto it
   if(survivor.deps&&survivor.deps!=="_"){ const kept=survivor.deps.split("|").filter(p=>{ const i=p.indexOf(":"); return i<0||p.slice(0,i)!==String(from); });
     survivor.deps=kept.length?kept.join("|"):"_"; }   // …which can leave a SELF-LOOP where one consumed component had an enhanced arc to another. It described a relation inside a word that no longer has an inside
-  /* `# text` is deliberately NOT respliced, though afterFormEdit would on an ordinary form edit: the tokeniser
-     split a string the file spells correctly, so the running sentence still says exactly what it said. And
-     afterFormEdit's other half — a background re-parse of the edited token — is the one operation guaranteed to
-     split the survivor straight back apart. The transliteration caches cleared above refill on the render below. */
+  /* `# text` is deliberately NOT respliced, and the gate above is what makes that safe rather than merely
+     convenient: with no space between any two components, their concatenation is the substring the line
+     already holds, so the sentence still says exactly what it said. Nor is afterFormEdit's other half done —
+     a background re-parse of the survivor, which is the one operation guaranteed to split it straight back
+     apart. The transliteration caches cleared above refill on the render below. */
   const n=to-from+1;
   markDirty(); selRange=null; sel={s:si,t:from}; preserveScroll(renderDoc);
   if(typeof pick==="function") pick(si,from,false);
   if(show.translit&&typeof fillTranslit==="function") fillTranslit();
+  /* …and in SANSKRIT, INSIDE A RANGE, the surface is not the concatenation: components are stored in pausa
+     and two of them written as one are written with the sandhi between them (`sat`+`ādi` → `sadādi`).
+     ⚠ ONLY inside a range, because that is the one place the app DERIVES the spelling rather than reading it:
+     a standalone token's form is what `# text` says it is (which is why the concatenation is safe there), and
+     re-deriving it by sandhi would put a spelling in the file that the line contradicts. Inside a range the
+     line spells the RANGE, whose own re-fusion sandhiMwtForms owns. Fire-and-forget off the bridge, exactly
+     as that call is — the concatenation stands in until it lands, and is the answer if it never does. */
+  if(saPausa&&typeof sandhiMergeForm==="function") sandhiMergeForm(si,from,saPausa,saLemmas);
   toast(`${n} tokens merged into one — check its lemma and features`); }
+/* Is the run `from..to` written SOLID — no space anywhere between two of its tokens? The one question Merge
+   turns on. `SpaceAfter=No` states it per token, so no language list is consulted; two pieces of ONE
+   multi-word token are solid by construction (the line spells the range, never the pieces), and the gap after
+   a range is recorded on the RANGE's own line rather than on its last component — which is what a pair
+   straddling a range's edge has to be asked about. */
+function mergeIsSolid(s,from,to){ if(!s||!s.tokens) return false; const mwt=s.mwt||[];
+  const at=k=>mwt.find(m=>k>=m.from&&k<=m.to);
+  for(let i=from;i<to;i++){ const a=at(i);
+    if(a&&a===at(i+1)) continue;
+    if(!spaceAfterNo(a?{misc:(a._cols&&a._cols[9])||""}:s.tokens[i-1])) return false; }
+  return true; }
 window.mergeTokensShortcut=function(){ if(sel.s<0) return;
-  if(!isSpacelessLang()) return toast("Merging is for languages written without spaces — use a goeswith relation instead");
   if(selRange&&selRange.s===sel.s&&selRange.to>selRange.from) mergeTokens(sel.s,selRange.from,selRange.to);
   else toast("Select two or more tokens (shift-click their id cells) to merge"); };
 function reorderToken(si,from,to){ const s=DOC[si],toks=s.tokens; if(from===to||from===to-1)return; pushUndo(si); if(typeof touchColW==="function") touchColW(si,si+1);
@@ -359,7 +391,14 @@ function setAsRoot(si,tokId){ const s=DOC[si]; if(!s||tokId<1||tokId>s.tokens.le
   xt.head="0"; syncSharedFeat(xt,s); xt.deprel=withDepBase(xt.deprel,"root");
   // Task B: no regenTok — re-rooting is purely structural and must never trigger a gloss/MGloss recompute (see
   // the matching note on setDiagramHead, js/diagram/diagram-edit.js).
-  markDirty(); sel={s:si,t:tokId}; preserveScroll(renderDoc); pick(si,tokId,false); toast(`Token ${tokId} is now the root`); }
+  /* ⚠ RE-ROOTING DOES NOT SELECT. Selecting a node is a READER's gesture — a click, or a rectangle
+     drag — and no command may make one on their behalf: reached from the right-click menu (or the
+     relation chooser's "root" row, which delegates here), this used to move the selection onto
+     whatever token was under the cursor, so a menu invoked on one token silently deselected another.
+     The command is structural and says nothing about what the reader is looking at. `sel` and pick()
+     are therefore left exactly as they were; only the re-render remains, which is all the screen
+     needs. */
+  markDirty(); preserveScroll(renderDoc); toast(`Token ${tokId} is now the root`); }
 // re-attach `tokId` to the previous/next valid head in token order (dir<0 = previous) — skips itself and its own subtree
 function stepHead(si,tokId,dir){ const s=DOC[si]; if(!s||tokId<1||tokId>s.tokens.length)return; const toks=s.tokens, dep=toks[tokId-1];
   if(depBase(dep.deprel)==="root")return toast("The root has no head");
@@ -629,10 +668,7 @@ function menuState(){ const has=sel.s>=0&&sel.t>0, s=has?DOC[sel.s]:null;
   const isRange=multi&&!!(s&&(s.mwt||[]).some(m=>m.from===selRange.from&&m.to===selRange.to));   // …and they ARE one, exactly
   return {has, zone:has?UIZONE:"", rtl:!!(s&&sentRTL(s)),
           group:multi&&!formsMWT,          // Group: only a fresh multi-token selection that isn't already an MWT
-          // …or a selection lying wholly INSIDE one range: there the components are pieces of a single
-          // orthographic word with no space between them, so the "a wrong split is a stray space" argument
-          // that narrows Merge to spaceless languages does not apply (see mergeTokens' own note).
-          merge:multi&&!formsMWT&&(isSpacelessLang()||!!(s&&(s.mwt||[]).some(m=>selRange.from>=m.from&&selRange.to<=m.to))),   // Merge: Group's selection, narrowed to the languages a segmenter can mis-split (SPACELESS_LANGS in js/core/state.js) — elsewhere a wrongly split word is a stray space in the file, which `goeswith` annotates rather than destroys. A selection that already forms an MWT has Flatten instead, the same collapse with the range's own surface form
+          merge:multi&&!formsMWT&&mergeIsSolid(s,selRange.from,selRange.to),   // Merge: Group's selection, narrowed to a run written with no space in it — the condition itself, in any language (see mergeTokens). A selection that already forms an MWT has Flatten instead, the same collapse with the range's own surface form
           /* …and Flatten / Ungroup need the selection to BE the range, not merely to sit inside one — matching
              the context menu, where those two are the multi-word token's OWN controls and a component's menu
              carries none of them (mwtTokenItems). They act on the range, so what has to be selected is the

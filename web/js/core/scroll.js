@@ -81,11 +81,40 @@ function blockFullyInView(sc){ const blk=sc.closest?sc.closest(".sblock"):null; 
   const r=blk.getBoundingClientRect();
   return vis(r,port)>=Math.min(r.height,port.bottom-port.top)-1; }
 let wheelIdle=null, wheelMode=null, wheelSc=null;   // per-gesture decision: null=undecided, "chain"=drive the page, "native"=leave to the browser; wheelSc = the inner scroller it was decided for
+/* ── IS THE PAGE ITSELF MOVING RIGHT NOW? ──────────────────────────────────────────────────────────
+   Stamped by #doc's own scroll listener below, so it covers every way the page moves: a chained wheel,
+   trackpad momentum, blockSnap's smooth glide, alignBlockTop after an insert. The window is short —
+   this is meant to mean "a scroll is in flight", not "a scroll happened recently". */
+let pageScrollAt=0, wheelDocTop=null;
+const PAGE_GLIDE_MS=180;
+/* IS A PAGE SCROLL IN FLIGHT? Two signals, because neither alone covers both cases.
+   · `pageScrollAt` — the page moved a moment ago. Catches a glide that was ALREADY running when this
+     gesture started (momentum from a previous fling, blockSnap easing, alignBlockTop after an insert),
+     which is the case the reader meets by putting the pointer down on a pane mid-glide.
+   · `wheelDocTop` — the page has moved SINCE this gesture began. Catches a glide that starts or
+     continues under an in-flight gesture, and is exact rather than time-boxed.
+   A pane scrolling natively moves no page and fires no #doc scroll event, so neither signal trips for
+   it: at rest the pane keeps the wheel exactly as before. */
+function pageMoving(){ return performance.now()-pageScrollAt<PAGE_GLIDE_MS; }
+function pageInFlight(docEl){ return pageMoving()
+  || (wheelDocTop!=null && Math.abs(docEl.scrollTop-wheelDocTop)>1); }
 document.getElementById("doc").addEventListener("wheel",e=>{ const docEl=document.getElementById("doc");
-  clearTimeout(wheelIdle); wheelIdle=setTimeout(()=>{wheelMode=null; wheelSc=null;},120);   // a pause ends the gesture; the owner is re-decided next time
+  clearTimeout(wheelIdle); wheelIdle=setTimeout(()=>{wheelMode=null; wheelSc=null; wheelDocTop=null;},120);   // a pause ends the gesture; the owner is re-decided next time
   if(wheelMode===null){   // decide ONCE, at the gesture's first event
     const sc=wheelSc=scrollableUnder(e.target);
+    wheelDocTop=docEl.scrollTop;   // the page position this gesture starts from — see pageInFlight
     if(!sc) wheelMode="native";
+    /* ⚠ A PAGE SCROLL IN FLIGHT TAKES THE WHEEL OUTRIGHT, ahead of every other test and WITHOUT
+       consulting blockFullyInView. That last part is the point, and is why an earlier attempt at this
+       fixed nothing: `blockFullyInView` reports TRUE for a block TALLER than the port whenever the
+       block covers it (deliberately — "either the block fits inside the port, or the port fits inside
+       the block", since otherwise a block with both panes open, routinely taller than the viewport,
+       could never scroll its panes at all). A tall block therefore satisfies the "fully in view" rule
+       for as long as the page glides THROUGH it, and its diagram and grid went on eating the wheel the
+       whole way down. Measured on the repro: block twice the port height, page moved 120px between
+       events, and both wheels stayed `native` and unprevented.
+       Two things scrolling at once is the fault; while the page is moving it is the owner. */
+    else if(pageInFlight(docEl)) wheelMode="chain";
     // A VERTICAL gesture over a block that isn't fully on screen drives the page, whatever the inner scroller's own
     // position: the block scrolls into view first, and only then (the 120ms pause below re-decides the owner) can its
     // diagram/grid be scrolled. This QUALIFIES item 5 below — that note was about not tying the decision to the
@@ -95,7 +124,11 @@ document.getElementById("doc").addEventListener("wheel",e=>{ const docEl=documen
     // never axis-pure) because the chain branch can only drive docEl.scrollTop by e.deltaY: a horizontal delta has
     // nowhere to chain TO, so gating it would merely deaden a wide diagram's horizontal pan and buy nothing. A wide
     // diagram therefore still pans sideways even while its block is half off screen.
-    else if(Math.abs(e.deltaY)>Math.abs(e.deltaX) && !blockFullyInView(sc)) wheelMode="chain";
+    // …and the axis test is WAIVED WHILE THE PAGE IS ALREADY MOVING. Its job is to keep a wide
+    // diagram pannable sideways when the page is at rest, since a horizontal delta has nowhere to
+    // chain to. Mid-glide that reasoning does not apply: two things scrolling at once is the fault
+    // being fixed, and the block is on its way somewhere, so the pane is not the owner of anything.
+    else if((Math.abs(e.deltaY)>Math.abs(e.deltaX)||pageMoving()) && !blockFullyInView(sc)) wheelMode="chain";
     else { const atTop=sc.scrollTop<=0, atBot=sc.scrollTop+sc.clientHeight>=sc.scrollHeight-1;
       // item 5: chain to the page ONLY once the inner scroller is ALREADY at its bound in this direction — NO dependency on
       // where the block sits relative to the toolbar. The inner scroller (a wide diagram's horizontal scroll, or a wrapped
@@ -109,8 +142,20 @@ document.getElementById("doc").addEventListener("wheel",e=>{ const docEl=documen
      half out of the viewport under the pointer. Re-testing costs one getBoundingClientRect per event.
      ONE-WAY, native → chain and never back: once the page owns the gesture it keeps it until the
      120ms pause above re-decides, which is the same "the block scrolls into view first, and only
-     then can its diagram/grid be scrolled" rule the first-event branch states. */
-  else if(wheelMode==="native" && wheelSc && Math.abs(e.deltaY)>Math.abs(e.deltaX) && !blockFullyInView(wheelSc)) wheelMode="chain";
+     then can its diagram/grid be scrolled" rule the first-event branch states.
+
+     ⚠ AND NO AXIS TEST HERE, which is where this leaked. The guard was copied down from the
+     first-event branch, where it earns its place (a horizontal delta cannot drive the page, so
+     gating on it would merely deaden a wide diagram's sideways pan). On the RE-check it asks the
+     wrong question: not "can this delta scroll the page" but "has the block left view, so should the
+     pane lose the wheel" — and the answer to that has nothing to do with the axis. A trackpad
+     momentum tail is never axis-pure, so every event whose |dX| happened to exceed its |dY| slipped
+     through and the browser went on scrolling the pane while the page glided the block out from
+     under it. Measured on the repro: with the block half off the top, deltas (6,9) and (4,7) both
+     stayed `native` and unprevented, and ownership only moved when a vertical-dominant (3,0)
+     arrived. That is exactly "they scroll in partially-visible blocks, but only while a page scroll
+     is in progress" — the page scroll is what takes the block out of view mid-gesture. */
+  else if(wheelMode==="native" && wheelSc && (pageInFlight(docEl)||!blockFullyInView(wheelSc))) wheelMode="chain";
   if(wheelMode==="chain"){ e.preventDefault(); docEl.scrollTop+=e.deltaY; } }, {passive:false});   // "native" → the browser scrolls the element under the cursor; overscroll-behavior:none stops any leak, even if it hits its bound mid-gesture
 let scrollRaf=false, lastST=null;
 // JS-driven block snapping: once scrolling settles, if the nearest block top is within a small threshold of the
@@ -139,6 +184,17 @@ function docTopInset(){
      here would run on every wheel event through blockFullyInView. */
   const tabH=parseFloat(document.documentElement.style.getPropertyValue("--tabH"))||0;
   return Math.max(bars, tabH); }
+/* ── HOW FAR DOWN A FLOATING MENU MAY START ────────────────────────────────────────────────────────
+   Every popup in this app clamps its top to a bare `8`, on the reasoning that the chrome above it is
+   the app's OWN titlebar — web content, which a menu's z-index sits over perfectly well. The native
+   window-TAB BAR is the exception and no z-index can help: it is an AppKit view in the window's theme
+   frame, drawn above the WKWebView entirely, so a menu positioned under it is not merely behind
+   something, it is unreachable. The only remedy available to the page is not to go there.
+   `--tabH` is that bar's bottom edge in page coordinates, published by app/mac/shell.py and 0
+   whenever the window is not in a tab group (and on Windows, which has no such bar) — so this is the
+   old constant 8 in every case except the one it is for. Read off the INLINE style, the same place
+   and for the same reason docTopInset does. */
+function menuTopBound(){ return Math.max(8, parseFloat(document.documentElement.style.getPropertyValue("--tabH"))||0); }
 /* ── THE READING POSITION SURVIVES A CHANGE IN THE TOP CHROME ────────────────────────────────────
    A tab bar appearing (or the options bar opening) makes the port shorter from the TOP. The blocks
    re-cap themselves to the new height, but the scroller does not move: the content point that was at
@@ -146,18 +202,37 @@ function docTopInset(){
    looking at BEFORE the chrome moves and put it back after: the block nearest the port top, and its
    offset from it, which is what keeps a reader mid-block where they were instead of jumping them to a
    block boundary. Restoring is one scrollTop write, after a frame, so the recap has been laid out. */
+/* ⚠ THE ANCHOR MEASURES THE PORT TOP OFF #doc's OWN PADDING, NOT docTopInset().
+   The two normally agree — `.doc{padding:var(--top-chrome) …}` IS that expression, resolved (app.css)
+   — but they come apart for exactly one caller, and it is the caller this pair exists for.
+   docTopInset() reads the options bar's `.hidden` CLASS; the padding reads `--vbH`, which syncChrome
+   writes a few statements LATER. So between the class toggle and that write, docTopInset() has already
+   moved by the bar's height while nothing on screen has: an anchor captured in that window records the
+   NEW inset against the OLD geometry, and the restore then lands the block one bar-height too high —
+   behind the bar, which is the very thing being avoided. (The restore is the one that counts: the
+   rAF'd one syncChrome fires after recapBlocks runs LAST and overrides the synchronous one
+   withTopChrome does, so the torn capture is what the reader is left looking at.) The used padding
+   cannot tear: it and the content it displaces are the same layout. */
+function docPadTop(docEl){ const p=parseFloat(getComputedStyle(docEl).paddingTop); return isFinite(p)?p:docTopInset(); }
 function captureTopAnchor(){
   const docEl=document.getElementById("doc"); if(!docEl) return null;
-  const portTop=docEl.getBoundingClientRect().top+docTopInset();
+  const portTop=docEl.getBoundingClientRect().top+docPadTop(docEl);
   let best=null, bestD=Infinity;
   docEl.querySelectorAll(".sblock").forEach(b=>{ const r=b.getBoundingClientRect();
     if(r.bottom<=portTop+1) return;                       // wholly scrolled past → not what is being read
     const d=r.top-portTop; if(Math.abs(d)<Math.abs(bestD)){ bestD=d; best=b; } });
-  return best?{blk:best, off:bestD}:null; }
+  // …and its INDEX as well as the node. The node is the fast path (a chrome change moves the element,
+  // it does not replace it); the index is what makes this survive a caller whose `fn` RE-RENDERS, which
+  // detaches every .sblock and left the restore below silently bailing on `isConnected` — the whole
+  // anchor doing nothing at all for exactly the caller that most needs it (a zoom change, which is a
+  // full rebuild). Same block, re-found by identity rather than by object.
+  return best?{blk:best, i:best.getAttribute("data-i"), off:bestD}:null; }
 function restoreTopAnchor(a){
-  if(!a||!a.blk||!a.blk.isConnected) return;
+  if(!a) return;
   const docEl=document.getElementById("doc"); if(!docEl) return;
-  const d=(a.blk.getBoundingClientRect().top-(docEl.getBoundingClientRect().top+docTopInset()))-a.off;
+  let blk=(a.blk&&a.blk.isConnected)?a.blk:(a.i!=null?docEl.querySelector(`.sblock[data-i="${a.i}"]`):null);
+  if(!blk) return;   // re-rendered out of the virtualization window → there is nothing to align to
+  const d=(blk.getBoundingClientRect().top-(docEl.getBoundingClientRect().top+docPadTop(docEl)))-a.off;   // the SAME measure the capture used (see docPadTop) — an offset restored against a different port top is not the offset that was captured
   if(Math.abs(d)>0.5) docEl.scrollTop+=d; }
 /* …and the two together, for a caller that changes the chrome in one go — including the JS
    app/mac/shell.py sends when a window joins or leaves a tab group.
@@ -203,13 +278,25 @@ function saveScrollPos(now){ if(!hasBridge()) return; clearTimeout(scrollSaveTim
     captureViewSnapshot(); };   // …and the picture the next launch shows must be of the anchor just saved, or Api._launch_snapshot will refuse it (it is throttled to once per 8s on the Python side)
 
   if(now) flush(); else scrollSaveTimer=setTimeout(flush,400); }   // debounce while scrolling; flush immediately on close/switch/unload
+/* PUT SENTENCE `idx` AT THE TOP OF THE USABLE PORT. The one implementation of "take me to that
+   sentence", shared by the saved-reading-position restore below and by a multi-sentence insert, which
+   lands the reader on the FIRST of what it just added (js/io/bridge.js). Two things it must do that a
+   bare scrollIntoView cannot: recentre the VIRTUALIZATION WINDOW first (scrollToSentence — the block
+   may not be built at all, and after a big paste routinely is not), and align to just BELOW the
+   overlaid titlebar + options bar rather than under them, sticky boundary headings included. Returns
+   the block, or null when there is none to align to. */
+function alignBlockTop(idx){
+  const docEl=document.getElementById("doc"); if(!docEl||idx==null||idx<0) return null;
+  const blk=(typeof scrollToSentence==="function")?scrollToSentence(idx):docEl.querySelector(`.sblock[data-i="${idx}"]`);
+  if(!blk) return null;
+  docEl.scrollTop+=blk.getBoundingClientRect().top-docEl.getBoundingClientRect().top-docTopInset()-(typeof stickyHeadH==="function"?stickyHeadH(blk):0);
+  return blk; }
 function restoreScrollPos(idx){ if(idx==null||idx<0) return;   // no saved anchor → leave at the top
-  const apply=()=>{ const docEl=document.getElementById("doc"); if(!docEl) return;
-    const blk=(typeof scrollToSentence==="function")?scrollToSentence(idx):docEl.querySelector(`.sblock[data-i="${idx}"]`); if(!blk) return;   // scrollToSentence (js/core/document.js) re-centres the rendered window on idx first — the render this fires after may have windowed the DOM to start at sentence 0, nowhere near a saved position deep in a large file
-    docEl.scrollTop+=blk.getBoundingClientRect().top-docEl.getBoundingClientRect().top-docTopInset()-(typeof stickyHeadH==="function"?stickyHeadH(blk):0); };   // item 1: align the saved block's top with just BELOW both overlaid bars (subtract the live titlebar + options-bar height), not under them — same technique as blockSnap, sticky boundary headings included (a restored position that puts the block under its own heading hides the very line the reader left off at)
+  const apply=()=>{ alignBlockTop(idx); };   // item 1: align the saved block's top with just BELOW both overlaid bars, not under them — same technique as blockSnap, sticky boundary headings included (a restored position that puts the block under its own heading hides the very line the reader left off at)
   requestAnimationFrame(()=>requestAnimationFrame(apply)); setTimeout(apply,480); }   // re-apply after settleAlign's ~450ms re-layout lands
 addEventListener("beforeunload",()=>saveScrollPos(true));
 document.getElementById("doc").addEventListener("scroll",()=>{ const st=document.getElementById("doc").scrollTop;
+  pageScrollAt=performance.now();   // the page is moving — see pageMoving() above, which the wheel owner test consults
   const v=snapST==null?Infinity:Math.abs(st-snapST); snapST=st;   // per-tick scroll speed
   clearTimeout(snapTimer); snapTimer=setTimeout(blockSnap,240);   // ALWAYS re-arm a settle timer: it fires ~240ms after the LAST scroll event (however tiny), so a scroll that stops near a boundary always gets re-checked
   if(!snapping && v<=SNAP_SPEED) blockSnap();   // and snap right away once the scroll has decelerated to a crawl (blockSnap self-guards against its own smooth-scroll animation)

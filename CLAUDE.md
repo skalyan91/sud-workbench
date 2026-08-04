@@ -136,6 +136,362 @@ function defined in a later-loaded module* — it throws `ReferenceError` at loa
 Put cross-module boot work in `js/core/init.js` (loads last, after every module is defined), and
 guard eager forward calls with `if(typeof fn==="function")fn()`.
 
+⚠ **A MULTI-SENTENCE INSERT IS A BATCH, and the per-DOCUMENT work must not be paid per sentence.**
+`__insertPastedText` raises `RENDER_HOLD` around its loop, which `inInsertBatch()` (js/io/bridge.js)
+reads as "we are part way through a paste". `doInsert` then skips what is not per-sentence work —
+`paintTr` (fillTranslit + fillOrtho) walks the WHOLE DOC and awaits a bridge round-trip, so run once per
+inserted sentence it is O(sentences × document) for an answer only correct at the end — along with the
+per-sentence toast, scroll and eager pick. All of it runs once, after the hold unwinds. Measured, 40
+sentences into a 300-sentence document: **1.31× faster**, transliteration bridge calls **81 → 1**. The
+**parse is batched too**: `Api.parse_texts` → `parse.parse_many` answers for the WHOLE paste in one
+bridge call, with the engine's own batching underneath — spaCy through `nlp.pipe`, and Stanza with a
+SINGLE grew UD→SUD conversion across the list, which its worker pool runs in parallel (a call per
+sentence pays the dispatch serially and leaves every worker but one idle). Measured: backend alone, 40
+English sentences **86 ms → 42 ms (2.05×)**, byte-identical output; the whole insert path **3.94×**,
+bridge calls **162 → 3**. `insertParsed` splices one batched answer in — doInsert's parsed branch with
+every bridge call and every per-sentence render/pick/toast removed. The per-sentence path stays the
+fallback, unchanged, and is taken with no bridge, no model, a single sentence, or a call that throws or
+returns a mismatched length: doInsert's two-phase reveal (tokens first, tree after) earns its keep when
+the reader is waiting on ONE sentence and has nothing to offer a batch. The viewport then lands on the FIRST inserted sentence (`alignBlockTop(start)`), not the last —
+the loop walks `index` forward, so the reader used to be shown the end of what they had just added.
+NB `pick(i,0,true)` cannot do that scroll: it aims at the token's GRID ROW, which does not exist with
+the grids hidden, and silently no-ops.
+
+⚠ **The zoom is CSS `zoom`, and it splits the measurement APIs in two.** `.sblock{zoom:var(--fs)}` is
+how ⌘+/⌘− scales the document — a real scale on the used values, so a block laid out 714px wide paints
+1142px at FS=1.6. `getBoundingClientRect`/`clientX`/`deltaY` report **viewport px** (zoom applied);
+`offsetTop`/`clientHeight`/`scrollTop`/`getComputedStyle` lengths/canvas `measureText` report the
+element's **own px** (unzoomed) — probed and identical in headless Chrome and in the shipping
+WKWebView, which also both expose `element.currentCSSZoom`. Any expression mixing the two families
+must convert, and `cssZoomOf(el)` (`js/core/document.js`) is the factor: `currentCSSZoom`, with an
+ancestor walk as the fallback. **Not `FS`** — that is right only inside `.sblock`, and these callers
+walk ancestor chains that leave it (`#doc` is never zoomed). Two paths were silently multiplying by
+it: `scrollNearest` nudged inner scrollers by a rect-derived delta (at FS=0.6 it under-shot the last
+grid row by 34px and left it off screen) and `caretAtPoint` matched a viewport-px click against
+unzoomed `measureText` widths (at FS=1.6 a click on boundary 5 of a ten-character field landed at 9).
+`--cap-dia`/`--cap-grid` and `AVAILW` were already divided by FS and are unchanged. The block snap and
+the wheel chain/native decision were re-measured at 0.6/1.0/1.6 and are zoom-correct as they stand.
+
+⚠⚠ **AND THE TWO ENGINES DISAGREE ABOUT `getComputedStyle` INSIDE A ZOOMED SUBTREE — on SVG only.**
+For HTML they match and both report the AUTHORED length (probed: a 20px input with 11px padding
+inside `zoom:1.6` reads back 20/11 in each). For **SVG text** — the diagram's own glyphs — WebKit
+reports the authored size **divided by the zoom** and Chrome reports it plain: a 14px form row at
+FS=1.6 reads 8.75px in the shipping WKWebView and 14px in Chrome, and 23.33px at FS=0.6. The inline
+editors multiplied by FS, which is right in Chrome and lands exactly back on the *unzoomed* size in
+WebKit — the reported "token input fields still show at the original size" while the diagram under
+them was drawn at 160 %. `cssLenScale(el)` **probes** the factor (a hidden `font-size:100px` element
+placed in the element's own zoom context; Chrome answers 100, WebKit answers 100/z) rather than
+branching on engine or namespace, and `visualFontPx(el)` is what the two `applyFont`s now call. **This
+is why the headless-Chrome smoke test is not sufficient on its own for anything measuring text**: run
+the WKWebView probe too (a `webview.create_window(hidden=True)` + `evaluate_js`, ~15 lines).
+
+⚠ **ONLY A CLICK OR A RECTANGLE SELECTS A NODE.** No command may make a selection on the reader's behalf, and
+`setAsRoot` (js/editing/edit-ops.js) was the one that did: reached from the right-click menu — or from the
+relation chooser's `root` row, which delegates to it — it moved `sel` onto whatever token was under the cursor,
+so a menu invoked on one token silently deselected another. Re-rooting is structural and says nothing about what
+the reader is looking at; only the re-render remains. This is the same rule the menus themselves already follow
+("NO pick() ON ANY OF THOSE PATHS", js/editing/context-menu.js).
+
+⚠ **A CONTENTEDITABLE HAS NO `selectionStart`, WHICH IS WHY MINTING A CHIP THREW THE CARET TO THE HEAD OF THE
+CELL.** Committing a FEATS/MISC segment calls `serialize()`, which writes the token and re-renders — and
+`preserveScroll` puts focus back with a bare `nc.focus()` and then `setSelectionRange`, which exists on
+INPUT/TEXTAREA and nothing else. Focusing a contenteditable DIV collapses the caret to its first position. The
+caret cannot be carried as a character offset either (the field is a mixed run of atomic `.fpill` chips and
+zero-width anchors, all rebuilt from the model), so `pillCaretGet`/`pillCaretSet` (js/grid/grid.js) carry the
+CHIP COUNT before the caret plus the offset within its text run — both facts about the serialised value, which
+is exactly what the re-render reproduces — and the un-minted text rides along on the same terms as
+`preserveScroll`'s `fd.val` for a plain cell.
+
+⚠ **A DELETION RE-FILTERS THE MGloss DROPDOWN; IT DOES NOT DISMISS IT.** Backspace is how a reader corrects a
+mistyped abbreviation, and closing the list on the keystroke that narrows the typo made the feature unusable for
+the case it is for. `mglossOpenAC` is re-run on any `delete*` inputType while the menu is open on that field; it
+closes itself when the run empties or nothing matches, which is the only dismissal a deletion should cause.
+**Right-clicking an abbreviation** opens the other values of ITS feature (`glossAbbrMenu`,
+js/editing/context-menu.js) — read off `EFF_FEATS_GLOSS` so a custom Gloss Mapping shows up unprompted, ordered
+by `UD_FEATS` (Sing before Plur, Nom before Acc), and the pick runs `mglossSyncFeats` so the gloss and the FEATS
+move together exactly as a hand edit's commit does. Morphemic tier only: a lexical Gloss's capitals are not a
+paradigm slot. Which run was clicked is its INDEX among the `.glabbr` nodes, not its text — two identical
+abbreviations in one gloss would otherwise be ambiguous. ⚠️ Its rows pass `opt:true`, and every checkable list in
+this file must: `.ctx .ck` is absolutely positioned at the menu's 12px inset and ONLY `.ctx button.opt`'s
+`padding-inline-start:25px` moves the label clear of it. Without it the row's leading padding is 7px and the tick
+paints straight under the first letter — drawn, and invisible, which is how it was first reported.
+
+⚠ **⌘⌫ AND THE MENU ARE ONE COMMAND.** `window.deleteSent` (js/io/bridge.js) is the range-aware one:
+it reads `blockRange()`, confirms "Delete N sentences?" and falls back to `delSent(curBlock())`. The
+keyboard path in `js/grid/columns.js` went through `deleteSel` (js/core/undo.js), which called
+`delSent(sel.s)` — one sentence, and not even the focused one, since `extendBlockRange` moves CURBLOCK
+and leaves the token selection where the range STARTED. Selecting five blocks and pressing ⌘⌫ therefore
+deleted the FIRST of them. `deleteSel` now keeps the token half (genuinely its own) and delegates the
+sentence half. Two copies of one command drift, and these had.
+
+⚠ **A DROP MUST AWAIT ITS COMMIT BEFORE RESTORING THE SELECTION.** `commitDrop`
+(js/diagram/diagram-edit.js) captures the selection and puts it back, so dragging a token onto another
+does not light up a token the reader never selected. Three of the four commit functions are **async** —
+`setDiagramHead` awaits `depIsError` before writing anything, and its trailing `pick()` of the moved
+token therefore runs a microtask later — so a synchronous `finally` restored first and the commit's own
+pick put it straight back. It looked fixed and did nothing. `commitDrop` is now `async`, `_commitDrop`
+RETURNS each branch's promise rather than discarding it, and the restore is awaited into last place.
+⚠ A test with no bridge cannot catch this: `depIsError` returns immediately without one, closing the
+very gap the bug lives in. Drive it with a stubbed `valid_deprels` that actually awaits.
+
+⚠ **A RETAG RE-DERIVES THE FEATURES FOR THE CLASS THAT WAS CHOSEN.** `parse_pretokenized` used to be handed
+the FORMS and nothing else, so the model re-analysed a sentence it had already analysed and returned the same
+answer: after retagging 行 NOUN→VERB the FEATS and lemma that came back were still the noun's, and the re-parse
+was a no-op wearing the look of a refresh. `reparseTokenFields` now sends the reader's own UPOS list, and
+`_force_upos` CONSTRAINS the model's answer rather than replacing it — spaCy's `Morphologizer` predicts UPOS and
+FEATS as one joint label (`POS=NOUN|Case=Nom|…`), so the best-scoring label whose `POS=` is the reader's is the
+model's own account of that word AS a verb. Measured: `show` NOUN→VERB moves `Number=Sing` → `VerbForm=Inf`. A
+class the model knows no label for leaves the token exactly as tagged — an honest silence, never an invented
+feature set. It runs BETWEEN the morphologizer and the lemmatiser so everything downstream sees the chosen class.
+⚠️ **The LEMMA will not move on the released wheels**, and that is a property of them, not of this code: all of
+them ship an `EditTreeLemmatizer`, whose model predicts an edit tree from the token vector and never reads
+`token.pos_`. A wheel with a rule-based `Lemmatizer` gets it for free. `opts.upos` (the split-token path) is the
+one caller that wants the parser's own class instead, and it says so by asking for it.
+
+⚠ **AND THE MGloss FOLLOWS, BECAUSE `retargetGlossForFeatsChange` IS NOW SYMMETRIC.** It retargets a value that
+CHANGED and drops a feature that was REMOVED; the third case, inserting one that was ADDED, used to be left out on
+purpose — "never invent an abbreviation for a feature that had none before", on the reasoning that a category
+absent from the gloss was absent by choice. **That reasoning does not survive `FEATS_GLOSS` becoming total**:
+measured, **201 of the 205 UD feature values carry exactly one abbreviation**, and the four that do not (`Typo`,
+`Foreign`, and SUD's own `Shared=Yes`/`No`) are bookkeeping that is deliberately unglossable. With a one-to-one
+mapping an absent abbreviation for a feature the token HAS is a gap, not a choice — and the asymmetry showed as
+one: a retag from NOUN to VERB dropped `SG` with `Number` and put no `INF` in its place, and setting `Number=Plur`
+on a token glossed `dog` left `dog`, with no later edit able to introduce the category either.
+
+⚠️ **SCOPED TO WHAT THE EDIT TOUCHED, which is the difference between this and a rebuild.** Every feature whose
+value moved ends up glossed — added, or changed-but-missing, which are the same gap — while a feature the edit did
+not touch is left alone, so a gloss the annotator has trimmed stays trimmed until they edit that very feature.
+Measured: with `Tense=Past` present but `PST` deleted by hand, a Number edit gives `walk.PL` and leaves it deleted;
+editing Tense itself gives `walk.SG.PRS`, which is what a fresh compose gives. Toggling `Foreign` still moves
+nothing, exactly as the comments at its call sites promise, because that feature has no abbreviation to insert.
+
+⚠️ **ADDITIVE, NOT `composeMGloss`.** A wholesale rebuild is what Task B recorded as reshuffling a settled
+abbreviation order and losing a hand-placed morpheme boundary; `mglossAddFeats` inserts at the `MGLOSS_FEAT_ORDER`
+slot and touches nothing else, so `walk-SG` → `walk-3SG.PRS.IND.FIN` keeps its hyphen and `walk.SG.EMPH` keeps an
+EMPH no FEATS implies. **Measured byte-identical to a fresh `composeMGloss` — 0 mismatches over 8 real retags**
+(VERB↔NOUN, ADJ→NOUN, DET→PRON, AUX→VERB, VERB→ADJ, FEATS pairs taken from the model itself) and over 9 value
+edits. Idempotent. `regenTok(si,tok,{regloss:true})` now adds only `mglossReglossLexical` on top, since the word
+class is the one thing a FEATS change can never move.
+
+⚠️ **Person and Number are written FUSED** (`3SG`, not `3.SG`), so agreement must arrive as ONE token — three
+cases, because the half already in the gloss keeps its own slot: neither present → one fused insert; one present →
+fuse ONTO it where it stands. Inserting the missing half beside its partner is what produced `walk-3.SG` from a
+hand-segmented `walk-SG`, i.e. the one shape the rest of the app never writes.
+
+⚠️ **The LEXICAL half follows too, because whether a token has one is a question about its word class.** Every
+builder writes a stem gloss into MGloss only for an OPEN class (`GLOSS_ON && !UPOS_LEIPZIG_ABBR[upos]`) — a
+closed-class tag already carries its own Leipzig abbreviation and its meaning IS that abbreviation. Neither
+retarget can cross that line (FEATS says nothing about a stem; the UPOS retarget only moves the prefix), so
+VERB→AUX left the stem stranded behind the newly-prepended prefix (`dog.SG` → `AUX.dog.SG`) and AUX→VERB left the
+token with no stem where a fresh parse gives one. Now `AUX.3SG.PRS.IND.FIN` and `have.3SG.PRS.IND.FIN`. An
+EXISTING lexical part is never rewritten — only supplied where the class now wants one and there is none.
+
+⚠ **A RE-HEADED TOKEN'S RELATION IS RE-ASKED OF THE PARSER**, in `afterHeadEdit`
+(js/editing/validation.js) — already the one funnel every head change passes through, so a new path
+gets it for free. A relation describes an EDGE, and moving the edge's other end can leave it describing
+nothing (a `subj` dragged under a noun). The head-0 ⟺ `root` rule is what follows with certainty;
+`headSyncDeprel` supplies what needs evidence — and **adopts the parser's relation only where the
+parser independently chose the same head**. `parse_tokens` returns a whole tree, its own heads
+included, so its label describes ITS attachment: taking it regardless would answer a question nobody
+asked, and taking its head too would undo the very edit that triggered the call. Only the relation is
+taken; an `@deep` tail the reader set survives. Async, best-effort, no undo entry of its own, no-op
+with no model. ⚠️ **That same-head gate is now the THIRD tier, not the rule** — see the ranking block
+below: the relation is asked of the ARC, so a head the parser would not have chosen gets an answer too.
+
+## The pipeline's runners-up (`analysis_scores`, `js/io/scores.js`)
+
+Every component scores a whole INVENTORY and the editor drew only the argmax: one head per token, one
+relation per edge, one class per token. `app/parse.py`'s `analysis_scores` hands the ranking back —
+one bridge call per sentence, cached, feeding the drag highlight, `headSyncDeprel`, and the opacity of
+the relation and POS menu rows.
+
+⚠ **THE PARSER IS TRANSITION-BASED, SO THERE IS NO HEAD DISTRIBUTION TO READ OFF**, and the two obvious
+routes were measured and rejected before the one in the tree. **`beam_parse` + `moves.get_beam_parses`**
+is the documented API and is nearly useless here: a greedily-trained model's action scores are so peaked
+that a width-64 beam returns 64 state sequences collapsing onto 2–3 distinct TREES, and across three
+ordinary sentences exactly **2 tokens** got more than one candidate head. Widening does not help (16/32/64
+all gave 2) — the alternatives are not being pruned, they are being scored ~0 — and every other head then
+reads as exactly 0.0, which is "never enumerated" wearing the look of "unlikely". **Scoring every (child,
+head) pair from a synthesised state** covers everything but answers a counterfactual, so it is confined to
+the one caller that wants exactly that (below). What is used is the parser's OWN deliberation: in arc-eager
+the only arc available at a state is between the stack top and the buffer front, so walking the greedy path
+and softmaxing the valid actions at each step yields, per token, the candidate heads it was actually weighed
+against. Measured — `with` in "I saw the man with the telescope" comes back **saw .78 / man .22**, `that` in
+"the plan that the board had rejected" **plan .54 / had .46**, and a determiner 1.0 on its one noun. The
+walk is verified to reproduce the shipped parse exactly, so the winner in the table is always the tree on
+screen. 24 ms for a 41-token sentence (12 of whose tokens have more than one candidate), ~800 bytes.
+
+⚠ **THE ROOT FALLS OUT OF THE WALK RATHER THAN NEEDING A RULE.** A token's offers are near-exclusive — once
+attached it never reaches the boundary again — so they are used RAW, with the shortfall below 1 credited to
+"no head". The sentence's actual root is offered arcs worth ~0.000 in total and lands on root ≈ 1.0; a PP
+weighed twice totals 1.28 and simply normalises. ⚠️ An earlier cut normalised each token's offers to sum to
+1 unconditionally, which turned the root's noise into a confident-looking head list (`saw` ← `.` at 0.47).
+The same trap one level down is why **the label table is emitted only for heads that survived the head
+prune**: normalising labels WITHIN an arc hides how little the arc was worth, and reported `parataxis` at
+0.46 under an attachment nothing ever considered.
+
+⚠ **A `||` LABEL IS NOT A RELATION.** The wheels carry a few composite training classes (`comp:obj||comp:aux`,
+`mod||mod`). They stay in the HEAD marginal — the parser really did weigh those arcs — but `scoreRealRel`
+keeps them out of every label the editor might adopt.
+
+⚠ **STANZA ANSWERS `scored: False`, AND THAT IS NOT A GAP TO FILL.** Its depparse is biaffine and so has the
+complete head distribution this whole block works to approximate — but Stanza emits UD and `convert.ud_to_sud`
+REWRITES HEADS, so its distribution describes a tree that is not the one on screen. Every caller degrades to
+its pre-existing behaviour; a weaker version of this would be worse than none.
+
+⚠ **THE CACHE IS KEYED ON THE QUESTION, NOT ON THE SENTENCE INDEX** (`scoresKey`), which is what makes
+invalidation a non-problem instead of a list of edit sites to remember. The question is "given these FORMS
+and these WORD CLASSES, what did you rank", so any edit that could change the answer changes the key, while
+re-heading, relabelling and glossing keep the entry warm. That ordering matters: **re-heading is precisely
+when the answer is consulted**, and a cache keyed on `si` would have dropped it on the edit that needed it.
+
+⚠ **THE MORPHOLOGIZER RETURNS LOGITS, NOT PROBABILITIES** — measured, a row sums to −147.3 over −16.4 … +21.0.
+`_force_upos` is unaffected (an argmax over a subset is scale-free) which is exactly why this went unnoticed;
+a RANKING has to be softmaxed, and reading them as weights gave every class an empty distribution. Classes are
+pooled from the joint `POS=…|Feat=Val` label, which is also the pooling the POS menu's dot-suffixed submenu
+needs — a parent row is weighted by exactly its own flyout.
+
+⚠ **THE RELATION FOLLOWS THE HEAD IN THREE TIERS**, ordered by what each is worth (`headSyncDeprel`): the arc
+the parser genuinely weighed; else `arcLabelScores`, a state SYNTHESISED to put the pair at the boundary
+(counterfactual, and labelled as such — measured against a real state it ranks the same two relations first
+and second and moves the split, .785/.214 → .576/.416); else the old whole-tree agreement rule, for the
+documents the scores cannot serve. ⚠️ **And the chosen relation is validated before it is written**:
+`setDiagramHead` already refuses a DROP whose relation is error-level on the new head, and an automatic step
+must not introduce what the manual one is stopped from doing. Verified: dragging `who` under `saw` — an arc the
+walk never weighed — takes `comp:obj` from the synthesised state, and a relation the validator rejects leaves
+the token untouched.
+
+⚠ **EXPECT ONE LIT NODE MOST OF THE TIME during a drag, and that is the honest answer rather than a thin
+feature.** A trained parser is genuinely certain about a determiner's noun; the spread appears exactly where a
+reader is deciding something (a PP's two sites, a relativiser's, a coordination's). Lighting every token to
+look busier would mean inventing mass for attachments the model never entertained. `.pcand` uses the same
+accent ink as `.dtarget` and is deliberately weaker — candidates against the choice — which is also why its
+rules come FIRST in `app.css`: the two match at equal specificity and the drop target must win outright.
+⚠️ **`color-mix()` with a `calc()` percentage was probed in both engines** before being relied on (Chrome, both
+kits, and the shipping WKWebView all resolve it, and `--phl:0` lands exactly on the untouched ink) — a dropped
+declaration here would be invisible, not an error. A root candidate is not drawn: there is no node to light.
+
+⚠ **MENU ROWS ARE WEIGHTED AFTER THE MENU IS UP**, never before it opens (`weightMenuRows`), so a menu never
+waits on a bridge call — it opens unweighted and settles a frame later, which is what the opacity transition is
+for. An option the ranking does not mention is dimmed to the floor rather than left bright: below the prune
+threshold means ~0, which is right for everything except a custom relation the model was never trained on, and
+leaving every unranked row bright would misreport the far commoner case as plausible. A ROOT's relation menu is
+left unweighted — there is no incoming arc to condition on. Floor 0.4, restored in full on hover: this is a
+ranking, not a disablement.
+
+⚠ **MERGE IS GATED ON "NO INTERVENING SPACE", NOT ON THE LANGUAGE.** `mergeTokens` (js/editing/edit-ops.js)
+used to refuse outside `SPACELESS_LANGS`, which is a proxy for the real condition and wrong in both
+directions: it forbade merging `do`+`n't` in English, where the two are written solid and a merge takes
+nothing away, and it would have allowed one across a real space in Chinese. Every file states the condition
+itself, per token — MISC `SpaceAfter=No` — so `mergeIsSolid` tests that per ADJACENT PAIR and consults no
+language list. Two pieces of one multi-word token are solid by construction (the line spells the range,
+never the pieces), and a pair STRADDLING a range's edge is asked about the RANGE's own `SpaceAfter`, which
+lives in its `_cols[9]` and not on its last component.
+⚠️ **WHAT THE GATE BUYS is the invariant the old restriction bought by accident**: a merge changes no
+CHARACTER of the sentence, so `# text` is never respliced and cannot come to disagree with the tokens. That
+is what makes the plain concatenation safe. (It rests on the file's own `SpaceAfter` being truthful, which
+is exactly what the tokenisation-mismatch badge already reports on.) Across a space it would not hold —
+and there `goeswith` annotates the split without destroying anything, which is what UD asks for anyway.
+The gate lives in four places, not one: both menu rows, `mergeTokens` itself (the funnel every caller
+shares), and `menuState().merge`, which drives the native item's `vis`.
+⚠️ **AND INSIDE A SANSKRIT RANGE THE MERGE IS A SANDHI FUSION** (`sandhiMergeForm`, js/io/bridge.js):
+`sat`+`ādi` is written `sadādi`, `ahaḥ`+`rātra` `ahorātra`, so gluing the strings is right only where the
+junction is inert. **Inside a multi-word token ONLY** — the one place the app DERIVES a Sanskrit spelling
+rather than reading it. The DCS convention this file follows stores a component in PAUSA and lets the
+RANGE's surface carry the sandhi, so re-deriving a component answers the question the file already poses;
+a STANDALONE token's form is what `# text` says it is (which is why concatenating there is safe), and
+re-deriving that by sandhi would put a spelling in the file the running line contradicts.
+**The input is the PAUSA forms** — MISC `Unsandhied` where there is one, the form otherwise, since feeding
+a sandhied surface back through a sandhi generator applies the rules twice (the rule
+`sa_notation.csl_forms` follows for the same reason) — **and the edges stay in pausa**: no neighbouring
+words are supplied, because external sandhi belongs to the range's surface, which `sandhiMwtForms` re-fuses
+here once the survivor has settled one member shorter. The survivor's `Unsandhied` is CLEARED, not
+rewritten: a component's form IS its pausa, and the head's old value described one piece while now sitting
+on the merged whole — the stale `-tve` trap. Fire-and-forget off the bridge, exactly as `sandhiMwtForms`
+is; the concatenation stands in until it lands, and is the answer if it never does.
+
+⚠ **WHO OWNS THE WHEEL, and the axis test that leaked.** An inner scroller (`.gwrap`/`.diagram`/
+`.wp-toks`) may only take the wheel while its whole block is on screen; otherwise the gesture belongs to
+the page (`blockFullyInView`, `js/core/scroll.js`). The first-event decision gates that on the gesture
+being vertical-dominant, and rightly — a horizontal delta cannot drive the page, so gating it would
+merely deaden a wide diagram's sideways pan. **The RE-check must not**, and copying the guard down there
+was the bug: it asks the wrong question (not "can this delta scroll the page" but "has the block left
+view, so should the pane lose the wheel"), and a trackpad momentum tail is never axis-pure. Measured on
+the repro — block dragged half off the top by a page glide, deltas (6,9) and (4,7) both stayed `native`
+and unprevented; ownership only moved when a vertical (3,0) arrived. That is the reported "panes scroll
+in partially-visible blocks, but only while a page scroll is in progress": the page scroll is what takes
+the block out of view mid-gesture. ⚠ **AND A PAGE SCROLL IN FLIGHT TAKES THE WHEEL OUTRIGHT — without consulting `blockFullyInView`.**
+That last part is the fix, and omitting it is why a first attempt at this changed nothing:
+`blockFullyInView` reports TRUE for a block TALLER than the port whenever the block covers it
+(deliberately — "either the block fits inside the port, or the port fits inside the block", or a block
+with both panes open, routinely taller than the viewport, could never scroll its panes at all). Such a
+block satisfies "fully in view" for as long as the page glides THROUGH it, so its diagram and grid went
+on eating the wheel the whole way down, and the `!blockFullyInView` precondition on every other rule
+meant none of them fired. Measured: block twice the port height, page moved 120 px between events, both
+wheels `native` and unprevented. `pageInFlight` uses two signals — `pageScrollAt` (stamped by #doc's own
+scroll listener, so it covers momentum, a chained wheel, blockSnap's glide and alignBlockTop alike) for
+a glide already running when the gesture started, and the doc scrollTop captured AT gesture start for
+one that begins or continues under an in-flight gesture. A pane scrolling natively moves no page and
+fires no #doc scroll event, so neither trips for it and the pane keeps the wheel at rest exactly as
+before.
+
+⚠ **THE READING POSITION SURVIVES A CHROME OR ZOOM CHANGE**, and `withTopChrome` is the one instrument
+for it — `preserveScroll` cannot do this job, since it anchors on the FOCUSED block's offset from #doc's
+RAW top, and both of those are wrong here (the focused block need not be on screen; the raw top is not
+the usable top). The zoom (`setFS`) and the options bar (`toggleOptionsBar`) both put their whole
+mutation INSIDE the capture, because `--fs`/`--vbH` reflow on the next layout read and capturing
+afterwards measures the state it is about to restore — a perfect no-op, which is what an earlier version
+of the zoom fix silently was. `captureTopAnchor` records the block's INDEX as well as its node, so the
+anchor survives a caller whose `fn` re-renders (it did not, and bailed on `isConnected`, for exactly the
+callers that most need it). `alignBlockTop(i)` is the related primitive — recentre the virtualization
+window, then put that block flush under the toolbar — shared by the saved-position restore and by a
+multi-sentence insert.
+⚠ **AND THE ANCHOR MEASURES THE PORT TOP OFF #doc's OWN PADDING, NOT `docTopInset()`** (`docPadTop`). The two
+normally agree — `.doc{padding:var(--top-chrome) …}` IS that expression, resolved — but they come apart for
+exactly the caller the pair exists for. `docTopInset()` reads the options bar's `.hidden` CLASS; the padding
+reads `--vbH`, which `syncChrome` writes a few statements later. In that window the inset has already moved by
+the bar's height while nothing on screen has, so an anchor captured there records the NEW inset against the OLD
+geometry and the restore lands the block one bar-height too high — behind the bar. Measured at the torn instant:
+padding 52, `docTopInset()` 91, i.e. **39px** of shift, which is the reported "enabling the options bar doesn't
+lower the focused block". It is the rAF'd restore inside `syncChrome` that decides, since it runs after
+`recapBlocks` and overrides `withTopChrome`'s synchronous one — so the torn capture is what the reader is left
+looking at. Driving the real command now measures **0px** of drift.
+
+⚠ **THE ORNAMENTAL SANSKRIT SCRIPTS ARE DRAWN AT DOUBLE SIZE, AND THE MEASUREMENT HAS TO FOLLOW THE PAINT.**
+Rañjanā, Soyombo and Zanabazar Square were made for titles, seals and inscriptions; their ornament is not
+resolvable at a 15px body size, while every other script in the list is a running hand that reads fine there
+(`ORNAMENTAL_SCRIPTS`, js/lang/translit.js — a judgement, so it is a list rather than something derived).
+⚠️ **Zanabazar Square is NOT one of them** — it was corrected out of the list on report: it is a practical
+script for Mongolian, Tibetan and Sanskrit, and its square construction is a letterform rather than ornament.
+Siddhaṃ and Balinese are in, surviving as bīja/mantra calligraphy and as ornamented palm-leaf lettering.
+`syncSchemeAttr` publishes `--script-mag` on #doc; `refreshFontStacks` reads it back into `TOK_MAG` in the same
+breath as the font stacks, because **a canvas `font` string cannot carry a `var()`** and every slot width in
+every notation comes from `meas()` against those strings — scaling the paint alone would lay out 15px boxes and
+draw 30px letters in them. ONLY the glyph faces scale (`WORD_F`/`NODE_F`/`MWT_F`/`GW_TIE_F` and their CSS
+twins, plus `.stext-script`); the POS, transliteration and gloss rows are Latin annotation, and doubling those
+would be a zoom, which ⌘+ already is. ⚠ **`belowGap()` is why the rows still clear.** The step below a token was
+the literal `18+descent(POS_F)` in **fifteen** places — every renderer's draw AND every renderer's reserve
+(`stackH`/`belowH`/`stackBot`/`--undpad`/`tieLead`/`mwtDepth`) — and that 18 is calibrated against a 15px form
+with about **1.6px** of slack (measured: ink bottom 166.0, POS row top 167.6). A doubled form eats it. The one
+expression now adds the magnification's own extra descent, so draws and reserves grow together; measured across
+all five notations at 2×, every row clears and nothing clips. Identical to the old expression at `TOK_MAG === 1`.
+⚠ **AND THE RUNNING LINE MEETS THE SENTENCE NUMBER AT THE CAP HEIGHT, NOT AT THE BASELINE.** `.shead` is
+baseline-aligned, which is right while everything in it is the same size; a script at double size then hangs its
+whole extra height ABOVE the row and towers over the number beside it. What reads as aligned is the top of the
+letters, so `.stext-script` is pushed down by capH(script) − capH(number) = 0.7 × `--stext-fs` × (mag − 1), with a
+matching `margin-bottom` giving the shift back to the flow so the line cannot lean into the transliteration row.
+Measured: the cap tops differ by 1.0px at mag 1 and 1.4px at mag 2, against the ~10px they would differ by without
+it. Both terms are 0 at mag 1.
+
+⚠ **A z-index cannot beat the native window-tab bar.** Every floating popup clamps its top to
+`menuTopBound()` (`js/core/scroll.js`) rather than to a bare `8`: the app's own titlebar is web content
+a menu paints over happily, but the tab bar is an AppKit view in the window's theme frame, above the
+WKWebView entirely, so a menu positioned under it is unreachable rather than merely behind something.
+`--tabH` is that bar's bottom edge, published by `app/mac/shell.py` and 0 when the window is not in a
+tab group (and on Windows), so this is the old constant everywhere else. The status-bar language menu
+opens *upward* and is the tallest thing in the app, so it is capped by `max-height` instead of moved —
+its list already scrolls.
+
 **Two chrome kits, one loaded.** `web/macos-kit/` (Liquid-Glass) and `web/win11-kit/` (Fluent) are
 self-contained, reusable, and **share 150 token names** — that identity is the whole
 design: `app.css` consumes tokens and needs no platform branching. Each has its own README. Keep
@@ -174,6 +530,19 @@ app carries no sample sentences. `samples/` is likewise repo-only — nothing at
 `__main__.py` is the **platform-neutral** pywebview bootstrap (~386 lines): the window, crash
 tracing, the close veto, and a `sys.platform` dispatch to `app/mac/` or `app/win/`. Menu actions call
 the frontend's bridge-aware JS helpers so toolbar and menu share one code path.
+
+⚠️ **THE MENU WIRING RETRIES UNTIL THERE IS A MENU TO WIRE, and that closes the one path in `app/mac/shell.py`
+that failed silently.** `_wire_menu` and `_install_menu_delegate` both opened `if mainmenu is None: return`.
+pywebview installs the main menu inside `webview.start()` while `_mutate` is marshalled off the window's `shown`
+handler, so which happens first is a RACE — and losing it made both bail with no log line, producing exactly one
+recognisable bug report: no key equivalents, no SF Symbol icons, the standard About panel instead of ours, and an
+application menu still named after the interpreter (the rename lives in `_wire_menu` too). Worse, the
+self-healing went with them: `_install_menu_delegate` is what re-runs the wiring on every menu open, and it was
+skipped by the same condition, so a race lost at launch stayed lost for the process's life. It now retries on the
+main thread (~120ms, bounded) and `_menu_reapply` re-asserts the delegate on every pass, since NSMenu holds it
+weakly and pywebview swaps submenus in underneath us. A successful wiring writes ONE line to `crash.log`
+(`[menu] wired: …`) — so a recurrence has evidence attached even from a LaunchServices launch, which is what the
+last two reports of this did not.
 
 `app/mac/shell.py` holds the AppKit/PyObjC work for the native feel — unified transparent title bar
 with the traffic lights placed in-content, a transparent drag view above the WKWebView, real SF
@@ -260,6 +629,19 @@ grew's OCaml backend is an **optional external prerequisite**: `app/convert.py` 
 Without it the app still runs and edits SUD/mSUD — only UD import/export and conversion are
 disabled, surfaced as a toast. Keep new features degrading that way rather than hard-failing.
 
+⚠ **The backend is not optional to the STANZA ENGINE, and that is the consequence everyone misses.**
+Stanza emits UD and this app stores SUD, so `parse._parse_stanza_ud_to_sud` runs the conversion
+grammar on *every* Stanza parse — no backend, no Stanza parsing at all, however cleanly the model
+downloaded. Both macOS builds therefore **ship `vendor/`** (`for d in app web grammars vendor`);
+before that they copied only `app web grammars`, so no user who had not built the app themselves had
+a grew backend and every Stanza model was inert — reported as "the Stanza models do nothing". The
+binary is arch-specific and `[ -e ]`-guarded, so a tree without `vendor/` still builds and still
+degrades. The **Windows** build deliberately does NOT copy it (a Mach-O on `PATH` would be found and
+fail to spawn — worse than finding nothing); it has no grew until something in this repo produces a
+Windows `grewpy_backend`. Manage Models states the consequence at the top of the Stanza group
+whenever `conversion_available()` reports no backend (`js/io/models.js`), so a user is told *before*
+a 400 MB download rather than by a silent no-op after it.
+
 ### Parsing, models, and on-demand extras
 
 `app/parse.py` runs two engines in-process: **SUD spaCy** packages (`en_sud_ewt`, …) and **Stanza
@@ -294,6 +676,53 @@ chunk*: one space anywhere disarmed it and every CJK chunk was swallowed whole (
 and `lzh_sud_kyoto` reach the fallback — stock spaCy tokenisers publish nothing; the Stanza zh/ja
 pipelines have no `mwt` processor and were never affected). Dropping the chunk test also let the
 genuine single-chunk case through — a bare `don't` is one orthographic word, and an MWT.
+
+⚠ **A BREVE IS TAKEN OFF BEFORE THE PARSER SEES LATIN, AND PUT BACK AFTERWARDS.** A reader pastes Latin as
+a textbook prints it (`pŭella`, `ĭnstar`), and the treebanks spell Latin with no quantities at all — so every
+marked word arrives out of vocabulary and comes back mis-tagged and mis-lemmatised. `_debreve` strips the
+marks from the string handed to the pipeline and returns an INDEX MAP; `_reform` slices each token's FORM back
+out of the ORIGINAL text, so what the parser sees is bare and what is stored is what the reader wrote. Both
+halves are load-bearing: a written breve is a quantity the author WROTE, which `macron.py` honours as the one
+thing it never revises, so stripping it into the file would delete a statement. Gated on the LANGUAGE, not on
+the character — Turkish `ğ` is g-with-breve, and stripping it there would rewrite the language. Applied on the
+four spaCy entry points (`_parse_spacy_sud`, `_parse_spacy_sud_many`, `_spacy_tokenize`, `parse_pretokenized`);
+**Stanza is deliberately left alone** rather than half-done, since an MWT-expanded Stanza word carries
+`start_char = None` and the same restore is not available there.
+
+**SUD'S OWN MISC LAYER IS PREDICTED TOO**, by components of the model's own
+(`sud_subject`/`sud_subject_rule`, `sud_reported_rule`, `sud_idiom`), and it arrives on ONE spaCy
+extension — `Token._.sud_misc`, a **dict**, which is why `_SUD_MISC_KEYS` folds it in `_ext_misc`
+separately rather than as another `_TOKEN_MISC_EXT` row. Four keys: `Subject=SubjRaising|ObjRaising`
+on the embedded predicate whose subject is raised, `Reported=Yes` on a speech verb's verbatim
+complement, `Idiom=Yes` on an idiom's head (which also carries `ExtPos`) and `InIdiom=Yes` on its
+other members (which attach by `unk`). **The app already drew all of that** — `subjGhostTarget`'s
+dashed edge, `isReported`'s subtree lifted off the line, the `:xsubj` pair `depsAutofill` writes on
+save — from annotation the reader had to make by hand; what was missing was the parser's own answer,
+which `spacy convert` discards on the way IN (it reads MISC for `SpaceAfter=No` and the NER pattern
+only), so upstream had to hoist it through FEATS at training time and publish it on an extension at
+inference. MISC and not `token.morph`, deliberately, on both sides: a MISC feature must never
+masquerade as a morphological one. Which keys a wheel carries is a per-language empirical choice
+recorded in SUD-spaCy's own CLAUDE.md (zh ships no `Subject`; fa/la no `Reported`; the four
+treebanks that annotate no idioms no `Idiom`), so **an absent key means "this model says nothing
+here", never "no"**.
+
+⚠ **A RE-PARSE OF ONE TOKEN'S FIELDS MUST NOT TAKE THEM.** All four are read off the tree the model
+itself produced, and `reparseTokenFields` (`SUD_TREE_MISC`, js/io/bridge.js) adopts none of the
+parser's heads or relations — it re-derives the model-derived FIELDS on the reader's own tokens. So
+those four answers describe a tree discarded a line later, and a fresh `Subject=SubjRaising` drawn
+as a ghost edge across an attachment the reader made themselves is not a weaker annotation but a
+claim about a different sentence. They are cleared from the parser's MISC there and the reader's own
+restored by the `keep` list; only a FULL parse (`doInsert`/`insertParsed`/`reparse`/`commitSentText`,
+which replace `s.tokens` wholesale together with the tree they belong to) takes them verbatim.
+
+⚠ **THE WHEELS GAINED THIS WITHOUT A VERSION BUMP**, so an environment built before them never
+refreshes: `requirements-core.txt` pins `en_sud_ewt` by release URL at `0.1.0`, pip sees `0.1.0`
+installed and skips it, and the per-user venv is built once and gated behind `.sud-core-ready`
+anyway. A downloaded model has the same problem through Manage Models, which reports it installed.
+Symptom: a parse that marks nothing, on a build that plainly contains this code. The resets are in
+README's "Resetting an install" table — remove-and-redownload for a downloaded model, `rm -rf …/venv`
+for the bundled one. **Check the pipeline, not the version**, when diagnosing:
+`nlp.pipe_names` either lists the `sud_*` components or it does not.
 
 `app/models_registry.py` lists/downloads models: SUD wheels from GitHub Release assets on
 `SUD_REPO` (`SunflowerAI/sud-spacy-parsers`, overridable via `$SUD_MODELS_REPO`) pip-installed into
@@ -380,6 +809,19 @@ missing tier must surface as an offer to install, never an exception.
   single graph, which has no phrase to gain and is where that hazard bites. The gate is "two or more Han
   characters", NOT "the fold is a dictionary entry" — pypinyin matches phrases as SUBSTRINGS, so 银行卡
   reads yínhángkǎ off the 银行 inside it without being an entry itself.
+- `app/data/tshet_uinh_mc.tsv` — **Middle Chinese for the ~16,000 graphs Baxter–Sagart never listed**, built by
+  **`tools/build_tshet_uinh_baxter.py`** from the 廣韻's own 音韻地位 (nk2028/tshet-uinh-data, **CC0**) through a
+  Python port of nk2028/tshet-uinh-examples' `baxter.js` (**MIT**). The appendix beside it is a list of 4,082
+  WORDS chosen for what they say about *Old* Chinese; it covers 4,330 graphs, so most ordinary Buddhist-text
+  vocabulary (菩薩, 涅槃, 般若) had no Middle Chinese in this app at all. A Qieyun position is recorded for every
+  graph the rhyme book lists and Baxter's transcription is a NOTATION for that position, so 19,492 graphs answer
+  here. ⚠️ **It is a fallback, not a replacement**: `_baxter_table`/`_baxter_all` consult it only where the
+  appendix has no Middle Chinese for the graph — measured, **0 of 4,330** existing renderings move — and it
+  supplies **no Old Chinese**, because a Qieyun position says nothing about the reconstruction. ⚠️ **Built in
+  Baxter's 1992 notation, not 2014**, because that is what `baxter_sagart.tsv` is written in (`ʔ æ ɛ ɨ`, not
+  `' ae ea +`) and the two answer the same row; the port validates at **94.3 %** agreement with the appendix's
+  own first reading over the 3,364 graphs both hold, the residue being the appendix choosing a different 小韻.
+  Byte-reproducible, `--retrieved` required — don't hand-edit it, re-run the script.
 - `app/langid.py` — fastText `lid.176`, model **vendored** at `app/data/lid.176.ftz` so detection is
   fully offline. Drives the document language on open.
 - `app/sud_rules.py` — parses the vendored grew validator patterns
@@ -501,6 +943,18 @@ missing tier must surface as an offer to install, never an exception.
   sentence in both scripts** — verified over both samples. All of that machinery was deleted rather
   than kept "just in case"; `models_registry.DEPRECATED_SUD` hides `sa_sud_vedic_ufal_csl` so the
   app cannot offer a model whose output it can no longer read.
+  ⚠ **A CONSONANT-FINAL WORD JOINS THE NEXT ONE IN THE SCRIPT LINE, AND ONLY THERE.** A Brahmic script writes a
+  word-final consonant with a virāma, and Devanagari does not leave a virāma standing before a space: `tad api` is
+  written तदपि, `vāk iti` वागिति, the two words sharing one akṣara run. Romanisation is under no such constraint,
+  so the IAST original keeps its space and the script line loses it — the two lines then disagree about word
+  division, which is correct rather than a defect, because word division is a fact about the script here.
+  ⚠ **Done on the INPUT, not on the output** (`_sa_join_final_consonant`): deleting the space after conversion
+  leaves the virāma where it was — तद्अपि, a dead consonant beside an independent vowel, which is not how the word
+  is written — whereas deleting it first hands aksharamukha `tadapi` and the real akṣara forms. The rule is
+  therefore stated in IAST, the one alphabet in which "ends in a consonant" is a question about a single
+  character; anusvāra and visarga are excluded, since neither leaves a consonant hanging. A file already stored in
+  Devanagari passes through untouched, and should: `_ak` returns it unchanged, so the author's own spelling is
+  what is drawn. It is ORTHOGRAPHY, not sandhi — `vāk iti` comes out वाकिति, not वागिति.
   ⚠ **The DCS representation is not the CSL one, and the difference is in the columns.** A token
   that is its own orthographic word keeps its **sandhied** surface in FORM, with the padapāṭha in
   MISC `Unsandhied=` (`kratuś` / `Unsandhied=kratuḥ`); only a token INSIDE a multi-word token is
@@ -534,6 +988,15 @@ missing tier must surface as an offer to install, never an exception.
   It is why `orthography` grew `feats`/`lemmas` beside the `upos` the Chinese readings already
   threaded: the FORM alone reaches only the morphology-blind level, where nominative `Gallia` picks
   up an ablative macron.
+  ⚠ **It is therefore the ONE Script scheme whose cached rendering is keyed on more than the form**,
+  and both halves of that used to be missing. `fillOrtho` batches on `orthoKeyOf(t)` — (surface, upos)
+  as every other scheme does, **plus FEATS and the lemma where the scheme reads them** — so two tokens
+  spelt and tagged alike but analysed differently stop sharing whichever one was reached first. And
+  each rendering carries the key it was computed for (`t._orthoKey`), so `fillOrtho` refills whatever
+  no longer matches instead of only what is empty. That stamp is what makes "a macron follows any edit
+  to the token" true: the trigger is `markDirty` — the one funnel every document edit passes through —
+  debounced, gated on `orthoNeedsMorph()`, and skipped while an inline field is open. Teaching the
+  dozen-odd FEATS/lemma write sites to invalidate was the alternative, and a new one would forget.
   **The data is FETCHED, not shipped** — Morpheus (CC BY-SA 3.0 US) via the `macrons.txt` Johan
   Winge commits in latin-macronizer (GPL-3.0), ~4 MB on the wire, downloaded on demand into
   `APP_DATA` and compiled there in ~4 s. GPL restricts DISTRIBUTION, not USE, so a file the user's
@@ -564,6 +1027,92 @@ missing tier must surface as an offer to install, never an exception.
   is precomputed at build time and only where it is decisive, so a rung never answers a question it
   cannot settle. `_PARADIGM` still applies on top: it is a statement about Latin, not a patch for a
   bad harvest.
+  **`macron._extra_fixes` is this app's own extension of that paradigm override**, kept in `macron.py`
+  rather than in the vendored file for the reason `translit._POS_OVERRIDE` is kept out of the
+  Baxter–Sagart TSV: a re-vendor would revert an edit there. Every cell was **measured against
+  `macrons.txt` itself** (724,191 rows) and admitted only at **≥ 99.8 %** agreement — the infinitive
+  in `-e`/`-ī`, the gerund/gerundive in `-ō`/`-ī`, the supine `-ū`, first-singular `-ō`/`-ī`, the
+  2sg future passive `-ēris`/`-ēre`, the imperative `-ā`/`-ī`, `-mus`/`-tis`, the dative/ablative
+  plural `-īs` and `-ibus`, genitive/dative singular `-ī`, first-declension accusative plural `-ās`,
+  second-declension vocative `-e`, the comparative `-ius`. `PRON` is excluded (`mihi`, `tibi` measure
+  33.8 % long).
+  ⚠ **THE MSeg TIER CARRIES MACRONS, AND IS THEREFORE GATED ON THE MACRONISER.** Everything else about vowel
+  length is a Script scheme, i.e. a DISPLAY preference; a morpheme segmentation is annotation, it is stored in
+  MISC MSeg, and `dī-vīsa` is a different claim from `di-visa`. So the tier carries the marks whatever the Script
+  pill says (`fillLaMacron`/`scheduleLaMacron`, js/lang/translit-load.js, debounced off `markDirty` exactly as
+  `scheduleOrthoMorph` is), and for Latin the tier cannot be switched on at all without the table — the checkbox
+  is disabled (`syncGlossUI`), `setTier` refuses again at the command, and the Script menu's own "With macrons"
+  row is one click from installing it. ⚠ **The macrons are OVERLAID on the segmentation, never segmented from**:
+  quantity alternates across a paradigm, so `dīvīsa` against `dīvidō` shares only `dīv` where the bare pair shares
+  `divi` — feeding marked strings to `msegSegment` makes the shared match SHORTER and moves the boundary. Letters
+  decide the cut, marks are written onto the letters that survived it, which is sound because macronisation is
+  length-preserving (precomposed ā ē ī ō ū). ⚠ And `editTier`'s MSeg back-write **strips the quantities first** —
+  the FORM column never carries them and the file must round-trip byte-identically.
+  ⚠ **AN MWT's MACRONS COME FROM ITS COMPONENTS** (`laMwtCompose`), because `macrons.txt` lists WORDS and never
+  host+clitic: `armaque` is simply absent from it, so the fused surface came back bare in the middle of an
+  otherwise macronised diagram and running line. `arma` and `que` each answer, each with its own UPOS/FEATS/lemma
+  — which the range could never have had. The join is CHECKED before it is trusted (stripping the quantities off
+  it must reproduce the stored form), so French `du` = `de`+`le` is left alone rather than mis-composed.
+  ⚠ **`ae`/`oe` ARE SINGLE LETTERS IN LATIN**, and that supersedes the older "a cut may not split a vowel
+  SEQUENCE" rule *for Latin only* (`MSEG_DIGRAPHS`, js/io/bridge.js). The old rule was a crude statement of the
+  same intent — knowing no language's letters, it treated every vowel run as indivisible — and it walked
+  `Troiae`/`Troia`'s cut back through `oiae` to `Tr-oiae`. With the digraph inventory the only forbidden cut is
+  one falling inside `ae`/`oe`: `Troi-ae`, `puell-ae`, `poen-ae`. Every language NOT in that table keeps the
+  whole-run approximation, deliberately — it is what declines `said`/`say` (the cut moves to `s|aid` and a match
+  of `s` then fails the vowel test), and dropping it everywhere would have cost that for nothing.
+  ⚠ **The MGloss ordering puts the POS-SUBTYPE features right after Number** (`3SG.PERS`) — they used to
+  trail every inflectional category. Placed after Clusivity, not between Number and Clusivity, because
+  `1PL.INCL` is one agreement statement nothing may split; with no Clusivity the two readings coincide.
+  They are also members of `MGLOSS_NOMINAL`, so they travel with the nominal block when Case moves it to
+  the end — otherwise a case-marked pronoun glosses `PERS.3SG.NOM` instead of `3SG.PERS.NOM`.
+
+  ⚠ **A QUANTITY THE AUTHOR WROTE IS KEPT; EVERY OTHER VOWEL IS STILL DERIVED.** Everything else in the
+  module is inference — somebody else's lexicon plus rules right 99-point-something per cent of the time
+  — and a macron or breve someone has WRITTEN is not inference, so it is never revised. A **breve** is
+  the pointed case: an unmarked vowel says nothing (Latin is normally written with no quantities), so a
+  breve is the only way to say "short, and I mean it" — exactly the mark a reader reaches for to
+  contradict this module. It is honoured, and written back AS a breve; a bare vowel would delete the
+  statement. But a mark exempts only ITS OWN VOWEL. Part-marking is the normal way of writing Latin
+  quantities, and that cuts the opposite way from how it first looks: precisely BECAUSE part-marking is
+  normal, an unmarked vowel is not a claim of shortness but simply unmarked, so filling it in adds
+  information without contradicting anyone. `dīvisa` → `dīvīsa`; `dĭvisa` → `dĭvīsa`. (`_written_marks`
+  reads the marks by BASE-character index after NFD, so precomposed `ā`/`ĭ` and their decomposed
+  spellings are caught alike and an unrelated combining mark — a diaeresis — neither counts nor shifts
+  the ones after it; `_strip_quantity` removes both marks for the lookup, since a breve left in place
+  would make `ĭnstar` a string no lexicon can match.)
+  ⚠ **THE RULES COME IN TWO TIERS.** A cell measured **exceptionless** (100.00 %) applies always — a
+  paradigm cell is a fact the lexicon may never have been shown, and contradicting its morphology-blind
+  fallback is the point. A cell with *any* measured residue applies **only where the lookup had no entry
+  for that word**, because the residue words are almost by definition ones the lexicon knows. That split
+  was forced by the nominative `-us` rule (99.89 %), which applied unconditionally shortened `senectūs`,
+  `virtūs`, `servitūs` — the third-declension `-tūs` abstracts. **Gender does not separate those**,
+  measured: feminine `-tus` nominatives are only 14.3 % long, the rest being Greek feminine names.
+  ⚠ **A cell that fails the bar is usually UNDER-SPECIFIED, not unstatable**, and the conditioner is
+  most often the SPELLING or the LEMMA, neither of which UPOS+FEATS carries: the 2sg future passive goes
+  91.6 % → 100 % excluding `-bere` (the 1st/2nd b-future); the imperative 30.0 % → 100 % on `-ā`/`-ī`,
+  and its remaining `-e` 25.0 % → 99.56 % when `lemma == form + "o"` marks the 2nd conjugation;
+  accusative plural `-ās` 98.6 % → 100 % on an a-stem lemma; the vocative 90.9 % → 99.98 % on an o-stem
+  one. The **positive adverb in `-ē`** deserves its own line: the contrast is DERIVATIONAL (`longē` ←
+  `longus`), so the rule must know the adjective — an earlier attempt keyed it on the LEMMA being the
+  adjective, which is Morpheus's convention and **not UD's** (UD lemmatises an adverb to itself), so it
+  could never fire on this app's own parses and was dead code wearing a measurement. It now asks the
+  loaded table whether `stem + "us"` is a form. Still out, with figures: the fifth-declension ablative
+  (already `_PARADIGM`'s, keyed on `InflClass`), "an enclitic is short" (95.2 / 82.5 / 70.6 % — sunk by
+  `aequē`, `plēnē`), and `-r`/`-l`/`-d`, which under the same gate changed **0 words either way**.
+  ⚠ **NO ENCLITIC SPECIAL CASE, deliberately.** An `_enclitic_host` helper briefly split an unsplit
+  `armaque` and macronised the host, on the (correct) observation that `macrons.txt` lists WORDS and
+  never host+clitic. It was removed: an enclitic is a separate TOKEN, UD tokenises `armaque` as a
+  multi-word token over `arma` + `que`, and **the Latin tokeniser is the layer that should split it**.
+  Once it does, each piece arrives here as its own word and every rule works with no special case — and
+  the MWT shows up in the diagram and the file too, which a macronisation-only fix could never give.
+  Measured on a held-out 5 % of the forms: whole-token 44.45 % → **48.62 %**, per-vowel 81.18 % →
+  **83.61 %**, 432 words newly right against 1 newly wrong, and in-vocabulary now *improves* rather than
+  merely holding (99.01 % → 99.04 %) — which is what the two-tier gate bought.
+  **What remains is not addressable by rules.** Bucketed over the held-out OOV split by the position of
+  each wrong vowel: stem 12,428 of 31,277 · penult 269 of 6,972 · final 173 of 3,883. **96.6 % of wrong
+  vowels are STEM vowels and 98 % of errors are "too short"** — we fail to restore a macron rather than
+  invent one. Stem length is lexical; the endings, which are this table's business, are now 95.5 % right
+  at the final vowel and 96.1 % at the penult.
 
 Optional dependencies are always isolated behind a single module façade in `app/`, as those last
 five do — follow that when adding another.
@@ -574,6 +1123,16 @@ five do — follow that when adding another.
   *source* plus a launcher; on first launch it builds a per-user venv from the user's **own**
   Python 3.12, because a Python linked against the current macOS SDK is what gets the native Tahoe
   chrome. CORE deps only.
+  ⚠ **`find_py.sh` RANKS candidates by that SDK; it no longer takes the first one that runs.** The app
+  runs *inside* the chosen interpreter, so AppKit reads the interpreter's own `LC_BUILD_VERSION` and
+  holds an older-SDK binary at the previous appearance — visibly, at the window edge, where a
+  pre-Tahoe corner radius sits beside fully-rounded native windows. That is the "not seeing
+  fully-rounded corners" report: the old order preferred Homebrew (SDK-current) but fell through to a
+  python.org framework build, which targets a deliberately old SDK. `_py_sdk_major` reads it with
+  `otool`; the first candidate at or beyond the running OS wins immediately (so the Homebrew case
+  still costs one `otool` call), otherwise the newest-SDK candidate does. A preference, never a
+  requirement — every candidate runs the app, and with no `otool` all score 0 and the list order
+  decides exactly as before.
 - **`make_portable.sh`** — self-contained bundle with a relocatable standalone CPython 3.12 + CORE
   deps (~300–450 MB). No external venv needed, but the older SDK costs some native chrome.
 - **`make_app.sh`** — thin launcher bundle that runs this project's `.venv`; dev convenience only.

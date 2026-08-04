@@ -120,7 +120,7 @@ function openWherePop(anchor,folders,current,onPick){ closeWherePop();
   document.body.appendChild(m);
   const r=anchor.getBoundingClientRect(), mw=m.offsetWidth, mh=m.offsetHeight;
   const left=Math.max(6,Math.min(r.left, innerWidth-mw-8));
-  const top=Math.max(6,Math.min(r.bottom+4, innerHeight-mh-8));
+  const top=Math.max(menuTopBound(),Math.min(r.bottom+4, innerHeight-mh-8));
   m.style.left=left+"px"; m.style.top=top+"px";
   setTimeout(()=>{ document.addEventListener("mousedown",_wherePopOutside,true); document.addEventListener("keydown",_wherePopKey,true); },0); }
 // the real macOS "Do you want to keep this new document ‘Untitled’?" prompt — shown (instead of the plain

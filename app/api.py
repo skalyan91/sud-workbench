@@ -842,14 +842,49 @@ class Api:
         ``reason`` when the requested model/engine can't run."""
         return parse.parse(text, model_id)
 
-    def parse_tokens(self, forms: list[str], model_id: str = "") -> dict:
+    def parse_texts(self, texts: list, model_id: str = "") -> dict:
+        """`parse_text` over a LIST, in one bridge call — what a multi-sentence paste needs.
+
+        Inserting a pasted passage used to cost two awaited round-trips per sentence (tokenize, then
+        parse_text), so an 80-sentence paste made 160 of them, each re-entering the pipeline for one
+        string. `parse.parse_many` resolves the model once and lets the engine batch: spaCy through
+        `nlp.pipe`, and Stanza with a SINGLE grew UD→SUD conversion across the whole list, which its
+        worker pool then runs in parallel. Entries come back in the order given, each in exactly
+        `parse_text`'s shape (including a per-entry `reason` when the engine could not run)."""
+        return {"results": parse.parse_many(list(texts or []), model_id)}
+
+    def parse_tokens(self, forms: list[str], model_id: str = "",
+                     upos: list[str] | None = None) -> dict:
         """Re-parse a sentence whose TOKENISATION IS FIXED — one token per entry of ``forms``.
 
         What the frontend needs after a Form or UPOS edit, where the heads, relations and annotation
         tiers hang off the existing tokens and an answer with a different token count is unusable.
         Asking `parse_text(" ".join(forms))` instead silently produced exactly that in any spaceless
-        script — see `parse.parse_pretokenized`, which explains the failure it removes."""
-        return parse.parse_pretokenized(forms or [], model_id)
+        script — see `parse.parse_pretokenized`, which explains the failure it removes.
+
+        ``upos`` carries the reader's OWN word classes, so a retag re-derives the features for the class
+        that was chosen instead of returning the model's unchanged opinion of the same sentence — see
+        `parse._force_upos`."""
+        return parse.parse_pretokenized(forms or [], model_id, upos or None)
+
+    def token_scores(self, forms: list[str], model_id: str = "",
+                     upos: list[str] | None = None) -> dict:
+        """The pipeline's RUNNERS-UP for one sentence — what it ranked second, and by how much.
+
+        Every component scores a whole inventory and the editor has only ever shown the argmax.  This
+        hands back the rest: per token, the candidate heads the parser weighed against each other, the
+        relation it would use for each of those arcs, and the morphologizer's distribution over word
+        classes.  See `parse.analysis_scores` for how a head distribution is recovered from a
+        transition-based parser at all, and why Stanza answers ``scored: False``."""
+        return parse.analysis_scores(forms or [], model_id, upos or None)
+
+    def arc_scores(self, forms: list[str], model_id: str, child: int, head: int) -> dict:
+        """"If ``child`` hung off ``head``, what would you call that edge?" (both 1-based).
+
+        The counterfactual companion to `token_scores`, for the arc a reader has just made by hand and
+        the parser never considered — so there is no recorded deliberation to read.  See
+        `parse.arc_label_scores`, which states plainly what a synthesised state can and cannot claim."""
+        return parse.arc_label_scores(forms or [], model_id, int(child), int(head))
 
     def tokenize(self, text: str, model_id: str = "") -> dict:
         """FAST first step of the interactive parse sequence (tokenise → transliterate → parse):
@@ -1417,9 +1452,30 @@ class Api:
                     job["note"] = "Installed"
                     if result.get("warning"):
                         job["warning"] = result["warning"]
+                    self._notify_extra_installed(feature)
 
         threading.Thread(target=worker, daemon=True).start()
         return {"job_id": job_id}
+
+    def _notify_extra_installed(self, feature: str) -> None:
+        """A TIER THAT HAS JUST ARRIVED IS USABLE NOW, not after a relaunch.
+
+        Nothing on THIS side caches its absence — ``macron.available()`` is a file test,
+        ``extras.available`` re-probes, and the data-tier install already drops the parser cache — but
+        the frontend does: each document window loads ``orthography_schemes(lang)`` once per language
+        switch and keeps the answer, so "With macrons" went on reading unavailable in a window that had
+        been open the whole time.  That is the reported "I wasn't able to use it until a restart".
+
+        Pushed to EVERY document window (``_broadcast_all``, not ``_broadcast``): the Model Manager
+        shares the ``Api`` of the window that opened it, which is precisely the window the ordinary
+        broadcast leaves out."""
+        cb = getattr(self, "_broadcast_all", None)
+        if cb is None:
+            return
+        try:
+            cb("window.__extraInstalled && __extraInstalled(%s)" % json.dumps(feature))
+        except Exception as exc:  # noqa: BLE001
+            print(f"[extras] notify: {exc}", file=sys.stderr)
 
     # ── secondary native windows (item 23) ────────────────────────────────────
     # Help / About / Model Manager / Toolbox / Gloss Mappings are REAL windows (not in-page scrim sheets).
@@ -2078,9 +2134,19 @@ class Api:
     .prog{height:4px;border-radius:2px;background:var(--line);overflow:hidden;margin-top:4px}
     .prog i{display:block;height:100%;width:0;background:var(--accent);transition:width .25s}
     .foot{display:flex;justify-content:space-between;align-items:center;gap:8px}
+    /* The filter row: the search takes the space, the toggle only what its label needs. `.on` is the
+       PRESSED state — an accent-tinted fill rather than a second colour of its own, so it reads as the
+       same control held down; aria-pressed carries the same fact for assistive tech. */
+    .bar input{flex:1;min-width:0}
+    .bar #instonly{flex:0 0 auto;white-space:nowrap}
+    .bar #instonly.on{background:color-mix(in srgb,var(--accent) 20%,transparent);border-color:color-mix(in srgb,var(--accent) 45%,transparent);color:var(--head)}
+    /* a note qualifying a whole GROUP (the Stanza group needs the grew backend to parse at all) — under
+       its heading, ahead of the rows it applies to. */
+    .gwarn{margin:2px 8px 6px;padding:7px 9px;border-radius:7px;font-size:11.5px;line-height:1.45;
+           background:color-mix(in srgb,var(--accent-orange,#d08700) 15%,transparent)}
     </style></head><body>
     <div class="sub">Download and remove SUD (spaCy) and UD (Stanza) parser models.</div>
-    <div class="bar"><input id="q" type="search" placeholder="Search language…" spellcheck="false" autocomplete="off"></div>
+    <div class="bar"><input id="q" type="search" placeholder="Search language…" spellcheck="false" autocomplete="off"><button class="sec sm" id="instonly" aria-pressed="false" title="Show only the models installed on this machine">Installed only</button></div>
     <div id="list">Loading…</div>
     <div class="foot">
       <button class="sec" id="refresh">Refresh</button>
@@ -2091,6 +2157,8 @@ class Api:
     var EXTRAS=[];   // optional heavy-dependency tiers (installed on demand)
     var TRAIN={};    // model id → training-set sentences, filled in by pollTrain as the sweep resolves them
     var KEEP_SCROLL=0;   // list scroll offset carried across a re-render (item 17)
+    var INST_ONLY=false;   // the "Installed only" filter — a VIEW state of this window, not a stored preference
+    var GREW=null;         // grewpy + backend: null until probed, then true/false (see the Stanza note in draw())
     function api(){return window.pywebview&&window.pywebview.api;}
     function esc(s){return (s||'').replace(/[&<>]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;'}[c];});}
     function fmtN(n){return String(n).replace(/\\B(?=(\\d{3})+(?!\\d))/g,',');}
@@ -2114,7 +2182,9 @@ class Api:
     // at the string start or after any non-letter/non-digit. The query is regex-escaped: it is typed text, and
     // a stray '(' would otherwise throw out of the keystroke handler and freeze the field.
     function wpRe(q){return new RegExp('(?:^|[^\\\\p{L}\\\\p{N}])'+String(q).replace(/[.*+?^${}()|[\\]\\\\]/g,'\\\\$&'),'u');}
-    function match(e,q){return !q||wpRe(q).test((e.label||'').toLowerCase())||(e.lang||'').toLowerCase()===q;}
+    // The two filters COMPOSE: "Installed only" narrows the set the language search then searches, so a
+    // search made inside it still means what it says.
+    function match(e,q){return (!INST_ONLY||e.installed)&&(!q||wpRe(q).test((e.label||'').toLowerCase())||(e.lang||'').toLowerCase()===q);}
     async function load(refresh){var host=document.getElementById('list'); if(!api()){host.textContent='Model management is available in the desktop app.';return;}
       KEEP_SCROLL=host.scrollTop;   // remember scroll before 'Loading…' clears it (item 17)
       host.textContent='Loading…';
@@ -2123,6 +2193,9 @@ class Api:
       AVAIL=r.available||[];
       AVAIL.forEach(function(e){if(e.train_sents)TRAIN[e.id]=e.train_sents;});   // whatever the disk cache already knew, shown immediately
       try{var ex=await api().list_extras(); EXTRAS=(ex&&ex.extras)||[];}catch(e){EXTRAS=[];}
+      // …and whether grew can run, which decides whether the Stanza group is usable at all. Probed here
+      // rather than per row: conversion_available spawns the OCaml backend on its first call.
+      try{var g=await api().conversion_available(); GREW=!!(g&&g.grewpy&&g.backend);}catch(e){}
       draw(); pollTrain(!!refresh);}
     function draw(){var host=document.getElementById('list'); var keep=host.scrollTop||KEEP_SCROLL; KEEP_SCROLL=0;
       var q=(document.getElementById('q').value||'').trim().toLowerCase(); host.innerHTML='';
@@ -2130,11 +2203,22 @@ class Api:
         var h=document.createElement('div');h.className='gh';h.textContent=title;host.appendChild(h);
         rows.forEach(function(e){host.appendChild(row(e));});}
       grp('SUD · spaCy','sud'); grp('UD · Stanza','stanza');
-      if(!q && EXTRAS.length){   // optional heavy-dependency tiers — always shown, not filtered by the language search
+      /* …AND WHY EVERY STANZA MODEL WOULD BE INERT, said BEFORE a 400 MB download rather than after.
+         Stanza emits UD and this app stores SUD, so parse._parse_stanza_ud_to_sud runs the conversion
+         grammar on EVERY Stanza parse — which needs grewpy AND its OCaml backend. Without the backend the
+         models download perfectly and then do nothing at all, which is exactly how the fault was reported.
+         GREW===null means never probed, and says nothing rather than raising a false alarm. */
+      if(GREW===false && AVAIL.some(function(e){return e.engine==='stanza'&&match(e,q);})){
+        var w=document.createElement('div');w.className='gwarn';
+        w.textContent='Stanza models produce UD, which this app converts to SUD with grew — and the grew backend is not available here, so they will parse nothing. Reinstall the app, or install it yourself with: brew install opam && opam init && opam install grewpy_backend';
+        var hs=[].slice.call(host.querySelectorAll('.gh')).filter(function(x){return x.textContent==='UD · Stanza';});
+        if(hs.length&&hs[0].nextSibling)host.insertBefore(w,hs[0].nextSibling); else host.appendChild(w);}
+      if(!q && !INST_ONLY && EXTRAS.length){   // optional heavy-dependency tiers — not filtered by the language search, and out of scope entirely under "Installed only", which is a question about MODELS
         var eh=document.createElement('div');eh.className='gh';eh.textContent='Optional language support';host.appendChild(eh);
         EXTRAS.forEach(function(t){host.appendChild(extraRow(t));});}
       host.scrollTop=keep;   // restore the pre-render scroll offset (item 17)
-      if(!host.children.length) host.textContent=q?'No matches.':'No models found (offline?). Try Refresh.';
+      // "No matches" under a filter the reader set themselves is a dead end; naming the filter says what to undo.
+      if(!host.children.length) host.textContent=INST_ONLY?(q?'No installed models match.':'No models installed yet.'):(q?'No matches.':'No models found (offline?). Try Refresh.');
       revealFocus();}
     // A tier named by open_models_window(focus) — the row a Script/transliteration menu's "install"
     // link was pointing at. Consumed ONCE: this list re-draws after every install and on Refresh, and
@@ -2195,6 +2279,10 @@ class Api:
         setTimeout(tick,500);};
       tick();}
     document.getElementById('q').addEventListener('input',draw);
+    // The toggle re-filters IN PLACE — the listing is already loaded, so it costs no bridge call.
+    (function(){var b=document.getElementById('instonly');
+      b.onclick=function(){INST_ONLY=!INST_ONLY;
+        b.classList.toggle('on',INST_ONLY); b.setAttribute('aria-pressed',String(INST_ONLY)); draw();};})();
     document.getElementById('refresh').onclick=function(){load(true);};
     document.getElementById('close').onclick=function(){try{api().close_child_window('models');}catch(_){}};
     document.addEventListener('keydown',function(e){if(e.key==='Escape'){e.preventDefault();try{api().close_child_window('models');}catch(_){}}});

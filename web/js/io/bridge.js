@@ -110,7 +110,7 @@ function openFolderMenu(){ closeFolderMenu();
   // native macOS proxy-icon placement: the menu sits right ON the title, leading (file) item anchored over the filename
   const r=anchor.getBoundingClientRect(), mw=m.offsetWidth, mh=m.offsetHeight;
   const left=Math.max(6,Math.min(r.left, innerWidth-mw-8));
-  const top=Math.max(6,Math.min(r.top-4, innerHeight-mh-8));
+  const top=Math.max(menuTopBound(),Math.min(r.top-4, innerHeight-mh-8));   // the proxy-icon menu opens ON the title, i.e. as high as any menu goes — so it is the one most likely to meet the native tab bar (menuTopBound, js/core/scroll.js)
   m.style.left=left+"px"; m.style.top=top+"px";
   setTimeout(()=>{ document.addEventListener("mousedown",_fpOutside,true); document.addEventListener("keydown",_fpKey,true); },0);
 }
@@ -125,7 +125,15 @@ function setTitle(name){ if(name)DOCNAME=name;
 // stored-transliteration rewrite, a session restored from disk — which stay dirty regardless of the history.
 function markDirty(v=true){ if(!v) DIRTY_BASE=false;
   DIRTY=!!v&&(DIRTY_BASE||UNDO.length>0);
-  if(hasBridge())try{window.pywebview.api.set_dirty(DIRTY);}catch(e){} setTitle(); }
+  if(hasBridge())try{window.pywebview.api.set_dirty(DIRTY);}catch(e){} setTitle();
+  /* …and the SCRIPT renderings that are keyed on more than the form follow the edit that invalidated
+     them. Only Latin macronisation is (app/macron.py reads UPOS + FEATS + lemma), and this is the one
+     funnel every document edit passes through — so hanging the refresh here is what makes it true of
+     ANY attribute of any token rather than of the handful of edit sites someone thought to instrument.
+     Debounced and self-gating; a no-op in every other language. Guarded because js/lang/translit-load.js
+     loads AFTER this module. */
+  if(v && typeof scheduleOrthoMorph==="function") scheduleOrthoMorph();
+  if(v && typeof scheduleLaMacron==="function") scheduleLaMacron(); }   // …and the MSeg tier's own copy of those lengths, which is annotation rather than display and therefore does NOT follow the Script pill (see fillLaMacron)
 function markDirtyBase(){ DIRTY_BASE=true; markDirty(); }   // an unsaved change with no undo entry to show for it
 // Stamp the one scheme a DOCUMENT owns onto its first sentence: the transliteration its MISC Translit/LTranslit
 // is written in. The script and the displayed romanisation are the READER's, kept per-language in PREFS, and
@@ -471,6 +479,30 @@ function hideBusy(){ const el=document.getElementById("statusBusy"); if(!el)retu
 // reproduces exactly the preview tokens (and, unlike a Doc rebuilt from bare words, keeps the tokeniser's own
 // norm/tag exceptions). Editing a single token takes a different path (regenTok) — it doesn't re-tokenise.
 async function paintTr(){ if(show.translit) await fillTranslit(); if((ORTHO_SCHEME&&ORTHO_SCHEME!=="none")||isSanskritLang()) await fillOrtho(); }
+/* ── ARE WE INSIDE A MULTI-SENTENCE INSERT? ────────────────────────────────────────────────────────
+   RENDER_HOLD (js/core/document.js) is raised by exactly one caller — __insertPastedText, around the
+   loop that inserts a paste sentence by sentence — so "the render is being held" and "we are part way
+   through a batch" are the same fact, and this reads it under the name the callers below actually
+   mean. It is what lets doInsert skip the work that is per-DOCUMENT rather than per-sentence.
+   Guarded for a harness that loads this module without document.js. */
+function inInsertBatch(){ return typeof RENDER_HOLD==="number" && RENDER_HOLD>0; }
+/* ONE SENTENCE OF A BATCHED PARSE, spliced in. This is doInsert's parsed branch with every bridge
+   call removed — the answer is already in hand — and with the per-sentence renders, picks, scrolls and
+   toasts removed too, which inInsertBatch was suppressing there anyway. What it keeps is everything
+   that is about the DOCUMENT rather than about the parser: the sid, the splice, the cascade and the
+   morphemic tiers, all inside the caller's one undo entry and one render hold.
+   Deliberately NOT folded into doInsert as an optional argument: doInsert's shape is "go and find out
+   what this sentence is", and it earns its two-phase reveal (tokens first, tree after) precisely
+   because the reader is waiting on one sentence. A batch has already found out, and has nothing to
+   reveal progressively. */
+function insertParsed(index,text,res){
+  const toks=((res&&res.tokens)||[]).map(t=>({...t,head:String(t.head)}));
+  const sid=autoInsertSid(index);
+  const b={sid,text:(text||"").trim(),tokens:toks.length?toks:buildTokens(text)};
+  const mwt=(res&&res.mwt)||[]; if(mwt.length) b.mwt=mwt;
+  DOC.splice(index,0,b); cascadeSids(index); sel={s:index,t:0};
+  morphAfterReparse(b);   // seed MSeg/MGloss from the FEATS this parse produced, as doInsert does
+  markDirty(); }
 const _doInsert=doInsert;
 doInsert=async function(index,text){
   if(hasBridge()&&model){
@@ -484,15 +516,20 @@ doInsert=async function(index,text){
        sentence-level command (insert, move, delete, the boundary toggles) at a token instead of at the block
        they just made. `t:0` is the state a block is in when it is merely being read (see the CURBLOCK note in
        js/core/prefs.js), which is exactly what a fresh parse leaves behind. */
-    cascadeSids(index); sel={s:index,t:0}; markDirty(); renderDoc(); pick(index,0,true);
-    await paintTr();                                                                 // transliterate the tokeniser's tokens BEFORE the parse
+    cascadeSids(index); sel={s:index,t:0}; markDirty(); renderDoc(); pick(index,0,!inInsertBatch());   // …and no SCROLL inside a batch: the run is walked forward one sentence at a time, so scrolling to each in turn drags the viewport down the whole paste and lands on the last. __insertPastedText scrolls once, to the FIRST
+    /* THE WHOLE-DOCUMENT PASSES ARE NOT PER-SENTENCE WORK, and inside a batch they were being paid for
+       as though they were. paintTr (fillTranslit + fillOrtho) walks the ENTIRE DOC on every call and
+       awaits a bridge round-trip; run once per inserted sentence it is O(sentences × document), for an
+       answer that is only correct at the end anyway. Held to the end of the batch, where
+       __insertPastedText runs it once. Outside a batch this is the same await it always was. */
+    if(!inInsertBatch()) await paintTr();                                            // transliterate the tokeniser's tokens BEFORE the parse
     const bt=document.getElementById("busyText"); if(bt)bt.textContent="Parsing…"; let r;
     try{ r=await window.pywebview.api.parse_text(text,model); }catch(e){ hideBusy(); return toast("Parse failed: "+e); }finally{ hideBusy(); }
     const b=DOC[index]; b.tokens=r.tokens.map(t=>({...t,head:String(t.head)})); b.mwt=r.mwt||[]; if(!b.mwt.length)delete b.mwt;
     morphAfterReparse(b);   // an inserted sentence's tokens carry no MSeg/MGloss either — seed both tiers from the FEATS this parse produced, so a new block doesn't sit tierless among sentences that all have them (same undo entry as the insert)
     renderDiagramIncremental(index);   // as in applySentText's parsed branch — the freshly parsed block converges on its tree instead of sitting blank
-    markDirty(); renderDoc(); pick(index,0,true);   // …and again once the parse lands: the block stays the selection (see above)
-    toast(r.parsed?`Parsed · ${MODELINFO[model]||model}`:(r.reason?`Whitespace tokeniser (no parse: ${r.reason})`:"Whitespace tokeniser"));
+    markDirty(); renderDoc(); pick(index,0,!inInsertBatch());   // …and again once the parse lands: the block stays the selection (see above)
+    if(!inInsertBatch()) toast(r.parsed?`Parsed · ${MODELINFO[model]||model}`:(r.reason?`Whitespace tokeniser (no parse: ${r.reason})`:"Whitespace tokeniser"));   // a batch says "Inserted N sentences" once; N per-sentence toasts would queue behind each other and outlive the insert
     // ⚠ THE MWT PASS RUNS FIRST, AND IS AWAITED. Both it and fillOrtho re-fuse every range through
     // Api.sanskrit_mwt, and firing them together raced: fillOrtho set m.ortho from its own answer while
     // sandhiMwtForms was clearing m.ortho to force a re-render, so whichever landed second decided what
@@ -500,9 +537,11 @@ doInsert=async function(index,text){
     // same edit applied by hand updated it — the edit path calls sandhiMwtForms alone, with nothing to
     // race. Settling the forms before anything renders from them removes the race rather than ordering it.
     if(isSanskritLang())await autoGroupSanskritMWTs(index,!!(r.mwt&&r.mwt.length));   // keep the TOKENISER's ranges (r.mwt); Compound=Yes only when the parse published none
-    if(show.translit)fillTranslit(); if((ORTHO_SCHEME&&ORTHO_SCHEME!=="none")||isSanskritLang())fillOrtho();   // item 2: re-apply the SCRIPT now the parse's tokens (and its MWT forms) are in
-    annotateTranslitMisc(index).then(ch=>{ if(ch)preserveScroll(renderDoc); });   // parse pass → write MISC Translit/LTranslit
-    const el=document.querySelector(`.sblock[data-i="${index}"]`); if(el)el.scrollIntoView({block:"center",behavior:"smooth"}); return;
+    if(!inInsertBatch()){   // …the same whole-document passes again, and held for the same reason
+      if(show.translit)fillTranslit(); if((ORTHO_SCHEME&&ORTHO_SCHEME!=="none")||isSanskritLang())fillOrtho();   // item 2: re-apply the SCRIPT now the parse's tokens (and its MWT forms) are in
+      annotateTranslitMisc(index).then(ch=>{ if(ch)preserveScroll(renderDoc); });   // parse pass → write MISC Translit/LTranslit
+      const el=document.querySelector(`.sblock[data-i="${index}"]`); if(el)el.scrollIntoView({block:"center",behavior:"smooth"}); }
+    return;
   }
   _doInsert(index,text); markDirty(); };
 
@@ -588,12 +627,40 @@ window.__insertPastedText=async function(text,index,opts){ opts=opts||{};
      leave the batch counter raised — every later edit in the session would then push no undo entry at all. */
   beginUndoBatch(); beginRenderHold();   // …and hold the per-sentence re-render with it: doInsert repaints the whole document each time round, which is ~250 ms per sentence on a large file (see beginRenderHold, js/core/document.js)
   try{
+  /* ── SENTENCISE EVERY PARAGRAPH FIRST, THEN PARSE THE WHOLE PASTE IN ONE CALL ────────────────
+     The loop below used to do both at once, so each sentence cost two awaited bridge round-trips of
+     its own (doInsert: tokenize, then parse_text) — 160 of them for an 80-sentence paste, each
+     re-entering the pipeline for a single string. Splitting the two phases lets `parse_texts`
+     (Api.parse_texts → parse.parse_many) answer for the entire paste at once, with the engine's own
+     batching underneath: spaCy through `nlp.pipe`, and Stanza with a SINGLE grew UD→SUD conversion
+     that its worker pool runs in parallel. Measured on the backend alone, 40 English sentences:
+     86 ms → 42 ms, 2.05×, byte-identical output.
+     THE FALLBACK IS THE OLD PATH, UNCHANGED. `parsed` stays null with no bridge, no model, a single
+     sentence (nothing to batch) or a call that throws, and the loop then calls doInsert per sentence
+     exactly as before — including its own tokenize/parse and its progressive reveal, which is worth
+     having when there is only one sentence to wait for. */
+  const paraSents=[];
   for(const para of paras){
     let sents=null;
     if(hasBridge()){ try{ const r=await window.pywebview.api.sentencize(para.body, DOCLANG||"", model||""); sents=(r&&r.sentences)||null; }catch(e){ sents=null; } }
     if(!sents||!sents.length) sents=localSentSplit(para.body);
     if(!sents.length) sents=[para.body];
-    for(let k=0;k<sents.length;k++){ await doInsert(index,sents[k]);   // doInsert (bridge-aware) parses each sentence via the model, or whitespace-tokenises with none
+    paraSents.push(sents); }
+  const flat=paraSents.flat();
+  let parsed=null, pi=0;
+  if(hasBridge()&&model&&flat.length>1){
+    showBusy(`Parsing ${flat.length} sentences…`);
+    try{ const r=await window.pywebview.api.parse_texts(flat,model); parsed=(r&&r.results)||null; }
+    catch(e){ parsed=null; }
+    finally{ hideBusy(); }
+    if(parsed&&parsed.length!==flat.length) parsed=null;   // belt and braces: a per-entry answer that doesn't line up is unusable, and the per-sentence path is right there
+  }
+  for(let p=0;p<paras.length;p++){
+    const para=paras[p], sents=paraSents[p];
+    for(let k=0;k<sents.length;k++){
+      if(parsed){ insertParsed(index,sents[k],parsed[pi]); }   // …the batched answer, spliced straight in
+      else await doInsert(index,sents[k]);   // doInsert (bridge-aware) parses each sentence via the model, or whitespace-tokenises with none
+      pi++;
       if(k===0&&DOC[index]){                      // the paragraph's first sentence carries whatever this paragraph opens
         if(para.doc!=null) DOC[index].newdoc=para.doc||true;   // a `# Heading` ⇒ a NAMED document boundary. `||true` because an empty heading is still a boundary, just an unnamed one
         if(para.par!=null) DOC[index].newpar=para.par||true;   // a `## Heading` ⇒ a NAMED paragraph boundary…
@@ -602,6 +669,22 @@ window.__insertPastedText=async function(text,index,opts){ opts=opts||{};
     paraCounts.push(sents.length); }   // ≥1 by construction (the two fallbacks above guarantee it), which the aligner relies on: a zero-block paragraph would have no sentence for its translation to land on
   if(multi) renderDoc();   // the ¶ marks were set AFTER doInsert had already drawn each block, so one repaint at the end puts them on screen — INSIDE the hold, so it simply marks the single pending render rather than adding one of its own
   } finally { endRenderHold(); endUndoBatch(); }   // unwind in the reverse order they were opened; endRenderHold is what performs the one real repaint
+  /* ── THE PER-DOCUMENT WORK, ONCE, NOW EVERY SENTENCE IS IN ────────────────────────────────────
+     doInsert skipped these while the batch ran (inInsertBatch), because each is a pass over the WHOLE
+     document and running one per inserted sentence is O(sentences × document) for an answer that is
+     only correct once the last sentence has landed. AFTER endRenderHold, so the blocks they re-render
+     from exist. Best-effort: an insert that has already succeeded must not be reported as a failure
+     because a derived row could not be filled. */
+  if(n){ try{ await paintTr(); }catch(e){ console.error("insert: transliteration pass failed",e); }
+    try{ await annotateTranslitMisc(); }catch(e){ console.error("insert: MISC Translit pass failed",e); } }   // no `si` → every sentence, which is what one pass at the end means
+  /* …AND THE VIEWPORT LANDS ON THE FIRST OF THEM, not the last. The loop walks `index` forward, so the
+     selection and the rendered window ended up on the final sentence of the paste — the reader was
+     shown the end of what they had just added and had to scroll back to read it from the top. `start`
+     was captured before the loop for exactly this kind of question. scrollToSentence (js/core/document.js)
+     recentres the virtualization window first, so this works however far the paste ran. */
+  if(n){ sel={s:start,t:0}; CURBLOCK=start;
+    pick(start,0,false);   // scroll:false — pick aims at the token's GRID ROW, which does not exist with the grids hidden, so it would silently no-op. The block is what we want on screen anyway
+    if(typeof alignBlockTop==="function") alignBlockTop(start); }   // js/core/scroll.js — recentres the virtualization window, then puts the block flush under the toolbar
   if(n>1&&!opts.quiet) toast(multi?`Inserted ${n} sentences in ${paras.length} paragraphs`:`Inserted ${n} sentences`);
   return {start,count:n,paras:paras.length,paraCounts}; };
 
@@ -897,7 +980,19 @@ function syncGlossUI(){ const g=document.querySelector('#toggles [data-t2="gloss
   // analysis are different things, and an mSUD document has as much use for the first as any other. (This used to
   // grey the checkbox out under mSUD on the reasoning that the morphemic gloss superseded it — it doesn't.)
   if(g){ g.checked=GLOSS_ON; g.disabled=false; const lab=g.closest("label"); if(lab){ lab.classList.remove("chk-off"); lab.title=""; } }
-  if(m)m.checked=MORPH_ON;
+  /* ⚠ THE MORPHEMIC TIER IS UNAVAILABLE FOR LATIN WITHOUT THE MACRONISER, and that is a statement about
+     what a Latin segmentation IS. A treebank spells Latin with no vowel lengths, so `divisa` divides into
+     morphemes only once something knows the word is `dīvīsa` — the boundary is a claim about the stem and
+     the ending, and a length-blind segmentation puts it in a place its author would not have chosen. The
+     tier therefore waits for the table rather than offering a worse version of itself; the checkbox says
+     so and the Script menu's own "With macrons" row is one click from installing it (js/lang/translit.js).
+     Gated on the LANGUAGE, not on the scheme being switched on: MSeg carries the macrons whatever the
+     Script pill is set to (see msegMacronise), because the segmentation is annotation and the pill is a
+     display preference. Every other language is untouched — macronNeeded() is false for all of them. */
+  if(m){ const need=(typeof macronNeeded==="function")&&macronNeeded(), lab=m.closest("label");
+    m.checked=MORPH_ON&&!need; m.disabled=need;
+    if(lab){ lab.classList.toggle("chk-off",need);
+      lab.title=need?"Latin morpheme glossing needs vowel lengths — install “Latin macrons” in Manage Models":""; } }
   // item 3: the Show/Hide VISIBILITY checkboxes appear only when the tier is present, and reflect GLOSS_VIS / MORPH_VIS
   const gv=document.querySelector('#toggles [data-vis="gloss"]'), mv=document.querySelector('#toggles [data-vis="morph"]');
   if(gv){ gv.checked=GLOSS_VIS; const l=gv.closest("label"); if(l)l.style.display=GLOSS_ON?"":"none"; }
@@ -958,7 +1053,7 @@ function syncGlossUI(){ const g=document.querySelector('#toggles [data-t2="gloss
 //
 // Not a live citation-perfect ordering for every category (nobody has run a corpus study on, say, Clusivity vs.
 // Reflex), but internally consistent and easy to re-order by hand if a specific placement should move.
-const MGLOSS_FEAT_ORDER=["Case","Person","Number","Clusivity","ExtPos","Polite","Deixis","DeixisRef","Degree","Definite","Gender","Animacy","NounClass","Evident","Tense","Aspect","Mood","Polarity","Voice","VerbForm","PronType","NumType","Poss","Reflex","Abbr"];   // Case pinned just AHEAD of the Person/Number agreement block, per instruction, so it glosses BEFORE Number (and can't split the fused Person+Number "3SG")   // item 2: the POS-subtype features (PronType, NumType, Poss, Reflex, Abbr) sit at the END of the hierarchy, so their Leipzig abbreviations gloss AFTER every non-subtype feature   // item 5: Polite sits with the other participant-oriented categories; DeixisRef immediately follows the Deixis value it anchors; Abbr — a property of the word FORM rather than of any morpheme — trails every inflectional category   // item 9b, per instruction: CLUSIVITY GOES BETWEEN NUMBER AND GENDER — i.e. directly after Number, glued to the Person/Number run it qualifies. A GENERAL rule about where Clusivity sits, applied to this RESTING order as well as inside the moved nominal block below, so the two never disagree. It used to sit after ExtPos, beside Polite (item 5's "participant-oriented" grouping); moving it up leaves Polite where it was rather than dragging it along, so Polite and Clusivity are no longer adjacent — Clusivity's slot is now fixed by a rule of its own and Polite's by item 5's, and only Clusivity was asked to move
+const MGLOSS_FEAT_ORDER=["Case","Person","Number","Clusivity","PronType","NumType","Poss","Reflex","Abbr","ExtPos","Polite","Deixis","DeixisRef","Degree","Definite","Gender","Animacy","NounClass","Evident","Tense","Aspect","Mood","Polarity","Voice","VerbForm"];   // Case pinned just AHEAD of the Person/Number agreement block, per instruction, so it glosses BEFORE Number (and can't split the fused Person+Number "3SG")   // ⚠ THE POS-SUBTYPE FEATURES (PronType, NumType, Poss, Reflex, Abbr) COME RIGHT AFTER NUMBER, per instruction — "3SG.PERS". They used to sit at the very END of the hierarchy (item 2), on the reasoning that a subtype qualifies the WORD CLASS rather than any morpheme, so it should trail every inflectional category; the instruction supersedes that. Placed after Clusivity rather than between Number and Clusivity, because item 9b pinned Clusivity "directly after Number, GLUED to the Person/Number run it qualifies" — 1PL.INCL is one agreement statement and nothing may split it, so "right after Number" here means "right after the agreement run Number belongs to". With no Clusivity (every language but a handful, and every example in the instruction) the two readings coincide exactly   // item 5: Polite sits with the other participant-oriented categories; DeixisRef immediately follows the Deixis value it anchors; Abbr — a property of the word FORM rather than of any morpheme — trails every inflectional category   // item 9b, per instruction: CLUSIVITY GOES BETWEEN NUMBER AND GENDER — i.e. directly after Number, glued to the Person/Number run it qualifies. A GENERAL rule about where Clusivity sits, applied to this RESTING order as well as inside the moved nominal block below, so the two never disagree. It used to sit after ExtPos, beside Polite (item 5's "participant-oriented" grouping); moving it up leaves Polite where it was rather than dragging it along, so Polite and Clusivity are no longer adjacent — Clusivity's slot is now fixed by a rule of its own and Polite's by item 5's, and only Clusivity was asked to move
 const MGLOSS_FEAT_RANK={}; MGLOSS_FEAT_ORDER.forEach((f,i)=>MGLOSS_FEAT_RANK[f]=i);
 /* CASE MOVES depending on whether PERSON is in play, which is why this takes a second argument at all.
    With no person marking, Case glosses BEFORE Number — "NOM.SG", the ordinary nominal sequence, which is what
@@ -1006,10 +1101,26 @@ const MGLOSS_FEAT_RANK={}; MGLOSS_FEAT_ORDER.forEach((f,i)=>MGLOSS_FEAT_RANK[f]=
    the unlisted-feature default: it is a named key in the no-person map too, immediately after Number, ahead of the
    gender group. Same rule, same relative position, in both orders and in the resting table.
    NOT in the block, deliberately: Definite (referential grounding, not a category case agrees with — its own slot). */
-const MGLOSS_NOMINAL={Case:0,Person:0,Number:0,Clusivity:0,Gender:0,Animacy:0,NounClass:0};   // membership set; the values are replaced per-call below
-function mglossNominalOrder(f,hasPerson){ return hasPerson
-  ? ({Person:0,Number:1,Clusivity:2,Case:3,Gender:4,Animacy:5,NounClass:6})[f]
-  : ({Case:0,Number:1,Clusivity:2,Gender:3,Animacy:4,NounClass:5})[f]; }
+/* …AND THE POS-SUBTYPE FEATURES TRAVEL WITH THE BLOCK, at their own slot inside it. They are in the
+   membership set for one reason: with Case present the whole nominal block moves to the END (item 14),
+   so a subtype left behind at its resting rank would gloss BEFORE the very run it was just asked to
+   follow — a personal pronoun would come out `PERS.3SG.NOM` instead of `3SG.PERS.NOM`. Being in the
+   block, they keep the position the resting order gives them: immediately after the Person/Number/
+   Clusivity agreement run, and ahead of Case and the gender group. */
+const MGLOSS_NOMINAL={Case:0,Person:0,Number:0,Clusivity:0,Gender:0,Animacy:0,NounClass:0,
+                      PronType:0,NumType:0,Poss:0,Reflex:0,Abbr:0};   // membership set; the values are replaced per-call below
+const MGLOSS_SUBTYPE_ORDER=["PronType","NumType","Poss","Reflex","Abbr"];   // their order among THEMSELVES, unchanged from the table
+function mglossNominalOrder(f,hasPerson){
+  const sub=MGLOSS_SUBTYPE_ORDER.indexOf(f);
+  const base=hasPerson
+    ? ({Person:0,Number:1,Clusivity:2})[f]
+    : ({Number:1,Clusivity:2})[f];
+  if(base!=null) return base;
+  if(sub>=0) return 3+sub;                      // the subtype run, right after the agreement run
+  const after=3+MGLOSS_SUBTYPE_ORDER.length;    // …and everything else shifts past it
+  return hasPerson
+    ? ({Case:after,Gender:after+1,Animacy:after+2,NounClass:after+3})[f]
+    : ({Case:-1,Gender:after+1,Animacy:after+2,NounClass:after+3})[f]; }   // no person → Case LEADS the block (…NOM.SG.M), which is what its own -1 says
 function mglossFeatRank(f,hasPerson,hasCase){
   if(hasCase&&Object.prototype.hasOwnProperty.call(MGLOSS_NOMINAL,f)){
     const o=mglossNominalOrder(f,hasPerson);
@@ -1265,6 +1376,16 @@ function mglossAcAccept(mg,caret,ab,upos){
     newStem = featName ? insertGlossAbbrevAtRank(stem,featName,ab) : (stem?stem+"."+ab:ab); }   // no FEATS category resolved (shouldn't happen for anything MGLOSS_AC_ITEMS offers) → the same append fallback insertGlossAbbrevAtRank itself uses
   const joiner = right && !/^[.\-]/.test(right) ? "." : "";   // reconnect an untouched tail (the caret was mid-string) with a category separator, unless it already starts with one
   return {mg:newStem+joiner+right, caret:newStem.length}; }
+/* Replace the abbreviation run at position `idx` — counting ABBREVIATION RUNS ONLY, in reading order —
+   with `ab`, leaving every other character of the gloss (its dots, its hyphens, its lexical stem) exactly
+   where it was. `idx` is what the renderer already knows: setGlossText (js/core/prefs.js) wraps each run
+   in its own .glabbr node, so the nth such node IS the nth run glossAbbrSegments finds, and the caller
+   can name the one that was clicked without matching on its text — which two identical abbreviations in
+   one gloss ("3SG.M.GEN" beside another GEN) would make ambiguous. Substituting in place rather than
+   going through insertGlossAbbrevAtRank, because this is not an insertion: the slot is already the
+   reader's, and re-ranking would move a value they had deliberately put somewhere else. */
+function mglossReplaceAbbrevIdx(mg,idx,ab){ let n=-1;
+  return glossAbbrSegments(mg||"").map(([t,isAb])=>{ if(!isAb) return t; n++; return n===idx?ab:t; }).join(""); }
 function rebuildGlossMaps(){ EFF_FEATS_GLOSS=Object.assign({},FEATS_GLOSS,(typeof PREFS==="object"&&PREFS&&PREFS.glossMap)||{});
   GLOSS_FEATS={}; for(const fv in EFF_FEATS_GLOSS){ const ab=EFF_FEATS_GLOSS[fv]; if(!ab)continue; (GLOSS_FEATS[ab]||(GLOSS_FEATS[ab]=[])).push(fv); }
   rebuildMglossAcItems(); }
@@ -1346,9 +1467,21 @@ function mglossSyncFeats(tk){ const adds=glossToFeats(tierText(tk,"mgloss"),tk.u
 // newFeatsStr. Extracted so regenSecondaries (Task B) can reuse the exact same non-destructive retarget for a
 // background re-parse's own FEATS changes, without featsSyncGloss's MORPH_ON gate (a reparse must preserve an
 // EXISTING MGloss regardless of whether the morph tier happens to be displayed right now — see regenSecondaries'
-// own comment). Only ever retargets/drops an abbreviation ALREADY present — never invents one for a feature that
-// had none before (same restraint featsSyncGloss has always had).
-function retargetGlossForFeatsChange(mg,oldFeatsStr,newFeatsStr){ if(!mg) return mg;
+// own comment).
+/* ⚠ AND IT IS SYMMETRIC: a value that CHANGED is retargeted, a feature that was REMOVED is dropped, and a
+   feature that was ADDED is inserted. That third case used to be missing on purpose — "never invents an
+   abbreviation for a feature that had none before" — on the reasoning that a category absent from the gloss
+   was absent by choice. That reasoning does not survive `FEATS_GLOSS` becoming total: 201 of the 205 UD
+   feature values carry exactly one abbreviation, and the four that do not (`Typo`, `Foreign`, and SUD's own
+   `Shared`) are bookkeeping that is deliberately unglossable. With a one-to-one mapping, an absent
+   abbreviation for a feature the token HAS is not a choice, it is a gap — and the asymmetry showed as one:
+   setting `Number=Plur` on a token glossed `dog` left `dog`, while changing it to `Number=Sing` afterwards
+   would have had nothing to retarget either, so the category could never enter the gloss at all.
+   ⚠️ IT REMAINS SCOPED TO WHAT THIS EDIT CHANGED, which is the difference between this and a rebuild. A
+   feature whose value did not move is not touched, so a gloss the annotator has trimmed by hand stays
+   trimmed until they edit that very feature — and toggling `Foreign` on a token still moves nothing, as
+   the comments at its call sites promise, because that feature has no abbreviation to insert. */
+function retargetGlossForFeatsChange(mg,oldFeatsStr,newFeatsStr,upos){ if(!mg) return mg;
   const splitFV=s=>{ const m={}; (s&&s!=="_"?s.split("|"):[]).forEach(fv=>{ const e=fv.indexOf("="); if(e>0)m[fv.slice(0,e)]=fv; }); return m; };
   const oldMap=splitFV(oldFeatsStr), newMap=splitFV(newFeatsStr);
   let out=mg;
@@ -1356,10 +1489,66 @@ function retargetGlossForFeatsChange(mg,oldFeatsStr,newFeatsStr){ if(!mg) return
     const oldAb=EFF_FEATS_GLOSS[oldMap[feat]]; if(!oldAb) continue;   // the old value had no gloss abbreviation → nothing to retarget
     const newAb=newMap[feat]?EFF_FEATS_GLOSS[newMap[feat]]:null;   // null → the feature was removed outright, or its new value has no gloss
     out=retargetGlossAbbrev(out,oldAb,newAb); }
+  /* Every feature THIS EDIT TOUCHED then ends up glossed, whether the loop above found an abbreviation to
+     move or not: a category the token did not carry before has none by definition, and one whose
+     abbreviation the annotator had deleted has none either — and "the value you just changed is not in the
+     gloss" is the same gap in both cases. `mglossAddFeats` skips whatever is already there, so a feature the
+     retarget handled is not touched twice. */
+  const touched=Object.keys(newMap).filter(f=>newMap[f]!==oldMap[f]);
+  return touched.length?mglossAddFeats(out,newFeatsStr,upos,touched):out; }
+/* ── INSERTING THE ABBREVIATION FOR A CATEGORY THE GLOSS DOES NOT YET SPEAK FOR ─────────────────
+   Scoped to the `feats` it is handed — the ones the caller's edit actually added — never the whole
+   FEATS string, so this stays an edit-driven sync and not a rebuild.
+
+   ⚠ ADDITIVE, AND THAT IS THE WHOLE REASON IT IS NOT `composeMGloss`. Every abbreviation, hyphen and
+   dot already in the gloss stays exactly where the annotator (or a prior parse) put it, so a
+   hand-placed morpheme boundary and a hand-added abbreviation no FEATS value implies both survive —
+   which is precisely what Task B recorded a wholesale rebuild as having destroyed. Measured: on a
+   token whose MGloss is the ordinary auto-generated one, the result is byte-identical to a fresh
+   `composeMGloss`, so the common case is canonical and only a hand-edited gloss is treated more
+   gently than a rebuild would treat it. */
+function mglossFeatsPresent(mg,upos){ const out=new Set();
+  (mg||"").split(/[.\-]/).filter(Boolean).forEach(tok=>{ if(!GLOSS_ABBR_TOK_RE.test(tok)) return;   // a lexical stem names no category
+    const pn=splitPersonNumber(tok);   // a FUSED "3SG" speaks for Person AND Number — neither may be re-inserted beside it
+    (pn||[tok]).forEach(part=>{ const f=mglossFeatNameFor(part,upos); if(f) out.add(f); }); });
   return out; }
+function mglossAddFeats(mg,featsStr,upos,feats){ const have=mglossFeatsPresent(mg,upos); let out=mg||"";
+  const fvs=(featsStr&&featsStr!=="_")?featsStr.split("|"):[];
+  const abOf=f=>{ const fv=fvs.find(x=>x.slice(0,x.indexOf("="))===f); return fv?EFF_FEATS_GLOSS[fv]:null; };
+  const want=(feats||[]).filter(f=>!have.has(f)&&abOf(f));   // already glossed, or unglossable (Typo/Foreign/Shared) → nothing to do
+  if(!want.length) return out;
+  /* Person and Number are written FUSED by featsToGloss ("3SG", not "3.SG"), so agreement has to arrive as
+     ONE token or this path would spell it in the one shape the rest of the app never produces. Three cases,
+     because the half already in the gloss keeps its own slot: both arriving → one fused insert; one arriving
+     beside a partner already there → fuse ONTO that partner where it stands, rather than inserting the new
+     half beside it, which is what produced `walk-3.SG` from a hand-segmented `walk-SG`. A fuse that does not
+     fire (the partner is hand-spelt as something EFF_FEATS_GLOSS does not name) falls through to the
+     ordinary insert below. */
+  const pAb=abOf("Person"), nAb=abOf("Number"), wantP=want.includes("Person"), wantN=want.includes("Number");
+  if(pAb&&nAb&&wantP&&wantN){ out=insertGlossAbbrevAtRank(out,"Person",pAb+nAb); have.add("Person"); have.add("Number"); }
+  else if(pAb&&nAb&&wantP&&have.has("Number")){ const f=retargetGlossAbbrev(out,nAb,pAb+nAb); if(f!==out){ out=f; have.add("Person"); } }
+  else if(pAb&&nAb&&wantN&&have.has("Person")){ const f=retargetGlossAbbrev(out,pAb,pAb+nAb); if(f!==out){ out=f; have.add("Number"); } }
+  want.forEach(f=>{ if(have.has(f)) return; out=insertGlossAbbrevAtRank(out,f,abOf(f)); have.add(f); });
+  return out; }
+/* …and the LEXICAL half follows the retag too, because whether a token has one at all is a question
+   about its word class. Every builder in this file writes the stem gloss into MGloss only for an OPEN
+   class — `(GLOSS_ON && !UPOS_LEIPZIG_ABBR[t.upos]) ? Gloss : ""` — since a closed-class tag already
+   carries its own Leipzig abbreviation (AUX/DET) and its meaning is that abbreviation, not a
+   definition. So a retag ACROSS that boundary has to add or drop the stem, and neither
+   `retargetGlossForFeatsChange` nor `retargetGlossForUposChange` can: FEATS says nothing about a stem,
+   and the UPOS retarget only ever moves the prefix. Left alone, retagging VERB → AUX left the stem
+   stranded behind the newly-prepended prefix (`dog.SG` → `AUX.dog.SG`) and AUX → VERB left the token
+   with no stem gloss at all where a fresh parse would have given it one.
+   An existing lexical part is never rewritten — only supplied where the class now wants one and there
+   is none, so an annotator's own wording survives a retag exactly as their abbreviations do. */
+function mglossReglossLexical(tk,mg){
+  if(UPOS_LEIPZIG_ABBR[tk.upos]) return keepGlossAbbrevs(mg);   // closed class → the stem belongs to the Gloss tier (rebuildGlossTokens keeps the attachment marks)
+  if(mglossLexicalPart(mg)) return mg;
+  const lex=GLOSS_ON?miscKV(tk.misc,"Gloss").replace(/-/g,"_"):"";   // the same cross-tier prefill every other builder here uses
+  return lex?(mg?lex+"."+mg:lex):mg; }
 function featsSyncGloss(tk,oldFeatsStr){ if(!MORPH_ON) return false;
   const mg=tierText(tk,"mgloss"); if(!mg) return false;
-  const next=retargetGlossForFeatsChange(mg,oldFeatsStr,tk.feats);
+  const next=retargetGlossForFeatsChange(mg,oldFeatsStr,tk.feats,tk.upos);   // …and the UPOS, which is only ever read to disambiguate an abbreviation that names more than one category
   if(next===mg) return false;
   tk.misc=setMiscKV(tk.misc,"MGloss",next); return true; }
 // Task B — the UPOS analogue of retargetGlossForFeatsChange: UPOS drives exactly ONE piece of MGloss on its
@@ -1431,13 +1620,21 @@ function detectXposMirrorsUpos(){
 // item 7: the Glossing drawer's two checkboxes toggle the tiers. Checking creates+shows (undoable);
 // unchecking DELETES the tier, confirming ONLY when it has data. All undoable via snap() (captures the flags + MISC).
 async function setTier(kind,on){ const flag=kind==="gloss"?GLOSS_ON:MORPH_ON; if(on===flag){ syncGlossUI(); return; }
+  /* …EXCEPT the morphemic tier in Latin with no macroniser, which the checkbox is already disabled for
+     (syncGlossUI) — this is the same refusal said again at the command, so the Edit-menu/keyboard route
+     and any restored preference cannot get in around the disabled control. The toast names the remedy
+     rather than the obstacle. */
+  if(on && kind==="morph" && typeof macronNeeded==="function" && macronNeeded()){
+    syncGlossUI(); toast("Latin morpheme glossing needs vowel lengths — install “Latin macrons” in Manage Models"); return; }
   if(on){ pushUndo();   // every tier is available in every format — mSUD adds the morph level alongside the lexical gloss, it doesn't rule it out (see syncGlossUI)
     if(kind==="gloss"){ GLOSS_ON=true;
       // cross-tier prefill: MGloss already exists (enabled first) → seed Gloss from MGloss's own lexical part
       // (the stem gloss the user already typed there), underscores→hyphens for the flat Gloss tier's convention
       if(MORPH_ON) DOC.forEach(s=>s.tokens.forEach(t=>{ if(miscKV(t.misc,"Gloss"))return;
         const lex=mglossLexicalPart(tierText(t,"mgloss")); if(lex) t.misc=setMiscKV(t.misc,"Gloss",lex.replace(/_/g,"-")); })); }
-    else { MORPH_ON=true; DOC.forEach(morphPrefillSent); }   // item 11b/12b: seed both morphemic tiers wherever they're empty — part of THIS undoable snapshot
+    else { MORPH_ON=true;
+      if(isLatinLang()&&typeof fillLaMacron==="function"){ try{ await fillLaMacron(); }catch(e){} }   // …with the vowel lengths ALREADY in hand, so the very first seeding reads `dī-vīsa` rather than seeding bare and being corrected a moment later by the debounced pass
+      DOC.forEach(morphPrefillSent); }   // item 11b/12b: seed both morphemic tiers wherever they're empty — part of THIS undoable snapshot
     markDirty(); syncGlossUI(); preserveScroll(renderDoc);
     toast(kind==="gloss"?"Lexical gloss on — double-click or Enter on a gloss to edit":"Morphemic gloss on — MSeg seeded; double-click or Enter to edit"); return; }
   const label=kind==="gloss"?"lexical gloss":"morphemic gloss";
@@ -1483,10 +1680,18 @@ function msegIsVowel(ch){ if(!ch) return false;
    The winner then has to survive three tests. Where it doesn't, the token is left UNSEGMENTED rather than falling
    back to a shorter candidate: a wrong boundary is worse than no boundary, and the shorter candidates are shorter
    precisely because they share less with the lemma.
-     · A CUT MAY NOT SPLIT A VOWEL SEQUENCE. Where a cut falls between two vowels it moves LEFT, to the start of
-       that run, so the whole run goes to the piece on the right: Latin puellae/puella cuts at 5, not 6 —
-       "puell-ae", never "puella-e". This is also what declines said/say: the cut between "sa" and "id" is
-       vowel|vowel, moves back to "s|aid", and a match of "s" then fails the vowel test.
+     · A CUT MAY NOT SPLIT A VOWEL LETTER, and there are two readings of what a vowel letter is.
+       ⚠ WHERE THE LANGUAGE'S OWN DIGRAPHS ARE KNOWN, THEY ARE THE RULE (MSEG_DIGRAPHS below). In Latin
+       `ae` and `oe` ARE single letters, so the only cut forbidden is one falling between their two
+       characters: Troiae/Troia cuts at 4 — "Troi-ae" — and puellae/puella at 5, "puell-ae". The
+       whole-run rule below got the second of those right and the first badly wrong, walking the cut back
+       through `oiae` to "Tr-oiae", because it is a cruder statement of the same intent: knowing nothing
+       about which sequences are one letter, it treated EVERY vowel sequence as indivisible.
+       · Elsewhere the whole-run rule stands as the approximation it is: where a cut falls between two
+       vowels it moves LEFT, to the start of that run, so the run goes whole to the piece on the right.
+       That is also what declines said/say — the cut between "sa" and "id" is vowel|vowel, moves back to
+       "s|aid", and a match of "s" then fails the vowel test — and taking it away from every language
+       rather than from the one whose letters we actually know would have cost that for nothing.
      · THE MATCH MUST HOLD AT LEAST ONE LETTER, AND AT LEAST ONE VOWEL. Checked on the MATCH — the material shared
        with the lemma — and deliberately NOT on the affix, because cats/cat is the canonical suffixation and its
        affix "s" has no vowel at all. This is what declines saw/see (a shared "s") and mice/mouse (a shared "m").
@@ -1494,6 +1699,12 @@ function msegIsVowel(ch){ if(!ch) return false;
        at all, and a cut that slid to the edge of the form takes its whole candidate down with it.
    `pre`/`post` name the side the MGloss hyphen hangs on, not the side the match is on: a shared PREFIX means the
    affix is a SUFFIX, so its gloss is written "-PST" (pre). See mglossMarks. */
+/* Sequences that are ONE LETTER in a given language, so a morpheme boundary may not fall inside one.
+   Latin's `ae`/`oe` are the diphthong digraphs; nothing else is claimed for any other language, and a
+   language absent from this table keeps the whole-vowel-run approximation (see msegSegment's own note).
+   Matched case-insensitively, so `Ae` at the head of a capitalised word counts. */
+const MSEG_DIGRAPHS={la:["ae","oe"]};
+function msegDigraphs(){ return MSEG_DIGRAPHS[((DOCLANG||"").toLowerCase().split(/[-_]/)[0])]||null; }
 function msegSegment(formStr,lemmaStr){
   const F=Array.from(formStr||""), L=Array.from(lemmaStr||"");   // CODE POINTS, not UTF-16 units — a hyphen must never land inside a surrogate pair
   const out={seg:formStr||"",pre:false,post:false};
@@ -1513,7 +1724,11 @@ function msegSegment(formStr,lemmaStr){
   if(bl>0&&bi>0&&bi+bl<F.length) cands.push({kind:"in",len:bl,cuts:[bi,bi+bl]});   // flanked on BOTH sides — an unflanked run is a prefix/suffix case the two candidates above already hold.   // THERE IS NO LENGTH THRESHOLD. An earlier rule required the infix to be more than a third of the form, and it was removed on instruction after excluding the commonest Sanskrit shape there is: `dadātu` against the lemma `dā` shares exactly `dā`, 2 of 6 characters — a reduplicated stem is a third of its form by construction — and went unsegmented for want of a single character. What guards the infix now is the same thing that guards the other two candidates, the letter-and-vowel test on the MATCH below, which is what was doing the real work in any case
   let best=null; cands.forEach(c=>{ if(!best||c.len>best.len) best=c; });   // strict >, so the first of equal lengths wins
   if(!best) return out;
-  const cuts=best.cuts.map(k=>{ while(k>0&&msegIsVowel(F[k-1])&&msegIsVowel(F[k])) k--; return k; });   // never inside a vowel run: the run goes whole to the piece on the right
+  const digs=msegDigraphs();
+  const cuts=best.cuts.map(k=>{
+    if(digs){ while(k>0 && digs.some(d=>d.length===2 && eq(F[k-1],d[0]) && eq(F[k],d[1]))) k--; return k; }   // never inside a single LETTER written with two characters (Latin ae/oe) — the letter goes whole to the piece on the right
+    while(k>0&&msegIsVowel(F[k-1])&&msegIsVowel(F[k])) k--; return k; });   // …and, with no such inventory to consult, never inside a vowel RUN: the crude form of the same rule
+
   const idx=[0].concat(cuts,[F.length]);
   for(let i=0;i<idx.length-1;i++) if(idx[i+1]<=idx[i]) return out;   // a shifted cut collapsed a piece (or crossed its neighbour, which the infix's two cuts can do)
   const pieces=[]; for(let i=0;i<idx.length-1;i++) pieces.push(F.slice(idx[i],idx[i+1]));
@@ -1529,7 +1744,14 @@ function msegSegment(formStr,lemmaStr){
 function msegPrefillParts(t){ if(!t) return {seg:"",pre:false,post:false};
   const ftr=translitNeeded(DOCLANG)?(miscTranslit(t.misc)||t.translit||""):"";   // "" ⇒ this document's MSeg is in the native script (Latin-script language, or no romanisation available for this token)
   const lraw=(t.lemma&&t.lemma!=="_")?t.lemma:"";
-  return msegSegment(ftr||(t.form||""), ftr?(miscKV(t.misc,"LTranslit")||t.translitLemma||""):lraw); }
+  const parts=msegSegment(ftr||(t.form||""), ftr?(miscKV(t.misc,"LTranslit")||t.translitLemma||""):lraw);
+  /* …and Latin gets its VOWEL LENGTHS written onto the result. Overlaid, never segmented from — the
+     letters decide the cut and the marks follow it (see msegOverlayMacrons, js/lang/translit-load.js,
+     for why the other order moves the boundary). `t._laMac` is filled by fillLaMacron, so a token the
+     pass has not reached yet simply segments bare and picks the marks up on the next refill. */
+  if(parts.seg && !ftr && typeof isLatinLang==="function" && isLatinLang() && t._laMac)
+    parts.seg=msegOverlayMacrons(parts.seg,t._laMac);
+  return parts; }
 // Put the segmentation's attachment hyphens on a composed MGloss — but only on a NONEMPTY one: a token whose
 // FEATS compose to nothing writes no MGloss at all (the `if(mg)` at every call site), and a bare "-" would be
 // that nothing dressed up as a gloss.
@@ -1763,7 +1985,95 @@ function renderBlockTrans(i){ const s=DOC[i], rows=sentTranslations(s);
 // head/tree are always left untouched (this function only ever re-derives the fields listed in PARSE_FIELDS).
 // Returns false (no change) when there's no model, no real parse, or the re-tokenisation no longer aligns 1:1.
 const PARSE_FIELDS=["lemma","xpos","feats","deps","misc"];
+/* ── A RE-HEADED TOKEN'S RELATION IS RE-ASKED OF THE PARSER ────────────────────────────────────────
+   A relation is a statement about an EDGE, so moving the edge's other end can leave it describing a
+   configuration that no longer exists — a `subj` dragged under a noun, a `comp:obj` under a
+   determiner. `afterHeadEdit` (js/editing/validation.js) already keeps the two invariants that follow
+   with certainty (head 0 ⟺ `root`, and the goeswith/Shared consequences); this supplies the part that
+   needs evidence rather than a rule.
+
+   ⚠ AND IT ADOPTS THE PARSER'S RELATION ONLY WHERE THE PARSER CHOSE THE SAME HEAD. That gate is the
+   whole design. `parse_tokens` re-analyses the sentence over its EXISTING tokens and hands back a
+   complete tree — its own heads included — and its relation for this token describes ITS attachment,
+   not the one the reader has just made. Taking that relation regardless would answer a question
+   nobody asked, and taking its HEAD too would silently undo the very edit that triggered this. Where
+   the two agree, the parser is describing exactly the edge now in the document and its label is the
+   best available answer; where they disagree it has nothing to say about this edge, so the existing
+   relation stands and the reader can set it themselves. In practice they agree in the common case,
+   which is a reader moving a token to the attachment the parser would have chosen.
+
+   Fire-and-forget and best-effort throughout: the head edit has already landed and been rendered, and
+   a relation that could not be refreshed must never make a completed edit look like a failure. No
+   undo entry of its own — this is a consequence of the edit that called it, so it belongs to that
+   edit's snapshot. It is a NO-OP with no model, which is the same degradation every parser-driven
+   refresh in this file takes. */
+/* ⚠ AND IT NOW ASKS FOR THE RELATION OF *THIS* ARC, rather than for a whole fresh tree it must then
+   agree with. The gate described above was the best available answer while the only question the
+   bridge could ask was "parse this sentence": `parse_tokens` re-analyses everything and its label for
+   this token describes ITS OWN attachment, so adopting it whenever the heads happened to coincide was
+   sound, and saying nothing whenever they did not was the honest remainder — but the remainder is
+   exactly the interesting case. A reader who drags a token somewhere the parser would not have put it
+   is the reader most in need of "well, if it were there, this is what it would be called".
+
+   `analysis_scores` (app/parse.py) can be asked that directly, in two tiers, and the tiers are ordered
+   by how much they are worth:
+     1. the arc the parser genuinely WEIGHED. In arc-eager the only arc available at a state is between
+        the stack top and the buffer front, so the walk records, for each token, the candidate heads it
+        was actually put on the scales against and the label distribution for each. Where the reader's
+        new head is one of them, this is the model's own deliberation about the very edge now in the
+        document — strictly better evidence than the old gate, which threw the same information away
+        by insisting the parser also PREFER that head.
+     2. `arcLabelScores`, a state synthesised to put the two tokens at the boundary. Counterfactual,
+        and marked as such where it is defined; it is what makes an answer available for an attachment
+        the parser never entertained, which the old path had no way to reach at all.
+   The old whole-tree path survives as the third tier, for the documents the scores cannot serve (a
+   Stanza model — see `analysis_scores` on why its distribution describes a tree nobody is looking at).
+
+   ⚠ AND AN INVALID RELATION IS NEVER WRITTEN. `setDiagramHead` already refuses a DROP whose existing
+   relation is error-level on the new head; a relation this function chooses must clear the same bar,
+   or the automatic step would introduce precisely what the manual one is stopped from doing. Checked
+   against the pair actually in the document, after the awaits.
+   Everything else is as before: the RELATION only (any `@deep` tail is the reader's and survives),
+   fire-and-forget, no undo entry of its own, and a no-op with no model. */
+async function headSyncDeprel(si,tokId){ if(!(hasBridge()&&model)) return false;
+  const s=DOC[si], t=s&&s.tokens[tokId-1]; if(!t) return false;
+  const want=parseInt(t.head,10); if(!(want>=1)) return false;   // a new ROOT is settled by afterHeadEdit's own invariant — there is nothing to ask
+  const forms=s.tokens.map(x=>x.form||""); if(!forms.some(f=>f)) return false;
+  let rel="";
+  if(typeof tokenScores==="function"){
+    const sc=await tokenScores(si);
+    if(sc&&sc.deprels&&sc.deprels[tokId-1]) rel=bestScoredRel(sc.deprels[tokId-1][String(want)]);
+    if(!rel) rel=bestScoredRel(await arcLabelScores(si,tokId,want));
+  }
+  if(!rel){                                                      // no scores at all (Stanza) → the whole-tree agreement rule
+    let r; try{ r=await window.pywebview.api.parse_tokens(forms,model); }catch(e){ return false; }
+    if(!r||!r.parsed||!r.tokens||r.tokens.length!==s.tokens.length) return false;
+    const p=r.tokens[tokId-1]; if(!p) return false;
+    if(parseInt(p.head,10)!==want) return false;                 // the parser is talking about a different edge
+    rel=p.deprel||""; }
+  const now=DOC[si]&&DOC[si].tokens[tokId-1];                    // re-read: the document may have moved while the call was out
+  if(!now||now!==t||parseInt(now.head,10)!==want) return false;
+  const nd=withDepBase(now.deprel,depBase(rel));                 // the RELATION only — any `@deep` tail the reader set is theirs and survives
+  if(!rel||nd===now.deprel) return false;
+  const hd=DOC[si]&&DOC[si].tokens[want-1];                      // …and never a relation the validator calls an error on this pair
+  if(hd&&typeof depIsError==="function"&&await depIsError(hd.upos,now.upos,nd)) return false;
+  const again=DOC[si]&&DOC[si].tokens[tokId-1];                  // depIsError is a bridge round-trip of its own — re-check before writing
+  if(again!==now||parseInt(now.head,10)!==want) return false;
+  now.deprel=nd; markDirty(); renderUnlessEditing();             // …and not over an open inline field, as every other background refresh here
+  return true; }
 const GESTURE_FEATS=["Shared"];   // FEATS keys settable only via a drag gesture or keyboard shortcut — a token re-parse must preserve them, same as Gloss/MSeg/MGloss. (Subject was here too until it moved to MISC; it is preserved by the `keep` list below instead — see raiseGet/raiseSet, js/core/prefs.js.)
+/* ⚠ SUD'S OWN MISC LAYER IS DERIVED FROM A TREE — AND THIS FUNCTION THROWS THE PARSER'S TREE AWAY.
+   The released SUD parsers now predict Idiom/InIdiom/Subject/Reported (app/parse.py's _SUD_MISC_KEYS), and every
+   one of the four is read off the analysis the model itself produced: Idiom is "has ExtPos AND has an `unk`
+   dependent", InIdiom is "attaches by `unk` under such a head", Subject names an embedded predicate's raised
+   argument, Reported a speech verb's verbatim complement. reparseTokenFields asks the parser to refill the
+   MODEL-DERIVED FIELDS on the reader's own tokens and adopts none of its heads or relations, so those four
+   answers describe a tree that is discarded a line later — a fresh Subject=SubjRaising drawn as a ghost edge
+   across an attachment the reader made themselves is not a weaker annotation, it is a claim about a sentence
+   nobody is looking at. They are therefore CLEARED from the parser's MISC here and the reader's own restored by
+   `keep` below; a FULL parse (doInsert/insertParsed/reparse/commitSentText, which replace s.tokens wholesale
+   together with the tree they belong to) takes all four exactly as the model wrote them. */
+const SUD_TREE_MISC=["Idiom","InIdiom","Reported","Subject"];
 async function reparseTokenFields(si,tokIds,opts){
   opts=opts||{};
   if(!(hasBridge()&&model)) return false;
@@ -1779,8 +2089,17 @@ async function reparseTokenFields(si,tokIds,opts){
      construction (app/parse.py's parse_pretokenized). */
   const forms=s.tokens.map(t=>t.form||"");
   if(!forms.some(f=>f)) return false;
+  /* ⚠ AND THE READER'S OWN WORD CLASSES GO WITH THEM, which is what makes a RETAG mean anything.
+     Sending the forms alone asks the model to re-analyse a sentence it has already analysed, so it
+     answers exactly as before: after retagging 行 from NOUN to VERB the FEATS and the lemma that came
+     back were still the noun's, and the re-parse was a no-op wearing the look of a refresh. With the
+     tags attached, `parse._force_upos` takes the model's own best analysis OF THAT CLASS — a
+     constraint on its answer, not a replacement for it. Sent on every call, not only after a retag:
+     `opts.upos` (the split-token path) is the one caller that wants the parser's own class instead, and
+     it says so by asking for it. */
+  const uposIn=opts.upos?null:s.tokens.map(t=>trUpos(t));
   showBusy("Parsing…"); let r;
-  try{ r=await window.pywebview.api.parse_tokens(forms,model); }catch(e){ return false; }finally{ hideBusy(); }
+  try{ r=await window.pywebview.api.parse_tokens(forms,model,uposIn); }catch(e){ return false; }finally{ hideBusy(); }
   if(!r||!r.parsed||!r.tokens||r.tokens.length!==s.tokens.length) return false;   // belt and braces: a pipeline that rebuilt the Doc anyway must not be aligned against
   const targets=tokIds?new Set(tokIds):null;
   s.tokens.forEach((t,i)=>{ if(targets && !targets.has(i+1)) return; const p=r.tokens[i]; if(!p)return;
@@ -1793,7 +2112,7 @@ async function reparseTokenFields(si,tokIds,opts){
        (saSyncUnsandhied, called from afterFormEdit). Without this the parser's MISC overwrote the column
        wholesale and the pausa spelling simply vanished on every form edit; `if(vv)` means a token that had
        none still takes whatever the parser offers. */
-    const keep={}; ["Gloss","MSeg","MGloss","Reported","CorrectForm","NewPar","Subject","Unsandhied"].forEach(kk=>{ const vv=miscKV(t.misc,kk); if(vv) keep[kk]=vv; });   /* Subject joined this list when the raising feature moved out of FEATS: `misc` is in PARSE_FIELDS, so the parser's own MISC overwrites the column wholesale, and a drag-set raising annotation would be silently lost by the next background re-parse — exactly what GESTURE_FEATS protects on the FEATS side. */   // item 3: the parser's MISC doesn't carry the annotation tiers, so writing it raw would wipe them — preserve the user's lexical gloss + morphemic segmentation/gloss, reported-speech marker, typo correction and mid-sentence paragraph break across a re-parse (e.g. after a Form edit); only a full re-parse may clear these
+    const keep={}; ["Gloss","MSeg","MGloss","Reported","CorrectForm","NewPar","Subject","Idiom","InIdiom","Unsandhied"].forEach(kk=>{ const vv=miscKV(t.misc,kk); if(vv) keep[kk]=vv; });   /* Subject joined this list when the raising feature moved out of FEATS: `misc` is in PARSE_FIELDS, so the parser's own MISC overwrites the column wholesale, and a drag-set raising annotation would be silently lost by the next background re-parse — exactly what GESTURE_FEATS protects on the FEATS side. */   // item 3: the parser's MISC doesn't carry the annotation tiers, so writing it raw would wipe them — preserve the user's lexical gloss + morphemic segmentation/gloss, reported-speech marker, typo correction and mid-sentence paragraph break across a re-parse (e.g. after a Form edit); only a full re-parse may clear these
     if(t._trPick){ const tv=miscKV(t.misc,"Translit"); if(tv) keep.Translit=tv; }   // …and a HAND-CORRECTED stored transliteration is the user's in exactly the same way (a Han heteronym, a kanji reading, an unwritten short vowel): it belongs to the annotator, not to the parser. Only conditional because every OTHER token's Translit is derived and SHOULD be regenerated — annotateTranslitMisc, at the end of this function, does that. It also reads a _trPick token's value back FROM MISC, so without this line the correction would be lost here and then replaced by whatever the displayed row happens to hold (a different scheme in general)
     const spAfter=miscKV(t.misc,"SpaceAfter");   // SpaceAfter survives a re-parse VERBATIM — its absence as much as its value (hence the restore below, not a `keep` entry). This function re-parses the sentence's forms JOINED WITH SPACES and never re-tokenises, so the parser has nothing to say about spacing here: taking its answer would silently drop every SpaceAfter=No in the sentence. Only a full re-parse (doInsert/reparse/commitSentText — they replace s.tokens wholesale, from the real text) may regenerate it
     const keepFeats={}; GESTURE_FEATS.forEach(kk=>{ const vv=getFeat(t.feats,kk); if(vv) keepFeats[kk]=vv; });   // Shared/Subj are set by drag gestures, not the parser — a per-token regen must not silently clear them; only a full re-parse (doInsert/reparse/commitSentText, which replace s.tokens wholesale) may do that
@@ -1805,6 +2124,7 @@ async function reparseTokenFields(si,tokIds,opts){
     (opts.upos?PARSE_FIELDS.concat("upos"):PARSE_FIELDS).forEach(k=>{ if(k==="xpos"&&XPOS_MIRRORS_UPOS){ t.xpos=t.upos; return; }   // this doc's XPOS just mirrors UPOS → the parser's own xpos guess must never win; keep it downstream of (this token's current) UPOS on every regen, not just at the moment UPOS was edited
       if(p[k]!=null){ const v=p[k]; t[k]=(v===""&&(k==="deps"||k==="misc"))?"_":v; } });
     Object.keys(keepFeats).forEach(kk=>{ t.feats=setFeat(t.feats,kk,keepFeats[kk]); });
+    SUD_TREE_MISC.forEach(kk=>{ t.misc=setMiscKV(t.misc,kk,""); });   // …the tree-derived layer the parser just wrote about a tree we discarded (see SUD_TREE_MISC) — dropped BEFORE the restore below, so the reader's own value is what survives
     Object.keys(keep).forEach(kk=>{ t.misc=setMiscKV(t.misc,kk,keep[kk]); });
     t.misc=setMiscKV(t.misc,"SpaceAfter",spAfter);   // …and put the token's OWN spacing back over whatever the parser wrote ("" removes the key, so a token that had no SpaceAfter keeps none)
     const seg=msegPrefillParts(t);   // the re-parse may have handed this token a NEW lemma, so re-derive the segmentation once here and let both morphemic rows below read the same answer (as morphPrefillSent does)
@@ -1816,7 +2136,8 @@ async function reparseTokenFields(si,tokIds,opts){
     // deprel reattach, e.g. attachAsSharedConjunct — is never allowed to touch MGloss/Gloss at all, Task B)
     // skips this whole block outright, leaving the tier exactly as `keep` already restored it above.
     if(!opts.skipGloss){
-      if(keep.MGloss){ const mg=retargetGlossForFeatsChange(keep.MGloss,oldFeatsStr,t.feats);
+      if(keep.MGloss){ let mg=retargetGlossForFeatsChange(keep.MGloss,oldFeatsStr,t.feats,t.upos);   // symmetric: the categories this re-parse dropped go, the ones it introduced arrive
+        if(opts.regloss) mg=mglossReglossLexical(t,mg);   // …and only a RETAG can move the token across the open/closed-class line that decides whether it carries a stem gloss at all — set by the two UPOS-edit call sites, since a form edit's background re-parse never changes the word class
         if(mg!==keep.MGloss) t.misc=setMiscKV(t.misc,"MGloss",mg); }
       else if(MORPH_ON){ const lex=(GLOSS_ON&&!UPOS_LEIPZIG_ABBR[t.upos])?miscKV(t.misc,"Gloss").replace(/-/g,"_"):"";   // nothing to preserve → compose one fresh, exactly as before (a token that had NO MGloss yet gets one, the same way morphPrefillSent would)
         const mg=glossEnc(mglossMarks(composeMGloss(lex,t.feats,t.upos),seg));
@@ -1919,6 +2240,45 @@ async function sandhiMwtForms(si,froms){ if(!isSanskritLang()||!hasBridge()||!DO
   if(any){ markDirty(); if((ORTHO_SCHEME&&ORTHO_SCHEME!=="none")||isSanskritLang()) fillOrtho(); else preserveScroll(renderDoc); }
   return any; }
 
+/* ── A MERGE INSIDE A SANSKRIT RANGE IS A SANDHI FUSION, NOT A CONCATENATION ─────────────────────────
+   Merging asserts that two pieces are written as one, and in Sanskrit that is exactly the environment
+   the sandhi rules describe: `sat`+`ādi` is written `sadādi`, `ahaḥ`+`rātra` `ahorātra`. Gluing the
+   strings gives the right answer only where the junction happens to be inert.
+
+   ⚠ INSIDE A MULTI-WORD TOKEN ONLY, which is the one place the app DERIVES a Sanskrit spelling rather
+   than reading it. The convention this file follows (DCS) stores a component in PAUSA and lets the
+   RANGE's surface carry the sandhi, so re-deriving a component is answering the question the file
+   already poses. A STANDALONE token's form is what `# text` says it is — that is precisely why
+   `mergeTokens` can concatenate there without respliceing the line — and re-deriving it by sandhi would
+   put a spelling in the file that the running sentence contradicts.
+
+   ⚠ THE INPUT IS THE PAUSA FORMS, and the edges stay in pausa. `mergeTokens` reads MISC `Unsandhied`
+   where there is one and the form otherwise (feeding a sandhied surface back through a sandhi generator
+   applies the rules twice — the same rule app/sa_notation.py's `csl_forms` follows). No neighbouring
+   words are supplied: external sandhi belongs to the range's own surface, which `sandhiMwtForms`
+   re-fuses here once the survivor has settled, one member shorter than before.
+
+   Fire-and-forget, no undo entry of its own (it belongs to the merge's snapshot, pushed before it), and
+   a no-op with no bridge — the plain concatenation `mergeTokens` already wrote then stands. */
+async function sandhiMergeForm(si,tokId,forms,lemmas){
+  if(!isSanskritLang()||!hasBridge()||!DOCLANG) return false;
+  const s=DOC[si], t=s&&s.tokens[tokId-1];
+  if(!t||!forms||forms.length<2||!forms.every(f=>f)) return false;
+  const inM=(s.mwt||[]).find(x=>tokId>=x.from&&tokId<=x.to); if(!inM) return false;
+  const lg=lemmas||forms.map(()=>"");
+  let r; try{ r=await window.pywebview.api.sanskrit_mwt([forms],DOCLANG,"",[lg],"",[""],[""],[false],[null]); }
+  catch(e){ return false; }
+  if(DOC[si]!==s||s.tokens[tokId-1]!==t) return false;   // an undo, an open, another edit landed while the call was out
+  const fused=r&&r.form&&r.form[0];
+  if(!fused) return false;
+  if(fused!==t.form){ t.form=fused;
+    t.translit=""; t.translitLemma=""; t.ortho=""; t._trMisc=false; t._trPick=false;   // a romanisation of the unfused string says nothing about the fused piece (afterFormEdit drops these for the same reason)
+    t.misc=setMiscKV(setMiscKV(t.misc,"Translit",""),"LTranslit",""); }
+  t.misc=setMiscKV(t.misc,"Unsandhied","");   // a component is STORED in pausa, so its form is its pausa: the head's old Unsandhied described one piece and would now describe the merged whole — the stale `-tve` trap documented below
+  markDirty();
+  await sandhiMwtForms(si,[inM.from]);   // …and the orthographic word ABOVE the survivor is one member shorter, so its own surface has to be re-fused from what is left
+  if((ORTHO_SCHEME&&ORTHO_SCHEME!=="none")||isSanskritLang()) fillOrtho(); else preserveScroll(renderDoc);
+  return true; }
 /* MISC `Unsandhied` FOLLOWS THE FORM, because it is a spelling OF the form — the padapāṭha, the word as
    it stands in citation. Edit the form and the old pausa describes a word that is no longer there, which
    is not a harmless staleness: app/sa_notation.py's csl_forms PREFERS Unsandhied over the form (feeding

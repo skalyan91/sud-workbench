@@ -408,6 +408,7 @@ async function loadOrthoSchemes(lang){ lang=lang||""; _orLangLoaded=lang; ORTHO_
   ORTHO_SCHEME=orthoResolve(lang,want); syncSchemeAttr();   // an UNCONDITIONAL assignment — see orthoResolve
   if(isSanskritLang(lang)) show.translit=saTransRow();   // item 27(c): the IAST transliteration row/pill is gated on the glyph being non-Latin, not on a script being SELECTED — a Devanagari-stored file wants the row under "Original"
   updateOrthoPill(); updateTranslitPill(); clearOrthoCache();
+  if(typeof syncGlossUI==="function") syncGlossUI();   // the Glossing drawer's morphemic row is gated on macronAvailable() for Latin, which is a view of the list just loaded — so it is refreshed HERE, where that list changes, and cannot be left describing the previous language's (or the pre-install) answer
   if(DOC.length) preserveScroll(renderDoc);
   if(ORTHO_SCHEME) fillOrtho();
   if(isSanskritLang(lang)&&show.translit) fillTranslit(); }
@@ -439,7 +440,25 @@ function syncSchemeAttr(){ const d=document.getElementById("doc"); if(!d) return
      — this is a strict superset of the old scoping, not a behaviour change for the diagram itself. */
   const root=document.documentElement;
   if(ORTHO_SCHEME==="Ranjana" && typeof TOKEN_STACK==="string") root.style.setProperty("--token-font",'"Nithya Ranjana", '+TOKEN_STACK);
-  else root.style.removeProperty("--token-font"); }
+  else root.style.removeProperty("--token-font");
+  d.style.setProperty("--script-mag",String(scriptMag()));   // …and how big the GLYPHS are drawn, for the scripts that need the room (see ORNAMENTAL_SCRIPTS). On #doc, which is where refreshFontStacks reads it back to keep canvas measurement in step with the paint
+}
+/* ── THE ORNAMENTAL SCRIPTS ARE DRAWN AT DOUBLE SIZE ───────────────────────────────────────────────
+   Rañjanā, Soyombo, Siddhaṃ and Balinese are not everyday scripts here: they are used for titles, seals,
+   temple inscriptions, mantras and manuscript ornament, and their letters carry decoration — heavy
+   head-strokes, stacked conjuncts, flags and finials — that is simply not resolvable at a 15px body size.
+   Every other script in the list is (or was) a running hand for ordinary text and reads perfectly well at
+   the size the rest of the app uses.
+   ⚠ Judgement, not a property of the data, which is why it is a list rather than something derived — and
+   the list has been corrected once already: **Zanabazar Square is NOT in it**. It was created as a
+   practical script for writing Mongolian, Tibetan and Sanskrit, and its square construction is a
+   letterform, not ornament. Siddhaṃ and Balinese are, on the other side: Siddhaṃ survives almost entirely
+   as bīja and mantra calligraphy, and Balinese as ornamented palm-leaf and temple lettering.
+   ONLY THE GLYPHS SCALE. The transliteration, POS, gloss and relation rows around them are Latin
+   annotation and are legible already — doubling those would be a zoom, which the app has (⌘+) and which
+   the reader did not ask for. */
+const ORNAMENTAL_SCRIPTS=new Set(["Ranjana","Soyombo","Siddham","Balinese"]);
+function scriptMag(){ return ORNAMENTAL_SCRIPTS.has(ORTHO_SCHEME)?2:1; }
 function orSchemeLabel(id){ const s=ORTHO_SCHEMES.find(x=>x.id===id); return s?s.label:""; }
 /* WHAT THE "no scheme" ROW IS CALLED, which is not the same question in every language. Everywhere else the
    Script menu picks a WRITING SYSTEM, and declining to pick one is "Original" — the stored glyphs. Latin's
@@ -449,6 +468,20 @@ function orSchemeLabel(id){ const s=ORTHO_SCHEMES.find(x=>x.id===id); return s?s
    `isLatinLang` and not a check for "does this language's only scheme happen to be `macron`": the naming is
    a fact about Latin, and a second Latin scheme later must not silently rename the row back. */
 function isLatinLang(lang){ return ((lang!=null?lang:DOCLANG)||"").toLowerCase().split(/[-_]/)[0]==="la"; }
+/* IS THERE A MACRONISER HERE? Read off the loaded scheme list rather than asked separately, so the one
+   answer drives the Script menu's own row, the MSeg tier's availability (js/io/bridge.js) and the
+   macronised segmentation itself — three features that must not be able to disagree about whether Latin
+   vowel length is knowable in this install. `available` is `app/translit.py`'s `_scheme_available`, which
+   for `macron` is `macron.available()`: a file test over the fetched Morpheus table. */
+function macronAvailable(){ return isLatinLang() && ORTHO_SCHEMES.some(s=>s.id==="macron"&&s.available); }
+/* …and a tier that has just been installed says so, from whichever window installed it
+   (Api._notify_extra_installed → _broadcast_all). Re-loading both scheme lists is the whole remedy: the
+   frontend's ONLY stale fact is the per-language answer it cached, and loadOrthoSchemes/loadTranslitSchemes
+   re-ask the bridge and re-render the pills and the document off the fresh one. Everything downstream —
+   macronAvailable, the Glossing drawer's Latin gate, fillOrtho's cache — reads through those, so nothing
+   else has to be told. */
+window.__extraInstalled=function(){ if(!DOCLANG) return;
+  try{ loadOrthoSchemes(DOCLANG); loadTranslitSchemes(DOCLANG); }catch(e){} };
 function orthoOffLabel(){ return isLatinLang()?"Without macrons":"Original"; }
 function updateOrthoPill(){ const p=document.getElementById("orthoPill"); if(!p)return;
   if(!ORTHO_SCHEMES.length){ p.hidden=true; return; }
@@ -480,11 +513,19 @@ function orRender(){ const m=orEl(); m.innerHTML="";
     const b=document.createElement("button"); b.type="button"; b.className="trrow";
     const ck=document.createElement("span"); ck.className="ck"; ck.textContent=(s.id===ORTHO_SCHEME)?"✓":""; b.appendChild(ck);
     const nm=document.createElement("span"); nm.className="trname"; nm.textContent=s.label; b.appendChild(nm);
-    /* An unavailable row that an install WOULD fix stays enabled, so its "install" tag can be clicked
-       and reached by keyboard — the row itself does nothing (picking a scheme with no engine behind it
-       would show the bare forms and say nothing about why), the tag inside it is the only live target.
-       One with no `needs` is disabled as before: there is nothing to click. */
-    if(s.id&&!s.available){ b.classList.add("trdim"); b.appendChild(naTag(s)); if(!s.needs) b.disabled=true; }
+    /* ⚠ NO "install" TAG IN THIS MENU — THE ROW IS THE TARGET. Every row here is a whole button that
+       already means "make the document look like this", so an unavailable one wants no second, smaller
+       control glued to its right edge to say the one thing that stands between the reader and that:
+       clicking "With macrons" when there are no macrons to be had should simply take them to where
+       macrons come from. So the row keeps its click, and the click opens Manage Models at the tier that
+       would supply it. (The transliteration table keeps `naTag`, and rightly: its rows are not buttons
+       at all but a NAME beside two radio cells, so there is nothing there to click and the tag has to
+       carry the affordance itself.) A row with no `needs` — a scheme nothing installable would repair —
+       is disabled as before: there is nowhere to be taken. */
+    if(s.id&&!s.available){ b.classList.add("trdim");
+      if(s.needs){ b.title="Not available yet — opens Manage Models";
+        b.addEventListener("click",()=>{ orClose(); if(typeof manageModels==="function") manageModels(s.needs); }); }
+      else b.disabled=true; }
     else b.addEventListener("click",()=>orPick(s.id));
     m.appendChild(b); }); }
 function orPick(id){ orClose(); id=id||""; if(id===ORTHO_SCHEME) return;

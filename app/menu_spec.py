@@ -181,7 +181,12 @@ MENUS: list[dict] = [
         item("Ungroup Multi-word Token", "window.ungroupMWTShortcut && ungroupMWTShortcut()",
              key="g", mods=("cmd", "shift"), sf="arrow.left.and.line.vertical.and.arrow.right",
              fluent="ArrowMaximize", vis="ungroup"),
-        item("Split into Multi-word Token", "window.convertTokenMWT && convertTokenMWT()",   # no ellipsis: a form carrying "=" divides on it directly, so this does not always open the count prompt
+        # No ellipsis: a form that spells its own division needs no prompt.  "=" divides the token into
+        # the components of a MULTI-WORD TOKEN (one orthographic word, several tokens); whitespace
+        # divides it into SEPARATE tokens with no range at all (splitTokenAtSpaces, js/editing/
+        # context-menu.js).  The title names the commoner case only — a native NSMenu item cannot
+        # re-title itself per selection, so the diagram/grid row does that instead (SPLIT_ROW).
+        item("Split into Multi-word Token", "window.convertTokenMWT && convertTokenMWT()",
              key="s", mods=("cmd", "alt"), sf="square.split.2x1", fluent="SplitHorizontal", vis="convmwt"),   # ⌥⌘S — "split"
         # MOVED off ⌥⌘F, which Find and Replace above now holds. The collision was not survivable:
         # AppKit matches a key equivalent against the FIRST eligible item in menu order, and Find and

@@ -24,6 +24,33 @@ import threading
 from .. import menu_spec
 
 
+_menu_wired: dict = {}   # one-shot flags for the wiring's own diagnostics
+
+
+def _shell_log(msg: str) -> None:
+    """A native-shell diagnostic that SURVIVES A LAUNCHSERVICES LAUNCH.
+
+    Everything in this module has always reported its failures with ``print(..., file=sys.stderr)``,
+    and for a run from a terminal that is exactly right. Double-clicked from the Finder there is no
+    terminal: stderr goes to the void, and a degradation that says so in one line becomes a silent
+    one — which is precisely how "the built app has no menu icons or shortcuts" reached us twice with
+    no evidence attached, while the same build ran correctly from a shell. So it goes to BOTH: stderr
+    for the developer, and ``crash.log`` in APP_DATA for everyone else, where it sits beside the
+    faulthandler dumps and the uncaught-exception hooks that are already the record of what a
+    packaged run did. Imported lazily — ``app/__main__`` imports THIS module, so a module-level
+    import would be circular — and it never raises, because a logger that can fail is a second fault
+    on top of the one being reported."""
+    try:
+        print(msg, file=sys.stderr)
+    except Exception:  # noqa: BLE001
+        pass
+    try:
+        from ..__main__ import _clog
+        _clog(msg)
+    except Exception:  # noqa: BLE001
+        pass
+
+
 def _fs_always_toolbar_state() -> bool:
     """Back-compat alias — the state itself now lives in menu_spec (both platforms read it)."""
     return menu_spec.fs_always_toolbar_state()
@@ -66,7 +93,7 @@ def _ctx_pair():
             if win is not None:
                 return win, api
         except Exception as exc:  # noqa: BLE001 — a resolver hiccup must never disable the menu
-            print(f"[menu] key window: {exc}", file=sys.stderr)
+            _shell_log(f"[menu] key window: {exc}")
     return _recent_ctx.get("window"), _recent_ctx.get("api")
 
 
@@ -99,7 +126,7 @@ def _recent_menu_target():
                         # main thread (this selector). Run it off-thread so the run loop can service it.
                         threading.Thread(target=lambda: win.evaluate_js(js), daemon=True).start()
                 except Exception as exc:  # noqa: BLE001
-                    print(f"[menu] open recent: {exc}", file=sys.stderr)
+                    _shell_log(f"[menu] open recent: {exc}")
 
             def clearRecent_(self, sender):         # ObjC selector: clearRecent: (invoked on the MAIN thread)
                 try:
@@ -110,11 +137,11 @@ def _recent_menu_target():
                         # off the main thread → evaluate_js's callAfter+acquire can't self-deadlock
                         threading.Thread(target=lambda: win.evaluate_js("window.toast && toast('Cleared recent files')"), daemon=True).start()
                 except Exception as exc:  # noqa: BLE001
-                    print(f"[menu] clear recent: {exc}", file=sys.stderr)
+                    _shell_log(f"[menu] clear recent: {exc}")
 
         _recent_target = _RecentMenuTarget.alloc().init()
     except Exception as exc:  # noqa: BLE001
-        print(f"[menu] recent target: {exc}", file=sys.stderr)
+        _shell_log(f"[menu] recent target: {exc}")
         _recent_target = None
     return _recent_target
 
@@ -143,11 +170,11 @@ def _about_menu_target():
                     if win is not None:
                         threading.Thread(target=lambda: win.evaluate_js("window.openAbout && openAbout()"), daemon=True).start()
                 except Exception as exc:  # noqa: BLE001
-                    print(f"[menu] about: {exc}", file=sys.stderr)
+                    _shell_log(f"[menu] about: {exc}")
 
         _about_target = _AboutMenuTarget.alloc().init()
     except Exception as exc:  # noqa: BLE001
-        print(f"[menu] about target: {exc}", file=sys.stderr)
+        _shell_log(f"[menu] about target: {exc}")
         _about_target = None
     return _about_target
 
@@ -244,7 +271,7 @@ def _rebuild_recent_menu_main(window, api):
             clear.setTarget_(target)
         submenu.addItem_(clear)
     except Exception as exc:  # noqa: BLE001 — a menu-API hiccup must never break the app
-        print(f"[menu] recent rebuild: {exc}", file=sys.stderr)
+        _shell_log(f"[menu] recent rebuild: {exc}")
 
 
 def refresh_recent_menu(window, api):
@@ -289,7 +316,7 @@ def _tab_bar_height(nswin) -> float:
             return 0.0
         return chrome   # …the bar's BOTTOM EDGE in page coordinates, which is what the page needs to clear
     except Exception as exc:  # noqa: BLE001
-        print(f"[titlebar] tab bar height: {exc}", file=sys.stderr)
+        _shell_log(f"[titlebar] tab bar height: {exc}")
         return 0.0
 
 
@@ -339,7 +366,7 @@ def publish_tab_height(window) -> None:
                         res["h"] = _tab_bar_height(nswin)
                         res["top"] = float(_chrome_base["h"] or 0.0) if res["h"] else 0.0
                 except Exception as exc:  # noqa: BLE001
-                    print(f"[titlebar] tab height read: {exc}", file=sys.stderr)
+                    _shell_log(f"[titlebar] tab height read: {exc}")
                 finally:
                     done.set()
             AppHelper.callAfter(read)
@@ -350,7 +377,7 @@ def publish_tab_height(window) -> None:
             window._sud_tabpub = pair
             window.evaluate_js(_tab_css(*pair))
         except Exception as exc:  # noqa: BLE001
-            print(f"[titlebar] tab height publish: {exc}", file=sys.stderr)
+            _shell_log(f"[titlebar] tab height publish: {exc}")
     threading.Thread(target=work, daemon=True).start()
 
 
@@ -422,7 +449,7 @@ def set_titlebar_reserve(window, height: float) -> None:
                                 nswin.removeTitlebarAccessoryViewControllerAtIndex_(i)
                                 break
                     except Exception as exc:  # noqa: BLE001
-                        print(f"[titlebar] reserve remove: {exc}", file=sys.stderr)
+                        _shell_log(f"[titlebar] reserve remove: {exc}")
                     _reserve.pop(key, None)
                 threading.Timer(0.25, lambda: publish_tab_height(window)).start()   # …the chrome just SHRANK; the page is still holding the taller figure until this lands (the same re-publish the grow path does below — an early return here was why closing the options bar left the document indented as if it were open)
                 return
@@ -446,7 +473,7 @@ def set_titlebar_reserve(window, height: float) -> None:
             # the blocks, since the viewport they are measured against changed with it.
             threading.Timer(0.25, lambda: publish_tab_height(window)).start()
         except Exception as exc:  # noqa: BLE001 — a missing reservation is a layout loss, never a failure
-            print(f"[titlebar] reserve: {exc}", file=sys.stderr)
+            _shell_log(f"[titlebar] reserve: {exc}")
     try:
         from PyObjCTools import AppHelper
         AppHelper.callAfter(work)   # NSWindow chrome belongs on the Cocoa main thread
@@ -484,9 +511,9 @@ def _enable_tab_plus_button():
                     try:
                         fn()
                     except Exception as exc:  # noqa: BLE001
-                        print(f"[menu] new tab: {exc}", file=sys.stderr)
+                        _shell_log(f"[menu] new tab: {exc}")
     except Exception as exc:  # noqa: BLE001 — no + button is a loss, not a failure
-        print(f"[menu] tab + button: {exc}", file=sys.stderr)
+        _shell_log(f"[menu] tab + button: {exc}")
 
 
 def _enable_first_mouse():
@@ -501,7 +528,7 @@ def _enable_first_mouse():
             def acceptsFirstMouse_(self, event):     # noqa: N802 — ObjC selector name
                 return True
     except Exception as exc:  # noqa: BLE001 — non-fatal; drag still works once the window is active
-        print(f"[firstmouse] could not enable: {exc}", file=sys.stderr)
+        _shell_log(f"[firstmouse] could not enable: {exc}")
 
 
 # ── titlebar drag overlay ────────────────────────────────────────────────────
@@ -616,7 +643,7 @@ def _compute_file_icon(AppKit):
             img = ws.iconForFileType_("conllu")
         return _nsimage_to_datauri(AppKit, img)
     except Exception as exc:  # noqa: BLE001 — never crash over a cosmetic icon
-        print(f"[titlebar] file icon: {exc}", file=sys.stderr)
+        _shell_log(f"[titlebar] file icon: {exc}")
         return None
 
 
@@ -638,7 +665,7 @@ def _compute_folder_icons(AppKit):
         root = ws.iconForFile_("/")                # boot volume (Macintosh HD) icon
         return _nsimage_to_datauri(AppKit, folder), _nsimage_to_datauri(AppKit, root)
     except Exception as exc:  # noqa: BLE001
-        print(f"[titlebar] folder icons: {exc}", file=sys.stderr)
+        _shell_log(f"[titlebar] folder icons: {exc}")
         return None, None
 
 
@@ -693,7 +720,7 @@ def _compute_symbol_icon(AppKit, name):
             return None
         return "data:image/png;base64," + str(png.base64EncodedStringWithOptions_(0))
     except Exception as exc:  # noqa: BLE001
-        print(f"[titlebar] sf symbol {name!r}: {exc}", file=sys.stderr)
+        _shell_log(f"[titlebar] sf symbol {name!r}: {exc}")
         return None
 
 # NSMenuDelegate that re-applies our key-equivalents / SF Symbol images / conditional show-hide every time
@@ -785,18 +812,18 @@ def snapshot_webview(window, timeout: float = 2.5):
                                 if data is not None:
                                     out["data"] = bytes(data)
                     except Exception as exc:  # noqa: BLE001
-                        print(f"[snapshot] encode: {exc}", file=sys.stderr)
+                        _shell_log(f"[snapshot] encode: {exc}")
                     finally:
                         done.set()
                 wk.takeSnapshotWithConfiguration_completionHandler_(cfg, finished)
             except Exception as exc:  # noqa: BLE001
-                print(f"[snapshot] take: {exc}", file=sys.stderr)
+                _shell_log(f"[snapshot] take: {exc}")
                 done.set()
         AppHelper.callAfter(take)
         done.wait(timeout)
         return out["data"]
     except Exception as exc:  # noqa: BLE001 — a launch without a picture is a launch, not a failure
-        print(f"[snapshot] {exc}", file=sys.stderr)
+        _shell_log(f"[snapshot] {exc}")
         return None
 
 
@@ -832,7 +859,7 @@ def _install_fullscreen_observer(AppKit, nswin, pywin):
                 if not fs and hasattr(nswin, "layoutIfNeeded"):
                     nswin.layoutIfNeeded()
             except Exception as exc:  # noqa: BLE001 — never crash over the full-screen bridge
-                print(f"[titlebar] fullscreen native toolbar: {exc}", file=sys.stderr)
+                _shell_log(f"[titlebar] fullscreen native toolbar: {exc}")
 
         cls = _win_fullscreen.get("__cls__")
         if cls is None:
@@ -857,7 +884,7 @@ def _install_fullscreen_observer(AppKit, nswin, pywin):
         except Exception:  # noqa: BLE001
             pass
     except Exception as exc:  # noqa: BLE001 — never crash over the full-screen bridge
-        print(f"[titlebar] fullscreen observer: {exc}", file=sys.stderr)
+        _shell_log(f"[titlebar] fullscreen observer: {exc}")
 
 
 def _install_accent_observer(AppKit, nswin, pywin):
@@ -898,7 +925,7 @@ def _install_accent_observer(AppKit, nswin, pywin):
         # system-wide (object=None): NSColor posts this when the accent/highlight preference changes
         nc.addObserver_selector_name_object_(obs, "accentChanged:", AppKit.NSSystemColorsDidChangeNotification, None)
     except Exception as exc:  # noqa: BLE001 — never crash over the accent bridge
-        print(f"[titlebar] accent observer: {exc}", file=sys.stderr)
+        _shell_log(f"[titlebar] accent observer: {exc}")
 
 
 def _activity_target(note):
@@ -967,7 +994,7 @@ def _install_activity_observer(AppKit, nswin, pywin):
         if nswin.isKeyWindow():
             _push(pywin, True)
     except Exception as exc:  # noqa: BLE001 — never crash over a cosmetic dim
-        print(f"[titlebar] activity observer: {exc}", file=sys.stderr)
+        _shell_log(f"[titlebar] activity observer: {exc}")
 
 
 def _menu_delegate_class():
@@ -984,7 +1011,7 @@ def _menu_delegate_class():
                 try:
                     cb(menu)
                 except Exception as exc:  # noqa: BLE001 — never break menu tracking over a cosmetic re-wire
-                    print(f"[menu] delegate re-wire: {exc}", file=sys.stderr)
+                    _shell_log(f"[menu] delegate re-wire: {exc}")
 
     _menu_delegate["__cls__"] = _SUDMenuDelegate
     return _SUDMenuDelegate
@@ -1075,7 +1102,7 @@ def _apply_titlebar_drag(window, rects):
                 pool[j].setHidden_(True)
                 pool[j].setFrame_(((0, 0), (0, 0)))
         except Exception as exc:  # noqa: BLE001 — never crash over a cosmetic overlay
-            print(f"[titlebar] drag overlay: {exc}", file=sys.stderr)
+            _shell_log(f"[titlebar] drag overlay: {exc}")
 
     try:
         from PyObjCTools import AppHelper
@@ -1131,7 +1158,7 @@ def _app_icon(dark=None):
                 path = os.path.join(base, "appicon.png")
             _APP_ICONS[key] = AppKit.NSImage.alloc().initWithContentsOfFile_(path) or False
         except Exception as exc:  # noqa: BLE001
-            print(f"[icon] {exc}", file=sys.stderr)
+            _shell_log(f"[icon] {exc}")
             _APP_ICONS[key] = False
     return _APP_ICONS[key] or None
 
@@ -1149,7 +1176,7 @@ def _set_dock_icon_on_show(window):
             if img is not None and app is not None:
                 app.setApplicationIconImage_(img)   # Dock + the default icon for pywebview's NSAlert dialogs
         except Exception as exc:  # noqa: BLE001
-            print(f"[icon] {exc}", file=sys.stderr)
+            _shell_log(f"[icon] {exc}")
 
     def first(*_):
         apply()
@@ -1163,7 +1190,7 @@ def _set_dock_icon_on_show(window):
                         "AppleInterfaceThemeChangedNotification", None,
                         AppKit.NSOperationQueue.mainQueue(), lambda _note: apply())
             except Exception as exc:  # noqa: BLE001
-                print(f"[icon] {exc}", file=sys.stderr)
+                _shell_log(f"[icon] {exc}")
 
     _titlebar_apply[id(window)] = (window, apply)   # …so remeasure() above can re-run this window's measurement when a tab bar appears or goes
     events = getattr(window, "events", None)
@@ -1205,7 +1232,7 @@ def _unify_titlebar_on_show(window, api=None):
                     if hasattr(nswin, "layoutIfNeeded"):
                         nswin.layoutIfNeeded()
                 except Exception as exc:  # noqa: BLE001
-                    print(f"[titlebar] toolbar: {exc}", file=sys.stderr)
+                    _shell_log(f"[titlebar] toolbar: {exc}")
             cv = nswin.contentView()
             close = nswin.standardWindowButton_(0)
             zoom = nswin.standardWindowButton_(2)
@@ -1239,7 +1266,7 @@ def _unify_titlebar_on_show(window, api=None):
                     _y = _LIGHT_TOP if flipped else (sup_h - _LIGHT_TOP - _f.size.height)
                     _b.setFrameOrigin_(AppKit.NSMakePoint(_f.origin.x, _y))
             except Exception as exc:  # noqa: BLE001
-                print(f"[titlebar] light place: {exc}", file=sys.stderr)   # a failed placement is cosmetic: the bar keeps the OS height, nothing breaks
+                _shell_log(f"[titlebar] light place: {exc}")   # a failed placement is cosmetic: the bar keeps the OS height, nothing breaks
             r = close.convertRect_toView_(close.bounds(), cv)
             cy = r.origin.y + r.size.height / 2.0
             if cy > win_h / 2:            # content view not flipped → convert to top-down
@@ -1266,7 +1293,7 @@ def _unify_titlebar_on_show(window, api=None):
                 + _tab_css(tab_h, tab_top)
             ) % (cy, right + 14)
         except Exception as exc:  # noqa: BLE001
-            print(f"[titlebar] light place: {exc}", file=sys.stderr)
+            _shell_log(f"[titlebar] light place: {exc}")
             return None
 
     def _wire_menu(AppKit):
@@ -1283,6 +1310,7 @@ def _unify_titlebar_on_show(window, api=None):
             app = AppKit.NSApp
             mainmenu = app.mainMenu() if app is not None else None
             if mainmenu is None:
+                _retry_menu_wiring("wire")   # …and try again shortly — see _retry_menu_wiring
                 return
             # the ONE place the table's portable modifier names become AppKit bits
             flag = {
@@ -1337,6 +1365,11 @@ def _unify_titlebar_on_show(window, api=None):
                         img = AppKit.NSImage.imageWithSystemSymbolName_accessibilityDescription_(symbol, None)
                         if img is not None:
                             it.setImage_(img)
+            if not _menu_wired.get("logged"):
+                _menu_wired["logged"] = True
+                _shell_log(f"[menu] wired: {mainmenu.numberOfItems()} top-level, "
+                           f"{len(menus_by_title)} submenus {sorted(menus_by_title)}, "
+                           f"symbols={'yes' if has_sym else 'no'}")
             # inject "About SUD Workbench" at the top of the application (program) menu, idempotently
             # (this whole function re-runs on every menu open, so guard against a duplicate insert)
             try:
@@ -1381,7 +1414,7 @@ def _unify_titlebar_on_show(window, api=None):
                                     _mi.setImage_(aimg)
                             break
             except Exception as exc:  # noqa: BLE001
-                print(f"[menu] about inject: {exc}", file=sys.stderr)
+                _shell_log(f"[menu] about inject: {exc}")
             # ── the WINDOW menu, injected natively and handed to AppKit ──────────────────────────
             # Every multi-window Mac app has one, and it is not decoration: once NSApp.windowsMenu is
             # set, AppKit MAINTAINS it — the list of open windows at the bottom, and (because the
@@ -1423,7 +1456,7 @@ def _unify_titlebar_on_show(window, api=None):
                     AppKit.NSApp.setWindowsMenu_(winmenu)   # …from here on AppKit owns it: window list + the tab commands
                     menus_by_title["Window"] = winmenu
             except Exception as exc:  # noqa: BLE001 — a missing Window menu is a loss, not a failure
-                print(f"[menu] window menu: {exc}", file=sys.stderr)
+                _shell_log(f"[menu] window menu: {exc}")
             # …and the Edit/View rows AppKit alone can serve, now that pywebview's duplicate default
             # menus are switched off (SHOW_DEFAULT_MENUS in __main__.py).  After the loop above, so
             # the injected items are never fed to the spec lookup, and idempotent for the same
@@ -1431,11 +1464,11 @@ def _unify_titlebar_on_show(window, api=None):
             try:
                 _inject_native_items(AppKit, menus_by_title)
             except Exception as exc:  # noqa: BLE001 — a missing Cut item must never break the menu
-                print(f"[menu] native items: {exc}", file=sys.stderr)
+                _shell_log(f"[menu] native items: {exc}")
             if api is not None:
                 api._menu = menu_map
         except Exception as exc:  # noqa: BLE001
-            print(f"[menu] wiring: {exc}", file=sys.stderr)
+            _shell_log(f"[menu] wiring: {exc}")
 
     # Cache the frontend's last-reported selection state so the menu delegate can re-apply conditional
     # show/hide synchronously when a menu opens (without a round-trip to JS). We wrap the api's own
@@ -1465,6 +1498,11 @@ def _unify_titlebar_on_show(window, api=None):
         submenu open, so it beats whatever pywebview did to the items underneath us."""
         import AppKit
         _wire_menu(AppKit)   # re-applies key equivalents + images and rebuilds api._menu from the live items
+        # …AND THE DELEGATE IS RE-ASSERTED HERE, not only once from _mutate. NSMenu holds its delegate
+        # weakly and pywebview REBUILDS these menus underneath us — a submenu object swapped in after
+        # _mutate ran carries no delegate at all, so it would never re-wire and would keep whatever
+        # pywebview left on it. Idempotent (it skips a submenu that already has ours), and cheap.
+        _install_menu_delegate(AppKit)
         # …and the conditional items follow the KEY window, not the window that installed this
         # delegate: every document window installs one, so with two windows open the last-installed
         # closure would otherwise decide what a menu opened over the OTHER window is allowed to show.
@@ -1474,7 +1512,7 @@ def _unify_titlebar_on_show(window, api=None):
             try:
                 target._apply_menu(st, force=True)   # synchronous, same thread → correct visibility before the menu paints. force: this IS the key window's state, so the not-key guard in _apply_menu must not second-guess it
             except Exception as exc:  # noqa: BLE001
-                print(f"[menu] delegate apply-state: {exc}", file=sys.stderr)
+                _shell_log(f"[menu] delegate apply-state: {exc}")
 
     def _install_menu_delegate(AppKit):
         """Set our retained NSMenuDelegate on every submenu (idempotent; re-assert on each pass in case
@@ -1483,6 +1521,7 @@ def _unify_titlebar_on_show(window, api=None):
             app = AppKit.NSApp
             mainmenu = app.mainMenu() if app is not None else None
             if mainmenu is None:
+                _retry_menu_wiring("delegate")
                 return
             _menu_delegate["cb"] = _menu_reapply   # closure over api / _wire_menu — refreshed each pass
             deleg = _menu_delegate.get("obj")
@@ -1494,9 +1533,73 @@ def _unify_titlebar_on_show(window, api=None):
                 if sub is not None and sub.delegate() is not deleg:
                     sub.setDelegate_(deleg)
         except Exception as exc:  # noqa: BLE001
-            print(f"[menu] delegate install: {exc}", file=sys.stderr)
+            _shell_log(f"[menu] delegate install: {exc}")
+
+    def _retry_menu_wiring(what):
+        """⚠ THE ONE PATH IN THIS MODULE THAT USED TO FAIL SILENTLY, AND IT FAILS EXACTLY LIKE A BUG REPORT.
+
+        `_wire_menu` and `_install_menu_delegate` both begin `if mainmenu is None: return`, and pywebview
+        installs the main menu inside `webview.start()` while `_mutate` is marshalled from the window's
+        `shown` handler — so which of the two happens first is a race. Lose it and BOTH bail, with no log
+        line and nothing to say so, leaving precisely the reported set of symptoms: no key equivalents, no
+        SF Symbol icons, the standard About panel instead of ours, and an application menu still named
+        after the interpreter (the rename lives in `_wire_menu` too). Worse, the SELF-HEALING is lost with
+        them — `_install_menu_delegate` is what re-runs the wiring on every menu open, and it is skipped by
+        the very same condition, so a race lost at launch stayed lost for the life of the process.
+
+        So it is retried rather than abandoned: a few main-thread turns, ~120ms apart, until a menu exists.
+        Bounded, because a build that genuinely has no menu (SUD_CHROME=win) must not spin for ever — and
+        the last attempt says so in `crash.log`, which is where a LaunchServices launch can still be read.
+        `apply()` also runs again on `loaded`, so this is belt and braces on a path that has now cost two
+        bug reports."""
+        n = _menu_wired.get("retries", 0)
+        if n >= 40:
+            if not _menu_wired.get("gaveup"):
+                _menu_wired["gaveup"] = True
+                _shell_log(f"[menu] {what} skipped: NSApp still has no main menu after {n} tries")
+            return
+        _menu_wired["retries"] = n + 1
+        try:
+            from PyObjCTools import AppHelper
+            import AppKit as _AK
+
+            def again():
+                try:
+                    _wire_menu(_AK)
+                    _install_menu_delegate(_AK)
+                except Exception as exc:  # noqa: BLE001
+                    _shell_log(f"[menu] retry: {exc}")
+            AppHelper.callLater(0.12, again)
+        except Exception as exc:  # noqa: BLE001 — no run loop to defer into; `loaded` will try again
+            _shell_log(f"[menu] retry schedule: {exc}")
 
     def _mutate(holder):  # runs on the Cocoa main thread — NSWindow geometry may only be touched there
+        # ── THE MENU IS WIRED FIRST, AND EACH CALL FAILS ALONE ──────────────────────────────────
+        # These three used to sit at the BOTTOM of the window-decoration `try` below, and that is a
+        # fault line this app has now been over twice. The menu's key equivalents and SF Symbols have
+        # nothing to do with a window's title bar — one is the application's, the other this window's —
+        # but downstream of a single `try` they shared its fate: any throw anywhere above jumped to the
+        # "could not unify" handler and skipped them, leaving a window that looks completely right
+        # beside a menu bar with no shortcuts and no icons. The three accent/activity/full-screen
+        # observers were isolated the first time this happened, on that same reasoning; the lesson did
+        # not generalise, and it recurred (reported again as "the menu icons and keyboard shortcuts are
+        # missing from the installed app"), because the REST of that block can throw too — a tab-group
+        # frame read, a titlebar accessory, a style-mask call an OS version resolves differently.
+        # Moved ABOVE the window work rather than merely wrapped: neither call touches `nswin` (both
+        # only need NSApp.mainMenu), so nothing about the window can precede them, and a future edit
+        # cannot reintroduce the dependency by accident. `_install_menu_delegate` then re-runs
+        # `_wire_menu` on every menu open, so even a transient failure here self-heals on first use.
+        try:
+            import AppKit as _AK
+            _wire_menu(_AK)
+            _install_menu_delegate(_AK)   # keep the wiring alive across pywebview's menu rebuilds
+        except Exception as exc:  # noqa: BLE001
+            _shell_log(f"[menu] wiring: {exc}")
+        try:
+            if api is not None:   # already on the main thread → rebuild Open Recent with live-action native items
+                _rebuild_recent_menu_main(window, api)
+        except Exception as exc:  # noqa: BLE001
+            _shell_log(f"[menu] open-recent: {exc}")
         try:
             import AppKit
             nswin = window.native
@@ -1526,7 +1629,7 @@ def _unify_titlebar_on_show(window, api=None):
                     if wk is not None and hasattr(wk, "setUnderPageBackgroundColor_"):
                         wk.setUnderPageBackgroundColor_(_bg_nscolor(AppKit))
                 except Exception as exc:  # noqa: BLE001 — cosmetic; a window that flickers still works
-                    print(f"[titlebar] under-page background: {exc}", file=sys.stderr)
+                    _shell_log(f"[titlebar] under-page background: {exc}")
                 # pywebview paints the title-bar view opaque (windowBackgroundColor); that opaque bar is what
                 # covers the toolbar. Clear it so the unified toolbar (web content) shows through. Pick the
                 # topmost sibling that ISN'T our drag overlay (which we add on top of the same frame view and
@@ -1559,7 +1662,7 @@ def _unify_titlebar_on_show(window, api=None):
                     if hasattr(nswin, "setTabbingMode_"):
                         nswin.setTabbingMode_(0)
                 except Exception as exc:  # noqa: BLE001 — tabbing is a nicety; never hold up the window for it
-                    print(f"[titlebar] tabbing: {exc}", file=sys.stderr)
+                    _shell_log(f"[titlebar] tabbing: {exc}")
                 # …AND A TAB KEEPS ITS GROUP'S FRAME. Everything above resizes the window — the style
                 # mask and, most of all, installing the unified toolbar — and a window that is already
                 # a TAB must not carry that resize alone: tabs in a group share one frame, so the odd
@@ -1576,7 +1679,7 @@ def _unify_titlebar_on_show(window, api=None):
                         if abs(want.size.height - cur.size.height) > 0.5 or abs(want.size.width - cur.size.width) > 0.5:
                             nswin.setFrame_display_(want, False)
                 except Exception as exc:  # noqa: BLE001
-                    print(f"[titlebar] tab frame: {exc}", file=sys.stderr)
+                    _shell_log(f"[titlebar] tab frame: {exc}")
                 holder["js"] = _place_lights(nswin, AppKit)
                 # THE THREE OBSERVERS CANNOT COST THE MENU ITS WIRING. They are decorations of the
                 # window (dimming, full-screen forwarding, accent recolouring); the menu below is the
@@ -1593,15 +1696,11 @@ def _unify_titlebar_on_show(window, api=None):
                     try:
                         _obs(AppKit, nswin, window)
                     except Exception as exc:  # noqa: BLE001
-                        print(f"[titlebar] {_what} observer: {exc}", file=sys.stderr)
-            _wire_menu(AppKit)
-            _install_menu_delegate(AppKit)   # keep the wiring alive across pywebview's menu rebuilds
+                        _shell_log(f"[titlebar] {_what} observer: {exc}")
             # (the native icons USED to be rasterised here, holding the main thread before the page
             #  could start loading — see _rasterise_icons, which now does it a run-loop turn later)
-            if api is not None:   # already on the main thread → rebuild Open Recent with live-action native items
-                _rebuild_recent_menu_main(window, api)
         except Exception as exc:  # noqa: BLE001
-            print(f"[titlebar] could not unify: {exc}", file=sys.stderr)
+            _shell_log(f"[titlebar] could not unify: {exc}")
         finally:
             holder["done"].set()
 
@@ -1646,7 +1745,7 @@ def _unify_titlebar_on_show(window, api=None):
             # exactly as the pair above does.
             _file_icon["sf_options"] = _compute_symbol_icon(AppKit, "slider.horizontal.3")
         except Exception as exc:  # noqa: BLE001 — an app with no native icons is still a working app
-            print(f"[titlebar] icons: {exc}", file=sys.stderr)
+            _shell_log(f"[titlebar] icons: {exc}")
         # …and hand them to the page from a WORKER thread: evaluate_js parks on a completion the main
         # thread has to deliver, so calling it from this main-thread callback would deadlock the very
         # run loop that would service it (the same invariant _dialog_lock is bridge-thread-only for).
@@ -1661,13 +1760,13 @@ def _unify_titlebar_on_show(window, api=None):
             try:
                 window.evaluate_js("window.__setFileIcon && window.__setFileIcon(%s)" % json.dumps(icon))
             except Exception as exc:  # noqa: BLE001
-                print(f"[titlebar] file icon inject: {exc}", file=sys.stderr)
+                _shell_log(f"[titlebar] file icon inject: {exc}")
         folder, root = _file_icon.get("folder"), _file_icon.get("root")
         if folder:   # native folder icons for the proxy-path menu
             try:
                 window.evaluate_js("window.__folderIcon=%s; window.__rootIcon=%s" % (json.dumps(folder), json.dumps(root or folder)))
             except Exception as exc:  # noqa: BLE001
-                print(f"[titlebar] folder icon inject: {exc}", file=sys.stderr)
+                _shell_log(f"[titlebar] folder icon inject: {exc}")
         sf_add, sf_manage = _file_icon.get("sf_addtext"), _file_icon.get("sf_manage")
         if sf_add or sf_manage:   # the real menu SF Symbols as titlebar mask glyphs
             try:
@@ -1675,7 +1774,7 @@ def _unify_titlebar_on_show(window, api=None):
                     "__setSfSymbol('addtext',%s)" % json.dumps(sf_add) if sf_add else "0",
                     "__setSfSymbol('manage',%s)" % json.dumps(sf_manage) if sf_manage else "0"))
             except Exception as exc:  # noqa: BLE001
-                print(f"[titlebar] sf symbol inject: {exc}", file=sys.stderr)
+                _shell_log(f"[titlebar] sf symbol inject: {exc}")
         # item 7: the Layout pill, upgraded the same way but through the CSS VARIABLE rather than __setSfSymbol —
         # that helper carries a hard-coded {which → one selector} map (js/io/bridge.js), so a second element wearing
         # the same glyph would need a second entry, whereas both pill segments already read `--m:var(--sf-paged|
@@ -1691,7 +1790,7 @@ def _unify_titlebar_on_show(window, api=None):
                     setvar % (k, json.dumps(uri)) for k, uri in
                     (("paged", sf_paged), ("unpaged", sf_unpaged), ("options", sf_options)) if uri))
             except Exception as exc:  # noqa: BLE001
-                print(f"[titlebar] layout symbol inject: {exc}", file=sys.stderr)
+                _shell_log(f"[titlebar] layout symbol inject: {exc}")
 
 
     def apply(*_):
@@ -1722,7 +1821,7 @@ def _unify_titlebar_on_show(window, api=None):
             try:
                 window.evaluate_js(js)   # off the main thread → safe to block until the JS bridge is ready
             except Exception as exc:  # noqa: BLE001
-                print(f"[titlebar] inject: {exc}", file=sys.stderr)
+                _shell_log(f"[titlebar] inject: {exc}")
         if _file_icon.get("done"):
             _push_icons()   # already rasterised (an earlier window, or an earlier event on this one)
         else:
@@ -1742,7 +1841,7 @@ def _unify_titlebar_on_show(window, api=None):
             rect = window.evaluate_js(_DRAG_MEASURE_JS)
             _apply_titlebar_drag(window, rect)
         except Exception as exc:  # noqa: BLE001
-            print(f"[titlebar] drag measure: {exc}", file=sys.stderr)
+            _shell_log(f"[titlebar] drag measure: {exc}")
         if api is not None and getattr(api, "_menu", None):
             try:
                 window.evaluate_js("window.syncMenu && window.syncMenu(true)")   # menu items now exist → re-push selection state
@@ -1772,7 +1871,7 @@ def _unify_titlebar_on_show(window, api=None):
                 rects = window.evaluate_js(_DRAG_MEASURE_JS)
                 _apply_titlebar_drag(window, rects)
             except Exception as exc:  # noqa: BLE001
-                print(f"[titlebar] drag remeasure: {exc}", file=sys.stderr)
+                _shell_log(f"[titlebar] drag remeasure: {exc}")
         threading.Thread(target=run, daemon=True).start()
 
     # item 3: let the frontend flip the drag overlay click-through while a titlebar context menu is open, so a

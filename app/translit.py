@@ -587,6 +587,51 @@ def _baxter_rows() -> dict[str, list[tuple[str, str, str, str, str]]]:
     return _BAXTER_ROWS
 
 
+_TSHET_UINH: dict[str, list[str]] | None = None
+
+
+def _tshet_uinh_rows() -> dict[str, list[str]]:
+    """graph → its Baxter MIDDLE CHINESE readings, DERIVED from the 廣韻's own 音韻地位 rather than
+    attested in a word list — ``app/data/tshet_uinh_mc.tsv``, built by
+    ``tools/build_tshet_uinh_baxter.py`` (see that script for the sources and the derivation).
+
+    ⚠ IT IS THE FALLBACK, NOT THE TABLE.  `baxter_sagart.tsv` is an OLD Chinese appendix: it lists the
+    4,082 words Baxter and Sagart chose to reconstruct, over 4,330 graphs, and everything outside that
+    editorial scope had no Middle Chinese in this app at all — including most ordinary Buddhist-text
+    vocabulary (菩薩, 涅槃, 般若), which is where a reader most wants it.  The rhyme book has a position for
+    every graph it lists, and Baxter's transcription is a notation FOR that position, so 19,492 graphs
+    answer here against 4,330 there.  It supplies a reading only where the appendix supplies none, so no
+    rendering that already worked moves — measured: the appendix's own first reading is reproduced by this
+    derivation for 94.3 % of the 3,364 graphs both hold, and the residue is the appendix choosing a
+    different 小韻, not a different notation for the same one.
+
+    NO OLD CHINESE COMES FROM HERE, and none is invented to keep the columns even: the Qieyun system is a
+    statement about Middle Chinese and says nothing about the reconstruction of Old Chinese.  A graph
+    reached through this table therefore renders under "Middle Chinese" and stays silent under "Old
+    Chinese", which is the true state of the evidence.
+
+    A row of fewer than two fields is SKIPPED rather than padded, on the same reasoning as
+    `_baxter_rows`': a file written to a different column shape must leave the table EMPTY rather than be
+    read one column across."""
+    global _TSHET_UINH
+    if _TSHET_UINH is None:
+        _TSHET_UINH = {}
+        try:
+            with open(os.path.join(_DATA_DIR, "tshet_uinh_mc.tsv"), encoding="utf-8") as fh:
+                for line in fh:
+                    if line.startswith("#"):
+                        continue
+                    p = line.rstrip("\n").split("\t")
+                    if len(p) < 2 or not p[0] or not p[1]:
+                        continue
+                    got = _TSHET_UINH.setdefault(p[0], [])
+                    if p[1] not in got:
+                        got.append(p[1])
+        except Exception:  # noqa: BLE001
+            pass
+    return _TSHET_UINH
+
+
 def _baxter_display(oc: str) -> str:
     """One OC reconstruction as the transliteration ROW should show it: its ``{…}`` annex dropped.
 
@@ -710,6 +755,13 @@ def _baxter_table() -> dict[str, tuple[str, str]]:
             mc, oc = rows[0][1], rows[0][2]
             ocv = _baxter_variants(oc, mc)
             _BAXTER[ch] = (mc, _baxter_display(ocv[0]) if ocv else "")   # variant 0 is what the Displayed row shows; the rest reach the user through `readings` (see _baxter_variants)
+        # …and every graph the appendix never listed, from the rhyme book's own positions
+        # (`_tshet_uinh_rows`).  ONLY where the appendix is silent about the MIDDLE CHINESE, so nothing
+        # already on screen moves; the Old Chinese slot stays as it was — empty for these graphs, because
+        # a Qieyun position says nothing at all about the reconstruction of Old Chinese.
+        for ch, mcs in _tshet_uinh_rows().items():
+            if mcs and not _BAXTER.get(ch, ("", ""))[0]:
+                _BAXTER[ch] = (mcs[0], _BAXTER.get(ch, ("", ""))[1])
     return _BAXTER
 
 
@@ -1543,6 +1595,46 @@ _DANDA_IAST = ("|", "‖")
 _DANDA_SPLIT = re.compile(r"(//|\|\||‖|/|\||॥|।|\n)")   # double markers first so "//"/"||"/"‖"/"॥" aren't split into singles; "‖" (U+2016) is the double-daṇḍa DISPLAY glyph; the native ।/॥ are captured too so a DEVANAGARI-stored text's daṇḍas are re-spelled rather than transliterated; item 20: a newline is captured too so it rides THROUGH the script conversion as a hard break (no sandhi/aksharamukha collapse across it)
 
 
+# The IAST letters a word can END in and still be a BARE CONSONANT — i.e. one a Brahmic script has to
+# write with a virāma.  The vowels (including the vocalic liquids ṛ ṝ ḷ ḹ and the diphthongs, which end
+# in i/u), the anusvāra ṃ/ṁ and the visarga ḥ are all absent by design: none of them leaves a consonant
+# hanging, so none of them triggers the join below.  An aspirate ends in "h", which is in the set.
+_IAST_FINAL_CONS = set("kgṅcjñṭḍṇtdnpbmyrlvśṣsh")
+
+
+def _sa_join_final_consonant(text: str) -> str:
+    """Join a consonant-final word to the word after it, by deleting the space between them.
+
+    ⚠ THIS IS ORTHOGRAPHY, NOT SANDHI, and it is what a Brahmic script actually does.  A word-final
+    consonant is written with a virāma, and Devanagari does not leave a virāma standing before a space:
+    ``tad api`` is written तदपि and ``vāk iti`` वागिति — the two words share one akṣara run, the final
+    consonant taking the following vowel as a mātrā.  Romanisation is under no such constraint, so the
+    IAST original keeps its space and the script line loses it.  The two lines then disagree about word
+    division, and that is correct rather than a defect: word division is a fact about the SCRIPT here.
+
+    ⚠ DONE ON THE INPUT, NOT ON THE OUTPUT, and the difference is visible.  Deleting the space after
+    conversion leaves the virāma exactly where it was — तद्अपि, a dead consonant beside an independent
+    vowel, which is not how the word is written.  Deleting it BEFORE means aksharamukha is handed
+    ``tadapi`` and forms the real akṣara.  The rule is therefore stated in IAST, which is also the only
+    alphabet in which "ends in a consonant" is a question about a single character.
+
+    A file already stored in Devanagari passes through untouched, and should: `_ak` returns it
+    unchanged (source and target agree), so its own spelling — the author's — is what is drawn."""
+    out, i, n = [], 0, len(text)
+    while i < n:
+        ch = text[i]
+        if ch == " " and out and out[-1] in _IAST_FINAL_CONS:
+            j = i
+            while j < n and text[j] == " ":
+                j += 1
+            if j < n and not text[j].isspace():
+                i = j                      # …the whole run of spaces goes, and the two words meet
+                continue
+        out.append(ch)
+        i += 1
+    return "".join(out)
+
+
 def _sanskrit(text: str, target: str) -> str:
     try:
         from aksharamukha import transliterate as ak
@@ -1570,7 +1662,7 @@ def _sanskrit(text: str, target: str) -> str:
             elif piece == "\n":
                 out.append("\n")   # item 20: keep the hard line break verbatim (multi-line verse stays multi-line)
             else:
-                out.append(_ak(piece))
+                out.append(_ak(_sa_join_final_consonant(piece) if target != "IAST" else piece))   # a consonant-final word joins the next — see _sa_join_final_consonant (BEFORE the conversion, so the akṣara forms)
         return "".join(out)
     except Exception:  # noqa: BLE001
         return ""
@@ -2603,6 +2695,13 @@ def _baxter_all() -> dict[str, list[tuple[str, str]]]:
                     if rec not in out:
                         out.append(rec)
             _BAXTER_ALL[ch] = out
+        # …and the rhyme book's readings for the graphs the appendix does not cover, so the readings
+        # flyout offers 菩's four Middle Chinese readings rather than nothing at all. Same rule as
+        # `_baxter_table`: only where the appendix has no Middle Chinese for the graph, and with an
+        # empty Old Chinese beside each — see `_tshet_uinh_rows`.
+        for ch, mcs in _tshet_uinh_rows().items():
+            if mcs and not any(mc for mc, _oc in _BAXTER_ALL.get(ch, ())):
+                _BAXTER_ALL[ch] = [(mc, "") for mc in mcs]
     return _BAXTER_ALL
 
 

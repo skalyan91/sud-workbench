@@ -697,6 +697,58 @@ function setStextSel(el,a,b){ try{ const p=_stextPoint(el,a),q=_stextPoint(el,b)
        past, which is off by half a character on every click). Horizontal only, which is right for the
        single-line fields this is used on; a wrapped textarea falls back to the end.
    Returns true when it placed a caret, false when it could not — a caret is a nicety, never a reason to throw. */
+/* ── THE APP'S ZOOM IS `zoom`, AND THAT SPLITS THE MEASUREMENT APIs IN TWO ─────────────────────────
+   `.sblock{zoom:var(--fs)}` (app.css) is how ⌘+/⌘− scales the document, and it is a real scale on the
+   USED values, not a transform: a block laid out 714px wide paints 1142px wide at FS=1.6. Which means
+   the two families of measurement no longer agree, and mixing them silently multiplies by the zoom:
+
+     · getBoundingClientRect / clientX / deltaY   →  VIEWPORT px (the zoom already applied)
+     · offsetTop/Height, clientHeight, scrollTop, getComputedStyle lengths, canvas measureText
+                                                  →  the element's OWN px (unzoomed)
+
+   Probed on this Chrome AND on the WKWebView the app actually ships in, which agree: at zoom 1.5 a
+   300px-tall box reports rect.height 480 and offsetHeight 320, and getComputedStyle still reports the
+   AUTHORED font-size. So an expression that subtracts one family from the other has to convert, and
+   this is the conversion factor — `currentCSSZoom` is the resolved product of every ancestor's zoom
+   (Chrome 128+/Safari 18+, present in both engines probed), with an ancestor walk as the fallback so
+   an older engine degrades to the same number rather than to 1.
+   NOT simply `FS`: that is right only for a node inside `.sblock`, and callers here walk arbitrary
+   ancestor chains that leave it (#doc itself is never zoomed). */
+function cssZoomOf(el){ if(!el||el.nodeType!==1) return 1;
+  const z=el.currentCSSZoom; if(typeof z==="number"&&z>0) return z;
+  let f=1; for(let n=el;n&&n.nodeType===1;n=n.parentElement){ const v=parseFloat(getComputedStyle(n).zoom); if(v>0&&v!==1) f*=v; }
+  return f||1; }
+/* ⚠ …AND THE TWO ENGINES DO NOT AGREE ABOUT WHAT `getComputedStyle` REPORTS INSIDE ONE.
+   For ordinary HTML the two match and both report the AUTHORED length (probed: a 20px input with
+   11px padding inside `zoom:1.6` reads back 20/11 in Chrome and in WebKit alike). For SVG TEXT they
+   diverge — the diagram's own glyphs — where WebKit reports the authored size DIVIDED by the zoom
+   and Chrome reports it plain: a 14px form row inside FS=1.6 reads 8.75px in the shipping WKWebView
+   and 14px in Chrome; at FS=0.6 it reads 23.33px. Multiplying that by FS, as the inline editors did,
+   therefore lands exactly back on the AUTHORED size in WebKit — the field opened at 100 % over a
+   diagram drawn at 160 %, which is the reported "input fields still show at the original size".
+
+   So the factor is PROBED, not branched on the engine or on the SVG namespace: a hidden element with
+   an inline `font-size:100px` is put in the SAME zoom context as `el`, and what comes back says how
+   this engine reports a length there. Chrome answers 100 (factor 1); WebKit answers 100/z on SVG
+   (factor z). A future engine that does something else in some third context is measured, not
+   guessed at. Cached on (namespace, zoom) — every token in a document shares both — and short-
+   circuited at zoom 1, which is every document nobody has zoomed. */
+function cssLenScale(el){ if(!el||el.nodeType!==1) return 1;
+  const z=cssZoomOf(el); if(!(z>0)||Math.abs(z-1)<1e-6) return 1;
+  const svg=el.namespaceURI===SVGNS, key=(svg?"s":"h")+z;
+  if(cssLenScale._k===key) return cssLenScale._v;
+  const host=el.parentNode; let v=1;
+  if(host&&host.appendChild){
+    const p=svg?document.createElementNS(SVGNS,"text"):document.createElement("span");
+    p.setAttribute("style","font-size:100px;position:absolute;visibility:hidden;pointer-events:none");
+    try{ host.appendChild(p); const got=parseFloat(getComputedStyle(p).fontSize); if(got>0) v=100/got; }
+    catch(_){}
+    finally{ if(p.parentNode) p.parentNode.removeChild(p); } }
+  cssLenScale._k=key; cssLenScale._v=v; return v; }
+// …and the one thing every caller actually wants: the size to draw a floating (un-zoomed, body-level)
+// overlay at so it matches the text it covers. authored = computed × cssLenScale; visual = authored × zoom.
+function visualFontPx(el){ const cs=getComputedStyle(el);
+  return (parseFloat(cs.fontSize)||0)*cssLenScale(el)*cssZoomOf(el); }
 function caretAtPoint(el,x,y){ if(!el) return false;
   const tag=el.tagName;
   if(tag==="INPUT"||tag==="TEXTAREA"){
@@ -708,7 +760,14 @@ function caretAtPoint(el,x,y){ if(!el) return false;
       if(rtl||(tag==="TEXTAREA"&&v.indexOf("\n")>=0)){ el.setSelectionRange(v.length,v.length); return true; }   // RTL and multi-line need a 2-D solve this does not attempt — end of text is the honest fallback
       const cv=caretAtPoint._cv||(caretAtPoint._cv=document.createElement("canvas"));
       const cx=cv.getContext("2d"); cx.font=cs.font||(cs.fontStyle+" "+cs.fontWeight+" "+cs.fontSize+" "+cs.fontFamily);
-      const dx=x-(r.left+bordL+padL-(el.scrollLeft||0));
+      /* …CONVERTED INTO THE FIELD'S OWN px before it meets measureText's. `x` and `r.left` are viewport
+         px; the padding, the border, scrollLeft and every width `cx.measureText` is about to return are
+         the field's own. Left mixed, the click point ran `FS`× too far along the string: measured at
+         FS=1.6 a click on boundary 5 of "abcdefghij" placed the caret at 9, and at FS=0.6 at 3. Every
+         grid cell control lives inside `.sblock` and so is zoomed; the diagram's floating .nodeedit is
+         appended to <body> and is not, where cssZoomOf reports 1 and this is the old expression. */
+      const z=cssZoomOf(el);
+      const dx=(x-r.left)/z-bordL-padL+(el.scrollLeft||0);
       let best=0, bestD=Math.abs(dx);
       for(let i=1;i<=v.length;i++){ const d=Math.abs(cx.measureText(v.slice(0,i)).width-dx);
         if(d<bestD){ bestD=d; best=i; } }                                   // NEAREST boundary, so a click in the left half of a glyph lands before it
@@ -2088,13 +2147,13 @@ function positionBracketAnnots(){ document.querySelectorAll("#doc .bwrap").forEa
     svg.appendChild(E("path",{class:"mwt-tie-cas",d:tieD}));   // occlusion halo behind the tie (matches the SVG-view mwtTie)
     svg.appendChild(E("path",{class:"mwt-tie",d:`M ${x0} ${yb} L ${x0} ${yb+dp+0.421875} M ${x1} ${yb+dp+0.421875} L ${x1} ${yb}`}));   // end-pins: the full weight — each extends 0.421875px (half the bar's own .75·--arc-stroke width, now 1.125px — item 1) PAST the bar's centreline so its (thicker) stroke fully covers the corner the (thinner) bar's stroke reaches, instead of butting flush and leaving a notch
     svg.appendChild(E("path",{class:"mwt-tie-h",d:`M ${x0} ${yb+dp} L ${x1} ${yb+dp}`}));   // the horizontal bar, drawn thinner — per psychophysics, a horizontal stroke reads heavier than a vertical one of the same width
-    const fyb=yb+dp+20, STEP=18+descent(POS_F);
+    const fyb=yb+dp+20, STEP=belowGap();
     if(m.kind==="xpos"){ drawTieLabel(svg,mx,fyb,m.pos,"mwt-pos","mwt-pos-cas",POS_F,null); tagXPosLabel(svg.lastElementChild,si0,m); return; }   // item 1: an ExtPos-only bracket — the value itself is the label, in the POS register
     const mfd=bform(m); let ly=fyb;
     const iastRow=iastFormEdit();   // Sanskrit + a real script → the surface form is edited on the IAST ROW, never on the derived glyph; same contract (and same {data-s, data-mwtfrom} tagging) as the SVG views' mwtTie
     { const mrt=trTxt(m); if(mrt){ ly+=STEP; const tr=E("text",{class:"translit mwt-tr"+(iastRow?" mwt-tr-edit":""),x:mx,y:ly,"text-anchor":"middle"}); tr.textContent=mrt; svg.appendChild(tr);
       if(si0>=0&&m.fromTok!=null){ tr.setAttribute("data-s",si0); tr.setAttribute("data-mwtfrom",m.fromTok); }   /* tagged in EVERY language, so the row's right-click resolves to its MWT rather than falling through to the ordinary token menu — see the fuller note on the same line in js/diagram/diagram-core.js. The .mwt-tr-edit class above stays gated on iastRow, because that is what the click-to-EDIT handler matches. */
-      if(iastRow&&si0>=0&&m.fromTok!=null){ tr.style.cursor="text"; svgTip(tr,"multi-word token — click to edit the surface form (the script glyph above is derived from it)"); } } }   // cursor:text matches mwtTie and the other click-to-edit diagram texts (.tr-edit/.gl-edit/.cform): clicking opens a field, not a button   // item 6: the MWT form→translit gap is a full inter-tier step (18+descent(POS_F)) — matching a NON-MWT token and the SVG mwtTie.   // Item 9: draw the MWT transliteration row FIRST so the MWT form (and its backing) below paints ON TOP where they crowd — consistent with the SVG mwtTie and .stext-over-.strans
+      if(iastRow&&si0>=0&&m.fromTok!=null){ tr.style.cursor="text"; svgTip(tr,"multi-word token — click to edit the surface form (the script glyph above is derived from it)"); } } }   // cursor:text matches mwtTie and the other click-to-edit diagram texts (.tr-edit/.gl-edit/.cform): clicking opens a field, not a button   // item 6: the MWT form→translit gap is a full inter-tier step (belowGap()) — matching a NON-MWT token and the SVG mwtTie.   // Item 9: draw the MWT transliteration row FIRST so the MWT form (and its backing) below paints ON TOP where they crowd — consistent with the SVG mwtTie and .stext-over-.strans
     if(m.pos){ drawTieLabel(svg,mx,ly+STEP,m.pos,"mwt-pos","mwt-pos-cas",POS_F,null); tagXPosLabel(svg.lastElementChild,si0,m); }   // item 1: the coinciding-span case — the MWT bracket simply gains the ExtPos as a POS annotation instead of a second bracket over the same tokens
     const cas=E("text",{class:"mwt-cas",x:mx,y:fyb,"text-anchor":"middle"}); cas.textContent=mfd; cas.setAttribute("aria-hidden","true"); svg.appendChild(cas);   // opaque backing behind the reconstructed word (and over the translit row above)
     const fe=E("text",{class:"mwt-form",x:mx,y:fyb,"text-anchor":"middle"}); fe.textContent=mfd;
@@ -2198,7 +2257,7 @@ function scrollRowToGridTop(row){ if(!row) return;
   scrollNearest(row);
   const wrap=row.closest&&row.closest(".gwrap"); if(!wrap) return;
   const wr=wrap.getBoundingClientRect(), rr=row.getBoundingClientRect();
-  wrap.scrollTop+=(rr.top-(wr.top+gridHeadH(wrap)))/FS;   // rects are SCALED viewport px, scrollTop is unscaled CSS px — the same /FS convention the tie geometry uses
+  wrap.scrollTop+=(rr.top-(wr.top+gridHeadH(wrap)))/cssZoomOf(wrap);   // rects are SCALED viewport px, scrollTop is unscaled CSS px — cssZoomOf rather than the bare FS this used to divide by, so the two scroll paths (here and scrollNearest) ask the DOM the same question rather than one of them assuming the wrap is inside .sblock
 }
 function scrollNearest(el){ if(!el) return;
   el=scrollRowOf(el);
@@ -2208,9 +2267,16 @@ function scrollNearest(el){ if(!el) return;
     if(/(auto|scroll)/.test(cs.overflowY) && node.scrollHeight>node.clientHeight){
       const nr=node.getBoundingClientRect(), er=el.getBoundingClientRect();   // re-measured each iteration: a nudge on an INNER container shifts el's rect for the NEXT (outer) one
       const stick=(node.id==="doc"&&typeof stickyHeadH==="function")?stickyHeadH((el.closest&&el.closest(".sblock"))||el):gridHeadH(node);   // the document scroller's top is additionally occluded by whatever boundary headings are PINNED over this element's block — scroll-padding-top only clears the toolbar, so without this a token brought to the top of the page lands underneath its own document/paragraph heading. The grid's own scroller is occluded the same way by its sticky column header
-      const top=nr.top+(parseFloat(cs.scrollPaddingTop)||0)+stick, bot=nr.bottom-(parseFloat(cs.scrollPaddingBottom)||0);
-      if(er.top<top) node.scrollTop-=(top-er.top);
-      else if(er.bottom>bot) node.scrollTop+=(er.bottom-bot);
+      /* …AND THE NUDGE IS CONVERTED INTO THE SCROLLER'S OWN px (see cssZoomOf above). Every scroller
+         this walk meets except `#doc` itself lives inside `.sblock{zoom:var(--fs)}` — the grid's
+         .gwrap, a wide diagram, a wrapped stemma's .wp-toks — so the delta measured off two rects is
+         `z`× the scrollTop it has to become. Measured on a capped grid: at FS=0.6, scrolling to the
+         last row under-shot by 34px and left the row off screen entirely. gridHeadH is already
+         viewport px (it is a rect height), so only the computed scroll-padding needs scaling up. */
+      const z=cssZoomOf(node);
+      const top=nr.top+(parseFloat(cs.scrollPaddingTop)||0)*z+stick, bot=nr.bottom-(parseFloat(cs.scrollPaddingBottom)||0)*z;
+      if(er.top<top) node.scrollTop-=(top-er.top)/z;
+      else if(er.bottom>bot) node.scrollTop+=(er.bottom-bot)/z;
     }
     node=node.parentElement;
   }

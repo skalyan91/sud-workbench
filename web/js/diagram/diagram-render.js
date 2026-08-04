@@ -106,7 +106,7 @@ function stemma(si,{proj,catNodes}){
     return {d,h,rel,origin:o,y1:ny(depth[d])-A,y2:ny(depth[h])+B}; });
   const total=Math.max(2,...c.map((cx,i)=>cx+lw[i]/2))+2;
   mirror(c,total);                                          // NOW flip for RTL, after label spacing is settled
-  const belowH=proj?((trLayer()?18+descent(POS_F):0)+(belowTierN()*(18+descent(POS_F)))+(show.pos?18+descent(POS_F):0)):0, tieH=proj?mwtDepth(D):0;   // Item 1/8: every below-row (translit, each gloss, POS) folds in descent(POS_F), matching belowStack's descender-matched per-row step
+  const belowH=proj?((trLayer()?belowGap():0)+(belowTierN()*(belowGap()))+(show.pos?belowGap():0)):0, tieH=proj?mwtDepth(D):0;   // Item 1/8: every below-row (translit, each gloss, POS) folds in descent(POS_F), matching belowStack's descender-matched per-row step
   const rep=reportOffsets(D);   // item 7/11: the BASELINE word row is the stemma's "line", so that is what a reported subtree steps UP off; the depth-positioned nodes above stay put (their y ENCODES depth — nudging it would read as a layout error, not as a plane)
   const maxRep=Math.max(0,...rep);   // #3: the deepest reported raising (highest step off the line). The baseline drops by this — see baseY — so the gap is sized to the deepest reporting level
   const baseY=TOP+maxD*LV+(proj?LV+maxRep:0), lowest=proj?baseY:ny(maxD), H=lowest+16+belowH+tieH;   // baseline sits one level (LV) below the lowest node; #3: dropped a further maxRep so a token raised by its reported-speech step (by=baseY−rep[i]) STILL clears the lowest tier by the full LV — the most-raised token lands exactly one level below, the rest hang beneath it
@@ -361,7 +361,7 @@ function arcs(si){
   /* label TEXTS last → in front of all arcs, their opaque casing occluding crossing edges cleanly */
   labs.forEach(L=>{ const lg=E("g",{class:"arc","data-s":si,"data-dep":L.dep}); lg.style.cursor="pointer"; lg.addEventListener("click",()=>pick(si,L.dep));
     drawLabel(lg,L.mx,L.fy,L.text,L.col); svg.appendChild(lg); });
-  const stackH=wordY+(trLayer()?18+descent(POS_F):0)+(belowTierN()*(18+descent(POS_F)))+(show.pos?18+descent(POS_F):0)+8;   // hit-rect reach: cover the transliteration + gloss + POS rows below the word (Item 1/8: every below-row folds in descent(POS_F), matching belowStack's descender-matched step)
+  const stackH=wordY+(trLayer()?belowGap():0)+(belowTierN()*(belowGap()))+(show.pos?belowGap():0)+8;   // hit-rect reach: cover the transliteration + gloss + POS rows below the word (Item 1/8: every below-row folds in descent(POS_F), matching belowStack's descender-matched step)
   let stackBot=wordY;
   t.forEach((tk,i)=>{const g=E("g",{class:"tok-group"+(sel.s===si&&sel.t===OID(i)?" sel":""),"data-s":si,"data-tok":OID(i)});
     const wy=repBase(rep,wordY,i);   // item 11: the word, its below-stack, its hit/wash band and its tail all lift by rep[i] — the SAME shared repBase the arc endpoint above went through — so the reported token and its arc float off the line together

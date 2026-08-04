@@ -10,9 +10,27 @@ function preserveScroll(fn){ const doc=document.getElementById("doc");
   const anchor=doc.querySelector(`.sblock[data-i="${CB}"]`);
   const before=anchor?anchor.getBoundingClientRect().top-doc.getBoundingClientRect().top:null;
   const innerTops=[]; if(anchor) anchor.querySelectorAll(INNER_SCROLL).forEach(el=>innerTops.push([el.scrollTop,el.scrollLeft]));
+  /* THE FOCUSED GRID CELL SURVIVES THE RE-RENDER — its caret, and the text being typed into it.
+     The caret alone was already carried across; the VALUE was not, and the two cannot be separated.
+     A grid cell commits on blur/Enter, not per keystroke, so while the reader is mid-word the model
+     still holds the old string — and a background pass re-rendering underneath them (the re-parse a
+     form edit kicks off, the macron refill, an MWT re-fuse) rebuilt the cell FROM the model, threw
+     their half-typed word away, and then set a caret offset into a string they had never seen. That
+     reads as the cursor jumping; it is actually the text vanishing under it.
+     `_edited` is the grid's own "this cell has been typed in" flag (set on the first `input` event,
+     js/grid/grid.js) and is exactly the condition under which the reader's text is the newer
+     statement about the field — the same rule makeEditable's INLINE_EDIT_SYNC applies to the
+     floating diagram editor, which is why an UN-edited cell still follows the model here and picks up
+     whatever the pass computed. */
   const ae=document.activeElement; let fd=null;
   if(ae&&ae.dataset&&ae.dataset.col!=null) fd={si:ae.dataset.si,ti:ae.dataset.ti,col:ae.dataset.col,
-    ss:ae.selectionStart,se:ae.selectionEnd};
+    ss:ae.selectionStart,se:ae.selectionEnd,
+    val:(ae._edited&&/INPUT|TEXTAREA/.test(ae.tagName))?ae.value:null,
+    // …and the FEATS/MISC pill field, which has no selectionStart to carry: it keeps its place as a
+    // chip count plus an offset into the text run (pillCaretGet, js/grid/grid.js). Without this a
+    // minted chip re-rendered the cell and `nc.focus()` below dropped the caret at its head — see
+    // that function's own note.
+    pill:(ae.classList&&ae.classList.contains("pillfield")&&typeof pillCaretGet==="function")?pillCaretGet(ae):null};
   fn();
   if(before!=null){ const a2=doc.querySelector(`.sblock[data-i="${CB}"]`);
     if(a2) doc.scrollTop+=(a2.getBoundingClientRect().top-doc.getBoundingClientRect().top)-before; }
@@ -21,7 +39,12 @@ function preserveScroll(fn){ const doc=document.getElementById("doc");
   if(a3&&innerTops.length){ const inners=a3.querySelectorAll(INNER_SCROLL);
     innerTops.forEach((p,k)=>{ if(inners[k]){inners[k].scrollTop=p[0]; inners[k].scrollLeft=p[1];} }); }
   if(fd){ const nc=doc.querySelector(`[data-si="${fd.si}"][data-ti="${fd.ti}"][data-col="${fd.col}"]`);
-    if(nc){ nc.focus(); if(/INPUT|TEXTAREA/.test(nc.tagName)&&fd.ss!=null){ try{nc.setSelectionRange(fd.ss,fd.se);}catch(e){} } } } }
+    if(nc){ nc.focus();
+      // the typed text goes back FIRST, so the caret offset below indexes the string it was measured
+      // against; `_edited` rides with it, or the blur-time ITRANS pass would no longer see a typed cell
+      if(fd.val!=null && nc.value!==fd.val){ nc.value=fd.val; nc._edited=true; }
+      if(/INPUT|TEXTAREA/.test(nc.tagName)&&fd.ss!=null){ try{nc.setSelectionRange(fd.ss,fd.se);}catch(e){} }
+      else if(fd.pill&&typeof pillCaretSet==="function") pillCaretSet(nc,fd.pill); } } }   // …and the pill field's own caret, restored AFTER focus() (which is what collapsed it)
 /* A RE-RENDER THAT MUST NOT INTERRUPT TYPING. For the background passes — the re-parse a form edit kicks off,
    which lands seconds after the edit — the render is a nicety, while the caret it would destroy is the reader's
    place in the next field. makeEditable's own field carries none of the attributes preserveScroll restores focus
@@ -113,7 +136,7 @@ function openTbMenu(x,y){ closeTbMenu(); _tbPass(true);   // item 3: make the na
     m.appendChild(it); });
   document.body.appendChild(m); localiseAccel(m);   // Windows: this popup is built fresh on every open, so the boot sweep never saw it (no accelerators today; the sweep is here so a row that grows one is localised for free)
   const mw=m.offsetWidth, mh=m.offsetHeight;
-  m.style.left=Math.max(6,Math.min(x,innerWidth-mw-8))+"px"; m.style.top=Math.max(6,Math.min(y,innerHeight-mh-8))+"px";   /* item 3: open AT the cursor (only clamped to the viewport) — the drag overlay is click-through while the menu is open, so a row under the titlebar is still clickable */
+  m.style.left=Math.max(6,Math.min(x,innerWidth-mw-8))+"px"; m.style.top=Math.max(menuTopBound(),Math.min(y,innerHeight-mh-8))+"px";   /* item 3: open AT the cursor (only clamped to the viewport) — the drag overlay is click-through while the menu is open, so a row under the titlebar is still clickable. The floor is menuTopBound, not 6: the app's own titlebar is web content a menu paints over, but the NATIVE tab bar is not (js/core/scroll.js) */
   setTimeout(()=>document.addEventListener("mousedown",_tbOutside,true),0);
   document.addEventListener("keydown",_tbKey,true);
 }
@@ -151,7 +174,7 @@ function openTbGroupMenu(items,x,y){ closeTbMenu(); _tbPass(true);   // item 3: 
     m.appendChild(b); });
   document.body.appendChild(m); localiseAccel(m);   // Windows: _tbGroupItems falls back to a button's `title=` for its label ("Zoom out (⌘−)") — already swept at boot, but a row's own tooltip is built here, so sweep the finished menu too
   const mw=m.offsetWidth, mh=m.offsetHeight;
-  m.style.left=Math.max(6,Math.min(x,innerWidth-mw-8))+"px"; m.style.top=Math.max(6,Math.min(y,innerHeight-mh-8))+"px";   /* item 3: open at the label anchor (only clamped to the viewport) — the drag overlay is click-through while the menu is open, so rows under the titlebar stay clickable */
+  m.style.left=Math.max(6,Math.min(x,innerWidth-mw-8))+"px"; m.style.top=Math.max(menuTopBound(),Math.min(y,innerHeight-mh-8))+"px";   /* item 3: open at the label anchor (only clamped to the viewport) — the drag overlay is click-through while the menu is open, so rows under the titlebar stay clickable; the native tab bar is the exception, see menuTopBound */
   setTimeout(()=>document.addEventListener("mousedown",_tbOutside,true),0);
   document.addEventListener("keydown",_tbKey,true); }
 (function(){ document.querySelectorAll(".titlebar .tbgroup .pilllabel").forEach(label=>{
@@ -229,8 +252,15 @@ function lmClose(){ if(_langMenu)_langMenu.classList.remove("show"); setPillMenu
 function openLangMenu(x,y){ const m=lmEl(); _lmInput.value=""; lmFilter(""); m.classList.add("show"); setPillMenuOpen("tokInfo",true);
   const w=m.offsetWidth,h=m.offsetHeight;   // the pill sits in the bottom status bar → open the menu upward, above it
   const left=Math.max(8,Math.min(x,innerWidth-w-8)); m.style.left=left+"px";
-  if(y-h-6>=8){ m.style.top=""; m.style.bottom=(innerHeight-(y-6))+"px"; }   // room above → anchor by the BOTTOM edge (6px over the pill) so the menu collapses toward the pill as results thin out, keeping the search field put
-  else { m.style.bottom=""; m.style.top=Math.min(y+6,innerHeight-h-8)+"px"; }   // no room above → drop below, anchored by the top
+  /* …and the head room is measured from menuTopBound (js/core/scroll.js), not from 8: this menu opens
+     UPWARD out of the status bar and is the tallest thing in the app, so in a tabbed window it is the
+     one that runs into the native tab bar — which no z-index can put it in front of. Anchored by its
+     bottom edge, moving it is not the remedy; capping its height is, and the list inside already
+     scrolls. */
+  const bound=(typeof menuTopBound==="function")?menuTopBound():8;
+  if(y-h-6>=bound){ m.style.top=""; m.style.maxHeight=""; m.style.bottom=(innerHeight-(y-6))+"px"; }   // room above → anchor by the BOTTOM edge (6px over the pill) so the menu collapses toward the pill as results thin out, keeping the search field put
+  else if(y-6-bound>=160){ m.style.top=""; m.style.bottom=(innerHeight-(y-6))+"px"; m.style.maxHeight=(y-6-bound)+"px"; }   // not enough for the WHOLE list but a usable band above the pill: keep the upward anchor and let the list scroll inside it
+  else { m.style.bottom=""; m.style.maxHeight=""; m.style.top=Math.max(bound,Math.min(y+6,innerHeight-h-8))+"px"; }   // no usable room above → drop below, anchored by the top
   _lmInput.focus();
   // item 16: the current language is rendered FIRST (see lmFilter), so lmRender's list.scrollTop=0 already
   // seats it at the top; a double-rAF re-affirms it after the bottom-anchored menu's geometry settles.
@@ -292,9 +322,34 @@ addEventListener("click",closeDrawers,true);
 document.getElementById("glossMapBtn").addEventListener("click",()=>{ document.querySelectorAll("#toggles .drawer.open").forEach(x=>x.classList.remove("open"));
   if(hasBridge()){ try{ window.pywebview.api.open_glossmap_window(); return; }catch(e){} }
   openSheet(sheetGlossMap()); });
-function setFS(v){ FS=Math.max(0.6,Math.min(2,Math.round(v*20)/20)); document.documentElement.style.setProperty("--fs",FS);
-  updateZoomBtns();   // item 17: keep the zoom buttons' disabled state in sync
-  preserveScroll(renderDoc); }   // fix 8: the "100%" readout was replaced by the actual-size icon button, so there is no text to update
+/* ZOOMING KEEPS THE READING POSITION, and preserveScroll alone cannot give it.
+   preserveScroll anchors on `curBlock()` — the FOCUSED block — and holds its offset from #doc's raw
+   top. Both halves are wrong for a zoom. The focused block is deliberately not always the one on
+   screen (a scroll moves the viewport without moving the selection — see the CURBLOCK note in
+   js/core/prefs.js), and the raw top is not the usable top: the document scrolls UNDER the titlebar
+   and options bar. So changing the zoom pinned whichever block happened to hold the focus and let
+   everything else slide by however much its height had changed — measured on a block snapped flush
+   to the top of the port: 502px below it at FS 1.4, and 349px ABOVE it at FS 0.8.
+   withTopChrome (js/core/scroll.js) is exactly the right instrument and already exists for the
+   neighbouring problem (the chrome getting taller under a reader): it captures the block nearest the
+   USABLE port top and its offset from it, and puts that back afterwards. A snapped block has offset 0
+   and stays at 0; a reader resting mid-block keeps their line.
+   NO blockSnap() AFTERWARDS, though it looks like the obvious finish. It would be a no-op in the case
+   it is meant for — the restore already lands the block within half a pixel, well inside the 1px floor
+   blockSnap declines to act on — and actively wrong in the other one, newly snapping a reader who was
+   resting mid-block and had not asked to move. What it does contribute is a SMOOTH scroll: an async
+   glide that outlives the call and fights the next zoom press, which is how a run of ⌘+ presses ended
+   up drifting during the fix's own measurement. The anchor restore is the whole remedy. */
+function setFS(v){ const nv=Math.max(0.6,Math.min(2,Math.round(v*20)/20));
+  /* ⚠ THE `--fs` WRITE IS INSIDE THE CAPTURE, and that is not a stylistic choice. `zoom` is a style
+     change like any other, so the moment the property is set the next layout read reflows to the new
+     scale — and captureTopAnchor reads rects. Setting FS first and capturing afterwards therefore
+     measures the ALREADY-ZOOMED positions and restores the state it just captured: a perfect no-op,
+     which is exactly what an earlier version of this fix did, silently, while looking correct. */
+  const apply=()=>{ FS=nv; document.documentElement.style.setProperty("--fs",FS);
+    updateZoomBtns();   // item 17: keep the zoom buttons' disabled state in sync
+    preserveScroll(renderDoc); };   // fix 8: the "100%" readout was replaced by the actual-size icon button, so there is no text to update
+  if(typeof withTopChrome==="function") withTopChrome(apply); else apply(); }
 function updateZoomBtns(){   // item 17: disable a zoom button whenever pressing it would be idempotent — Zoom In at the 2.0 ceiling, Zoom Out at the 0.6 floor, Actual Size when already at 100%
   const u=document.getElementById("fsUp"),d=document.getElementById("fsDown"),r=document.getElementById("fsReset");
   if(u)u.disabled=FS>=2; if(d)d.disabled=FS<=0.6; if(r)r.disabled=Math.abs(FS-1)<1e-9; }
@@ -305,14 +360,24 @@ updateZoomBtns();   // item 17: initial state (FS starts at 1 → Actual Size di
 function zoomIn(){ setFS(FS+0.1); } function zoomOut(){ setFS(FS-0.1); } function zoomReset(){ setFS(1); }   // View menu drives the same per-block font size
 // fix 5/14: Preview-style toolbar button that shows/hides the options bar (.viewbar). Default = HIDDEN → button UNSELECTED.
 function toggleOptionsBar(){ const vb=document.querySelector(".viewbar"), btn=document.getElementById("btnOptions"); if(!vb)return;
-  const hidden=vb.classList.toggle("hidden");
-  if(btn){ btn.classList.toggle("active",!hidden); btn.setAttribute("aria-pressed",String(!hidden)); btn.title=hidden?"Show the options bar":"Hide the options bar"; }
-  syncChrome();   // fix 3: recompute the doc top-padding for the now shown/hidden options bar
-  if(hasBridge()){ try{ window.pywebview.api.options_bar_state(!hidden); }catch(e){} }   // …and every other tab follows: the options bar is app-wide (Api.options_bar_state)
-  // Item 1: showing/hiding the options bar changed --vbH → the doc's top padding → the VISIBLE viewport height. The
-  // per-block height cap is computed only inside renderDoc from that visible height, so re-render to re-tighten it —
-  // otherwise a block sized to the taller/shorter old viewport overflows (bar shown) or wastes room (bar hidden).
-  preserveScroll(renderDoc); }
+  /* THE READING POSITION SURVIVES THE BAR, and withTopChrome (js/core/scroll.js) is the instrument
+     written for precisely this: the bar makes the port shorter FROM THE TOP, so the content point the
+     reader was looking at ends up that many pixels above it — behind the bar — while preserveScroll,
+     which anchors on the FOCUSED block's offset from #doc's raw top, cannot see the difference. The
+     whole mutation goes inside the capture, `--vbH` write and re-render together: the capture has to
+     read the port as it was BEFORE syncChrome moves it, exactly as the zoom path has to capture before
+     `--fs` reflows. Same helper, same reason, and it now re-finds its block by index, so it survives
+     the renderDoc in the middle (it did not, and silently did nothing, until that was fixed). */
+  const apply=()=>{
+    const hidden=vb.classList.toggle("hidden");
+    if(btn){ btn.classList.toggle("active",!hidden); btn.setAttribute("aria-pressed",String(!hidden)); btn.title=hidden?"Show the options bar":"Hide the options bar"; }
+    syncChrome();   // fix 3: recompute the doc top-padding for the now shown/hidden options bar
+    if(hasBridge()){ try{ window.pywebview.api.options_bar_state(!hidden); }catch(e){} }   // …and every other tab follows: the options bar is app-wide (Api.options_bar_state)
+    // Item 1: showing/hiding the options bar changed --vbH → the doc's top padding → the VISIBLE viewport height. The
+    // per-block height cap is computed only inside renderDoc from that visible height, so re-render to re-tighten it —
+    // otherwise a block sized to the taller/shorter old viewport overflows (bar shown) or wastes room (bar hidden).
+    preserveScroll(renderDoc); };
+  if(typeof withTopChrome==="function") withTopChrome(apply); else apply(); }
 document.getElementById("btnOptions").addEventListener("click",toggleOptionsBar);
 // …the same change arriving FROM another window. Everything toggleOptionsBar does except the
 // broadcast — which is what stops two windows from telling each other about it forever — and a no-op

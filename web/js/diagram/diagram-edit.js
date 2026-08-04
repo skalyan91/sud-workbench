@@ -253,7 +253,7 @@ async function attachAsSharedConjunct(si,depId,conjDepId){ const s=DOC[si]; if(!
         else if(node){ DDRAG={kind:"node",si:+node.getAttribute("data-s"),tok:+node.getAttribute("data-tok"),x0:e.clientX,y0:e.clientY,moved:false}; }   // …and no pick() here either, for the stronger version of the reason above: this branch only ever runs from a pointermove with the button held, i.e. a gesture already known to be a DRAG
         if(DDRAG) DLAST={kind:DDRAG.kind,si:DDRAG.si,tok:DDRAG.tok,dep:DDRAG.dep,x0:e.clientX,y0:e.clientY,t:Date.now()}; } }
     if(!DDRAG)return;
-    if(!DDRAG.moved && Math.hypot(e.clientX-DDRAG.x0,e.clientY-DDRAG.y0)>4){ DDRAG.moved=true; document.body.classList.add("dg-drag"); try{docEl.setPointerCapture(e.pointerId);}catch(_){} dragGhost(DDRAG,e); }
+    if(!DDRAG.moved && Math.hypot(e.clientX-DDRAG.x0,e.clientY-DDRAG.y0)>4){ DDRAG.moved=true; document.body.classList.add("dg-drag"); try{docEl.setPointerCapture(e.pointerId);}catch(_){} dragGhost(DDRAG,e); paintHeadCandidates(DDRAG); }
     if(DDRAG.moved){ e.preventDefault(); DDRAG.lastX=e.clientX; DDRAG.lastY=e.clientY; moveGhost(e); document.querySelectorAll("#doc .dtarget").forEach(n=>n.classList.remove("dtarget"));   // remember the live drop point → a pointercancel can still commit there
       const t=ddNode(document.elementFromPoint(e.clientX,e.clientY)), self=DDRAG.kind==="node"&&t&&+t.getAttribute("data-tok")===DDRAG.tok, overNode=t&&+t.getAttribute("data-s")===DDRAG.si&&!self;
       if(overNode){ const tid=+t.getAttribute("data-tok");   // a stemma draws a token as an upper node + a baseline word group — highlight both, so the transliteration under the baseline is covered too
@@ -267,29 +267,89 @@ async function attachAsSharedConjunct(si,depId,conjDepId){ const s=DOC[si]; if(!
         else { const blk=document.querySelector(`.sblock[data-i="${DDRAG.si}"]`); if(blk)dropCaret(DDRAG.si,e.clientX,e.clientY,blk,DDRAG.tok); } } } });   // empty space → reorder: show where it would land
   function endDrag(e){ document.body.classList.remove("dg-drag"); clearGhost(); clearCaret();
     document.querySelectorAll("#doc .dtarget").forEach(n=>n.classList.remove("dtarget"));
+    clearHeadCandidates();
     try{docEl.releasePointerCapture(e.pointerId);}catch(_){} }
+  /* ── EVERY HEAD THE PARSER WEIGHED, LIT IN PROPORTION ───────────────────────────────────────────
+     Starting to drag a token asks a question the pipeline has already answered and discarded: where
+     could this attach? `tokenScores` (js/io/scores.js) hands back the candidate heads the parser
+     actually put on the scales for this token and the mass it gave each, and they are washed with the
+     accent at that strength — the same ink `.dtarget` uses for the node under the pointer, so the
+     reader sees one visual language: "the parser's candidates" and, brighter, "the one you are on".
+
+     ⚠ EXPECT ONE LIT NODE MOST OF THE TIME, and that is the honest answer rather than a thin feature.
+     A trained parser is genuinely certain about a determiner's noun; the spread appears exactly where
+     the ambiguity is (a PP's two attachment sites, a relativiser's two, a coordination's), which is
+     where a reader is deciding something. Lighting every token in the sentence to make the feature
+     look busier would mean inventing mass for attachments the model never entertained — see
+     `analysis_scores` for why the alternatives really are zero and not merely pruned.
+
+     Fire-and-forget: the fetch is one bridge call, usually already cached, and the drag is fully
+     usable before it lands. The paint is dropped if the gesture ended first, or moved to another
+     token, so a slow answer can never decorate the wrong drag. A root candidate is deliberately not
+     drawn — there is no node to light, and the ghost already says what dropping in empty space does. */
+  function clearHeadCandidates(){ document.querySelectorAll("#doc .pcand").forEach(n=>{ n.classList.remove("pcand"); n.style.removeProperty("--phl"); }); }
+  function paintHeadCandidates(d){
+    if(!d||typeof tokenScores!=="function") return;
+    const si=d.si, child=d.kind==="head"?d.dep:d.tok; if(!(child>=1)) return;
+    tokenScores(si).then(sc=>{
+      if(!sc||!DDRAG||DDRAG!==d||!DDRAG.moved) return;   // the drag ended, or is now a different one
+      const hs=sc.heads&&sc.heads[child-1]; if(!hs) return;
+      Object.keys(hs).forEach(k=>{ const h=+k, p=scoreShade(hs[k]);
+        if(!(h>=1)||!(p>0)) return;                      // "0" is root: no node to light
+        document.querySelectorAll(`#doc .node[data-s="${si}"][data-tok="${h}"], #doc .tok-group[data-s="${si}"][data-tok="${h}"], #doc .bwtok[data-s="${si}"][data-tok="${h}"]`)
+          .forEach(n=>{ n.classList.add("pcand"); n.style.setProperty("--phl",p.toFixed(3)); }); });
+    }).catch(()=>{});
+  }
   // Commit a finished node/edge drag at (clientX,clientY): drop onto a node → that node becomes the head; drop into
   // empty space → reorder to that x. Shared by pointerup AND pointercancel: with macOS "double-tap to drag" (drag-
   // lock) enabled, WebKit reclaims the gesture and fires pointercancel INSTEAD OF the committing pointerup, so the
   // reorder must still land from the cancel path (the caret already showed where) — otherwise the drop silently no-ops.
-  function commitDrop(d,clientX,clientY){
+  /* ── A DROP DOES NOT SELECT ─────────────────────────────────────────────────────────────────────
+     The commit functions below each end in a `pick()` of the token they moved, which is right when
+     they are reached from a MENU or a keystroke — the reader named that token, so leaving it selected
+     is the answer to what they asked. Reached from a DRAG it is not: pressing is not selecting (see
+     the pointerdown above, which stopped picking for exactly this reason), and a drag that ends in a
+     drop is still a press. Dropping a token onto another therefore lit up a token the reader had
+     never selected, and with it the three-level subtree dimming the selection projects over its
+     sentence — a whole sentence re-shaded as a side effect of moving one word.
+     So the selection is captured here and put back afterwards, UNLESS the dragged token was already
+     the selected one, in which case it stays selected and nothing has changed. Restored with
+     reflow=false: the tree was just re-rendered by the commit itself, and this only has to re-assert
+     which token wears the highlight. The `pick()`s inside the commit functions are left alone —
+     they are correct for their other callers, and this is the one caller that differs. */
+  async function commitDrop(d,clientX,clientY){
     DLAST=null;   // this grab is spent — don't let a later stray pointermove resurrect it
     DSUPPRESS=true; setTimeout(()=>DSUPPRESS=false,0);   // swallow the click that follows a drag
+    const dragged=d.kind==="head"?d.dep:d.tok;
+    const keepSel=(sel.s===d.si&&sel.t===dragged)?null:{s:sel.s,t:sel.t,rng:selRange};   // null ⇒ it WAS the selection; leave the commit's own pick standing
+    const restore=()=>{ if(!keepSel)return;
+      selRange=keepSel.rng;
+      if(keepSel.s>=0&&keepSel.s<DOC.length) pick(keepSel.s,keepSel.t,false,false); else { sel={s:keepSel.s,t:keepSel.t}; applySel(); } };
+    /* ⚠ AWAITED, and that `async` is the whole fix. Three of the four commit functions are async —
+       `setDiagramHead` awaits `depIsError` before it writes anything, and its trailing `pick()` of the
+       moved token therefore runs a microtask LATER. A synchronous `finally` restored the selection
+       first and the commit's own pick then put it straight back, so the dragged token lit up exactly
+       as before and this looked fixed while doing nothing. The restore has to be the last thing to
+       run, which means waiting for the commit to finish. Nothing awaits `commitDrop` itself (the
+       pointerup/pointercancel handlers are fire-and-forget) and nothing needs to: the restore is
+       inside the chain. */
+    try{ await _commitDrop(d,clientX,clientY); } finally { restore(); } }
+  async function _commitDrop(d,clientX,clientY){
     const el=document.elementFromPoint(clientX,clientY), tgt=ddNode(el), onNode=tgt&&+tgt.getAttribute("data-s")===d.si;
     const fromId=d.kind==="head"?d.dep:d.tok;
-    if(onNode){ const toId=+tgt.getAttribute("data-tok"); if(toId!==fromId) setDiagramHead(d.si,fromId,toId); return; }   // edge/node dropped onto a node → that node becomes the head
+    if(onNode){ const toId=+tgt.getAttribute("data-tok"); if(toId!==fromId) return setDiagramHead(d.si,fromId,toId); return; }   // edge/node dropped onto a node → that node becomes the head
     const edge=ddEdge(el);   // not onto a node — a conj edge dropped onto? → attach as a SHARED dependent of its later conjunct (item: drag onto a conj edge). A subj/comp:obj/comp:obl/root edge → Subject-raising instead.
     if(edge && edge.getAttribute("data-dep")!=null && +edge.getAttribute("data-s")===d.si){
       const edgeDepId=+edge.getAttribute("data-dep");
       if(edgeDepId!==fromId){
-        if(isConjDep(d.si,edgeDepId)){ attachAsSharedConjunct(d.si,fromId,edgeDepId); return; }
+        if(isConjDep(d.si,edgeDepId)){ return attachAsSharedConjunct(d.si,fromId,edgeDepId); }
         /* THE PREDICATE dropped onto the ARGUMENT's own edge — the only raising direction there is. `fromId` is
            the predicate, `edgeDepId` the argument, which is why they go to attachAsRaisedSubj in that order
            (its first parameter is the ARGUMENT). Which feature is set comes from the zone released in; a release
            outside both zones is not a raising drop at all and falls through to the ordinary reorder below. */
-        if(raiseMirror(d.si,fromId,edgeDepId)){ attachAsRaisedSubj(d.si,edgeDepId,fromId); return; } } }   // …and the mirror: the PREDICATE dropped onto the argument's own edge. Same call, the two ids swapped — attachAsRaisedSubj's parameters are (argument, predicate) and the annotation it writes is identical either way. Second, so a drop that satisfies BOTH keeps the meaning it has today
+        if(raiseMirror(d.si,fromId,edgeDepId)){ return attachAsRaisedSubj(d.si,edgeDepId,fromId); } } }   // …and the mirror: the PREDICATE dropped onto the argument's own edge. Same call, the two ids swapped — attachAsRaisedSubj's parameters are (argument, predicate) and the annotation it writes is identical either way. Second, so a drop that satisfies BOTH keeps the meaning it has today
     if(d.kind==="head") return;   // an edge drag that misses both a node and a valid attach target → no-op
-    const blk=el&&el.closest&&el.closest(`.sblock[data-i="${d.si}"]`); if(blk) reorderByX(d.si,d.tok,clientX,clientY,blk); }   // node into empty space → reorder to that x
+    const blk=el&&el.closest&&el.closest(`.sblock[data-i="${d.si}"]`); if(blk) return reorderByX(d.si,d.tok,clientX,clientY,blk); }   // node into empty space → reorder to that x
   docEl.addEventListener("pointerup",e=>{ if(!DDRAG)return; const d=DDRAG; DDRAG=null; endDrag(e);
     // e.target is the actual element tapped (no pointer capture happened — that only kicks in once a drag starts
     // moving), which may be a .tr-edit/.gl-edit/goeswith part NESTED inside the node's group rather than the node

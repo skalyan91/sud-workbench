@@ -47,6 +47,83 @@ each measured rather than assumed:
 Building also drops the whole offline apparatus the harvest needs: Docker, a compiled Morpheus, and
 RFTagger (itself non-commercial-only).
 
+THE PARADIGM RULES THIS MODULE ADDS ON TOP
+------------------------------------------
+A lookup memorises (form, morphology) pairs and cannot express a rule, so any cell it has never seen
+falls through to something morphology-blind.  `_la_macron_vendor._PARADIGM` covers three such cells
+(a-stem nominative/vocative/ablative singular, o-stem dative/ablative singular, e-stem ablative
+singular) and is upstream's, kept verbatim; :data:`_EXTRA` below is this app's own extension and
+lives here rather than in the vendored file precisely because a re-vendor would revert an edit made
+there — the same arrangement `translit._POS_OVERRIDE` has with the Baxter–Sagart TSV.
+
+⚠ **Every rule below was MEASURED against ``macrons.txt`` itself** (724,191 usable rows) before being
+written, and the figure is quoted beside each rule — that is what makes "this is a statement about
+Latin" checkable rather than asserted.
+
+**THE RULES COME IN TWO TIERS, and `oov` separates them** (see :func:`_extra_fixes`):
+
+* ``fix()`` — a cell measured **exceptionless** (100.00 %). Applied always, because a paradigm cell is
+  a fact the lexicon may never have been shown, and contradicting its morphology-blind fallback is the
+  whole point (nominative ``Gallia`` against ablative ``Galliā``).
+* ``dflt()`` — a cell with any measured residue at all. Applied **only where the lookup had no entry
+  for this very word**. The residue words are almost by definition ones the lexicon KNOWS —
+  ``senectūs``, ``virtūs``, ``bene``, ``ante``, ``occepso``, the Greek ``-ēm`` accusatives — so gating
+  on ignorance puts them out of reach while losing nothing.
+
+That split was forced by the nominative ``-us`` rule, which is 99.89 % and, applied unconditionally,
+shortened ``senectūs``/``virtūs``/``servitūs`` — the third-declension ``-tūs`` abstracts. **Gender does
+not separate those**, measured: feminine ``-tus`` nominatives are only 14.3 % long, the rest being
+Greek feminine names. Ignorance does.
+
+**A CELL THAT FAILS THE BAR IS USUALLY UNDER-SPECIFIED, NOT UNSTATABLE**, and the conditioner it wants
+is most often the SPELLING or the LEMMA — neither of which UPOS+FEATS carries:
+
+===========================  ========  ==========================================  ========
+cell                          whole    once conditioned on                          then
+===========================  ========  ==========================================  ========
+2sg future passive ``-ēre``    91.6 %  not spelt ``-bere`` (the 1st/2nd b-future)   100.00 %
+2sg imperative                 30.0 %  ending ``-ā``/``-ī`` (1st/4th conjugation)   100.00 %
+  …and its remaining ``-e``    25.0 %  ``lemma == form + "o"`` (2nd conjugation)     99.56 %
+accusative plural ``-ās``      98.6 %  an a-stem lemma                              100.00 %
+vocative singular ``-e``       90.9 %  an o-stem lemma                               99.98 %
+nominative singular ``-us``    99.68 % excluding monosyllables                       99.89 %
+positive adverb ``-ē``         96.4 %  the ADJECTIVE existing in the lexicon         99.64 %
+===========================  ========  ==========================================  ========
+
+That last one is worth its own line. The contrast is DERIVATIONAL — ``longē`` is long because it comes
+from ``longus``, and the ~105 short adverbs come from nothing — so the rule has to know the adjective.
+An earlier attempt keyed it on the LEMMA being the adjective, which is Morpheus's convention and **not
+UD's**: UD lemmatises an adverb to itself, so that gate could never fire on this app's own parses and
+the rule was dead code wearing a measurement. It now asks the loaded table whether ``stem + "us"`` is a
+form — one set membership test, true whatever the lemma says.
+
+What is still OUT, with its figure, so it is not re-proposed:
+
+* **fifth-declension ablative ``-ē``** (35.6 % on a lemma-in-``-es`` proxy, which also catches every
+  third-declension ``-ēs`` nominative). Already the vendored ``_PARADIGM``'s, keyed on ``InflClass``.
+* **"an enclitic ``-que``/``-ne``/``-ve`` is short"** — 95.2 % / 82.5 % / 70.6 %, sunk by ``aequē``,
+  ``antīquē``, ``plēnē``, ``suāve``, which merely END in those letters.
+* **a final vowel before ``-r``/``-l``/``-d``** (99.89 % / 91.8 % / 83.3 % — ``pār``, ``compār``,
+  ``aer``, then the Hebrew names). Re-tried under the ``dflt`` gate on the reasoning that the whole
+  residue is in-vocabulary: it changed **0 words either way**. The suffix table already answers those
+  endings, so there is nothing to win.
+
+WHAT THE RESIDUE ACTUALLY IS, and why more rules will not move it far
+--------------------------------------------------------------------
+Bucketed over the held-out out-of-vocabulary split, by the position of each wrong vowel:
+
+    stem   12,428 of 31,277   ·   penult   269 of 6,972   ·   final   173 of 3,883
+
+**96.6 % of the remaining wrong vowels are STEM vowels, and 98 % of all errors are "too short"** — we
+fail to restore a macron rather than invent one (``scrīpulāris``, ``volāticum``, ``verbēnae``,
+``dēscīverim``). Stem length is LEXICAL: no morphological rule can supply it, which is exactly what
+`_la_macron_vendor`'s own note says — "endings are a function of the paradigm, which we predict; stems
+are lexical, and covering them for arbitrary vocabulary needs Morpheus itself". The endings, which are
+this table's business, are now 95.5 % right at the final vowel and 96.1 % at the penult.
+
+Don't re-add a rejected rule without re-running the measurement; the script is a dozen lines over
+`build_table`'s own row filter.
+
 HOW THE MORPHOLOGY IS MATCHED
 -----------------------------
 ``macrons.txt`` keys morphology as the Perseus/LDT **nine-position tag** (``n-s---mn-``); this app's
@@ -380,7 +457,11 @@ def _legacy():
 
 
 def _mask_for(t, form: str, upos: str, feats: str):
-    """The long-vowel mask for `form`, walking the ladder. None when nothing answers."""
+    """``(mask, level)`` for `form`, walking the ladder — ``(None, None)`` when nothing answers.
+
+    `level` is ``"form"`` where the lexicon holds THIS WORD (at whatever rung) and ``"suffix"``
+    where only its ending was recognised. The two are not interchangeable to `_extra_fixes`, whose
+    orthographic rules may correct a guess but must not contradict an entry."""
     lower = form.lower()
     key = _ud_key(upos, feats)
     K, F, S = t["K"], t["F"], t["S"]
@@ -388,21 +469,261 @@ def _mask_for(t, form: str, upos: str, feats: str):
         for keep in _RUNGS:                      # a rung only exists where it was decisive
             m = K.get(lower + "\t" + _rung(key, keep))
             if m is not None:
-                return m
-        return F[lower]                          # unambiguous, or the majority reading
+                return m, "form"
+        return F[lower], "form"                  # unambiguous, or the majority reading
     for k in (4, 3):                             # unseen word: fall back on its ending
         if len(lower) > k:
             m = S.get(f"{k}\t{lower[-k:]}")
             if m is not None:
                 n = len(lower)
-                return sum(1 << (n - k + j) for j in range(k) if (m >> j) & 1)
-    return None
+                return sum(1 << (n - k + j) for j in range(k) if (m >> j) & 1), "suffix"
+    return None, None
+
+
+# ── this app's own paradigm rules (see the module docstring for the measurement) ────────────────
+_VOW = "aeiouy"
+_NOMINAL = {"NOUN", "PROPN", "ADJ", "DET", "NUM"}   # PRON is deliberately absent: `mihi`/`tibi`/`sibi`
+_VERBAL = {"VERB", "AUX"}                           # are dative singulars in SHORT -i (measured 33.8 % long)
+# The two deadjectival adverbs with a SHORT -e, listed by every grammar beside each other. See the
+# rule in `_extra_fixes` for why a two-entry list is the right shape here and a type-count is not.
+_ADV_SHORT_E = {"bene", "male"}
+
+
+def _last_vowel(form: str, before: int) -> int:
+    """Index of the last vowel at or before `before`, or -1. Used by the final-consonant rules,
+    where the vowel being fixed is not the last CHARACTER (``amant``, ``caput``, ``deōrum``)."""
+    for i in range(min(before, len(form) - 1), -1, -1):
+        if form[i] in _VOW:
+            return i
+    return -1
+
+
+def _extra_fixes(form: str, upos: str, feats: str, lemma: str, oov: bool, known=None) -> dict:
+    """``{index: is-that-vowel-long}`` for the cells this app settles itself. `form` is bare (macrons
+    already stripped) and lowercased by the caller; indices are into it. `known` is the lexicon's
+    form set, for the one rule that needs to ask whether another word exists.
+
+    TWO TIERS, AND `oov` IS WHAT SEPARATES THEM.
+      · ``fix()`` — a cell measured EXCEPTIONLESS (100.00 %) against ``macrons.txt``. Applied always,
+        because a paradigm cell is a fact the lexicon may simply never have been shown, and
+        contradicting its morphology-blind fallback is the entire point (nominative `Gallia` against
+        ablative `Galliā`).
+      · ``dflt()`` — a cell with a measured residue, however small. Applied ONLY where the lookup had
+        no entry for this very word. The residue words are, almost by definition, ones the lexicon
+        KNOWS — `senectūs`, `virtūs`, `bene`, `ante`, `occepso`, the Greek `-ēm` accusatives — so
+        gating on ignorance makes them unreachable while losing nothing: a rule that fires where there
+        is no evidence can only improve on a suffix guess. Applied unconditionally, the nominative
+        `-us` rule shortened `senectūs` to `senectus`, which is what made the line worth drawing.
+    The tier of every rule is stated beside it with the figure that decided it."""
+    f = form
+    n = len(f)
+    if not n:
+        return {}
+    out: dict = {}
+
+    def fix(i, long):                      # exceptionless — a statement about the paradigm
+        if 0 <= i < n:
+            out[i] = long
+
+    def dflt(i, long):                     # a default — only where the lexicon has nothing to say
+        if oov and 0 <= i < n:
+            out.setdefault(i, long)
+
+    case, num, vf = _feat(feats, "Case"), _feat(feats, "Number"), _feat(feats, "VerbForm")
+    person, mood, voice = _feat(feats, "Person"), _feat(feats, "Mood"), _feat(feats, "Voice")
+    lem = strip_macron(str(lemma or "")).lower()   # a lemma may be stored macronised; the tests are on its ENDING
+    last = f[-1]
+
+    # ── verbal, where the ending is the whole of what the form says ─────────────────────────────
+    if upos in _VERBAL and vf != "Part":
+        if vf == "Inf":
+            if last == "e":
+                fix(n - 1, False)          # amāre, legere, esse — 100.00 % (n=5,726)
+            elif last == "i":
+                fix(n - 1, True)           # amārī, legī, loquī — 100.00 % (n=2,970)
+        elif vf in ("Ger", "Gdv") and case in ("Gen", "Dat", "Abl") and last in "oi":
+            fix(n - 1, True)               # amandī / amandō — 100.00 % (n=1,618 / 4,911)
+        elif vf == "Sup" and last == "u":
+            fix(n - 1, True)               # the -ū supine (mīrābile dictū) — 100.00 % (n=574)
+        elif person == "1" and num == "Sing":
+            if last == "o":
+                dflt(n - 1, True)          # amō, sum, legō — 99.99 % (n=8,051; `occepso` alone)
+            elif last == "i":
+                dflt(n - 1, True)          # the perfect amāvī — 99.88 % (n=2,409; abstinī-type only)
+        elif mood == "Imp" and person == "2" and num == "Sing" and voice != "Pass":
+            # THE IMPERATIVE is conjugation-dependent (30.0 % long taken whole), and nothing in
+            # UPOS+FEATS states the conjugation — but three of the four endings do.
+            if last in "ai":
+                fix(n - 1, True)           # -ā and -ī ARE the 1st and 4th — 100.00 % (n=1,439 / 217)
+            elif last == "e" and lem == f + "o":
+                # `monē` (2nd) against `lege` (3rd): 25.0 % long together, and the LEMMA separates
+                # them — a 2nd-conjugation imperative IS its lemma minus the final -o. 99.56 %, and
+                # by TYPE 225 distinct forms long against one (`terge`, which the authorities give
+                # as `tergē`). A default, not a fix, on the strength of that one.
+                dflt(n - 1, True)
+        elif person == "2" and num == "Sing" and _feat(feats, "Tense") == "Fut" and voice == "Pass":
+            # `abūtēris`/`abūtēre` — the long ē of the 3rd/4th-conjugation future. Excluding the
+            # 1st/2nd b-future (`amāberis`, short) takes the cell 91.6 % → 100.00 % (n=313 / 1,381).
+            if f.endswith("ris") and not f.endswith("beris") and n > 4 and f[n - 4] in _VOW:
+                fix(n - 4, True)
+            elif f.endswith("re") and not f.endswith("bere") and n > 3 and f[n - 3] in _VOW:
+                fix(n - 3, True)
+        if person in ("1", "2") and num == "Plur" and n > 3:
+            # the personal endings, which no conjugation varies — 100.00 % (n=5,044 / 3,340). Not an
+            # `elif`: these coexist with the tense-vowel rules above and settle a different slot.
+            if person == "1" and f.endswith("mus"):
+                fix(n - 2, False)
+            elif person == "2" and f.endswith("tis"):
+                fix(n - 2, False)
+
+    # ── nominal, INCLUDING a participle, which declines as an adjective ─────────────────────────
+    if upos in _NOMINAL or (upos in _VERBAL and vf == "Part"):
+        if num == "Plur" and case in ("Dat", "Abl") and n >= 3:
+            if f.endswith("is"):
+                fix(n - 2, True)           # dominīs — 100.00 % (n=35,676)
+            elif f.endswith("bus"):
+                fix(n - 2, False)          # -ibus / -ēbus / -ubus: that u is short — 100.00 % (n=11,100)
+        elif num == "Plur" and case == "Acc" and f.endswith("is") and n >= 3:
+            fix(n - 2, True)               # the i-stem accusative plural -īs — 100.00 % (n=7,287)
+        elif num == "Plur" and case in ("Nom", "Voc") and last == "i":
+            fix(n - 1, True)               # dominī, factī — 100.00 % (n=20,798)
+        elif num == "Plur" and case == "Gen" and f.endswith("um") and n > 2:
+            fix(n - 2, False)              # -ārum / -ōrum / -uum: that u is short — 100.00 % (n=28,310)
+        elif num == "Plur" and case == "Acc" and f.endswith("as") and lem.endswith("a") and n > 2:
+            # FIRST-DECLENSION accusative plural -ās. Whole, 98.6 % — a latinised Greek
+            # third-declension `Arcadas` is spelt alike and is short; an a-stem lemma (the signal
+            # `_la_macron_vendor._LEMMA_CLASS` reads) separates them, and then 100.00 % (n=2,010).
+            fix(n - 2, True)
+        elif num == "Sing" and case == "Abl" and last == "a":
+            # THE ABLATIVE SINGULAR -ā, and it needs NO declension test: only the a-stems have one.
+            # 100.00 % (n=13,606). This is the vendored `_PARADIGM`'s own cell reached without
+            # `InflClass`, which that table requires and which a tagger routinely omits.
+            fix(n - 1, True)
+        elif num == "Sing" and case == "Dat" and last == "o":
+            fix(n - 1, True)               # the dative singular -ō — 100.00 % (n=18,180)
+        elif num == "Sing" and case == "Abl" and last == "o":
+            dflt(n - 1, True)              # ablative -ō — 99.99 % (n=18,184; the Greek `chao` alone)
+        elif num == "Sing" and case in ("Gen", "Dat") and last == "i":
+            dflt(n - 1, True)              # dominī, fortī, diēī — 99.99 % (n=15,664 / 5,964; `senati`)
+        elif num == "Sing" and case == "Nom" and f.endswith("us") and n > 2 and sum(
+                1 for c in f if c in _VOW) > 2:
+            # NOMINATIVE SINGULAR -us, that u short: 99.89 % once monosyllables are out (n=12,660).
+            # A DEFAULT, and this is the cell that forced the two-tier split — its residue is the
+            # third-declension `-tūs` abstracts (`virtūs`, `senectūs`, `servitūs`, `iuventūs`) and the
+            # Greek `-ūs` names, and applied unconditionally it shortened every one of them. Gender
+            # does NOT separate them, measured: feminine `-tus` nominatives are only 14.3 % long, the
+            # rest being Greek feminine names. They are all common words the lexicon holds, so
+            # gating on ignorance is what actually settles it.
+            dflt(n - 2, False)
+        elif num == "Sing" and case == "Voc" and last == "e" and (lem.endswith("us") or lem.endswith("um")):
+            # SECOND-DECLENSION vocative singular -e, short. Whole, 90.9 % — the residue is Greek
+            # vocatives in -ē (`Achātē`); on an o-stem lemma, 99.98 % (n=4,379, `androgynē` alone).
+            dflt(n - 1, False)
+
+    # ── the DEADJECTIVAL ADVERB in -ē ───────────────────────────────────────────────────────────
+    # `longē` is long and `bene` is short, and no FEATURE of the token says which: the difference is
+    # DERIVATIONAL — an adverb formed from an o-stem adjective ends in -ē, and the ~105 short ones are
+    # the adverbs formed from nothing (`ante`, `inde`, `prope`, `saepe`) plus `bene`/`male`.
+    # SO THE RULE ASKS THE LEXICON WHETHER THE ADJECTIVE EXISTS. An earlier attempt keyed on the LEMMA
+    # being the adjective, which is Morpheus's convention and NOT UD's — UD lemmatises an adverb to
+    # itself, so that gate could never fire on this app's own parses and the rule was dead code
+    # wearing a measurement. Looking `stem + "us"` up in the very table already loaded costs one set
+    # membership test and works whatever the lemma says: 99.56 %, or 99.64 % with the `-cumque`
+    # compounds out. The residue (`inde` ← a real `indus`, `pene` ← `penus`, `bone`, `anne`, `mage`)
+    # is coincidence — words that merely happen to have an -us neighbour — and every one of them is a
+    # common word the lexicon holds, so `dflt` puts it out of reach. `bene`/`male` are named anyway:
+    # they are the two the grammars list, and the two a type-count measurement most under-weights.
+    if (upos == "ADV" and last == "e" and n > 3 and f not in _ADV_SHORT_E
+            and _feat(feats, "Degree") not in ("Cmp", "Sup")
+            and not f.endswith(("cumque", "cunque", "opere", "modum"))
+            and known is not None and (f[:-1] + "us") in known):
+        dflt(n - 1, True)
+
+    # ── degree, which is not tied to a word class ────────────────────────────────────────────────
+    if _feat(feats, "Degree") == "Cmp" and f.endswith("ius") and n > 3:
+        fix(n - 3, False)                  # longius, facilius — the comparative -ius — 100.00 % (n=3,718)
+
+    # ── ORTHOGRAPHIC, and defaults for the reason the tier exists ───────────────────────────────
+    # A vowel before final -m or -t is short: 99.92 % (n=129,773) and 99.98 % (n=37,053), the same
+    # walk reaching the vowel before -nt (100.00 %, n=14,737). The residue is real words the lexicon
+    # spells right — latinised Greek accusatives in -ēm, `ēst` "he eats" beside `est` "he is".
+    if last == "m" or last == "t":
+        i = _last_vowel(f, n - 2)
+        if i >= 0:
+            dflt(i, False)
+    return out
+
+
+def _mask_of(macronised: str) -> int:
+    """The long-vowel mask implied by a spelling that already carries its macrons — the inverse of
+    `_la_macron_vendor.apply_mask`. Needed only on the harvested-LUT path, which hands back a
+    finished string rather than the mask it built it from."""
+    mask, i = 0, 0
+    for ch in unicodedata.normalize("NFD", macronised):
+        if ch == "̄":
+            if i:
+                mask |= 1 << (i - 1)
+        elif not unicodedata.combining(ch):
+            i += 1
+    return mask
+
+
+def _apply_extra(base: str, mask: int, upos: str, feats: str, lemma: str, oov: bool, known=None) -> int:
+    """`mask` with :func:`_extra_fixes` written over it. `known` is the lexicon's form set, which the
+    deadjectival-adverb rule asks whether the corresponding ADJECTIVE exists."""
+    for i, long in _extra_fixes(base.lower(), upos or "", feats or "", lemma or "", oov, known).items():
+        if 0 <= i < len(base):
+            mask = (mask | (1 << i)) if long else (mask & ~(1 << i))
+    return mask
 
 
 _REAL_LEVELS = ("L1", "L2", "L3")   # a harvested entry for THIS word, as opposed to a suffix guess
 
 
+# (An `_enclitic_host` helper lived here: it split an UNSPLIT `armaque` into host + clitic and
+# macronised the host, because `macrons.txt` lists WORDS and never host+clitic — measured, only 64 of
+# its forms end in `-que` with the host also listed, and 14 of those are lexicalised (`dēnique`,
+# `quisque`). REMOVED because it was solving the problem in the wrong layer: an enclitic is a separate
+# TOKEN, UD tokenises `armaque` as a multi-word token over `arma` + `que`, and the Latin tokeniser is
+# what should be splitting it. Once it does, each piece reaches this module as its own word and every
+# rule below simply works — no special case, and the MWT is visible in the diagram and the file as
+# well, which a fix confined to macronisation could never have given.)
+
+
 def macronise(form: str, upos: str = "", feats: str = "", lemma: str = "") -> str:
+    """The macronised spelling of one Latin word, or ``""`` when it cannot be given.
+
+    ⚠ **A QUANTITY THE AUTHOR WROTE IS KEPT; EVERY OTHER VOWEL IS STILL DERIVED.**
+
+    Everything else in this module is inference — somebody else's lexicon plus rules that are right
+    99-point-something per cent of the time — and a macron or breve someone has WRITTEN is not
+    inference. So a written mark is authoritative and this module will not revise it. A **breve** is
+    the pointed case: an unmarked vowel says nothing (Latin is normally written with no quantities at
+    all), so a breve is the ONLY way to say "short, and I mean it", which makes it exactly the mark a
+    reader reaches for to contradict this module. It is honoured, and written back AS a breve — a bare
+    vowel would lose the statement.
+
+    But a mark exempts only ITS OWN VOWEL, not the whole word. Part-marking is the normal way of
+    writing Latin quantities — you mark what is contrastive or unexpected and leave the rest — and
+    that cuts the opposite way from how it first looks: precisely BECAUSE part-marking is normal, an
+    unmarked vowel is not a claim of shortness, it is simply unmarked, and filling it in adds
+    information without contradicting anybody. `dīvisa` therefore comes back `dīvīsa`, keeping the
+    author's first macron and supplying the second; `dĭvisa` comes back `dĭvīsa`, the breve intact and
+    the machine's own macron beside it.
+
+    (An earlier version returned any marked word verbatim. That treated the silence as deliberate,
+    which is the one thing part-marking says it is not.)"""
+    if not form:
+        return ""
+    written = _written_marks(form)
+    if not written:
+        return _macronise_bare(form, upos, feats, lemma)
+    bare = _strip_quantity(form)
+    out = _macronise_bare(bare, upos, feats, lemma)
+    return _reapply_written(out or bare, written)
+
+
+def _macronise_bare(form: str, upos: str = "", feats: str = "", lemma: str = "") -> str:
     """The macronised spelling of one Latin word, or ``""`` when it cannot be given.
 
     ``""`` rather than the form itself, because that is what every `translit` engine returns for
@@ -426,7 +747,10 @@ def macronise(form: str, upos: str = "", feats: str = "", lemma: str = "") -> st
         Morpheus alone 95.75 %    harvest alone 87.02 %    cascaded 97.24 %
 
     Most users will have only the Morpheus table, since the harvested one cannot be distributed at
-    all — so the ordering matters chiefly for the person who has already built one."""
+    all — so the ordering matters chiefly for the person who has already built one.
+
+    ⚠ **QUANTITIES THE AUTHOR WROTE ARE KEPT AND THE REST ARE STILL FILLED IN** — see the wrapper
+    :func:`macronise` above, which is what callers reach; this is the derivation for a BARE word."""
     if not form:
         return ""
     t = _table()
@@ -436,10 +760,22 @@ def macronise(form: str, upos: str = "", feats: str = "", lemma: str = "") -> st
             out, lvl = eng.resolve(form, upos or "", feats or "_", lemma or "")
         except Exception:  # noqa: BLE001
             out, lvl = "", None
-        if out and (lvl or "").split("+")[0] in _REAL_LEVELS:
-            return out          # a real harvested entry for this very word — the best answer there is
+        real = out and (lvl or "").split("+")[0] in _REAL_LEVELS
+        if real or (t is None and out):
+            # A harvested entry for this very word is the best answer there is — but it is still a
+            # LOOKUP, so this module's paradigm rules apply over it exactly as they do over
+            # Morpheus's. Re-derived from the finished string rather than threaded through
+            # `eng.resolve`, which is vendored and returns no mask.
+            try:
+                from . import _la_macron_vendor as _V
+                base = _V.strip_macron(out)
+                m = _apply_extra(base, _mask_of(out), upos or "", feats or "", lemma or "", not real,
+                                 (t or {}).get("F"))
+                return _V.apply_mask(base, m) if m else base
+            except Exception:  # noqa: BLE001
+                return out
         if t is None:
-            return out or ""    # no Morpheus table: its suffix guess is all there is
+            return out or ""    # no Morpheus table and no harvested answer either
     if t is None:
         return ""
     try:
@@ -447,7 +783,8 @@ def macronise(form: str, upos: str = "", feats: str = "", lemma: str = "") -> st
         if not any(c.isalpha() for c in form):
             return form
         base = _V.strip_macron(form)
-        mask = _mask_for(t, base, upos or "", feats or "") or 0
+        got, level = _mask_for(t, base, upos or "", feats or "")
+        mask = got or 0
         # The PARADIGM OVERRIDE still applies, and still for its own reason: a lookup memorises
         # pairs and cannot express a rule, so a cell it has never seen falls through to something
         # morphology-blind. It is a statement about Latin (a-stem nominative -a is short, ablative
@@ -456,6 +793,10 @@ def macronise(form: str, upos: str = "", feats: str = "", lemma: str = "") -> st
         if fixed is not None and base:
             bit = 1 << (len(base) - 1)
             mask = (mask | bit) if fixed else (mask & ~bit)
+        # …and THIS module's own cells over the top of upstream's three (see `_extra_fixes`). Last,
+        # so an overlapping cell is settled by the rule measured here — the two agree wherever both
+        # speak (the a-/o-/e-stem finals), and the extension is what covers everything else.
+        mask = _apply_extra(base, mask, upos or "", feats or "", lemma or "", level != "form", t["F"])
         return _V.apply_mask(base, mask) if mask else base
     except Exception:  # noqa: BLE001
         return ""
@@ -496,3 +837,76 @@ def strip_macron(s: str) -> str:
     """Public alias — the inverse the caller needs to compare a macronised display against a form."""
     return unicodedata.normalize("NFC", "".join(
         c for c in unicodedata.normalize("NFD", s) if c != "̄"))
+
+
+# U+0304 COMBINING MACRON and U+0306 COMBINING BREVE — the two marks that STATE a vowel's quantity.
+# Tested after NFD, so the precomposed spellings decompose into them and are caught alike: `ā` U+0101,
+# `ē` U+0113, `ī` U+012B, `ō` U+014D, `ū` U+016B, `ȳ` U+0233, and the breves `ă` U+0103, `ĕ` U+0115,
+# `ĭ` U+012D, `ŏ` U+014F, `ŭ` U+016D (`y̆` has no precomposed form and is already decomposed). Nothing
+# else counts: a diaeresis or an acute is not a quantity mark and must not trip this.
+_QUANTITY_MARKS = ("̄", "̆")
+
+
+def _written_marks(s: str) -> dict:
+    """``{index into the BARE spelling: True for a macron, False for a breve}`` — the quantities this
+    spelling actually states. ``{}`` for the ordinary bare word, which is the fast path.
+
+    Indexed by BASE character, so the combining marks themselves do not advance the counter and an
+    unrelated combining mark (a diaeresis, an acute) neither counts as a quantity nor shifts the ones
+    that follow it. NFD first, so the precomposed spellings decompose into these same marks and
+    ``ā``/``ă`` are caught exactly as ``a``+U+0304 / ``a``+U+0306 are."""
+    out: dict = {}
+    i = 0
+    for ch in unicodedata.normalize("NFD", s or ""):
+        if ch == "\u0304":
+            if i:
+                out[i - 1] = True
+        elif ch == "\u0306":
+            if i:
+                out[i - 1] = False
+        elif not unicodedata.combining(ch):
+            i += 1
+    return out
+
+
+def _strip_quantity(s: str) -> str:
+    """`s` with every macron AND breve removed — the spelling the lexicon is keyed on.
+
+    Not `strip_macron`, which drops only the macron: a breve left in place would make `ĭnstar` a
+    string no lookup can match, and the derivation would fall to the ending guess for a word the
+    table knows perfectly well."""
+    return unicodedata.normalize("NFC", "".join(
+        c for c in unicodedata.normalize("NFD", s or "") if c not in _QUANTITY_MARKS))
+
+
+def _reapply_written(out: str, written: dict) -> str:
+    """`out` (a derived spelling) with the quantities the author WROTE forced back over it.
+
+    The breves are re-inserted as breves rather than left as bare vowels: `apply_mask` knows only
+    long and short and renders a short one plain, which would silently delete the author's statement
+    that this vowel is short — the very mark they wrote to disagree with this module."""
+    from . import _la_macron_vendor as _V
+    bare = _strip_quantity(out)
+    mask = _mask_of(out)
+    for i, long in written.items():
+        if 0 <= i < len(bare):
+            mask = (mask | (1 << i)) if long else (mask & ~(1 << i))
+    res = _V.apply_mask(bare, mask) if mask else bare
+    breves = {i for i, long in written.items() if not long}
+    if not breves:
+        return res
+    chars, i = [], 0
+    for ch in unicodedata.normalize("NFD", res):
+        chars.append(ch)
+        if not unicodedata.combining(ch):
+            if i in breves:
+                chars.append("\u0306")
+            i += 1
+    return unicodedata.normalize("NFC", "".join(chars))
+
+
+def marked(s: str) -> bool:
+    """Does this spelling state ANY of its vowel quantities? Public because it is the question a
+    caller asks to know whether a form carries the author's own marks; :func:`macronise` keeps each
+    one it finds and derives the rest."""
+    return bool(_written_marks(s))
