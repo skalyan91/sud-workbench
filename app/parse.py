@@ -16,9 +16,10 @@ Legacy bare ids (``"en"``) resolve to a default SUD package via the registry.
 from __future__ import annotations
 
 import difflib
+import os
+import unicodedata
 
 from . import convert
-from . import sa_csl          # pure-text CSL sandhi reversal; no spaCy/model/network, so a top-level import
 from .paths import STANZA_DIR
 
 
@@ -56,7 +57,26 @@ def invalidate_cache() -> None:
     _STANZA_TOK_PIPES.clear()
 
 
-# ── SUD spaCy engine ─────────────────────────────────────────────────────────
+def _share_macron_table() -> None:
+    """Point the Latin model's own `la_macronise` at the table THIS APP manages.
+
+    The released Latin wheel carries `la_macronise` in its pipeline but ships no vowel-length data
+    (Morpheus is CC BY-SA, the model CC BY-NC-SA — see the SUD-spaCy repo's NOTICE.md), and looks
+    for a table in `~/.cache/sud-spacy/`. `app/macron.py` fetches and compiles exactly that table
+    into `paths.APP_DATA`, as the `la_macron` extras tier. Without this the two would want the same
+    4 MB download twice, in two places, and the component would sit in the pipeline warning that it
+    has no data while the app's copy of the same data was on disk a directory away.
+
+    `$LA_MORPHEUS_TABLE` is the component's own documented override, so this asks for nothing the
+    component does not already offer. Set unconditionally, and BEFORE the model is constructed
+    (`Morpheus.load` runs in the component's `__init__`): pointing at a table that does not exist
+    yet is the no-data case, which the component passes through unchanged, and the tier installing
+    later drops the model cache anyway (`invalidate_cache`), so the next load picks it up.
+    """
+    from . import macron   # local: keeps the import off every parse.py consumer's start-up path
+    os.environ.setdefault("LA_MORPHEUS_TABLE", macron.morpheus_table_path())
+
+
 def _load_spacy(package: str):
     if package in _SPACY_MODELS:
         return _SPACY_MODELS[package]
@@ -64,10 +84,19 @@ def _load_spacy(package: str):
         import spacy
     except ImportError as exc:
         raise ParserUnavailable("spaCy is not installed") from exc
+    _share_macron_table()
     try:
         nlp = spacy.load(package)
-    except Exception as exc:  # OSError / model-not-found
-        raise ParserUnavailable(f"model {package!r} is not installed") from exc
+    except Exception as exc:  # noqa: BLE001
+        # …AND THE REASON TRAVELS WITH IT, exactly as in `_load_stanza`. `spacy.load` raises OSError
+        # for a genuinely absent model, but every failure inside the pipeline's OWN code lands here
+        # too — and the commonest is a bundled tokeniser whose dependency is missing, which raises
+        # ModuleNotFoundError (`zh_sud_gsd_simp_trad` imports jieba). Reporting that as "not
+        # installed" sends the reader hunting for a model that is sitting on disk, correctly
+        # installed; the one thing they need to know is the name of the module that was absent.
+        why = f"{type(exc).__name__}: {exc}".strip(": ")
+        raise ParserUnavailable(
+            f"model {package!r} could not be loaded (is it installed?) — {why}") from exc
     _SPACY_MODELS[package] = nlp
     return nlp
 
@@ -84,11 +113,19 @@ def _spacy_doc_to_sud(doc) -> tuple[list[dict], list[dict]]:
         head = "0" if is_root else str(index[t.head.i] + 1)
         deprel = "root" if is_root else (t.dep_ or "")
         out.append(_tok(t.text, t.lemma_ or "", t.pos_ or "", t.tag_ or "",
-                        str(t.morph) if t.morph else "", head, deprel))
+                        str(t.morph) if t.morph else "", head, deprel,
+                        misc=_ext_misc(t)))
         space_after.append(t.whitespace_ != "")
     if not out:
         return [], []
-    mwt = _mwt_from_doc(doc, out)          # a tokeniser that KNOWS its MWTs wins over the heuristic
+    # Three answers about the MWT ranges, most authoritative first: the ranges the tokeniser
+    # PUBLISHED, the ranges its published source spans IMPLY, and — for a tokeniser that says
+    # nothing at all — the whitespace/PUNCT heuristic. Only the last is a guess.
+    mwt = _mwt_from_doc(doc, out)
+    if mwt is None:
+        layout = _src_span_layout(doc, out)
+        if layout is not None:
+            mwt, space_after = layout        # the RAW text's spacing, not the reconstruction's
     if mwt is None:
         mwt = _reconstruct_mwt(out, space_after)
     else:
@@ -96,13 +133,81 @@ def _spacy_doc_to_sud(doc) -> tuple[list[dict], list[dict]]:
     return out, mwt
 
 
+_BREVE = "̆"
+
+
+def _is_latin(name: str) -> bool:
+    """Does this SUD package / Stanza language code name Latin?  ``la_sud_ittb_proiel_perseus`` and
+    ``la`` alike."""
+    return (name or "").split("_", 1)[0].split("#", 1)[0].lower() == "la"
+
+
+def _debreve(text: str) -> tuple[str, list[int] | None]:
+    """``text`` WITH ITS BREVES TAKEN OFF, plus a map from each surviving character back to the index
+    it came from — ``None`` when there was nothing to do (the overwhelmingly common case, and free).
+
+    ⚠ WHY, AND WHY ONLY LATIN.  A reader pastes Latin the way a textbook prints it — ``pŭella``,
+    ``ĭnstar`` — and the parser has never seen such a string: the treebanks spell Latin with no vowel
+    quantities at all, so every marked word is out of vocabulary and comes back mis-tagged, mis-lemmatised
+    and often mis-tokenised.  Taking the marks off before the pipeline runs turns those words back into
+    words it knows.  Gated on the language and not on the character, because a breve is not decoration
+    everywhere: Turkish ``ğ`` IS g-with-breve, and stripping it there would rewrite the language.
+
+    ⚠ AND THE READER'S SPELLING SURVIVES IT.  A written breve is a QUANTITY THE AUTHOR WROTE, which
+    `app/macron.py` honours as the one statement it will never revise — so it must reach the FORM column,
+    the file, and the macroniser.  Hence the index map rather than a bare replace: what the parser sees is
+    stripped, what is stored is sliced back out of the original text (`_reform`).  A lone combining breve
+    contributes no character of its own and simply rides along inside the slice of the letter it follows.
+
+    Applied on the spaCy (SUD) paths only — parse, parse_many, tokenize, parse_pretokenized.  Stanza is
+    deliberately left alone rather than half-done: its words carry ``start_char`` but an MWT-expanded one
+    carries ``None``, so the same restore is not simply available there, and stripping WITHOUT restoring
+    would delete a quantity the reader wrote.  Latin in this app is a SUD-spaCy language (it is where the
+    macron layer, the MSeg tier and `la_sud_ittb_proiel_perseus` all live), so that is where the marks
+    arrive."""
+    if not text or _BREVE not in unicodedata.normalize("NFD", text):
+        return text, None
+    out: list[str] = []
+    imap: list[int] = []
+    for i, ch in enumerate(text):
+        d = unicodedata.normalize("NFD", ch)
+        if d == _BREVE:
+            continue                      # a bare combining mark belongs to the letter before it
+        if _BREVE in d:
+            bare = unicodedata.normalize("NFC", d.replace(_BREVE, ""))
+            if len(bare) == 1:            # anything that does not recompose to ONE character would
+                ch = bare                 # desync the map — leave it alone rather than shift every index
+        out.append(ch)
+        imap.append(i)
+    imap.append(len(text))
+    return "".join(out), imap
+
+
+def _reform(tokens: list[dict], doc, text: str, imap: list[int] | None,
+            mwt: list[dict] | None = None) -> None:
+    """Put the ORIGINAL spelling back on each token's FORM, in place — see `_debreve`.
+
+    The slice runs to the start of the NEXT surviving character, so a breve sitting between two of them
+    goes to the token on its left, which is the letter it belongs to."""
+    if imap is None:
+        return
+    for tok, t in zip(tokens, doc):
+        a, b = imap[t.idx], imap[t.idx + len(t.text)]
+        tok["form"] = text[a:b]
+    if mwt:                               # …and a reconstructed range's surface, which is its components' glued together
+        for m in mwt:
+            m["form"] = "".join(tokens[i]["form"] for i in range(m["from"] - 1, m["to"]))
+
+
 def _parse_spacy_sud(text: str, package: str) -> tuple[list[dict], list[dict]]:
     nlp = _load_spacy(package)
+    fed, imap = _debreve(text) if _is_latin(package) else (text, None)
     try:
-        doc = nlp(text)
+        doc = nlp(fed)
     except Exception as exc:  # noqa: BLE001 — e.g. a raw-text tokeniser dependency isn't installed yet
         raise ParserUnavailable(str(exc)) from exc
     out, mwt = _spacy_doc_to_sud(doc)
+    _reform(out, doc, text, imap, mwt)
     return (out, mwt) if out else (whitespace_tokens(text), [])
 
 
@@ -112,26 +217,33 @@ def _spacy_tokenize(text: str, package: str) -> tuple[list[dict], list[bool], li
     parse, so the tokens (and their transliterations) appear before the heavy parse runs. The
     SpaceAfter flags are handed back so the follow-up parse can rebuild the very same Doc.
 
-    Also returns any MWT ranges the tokeniser published (`_mwt_from_doc`), so a morphologically
-    tokenised language shows its ranges in the preview rather than having them pop in when the
-    parse lands. `_reconstruct_mwt` is NOT run here: nothing has tagged yet, so its PUNCT test
-    has no input — published ranges are the only ones available this early, which is why the
-    preview used to return none at all."""
+    Also returns any MWT ranges the tokeniser published (`_mwt_from_doc`) or that its published
+    source spans imply (`_src_span_layout`), so a morphologically tokenised language shows its
+    ranges in the preview rather than having them pop in when the parse lands. `_reconstruct_mwt` is
+    NOT run here: nothing has tagged yet, so its PUNCT test has no input — the two published answers
+    are the only ones available this early, which is why the preview used to return none at all."""
     nlp = _load_spacy(package)
+    fed, imap = _debreve(text) if _is_latin(package) else (text, None)   # …the tokeniser too: a marked word can be SPLIT differently (see _debreve)
     try:
-        doc = nlp.tokenizer(text)
+        doc = nlp.tokenizer(fed)
     except Exception as exc:  # noqa: BLE001
         raise ParserUnavailable(str(exc)) from exc
-    forms = [t.text for t in doc]
+    forms = ([text[imap[t.idx]:imap[t.idx + len(t.text)]] for t in doc] if imap is not None
+             else [t.text for t in doc])   # the reader's own spelling goes into the preview, as it does into the parse
     spaces = [t.whitespace_ != "" for t in doc]
     if not forms:
         return whitespace_tokens(text), [], []
     toks = [_tok(f, head="0" if j == 0 else "1", deprel="root" if j == 0 else "")
             for j, f in enumerate(forms)]
+    mwt = _mwt_from_doc(doc, toks)
+    if mwt is None:
+        layout = _src_span_layout(doc, toks)
+        if layout is not None:
+            mwt, spaces = layout      # a rewriting tokeniser's own text has the wrong spacing
     for i, sa in enumerate(spaces):   # keep a spaceless join (clitics, CJK) visible in the preview
         if not sa and i < len(toks) - 1:
             toks[i]["misc"] = "SpaceAfter=No"
-    return toks, spaces, _mwt_from_doc(doc, toks) or []
+    return toks, spaces, mwt or []
 
 
 def _mwt_from_doc(doc, tokens: list[dict]) -> list[dict] | None:
@@ -167,6 +279,179 @@ def _mwt_from_doc(doc, tokens: list[dict]) -> list[dict] | None:
                     "_cols": [f"{a}-{b}", form, "_", "_", "_", "_", "_", "_", "_", "_"]})
     mwt.sort(key=lambda m: m["from"])
     return mwt
+
+
+def _is_punct_form(form: str) -> bool:
+    """A token made of nothing but punctuation. Used where `_reconstruct_mwt`'s UPOS test can't be:
+    the tokenise-only path has no tagger output yet, and a daṇḍa run glued to the word before it
+    (``raviḥ‖``) has to be kept out of that word's range all the same."""
+    return bool(form) and not any(ch.isalnum() for ch in form)
+
+
+def _src_span_layout(doc, tokens: list[dict]) -> tuple[list[dict], list[bool]] | None:
+    """MWT ranges and SpaceAfter flags read off a tokeniser's PUBLISHED source spans, or ``None``.
+
+    Sits between the two existing answers (`_mwt_from_doc`'s explicit ``mwt_ranges`` and
+    `_reconstruct_mwt`'s heuristic) and is better than the heuristic for the same reason the
+    explicit list is: it is not a guess. A tokeniser that publishes ``doc._.src_text`` +
+    ``doc._.src_spans`` has told us where every token came from in the RAW input, and an
+    orthographic word is just a run of tokens whose spans fall in one whitespace-delimited chunk of
+    that input — which is precisely what a multi-word token is. `sa_sud_vedic_ufal_dcs` is the case
+    this exists for; any future splitter that publishes spans gets it for nothing.
+
+    Two things it gets right that `_reconstruct_mwt` cannot:
+
+    · **The range's FORM is the raw substring**, not the concatenation of the components. Those
+      differ exactly where a sandhi splitter earns its keep — ``vartmā`` + ``punar-`` is stored as
+      the two words ``vartma`` and ``a``, whose concatenation ``vartmaa`` is not a word in any
+      script. Taking the substring instead is what lets the frontend's literal-match alignment
+      settle the sentence with no bridge call at all.
+    · **SpaceAfter comes from the RAW text.** ``doc.text`` here is the tokeniser's RECONSTRUCTION,
+      and it puts spaces where the input had none (the CSLiser splits ``vartmāpunarjanmanām`` into
+      three space-separated pieces), so ``token.whitespace_`` would report gluing that the file must
+      not record. Two tokens are glued iff their spans meet or overlap in the input.
+
+    A token the tokeniser could not place (a ``None`` span) inherits its neighbour's chunk rather
+    than breaking the run: it is a gap in the OFFSETS, not evidence of a word boundary — the
+    Devanagari path produces one on the coalesced particle of every ``vartmā``-type junction, and
+    treating it as a boundary would split the orthographic word in half."""
+    try:
+        from spacy.tokens import Doc
+        if not (Doc.has_extension("src_text") and Doc.has_extension("src_spans")):
+            return None
+        text = doc._.src_text
+        spans = doc._.src_spans
+        if not text or not spans or len(spans) != len(doc) or len(doc) != len(tokens):
+            return None
+        # chunk id per character of the raw input; -1 on whitespace, so a span start names its word
+        chunk_at, cid, prev_ws = [], -1, True
+        for ch in text:
+            if ch.isspace():
+                chunk_at.append(-1)
+                prev_ws = True
+            else:
+                if prev_ws:
+                    cid += 1
+                chunk_at.append(cid)
+                prev_ws = False
+        norm: list[tuple[int, int] | None] = []
+        for sp in spans:
+            try:
+                a, b = int(sp[0]), int(sp[1])
+            except (TypeError, ValueError, IndexError):
+                norm.append(None)
+                continue
+            norm.append((a, b) if 0 <= a < b <= len(text) else None)
+        if not any(norm):
+            return None
+        # each token's chunk, with an unplaced token borrowing from the nearest placed neighbour
+        chunk_of: list[int] = [chunk_at[sp[0]] if sp else -1 for sp in norm]
+        for i, sp in enumerate(norm):
+            if sp:
+                continue
+            # only borrow when BOTH sides agree, or only one side exists: a hole between two
+            # different words is a boundary we cannot see, and guessing either way invents a range
+            left = next((chunk_of[t] for t in range(i - 1, -1, -1) if norm[t]), -1)
+            right = next((chunk_of[t] for t in range(i + 1, len(norm)) if norm[t]), -1)
+            chunk_of[i] = left if right < 0 else (right if left < 0 else
+                                                  (left if left == right else -1))
+        # glued-to-next: the spans meet or overlap (they overlap by one character at a coalescence)
+        space_after = []
+        for i in range(len(norm)):
+            a, b = norm[i], (norm[i + 1] if i + 1 < len(norm) else None)
+            space_after.append(True if not a or not b else b[0] > a[1])
+        if space_after:
+            space_after[-1] = False
+        mwt: list[dict] = []
+        i = 0
+        while i < len(tokens):
+            j = i
+            while (j + 1 < len(tokens) and chunk_of[j + 1] >= 0
+                   and chunk_of[j + 1] == chunk_of[i]):
+                j += 1
+            if chunk_of[i] >= 0:      # one orthographic word: split it on punctuation runs
+                k = i
+                while k <= j:
+                    if _is_punct_form(tokens[k]["form"]):
+                        k += 1
+                        continue
+                    e = k
+                    while e + 1 <= j and not _is_punct_form(tokens[e + 1]["form"]):
+                        e += 1
+                    if e > k:
+                        placed: list[tuple[int, int]] = [sp for sp in norm[k:e + 1] if sp is not None]
+                        a = placed[0][0] if placed else -1
+                        b = placed[-1][1] if placed else -1
+                        form = text[a:b] if b > a >= 0 else \
+                            "".join(tokens[t]["form"] for t in range(k, e + 1))
+                        mwt.append({"from": k + 1, "to": e + 1, "form": form,
+                                    "_cols": [f"{k + 1}-{e + 1}", form,
+                                              "_", "_", "_", "_", "_", "_", "_", "_"]})
+                    k = e + 1
+            i = j + 1
+        return mwt, space_after
+    except Exception:  # noqa: BLE001 — an unexpected extension shape falls through to the heuristic
+        return None
+
+
+# The spaCy extensions a SUD model may set on a token beyond the ten CoNLL-U columns, and the MISC
+# key each rides in.  All three are UD conventions rather than inventions of ours: a non-Latin-script
+# treebank puts the native script in FORM/LEMMA and the romanisation in `Translit`/`LTranslit`
+# (`sa_sud_vedic_ufal_dcs`'s `sa_deva` component does exactly that for a Devanagari input), and the
+# Vedic treebank records the padapāṭha in `Unsandhied` on 100 % of its tokens — the DCS
+# representation leaves a standalone word SANDHIED in FORM, so without this key the unsandhied
+# analysis the model predicts would simply be discarded.  MISC is the right home for all three: they
+# are annotation layers on a token, they round-trip through the file untouched, and none of them is
+# the FORM.
+_TOKEN_MISC_EXT = (("translit", "Translit"), ("ltranslit", "LTranslit"),
+                   ("unsandhied", "Unsandhied"))
+
+# SUD's OWN MISC LAYER, which the released parsers predict with components of their own
+# (`sud_subject`/`sud_subject_rule`, `sud_reported_rule`, `sud_idiom`) and publish on a SINGLE
+# extension, `Token._.sud_misc` — a dict, not a string, so it needs its own fold rather than another
+# `_TOKEN_MISC_EXT` row.  Four keys, and the app already draws three of the four analyses they name:
+#
+#   Subject=SubjRaising|ObjRaising|…  the embedded predicate whose subject is raised — the ghost edge
+#                                     `subjGhostTarget` draws (js/diagram/diagram-edit.js)
+#   Reported=Yes                      a verbatim-speech complement — `isReported`, drawn as a subtree
+#                                     lifted off the line (js/diagram/diagram-core.js)
+#   Idiom=Yes / InIdiom=Yes           the head of a SUD idiom (it also carries `ExtPos`) and its other
+#                                     members (they attach by `unk`)
+#
+# Upstream deliberately keeps these OUT of `token.morph`, so a MISC feature never masquerades as a
+# morphological one; MISC is where the treebanks put all four, and where this app's own hand-annotation
+# of `Subject`/`Reported` already lives (raiseGet/raiseSet, js/core/prefs.js).  Not every wheel carries
+# every key — the split is empirical, per language, and recorded in SUD-spaCy's own CLAUDE.md (zh ships
+# no `Subject`; fa/la ship no `Reported`; the four non-idiom-annotating treebanks ship no `Idiom`) — so
+# an absent key means "this model says nothing here", never "no".
+_SUD_MISC_KEYS = ("Idiom", "InIdiom", "Reported", "Subject")
+
+
+def _ext_misc(tok, misc: str = "_") -> str:
+    """``misc`` with whatever `_TOKEN_MISC_EXT` / `sud_misc` values this token carries folded in.
+
+    Silent about extensions that are not registered (every model but the Sanskrit one, and every
+    model packaged before the SUD MISC layer existed) and about empty values, so a model that
+    publishes none leaves MISC exactly as it was."""
+    parts = [p for p in (misc or "").split("|") if p and p != "_"]
+    have = {p.split("=", 1)[0] for p in parts}
+    try:
+        from spacy.tokens import Token
+        for attr, key in _TOKEN_MISC_EXT:
+            if key in have or not Token.has_extension(attr):
+                continue
+            val = getattr(tok._, attr, "") or ""
+            if val:
+                parts.append(f"{key}={val}")
+        if Token.has_extension("sud_misc"):
+            sud = getattr(tok._, "sud_misc", None) or {}
+            for key in _SUD_MISC_KEYS:            # a fixed order, not the dict's: MISC is a set of
+                val = str(sud.get(key) or "")     # key=value pairs and the file should not record
+                if val and key not in have:       # which component happened to run first
+                    parts.append(f"{key}={val}")
+    except Exception:  # noqa: BLE001
+        pass
+    return "|".join(parts) if parts else "_"
 
 
 def _add_space_after_no(misc: str | None) -> str:
@@ -299,8 +584,8 @@ def _reconstruct_mwt(tokens: list[dict], space_after: list[bool]) -> list[dict]:
 
 
 # ── Stanza UD engine (→ SUD via grew) ────────────────────────────────────────
-def _load_stanza(lang: str, package: str = "default"):
-    key = f"{lang}#{package}"
+def _load_stanza(lang: str, package: str = "default", pretokenized: bool = False):
+    key = f"{lang}#{package}" + ("#pretok" if pretokenized else "")
     if key in _STANZA_PIPES:
         return _STANZA_PIPES[key]
     try:
@@ -308,10 +593,13 @@ def _load_stanza(lang: str, package: str = "default"):
     except ImportError as exc:
         raise ParserUnavailable("spacy-stanza is not installed") from exc
     def _load(procs: str):
+        # `tokenize_pretokenized` tells Stanza the sentence is ALREADY segmented — it then splits on
+        # whitespace and nothing else, which is the promise `parse_pretokenized` needs. Cached under
+        # its own key so a document does not share a pipeline between the two modes.
         return spacy_stanza.load_pipeline(
             lang, processors=procs,
             download_method="none", dir=STANZA_DIR, package=package, use_gpu=False,
-            logging_level="ERROR",
+            logging_level="ERROR", tokenize_pretokenized=pretokenized,
         )
     # Try the full pipeline, then progressively drop the OPTIONAL processors some languages lack:
     # `mwt` (no multi-word-token model) and `lemma` (an identity no-op with no model, e.g. Telugu).
@@ -325,19 +613,30 @@ def _load_stanza(lang: str, package: str = "default"):
             break
         except Exception as exc:  # noqa: BLE001
             last = exc
-    if nlp is None:  # genuinely missing model dir / resources
-        raise ParserUnavailable(f"Stanza model {lang!r} is not installed") from last
+    if nlp is None:
+        # …AND THE REASON TRAVELS WITH IT. This loop swallows every exception from all three
+        # processor sets, so "is not installed" was a GUESS at which of them fired — right for a
+        # missing model directory and misleading for anything else (a torch/NumPy ABI mismatch, an
+        # unreadable resources.json, a package name the treebank does not publish), all of which
+        # reach the user as `parse()`'s `reason` and get read as fact. Name the likely cause, then
+        # quote what actually failed; `str(exc)` alone can be empty, hence the class name.
+        why = f"{type(last).__name__}: {last}".strip(": ") if last else "no error reported"
+        raise ParserUnavailable(
+            f"Stanza model {lang!r} could not be loaded (is it installed?) — {why}") from last
     pipe = nlp.tokenizer.snlp   # the underlying stanza.Pipeline (keeps MWT info)
     _STANZA_PIPES[key] = pipe
     return pipe
 
 
-def _stanza_ud(text: str, lang: str, package: str) -> tuple[list[dict], list[dict]]:
+def _stanza_ud(text, lang: str, package: str, pretokenized: bool = False) -> tuple[list[dict], list[dict]]:
     """Run Stanza and extract UD tokens + MWT ranges from the stanza Document.
 
     Multiple detected sentences are flattened into one token table (the app treats
-    each parse as a single sentence); heads are made positional across the whole text."""
-    pipe = _load_stanza(lang, package)
+    each parse as a single sentence); heads are made positional across the whole text.
+
+    ``pretokenized`` takes ``text`` as a list of sentences, each a list of word strings, and holds
+    Stanza to that segmentation — see :func:`parse_pretokenized`."""
+    pipe = _load_stanza(lang, package, pretokenized)
     sdoc = pipe(text)
     pos_of: dict[tuple[int, int], int] = {}
     gpos = 0
@@ -408,8 +707,10 @@ def _load_stanza_tok(lang: str, package: str = "default"):
             break
         except Exception as exc:  # noqa: BLE001
             last = exc
-    if nlp is None:
-        raise ParserUnavailable(f"Stanza model {lang!r} is not installed") from last
+    if nlp is None:   # the reason travels with it — see _load_stanza's own note on why
+        why = f"{type(last).__name__}: {last}".strip(": ") if last else "no error reported"
+        raise ParserUnavailable(
+            f"Stanza model {lang!r} could not be loaded (is it installed?) — {why}") from last
     pipe = nlp.tokenizer.snlp
     _STANZA_TOK_PIPES[key] = pipe
     return pipe
@@ -446,6 +747,92 @@ def _stanza_tokenize(text: str, lang: str, package: str) -> tuple[list[dict], li
     return toks, mwt
 
 
+# ── batch ────────────────────────────────────────────────────────────────────
+def _parse_spacy_sud_many(texts: list[str], package: str) -> list[tuple]:
+    """`_parse_spacy_sud` over a list, through ``nlp.pipe`` — which is spaCy's own batching and the
+    reason this exists rather than a loop at the call site: the pipeline's components run over the
+    whole batch at once instead of once per text."""
+    nlp = _load_spacy(package)
+    la = _is_latin(package)
+    pairs = [_debreve(t) if la else (t, None) for t in texts]   # Latin quantities off before the pipeline, back on after — see _debreve
+    try:
+        docs = list(nlp.pipe([p[0] for p in pairs]))
+    except Exception as exc:  # noqa: BLE001 — e.g. a raw-text tokeniser dependency isn't installed yet
+        raise ParserUnavailable(str(exc)) from exc
+    out = []
+    for text, (_fed, imap), doc in zip(texts, pairs, docs):
+        toks, mwt = _spacy_doc_to_sud(doc)
+        _reform(toks, doc, text, imap, mwt)
+        out.append((toks, mwt) if toks else (whitespace_tokens(text), []))
+    return out
+
+
+def _parse_stanza_many(texts: list[str], lang: str, package: str) -> list[tuple]:
+    """`_parse_stanza_ud_to_sud` over a list, with **one** UD→SUD conversion for the whole batch.
+
+    That single `convert.ud_to_sud` call is the win here and it is a large one: grew runs a worker
+    POOL (`convert._POOL_WORKERS`), so a list of sentences is converted in parallel, where a call per
+    sentence pays the dispatch serially and leaves every worker but one idle."""
+    got = [_stanza_ud(t, lang, package) for t in texts]
+    idx, sents = [], []
+    for i, (tokens, _mwt) in enumerate(got):
+        if tokens:
+            idx.append(i)
+            sents.append({"sid": None, "text": texts[i].strip(), "comments": [],
+                          "tokens": tokens, "mwt": [], "empties": []})
+    if sents:
+        try:
+            conv = convert.ud_to_sud(sents)
+        except convert.ConversionUnavailable as exc:
+            raise ParserUnavailable(
+                "Stanza produces UD; converting to SUD needs grew (grewpy + opam "
+                "backend). Install it, or use a SUD spaCy model.") from exc
+        except convert.ConversionError as exc:
+            raise ParserUnavailable(f"UD→SUD conversion failed: {exc}") from exc
+        for k, i in enumerate(idx):
+            got[i] = (conv[k]["tokens"], got[i][1])   # the conversion never adds or removes a token, so the positional MWT ranges still hold
+    return [(tk, mwt) if tk else (whitespace_tokens(texts[i]), [])
+            for i, (tk, mwt) in enumerate(got)]
+
+
+def parse_many(texts, model_id: str = "") -> list[dict]:
+    """:func:`parse` over a list of texts, in ONE call and with the engine's own batching.
+
+    The shape of each entry is exactly `parse`'s, so a caller can treat the two interchangeably. What
+    it buys is not a different answer but a different cost: inserting a pasted passage used to make
+    two awaited bridge round-trips PER SENTENCE (tokenize, then parse_text), each one re-entering the
+    pipeline for a single string. Here the model is resolved once, spaCy sees the batch through
+    `nlp.pipe`, and Stanza's UD→SUD conversion — much the most expensive part of that engine — runs as
+    a single grew call across the whole list.
+
+    A failure is reported PER ENTRY rather than raised, again matching `parse`: a paste that cannot be
+    parsed still inserts, whitespace-tokenised, with the reason attached to every sentence."""
+    texts = [str(t or "") for t in (texts or [])]
+    if not texts:
+        return []
+    if not model_id:
+        return [{"tokens": whitespace_tokens(t), "mwt": [], "parsed": False} for t in texts]
+    engine, _, name = model_id.partition(":")
+    try:
+        if engine == "stanza":
+            lang, _, package = name.partition("#")
+            pairs = _parse_stanza_many(texts, lang, package or "default")
+            return [{"tokens": tk, "mwt": m, "parsed": True, "engine": "stanza", "model": name}
+                    for tk, m in pairs]
+        package = name
+        if engine != "sud":                      # legacy bare id → best-effort SUD package via the registry
+            from . import models_registry
+            package = models_registry.resolve_default_package(model_id)
+            if not package:
+                raise ParserUnavailable(f"unknown model {model_id!r}")
+        pairs = _parse_spacy_sud_many(texts, package)
+        return [{"tokens": tk, "mwt": m, "parsed": True, "engine": "sud", "model": package}
+                for tk, m in pairs]
+    except ParserUnavailable as exc:
+        return [{"tokens": whitespace_tokens(t), "mwt": [], "parsed": False, "reason": str(exc)}
+                for t in texts]
+
+
 # ── dispatch ─────────────────────────────────────────────────────────────────
 def parse(text: str, model_id: str = "") -> dict:
     if not model_id:
@@ -470,6 +857,422 @@ def parse(text: str, model_id: str = "") -> dict:
     except ParserUnavailable as exc:
         return {"tokens": whitespace_tokens(text), "mwt": [], "parsed": False,
                 "reason": str(exc)}
+
+
+def _force_upos(morphologizer, doc, upos) -> None:
+    """Re-derive each token's FEATS **for the word class the reader chose**, in place.
+
+    ⚠ THIS IS WHAT MAKES A RETAG DO ANYTHING AT ALL.  `parse_pretokenized` hands the pipeline the FORMS
+    and nothing else, so the model re-analyses the same sentence it analysed before and returns the same
+    answer — which means that after a reader retagged 行 from NOUN to VERB, the FEATS and the lemma that
+    came back were still the NOUN's.  Nothing followed the edit; the re-parse was a no-op wearing the
+    look of a refresh.
+
+    The fix is not to overwrite the answer but to CONSTRAIN it.  spaCy's `Morphologizer` predicts UPOS
+    and FEATS as ONE joint label (`POS=NOUN|Case=Nom|Number=Sing`), so the model already holds a score
+    for every analysis it knows — including the verbal ones it ranked second.  Taking the best-scoring
+    label whose `POS=` is the reader's therefore answers "what are this word's features AS a verb?" with
+    the model's own evidence, rather than with a rule someone wrote here.  Where the model knows no label
+    for that class the token is left exactly as the pipeline tagged it: an honest "this model has nothing
+    to say", never an invented feature set.
+
+    Run BETWEEN the morphologizer and the lemmatizer, so every later component sees the chosen class —
+    which is the other half of the request.  ⚠️ It reaches a RULE-BASED lemmatiser (`Lemmatizer`, which
+    keys on `token.pos_`) and not an `EditTreeLemmatizer`, whose model predicts an edit tree from the
+    token vector alone and is POS-blind by construction; `en_sud_ewt` ships the latter, so its lemma will
+    not move on a retag however the class is set. That is a property of the released wheel, not something
+    this function can route around — and it is the reason the constraint is applied to the FEATS here
+    rather than the whole answer being re-asked."""
+    if not upos:
+        return
+    try:
+        labels = list(morphologizer.labels)
+        scores = morphologizer.model.predict([doc])[0]
+        from spacy.morphology import Morphology
+        for i, want in enumerate(upos):
+            if i >= len(doc) or not want or want == "_" or doc[i].pos_ == want:
+                continue
+            best, best_j = None, -1
+            for j, lab in enumerate(labels):
+                if f"POS={want}" not in lab.split("|"):
+                    continue
+                if best is None or scores[i][j] > best:
+                    best, best_j = scores[i][j], j
+            if best_j < 0:
+                continue                       # the model knows no analysis of this class → leave it be
+            feats = Morphology.feats_to_dict(labels[best_j])
+            feats.pop("POS", None)
+            doc[i].set_morph(feats)
+            doc[i].pos_ = want
+    except Exception:  # noqa: BLE001 — a model whose morphologizer is shaped differently keeps the plain answer
+        pass
+
+
+def parse_pretokenized(forms: list[str], model_id: str = "", upos: list[str] | None = None) -> dict:
+    """Parse a sentence whose TOKENISATION IS ALREADY DECIDED — one token per entry of ``forms``.
+
+    This is what "re-derive the model-derived fields for these tokens" needs, and it is not the same
+    request as :func:`parse`. The caller (the frontend's `reparseTokenFields`, after a form or UPOS
+    edit) has a token table it must keep: the heads, the relations and the annotation tiers hang off
+    those exact tokens, so an answer with a different token count is not a worse answer, it is an
+    unusable one.
+
+    It used to be asked as `parse(" ".join(forms))`, and that quietly failed whenever the tokeniser
+    disagreed with the join — which is routine in a SPACELESS SCRIPT, where the tokeniser is a
+    segmenter and the spaces are not evidence it is obliged to respect. Editing 苹果 to 苹果汁 in
+    ``我 喜欢 吃 苹果 。`` comes back as SIX tokens (苹果 + 汁), the count check fails, and the
+    caller's `return false` meant the lemma, XPOS, FEATS and MISC of the edited token were simply
+    never refreshed — silently, and with no way for the user to ask again.
+
+    Bypassing the tokeniser removes the failure mode rather than detecting it: the alignment is 1-to-1
+    by construction. spaCy supports this directly (build the ``Doc`` from a word list and run the
+    pipeline components over it), and the SUD models are built for it — `sa_compound` exists
+    specifically to supply its input feature "to a caller who hands the pipeline TOKENS rather than
+    raw text". Stanza has ``tokenize_pretokenized``, which takes the same promise.
+
+    ``upos`` — one word class per form, the READER's own tags — is what makes a retag mean something:
+    the FEATS are re-derived for the class that was chosen and every component after the morphologizer
+    sees it.  See `_force_upos`, which also states what a retag can and cannot move.
+
+    Returns the same shape as :func:`parse` minus ``mwt``: the ranges belong to the caller's own
+    table, and a re-parse that was forbidden to re-tokenise has nothing new to say about them."""
+    forms = [str(f or "") for f in (forms or []) if str(f or "")]
+    if not forms:
+        return {"tokens": [], "parsed": False, "reason": "nothing to parse"}
+    engine, _, name = (model_id or "").partition(":")
+    if not model_id:
+        return {"tokens": whitespace_tokens(" ".join(forms)), "parsed": False}
+    try:
+        if engine == "stanza":
+            lang, _, package = name.partition("#")
+            tokens, _mwt = _stanza_ud([forms], lang, package or "default", pretokenized=True)
+            if len(tokens) != len(forms):
+                raise ParserUnavailable("the model re-tokenised a pre-tokenised sentence")
+            ud_sent = {"sid": None, "text": " ".join(forms), "comments": [],
+                       "tokens": tokens, "mwt": [], "empties": []}
+            try:
+                tokens = convert.ud_to_sud([ud_sent])[0]["tokens"]
+            except (convert.ConversionUnavailable, convert.ConversionError) as exc:
+                raise ParserUnavailable(str(exc)) from exc
+            return {"tokens": tokens, "parsed": True, "engine": "stanza", "model": name}
+        if engine != "sud":
+            from . import models_registry
+            name = models_registry.resolve_default_package(model_id) or ""
+            if not name:
+                raise ParserUnavailable(f"unknown model {model_id!r}")
+        nlp = _load_spacy(name)
+        from spacy.tokens import Doc
+        # …and the same de-breving here, one form at a time — the tokenisation is already decided, so
+        # there is no text to map back through and no re-tokenisation to protect against: the caller's
+        # own forms are restored verbatim below.  Without it every marked word reached the tagger as an
+        # unknown string and came back with the lemma and features of nothing (see _debreve).
+        words = [_debreve(f)[0] for f in forms] if _is_latin(name) else forms
+        doc = Doc(nlp.vocab, words=words)
+        for _pname, proc in nlp.pipeline:
+            doc = proc(doc)
+            if _pname == "morphologizer":
+                _force_upos(proc, doc, upos)   # …and everything downstream now reads the READER's word class
+
+        tokens, _mwt = _spacy_doc_to_sud(doc)
+        if len(tokens) != len(forms):
+            # A component may still rebuild the Doc (clause_parser does); if one ever changes the
+            # count the caller must be told, not handed a table it cannot align.
+            raise ParserUnavailable("the pipeline changed the token count")
+        for tok, f in zip(tokens, forms):
+            tok["form"] = f          # the reader's spelling, quantities and all — this call re-derives FIELDS, never the forms
+        return {"tokens": tokens, "parsed": True, "engine": "sud", "model": name}
+    except ParserUnavailable as exc:
+        return {"tokens": [], "parsed": False, "reason": str(exc)}
+    except Exception as exc:  # noqa: BLE001 — a pipeline that refuses pre-tokenised input must degrade
+        return {"tokens": [], "parsed": False, "reason": str(exc)}
+
+
+# ── THE RUNNERS-UP ──────────────────────────────────────────────────────────────────────────────
+# Every component here scores a whole INVENTORY and the pipeline then keeps the argmax, so the
+# ranking below the winner is computed and thrown away.  These functions hand it back instead.
+#
+# ⚠ THE DEPENDENCY PARSER IS TRANSITION-BASED, SO THERE IS NO "DISTRIBUTION OVER HEADS" TO READ OFF.
+# A biaffine parser scores every (child, head) pair directly; spaCy's arc-eager one scores ACTIONS at
+# a sequence of states, and a head distribution has to be recovered from them.  Two ways were measured
+# before this one:
+#   · `beam_parse` + `moves.get_beam_parses`, which is the documented route and is what it looks like
+#     you should use.  It is nearly useless here: a greedily-trained model's action scores are so
+#     peaked that a width-64 beam returns 64 state sequences collapsing onto 2-3 distinct TREES, and
+#     across three ordinary sentences only 2 tokens got more than one candidate head at all.  Widening
+#     it does not help (16/32/64 all gave the same 2), because the alternatives are not being pruned —
+#     they are being assigned ~0 by the model.  Every other head then reads as exactly 0.0, which is
+#     not "unlikely", it is "never enumerated", and the two must not look alike in the UI.
+#   · scoring every (child, head) pair from a synthesised state, i.e. the biaffine question asked of a
+#     transition parser.  That covers everything but answers a counterfactual — see `arc_label_scores`,
+#     which is the one caller that genuinely wants it.
+# What is used instead is the parser's OWN deliberation.  In arc-eager the only arc available at a
+# state is between the stack top and the buffer front, so walking the greedy path and taking the
+# softmax over valid actions at each step yields, for each token, the candidate heads it was actually
+# weighed against and the mass the model gave each — which is exactly "the few most likely answers"
+# rather than a ranking over an inventory it never considered.  Measured on the classic ambiguities:
+# `with` in "I saw the man with the telescope" comes back saw .78 / man .22, and `that` in "the plan
+# that the board had rejected" plan .54 / had .46, while an unambiguous determiner comes back 1.0 on
+# its one head.  The walk is verified to reproduce the shipped parse exactly (`greedy` below is the
+# same argmax the pipeline takes), so the winner in this table is always the tree on screen.
+_SCORE_CACHE: dict = {}
+_SCORE_CACHE_ORDER: list = []
+_SCORE_CACHE_MAX = 48          # sentences; one entry is a few kB of small dicts
+
+
+def _softmax(row, keep):
+    """Softmax of `row` restricted to the indices in `keep`, as a plain list of floats."""
+    import numpy as np
+    v = np.asarray([row[i] for i in keep], dtype="float64")
+    v = np.exp(v - v.max())
+    s = v.sum()
+    return (v / s).tolist() if s else [0.0] * len(keep)
+
+
+def _arc_scores(parser, doc):
+    """Walk the parser's greedy path, collecting the arcs it weighed at each state.
+
+    Returns ``(heads, deprels)``, both 0-indexed by token:
+      heads[i]   → {head_index_or_-1_for_root: p}
+      deprels[i] → {head_index: {relation: p}}
+
+    The masses a token collects are near-exclusive by construction — once it is attached it never
+    reaches the stack/buffer boundary again — so they are used raw, with the SHORTFALL below 1
+    credited to "no head", i.e. root.  That is what makes a root fall out of the walk rather than
+    needing a rule: the sentence's actual root is offered arcs worth ~0.000 in total and so lands on
+    root ≈ 1.0, while a token whose offers total 1.28 (the PP above, weighed twice) simply normalises."""
+    import numpy as np
+    names = [parser.moves.get_class_name(i) for i in range(parser.moves.n_moves)]
+    step_model = parser.model.predict([doc])
+    state = parser.moves.init_batch([doc])[0]
+    n = len(doc)
+    offers = [{} for _ in range(n)]
+    labels = [{} for _ in range(n)]
+    steps, cap = 0, 8 * n + 32          # arc-eager terminates in 2n; the cap is a guard, never a budget
+    while not state.is_final() and steps < cap:
+        steps += 1
+        row = np.asarray(step_model.predict([state]))[0]
+        valid = [i for i, nm in enumerate(names) if parser.moves.is_valid(state, nm)]
+        if not valid:
+            break
+        probs = _softmax(row, valid)
+        s0, b0 = state.S(0), state.B(0)
+        if s0 >= 0 and b0 >= 0:
+            for k, i in enumerate(valid):
+                nm = names[i]
+                if "-" not in nm or nm[0] not in "LR":
+                    continue
+                # L-x: head is the buffer front, child the stack top.  R-x: the other way round.
+                child, head = (s0, b0) if nm[0] == "L" else (b0, s0)
+                rel = nm[2:]
+                offers[child][head] = offers[child].get(head, 0.0) + probs[k]
+                labels[child].setdefault(head, {})
+                labels[child][head][rel] = labels[child][head].get(rel, 0.0) + probs[k]
+        parser.moves.transition(state, names[valid[int(np.argmax(probs))]])
+    heads, deprels = [], []
+    for i in range(n):
+        tot = sum(offers[i].values())
+        root = max(0.0, 1.0 - tot)
+        denom = tot + root or 1.0
+        h = {h_i: m / denom for h_i, m in offers[i].items() if m / denom >= 0.002}
+        if root / denom >= 0.002:
+            h[-1] = root / denom          # -1 → root; the caller renders it as head 0
+        heads.append(h)
+        # ⚠ ONLY FOR THE HEADS THAT SURVIVED THE PRUNE ABOVE.  Normalising a label set WITHIN its arc
+        # hides how little the arc itself was worth: the root `saw` is offered arcs totalling 0.0004,
+        # and dividing those by their own sum reported `parataxis` at 0.46 under `I` — a confident-
+        # looking answer about an attachment the parser never entertained.  A head the reader picks
+        # that is not in this table is a question for `arc_label_scores`, which is honest about being
+        # a counterfactual, rather than for noise dressed up as deliberation.
+        d = {}
+        for h_i, ls in labels[i].items():
+            if h_i not in h:
+                continue
+            t = sum(ls.values())
+            if t:
+                d[h_i] = {r: m / t for r, m in ls.items() if m / t >= 0.005}
+        deprels.append(d)
+    return heads, deprels
+
+
+def _upos_scores(morphologizer, doc):
+    """The morphologizer's own distribution, POOLED BY WORD CLASS.
+
+    It predicts UPOS and FEATS as one joint label (`POS=NOUN|Case=Nom|Number=Sing` — the same fact
+    `_force_upos` leans on), so the probability of a CLASS is the sum over every analysis carrying it.
+    That pooling is also what item 4 needs for the menu's dot-suffixed subtypes: PRON.Dem and PRON.Int
+    are two of PRON's labels, so a parent row's weight is the sum of its submenu's."""
+    import numpy as np
+    labels = list(morphologizer.labels)
+    # ⚠ LOGITS, NOT PROBABILITIES — measured: a row sums to -147.3 and runs -16.4 … +21.0.  Reading
+    # them as weights and normalising gives nonsense (it did: every class came back empty).  `_force_upos`
+    # is unaffected because an argmax over a subset is scale-free, but a RANKING has to be softmaxed.
+    scores = np.asarray(morphologizer.model.predict([doc])[0], dtype="float64")
+    pos = []
+    for lab in labels:                     # cache the POS= of each label once, not per token
+        p = ""
+        for part in lab.split("|"):
+            if part.startswith("POS="):
+                p = part[4:]
+                break
+        pos.append(p)
+    out = []
+    all_idx = list(range(len(labels)))
+    for i in range(len(doc)):
+        if i >= scores.shape[0]:
+            out.append({})
+            continue
+        probs = _softmax(scores[i], all_idx)
+        agg: dict = {}
+        for j, p in enumerate(pos):
+            if p:
+                agg[p] = agg.get(p, 0.0) + probs[j]
+        out.append({k: v for k, v in agg.items() if v >= 0.002})
+    return out
+
+
+def _score_doc(nlp, package, forms, upos=None):
+    from spacy.tokens import Doc
+    # …de-breved exactly as `parse_pretokenized` does, or a marked Latin word reaches the model as an
+    # unknown string and its whole candidate ranking is a ranking for a word nobody wrote.
+    words = [_debreve(f)[0] for f in forms] if _is_latin(package) else forms
+    doc = Doc(nlp.vocab, words=words)
+    heads: list = []
+    deprels: list = []
+    uposd: list = []
+    for pname, proc in nlp.pipeline:
+        if pname == "parser":
+            heads, deprels = _arc_scores(proc, doc)
+        elif pname == "morphologizer":
+            uposd = _upos_scores(proc, doc)
+        doc = proc(doc)
+        if pname == "morphologizer":
+            _force_upos(proc, doc, upos)
+    return heads, deprels, uposd
+
+
+def _resolve_sud_package(model_id: str) -> str:
+    """The spaCy package name behind a model id, or "" for anything that is not a SUD spaCy model."""
+    engine, _, name = (model_id or "").partition(":")
+    if engine == "stanza" or not model_id:
+        return ""
+    if engine != "sud":
+        from . import models_registry
+        return models_registry.resolve_default_package(model_id) or ""
+    return name
+
+
+def analysis_scores(forms: list[str], model_id: str = "", upos: list[str] | None = None) -> dict:
+    """What the pipeline ranked SECOND (and third) for one sentence's tokens.
+
+    ``{"scored": True, "heads": [...], "deprels": [...], "upos": [...]}`` — one entry per form, with
+    head keys as 1-based token ids and ``0`` for root, so the frontend can use them without an
+    off-by-one of its own.
+
+    ⚠ SUD spaCy models only.  A Stanza document is parsed in UD and then converted to SUD by grew,
+    which REWRITES HEADS — so Stanza's own (genuinely biaffine, genuinely complete) head distribution
+    describes a tree that is not the one on screen, and there is no honest way to carry it across the
+    conversion.  ``scored: False`` is the answer there, and every caller degrades to its pre-existing
+    behaviour rather than showing a weaker version of this."""
+    forms = [str(f or "") for f in (forms or [])]
+    if not forms or not any(forms):
+        return {"scored": False, "reason": "nothing to score"}
+    name = _resolve_sud_package(model_id)
+    if not name:
+        return {"scored": False, "reason": "the ranking below the winner is a SUD spaCy model's own"}
+    key = (name, tuple(forms), tuple(upos or ()))
+    hit = _SCORE_CACHE.get(key)
+    if hit is not None:
+        return hit
+    try:
+        nlp = _load_spacy(name)
+        heads, deprels, uposd = _score_doc(nlp, name, forms, upos)
+        if len(heads) != len(forms):
+            return {"scored": False, "reason": "the pipeline changed the token count"}
+        out = {
+            "scored": True,
+            # -1 is the walk's "no head"; the wire format is CoNLL-U's own 0, and every other id is 1-based.
+            "heads": [{str(h + 1 if h >= 0 else 0): round(p, 4) for h, p in d.items()} for d in heads],
+            "deprels": [{str(h + 1): {r: round(p, 4) for r, p in ls.items()}
+                         for h, ls in d.items()} for d in deprels],
+            "upos": [{k: round(v, 4) for k, v in d.items()} for d in uposd],
+        }
+    except Exception as exc:  # noqa: BLE001 — a pipeline shaped differently keeps the plain editor
+        return {"scored": False, "reason": str(exc)}
+    _SCORE_CACHE[key] = out
+    _SCORE_CACHE_ORDER.append(key)
+    while len(_SCORE_CACHE_ORDER) > _SCORE_CACHE_MAX:
+        _SCORE_CACHE.pop(_SCORE_CACHE_ORDER.pop(0), None)
+    return out
+
+
+def _synth_state(parser, doc, i, j):
+    """A state with the stack top at token ``i`` and the buffer front at ``j`` (``i < j``).
+
+    Reached by driving the machine rather than parsing: push everything up to and including ``i``,
+    then push-and-pop each token between them so it leaves the buffer without acquiring a head."""
+    state = parser.moves.init_batch([doc])[0]
+    while state.B(0) != -1 and state.B(0) < i:
+        state.push()
+    if state.B(0) == i:
+        state.push()
+    for _ in range(j - i - 1):
+        if state.B(0) == -1:
+            break
+        state.push()
+        state.pop()
+    return state
+
+
+def arc_label_scores(forms: list[str], model_id: str, child: int, head: int) -> dict:
+    """"If this token hung off THAT one, what would you call the edge?" — ``child``/``head`` 1-based.
+
+    ⚠ THIS IS THE COUNTERFACTUAL QUESTION, and it is asked only where the honest one has no answer.
+    `analysis_scores` reports the arcs the parser actually weighed, and a reader is free to drag a
+    token onto a head it never entertained — at which point there is no recorded deliberation to
+    consult, and the alternative to synthesising a state is to say nothing at all.  So the state is
+    driven to put the two tokens at the stack/buffer boundary and the model is asked for its action
+    scores there.  Its history features are not the ones a real parse would have accumulated, so this
+    is the model's opinion of the arc rather than a probability from a parse; measured against the
+    real state for a pair the walk DID weigh, it ranks the same two relations first and second and
+    moves the split (saw→with: .785/.214 natural, .576/.416 synthesised).  Good enough to choose a
+    label with, which is all any caller does with it — and never used to override the walk."""
+    forms = [str(f or "") for f in (forms or [])]
+    n = len(forms)
+    if not (1 <= child <= n and 1 <= head <= n) or child == head:
+        return {"scored": False}
+    name = _resolve_sud_package(model_id)
+    if not name:
+        return {"scored": False}
+    try:
+        nlp = _load_spacy(name)
+        from spacy.tokens import Doc
+        import numpy as np
+        words = [_debreve(f)[0] for f in forms] if _is_latin(name) else forms
+        doc = Doc(nlp.vocab, words=words)
+        parser = None
+        for pname, proc in nlp.pipeline:
+            if pname == "parser":
+                parser = proc
+                break
+            doc = proc(doc)
+        if parser is None:
+            return {"scored": False}
+        c, h = child - 1, head - 1
+        want = "L" if c < h else "R"       # child before head → a LEFT arc, and vice versa
+        state = _synth_state(parser, doc, min(c, h), max(c, h))
+        if state.S(0) != min(c, h) or state.B(0) != max(c, h):
+            return {"scored": False}       # the machine would not go there; say nothing rather than guess
+        names = [parser.moves.get_class_name(i) for i in range(parser.moves.n_moves)]
+        row = np.asarray(parser.model.predict([doc]).predict([state]))[0]
+        idx = [i for i, nm in enumerate(names) if nm[0] == want and "-" in nm]
+        if not idx:
+            return {"scored": False}
+        probs = _softmax(row, idx)         # over the arc actions in the RIGHT DIRECTION only: the
+        # question is "which relation", not "whether to attach" — the caller has already decided that.
+        out = {names[i][2:]: round(p, 4) for i, p in zip(idx, probs) if p >= 0.005}
+        return {"scored": True, "labels": out}
+    except Exception as exc:  # noqa: BLE001
+        return {"scored": False, "reason": str(exc)}
 
 
 def tokenize(text: str, model_id: str = "") -> dict:
@@ -522,10 +1325,9 @@ def _tokenizer_spans(text: str, model_id: str) -> list[tuple[int, int, str]]:
     rewrites what it reads (Sanskrit's sandhi splitter) those differ, and it is the form that the
     caller's own forms are comparable with.
 
-    Three sources of offsets, in order of authority: the tokeniser's PUBLISHED spans
-    (``_published_spans``), ``token.idx`` where the tokeniser left the text alone, and — Sanskrit
-    only — the CSL transform redone from the text (:mod:`app.sa_csl`). Returns ``[]`` (rather than
-    raising) whenever none of the three yields an honest answer: no model, or a tokeniser whose
+    Two sources of offsets, in order of authority: the tokeniser's PUBLISHED spans
+    (``_published_spans``) and ``token.idx`` where the tokeniser left the text alone. Returns ``[]``
+    (rather than raising) whenever neither yields an honest answer: no model, or a tokeniser whose
     ``doc.text`` differs from the input, which means it RECONSTRUCTED the text (a sandhi/clitic
     splitter building its Doc from a word list) and its ``token.idx`` no longer indexes ``text``."""
     engine, _, name = (model_id or "").partition(":")
@@ -548,37 +1350,18 @@ def _tokenizer_spans(text: str, model_id: str) -> list[tuple[int, int, str]]:
         name = models_registry.resolve_default_package(model_id) or ""
         if not name:
             return []
-    # SANSKRIT, no model: the CSL transform redone from the text alone (see `_sa_units`). An
-    # uninstalled model is fatal for every other language — the caller surfaces the exception as its
-    # `reason` — but not for this one, because the transform IS derivable without the wheel.
-    try:
-        nlp = _load_spacy(name)
-    except ParserUnavailable:
-        if name.startswith("sa_") and sa_csl.available():
-            return _sa_units(text)
-        raise                   # …but with the vendored transform gone too there is nothing to say
-                                # but "not installed", which is what the caller reports as `reason`
+    nlp = _load_spacy(name)     # an uninstalled model is fatal; the caller surfaces it as `reason`
     doc = nlp.tokenizer(text)
     pub = _published_spans(doc, text)
     if pub is not None:
         return pub
     if doc.text != text:
-        # The tokeniser RECONSTRUCTED the text and published nothing. Sanskrit is still derivable
-        # (and this is the pre-`src_spans` `sa_sud_vedic_ufal_csl` wheel's path); anything else has
-        # no honest offsets, and a guess here would be a silently wrong decoration.
-        return _sa_units(text) if name.startswith("sa_") else []
-    return [(t.idx, t.idx + len(t.text), t.text) for t in doc]
-
-
-def _sa_units(text: str) -> list[tuple[int, int, str]]:
-    """Sanskrit surface units WITHOUT the model: `sa_sud_vedic_ufal_csl`'s input front-end SPLITS
-    SANDHI — it builds its Doc from a word list, so its text is not the input's — but that front-end
-    is a deterministic, lexicon-free rewriting of CSL notation, so :mod:`app.sa_csl` re-runs it with
-    the offsets attached. Same units the model would produce, addressed in the ORIGINAL string; this
-    is the conversion direction built into the tokenise path, and it needs no wheel installed."""
-    if not sa_csl.available():
+        # The tokeniser RECONSTRUCTED the text and published nothing: no honest offsets exist, and a
+        # guess here would be a silently wrong decoration. (Sanskrit used to be rescued here by
+        # re-running the CSL transform from the text; `sa_sud_vedic_ufal_dcs` publishes `src_spans`,
+        # so it never reaches this line, and the CSL notation it needed is gone from the app.)
         return []
-    return [(a, b, "".join(comp)) for a, b, comp in sa_csl.surface_units(text)]
+    return [(t.idx, t.idx + len(t.text), t.text) for t in doc]
 
 
 def _published_spans(doc, text: str) -> list[tuple[int, int, str]] | None:
@@ -623,37 +1406,30 @@ def token_spans(text: str, forms: list[str], model_id: str = "",
     """Character spans in ``text`` for each of ``forms`` (the file's surface units, in order).
 
     ``spans[i]`` is ``[start, end]`` or ``None`` where no honest span could be found — a hole,
-    not a guess, so the caller decorates what aligned and leaves the rest alone. ``parts[i]``, when
-    the caller supplies it, is unit *i*'s component forms (a multi-word token's own tokens), which
-    only the Sanskrit stage uses — and uses to VERIFY, not to search.
+    not a guess, so the caller decorates what aligned and leaves the rest alone.
 
-    Two stages here, behind the frontend's own literal-match stage:
+    ONE stage here, behind the frontend's own literal-match stage: **THE TOKENISER'S OWN OFFSETS**,
+    mirroring :func:`sentencize`'s. The two unit SEQUENCES are diffed (``difflib``) so every run they
+    agree on maps 1-to-1 onto the tokeniser's real offsets, and each DIVERGENT run is then aligned
+    CHARACTER-wise inside the window its neighbours pin down, by the same :func:`_align_map` that
+    maps a model sentence boundary back onto the original text. A file unit the tokeniser has no
+    counterpart for (a token that isn't in the text at all) simply keeps its ``None``.
 
-     2. **SANSKRIT CSL** (:mod:`app.sa_csl`) — deterministic, offline, and needing NO model, so it
-        is tried first: the `# text` is in Clay-Sanskrit-Library notation, whose sandhi marking is
-        a reversible rewriting, and reversing it recovers each token together with its span. It
-        answers or it refuses; it never approximates.
-     3. **THE TOKENISER'S OWN OFFSETS** — the general fallback, mirroring :func:`sentencize`'s: the
-        two unit SEQUENCES are diffed (``difflib``) so every run they agree on maps 1-to-1 onto the
-        tokeniser's real offsets, and each DIVERGENT run is then aligned CHARACTER-wise inside the
-        window its neighbours pin down, by the same :func:`_align_map` that maps a model sentence
-        boundary back onto the original text. That character alignment is a best effort, which is
-        why stage 2 goes first where it applies: over ``samples/brihat_jataka.conllu`` this stage —
-        fed the re-released Sanskrit wheel's own published per-token spans — also reaches 88/88
-        units, but one of them comes back a character wide (a trailing space swept into
-        ``aneka-kiraṇas``) because two adjacent divergent units shared one diff window, whereas
-        stage 2's spans are exact. A file unit the tokeniser has no counterpart for (a token that
-        isn't in the text at all) simply keeps its ``None``."""
+    ``parts`` — unit *i*'s component forms — and ``lang`` are accepted and unused. Both fed the
+    Sanskrit CSL stage that used to sit in front of this one: ``lang`` selected it and ``parts``
+    verified its reversed-sandhi alignment against the file's own components.
+    `sa_sud_vedic_ufal_dcs` publishes real ``src_spans`` and needs no such reconstruction, so the
+    stage is gone. The parameters stay because the frontend computes them anyway and dropping them
+    from the bridge signature would break an older frontend against a newer shell for nothing.
+
+    ⚠ SPANS MAY OVERLAP BY A CHARACTER, and the caller must tolerate it rather than treat it as
+    corruption. A sandhi-splitting tokeniser reports the truth about a vowel coalescence: in
+    ``vartmāpunar-``, the ``ā`` is simultaneously the end of ``vartma`` and the start of ``a``, so
+    the two spans share it. A tiling invariant would have to answer that with a hole on one of the
+    two words, which is less true and less useful than the overlap."""
     forms = [str(f or "") for f in (forms or [])]
     if not text or not forms:
         return {"spans": [], "reason": "nothing to align"}
-    if sa_csl.is_sanskrit(lang, model_id):
-        try:
-            sa = sa_csl.align(text, forms, parts)
-        except Exception:  # noqa: BLE001 — the fallback below is still worth trying
-            sa = None
-        if sa:
-            return {"spans": sa, "source": "csl"}
     try:
         units = _tokenizer_spans(text, model_id or "")
     except Exception as exc:  # noqa: BLE001 — an unavailable model must degrade, never raise at the bridge

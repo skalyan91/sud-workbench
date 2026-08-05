@@ -87,7 +87,7 @@ let MODELLANG={};   // language code → an installed model id, for auto-selecti
 // Language authority order (see maybeAutoDetectLang): (1) a filename `<langcode>_…` prefix pins the
 //  language and overrides everything; else (2) the Kyoto XPOS ⇒ lzh heuristic; else (3) fastText. The chosen
 //  language drives the parser via applyLang(lang,true)→syncModelToLang.
-let show={graphs:true,grids:true,colour:true,labels:true,pos:true,arrows:false,mergePunct:true,translit:false,wrap:true,extRel:true};   // translit starts OFF — turned on by the status-bar transliteration menu when a scheme is picked. extRel = Shared=Yes/Subj-raising ghost edges (dashed, decorative), on by default
+let show={graphs:true,grids:true,colour:true,labels:true,pos:true,arrows:false,mergePunct:true,translit:false,wrap:true,extRel:true};   // translit starts OFF — turned on by the status-bar transliteration menu when a scheme is picked. extRel = Shared=Yes/Subject-raising ghost edges (dashed, decorative), on by default
 // Document-level glossing TIERS (item 4). Visibility flags; the data lives in MISC and round-trips there.
 //  · GLOSS_ON  → a single Gloss tier (MISC Gloss), one editable row per token.
 //  · MORPH_ON  → a morphemic gloss: TWO tiers, morpheme segmentation (MISC MSeg) + morpheme gloss (MISC MGloss),
@@ -371,7 +371,19 @@ function msegStrip(txt,post,pre){ let v=(txt||"").replace(/[꞊=⹀]+$/,"");
   if(post) v=v.replace(/-+$/,"");
   if(pre) v=v.replace(/^[꞊=⹀-]+/,"");
   return v; }
-function tierText(o,tier){ return o?miscKV(o.misc,TIER_MISC[tier]).replace(INVISIBLE_RE,"").replace(GLOSS_WS_RE,""):""; }   // strip invisible/stray-whitespace chars at the shared read accessor, not just at render/encode time — every direct miscKV(...,"MGloss"/"MSeg") read used to bypass glossEnc/glossAbbrSegments' stripping (e.g. retargetGlossAbbrev reading+rewriting raw MISC on a FEATS-driven sync), letting a stray invisible/CR-LF-tab char from old data persist across edits that never touch the field itself
+/* TWO ADJACENT MORPHEME BOUNDARIES ARE ONE BOUNDARY. `-` separates morphemes in MSeg and MGloss, so `--`
+   states the same division twice and lines the two tiers up one slot apart from the form they gloss. It is
+   generated rather than typed — a flatten whose left piece already ended in `-` met a joiner that adds one
+   (`x-` + `y` → `x--y`), and the abbreviation reassignment on a split can put a `-GEN` beside a piece that
+   carries its own trailing mark — so the fix belongs where every consumer reads, and is applied at the WRITE
+   sites too so the file does not keep a doubled mark the display has quietly stopped showing.
+   ⚠ NOT for `gloss`. That tier is free-running translation prose, where `--` is a perfectly ordinary way to
+   type a dash and merging it would silently edit the user's words. The morphemic tiers are the ones in which
+   `-` is a piece of notation rather than a character. */
+// Takes the tier id ("mgloss") or the MISC key ("MGloss") — the write sites have one, the read accessor the
+// other, and a normaliser that only recognised one of them would have covered only half of them.
+function tierDashFix(v,tier){ return /^gloss$/i.test(tier||"")?String(v||""):String(v||"").replace(/-{2,}/g,"-"); }
+function tierText(o,tier){ return o?tierDashFix(miscKV(o.misc,TIER_MISC[tier]).replace(INVISIBLE_RE,"").replace(GLOSS_WS_RE,""),tier):""; }   // strip invisible/stray-whitespace chars at the shared read accessor, not just at render/encode time — every direct miscKV(...,"MGloss"/"MSeg") read used to bypass glossEnc/glossAbbrSegments' stripping (e.g. retargetGlossAbbrev reading+rewriting raw MISC on a FEATS-driven sync), letting a stray invisible/CR-LF-tab char from old data persist across edits that never touch the field itself
 // a Leipzig glossing abbreviation: a run of [A-Z0-9]+ bounded on BOTH sides by a punctuation mark or the edge of
 // the string (so "PST" in "run.PST", and "3SG" itself in "PST-3SG", both qualify; "St" or a bare word doesn't).
 // Small-capped via c2sc. The SAME pattern (as a whole-token test) also decides which already-split MGloss tokens
@@ -413,6 +425,19 @@ function sentRTL(sent){ if(sent.rtl!==undefined) return sent.rtl;   // explicit 
 function flipX(c,total){ return RTL ? c.map(x=>total-x) : c; }   // mirror a set of x-centres when right-to-left
 let sel={s:-1,t:0};   // item 9: {s:-1,t:0} IS "nothing selected", and it is the state a document starts in — opening a file (or re-parsing a sentence) no longer jumps the selection to token 1. It used to seed {s:0,t:2}, the sample document's second token, which the boot render then made real before any load path had spoken. Everything that reads a selection already guards for s<0 (selEmphasis returns null → nothing dims, menuState reports has:false, pick() short-circuits), so the empty state renders as a complete document with no accent anywhere; what a LOAD sets instead is the reading focus — see clearSelToBlock in js/io/bridge.js.
 let selRange=null;   // {s, from, to} — a continuous token range shift-selected in a grid, for grouping into an MWT
+/* IS AN INLINE EDITOR OPEN? makeEditable's field (js/editing/context-menu.js) is a bare `<input class="nodeedit">`
+   created over whatever it edits — a diagram node, a transliteration row, an MWT tie — and it carries none of the
+   data-si/ti/col attributes preserveScroll uses to put focus back after a render. So any re-render while it is
+   open destroys it and drops the caret, and the background re-parse a form edit kicks off lands seconds later,
+   typically while the reader has moved on to the next field and is mid-word. Renders that are a CONSEQUENCE of
+   the edit (makeEditable's own, on commit) must still run — hence a flag consulted by the background paths
+   (renderUnlessEditing, js/ui/wiring.js) rather than a block inside preserveScroll itself. */
+let INLINE_EDIT_OPEN=false;
+/* …and how to bring that field up to date without redrawing it. A skipped render is the right call for the
+   caret and the wrong one for the VALUE: if the pass we just declined to draw is what changed the very field
+   under the cursor, the reader is left looking at a stale string in a live editor. This closure re-reads the
+   model into the open input, and makeEditable sets it (and the flag) together. */
+let INLINE_EDIT_SYNC=null;
 /* THE CURRENT BLOCK is not the same thing as the selection, and scrolling moves only the first.
    `sel` answers "what is selected" — the token every edit, menu action and keyboard command operates on, and what
    the three-level subtree dimming is computed from (selEmphasis). CURBLOCK answers "which sentence is the reader
@@ -427,6 +452,36 @@ let selRange=null;   // {s, from, to} — a continuous token range shift-selecte
    reads it can ever land out of range. */
 let CURBLOCK=-1;
 function curBlock(){ return (CURBLOCK>=0&&typeof DOC!=="undefined"&&CURBLOCK<DOC.length)?CURBLOCK:sel.s; }
+/* ── A RANGE OF SENTENCES, for the operations that act on more than one ───────────────────────────────────────
+   Anchored, not a free set: shift-click and shift-arrow both extend FROM the block focus TO the one clicked, the
+   way a list selection works everywhere else, so the state is two indices and not a collection. `BLOCKANCHOR`
+   is where the range started; `curBlock()` is its other end, which means the range follows the focus for free
+   and there is no second cursor to keep in step with the first.
+   -1 is "no range", and that is a different state from "a range of one": a lone block is selected all the time,
+   simply by being read, and the sentence commands must not start acting on several until a range is asked for. */
+let BLOCKANCHOR=-1;
+function blockRange(){ if(BLOCKANCHOR<0) return null; const b=curBlock(); if(b<0) return null;
+  const lo=Math.min(BLOCKANCHOR,b), hi=Math.max(BLOCKANCHOR,b);
+  return hi>lo ? {lo,hi} : null; }                      // a range that collapsed onto one block is no range
+function clearBlockRange(){ if(BLOCKANCHOR<0) return; BLOCKANCHOR=-1; paintBlockRange(); }
+/* Every sentence at once (⌘A at block level). Plants the anchor on the first block OUTRIGHT rather than
+   letting extendBlockRange adopt curBlock() as it does for a shift-click — "select all" is not an
+   extension of where the reader happens to be, it is a range with both ends named. Note a single-sentence
+   document ends with no range: blockRange() calls a span of one no range at all, deliberately, and the
+   whole point of that rule is that one sentence is selected all the time simply by being read. */
+function selectAllBlocks(){ if(typeof DOC==="undefined"||!DOC.length) return;
+  BLOCKANCHOR=0; setCurBlock(DOC.length-1); paintBlockRange();
+  if(typeof updateFileBlock==="function") updateFileBlock(); }
+/* Extend the range to `i` and make it the focus. The anchor is planted on the FIRST shift-click, so an
+   ordinary click (which clears it) followed by a shift-click selects exactly the span between the two. */
+function extendBlockRange(i){ if(i<0||typeof DOC==="undefined"||i>=DOC.length) return;
+  if(BLOCKANCHOR<0) BLOCKANCHOR=curBlock()>=0?curBlock():i;
+  setCurBlock(i); paintBlockRange(); if(typeof updateFileBlock==="function") updateFileBlock(); }
+/* Class only, no re-render: the range is a selection, and a selection must not cost a repaint of the document
+   (the same reasoning applySel already follows for tokens). */
+function paintBlockRange(){ const r=blockRange();
+  document.querySelectorAll("#doc .sblock").forEach(b=>{ const i=+b.dataset.i;
+    b.classList.toggle("rng-block", !!r && i>=r.lo && i<=r.hi); }); }
 /* ── ESCAPE DISMISSES THE NARROWEST OPEN THING ────────────────────────────────────────────────────────────────
    Overlays in this app each wired their own Escape, bound to their own element — which works only while focus is
    INSIDE them. Open the find bar, click into the document, press Escape: nothing had the key. This is the
@@ -447,6 +502,7 @@ document.addEventListener("keydown",e=>{
   try{ open[0].close(); }catch(_){} });
 function setCurBlock(i){ if(i===curBlock()) return; CURBLOCK=i;   // scroll-spy entry point: block focus WITHOUT touching the token selection
   document.querySelectorAll("#doc .sblock").forEach(b=>b.classList.toggle("sel-block",+b.dataset.i===i));
+  paintBlockRange();   // the range's far end IS the focus, so moving the focus redraws the range
   if(typeof updateFileBlock==="function") updateFileBlock(); }   // keep the "Sentence X of Y" subtitle on the sentence being read
 const isStemma=()=>conv.indexOf("stemma")===0;
 const arrowsOK=()=>isStemma()||conv==="tree";   // semantic arrows apply to stemmas and hierarchies
@@ -456,5 +512,20 @@ function famOf(r){return (r||"").split(/[:@\/]/)[0];}   // base of a relation (c
 // does a "|"-joined FEATS string carry this exact Feat=Val pair? (setFeat/clearFeat below add/remove one; this checks one)
 function hasFeat(featsStr,name,val){ if(!featsStr||featsStr==="_")return false;
   return featsStr.split("|").some(kv=>{const i=kv.indexOf("="); return i>=0&&kv.slice(0,i)===name&&kv.slice(i+1)===val;}); }
-function getFeat(featsStr,name){ if(!featsStr||featsStr==="_")return null;
+function getFeat(featsStr,name){ if(!featsStr||featsStr==="_")return null;   // NAME NOTWITHSTANDING, this parses any `|`-joined k=v column — FEATS and MISC share that syntax, so the raising accessors below read MISC through it rather than duplicating the loop
   for(const kv of featsStr.split("|")){ const i=kv.indexOf("="); if(i>=0&&kv.slice(0,i)===name) return kv.slice(i+1); } return null; }
+/* ── SUD'S `Subject` FEATURE LIVES IN MISC, NOT FEATS ─────────────────────────────────────────────────────────
+   It records how the unexpressed subject of a controlled/raised predicate is instantiated. Despite being written
+   up on the guidelines' Features pages it is NOT a morphological feature of the token: it describes a
+   relationship between two tokens, which is MISC's business. VERIFIED to survive the move where it actually
+   matters — grew reads a CoNLL-U MISC entry as a node feature just as it reads FEATS, so SUD_to_UD.grs's
+   `D[Subject=ObjRaising|OblRaising|SubjRaising|Raising]` still fires and a raising complement still converts to
+   `xcomp` rather than `ccomp` (tested both ways round through the real grammar; that ccomp/xcomp split IS how UD
+   represents subject raising, and is the whole reason this feature exists).
+   THE KEY IS `Subject`, SPELLED OUT. This app briefly wrote `Subj` into FEATS, which was wrong in both the
+   column and the name — the validator's own obsolete-@x message names the feature `Subject`, the conversion
+   grammars match on `Subject`, and grid.js's completion inventory always offered `Subject`. No reader here
+   accepts the old spelling: migrateLegacySubj (js/io/bridge.js) rewrites it once at load, so nothing downstream
+   ever has to know it existed. */
+function raiseGet(t,key){ return t?getFeat(t.misc,key):null; }
+function raiseSet(t,key,val){ if(t) t.misc=setMiscKV(t.misc,key,val||""); }   // setMiscKV (js/lang/translit-load.js) treats ""/null as "remove the key"   // …and the legacy FEATS spelling goes with it, whether we are setting or clearing

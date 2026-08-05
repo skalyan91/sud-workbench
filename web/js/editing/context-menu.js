@@ -5,6 +5,7 @@ const ctx2=document.createElement("div"); ctx2.className="ctx ctx-sub"; document
 // item forms accepted: null → separator; [label,kbd,fn,danger] tuple; {header} → section label; {label,expand,kbd,fn,danger,sub,disabled}
 function normItem(it){ return (it==null||Array.isArray(it)) ? (it&&{label:it[0],kbd:it[1],fn:it[2],danger:it[3]}) : it; }
 function makeCtxButton(it,isSub){ const b=document.createElement("button"); if(it.danger)b.className="danger"; if(it.opt)b.classList.add("opt");
+  if(it.optval!=null) b.dataset.optval=it.optval;   // the row's own VALUE (a relation, a UPOS) — how weightMenuRows finds it again once the pipeline's ranking arrives
   if(it.disabled) b.disabled=true;   // a row that is SHOWN but inert — the column chooser's obligatory ID/Form rows, which still carry their checkmark. A real `disabled` attribute rather than a class, so it also can't be reached by keyboard or by a synthesised click; the kits dim it and drop its hover (.ctx button:disabled)
   if(it.footLink)b.classList.add("ctx-footlink");   // item 1: openSub lifts this row into the flyout's FIXED footer (an ordinary .ctx button, not a full-bleed sticky bar). This replaced an earlier `sticky:true` form (a position:sticky full-bleed bar, .ctx-sticky) that rode at the bottom of the SCROLLING list rather than sitting below it — the footer is what both callers actually wanted, so the sticky form has no users left and both it and its rule are gone
   let inner="";
@@ -117,7 +118,7 @@ function openSub(btn,items,fit,colSize){ _subLoadToken++; const myToken=_subLoad
   // the flyout below one normal menu's width, and can't drag the min-width floor clamp in render() down with it.
   const parentW=Math.max(ctx.offsetWidth,224);
   const positionSub=()=>{ const r=btn.getBoundingClientRect(); let left=r.right-2; if(left+ctx2.offsetWidth>innerWidth-8) left=r.left-ctx2.offsetWidth+2;
-    ctx2.style.left=Math.max(8,left)+"px"; ctx2.style.top=Math.max(8,Math.min(r.top-5,innerHeight-ctx2.offsetHeight-8))+"px"; };   // item 6: clamp the TOP too (matches showCtx's own Math.max(8,...) on both axes) — a TALL colSize flyout (as tall as the whole POS menu) anchored near a LOW row could otherwise compute a negative top and render mostly off the top of the screen, making it look unresponsive to clicks/Escape that land on the (invisible) area instead
+    ctx2.style.left=Math.max(8,left)+"px"; ctx2.style.top=Math.max(menuTopBound(),Math.min(r.top-5,innerHeight-ctx2.offsetHeight-8))+"px"; };   // item 6: clamp the TOP too (matches showCtx's own Math.max(8,...) on both axes) — a TALL colSize flyout (as tall as the whole POS menu) anchored near a LOW row could otherwise compute a negative top and render mostly off the top of the screen, making it look unresponsive to clicks/Escape that land on the (invisible) area instead
   // item 1 — lift the footer link out of the scrolling content into a FIXED footer: the rows above scroll, the
   // link (and its separator) stay put at the bottom, always visible.  Called from BOTH flyout shapes — the
   // colSize POS-subtype menu ("Guidelines for …") and the shrink-to-fit "Definitions of …" list ("Open …") —
@@ -170,7 +171,7 @@ function showCtx(x,y,items,twoCol,rtlArg,fit){ const norm=items.map(normItem);
   if(cols.length===2){ const ww=cols[0].offsetWidth+cols[1].offsetWidth+13; ctx.querySelectorAll(".note").forEach(nn=>nn.style.maxWidth=ww+"px"); }   // the INTRINSIC two-column width (each .mcol is content-sized, not stretched to the note-widened host) + the 12px inter-column rule/padding
   const w=ctx.offsetWidth, h=ctx.offsetHeight;
   let left = rtl ? x-w : x;   // RTL → the menu opens to the bottom-left of the cursor
-  ctx.style.left=Math.max(8,Math.min(left,innerWidth-w-8))+"px"; ctx.style.top=Math.max(8,Math.min(y,innerHeight-h-8))+"px"; }
+  ctx.style.left=Math.max(8,Math.min(left,innerWidth-w-8))+"px"; ctx.style.top=Math.max(menuTopBound(),Math.min(y,innerHeight-h-8))+"px"; }   // menuTopBound (js/core/scroll.js): the NATIVE window-tab bar is the one thing a menu cannot be drawn over, so it is not drawn under it either
 function closeCtx(){ ctx.classList.remove("show"); closeSub(); void ctx.offsetHeight;   // same forced-reflow fix as closeSub, for ctx's own backdrop-filter layer
   if(typeof setPillMenuOpen==="function") setPillMenuOpen("fmtPill",false); }   // the Format pill borrows this shared #ctx for its own menu (fmtMenu, js/io/formats.js) and its chevron has to point back UP however the menu was dismissed — Escape, a pick, a click outside, or another menu stealing #ctx. Unconditional and idempotent: for every OTHER #ctx menu the pill is already un-flagged, so clearing it again costs a no-op class toggle. typeof-guarded because this file loads before js/ui/wiring.js, which defines the helper — harmless at runtime (closeCtx only ever runs from a handler, long after both are defined), but the guard is what the codebase's forward-reference rule asks for
 addEventListener("click",closeCtx); addEventListener("scroll",e=>{ if(e.target===ctx||ctx.contains(e.target)||e.target===ctx2||ctx2.contains(e.target)) return;   // a scroll INSIDE the menu itself (e.g. the Wiktionary "Definitions of …" flyout's own overflow-y:auto list) must not dismiss it — only a scroll of whatever's BEHIND the menu should
@@ -232,7 +233,7 @@ function optionMenu(x,y,all,cats,expandOf,current,choose,guide,rtl,subFor,custom
   const placed=new Set(), items=[];
   if(noteTop) items.push({note:noteTop});   // item 2: a leading scope note (e.g. the external-POS menu explaining which span it tags)
   if(subFor) items.push({note:subNote||"Right-click to show available deep features for a relation"});   // the relation menu's deep features and (item 4) the POS menu's UPOS subtypes both hang off a right-click submenu, so each passes its own hint
-  const row=r=>{ const o={label:esc(r), expand:expandOf(r), check:r===current, opt:true, fn:()=>choose(r)}; if(subFor){ const sm=subFor(r); if(sm){ o.subRight=sm; if(subColSize)o.subColSize=true; } } return o; };   // subFor(r) → a submenu builder for that option (relations: deep features), or null. item 3: subColSize → size that flyout to ONE parent column, parent height
+  const row=r=>{ const o={label:esc(r), expand:expandOf(r), check:r===current, opt:true, optval:r, fn:()=>choose(r)}; if(subFor){ const sm=subFor(r); if(sm){ o.subRight=sm; if(subColSize)o.subColSize=true; } } return o; };   // subFor(r) → a submenu builder for that option (relations: deep features), or null. item 3: subColSize → size that flyout to ONE parent column, parent height
   cats.forEach(([name,members])=>{ const present=members.filter(m=>all.includes(m));
     present.forEach(m=>placed.add(m)); if(present.length){ items.push({header:name}); present.forEach(m=>items.push(row(m))); } });
   const extra=all.filter(r=>!placed.has(r));   // any options not covered by a category
@@ -241,6 +242,35 @@ function optionMenu(x,y,all,cats,expandOf,current,choose,guide,rtl,subFor,custom
   if(custom.length){ items.push({header:"Custom"}); custom.forEach(r=>items.push(row(r))); }
   if(guide){ items.push(null,guide); }
   showCtx(x,y,items,true,rtl); }   // true → two-column layout (balanced) for tall menus
+/* ── HOW LIKELY DOES THE PIPELINE THINK EACH OF THESE IS? ───────────────────────────────────────────
+   A menu of 40 relations or 17 word classes shows every option as equally plausible, when the model
+   that produced the current one ranked them all and the editor drew only the winner. Fading a row by
+   the mass the model gave it turns the list into what it always was underneath — a ranking — without
+   removing anything: every option stays present, in place, and clickable, because the reader
+   overruling the model is the whole reason the menu exists.
+
+   Applied AFTER the menu is on screen rather than before it opens, so a menu never waits on a bridge
+   call; the ranking usually arrives within a frame (the sentence is normally already cached) and the
+   rows simply settle. The stamp is what stops a slow answer from painting a menu that has since been
+   closed and reopened on another token.
+
+   ⚠ An option the ranking does not mention is dimmed to the floor, NOT left bright. Below the pruning
+   threshold means the model gave it ~0, which is the honest reading for all but one case: a relation
+   the DOCUMENT uses that the model was never trained on is unknown rather than unlikely, and it will
+   dim too. That is the one wrong answer here, it is confined to custom relations, and the alternative
+   — leaving every unranked row bright — would misreport the far commoner case as "plausible". */
+const OPT_WEIGHT_FLOOR=0.4;   // a dim row must stay readable and hittable: this is a ranking, not a disablement
+function weightMenuRows(p){ if(!p) return;
+  const stamp=(ctx._wgen=(ctx._wgen||0)+1);
+  /* ⚠ AN EMPTY MAP IS "NO RANKING", NOT "EVERYTHING IS UNLIKELY", and `{}` is truthy — so a bare
+     null check dimmed every row to the floor on exactly the paths that have nothing to say (no
+     model at all, or a token the morphologizer skipped), which is the one case where the menu must
+     look untouched. `relWeightsFor` returns `{}` rather than null by construction, so the guard
+     belongs here, where every present and future caller gets it. */
+  Promise.resolve(p).then(map=>{ if(!map||!Object.keys(map).length||ctx._wgen!==stamp||!ctx.classList.contains("show")) return;
+    ctx.querySelectorAll("button[data-optval]").forEach(b=>{
+      const w=OPT_WEIGHT_FLOOR+(1-OPT_WEIGHT_FLOOR)*scoreShade(map[b.dataset.optval]||0);
+      b.style.setProperty("--pw",w.toFixed(3)); }); }).catch(()=>{}); }
 // right-click a relation label → pick a relation (grouped by role). Each relation's DEEP features live on its OWN
 // submenu, reached by right-clicking that relation's row (or clicking its ▸) — replacing the old ⇧-right-click menu.
 const DEEP_BY_REL={subj:["expl","pass","caus"],comp:["expl","pass"],"comp:aux":["pass","caus","tense"],"comp:obj":["pass","lvc","agent"],"comp:obl":["agent"],mod:["relcl"],"conj:coord":["emb"],flat:["name","foreign"]};   // taxo_2023: the @deep features each surface relation admits
@@ -277,13 +307,24 @@ function relMenu(x,y,si,tokId){ const s=DOC[si]; if(!s)return; const dep=s.token
   const subFor=r=>()=>deepSubItems(si,tokId,r,dfMap[r]||[]);   // EVERY relation gets a right-click deep-feature submenu (its taxonomy ∪ file features, or just an add-field)
   const choose=d=>{ if(d==="root"&&rb!=="root"){ setAsRoot(si,tokId); return; }   // not yet root → the FULL re-attach (migrates the old root's dependents, demotes it to udep), not a naive head=0 flip
     if(d!==dep.deprel){ pushUndo(si); dep.deprel=d; afterDeprelEdit(dep,s); markDirty(); preserveScroll(renderDoc); } };   // left-click sets the BARE relation — so clicking the current relation drops its @feature (= "(none)"); a feature is set via the row's submenu. Task B: no regenTok — structural, must never trigger a gloss/MGloss recompute
-  optionMenu(x,y,cands,deprelMenuGroups(cands),deprelExpand,depBase(dep.deprel),choose,guide,sentRTL(s),subFor); }   // deprelMenuGroups interleaves any user-added relation into its own family/Other — no separate "Custom" heading needed
+  optionMenu(x,y,cands,deprelMenuGroups(cands),deprelExpand,depBase(dep.deprel),choose,guide,sentRTL(s),subFor);   // deprelMenuGroups interleaves any user-added relation into its own family/Other — no separate "Custom" heading needed
+  /* …and then fade each row by how likely the parser thinks that relation is FOR THIS EDGE — the arc it
+     weighed if this is one it considered, the synthesised state if the reader made the attachment
+     themselves. Pooled to the base relation by `relWeightsFor`, which is the same pooling the rows'
+     own deep-feature submenus do (`mod@relcl` lives under `mod`), so the two cannot disagree.
+     A ROOT has no incoming arc to condition on, so its menu is left unweighted rather than weighted
+     against an edge that does not exist. */
+  weightMenuRows(typeof tokenScores!=="function"?null:(async()=>{
+    const h=parseInt(dep.head,10); if(!(h>=1)) return null;
+    const sc=await tokenScores(si);
+    const d=sc&&sc.deprels&&sc.deprels[tokId-1]&&sc.deprels[tokId-1][String(h)];
+    return relWeightsFor(d||await arcLabelScores(si,tokId,h)); })()); }
 // right-click a POS tag → pick a POS (all shown, grouped by class)
 /* item 4 — the UD LEXICAL features: the ones that subcategorise the UPOS itself (a SUBTYPE of the tag) rather
    than inflect the word, so a token carrying one is naturally read as a dot-suffixed tag — PRON.Dem, NUM.Ord,
    DET.Poss. universaldependencies.org/u/feat groups exactly these under "Lexical features"; ExtPos, Foreign and
    Typo belong to the same group but get their own commands here (items 1/2/3) and are deliberately left out,
-   and SUD's own Shared/Subject are bookkeeping, not word classes. Everything else in the FEATS inventory is
+   and SUD's own Shared (FEATS) and Subject/Object (MISC) are bookkeeping, not word classes. Everything else in the FEATS inventory is
    inflectional and belongs on the morphemic-gloss tier, which is where its Leipzig abbreviation already goes. */
 const UPOS_SUBTYPE_FEATS=["PronType","NumType","Poss","Reflex","Abbr"];
 // Where each one is actually attested, per its own page at universaldependencies.org/u/feat/* — so a VERB's POS
@@ -344,9 +385,17 @@ function posMenu(x,y,si,tokId,opts){ opts=opts||{}; const s=DOC[si]; if(!s)retur
     featsSyncGloss(tok,before);
     if(posChanged) uposSyncGloss(tok,oldUpos);   // Task B: retarget the closed-class gloss prefix IN PLACE, immediately — never a wholesale MGloss rebuild (see uposSyncGloss's own note, js/io/bridge.js)
     markDirty(); preserveScroll(renderDoc);
-    if(posChanged) regenTok(si,tokId); };   // only a genuine POS change reparses; a same-tag "clear subtype" must not (item 10). regenSecondaries' OWN gloss-touch is now itself non-destructive in place too (Task B) — see its own note
+    if(posChanged) uposSyncTranslit(si,tokId);   // the romanisation and script glyph are asked for a form AS a part of speech, so a retag makes both stale — refreshed HERE rather than left to regenTok below, which reaches its own translit pass on only one of its paths (no model / a misaligned re-parse skip it entirely). BEFORE regenTok so the fast language-driven refresh lands first, exactly as afterFormEdit orders the same two; regenTok's trailing pass then finds every value current and rewrites what is already there
+    if(posChanged) regenTok(si,tokId,{regloss:true}); };   // regloss: the re-parse re-derives the FEATS for the chosen class, so the MGloss has to gain the categories that class brought with it and not merely lose the old one's (mglossFillFromFeats, js/io/bridge.js) — uposSyncGloss above has already moved the AUX/DET prefix, which is the one piece UPOS drives on its own.   // only a genuine POS change reparses; a same-tag "clear subtype" must not (item 10). regenSecondaries' OWN gloss-touch is now itself non-destructive in place too (Task B) — see its own note
   optionMenu(x,y,SETTINGS.upos.slice(),UPOS_CATS,r=>UPOS_INFO[r]||"",tok.upos,choose,guide,rtl,subFor,null,
-    "Right-click a tag for its subtypes (PRON.Dem, NUM.Ord, …)",null,true); }   // subColSize=true → the subtype flyout is one POS column wide and as tall as the POS menu (item 3)
+    "Right-click a tag for its subtypes (PRON.Dem, NUM.Ord, …)",null,true);   // subColSize=true → the subtype flyout is one POS column wide and as tall as the POS menu (item 3)
+  /* …and then fade each tag by the morphologizer's own probability for it. The pooling this needs is
+     already done where the model is read (`_upos_scores`, app/parse.py): it predicts UPOS and FEATS as
+     ONE joint label, so the mass of a CLASS is the sum over every analysis carrying it — which is the
+     same sum as "this row plus everything in its subtype flyout", PRON.Dem and PRON.Int being two of
+     PRON's labels. The parent row is therefore weighted by exactly its own submenu. */
+  weightMenuRows(typeof tokenScores!=="function"?null:(async()=>{
+    const sc=await tokenScores(si); return sc&&sc.upos?sc.upos[tokId-1]:null; })()); }
 /* item 1/2 — the external POS of a multi-token expression, reached three ways, all meaning "tag this WHOLE
    expression with the word class it behaves as": right-clicking the POS tag of a token inside a multi-token
    selection, ⇧-right-clicking a node, and right-clicking an ExtPos bracket's own label. The value lands on the
@@ -372,7 +421,7 @@ function headItems(si,tokId){ return [["Select previous head","⌃⌘[",()=>step
 function nodeTokenMenu(x,y,si,tokId){ const s=DOC[si]; if(!s)return; const rtl=sentRTL(s);
   const items=[
     ["Edit token","↩",()=>editNodeInline(si,tokId)],
-    ["Edit lemma…","",()=>editLemmaPrompt(si,tokId)],   // item 4: the same editor a double-click on the token opens — that gesture has nothing on screen to advertise it, so the command needs a menu row of its own. Ellipsis, unlike "Edit token" above: this one opens a popover rather than editing in place, which is what the ellipsis means on macOS
+    ["Edit lemma…","⌘L",()=>editLemmaPrompt(si,tokId)],   // the accelerator is named now that ⌘L is the ONLY gesture besides this row — the double-click that used to open it is gone   // item 4: the same editor a double-click on the token opens — that gesture has nothing on screen to advertise it, so the command needs a menu row of its own. Ellipsis, unlike "Edit token" above: this one opens a popover rather than editing in place, which is what the ellipsis means on macOS
     null, ...moveItems(si,tokId,false),
     null, ...insertItems(si,tokId,false),
     null, ...headItems(si,tokId),
@@ -385,7 +434,7 @@ function nodeTokenMenu(x,y,si,tokId){ const s=DOC[si]; if(!s)return; const rtl=s
   if(rdRow){ items.unshift(null); items.unshift(rdRow); }
   if(selRange&&selRange.s===si&&selRange.to>selRange.from&&tokId>=selRange.from&&tokId<=selRange.to&&!rangeIsMWT(si,selRange.from,selRange.to)){
     items.unshift(null);
-    if(isSpacelessLang()) items.unshift([`Merge ${selRange.from}–${selRange.to} into one token`,"⌃⌘M",()=>mergeTokens(si,selRange.from,selRange.to)]);   // spaceless languages only (see SPACELESS_LANGS); under Group, and deliberately: grouping keeps the tokens, merging destroys them, so the reversible one is offered first
+    if(mergeIsSolid(s,selRange.from,selRange.to)) items.unshift([`Merge ${selRange.from}–${selRange.to} into one token`,"⌃⌘M",()=>mergeTokens(si,selRange.from,selRange.to)]);   // only a run written with no space in it, in any language (see mergeTokens' own note); under Group, and deliberately: grouping keeps the tokens, merging destroys them, so the reversible one is offered first
     items.unshift([`Group ${selRange.from}–${selRange.to} as MWT`,"⌘G",()=>addMWT(si,selRange.from,selRange.to)]); }
   const tok=s.tokens[tokId-1], lemma=tok&&((tok.lemma&&tok.lemma!=="_")?tok.lemma:tok.form);   // EITHER gloss tier can receive a dictionary sense: the lexical tier takes it whole (MISC Gloss), the morphemic one folds it in beside the grammatical abbreviations (MISC MGloss) — see applyWiktionaryDef, which writes whichever tiers are on
   /* THE DICTIONARY IS AVAILABLE WITH NO GLOSSING TIER ENABLED, on request — the tier gate ((GLOSS_ON||MORPH_ON))
@@ -412,7 +461,10 @@ async function wiktionaryDefItems(si,tokId,lemma,upos){
   const defs=(r&&r.definitions)||[];
   const link=(r&&r.page_url)?[{label:esc((r&&r.page_label)||`Open on ${src}`),kbd:"↗",fn:()=>openExternal(r.page_url),footLink:true}]:[];   // where the senses came from, labelled by the source itself: Wiktionary links the word's own language section (not the filtered POS — see app.wiktionary.lookup), Apte the scan of the printed page the entry is on (the only per-entry URL the C-SALT API exposes — see app.apte). footLink:true → openSub lifts the row (and the separator above it) into the flyout's FIXED footer, so it sits below the (often long, scrolling) sense list and stays put while the senses scroll — it was a position:sticky bar riding at the bottom of the list itself before
   if(!defs.length) return [{header: (r&&r.error)?`${src} lookup failed`:`No definitions found for “${esc(lemma)}”`}, ...(link.length?[null,...link]:[])];
-  // already filtered server-side to this token's own UPOS (app.wiktionary.lookup / app.apte.lookup) → no per-POS header needed…
+  // already filtered server-side to this token's own UPOS (app.wiktionary.lookup / app.apte.lookup) → no per-POS header needed.
+  // Where that filter would have emptied the flyout, both dictionaries fall back to a wider set rather than report the token's
+  // own dictionary as silent (see either module's lookup) — and those senses have no heading to print either, since what
+  // admits them is precisely that their entry states no word class…
   // …EXCEPT nouns, which group under a gender heading when the dictionary's headword line marked one (grouped by
   // gender_ud, not just split wherever it happens to change between consecutive senses — see app.wiktionary.lookup)
   const hasGender=(upos==="NOUN"||upos==="PROPN") && defs.some(d=>d.gender_ud);   // PROPN too, now that a proper-noun token draws on the dictionary's NOUN entries (dictionaries file a name as a noun — app.apte._pos_matches / app.wiktionary._pos_matches): those senses arrive carrying the same gender, so a PROPN lookup lands the same masculine/feminine/neuter mix a NOUN one does. Grouping is not decoration here — picking a sense WRITES its gender to FEATS, so an ungrouped list would have the user choose one blind
@@ -559,14 +611,71 @@ function bracketTokenEl(e){
 }
 // A relation's DEEP features are reached through the relation menu itself: right-click the deprel label → the relation
 // menu, then right-click a relation's row (or click its ▸) for that relation's admissible deep features.
-document.getElementById("doc").addEventListener("contextmenu",e=>{
-  let relEl=e.target.closest(".lbl,.orel,.bwrel");
+/* WHICH LABEL A POS / RELATION MENU BELONGS TO — asked by TWO gestures now (right-click below and
+   double-click just after), so the answer lives in one place rather than being written out twice and
+   drifting. Returns null when the point is on neither, which is how both callers fall through to the
+   ordinary token menu / editor paths. */
+function posRelHit(target){ if(!target||!target.closest) return null;
+  let relEl=target.closest(".lbl,.orel,.bwrel");
   if(relEl && !(relEl.textContent||"").trim()) relEl=null;   // a reserved (blank " ") .bwrel row — an interrupter's or root-neighbour's placeholder — is NOT a deprel label; fall through to the token menu
-  const posEl=relEl?null:e.target.closest(".tok-pos,.node-cat,.opos,.bwpos");
-  if(relEl||posEl){ const tk=tokFromEl(relEl||posEl); if(tk){ e.preventDefault(); e.stopPropagation();
-      if(relEl) relMenu(e.clientX,e.clientY,tk.si,tk.tokId);   // right-click a deprel → relation menu (deep features live on each relation's submenu)
-      else if(e.shiftKey||inSelRange(tk.si,tk.tokId)) extPosMenu(e.clientX,e.clientY,tk.si,tk.tokId);   // item 1: a POS tag right-clicked while a RANGE covering it is selected tags the whole EXPRESSION (ExtPos on its head), not that one token; ⇧-right-click asks for the same on a single node
-      else posMenu(e.clientX,e.clientY,tk.si,tk.tokId); } return; }
+  const posEl=relEl?null:target.closest(".tok-pos,.node-cat,.opos,.bwpos");
+  return (relEl||posEl)?{relEl,posEl}:null; }
+// …and what each of the two gestures then does with it, likewise written once.
+function openPosRelMenu(hit,x,y,shift){ const tk=tokFromEl(hit.relEl||hit.posEl); if(!tk) return false;
+  if(hit.relEl) relMenu(x,y,tk.si,tk.tokId);   // a deprel → relation menu (deep features live on each relation's submenu)
+  else if(shift||inSelRange(tk.si,tk.tokId)) extPosMenu(x,y,tk.si,tk.tokId);   // item 1: a POS tag opened while a RANGE covering it is selected tags the whole EXPRESSION (ExtPos on its head), not that one token; ⇧ asks for the same on a single node
+  else posMenu(x,y,tk.si,tk.tokId);
+  return true; }
+/* ── A GLOSSING ABBREVIATION'S OWN MENU ───────────────────────────────────────────────────────────
+   Right-clicking `GEN` in a morphemic gloss offers the other cases; right-clicking `PL` offers the
+   other numbers. It is the same gesture the POS tag and the relation label already answer, brought to
+   the one remaining label that names a choice from a closed set — and the set is not guessed here but
+   read off EFF_FEATS_GLOSS, the app's own Feat=Val → abbreviation map (custom PREFS.glossMap overrides
+   included), so a mapping the reader has edited in Gloss Mappings shows up in this menu unprompted.
+   WHICH feature the run belongs to is mglossFeatNameFor's answer, UPOS and all, so an ambiguous
+   abbreviation lands on the same reading the autocomplete and the FEATS back-sync give it.
+   Values are listed in UD's OWN ORDER (UD_FEATS) rather than alphabetically — Sing before Plur, Nom
+   before Acc — with anything only the custom map knows trailing after; each row shows the value's gloss
+   (FEATS_VDESC) beside its abbreviation, and the current one carries the tick.
+   MORPHEMIC TIER ONLY. The lexical Gloss tier renders abbreviation runs the same way, but a Gloss is a
+   word's MEANING and its capitals are not a paradigm slot — there is nothing there for a list of
+   alternative values to be alternatives to. */
+function glossAbbrMenu(x,y,si,tokId,idx,ab){
+  const s=DOC[si]; if(!s) return false; const t=s.tokens[tokId-1]; if(!t) return false;
+  const feat=(typeof mglossFeatNameFor==="function")?mglossFeatNameFor(ab,t.upos):null; if(!feat) return false;
+  const seen=new Set(), rows=[];
+  const add=v=>{ if(!v||seen.has(v))return; const a=EFF_FEATS_GLOSS[feat+"="+v]; if(!a)return; seen.add(v); rows.push({v,ab:a}); };
+  ((typeof UD_FEATS==="object"&&UD_FEATS&&UD_FEATS[feat])||[]).forEach(add);                       // UD's canonical order first…
+  Object.keys(EFF_FEATS_GLOSS).forEach(fv=>{ if(fv.indexOf(feat+"=")===0) add(fv.slice(feat.length+1)); });   // …then any value only the (possibly customised) map knows about
+  if(rows.length<2) return false;   // a one-value feature (Poss=Yes, Reflex=Yes) offers no alternative — fall through to the ordinary token menu rather than opening a list of one
+  const desc=(typeof FEATS_VDESC==="object"&&FEATS_VDESC&&FEATS_VDESC[feat])||{};
+  // opt:true opens the CHECKMARK GUTTER. `.ctx .ck` is absolutely positioned at the menu's 12px inset and
+  // only `.ctx button.opt`'s padding-inline-start:25px moves the label clear of it — measured without it,
+  // the row's leading padding is 7px and the ✓ paints straight underneath the abbreviation's first letter,
+  // i.e. it is drawn and invisible. Every other checkable list in this file passes it for the same reason
+  // (POS, deprel, deep features, the Foreign/Typo marks); this menu is one more of them.
+  showCtx(x,y,[{header:feat}].concat(rows.map(r=>({label:r.ab, expand:desc[r.v]||r.v, check:r.ab===ab, opt:true,
+    fn:()=>setGlossAbbrevAt(si,tokId,idx,r.ab)}))), rows.length>12, sentRTL(s));
+  return true; }
+/* …and what a pick does. The abbreviation is substituted in place (mglossReplaceAbbrevIdx, js/io/bridge.js)
+   and the token's FEATS follow through mglossSyncFeats — the SAME back-sync a hand edit of the field runs
+   on commit (see editTier's `after`), so choosing DAT here and typing it there leave the token in exactly
+   one state. One undo entry covers both halves, because they are one edit. */
+function setGlossAbbrevAt(si,tokId,idx,ab){ const s=DOC[si]; if(!s)return; const t=s.tokens[tokId-1]; if(!t)return;
+  const cur=tierText(t,"mgloss"), next=mglossReplaceAbbrevIdx(cur,idx,ab);
+  if(!next||next===cur) return;
+  pushUndo(si); if(typeof touchColW==="function") touchColW(si,si+1);   // the MISC column's widest chip can change with the value
+  t.misc=setMiscKV(t.misc,TIER_MISC.mgloss,glossEnc(next));
+  mglossSyncFeats(t);
+  markDirty(); preserveScroll(renderDoc); }
+document.getElementById("doc").addEventListener("contextmenu",e=>{
+  const abEl=e.target.closest&&e.target.closest(".glabbr");   // BEFORE every other resolver: a .glabbr sits inside the gloss row, which sits inside the token group the generic node branch below would otherwise claim
+  if(abEl){ const gl=abEl.closest(".gl-edit"), tk=gl&&tokFromEl(gl);
+    if(gl&&tk&&(gl.dataset.tier||"gloss")==="mgloss"){
+      const idx=[...gl.querySelectorAll(".glabbr")].indexOf(abEl);
+      if(idx>=0 && glossAbbrMenu(e.clientX,e.clientY,tk.si,tk.tokId,idx,(abEl.textContent||"").trim())){ e.preventDefault(); e.stopPropagation(); return; } } }
+  const hit=posRelHit(e.target);
+  if(hit){ if(openPosRelMenu(hit,e.clientX,e.clientY,e.shiftKey)){ e.preventDefault(); e.stopPropagation(); } return; }
   // item 1 — an ExtPos bracket's own label: right-click it to change or clear the value, wherever it was set from
   const xpEl=e.target.closest(".mwt-pos");
   if(xpEl&&xpEl.hasAttribute("data-xpostok")){ e.preventDefault(); e.stopPropagation();
@@ -575,18 +684,70 @@ document.getElementById("doc").addEventListener("contextmenu",e=>{
     // Both rows of a tie open the SAME menu, and "Edit surface form" stays coherent under a Sanskrit script
     // because editMWTInline (not this row) decides which element the field opens over — the IAST row when the
     // glyph is derived, the glyph itself otherwise. So the menu item edits whatever the left-click would.
-    showCtx(e.clientX,e.clientY,[["Edit surface form","⏎",()=>editMWTInline(si,from)],["Remove MWT","⌫",()=>{ const s=DOC[si]; if(s){ pushUndo(si); s.mwt=(s.mwt||[]).filter(x=>x.from!==from); markDirty(); preserveScroll(renderDoc); } },true]]); return; }
+    /* THE WHOLE MWT FAMILY, ON THE RANGE THAT WAS CLICKED — not on the selection. Ungroup and Flatten
+       are in the Edit menu too, where they read `sel`/`selRange` and are hidden unless the selection
+       forms an MWT (menuState's `ungroup`/`flatmwt`); reaching them therefore meant selecting the range
+       first. A right-click already names its target unambiguously, so these resolve the MWT from
+       `data-mwtfrom` and need no selection at all.
+       Same labels and accelerators as the Edit menu, so the two cannot read as different commands.
+       "Remove MWT" was this menu's own name for Ungroup — one operation under two names, and the ⌫ hint
+       and danger styling said "delete", which it never was: dropping a RANGE leaves every token in
+       place. Flatten is the one that removes tokens, and it is not styled as a deletion in the Edit
+       menu either, because replacing n components with the word they spell is an ordinary edit. */
+    // …and they are mwtTokenItems' OWN rows, not a second pair written out here: that helper already
+    // supplies Flatten/Ungroup to the component tokens' menu, and two hand-kept copies of one pair is
+    // how the labels and the accelerators drift apart (this file already carries a post-mortem on an
+    // ⌥⌘F that outlived its binding by exactly that route). It resolves the range with mwtAtSel, so
+    // passing the range's FIRST component id asks it about this very MWT.
+    showCtx(e.clientX,e.clientY,[
+      ["Edit surface form","⏎",()=>editMWTInline(si,from)],
+      null,
+      ...mwtTokenItems(si,from,true),   // the RANGE's own menu: Flatten and Ungroup, but no Split — see mwtTokenItems
+    ]); return; }
   // a goeswith continuation's own form field: it lives INSIDE the head's cell, so the generic resolver below would
   // hand back the head. Its right-click menu is the ordinary token menu, for the token it actually draws.
   const gwEl=e.target.closest("[data-gwtok]");
   if(gwEl&&gwEl.hasAttribute("data-s")){ const gs=+gwEl.getAttribute("data-s"), gt=+gwEl.getAttribute("data-gwtok");
-    e.preventDefault(); e.stopPropagation(); pick(gs,gt,false); nodeTokenMenu(e.clientX,e.clientY,gs,gt); return; }
+    e.preventDefault(); e.stopPropagation(); nodeTokenMenu(e.clientX,e.clientY,gs,gt); return; }
   // a direct token/node hit wins; otherwise, inside a brackets diagram, the resolver is deterministic (never null).
   const nodeEl=e.target.closest(".node,.tok-group,.oline,.bwtok") || bracketTokenEl(e);
   if(nodeEl){ const tk=tokFromEl(nodeEl); if(tk){ e.preventDefault(); e.stopPropagation();
-    if(e.shiftKey){ if(!inSelRange(tk.si,tk.tokId)) pick(tk.si,tk.tokId,false); extPosMenu(e.clientX,e.clientY,tk.si,tk.tokId); return; }   // item 1: ⇧-right-click a node → external POS. A click INSIDE the current range must NOT re-pick (that would collapse the very selection being tagged); one outside starts a fresh single-token selection.
-    pick(tk.si,tk.tokId,false); nodeTokenMenu(e.clientX,e.clientY,tk.si,tk.tokId); } }
+    if(e.shiftKey){ extPosMenu(e.clientX,e.clientY,tk.si,tk.tokId); return; }   // item 1: ⇧-right-click a node → external POS, on the whole selected expression where the range covers this token (posMenu's own `multi` test) and on this node alone otherwise
+    nodeTokenMenu(e.clientX,e.clientY,tk.si,tk.tokId); } }
 });
+/* ── …AND THE SAME TWO MENUS OPEN ON A DOUBLE-CLICK ────────────────────────────────────────────────
+   Retagging and relabelling are the two commonest edits in the app and the only way to reach either
+   was the right button, which on a trackpad is a modifier chord or a two-finger gesture. A double-
+   click on the very label being changed is the shorter road to the same menu, and it addresses the
+   same token by the same resolver (posRelHit/openPosRelMenu above), so the two gestures cannot come
+   to different conclusions about what was clicked.
+
+   NO HIGHLIGHT, and that needs a separate handler. A double-click's word selection is made by the
+   SECOND mousedown, before `dblclick` is dispatched at all — so cancelling it here would be too late,
+   and clearing the selection afterwards would flash it. Cancelling that mousedown's default is what
+   prevents it being made; `e.detail>=2` is the browser's own count of the click run, so a single
+   click is untouched and keeps whatever it does today. Capture phase, so it lands ahead of the
+   diagram's drag/tap handlers — which are on POINTER events and therefore unaffected by a cancelled
+   mousedown (the drag system never sees this call). The selection is cleared as well as prevented,
+   because a triple-click's third mousedown carries detail 3 and the run may already have selected on
+   an earlier engine. */
+document.getElementById("doc").addEventListener("mousedown",e=>{
+  if(e.detail>=2 && posRelHit(e.target)) e.preventDefault(); },true);
+document.getElementById("doc").addEventListener("dblclick",e=>{
+  const hit=posRelHit(e.target); if(!hit) return;
+  e.preventDefault(); e.stopPropagation();
+  try{ const g=getSelection(); if(g&&g.rangeCount&&document.getElementById("doc").contains(g.anchorNode)) g.removeAllRanges(); }catch(_){}
+  openPosRelMenu(hit,e.clientX,e.clientY,e.shiftKey); });
+/* NO pick() ON ANY OF THOSE PATHS: OPENING A MENU IS NOT SELECTING. Right-clicking a token used to
+   select it — collapsing a multi-token range you had just marqueed, if the click landed outside it —
+   which is neither what the platform menus do nor what the rest of this app does: the deprel, POS,
+   ExtPos-bracket, MWT-tie and grid-row menus above and in js/grid/grid.js have never picked either.
+   Nothing is lost by it, because a token menu addresses the token it was opened ON, by id, all the
+   way down (nodeTokenMenu/posMenu/relMenu take si+tokId; the few rows that run a SELECTION-based
+   command, e.g. markFeatRow's Foreign/Typo toggles, pick() for themselves at the moment they run).
+   The range-scoped rows behave the same as before for the same reason they were written: "Group N–M
+   as MWT" and ExtPos-over-an-expression are gated on the range actually covering the right-clicked
+   token, so a range left standing somewhere else in the sentence can't silently capture the menu. */
 // a single click on a token/tier opens its inline editor directly, caret at the click point (Enter on a selected
 // token does the same, select-all instead — see makeEditable/makeGlossEditableSC's clickXY param). Node clicks in
 // the four DRAGGABLE notations (stemma/tree/arcs/brackets: .node/.tok-group/.bwtok) are handled by the pointerdown/
@@ -631,7 +792,7 @@ async function afterDiagramFormEdit(si,tokId,changed){ pick(si,tokId,false);
   afterFormEdit(si,tokId,changed); }
 function editTransInline(si,tokId,clickXY){ const s=DOC[si]; if(!s||tokId<1||tokId>s.tokens.length)return; const el=transElOf(si,tokId); if(!el)return;
   if(iastFormEdit()){   // Item 10: Sanskrit + real script → this IAST row IS the editable form field. Bind the edit to the token FORM (the stored IAST); on commit regenTok re-derives the script glyph above from the new IAST. Mirrors editNodeInline's form binding, and joins the same form-row Tab/arrow navigation.
-    bindLemmaDblclick(makeEditable(el, s.tokens[tokId-1], "form", changed=>afterDiagramFormEdit(si,tokId,changed), sentRTL(s), ()=>transElOf(si,tokId), d=>tierNav(si,tokId,"form",d), false, clickXY), si, tokId, ()=>transElOf(si,tokId));   // item 9: anchor the lemma box under THIS row (the IAST), which is the one being edited   // …including the lemma double-click: this row IS the form field here, so it carries the form field's gesture
+    makeEditable(el, s.tokens[tokId-1], "form", changed=>afterDiagramFormEdit(si,tokId,changed), sentRTL(s), ()=>transElOf(si,tokId), d=>tierNav(si,tokId,"form",d), false, clickXY);   // item 9: anchor the lemma box under THIS row (the IAST), which is the one being edited   // …including the lemma double-click: this row IS the form field here, so it carries the form field's gesture
     return; }
   if(typeof storedTrEditable==="function" && storedTrEditable()){ editStoredTransInline(si,tokId,clickXY); return; }   // non-deterministic romanisation → this row edits the STORED transliteration (MISC Translit, in the stored scheme), and the displayed row is re-derived from it. Ahead of the ORTHO_SCHEME guard below: a Chinese document displayed in Traditional glyphs still stores a romanisation, so it must still be correctable
   if(ORTHO_SCHEME)return;   // any OTHER re-rendering scheme (a non-Sanskrit script / Latin / transform) → the romanisation row is not editable
@@ -672,6 +833,31 @@ function editTier(si,tokId,tier,clickXY){ const s=DOC[si]; if(!s||tokId<1||tokId
   // instead — see msegFlagSent.
   const after=changed=>{ if(!changed){ preserveScroll(renderDoc); return; }   // item 1: opening a gloss field and leaving it as it was changes nothing, so it dirties nothing
     if(tier==="mgloss") mglossSyncFeats(tk);
+    /* AN MSeg EDIT IS ALSO A STATEMENT ABOUT THE WORD, not only about where its morphemes divide: strip
+       the boundary hyphens and what is left is the word itself. Writing that back is the inverse of
+       msegPrefillParts, which is what DERIVES the segmentation — so the same test decides the target.
+       That function segments the TRANSLITERATION where the language has one (translitNeeded) and the FORM
+       otherwise, so an edit lands on whichever of the two it was segmenting; anything else would correct
+       a string the tier was never describing.
+       Writing a FORM goes through afterFormEdit, because a form is not a private field: `# text` spells
+       this word and everything derived from it is now stale. No loop — msegRefill declines to re-derive a
+       hand-edited MSeg (its `cur!==t._msegPre` guard), and this edit has just made it one.
+       "=" is left alone: it is the CLITIC seam, a character the form legitimately carries (openConvertMWT
+       reads it), so stripping it would rewrite the word rather than un-segment it. Only "-" goes. */
+    /* ⚠ AND IN LATIN THE MARKS COME OFF FIRST. The MSeg tier carries vowel lengths (fillLaMacron,
+       js/lang/translit-load.js) while the FORM column never does — the treebanks spell Latin bare and
+       the file must round-trip byte-identically — so de-hyphenating `dī-vīsa` and writing it back
+       verbatim would put a macron in the form, in `# text`, and in the saved file. Stripping the
+       quantity marks (and only those: a breve is a written quantity too) leaves exactly the word the
+       reader re-spelt, and an edit that only moved the boundary then compares equal and writes nothing
+       at all, as it should. */
+    if(tier==="mseg"){ let bare=tierText(tk,"mseg").replace(/-/g,"");
+      if(bare && typeof isLatinLang==="function" && isLatinLang()) bare=bare.normalize("NFD").replace(/[̄̆]/g,"").normalize("NFC");   // combining macron + breve, taken off the DECOMPOSED string so precomposed ā and a+U+0304 are caught alike (the same rule macron.py's _strip_quantity applies on the Python side)
+      if(bare){
+        if(typeof translitNeeded==="function" && translitNeeded(DOCLANG)){
+          if((tk.translit||"")!==bare){ tk.translit=bare; tk.misc=setMiscKV(tk.misc,"Translit",bare); tk._trMisc=true; markDirty(); }
+        } else if((tk.form||"")!==bare){ tk.form=bare; markDirty();
+          if(typeof afterFormEdit==="function") afterFormEdit(si,tokId,true); } } }
     markDirty(); preserveScroll(renderDoc); };
   if(tier!=="mseg") makeGlossEditableSC(el, proxy, "v", after, sentRTL(s), ()=>tierElOf(si,tokId,tier), d=>tierNav(si,tokId,tier,d), clickXY, tier==="mgloss"?tk:null);   // live c2sc small-caps on its Leipzig abbreviations as the user types — on BOTH gloss tiers, matching how both now render (setGlossText); MSeg is word text, not a gloss, so it keeps the plain <input> editor. Task C: the trailing token is the MGloss abbreviation-autocomplete's UPOS context (AMBIG_UPOS) — passed ONLY for "mgloss" (a lexical Gloss definition isn't built from Leipzig abbreviations, so it gets no dropdown)
   else makeEditable(el, proxy, "v", after, sentRTL(s), ()=>tierElOf(si,tokId,tier), d=>tierNav(si,tokId,tier,d), true, clickXY); }   // item 2: allowEmpty → a gloss/MSeg value can be deleted (cleared), unlike a Form
@@ -689,7 +875,27 @@ function caretIndexForX(text,fontStr,localX){ if(localX<=0) return 0;
 // that tracks `el` via getBoundingClientRect() (position:fixed, re-placed on scroll) but isn't itself inside that
 // scroller, so it would otherwise keep floating over the block/grid/titlebar instead of clipping away with the
 // token underneath it.
-function elClippedOut(el){ if(!el||!el.isConnected)return true; const r=el.getBoundingClientRect(); if(!r.width&&!r.height)return true;
+/* IS THIS ELEMENT SCROLLED OUT OF ITS CONTAINER? Drives `place()`'s visibility toggle: an inline
+   editor is position:fixed and appended to <body>, outside the diagram's own scroller, so it must
+   hide itself when the token it covers scrolls away rather than float over unrelated content.
+   ⚠ A ZERO-SIZE RECT IS NOT EVIDENCE OF THAT, and treating it as such was a real bug. An EMPTY
+   token's form element has no text and therefore no extent — and that is precisely the element an
+   INSERTED token's editor has to anchor to. Reporting it clipped hid the field (visibility:hidden),
+   and `focus()` on a hidden element is a no-op in every browser, so the editor opened invisible and
+   unfocused and a newly inserted token could not be typed into at all. Detachment is already
+   covered by `isConnected` above, and an element inside a display:none subtree is still caught by
+   the ancestor test below — its container's rect is zero too, so the containment test fails.
+   A zero-size rect is therefore INFLATED to a caret-sized box before the containment test rather
+   than tested as a point. The containment test is exclusive at the edges (`r.bottom <= nr.top`), so
+   a point sitting anywhere on its container's boundary reads as outside it — and an empty token's
+   insertion point sits exactly there whenever the diagram is scrolled to it. Measured: the inserted
+   token's element came out at y=96 against a `.diagram` scroller starting at y=101, a five-pixel
+   miss that hid the editor for a token plainly on screen. A real token's 16px box clears it; a point
+   never can, which is why the fix belongs to the rect and not to the caller. */
+const _CARET_BOX=9;   // half a line — enough to clear the boundary case above, small enough that a genuinely scrolled-away point still reads as clipped
+function elClippedOut(el){ if(!el||!el.isConnected)return true; let r=el.getBoundingClientRect();
+  if(!r.width&&!r.height) r={top:r.top-_CARET_BOX, bottom:r.bottom+_CARET_BOX,
+                              left:r.left-_CARET_BOX, right:r.right+_CARET_BOX};
   for(let n=el.parentElement;n;n=n.parentElement){ const cs=getComputedStyle(n);
     if(!/(auto|scroll|hidden|clip)/.test(cs.overflowY)&&!/(auto|scroll|hidden|clip)/.test(cs.overflowX))continue;
     const nr=n.getBoundingClientRect();
@@ -726,10 +932,28 @@ document.addEventListener("pointerdown",e=>{ window.LAST_POINTER_EL=e.target; wi
 // actually changing anything: a CANCELLED edit still ran hideOrig, so its cached node is just as stale.
 function hideOrig(el){ if(el.namespaceURI===SVGNS){ el.style.fill="transparent"; el.style.stroke="transparent"; } else el.style.color="transparent";
   const blk=el.closest&&el.closest(".sblock[data-i]"); if(blk&&typeof invalidateDiaSentence==="function") invalidateDiaSentence(+blk.getAttribute("data-i")); }
-function makeEditable(el,obj,key,after,rtl,relocate,nav,allowEmpty,caretHint){ if(!el)return; const orig=obj[key]||"", pre=snap();
+function makeEditable(el,obj,key,after,rtl,relocate,nav,allowEmpty,caretHint){ if(!el)return; let orig=obj[key]||""; const pre=snap();
+  INLINE_EDIT_OPEN=true;   // …and cleared in `finish` below, so a background re-render cannot pull the caret out of this field (see the flag in js/core/prefs.js)
+  /* THE FIELD UPDATES UNDER THE CARET when the value beneath it moves — a background pass changing the very
+     thing being edited (the re-parse revising a lemma, a Sanskrit re-fuse respelling a form) would otherwise
+     leave a live editor showing a string the document no longer holds, and committing it would write the
+     stale one back.
+     ⚠ ONLY WHILE THE READER HAS NOT TYPED. `base` is the last value WE put in the field; once inp.value has
+     moved away from it the reader is mid-word, and their text is the newer statement about this field — a
+     background pass must not take the keyboard out from under them. `orig` follows too, or the commit's
+     changed-test would compare against a value that has not been on screen since the field opened. */
+  let base=orig;
+  INLINE_EDIT_SYNC=()=>{ const v=obj[key]||""; if(inp.value!==base||v===base) return false;
+    /* …and the caret stays put. Writing .value drops it to the end, which would be a visible jump in a field
+       the reader has not touched — the one state this branch runs in. Clamped, since the new value may be
+       shorter than where they were sitting. */
+    const ss=inp.selectionStart, se=inp.selectionEnd;
+    inp.value=base=orig=v;
+    if(ss!=null){ try{ inp.setSelectionRange(Math.min(ss,v.length),Math.min(se==null?ss:se,v.length)); }catch(e){} }
+    if(typeof reflow==="function") reflow(); return true; };
   const inp=document.createElement("input"); inp.className="nodeedit"+(key==="form"?formDeco(obj):""); inp.value=orig;   // item 4: while editing a token FORM, keep its Typo strikethrough on the edit field so the marker doesn't blink off mid-edit (the Foreign italics come across via applyFont, which copies the form's computed font-style)
-  let fontStr; const applyFont=e=>{ const cs=getComputedStyle(e);   // `e` lives inside .sblock{zoom:var(--fs)} but `inp` is appended to <body>, OUTSIDE that zoomed context — getComputedStyle reports the AUTHORED font-size (zoom doesn't rewrite it), so it must be scaled by FS by hand or the field renders at the un-zoomed size while the diagram text it's covering renders at size×FS
-    const sizePx=(parseFloat(cs.fontSize)||0)*FS+"px";
+  let fontStr; const applyFont=e=>{ const cs=getComputedStyle(e);   // `e` lives inside .sblock{zoom:var(--fs)} but `inp` is appended to <body>, OUTSIDE that zoomed context — so the size has to be converted by hand, or the field renders at a different size from the diagram text it is covering
+    const sizePx=visualFontPx(e)+"px";   // js/core/document.js — computed × cssLenScale × zoom, the last two PROBED because Chrome and WebKit report an SVG length inside a zoomed subtree differently. This used to be a bare `×FS`, which is right in Chrome and lands back on the UNZOOMED size in WebKit (see cssLenScale's note): the field opened at 100 % over a diagram drawn at 160 %
     inp.style.fontFamily=cs.fontFamily; inp.style.fontSize=sizePx; inp.style.fontWeight=cs.fontWeight; inp.style.fontStyle=cs.fontStyle; fontStr=cs.fontStyle+" "+cs.fontWeight+" "+sizePx+" "+cs.fontFamily;
     // …and the row's INK, which .nodeedit's own `color:var(--text)` would otherwise override. Without this the
     // transliteration row (.translit/.otrans — italic, --dia-muted) visibly jumped to full-strength body text the
@@ -774,6 +998,7 @@ function makeEditable(el,obj,key,after,rtl,relocate,nav,allowEmpty,caretHint){ i
   const finish=save=>{ if(inp._closed)return; inp._closed=true; const v=inp.value.trim(), changed=save&&(v||allowEmpty)&&v!==orig;   // item 2: gloss/morphemic tiers pass allowEmpty → an emptied value COMMITS (clears the tier) instead of reverting; the Form editor keeps allowEmpty falsy, so a form can't be blanked
     obj[key]=changed?v:orig;   // commit the trimmed value, or revert the live edits on cancel/no-op
     if(changed){ UNDO.push(pre); if(UNDO.length>80)UNDO.shift(); REDO.length=0; updateUndoUI(); markDirty(); }   // one undo step for the whole edit (the snapshot from before it began)
+    INLINE_EDIT_OPEN=false; INLINE_EDIT_SYNC=null;   // BEFORE the render below: that one is this edit's own consequence and must run
     document.removeEventListener("scroll",place,{capture:true}); inp.remove(); preserveScroll(renderDoc); if(after)after(changed); };   // pass `changed` so a commit-only hook (e.g. MGloss→FEATS back-fill) can distinguish a real commit from a cancel/no-op
   inp.addEventListener("input",reflow);
   inp.addEventListener("keydown",ev=>{
@@ -855,34 +1080,11 @@ function makeEditable(el,obj,key,after,rtl,relocate,nav,allowEmpty,caretHint){ i
   // commit the edit first, then open it for the token being edited (the current selection).
   inp.addEventListener("contextmenu",ev=>{ ev.preventDefault(); ev.stopPropagation(); const cs=sel.s, ct=sel.t; finish(true);
     if(cs>=0&&ct>0) nodeTokenMenu(ev.clientX,ev.clientY,cs,ct); });
-  return inp; }   // the field itself, so a caller that knows WHICH token it opened over can bind a gesture to it — see bindLemmaDblclick
-/* DOUBLE-CLICKING INSIDE AN OPEN FORM FIELD OPENS THE LEMMA EDITOR — the same thing double-clicking the
-   token itself does when no field is open (the DTAP double-tap in js/diagram/diagram-edit.js), routed
-   through that gesture's own openLemmaEditor so the two can't drift.
-   IT HAS TO LIVE ON THE FIELD, and that is the whole point: the first click opens this field OVER the
-   glyph, so the second click of the user's double-click lands on an <input> in <body>, not on the token
-   — #doc's pointerdown/pointerup never fire and DTAP never sees a second tap. A native "dblclick" is
-   what works here and a native "dblclick" is exactly what does NOT work on the token (see DTAP's own
-   note: pointerdown rebuilds #doc, so the element the browser would report the dblclick on is
-   detached). The two mechanisms are complementary, not redundant. Verified by instrumentation: with
-   the field open, the browser delivers click, click, dblclick to the input itself.
-   BOUND ONLY WHERE THE FIELD IS A TOKEN'S FORM (editNodeInline, and the IAST row that IS the form
-   field under a Sanskrit script) — the same restriction DTAP documents. A gloss/transliteration/MSeg
-   field keeps the browser's own "select the word under the pointer", which is what a double-click owes
-   a field you are typing prose into.
-   inp.blur() first, not finish(): finish() is closed over inside makeEditable, and blur reaches it
-   through the same path every click-away already uses (committing the edit, re-rendering, and leaving
-   the selection alone — the recorded pointer element is this input, which resolves to no token and no
-   block, so its "what was clicked becomes the selection" pass does nothing). The prompt then opens over
-   a settled token rather than one with an edit still pending underneath it. */
-/* `anchorFn` names the ROW the lemma box should hang under — the row this field is editing, not always the form
-   row. Under a Sanskrit script the editable surface form lives on the TRANSLITERATION row (iastFormEdit; the
-   script glyph above it is derived and read-only), so a double-click there must drop the box under the IAST it
-   was aimed at, rather than under the Devanagari two rows up with the IAST stranded between them. */
-function bindLemmaDblclick(inp,si,tokId,anchorFn){ if(!inp) return;
-  inp.addEventListener("dblclick",e=>{ if(typeof openLemmaEditor!=="function") return;   // guarded: openLemmaEditor lives in js/diagram/diagram-edit.js, which loads AFTER this module
-    e.preventDefault(); e.stopPropagation(); inp.blur();
-    openLemmaEditor(si,tokId,{x:e.clientX,y:e.clientY}, (typeof anchorFn==="function")?anchorFn():null); }); }
+  return inp; }   // the field itself, for a caller that wants to reach it after openingblclick
+/* bindLemmaDblclick WAS HERE — a native dblclick inside an open form field opened the lemma editor,
+   the counterpart to a double-tap on the token itself. Both gestures are gone: ⌘L reaches the same
+   editor from the keyboard and the token context menu names it, neither of which needs the reader to
+   discover that double-clicking a word means something other than selecting it. */
 // caret position, as a plain character count into `el`'s textContent (ignoring the internal .glabbr span
 // boundaries) — how far to walk back in after a rebuild that just replaced those spans.
 function caretOffset(el){ const sel=window.getSelection(); if(!sel||!sel.rangeCount) return el.textContent.length;
@@ -919,7 +1121,7 @@ function setCaretRange(el,anchorOff,focusOff){ const sel=window.getSelection(); 
 // arrow-key tier/token navigation — see makeEditable's own caretHint doc).
 function makeGlossEditableSC(el,obj,key,after,rtl,relocate,nav,caretHint,mglossTok){ if(!el)return; const orig=obj[key]||"", pre=snap();
   const box=document.createElement("div"); box.className="nodeedit glabbrbox"; box.contentEditable="plaintext-only";
-  let fontStr; const applyFont=e=>{ const cs=getComputedStyle(e); const sizePx=(parseFloat(cs.fontSize)||0)*FS+"px";
+  let fontStr; const applyFont=e=>{ const cs=getComputedStyle(e); const sizePx=visualFontPx(e)+"px";   // see makeEditable's applyFont: the size is CONVERTED, not multiplied by FS — the two engines report an SVG length inside a zoomed subtree differently (cssLenScale, js/core/document.js)
     box.style.fontFamily=cs.fontFamily; box.style.fontSize=sizePx; box.style.fontWeight=cs.fontWeight; box.style.fontStyle=cs.fontStyle; fontStr=cs.fontStyle+" "+cs.fontWeight+" "+sizePx+" "+cs.fontFamily; };
   applyFont(el);
   const render=text=>{ box.innerHTML=""; glossAbbrSegments(text).forEach(([t,abbr])=>{
@@ -981,7 +1183,16 @@ function makeGlossEditableSC(el,obj,key,after,rtl,relocate,nav,caretHint,mglossT
       ab=>{ const it=ms.find(x=>x.ab===ab); return it?it.expand:""; }); };
   box.addEventListener("input",e=>{ if(e.isComposing) return; reflow();
     if(e.inputType==="insertText" && e.data && /^[A-Z1-4]$/.test(e.data)) mglossOpenAC();
-    else if(_acInput===box) acCloseSoon(); });   // defer the abbreviation-run rebuild until any dead-key/IME composition finishes — rebuilding mid-composition (innerHTML wipe + a manually-reset caret) would cancel the OS composition before it completes
+    /* ⚠ A DELETION RE-FILTERS THE DROPDOWN; IT DOES NOT DISMISS IT. Backspace is how a reader
+       corrects a mistyped abbreviation — "GNE" back to "GN" — and closing the list on the very
+       keystroke that narrows the typo made the feature unusable for exactly the case it is for:
+       the list vanished and only re-appeared once another capital was typed, by which time the
+       reader has finished guessing. Re-opening rather than merely leaving it alone, because the
+       run under the caret has changed and the offered set must change with it; mglossOpenAC
+       closes it itself when the run empties or nothing matches, which is the only dismissal a
+       deletion should ever cause. Gated on the menu being open ON THIS FIELD — backspacing in a
+       field with no dropdown is not a request for one. */
+    else if(_acInput===box){ if(/^delete/i.test(e.inputType||"")) mglossOpenAC(); else acCloseSoon(); } });   // defer the abbreviation-run rebuild until any dead-key/IME composition finishes — rebuilding mid-composition (innerHTML wipe + a manually-reset caret) would cancel the OS composition before it completes
   box.addEventListener("compositionend",reflow);   // now that the composed character has landed, apply the deferred rebuild
   box.addEventListener("keydown",ev=>{
     if(mglossTok && _acMenu && _acMenu.classList.contains("show") && _acInput===box){   // Task C: dropdown open on THIS field → its own ↑/↓/Enter/Tab/Esc, exactly like the grid's Deep/DepRel cells (js/grid/grid.js) — takes priority over the tier-nav/Enter/Escape handling below
@@ -1081,7 +1292,7 @@ function editNodeInline(si,tokId,clickXY){ const s=DOC[si]; if(!s||tokId<1||tokI
   if(iastFormEdit() && transElOf(si,tokId)){ editTransInline(si,tokId,clickXY); return; }   // Item 10: the script glyph is display-only — route form editing onto the IAST transliteration row (which is bound to the token form). Only when that row is actually present; otherwise fall through to the plain form editor below.
   const el=formElOf(si,tokId);
   if(!el){ const c=document.querySelector(`[data-si="${si}"][data-ti="${tokId-1}"][data-col="form"]`); if(c)c.focus(); return; }   // no visible node → fall back to the grid cell
-  bindLemmaDblclick(makeEditable(el, s.tokens[tokId-1], "form", changed=>afterDiagramFormEdit(si,tokId,changed), sentRTL(s), ()=>formElOf(si,tokId), d=>tierNav(si,tokId,"form",d), false, clickXY), si, tokId); }   // item 4: the form row joins the gloss-tier arrow/Tab navigation. afterDiagramFormEdit = pick + the ITRANS→IAST pass + afterFormEdit, shared with the IAST-row route above
+  makeEditable(el, s.tokens[tokId-1], "form", changed=>afterDiagramFormEdit(si,tokId,changed), sentRTL(s), ()=>formElOf(si,tokId), d=>tierNav(si,tokId,"form",d), false, clickXY); }   // item 4: the form row joins the gloss-tier arrow/Tab navigation. afterDiagramFormEdit = pick + the ITRANS→IAST pass + afterFormEdit, shared with the IAST-row route above
 // ── inline-editing a multi-word token's surface form on a diagram ───────────────────────────────────────────
 // Reached by a plain left-click on a drawn tie row (the delegated handler above) or by the tie's right-click
 // menu. `fromId` is always the ORIGINAL token id, which is what data-mwtfrom carries even in a display-folded
@@ -1192,7 +1403,7 @@ function SCTRL(i){ return [
   ["movedown","Move down","⌃⌘↓",()=>moveSent(i,i+2)],
   ["newdoc","Document boundary","⇧⌘D",()=>toggleBound(i,"newdoc")],   // replaced Duplicate (⌘D), which is gone: a treebank is edited by inserting and re-parsing, not by cloning a sentence with its whole annotation and a "-copy" id
   ["newpar","Paragraph boundary","⇧⌘P",()=>toggleBound(i,"newpar")],   // both TOGGLE — the same gesture removes the boundary it added, which is why the pair sits in the block controls rather than only in the menu
-  ["url","Sentence URL","",()=>editURL(i)],   // item 14: a link icon → set/edit a source URL for the sentence (blue when set)
+  ["url","Sentence URL","⌘U",()=>editURL(i)],   // item 14: a link icon → set/edit a source URL for the sentence (blue when set)
   ["reenter","Reset parse","⌘R",()=>reparse(i)],
   ["export","Export diagram as SVG","⌥⌘E",()=>exportSVG(i)],
   ["delete","Delete sentence","⌘⌫",()=>delSent(i),true],
@@ -1213,7 +1424,17 @@ function sentMenu(x,y,i){ const by={}; SCTRL(i).forEach(e=>by[e[0]]=e); const mk
   items.push(null,
     {label:"Document boundary", kbd:"⇧⌘D", check:hasNewdoc(bs), fn:()=>toggleBound(i,"newdoc")},
     {label:"Paragraph boundary", kbd:"⇧⌘P", check:hasNewpar(bs), fn:()=>toggleBound(i,"newpar")});
-  items.push(null,mk(by.delete));
+  /* A shift-selected RANGE that covers this block retitles the two commands that act on the range and adds the
+     one that only exists for it. The count goes in the label rather than being left to the painted wash: the
+     wash says WHICH sentences, and a number is what makes an accidental extension obvious before ⌘⌫ takes six.
+     Both rows delegate to the bridge-level commands (js/io/bridge.js) rather than calling delSents/mergeSentRange
+     directly, so the confirmation the keyboard path raises is the same one the menu path raises. */
+  const rng=(typeof blockRange==="function")?blockRange():null;
+  const nsel=(rng&&i>=rng.lo&&i<=rng.hi)?rng.hi-rng.lo+1:0;
+  if(nsel>1) items.push(null,["Merge "+nsel+" sentences","⌥⌘M",()=>window.mergeSents&&window.mergeSents()]);
+  items.push(null, nsel>1
+    ? ["Delete "+nsel+" sentences","⌘⌫",()=>window.deleteSent&&window.deleteSent(),true]
+    : mk(by.delete));
   showCtx(x,y,items); }
 // items 14/5: set/edit/clear a sentence's source URL via a LOCAL popover anchored to the link icon → the
 // `# url = …` comment (round-trips via io_conllu). Enter commits, Esc cancels; blank clears; icon blue when set.
@@ -1227,7 +1448,7 @@ function editURL(i,anchor){ const s=DOC[i]; if(!s)return; closeURLPopup();
   pop.appendChild(inp); document.body.appendChild(pop); pop.addEventListener("mousedown",e=>e.stopPropagation());
   const r=(anchor||document.body).getBoundingClientRect();
   pop.style.left=Math.max(8, Math.min(r.right-pop.offsetWidth, innerWidth-pop.offsetWidth-8))+"px";   // item 8(a): open to the LEFT — align the popover's right edge to the icon and grow leftward (clamped to 8px so it never clips the left window edge)
-  pop.style.top=Math.min((r.bottom||0)+5, innerHeight-pop.offsetHeight-8)+"px";
+  pop.style.top=Math.max(menuTopBound(),Math.min((r.bottom||0)+5, innerHeight-pop.offsetHeight-8))+"px";
   inp.focus(); inp.select();
   const done=save=>{ if(pop._done)return; pop._done=true;
     if(save){ const nv=(inp.value||"").trim(); if(nv!==(s.url||"")){ pushUndo(i); s.url=nv; markDirty(); preserveScroll(renderDoc); toast(nv?"URL set":"URL cleared"); } }
@@ -1394,7 +1615,7 @@ function tokenMenu(x,y,si,idx,target){ const rng=(selRange&&selRange.s===si&&sel
   const rdRow=(typeof readingsMenuItem==="function")?readingsMenuItem(si,tokId,()=>tokenMenu(x,y,si,idx,target)):null;   // the same CJK heteronym flyout the diagram node menu carries (js/lang/readings.js)
   if(rdRow){ items.unshift(null); items.unshift(rdRow); }
   if(rng && !rangeIsMWT(si,rng.from,rng.to)){ items.unshift(null);
-    if(isSpacelessLang()) items.unshift([`Merge ${rng.from}–${rng.to} into one token`,"⌃⌘M",()=>mergeTokens(si,rng.from,rng.to)]);   // the same pair the diagram's node menu offers, in the same order — Group (keeps the tokens) above Merge (does not), and Merge only where a segmenter could have split the word
+    if(mergeIsSolid(s,rng.from,rng.to)) items.unshift([`Merge ${rng.from}–${rng.to} into one token`,"⌃⌘M",()=>mergeTokens(si,rng.from,rng.to)]);   // the same pair the diagram's node menu offers, in the same order — Group (keeps the tokens) above Merge (does not), and Merge only across a seam the line writes solid
     items.unshift([`Group ${rng.from}–${rng.to} as MWT`,"⌘G",()=>addMWT(si,rng.from,rng.to)]); }
   const gc=target&&target.closest("td.w-deprel, td.w-upos");   // right-clicked a DepRel/UPOS cell → offer its guidelines page
   if(gc){ const sc=gc.querySelector("select,input"), val=sc?sc.value:""; if(val&&val!=="_"){ const rel=gc.classList.contains("w-deprel");
@@ -1418,23 +1639,195 @@ function ungroupMWTShortcut(){ const s=DOC[sel.s]; if(!s||!s.mwt||!s.mwt.length)
 // the original token stays as the head component (keeps its POS/deprel/head/feats); the extra
 // components are inserted after it as blank words hanging off it; the MWT's surface form = the
 // original form. Flatten (below) is the exact inverse.
-function convertTokenToMWT(si,idx,n){ const s=DOC[si], toks=s.tokens; const head=toks[idx]; if(!head)return; pushUndo(si);
+/* `parts`, when given, are the component FORMS — the split is already known and the components are born
+   spelt rather than blank. That is the "=" path (see openConvertMWT): a form written `pra=kāśa` states its
+   own division, so asking how many pieces it has and then leaving them empty asks twice for what the token
+   already says. Without `parts` this is the count-prompt path exactly as before: n blank components. */
+function convertTokenToMWT(si,idx,n,parts){ const s=DOC[si], toks=s.tokens; const head=toks[idx]; if(!head)return; pushUndo(si);
+  const origForm=head.form;   // the MWT's surface form: what the text actually spells, "=" and all
   const oldIds=new Map(); toks.forEach((t,i)=>oldIds.set(t,i+1));
   toks.forEach(t=>{const h=parseInt(t.head,10); t._ht=(h>=1&&h<=toks.length)?toks[h-1]:0;});   // heads by identity, so the coming splice renumbers cleanly
   (s.mwt||[]).forEach(m=>{ m._toks=toks.slice(m.from-1,m.to); });                                // existing MWT ranges by identity
-  const comps=[]; for(let k=1;k<n;k++){ const c=tok("","","X","","",0,"udep"); c._ht=head; comps.push(c); }   // blank components attach to the head component
+  const comps=[]; for(let k=1;k<n;k++){ const c=tok(parts?(parts[k]||""):"","","X","","",0,"udep"); c._ht=head; comps.push(c); }
+  if(parts) head.form=parts[0]||head.form;   // blank components attach to the head component
   toks.splice(idx+1,0,...comps);
   toks.forEach(t=>{ t.head=t._ht===0?"0":String(toks.indexOf(t._ht)+1); delete t._ht; });
   remapMWT(s,toks);
   remapTokenRefs(s,idMapAfter(oldIds,toks));   // the original token survives as the head component and the new ones are blank, so nothing is dropped — this only shifts the ids after it, and DEPS / empty-node anchors with them
   const from=idx+1, to=idx+n;
-  s.mwt=(s.mwt||[]).filter(m=>!(m.from<=to&&m.to>=from));   // drop any overlapping range
-  s.mwt.push({from,to,form:head.form}); s.mwt.sort((a,b)=>a.from-b.from);
+  /* SPLITTING A TOKEN THAT IS ALREADY A COMPONENT divides it INSIDE its range, rather than carving a new
+     range out of the middle of one. The filter below drops every overlapping range, which is right when a
+     free-standing token becomes a multi-word token and destructive when the token was already inside one —
+     the orthographic word above it would simply vanish, taking its surface form with it.
+     The host range only has to GROW: remapMWT above rebuilt it from its members' identities, so it already
+     spans the new pieces wherever the token split was not its LAST member (the pieces land between two
+     members, and from/to are the min and max). Where it was the last, they land past the end and `to` has
+     to take them. Its FORM is deliberately untouched — the word still spells what it spelt; only the
+     analysis underneath it has become finer. */
+  const host=(s.mwt||[]).find(m=>from>=m.from&&from<=m.to);
+  if(host){ if(host.to<to) host.to=to; }
+  else { s.mwt=(s.mwt||[]).filter(m=>!(m.from<=to&&m.to>=from));   // drop any overlapping range
+    s.mwt.push({from,to,form:origForm}); s.mwt.sort((a,b)=>a.from-b.from); }   // the range spells the ORIGINAL, not the head component
+  /* …and the morpheme tiers divide with it, where they mark the SAME division. `=` is this app's clitic
+     seam in MSeg (msegStrip strips ꞊/=/⹀), so a form and an MSeg that both carry it are describing one
+     boundary and the pieces line up one-for-one. Only then — a tier that splits into a different number of
+     pieces is describing something else, and slicing it on a count that does not match would scatter one
+     morpheme's gloss across two tokens. It is left whole on the head instead, where it was. */
+  if(parts){ const all=[head].concat(comps);
+    // THE LEMMA DIVIDES TOO, on the same terms: a lemma written `pra=kāśa` states the same boundary the
+    // form does, and leaving it whole on the head would give the first component the whole word's lemma
+    // and the rest none. Guarded on the piece count exactly as the tiers are — a lemma that splits into
+    // a different number is not describing this division, and stays where it was.
+    const lem=(head.lemma&&head.lemma!=="_")?head.lemma:"";
+    if(lem.indexOf("=")>=0){ const lb=lem.split("=");
+      if(lb.length===all.length && lb.every(x=>x)) all.forEach((c,k)=>{ c.lemma=lb[k]; }); }
+    ["MSeg","MGloss","Unsandhied"].forEach(key=>{ const v=miscKV(head.misc,key); if(!v) return;   // Unsandhied divides with the rest: it is a per-token pausa spelling, so a token that has become several needs one each
+      /* A GLOSS NEED NOT CARRY THE "=" TO BE PLACED. Splitting `punarjanman-ām` as `punar=janman-ām`
+         leaves the MGloss a single undivided `-GEN.PL.M` — and that leading hyphen already says where it
+         belongs: it glosses a SUFFIX, so it goes to the component holding the end of the word, not to the
+         head it happened to be stored on. A trailing mark says the opposite, prefix categories, so the
+         FIRST component. Only for a gloss that is entirely abbreviations: a lexical gloss with no "=" is
+         a gloss of the whole word and there is nothing in it to say which part it describes, so it stays
+         where it was rather than being guessed at. */
+      if(v.indexOf("=")<0){ if(key!=="MGloss"||!mglossAbbrOnly(v)) return;
+        const last=all.length-1, to=/^[-.]/.test(v)?last:(/[-.]$/.test(v)?0:-1);
+        if(to<=0) return;                                   // no mark, or already on the first component
+        all[0].misc=setMiscKV(all[0].misc,key,""); all[to].misc=setMiscKV(all[to].misc,key,tierDashFix(v,key)); return; }
+      const bits=v.split("="); if(bits.length!==all.length) return;
+      /* AN ABBREVIATION-ONLY PIECE BELONGS TO THE MORPHEME ITS HYPHEN POINTS AT, not to the component it
+         happens to sit opposite. `-LOC` is the categories of the word BEFORE it and `DEF-` those of the
+         word after, so a positional hand-out would give one component a gloss that is entirely about its
+         neighbour — and leave that neighbour's own gloss looking complete when it is not. The piece is
+         moved onto the indicated side and its own slot left empty; the merge rule (mglossAbbrOnly in
+         tierJoin) reads the same hyphens the other way round, so a split and a re-flatten agree.
+         Only MGloss: MSeg holds segmented word text, where a capital is just a capital. */
+      if(key==="MGloss"){ for(let k=0;k<bits.length;k++){ const bit=bits[k];
+        if(!mglossAbbrOnly(bit)) continue;
+        if(/^[-.]/.test(bit) && k>0){ bits[k-1]+=bit; bits[k]=""; }          // leads with its mark → attaches leftward
+        else if(/[-.]$/.test(bit) && k<bits.length-1){ bits[k+1]=bit+bits[k+1]; bits[k]=""; } } }   // trails → attaches rightward
+      // …and the two marks meeting COLLAPSE: the piece being moved carries the boundary it points across, and
+      // the piece it lands on may already carry one (`janman-` taking `-GEN.PL.M` → `janman--GEN.PL.M`). One
+      // boundary, written once — see tierDashFix, which also catches whatever reaches MISC by another route.
+      /* …and a DIVIDED MSeg is marked as ours (`_msegPre`), not as a hand edit. It is a derivation — this
+         function cut it out of the head's own value — and msegRefill declines to touch a segmentation whose
+         stored value differs from the one it last prefilled, on the reasoning that the difference is the
+         annotator's. Without this the piece would be frozen against a form that is about to change under it
+         (sandhiSplitPausa puts the components back into pausa moments later), leaving `MSeg=bhṛ-to`
+         segmenting a token now spelt `bhṛtaḥ`. A genuinely typed MSeg still differs and is still left alone. */
+      all.forEach((c,k)=>{ const val=tierDashFix(bits[k],key); c.misc=setMiscKV(c.misc,key,val);
+        if(key==="MSeg") c._msegPre=val; }); });
+    /* …and everything DERIVED FROM A FORM is now stale: the head's script glyph and romanisation render
+       the WHOLE `pra=kāśa` it no longer is, and the new components have none at all. Clearing them is
+       what makes the fills recompute — the same move afterFormEdit makes when a form changes under it —
+       and the range's own cached renderings go with them, being renderings of a surface that has only
+       just come into existence. */
+    all.forEach(c=>{ c.ortho=""; c.translit=""; c.translitLemma=""; c._trMisc=false; c._trPick=false;
+      c.misc=setMiscKV(setMiscKV(c.misc,"Translit",""),"LTranslit",""); });
+    const rng=(s.mwt||[]).find(x=>x.from===from); if(rng){ rng.ortho=""; rng.translit=""; rng.miast=""; } }
   markDirty(); selRange=null; sel={s:si,t:from}; preserveScroll(renderDoc); pick(si,from,false);
-  toast(`Token split into a ${n}-part multi-word token — fill in the component words`); }
+  if(parts){   // the components are already spelt, so the only thing left to refresh is what is derived from them
+    /* …EXCEPT THE LAST ONE'S ENDING. The token being split was its own orthographic word and so carried
+       the external sandhi the FOLLOWING word imposed; its components are stored in pausa. Only the last
+       piece is affected — the interior junctions are compound-internal — and only the backend can undo it,
+       so this goes on the bridge and is deliberately not awaited, exactly as sandhiFlattenLemma is: a split
+       is a synchronous editing command and must not hold the selection while a call is out. It re-fuses the
+       range afterwards, so the surface the text spells is unchanged either way. */
+    /* ⚠ A NESTED SPLIT NEEDS THIS TOO, and skipping it was wrong. The reasoning was that a component is
+       already stored in pausa — true of its EDGES, and only of those. Dividing one exposes an INTERIOR
+       junction that never was in pausa, because it was inside a fused word: `punarjanmanām` cut as
+       `punar=janmanām` leaves `punar` standing before a voiced sound, where the pausa is `punaḥ`. The pass
+       walks the whole range and declines wherever there is nothing to undo, so running it over an existing
+       range costs the components that did not move nothing at all. */
+    /* ⚠ RE-PARSE THE PIECES FIRST, because the reversal READS THEIR TAGS and a fresh split has none worth
+       reading. The head keeps the analysis of the WHOLE word it used to be — `punarjanmanām` is an ADJ
+       with lemma `punarjanman`, and neither describes the `punar` just cut out of it — while every other
+       piece is born bare (upos "X", no lemma). desandhi_final asks the UPOS whether this word's pausa
+       column takes a citation form or an inflected one, and the lemma IS the answer for an indeclinable
+       (bdc7333), so running it on inherited tags gets `punaḥ` for a word cited `punar`: the right rule
+       reading the wrong evidence.
+       reparseTokenFields fills lemma/UPOS/FEATS on the tokens that now exist without re-tokenising, so
+       the reversal then reads what the pieces ARE. Chained rather than awaited — the split itself stays
+       synchronous — and it degrades: with no model the reversal still runs, on whatever tags are there. */
+    if(isSanskritLang() && typeof sandhiSplitPausa==="function"){
+      const ids=[]; for(let k=from;k<=to;k++) ids.push(k);
+      const tagged=(hasBridge()&&model&&typeof reparseTokenFields==="function")
+        ? reparseTokenFields(si,ids,{upos:true}).catch(()=>false) : Promise.resolve(false);   // …UPOS included: see the opt in reparseTokenFields — a split piece has no chosen word class to protect, and the reversal's answer turns on it
+      tagged.then(()=>sandhiSplitPausa(si,host?host.from:from)); }   // the HOST's id where there is one: that is the range the components belong to
+    if(show.translit) fillTranslit();
+    if((ORTHO_SCHEME&&ORTHO_SCHEME!=="none")||isSanskritLang()) fillOrtho();
+    toast(`Split into ${n} components at “=”`); }
+  else toast(`Token split into a ${n}-part multi-word token — fill in the component words`); }
 
+/* ── SPLITTING A TOKEN INTO SEPARATE WORDS, at its spaces ──────────────────────────────────────────
+   The counterpart of the `=` division above, and deliberately its counterpart rather than a variant
+   of it: `=` is this app's CLITIC SEAM, so `pra=kāśa` is one orthographic word analysed as two tokens
+   and the division produces a multi-word token spanning them. A SPACE is the opposite claim — it says
+   these are two orthographic words that a mis-tokenisation ran together — so the division produces
+   two free-standing tokens and no range at all. Same gesture, same "the form has already said how it
+   divides" convenience, opposite structural answer; `=` wins where a form somehow carries both,
+   because it is the explicit mark and a space could be a stray keystroke.
+
+   WHAT EACH PIECE INHERITS. The head piece keeps the token's own analysis and its incoming relation —
+   it is the one thing about the old token that is still true of something — and the rest are born
+   bare (`X`, no lemma) attached to it as `udep`, exactly as a fresh MWT component is. Then the whole
+   run is RE-PARSED with `{upos:true}`: unlike the clitic case, these are genuinely different words,
+   so no piece has a word class worth protecting and the head's own (an analysis of the two words
+   together) is as wrong as the placeholders. Chained, not awaited, so the command stays synchronous,
+   and it degrades to "the pieces keep what they were given" with no model.
+
+   SpaceAfter GOES TO THE LAST PIECE ALONE. It is a statement about what follows the token, and after
+   the split what follows the earlier pieces is the space they were divided at — i.e. the default. A
+   `SpaceAfter=No` left on the head would have the file assert that `two` and `words` are written
+   `twowords`, which is the very thing this split exists to deny.
+
+   ⚠ REFUSED INSIDE A MULTI-WORD TOKEN. An MWT range IS one orthographic word; a space inside one is a
+   contradiction, not an annotation, and silently growing the range around the pieces (which is what
+   the `=` path rightly does) would record that contradiction in the file. Say so instead. */
+function splitTokenAtSpaces(si,idx,parts){ const s=DOC[si], toks=s.tokens; const head=toks[idx]; if(!head)return false;
+  if((s.mwt||[]).some(m=>idx+1>=m.from&&idx+1<=m.to)){
+    toast("This token is inside a multi-word token — one orthographic word cannot contain a space. Divide it with “=” instead."); return false; }
+  pushUndo(si);
+  const oldIds=new Map(); toks.forEach((t,i)=>oldIds.set(t,i+1));
+  toks.forEach(t=>{const h=parseInt(t.head,10); t._ht=(h>=1&&h<=toks.length)?toks[h-1]:0;});   // heads by identity, so the coming splice renumbers cleanly
+  (s.mwt||[]).forEach(m=>{ m._toks=toks.slice(m.from-1,m.to); });
+  const comps=[]; for(let k=1;k<parts.length;k++){ const c=tok(parts[k],"","X","","",0,"udep"); c._ht=head; comps.push(c); }
+  const spAfter=miscKV(head.misc,"SpaceAfter");           // …captured before the head stops being the last piece
+  head.form=parts[0];
+  head.misc=setMiscKV(head.misc,"SpaceAfter","");         // a space now follows the head — it is where the split was made
+  if(spAfter&&comps.length) comps[comps.length-1].misc=setMiscKV(comps[comps.length-1].misc,"SpaceAfter",spAfter);
+  toks.splice(idx+1,0,...comps);
+  toks.forEach(t=>{ t.head=t._ht===0?"0":String(toks.indexOf(t._ht)+1); delete t._ht; });
+  remapMWT(s,toks);
+  remapTokenRefs(s,idMapAfter(oldIds,toks));   // no token is dropped — this only shifts the ids after the insertion, and DEPS / empty-node anchors with them
+  /* The tiers that describe the OLD word describe nothing now: a lemma, a segmentation, a gloss and a
+     pausa spelling were all statements about `two words` as one word. They are cleared off the head
+     rather than divided (the `=` path divides them, because there the pieces really are the morphemes
+     the tier enumerated) and the re-parse below fills what it can. Gloss and CorrectForm go with them
+     for the same reason; MISC keys the split has nothing to say about are left exactly as they were. */
+  const all=[head].concat(comps);
+  head.lemma="_";
+  ["MSeg","MGloss","Gloss","Unsandhied","CorrectForm"].forEach(k=>{ head.misc=setMiscKV(head.misc,k,""); });
+  delete head._msegPre;
+  all.forEach(c=>{ c.ortho=""; c.translit=""; c.translitLemma=""; c._trMisc=false; c._trPick=false; c._orthoKey="";
+    c.misc=setMiscKV(setMiscKV(c.misc,"Translit",""),"LTranslit",""); });
+  const from=idx+1, to=idx+parts.length;
+  markDirty(); selRange=null; sel={s:si,t:from}; preserveScroll(renderDoc); pick(si,from,false);
+  if(hasBridge()&&model&&typeof reparseTokenFields==="function"){
+    const ids=[]; for(let k=from;k<=to;k++) ids.push(k);
+    reparseTokenFields(si,ids,{upos:true}).then(ok=>{ if(ok)preserveScroll(renderDoc); }).catch(()=>{}); }
+  if(show.translit) fillTranslit();
+  if((ORTHO_SCHEME&&ORTHO_SCHEME!=="none")||isSanskritLang()) fillOrtho();
+  toast(`Split into ${parts.length} separate tokens at the spaces`);
+  return true; }
 // flatten a multi-word token back to a single token: its form = the MWT's surface form, its POS/deprel/
 // head/other attributes = those of the MWT's head component (the one whose head lies outside the range)
+/* Is this MGloss made ONLY of Leipzig abbreviations — i.e. grammatical categories rather than a gloss of
+   its own morpheme? Both the split and the flatten need the same answer, and glossAbbrSegments is already
+   the app's ruling on which runs of a gloss are abbreviations, so neither re-decides it. */
+function mglossAbbrOnly(v){ if(typeof glossAbbrSegments!=="function") return false; let any=false;
+  for(const seg of glossAbbrSegments(v||"")){ const t=String(seg[0]||"").replace(/[-.\s]/g,"");
+    if(!t) continue; if(!seg[1]) return false; any=true; }
+  return any; }
 function flattenMWT(si,m){ const s=DOC[si], toks=s.tokens; if(!m)return; pushUndo(si);
   const from=m.from, to=m.to;
   const oldIds=new Map(); toks.forEach((t,i)=>oldIds.set(t,i+1));
@@ -1449,8 +1842,88 @@ function flattenMWT(si,m){ const s=DOC[si], toks=s.tokens; if(!m)return; pushUnd
      recompute. MISC Translit/LTranslit go, being the component's — annotateTranslitMisc rewrites them. */
   const survivor={...head, form:m.form, ortho:m.ortho||"", translit:m.translit||"", translitLemma:""};
   survivor._ht=head._ht; survivor._trMisc=false; survivor._trPick=false;
+  /* ⚠ SANSKRIT FUSES; IT DOES NOT CONCATENATE. Inside a multi-word token the components are stored in
+     PAUSA (the DCS convention — see CLAUDE.md), so running them together spells a word that Sanskrit
+     never writes: `manaḥ`+`ratha` is `manoratha`, not `manaḥratha`; `ātman`+`vid` is `ātmavid`, not
+     `ātmanvid`. Every junction has to go back through sandhi, and WHICH sandhi depends on the junction:
+     a member marked FEATS `Compound=Yes` is BOUND, so what follows it is compound-INTERNAL. Almost
+     every rule fires at both boundaries; the one that does not is the -n gemination, which is external
+     only — `asmin`+`eva` → `asminneva` between words, but `an`+`anta` → `ananta` (NOT `annanta`) inside
+     a compound, and a- / an- before a vowel is much the commonest bound member there is. That flag
+     rides the fusion as `bounds`; app/translit.py's _sandhi_preprocess is where it is spent.
+     The FORM is exempt because it is not being derived at all: `m.form` is the orthographic word as it
+     already stands in `# text`, fused when the tokeniser read it or when sandhiMwtForms last re-fused
+     it, and re-deriving it here could only contradict the running text. Everything else the flattened
+     token carries is derived FROM that fused word rather than assembled from the pieces.
+     ⚠ GATED ON THE BRIDGE, because the derived rows below are BLANKED for it to refill and only the
+     backend can romanise: with no bridge (a browser design session) blanking them would leave them
+     blank for good, so there flatten keeps its naive join — which is the best answer available when
+     nothing can transliterate anything anyway. */
+  const saFuse=(typeof isSanskritLang==="function" && isSanskritLang()
+                && typeof hasBridge==="function" && hasBridge() && DOCLANG) ? {
+    lemmas: comps.map(t=>(t.lemma&&t.lemma!=="_")?t.lemma:""),
+    bound:  comps.map(t=>/(?:^|\|)Compound=Yes(?:\||$)/.test(t.feats||"")) } : null;
+  /* ⚠ EVERY PER-WORD FIELD IS CONCATENATED, not inherited from the head component. Flatten makes one
+     word out of n, so the analysis of that word is the analyses of its parts in order — taking only the
+     head's silently DISCARDED the rest: `ātma`+`vidām` flattened to lemma `vid`, losing `ātman`, and
+     the same for the transliteration and the glossing tiers, which is a whole morpheme's annotation gone.
+     ‣ lemma / transliteration are joined SOLID: they are word-shaped, and the word is written solid.
+     ‣ the glossing tiers join on "-", because that is already the morpheme separator INSIDE each of
+       them (`MSeg=vid-ām`), and the components become morphemes of the flattened word — so
+       `ātma` + `vid-ām` reads `ātma-vid-ām` and its MGloss `self-know-GEN.PL`, which is what the tier
+       means. Seam marks are stripped first (msegStrip): they marked the MWT boundary that has just
+       ceased to exist. A component contributing nothing to a tier is skipped rather than leaving an
+       empty slot, so one unglossed part cannot produce a stray "-". */
+  /* A gloss made ONLY of Leipzig abbreviations is not a gloss of its own morpheme — it is the categories
+     that attach to the one before it, so it keeps its hyphen on the side it attaches to EVEN WHERE THE
+     NEIGHBOUR CONTRIBUTES NOTHING: `` + `GEN.PL.M` is `-GEN.PL.M`, not `GEN.PL.M`, because the morpheme it
+     qualifies is still there in MSeg and in the form. Dropping empty pieces and joining what was left —
+     which is what this did — silently promoted a suffix's categories to a word-level gloss.
+     A lexical gloss beside an empty one keeps no hyphen (`` + `shining` → `shining`): there the empty
+     piece really is nothing to attach to.
+     A value that ALREADY leads with "-" or "." carries its own mark and is joined as-is, so nothing is
+     doubled — which also fixes a plain `x` + `-ām` running together as `x--ām`. */
+  const tierJoin=k=>{ let out="";
+    comps.forEach(t=>{ const v=msegStrip(tierText(t,k)); if(!v) return;
+      const lead=/^[-.]/.test(v);
+      /* …and no separator where ONE IS ALREADY THERE, on either side. The `lead` test caught a piece that
+         brings its own mark; a piece whose PREDECESSOR ends in one was the other half of the same rule and
+         was missing, so `x-` + `y` came out `x--y`. tierDashFix normalises what still slips through. */
+      if(out) out += (lead||/-$/.test(out)) ? v : "-"+v;
+      else out = (!lead && k==="mgloss" && mglossAbbrOnly(v)) ? "-"+v : v; });
+    return tierDashFix(out,k); };
+  survivor.lemma=comps.map(t=>(t.lemma&&t.lemma!=="_")?t.lemma:"").join("")||survivor.form;
+  /* ⚠ THE COMPONENTS' OWN VALUES FIRST, not the RANGE's. `m.translit` is a rendering of a RANGE, and a
+     range's rendering marks the seams between its members — under CSL that is literally what it is for
+     (`ātma-vidāṃ`, see fillTranslitCSL). Flatten abolishes those seams: what comes out is ONE word, whose
+     form is written solid, so a transliteration still carrying a hyphen describes a division the token no
+     longer has and disagrees with the form beside it. Joining the components' own transliterations solid
+     gives the word's romanisation with no seam in it. `m.translit` survives only as the fallback for a
+     range whose components have none, which is where it was doing useful work before. */
+  const trJoined=comps.map(t=>t.translit||"").join("");
+  /* SANSKRIT TAKES NEITHER OF THOSE. A component's transliteration romanises its PAUSA form, so joining
+     them reproduces the unfused spelling one letter for one letter — `ātma`+`vidām` romanised and run
+     together is `ātmavidām` only by luck, and `manaḥ`+`ratha` comes out `manaḥratha` beside a form that
+     says `manoratha`: the romanisation would contradict the very glyph it sits under. Blanking both
+     makes fillTranslit/fillOrtho re-derive them from `survivor.form`, which IS the fused word — so the
+     two rows cannot disagree, and no seam can survive into them either (m.translit marks the seams of a
+     RANGE; see the note above). The lemma has no such row to fall back on and is fused outright, below. */
+  survivor.translit=saFuse?"":(trJoined||m.translit||"");
+  survivor.translitLemma=saFuse?"":comps.map(t=>t.translitLemma||"").join("");
+  if(saFuse) survivor.ortho="";
   survivor.misc=setMiscKV(setMiscKV(survivor.misc,"Translit",""),"LTranslit","");
-  if(head.lemma===head.form) survivor.lemma=survivor.form;   // the same rule mergeTokens applies: a lemma that merely echoed the component's form said nothing, so it follows the new form; a real lemma is analysis and stays
+  /* ⚠ Unsandhied MERGES TOO, and leaving it on the head's value is what made a flattened `mūrti`+`tve`
+     read as `tve`: MISC `Unsandhied` is the token's PAUSA spelling, and app/sa_notation.py's csl_forms
+     prefers it over the form (that is the whole point of it — feeding a sandhied surface back through a
+     sandhi generator would apply the rules twice). So the survivor said `mūrtitve` in its form and
+     `-tve` in its pausa, and every CSL rendering believed the pausa.
+     Joined SOLID like the lemma and the transliteration, with each piece's seam marks taken off first:
+     a continuation mark records a boundary between components, and flatten has just removed the
+     boundary it recorded. */
+  { const un=comps.map(c=>String(miscKV(c.misc,"Unsandhied")||"").replace(/^[-꞊=⹀]+|[-꞊=⹀]+$/g,"")).filter(Boolean).join("");
+    survivor.misc=setMiscKV(survivor.misc,"Unsandhied",un); }
+  ["gloss","mseg","mgloss"].forEach(k=>{ const v=tierJoin(k); survivor.misc=setMiscKV(survivor.misc,TIER_MISC[k],v); });
+  if(comps.every(t=>t.lemma===t.form)) survivor.lemma=survivor.form;   // the rule mergeTokens applies: lemmas that merely echoed their forms said nothing, so the result follows the new form rather than gluing the same string twice
   toks.forEach(t=>{ if(compSet.has(t._ht)) t._ht=survivor; });            // dependents of any removed component re-point to the survivor
   (s.mwt||[]).forEach(mm=>{ mm._toks=toks.slice(mm.from-1,mm.to); });
   toks.splice(from-1, to-from+1, survivor);
@@ -1461,6 +1934,12 @@ function flattenMWT(si,m){ const s=DOC[si], toks=s.tokens; if(!m)return; pushUnd
   if(sv&&sv.deps&&sv.deps!=="_"){ const kept=sv.deps.split("|").filter(p=>{ const i=p.indexOf(":"); return i<0||p.slice(0,i)!==String(from); });
     sv.deps=kept.length?kept.join("|"):"_"; }   // …which can leave a self-loop where one component had an enhanced arc to another
   markDirty(); selRange=null; sel={s:si,t:from}; preserveScroll(renderDoc); pick(si,from,false);
+  /* …and THEN the sandhi, because only the backend can fuse: the concatenated lemma above stands as a
+     placeholder for the one paint before the bridge answers (and as the whole answer when there is no
+     bridge — a browser design session still flattens, it just spells the lemma naively). Deliberately
+     not awaited: flatten is a synchronous editing command and must not leave the selection unmoved
+     while a call is in flight — sandhiMwtForms is fire-and-forget for the same reason. */
+  if(saFuse && typeof sandhiFlattenLemma==="function") sandhiFlattenLemma(si,from,saFuse);
   toast("Multi-word token flattened to a single token"); }
 
 // small floating prompt with a numeric input (used by Convert-to-MWT to ask for the component count)
@@ -1482,7 +1961,7 @@ function countPrompt(x,y,opts){ closeCtx();
   pop.classList.add("show");
   const w=pop.offsetWidth, h=pop.offsetHeight;
   const left = opts.rtl ? (x-w) : x;   // RTL → the popover extends leftward so it sits on the reading-start (right) side
-  pop.style.left=Math.max(8,Math.min(left,innerWidth-w-8))+"px"; pop.style.top=Math.max(8,Math.min(y,innerHeight-h-8))+"px";
+  pop.style.left=Math.max(8,Math.min(left,innerWidth-w-8))+"px"; pop.style.top=Math.max(menuTopBound(),Math.min(y,innerHeight-h-8))+"px";
   setTimeout(()=>{ inp.focus(); inp.select(); },20);
   setTimeout(()=>{ document.addEventListener("pointerdown",outside,true); document.addEventListener("keydown",onkey,true); },0); }
 /* item 6 — the same popover shell as countPrompt, but for a FREE-TEXT value: the correct form of a token just
@@ -1522,7 +2001,7 @@ function textPrompt(x,y,opts){ closeCtx();
      Only the border: a previous attempt subtracted the popup's whole content inset (border + the 11px padding),
      which over-corrected and pushed the box visibly LEFT of the word. The padding is meant to be there — it is
      the gap between the glass and the field — and it is not part of the alignment. */
-  pop.style.left=Math.max(8,Math.min(left,innerWidth-w-8))+"px"; pop.style.top=Math.max(8,Math.min(y,innerHeight-h-8))+"px";
+  pop.style.left=Math.max(8,Math.min(left,innerWidth-w-8))+"px"; pop.style.top=Math.max(menuTopBound(),Math.min(y,innerHeight-h-8))+"px";
   if(!opts.rtl){ const bw=parseFloat(getComputedStyle(pop).borderLeftWidth)||0;
     if(bw) pop.style.left=Math.max(8,Math.min(left-bw,innerWidth-w-8))+"px"; }
   setTimeout(()=>{ inp.focus(); inp.select(); },20);
@@ -1534,6 +2013,22 @@ function openConvertMWT(si,idx){ pick(si,idx+1,false); const rtl=sentRTL(DOC[si]
   let x,y;
   if(el){ const b=el.getBoundingClientRect(); y=b.bottom+4; x=rtl?b.right:Math.max(12,b.left+20); }   // RTL → anchor at the token's right edge, opening leftward
   else { y=innerHeight/2-60; x=rtl?innerWidth/2+105:innerWidth/2-105; }
+  /* A FORM THAT SPELLS ITS OWN DIVISION NEEDS NO PROMPT. `=` is the clitic seam this app already reads in
+     the MSeg tier, so `pra=kāśa` has said both how many components it has and what they are — asking for a
+     count and then handing back empty fields makes the user type what the token already told us.
+     Every piece must be non-empty: a leading, trailing or doubled `=` gives an empty component, which is
+     not a division anybody meant, so those fall through to the prompt rather than producing a blank token. */
+  const t0=(DOC[si]&&DOC[si].tokens[idx])||null, raw=(t0&&t0.form)||"";
+  if(raw.indexOf("=")>=0){ const parts=raw.split("=");
+    if(parts.length>1 && parts.every(x=>x)){ convertTokenToMWT(si,idx,parts.length,parts); return; } }   // it announces the split itself
+  /* …AND A FORM THAT SPELLS ITS DIVISION WITH SPACES divides into free-standing tokens instead — the
+     same "no prompt needed" rule, for the other kind of division (see splitTokenAtSpaces for why the
+     two answers differ, and why `=` is tested first). Any run of whitespace counts as one boundary,
+     so a form pasted with a double space or a stray tab still yields the words the reader can see.
+     A refusal (inside an MWT) falls through to the count prompt, which is still a sensible thing to
+     have asked for. */
+  if(/\s/.test(raw)){ const words=raw.split(/\s+/).filter(x=>x);
+    if(words.length>1 && splitTokenAtSpaces(si,idx,words)) return; }
   countPrompt(x,y,{rtl, title:`Split token ${idx+1}`, min:2, value:2,
     hint:"Component tokens<br>(2 or more).", ok:n=>convertTokenToMWT(si,idx,n)}); }   // explicit <br> → the parenthetical always drops to its own line
 // the MWT entries for a token menu (grid or diagram): flatten + ungroup when the token is in an MWT, else split
@@ -1561,14 +2056,38 @@ function markFeatRow(si,tokId){ const items=markFeatItems(si,tokId);
 function extPosMenuAtSel(si,tokId){ const el=tokGroupOf(si,tokId)||document.querySelector(`#doc tr[data-s="${si}"][data-tok="${tokId}"]`);
   const b=el?el.getBoundingClientRect():null, rtl=sentRTL(DOC[si]);
   extPosMenu(b?(rtl?b.right:b.left+20):innerWidth/2, b?b.bottom+4:innerHeight/2, si, tokId); }
-function mwtTokenItems(si,tokId){ const m=mwtAtSel(DOC[si],tokId);
-  if(m) return [
+/* WHOSE MENU IS THIS — the multi-word token's, or one of its component tokens'? The two get DIFFERENT rows,
+   because they are different objects and the operations belong to one or the other:
+     · Flatten and Ungroup act on the RANGE. They are the range's own controls, and a component showing them
+       offers to dissolve the word it merely belongs to — the same slip as a paragraph's menu offering to
+       delete the chapter. `forRange` is what the tie's and the range row's menus pass.
+     · Split divides a TOKEN. On a component it divides that component in place and grows the range around it
+       (convertTokenToMWT's `host` branch); on the range it has no object at all, and would silently act on
+       whichever component happens to be first.
+   So neither row set is a subset of the other, and nothing is shared but the resolution of `si`/`tokId`. */
+function mwtTokenItems(si,tokId,forRange){
+  if(!forRange) return SPLIT_ROW(si,tokId);
+  const m=mwtAtSel(DOC[si],tokId); if(!m) return [];
+  return [
     ["Flatten MWT","⌥⌘G",()=>flattenMWT(si,m)],   // ⌥⌘G, matching app/menu_spec.py's "Flatten Multi-word Token" — this row still read ⌥⌘F, the binding that item moved OFF when Find and Replace took ⌥⌘F (menu_spec records why: AppKit matches a key equivalent against the first eligible item in menu order, and Find and Replace sits above Flatten in the Edit menu, so ⌥⌘F here would have flattened nothing). The keystroke has been ⌥⌘G since; only this label was left behind
     ["Ungroup MWT","⇧⌘G",()=>{ const s=DOC[si]; pushUndo(si); s.mwt=(s.mwt||[]).filter(x=>x!==m); if(!s.mwt.length)delete s.mwt; markDirty(); preserveScroll(renderDoc); toast("Multi-word token removed"); }],
-  ];
-  return [["Split into MWT…","⌥⌘S",()=>openConvertMWT(si,tokId-1)]]; }
+  ]; }
+// The token-level row, for a free token and a component alike — see mwtTokenItems.
+/* One command, and the row NAMES WHAT IT WILL ACTUALLY DO to this token — read off the form, which is
+   where the division was written. A form carrying `=` (or nothing at all) makes a multi-word token; one
+   carrying spaces makes separate words (splitTokenAtSpaces), and calling that "Split into MWT" would
+   name the opposite structure. No ellipsis on either: a form that spells its own division needs no
+   prompt, so the row does not always lead to one. The Edit menu's row keeps its own fixed wording — a
+   native NSMenu item cannot re-title itself per selection. */
+function SPLIT_ROW(si,tokId){ const t=(DOC[si]&&DOC[si].tokens[tokId-1])||null, f=(t&&t.form)||"";
+  const spaces=/\s/.test(f)&&f.indexOf("=")<0;
+  return [[spaces?"Split at Spaces":"Split into MWT","⌥⌘S",()=>openConvertMWT(si,tokId-1)]]; }
 window.convertTokenMWT=function(){ if(sel.s<0||sel.t<1)return toast("Select a token to convert");
-  if(mwtAtSel(DOC[sel.s],sel.t))return toast("This token is already part of a multi-word token"); openConvertMWT(sel.s,sel.t-1); };
+  /* A COMPONENT IS SPLITTABLE TOO, and this used to refuse it — "already part of a multi-word token" answered a
+     question nobody asked. A range asserts that its tokens spell ONE orthographic word; it says nothing about how
+     finely that word is analysed underneath, and dividing a component is a statement about the analysis. The split
+     grows the host range around the new pieces rather than nesting a second range inside it (convertTokenToMWT). */
+  openConvertMWT(sel.s,sel.t-1); };
 window.flattenTokenMWT=function(){ if(sel.s<0||sel.t<1)return toast("Select a token inside a multi-word token");
   const m=mwtAtSel(DOC[sel.s],sel.t); if(!m)return toast("The selected token is not part of a multi-word token"); flattenMWT(sel.s,m); };
 

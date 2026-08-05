@@ -23,7 +23,21 @@ mkdir -p "$APP/Contents/MacOS" "$RES/appsrc"
 echo "▶ copying app source…"
 # samples/ is deliberately NOT bundled — it is repo-only test data (see README). Nothing in app/ or
 # web/ reads from it at runtime, so the shipped app carries no sample datasets.
-for d in app web grammars; do
+# `vendor/` IS SHIPPED, and leaving it out was a silent feature amputation rather than a size saving.
+# It holds the self-contained grew backend (tools/bundle_grew.sh: the arm64 grewpy_backend plus its
+# rewritten dylib closure, ~12 MB), and app/convert.py looks for it at <appsrc>/vendor/grew/bin —
+# which is exactly where this line puts it, since `app` lands at <appsrc>/app and _VENDORED_BACKEND is
+# resolved two levels up from convert.py.
+# Without it the only grew on an end user's machine is an opam install, which nobody who did not build
+# this app has. That does not merely disable UD import/export and format conversion (which degrade to
+# a toast, by design) — it kills EVERY STANZA MODEL outright, because Stanza emits UD and this app
+# stores SUD, so `parse._parse_stanza_ud_to_sud` has to run the conversion grammar on every parse.
+# The reported symptom was "the Stanza models do nothing", on a machine that had downloaded them
+# successfully; see the ParserUnavailable message in that function, which says so and had no way to
+# be true on a machine that could not act on it.
+# The binary is architecture-specific, so a build on an Intel Mac ships an Intel one; `[ -e ]` means a
+# tree with no vendor/ still builds, and the app then degrades exactly as it does today.
+for d in app web grammars vendor; do
   [ -e "$PROJECT/$d" ] && cp -R "$PROJECT/$d" "$RES/appsrc/$d"
 done
 find "$RES/appsrc" -name '__pycache__' -type d -prune -exec rm -rf {} + 2>/dev/null || true
@@ -64,7 +78,7 @@ if [ -d "$FONTDIR" ]; then
     [ -f "$FONTDIR/$f" ] || { echo "!! core font missing from web/fonts: $f" >&2; exit 1; }
     mv "$FONTDIR/$f" "$KEEPDIR/$f"
   done
-  rm -f "$FONTDIR"/*
+  rm -rf "$FONTDIR"/*
   mv "$KEEPDIR"/* "$FONTDIR"/ && rmdir "$KEEPDIR"
 fi
 

@@ -39,7 +39,7 @@ warnings.filterwarnings(
 import webview
 from webview.menu import Menu, MenuAction, MenuSeparator
 
-from . import menu_spec
+from . import appearance, menu_spec
 from .api import Api
 from .paths import APP_DATA
 
@@ -109,48 +109,357 @@ except Exception as exc:  # noqa: BLE001
     print(f"[crashlog] could not arm crash log: {exc}", file=sys.stderr)
 
 
-# ── item 14: "New Window" spawns a SECOND app process (a fresh, empty document) ──────────────────
-# pywebview is single-window, so a genuinely-new window = a new `python -m app` process (no file arg →
-# empty doc). It MUST be launched DETACHED (start_new_session → os.setsid), otherwise the background-job
-# manager treats a child GUI process as part of this job and SIGKILLs it (see MEMORY: app-vanish-is-sigkill).
-# Windows has no sessions and no setsid: `start_new_session=True` is silently ignored there, so the
-# child would stay in this console's process group and die with a Ctrl-Break / job-object kill.
-# DETACHED_PROCESS cuts it loose from the console and CREATE_NEW_PROCESS_GROUP from the group — the
-# pair is the Win32 spelling of the same intent, hence one branch and not two code paths.
-_DETACHED_PROCESS = 0x00000008
-_CREATE_NEW_PROCESS_GROUP = 0x00000200
+# ── SEVERAL DOCUMENT WINDOWS, ONE PROCESS ────────────────────────────────────────────────────────
+# "New Window" used to launch a whole second `python -m app` PROCESS, on the reading that pywebview is
+# single-window. It isn't: create_window may be called again after start (from a NON-main thread —
+# webview/__init__.py creates the window inline only for a non-MainThread caller), which is already how
+# every secondary window in this app is made (api.py's _open_window: Help / About / Model Manager / …).
+# One process buys what the process-per-window design could not have at any price:
+#   · NATIVE WINDOW TABBING — macOS groups NSWindows within an application, never across processes, so
+#     "Merge All Windows" and ⌃⇥ were simply unavailable (see the tabbing identifier in mac/shell.py);
+#   · ONE menu bar with one wiring pass, rather than N processes each re-wiring their own;
+#   · a shared model/parse cache and a single state.json writer instead of N racing ones.
+# What it costs is that the menu bar is now app-global while the commands are per-document, so nothing
+# may close over "the" window any more: _key_pair() resolves the KEY window at click time, and the same
+# provider is handed to mac/shell.py for the native items it owns (Open Recent, About, the delegate).
+_WINDOWS: list = []                     # live document windows, oldest first: [(window, api), …]
+_WIN_LOCK = threading.Lock()
+_WIN_URL = ""                           # the index URL every document window loads (with ?platform= under SUD_CHROME)
+_FORCED_CHROME = ""                     # SUD_CHROME=win|mac preview, if any
 
 
-def _spawn_new_window() -> None:
+def _key_pair():
+    """The ``(window, api)`` a menu command should act on: the key (frontmost) document window, or
+    the most recently opened one when AppKit names something else — a secondary window such as the
+    Model Manager, or nothing at all. ``(None, None)`` only once every document window has closed."""
+    with _WIN_LOCK:
+        pairs = list(_WINDOWS)
+    if not pairs:
+        return (None, None)
+    if IS_MAC:
+        try:
+            import AppKit
+            app = AppKit.NSApp
+            key = (app.keyWindow() if app is not None else None) or (app.mainWindow() if app is not None else None)
+            if key is not None:
+                num = int(key.windowNumber())
+                for win, api in pairs:
+                    native = getattr(win, "native", None)
+                    if native is not None and int(native.windowNumber()) == num:   # windowNumber, not object identity: PyObjC hands back a fresh proxy per call
+                        return (win, api)
+        except Exception as exc:  # noqa: BLE001 — never let a menu command die over window resolution
+            print(f"[window] key window: {exc}", file=sys.stderr)
+    return pairs[-1]
+
+
+def _forget_window(window) -> None:
+    with _WIN_LOCK:
+        for i, (win, _api) in enumerate(_WINDOWS):
+            if win is window:
+                del _WINDOWS[i]
+                break
+
+
+def _is_closed(window) -> bool:
+    """True once pywebview has torn ``window`` down — the question every DEFERRED, main-thread window
+    action below has to ask before it touches an NSWindow.
+
+    ⚠️ A CLOSED NSWindow IS STILL A LIVE OBJECT, AND ORDERING IT FRONT RESURRECTS IT AS A GHOST.
+    pywebview's cocoa backend creates every window with ``setReleasedWhenClosed_(False)`` and, in
+    ``windowWillClose_``, guts it rather than releasing it: the WKWebView is removed from the view
+    tree and set to None, and the uid is dropped from ``BrowserView.instances``. The NSWindow object
+    survives, EMPTY. So a later ``makeKeyAndOrderFront_`` / ``addTabbedWindow_ordered_`` on it puts a
+    blank window back on screen — and that window CANNOT BE CLOSED: its delegate is still installed,
+    so clicking the close button reaches ``WindowDelegate.windowShouldClose_``, which looks the uid up
+    in ``instances``, gets None, and raises ``AttributeError`` on ``i.pywebview_window``; PyObjC turns
+    a throw from a BOOL-returning delegate method into NO, i.e. a permanent close veto. That is
+    exactly the "closing a tab brings up a blank window I can't close" report, and BOTH deferred paths
+    below could reach it — the 6 s ``_show_if_hidden`` fallback for a tab closed before it fired, and
+    ``_attach_as_tab``'s merge for a tab (or a HOST) closed while the merge was still queued.
+
+    ``events.closed`` is the signal, in preference to our own ``_WINDOWS`` registry, because pywebview
+    sets it SYNCHRONOUSLY inside ``windowWillClose_`` on the AppKit main thread — ``Event.set()`` flips
+    its flag inline and only DISPATCHES the handlers on a thread — so a check made from a ``callAfter``
+    block, which runs on that same thread, cannot interleave with the teardown. ``_WINDOWS`` is
+    consulted as a backstop (its removal rides on one of those dispatched handlers, so it can lag by a
+    few microseconds, but it never lags in the other direction)."""
+    ev = getattr(getattr(window, "events", None), "closed", None)
     try:
-        import subprocess
-        repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        kwargs: dict = {}
-        if IS_WIN:
-            kwargs["creationflags"] = _DETACHED_PROCESS | _CREATE_NEW_PROCESS_GROUP
-        else:
-            kwargs["start_new_session"] = True   # os.setsid() → own session, not a reaped child
-        subprocess.Popen(
-            [sys.executable, "-m", "app"],
-            cwd=repo_root,                      # so the `app` package is importable
-            stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-            **kwargs,
-        )
-    except Exception as exc:  # noqa: BLE001 — never crash the running window over a spawn failure
-        print(f"[menu] new window spawn: {exc}", file=sys.stderr)
+        if ev is not None and ev.is_set():
+            return True
+    except Exception:  # noqa: BLE001 — an event object we don't recognise is not evidence of a close
+        pass
+    with _WIN_LOCK:
+        return not any(win is window for win, _api in _WINDOWS)
 
 
-def build_menu(window, api=None) -> list[Menu]:
+def _new_document_window(path: str | None = None, as_tab: bool = False) -> None:
+    """Open another document window in THIS process (File ▸ New Window, and the bridge's own
+    ``api._new_window``).  Empty unless a path is handed in.
+
+    Threaded, always: pywebview creates a post-start window only when create_window is called off the
+    MainThread (it otherwise just registers it and waits for a start that has already happened), and
+    both callers here — a pywebview MenuAction, which runs on its own thread, and a JS bridge call —
+    could in principle arrive on either. api.py's _open_window threads for the same reason."""
+    host = _key_pair()[0] if as_tab else None   # RESOLVED FIRST: the new window becomes key the moment it is created, so asking afterwards would name the tab's own window as its host and merge nothing
+    def make():
+        try:
+            api = Api()
+            if path and os.path.exists(path):
+                api.path = os.path.abspath(path)
+            win = webview.create_window(
+                "SUD Workbench",
+                url=_WIN_URL,
+                js_api=api,
+                width=1240,
+                height=820,
+                min_size=(1200, 560),
+                # A TAB IS BORN HIDDEN. Created visible, it appears as a window of its own for the
+                # moment before addTabbedWindow:ordered: pulls it into the group — which reads as the
+                # window closing and reopening. It is shown by the merge itself (makeKeyAndOrderFront)
+                # once it is a tab, or by the fallback below if the merge never happens.
+                hidden=bool(as_tab and IS_MAC),
+                **({"vibrancy": False} if IS_MAC else {}),
+                background_color=appearance.window_bg(),   # the colour the window IS until its page paints — light mode must not open black (see app/appearance.py)
+                text_select=True,
+            )
+            if win is None:
+                print("[window] new window: create_window returned None", file=sys.stderr)
+                return
+            _setup_window(win, api)
+            if as_tab and IS_MAC:
+                _attach_as_tab(win, host)
+                threading.Timer(6.0, lambda: _show_if_hidden(win)).start()   # …and if the merge never lands, the window must not stay invisible. SIX seconds, not two: the merge waits for the new window's `loaded` event, measured at ~2.8s on this machine, so a 2s fallback beat it — showing the window as its own for the moment before it became a tab, which is exactly the "it opens un-hidden, then closes and reopens" flash this hidden-until-merged path exists to remove
+        except Exception as exc:  # noqa: BLE001 — never crash the running window over a failed second one
+            print(f"[window] new window: {exc}", file=sys.stderr)
+    threading.Thread(target=make, daemon=True).start()
+
+
+def _attach_as_tab(window, host) -> None:
+    """Put a just-created window into the KEY window's tab group — what ⌘T / the tab bar's + button
+    mean, as against New Window's separate window. addTabbedWindow:ordered: is the same call
+    "Merge All Windows" makes; it must run on the AppKit main thread, and the new window has to be
+    key-able first, so this is marshalled rather than called inline."""
+    try:
+        import AppKit
+        from PyObjCTools import AppHelper
+        hn = getattr(host, "native", None) if host is not None else None
+        if hn is None or host is window:
+            return
+
+        def join(*_a):
+            # NEITHER END MAY HAVE CLOSED IN THE MEANTIME. This runs a callAfter later than the decision
+            # to merge, and both windows are closable in between: merging a closed window orders its
+            # empty husk front, and so does merging INTO a closed host — the ghost-window resurrection
+            # _is_closed documents. Checked HERE rather than at the call site precisely because this is
+            # the main thread, the same one windowWillClose_ runs on, so the answer cannot go stale
+            # between the test and the AppKit calls below.
+            if _is_closed(window) or _is_closed(host):
+                return
+            # `window.native` is resolved HERE, not above: pywebview fills it in as the GUI creates the
+            # window, so at the moment _new_document_window returns it is still None — reading it early
+            # made this function return before it ever tried, silently (the symptom: ⌘T opened a window
+            # that never joined the group, with nothing logged).
+            new = getattr(window, "native", None)
+            if new is None or new is hn:
+                return
+            try:
+                # THE IDENTIFIER FIRST. addTabbedWindow:ordered: silently refuses windows whose
+                # tabbingIdentifier differs, and the new window's is still AppKit's default here: the
+                # one mac/shell.py sets is applied by _mutate, which runs on the window's own
+                # shown/loaded event and so may not have fired yet. Copy the host's, which is the
+                # identity that matters for the group being joined.
+                if hasattr(new, "setTabbingIdentifier_"):
+                    new.setTabbingIdentifier_(hn.tabbingIdentifier())
+                hn.addTabbedWindow_ordered_(new, 1)   # NSWindowAbove — the new tab lands after the current one
+                new.makeKeyAndOrderFront_(None)
+                # …then tell every window in the group how tall the bar is. Delayed, because AppKit
+                # lays the tab bar out on a later pass of the run loop — read in this same turn it is
+                # not there yet. publish_tab_height touches nothing but that one CSS variable (the
+                # full titlebar re-measure crashes around a window still being shown — see its note).
+                _tab_heights_soon()
+            except Exception as exc:  # noqa: BLE001 — a window that won't tab is still a perfectly good window
+                print(f"[window] add tab: {exc}", file=sys.stderr)
+        # AS SOON AS THERE IS AN NSWINDOW TO MERGE — not once the page has loaded. Merging the instant
+        # create_window returns does nothing (no error, no group): `window.native` is still None then,
+        # which is the whole reason the first attempt at this failed silently. But it appears within a
+        # frame or two, long before the document does, so polling for it lands the tab in the group
+        # almost immediately. Waiting for `loaded` instead was measured at ~2.8s — a long pause after
+        # ⌘T with nothing on screen — and the tab appearing EMPTY for a moment while its page loads is
+        # the better trade (asked for explicitly). The window stays hidden until this merge shows it,
+        # so it is a tab from the first moment it is visible: never a separate window that then merges.
+        def try_join(attempt=0):
+            if _is_closed(window):
+                return   # closed while we were still waiting for its NSWindow — stop polling; there is nothing left to merge and a merge would resurrect it (see _is_closed)
+            if getattr(window, "native", None) is None:
+                if attempt < 100:   # ~5s at 50ms, then _show_if_hidden's fallback takes over
+                    threading.Timer(0.05, lambda: try_join(attempt + 1)).start()
+                return
+            AppHelper.callAfter(join)
+        try_join()
+    except Exception as exc:  # noqa: BLE001
+        print(f"[window] add tab: {exc}", file=sys.stderr)
+
+
+def _setup_window(window, api) -> None:
+    """Everything a document window needs beyond existing — the per-window half of what main() used to
+    do inline, now shared by the first window and every later one so the two cannot drift."""
+    api.set_window(window)
+    api._new_window = _new_document_window   # the bridge's "New Window", same call the menu makes
+    api._new_tab = lambda: _new_document_window(as_tab=True)   # …and its "New Tab" twin
+    api._broadcast = lambda code, api_self=api: _broadcast_js(code, exclude=api_self.window)   # app-wide UI state → every OTHER window
+    # …and the same call with NOTHING excluded, for a fact about the INSTALL rather than about a
+    # window's UI state: a tier that has just appeared on disk changes what every document window may
+    # offer, this one included.  The Model Manager shares its opener's `Api`, so `api.window` is the
+    # very document window that must hear about it — the exclusion above is exactly wrong there.
+    api._broadcast_all = lambda code: _broadcast_js(code)
+    _warn_on_unsaved_close(window, api)
+    _inject_path_info(window, api)           # window.__pathInfo — portable, both platforms
+
+    if IS_MAC:
+        from .mac import shell as mac_shell
+        mac_shell._set_dock_icon_on_show(window)   # show the app's own Dock icon at runtime
+        # The native Open Recent / About items resolve their target through the key-window provider
+        # installed in main(); this pair is only the fallback for before one exists.
+        mac_shell._recent_ctx.setdefault("window", window)
+        mac_shell._recent_ctx.setdefault("api", api)
+        api._recent_menu_refresh = lambda: mac_shell.refresh_recent_menu(*_recent_target_pair(window, api))
+        # Under SUD_CHROME=win this ONE piece is suppressed, and it has to be: it places the real
+        # traffic lights in-content and publishes --lights-cy/--lights-right, which the Fluent kit
+        # neither reads nor leaves room for. Leaving it on puts three macOS window buttons on top of a
+        # Windows title bar that draws its own caption buttons on the right — a chimera that
+        # misrepresents both platforms, which is worse than not offering the preview at all.
+        if _FORCED_CHROME != "win":
+            mac_shell._unify_titlebar_on_show(window, api)
+        mac_shell._enable_first_mouse()
+    elif IS_WIN:
+        from .win import shell as win_shell
+        win_shell.install(window, api)
+        # The in-window menu bar rebuilds its Open Recent flyout from api.recent_files() each time it
+        # opens (js/ui/menubar.js), so there is nothing to retain and nothing to refresh here — the
+        # native-NSMenu bookkeeping mac/shell.py needs exists only because pywebview has no rebuild API.
+    elif IS_LINUX:
+        from .linux import shell as linux_shell
+        linux_shell.install(window, api)   # live GTK3 theme watcher + a native Gtk.MenuBar built from menu_spec.MENUS, one per window — see app/linux/shell.py
+
+    with _WIN_LOCK:
+        _WINDOWS.append((window, api))
+    ev = getattr(getattr(window, "events", None), "closed", None)
+    if ev is not None:
+        try:
+            ev += (lambda *_a, _w=window: _forget_window(_w))   # …so a closed window stops being a candidate for _key_pair
+            if IS_MAC:
+                # …and the survivors re-read the tab bar: closing a tab can leave the group with one
+                # window and no bar at all, which frees 36px the page is still reserving. Delayed for
+                # the same reason the merge is — AppKit lays the change out a pass later.
+                ev += (lambda *_a: _tab_heights_soon())
+        except Exception:  # noqa: BLE001
+            pass
+
+
+def _show_if_hidden(window) -> None:
+    """Last resort for a tab that never joined its group: show it as an ordinary window rather than
+    leave the user with a document they cannot see. A no-op once the merge has ordered it front.
+
+    ⚠️ AND A NO-OP ONCE THE TAB HAS BEEN CLOSED — which is the case this timer got wrong, and the
+    whole of the "closing a tab brings up a blank window that can't be closed" bug. A tab closed
+    within its first six seconds (⌘T, look, ⌘W — the ordinary way anyone tries tabs out) left this
+    timer armed on a window pywebview had already gutted: `tabGroup()` is nil for a closed window and
+    `isVisible()` is False, so BOTH guards below read exactly as they do for a merge that never
+    happened, and the fallback dutifully ordered the empty husk front. See _is_closed for why that
+    husk exists and why it then refuses to close."""
+    try:
+        if _is_closed(window):
+            return
+        native = getattr(window, "native", None)
+        if native is None:
+            return
+        grp = native.tabGroup() if hasattr(native, "tabGroup") else None
+        if grp is not None and len(grp.windows() or []) > 1:
+            return   # it did become a tab; the merge showed it
+        if not native.isVisible():
+            from PyObjCTools import AppHelper
+
+            def show():
+                # Asked AGAIN, on the main thread. The read above is off a timer thread, so a close
+                # landing between it and this block would slip through; windowWillClose_ runs here,
+                # so on this thread the two cannot interleave.
+                if _is_closed(window):
+                    return
+                native.makeKeyAndOrderFront_(None)
+            AppHelper.callAfter(show)
+    except Exception as exc:  # noqa: BLE001
+        print(f"[window] show tab: {exc}", file=sys.stderr)
+
+
+def _broadcast_js(code: str, exclude=None) -> None:
+    """Run ``code`` in every document window except ``exclude``.
+
+    For the state that belongs to the APP rather than to one document — the options bar being open is
+    the first of them. Each window is its own page with its own frontend, so "shown in all tabs" has
+    to be said to each; there is no shared DOM. Off-thread per window, the shape every JS push in this
+    file uses (evaluate_js blocks on a completion the UI thread delivers)."""
+    for w, _a in list(_WINDOWS):
+        if w is exclude:
+            continue
+        threading.Thread(target=lambda _w=w: _eval_quiet(_w, code), daemon=True).start()
+
+
+def _eval_quiet(window, code: str) -> None:
+    try:
+        window.evaluate_js(code)
+    except Exception as exc:  # noqa: BLE001 — a window mid-teardown is not an error worth raising
+        print(f"[window] broadcast: {exc}", file=sys.stderr)
+
+
+def _publish_tab_heights() -> None:
+    """Tell every live document window how tall its tab bar is now (0 when it has none).
+
+    Called on a timer after a tab joins or leaves a group, and TWICE (see _tab_heights_soon): the
+    read is a race against AppKit's own tab-bar layout, which lands a pass later — and a machine busy
+    rendering the new tab's document can push that past the first timer. A window that reads too
+    early sees no bar, publishes --tabH:0, and keeps the untabbed layout; the window it happens to
+    is the PRE-EXISTING tab, since the new one is re-published by its own shown/loaded event.
+    Re-publishing is free where nothing moved (publish_tab_height dedupes against the last pair)."""
+    try:
+        from .mac import shell as _sh
+        for w, _a in list(_WINDOWS):
+            _sh.publish_tab_height(w)
+    except Exception as exc:  # noqa: BLE001
+        print(f"[window] tab height: {exc}", file=sys.stderr)
+
+
+def _tab_heights_soon() -> None:
+    """…and again once the bar has certainly been laid out. Two timers, not a poll: the second is a
+    no-op in the normal case, and the become-key handler in mac/shell.py is the backstop for the rest."""
+    threading.Timer(0.5, _publish_tab_heights).start()
+    threading.Timer(1.6, _publish_tab_heights).start()
+
+
+def _recent_target_pair(window, api):
+    """(window, api) for an Open Recent rebuild — the key window, falling back to the caller's own."""
+    win, a = _key_pair()
+    return (win, a) if win is not None else (window, api)
+
+
+def build_menu(api=None) -> list[Menu]:
     """Turn app/menu_spec.py's table into pywebview's declarative Menu tree.
 
     PORTABLE ON PURPOSE — this touches no AppKit at all: pywebview builds the NSMenu from these
     objects, and app/mac/shell.py's _wire_menu then decorates the live items with key equivalents
     and SF Symbols from the SAME table.  A row's `js` string is what the Windows in-window menu bar
-    invokes too, so neither platform owns a command."""
+    invokes too, so neither platform owns a command.
+
+    NO WINDOW IS CAPTURED HERE. There is one menu bar and now several document windows, so each
+    command resolves _key_pair() when it RUNS; the menu built at startup would otherwise drive the
+    first window forever. `api` is used only to read the recent-files list, which is app-wide state."""
     def js(code: str):
         def action():
+            win, _api = _key_pair()
+            if win is None:
+                return
             try:
-                window.evaluate_js(code)
+                win.evaluate_js(code)   # pywebview dispatches a MenuAction on its own thread (cocoa.py's handleMenuAction_), so this can't self-deadlock on the main run loop
             except Exception as exc:  # noqa: BLE001
                 print(f"[menu] {code!r} failed: {exc}", file=sys.stderr)
         return action
@@ -160,16 +469,20 @@ def build_menu(window, api=None) -> list[Menu]:
         we flip the Python mirror (drives the checkmark) and let the JS toggle apply + save it."""
         menu_spec.toggle_fs_toolbar_mirror()
         def run():
+            win, _api = _key_pair()
+            if win is None:
+                return
             try:
-                window.evaluate_js("window.__toggleFsAlwaysToolbar && __toggleFsAlwaysToolbar()")
+                win.evaluate_js("window.__toggleFsAlwaysToolbar && __toggleFsAlwaysToolbar()")
             except Exception as exc:  # noqa: BLE001
                 print(f"[menu] fs toolbar toggle failed: {exc}", file=sys.stderr)
         threading.Thread(target=run, daemon=True).start()   # off-thread → evaluate_js can't self-deadlock on the main thread
 
-    # The two rows the web layer cannot do alone: spawning a second PROCESS, and flipping the
+    # The two rows the web layer cannot do alone: opening another document window, and flipping the
     # Python-side mirror that draws the full-screen-toolbar checkmark.  Named in the table as
     # `action=`, resolved to a callable here.
-    natives = {"new_window": _spawn_new_window, "toggle_fs_toolbar": _toggle_fs_toolbar}
+    natives = {"new_window": lambda: _new_document_window(), "new_tab": lambda: _new_document_window(as_tab=True),
+               "toggle_fs_toolbar": _toggle_fs_toolbar}
 
     def _open_recent_items() -> list:
         """Build the Open Recent submenu from the persisted recent-files list.
@@ -239,6 +552,17 @@ def main(argv: list[str] | None = None):
         if arg.lower().endswith((".conllu", ".conll")) and os.path.exists(arg):
             api.path = os.path.abspath(arg)
             break
+    # …and with NO file named, reopen whatever the last window to close had open (Api.record_last_doc,
+    # written from the `closed` handler below). Only when nothing was named, so an explicitly opened
+    # document — a command-line path, a Finder double-click, a drop on the Dock icon — always wins.
+    # A window closed EMPTY records None and so starts the next launch empty, which is the way to ask
+    # for one. Nothing else is needed to restore the view: get_state already returns _saved_scroll for
+    # whatever path it loads, so the document comes back at the sentence it was left on.
+    # `--empty` opts out, for a command line that wants a blank window rather than last session's
+    # document. (File ▸ New Window no longer needs it: a second window is now made in-process by
+    # _new_document_window, which never runs this function and so is empty unless handed a path.)
+    if not api.path and "--empty" not in argv:
+        api.path = api.last_doc()
 
     # SUD_CHROME=win|mac — DEV PREVIEW ONLY: wear the other platform's chrome kit in a real native
     # window, so the Fluent skin can be looked at on a Mac without a Windows machine. The web layer
@@ -250,6 +574,8 @@ def main(argv: list[str] | None = None):
     _chrome = (os.environ.get("SUD_CHROME") or "").strip().lower()
     _forced = _chrome if _chrome in ("win", "mac") else ""
     _url = INDEX + (f"?platform={_forced}" if _forced else "")
+    global _WIN_URL, _FORCED_CHROME       # …so every later window opens the same document UI under the same chrome
+    _WIN_URL, _FORCED_CHROME = _url, _forced
 
     window = webview.create_window(
         "SUD Workbench",
@@ -258,49 +584,30 @@ def main(argv: list[str] | None = None):
         width=1240,
         height=820,
         min_size=(1200, 560),   # keep the unified toolbar on one line (incl. traffic-light inset + search bar)
-        # vibrancy is a Cocoa NSVisualEffectView and macOS-only; pywebview's winforms backend has no
-        # such argument, and Windows' equivalent (Mica) is a DWM attribute set in app/win/dwm.py.
-        **({"vibrancy": True} if IS_MAC else {}),
-        background_color="#1e1e1e",
+        # VIBRANCY OFF, DELIBERATELY. It is a Cocoa NSVisualEffectView (macOS-only; pywebview's
+        # winforms backend has no such argument, and Windows' equivalent, Mica, is a DWM attribute set
+        # in app/win/dwm.py) — and asking for it bought this app nothing but a flicker. The page paints
+        # an opaque --content-bg over the whole window, so the material is never visible once a
+        # document is up: an A/B of the loaded window with it on and off is PIXEL-IDENTICAL (worst
+        # channel delta 0 across 3.9M pixels). What it did do was own the window for the ~85ms between
+        # its own layout and the page's first paint, which is the semitransparent dip a loading tab
+        # showed — white → glass → white. Off, the window is the appearance-matched colour from
+        # app/appearance.py right through to the first paint.
+        **({"vibrancy": False} if IS_MAC else {}),
+        background_color=appearance.window_bg(),   # …the same for the first window, which is created before webview.start() and so before there is an NSApp to ask
         text_select=True,
     )
-    api.set_window(window)
-    # "New Window" needs a PROCESS, which only the shell can spawn — handed to the bridge the same
-    # way the titlebar re-measure and recent-menu refresh are, so api.py stays free of shell code.
-    api._new_window = _spawn_new_window
-    _warn_on_unsaved_close(window, api)
-    _inject_path_info(window, api)   # window.__pathInfo — portable, both platforms
-
     if IS_MAC:
         from .mac import shell as mac_shell
-        mac_shell._set_dock_icon_on_show(window)   # show the app's own Dock icon at runtime
-        # let the api's recent-file recording live-rebuild the native Open Recent submenu
-        mac_shell._recent_ctx["window"] = window
-        mac_shell._recent_ctx["api"] = api
-        api._recent_menu_refresh = lambda: mac_shell.refresh_recent_menu(window, api)
-        # Under SUD_CHROME=win this ONE piece is suppressed, and it has to be: it places the real
-        # traffic lights in-content and publishes --lights-cy/--lights-right, which the Fluent kit
-        # neither reads nor leaves room for. Leaving it on puts three macOS window buttons on top of a
-        # Windows title bar that draws its own caption buttons on the right — a chimera that
-        # misrepresents both platforms, which is worse than not offering the preview at all.
-        if _forced != "win":
-            mac_shell._unify_titlebar_on_show(window, api)
-        else:
+        mac_shell.set_key_provider(_key_pair)   # …so the native Open Recent / About / delegate items act on the KEY window, not on this first one
+        mac_shell.set_new_tab_handler(lambda: _new_document_window(as_tab=True))   # ⌘T and the tab bar's + button
+        if _forced == "win":
             print("[chrome] SUD_CHROME=win — Fluent kit in a native window; macOS titlebar "
                   "unification skipped. The NSMenu is still macOS's, but its AppKit wiring rides "
                   "along with the unification and is skipped too, so this preview has no menu key "
                   "equivalents and no injected Cut/Copy/Paste. Mica/caption buttons are not "
                   "wired here (that is app/win/, and it needs Windows).", file=sys.stderr)
-        mac_shell._enable_first_mouse()
-    elif IS_WIN:
-        from .win import shell as win_shell
-        win_shell.install(window, api)
-        # The in-window menu bar rebuilds its Open Recent flyout from api.recent_files() each time it
-        # opens (js/ui/menubar.js), so there is nothing to retain and nothing to refresh here — the
-        # native-NSMenu bookkeeping mac/shell.py needs exists only because pywebview has no rebuild API.
-    elif IS_LINUX:
-        from .linux import shell as linux_shell
-        linux_shell.install(window, api)   # no-op today — native GTK title bar/menu land in later phases
+    _setup_window(window, api)   # the same per-window wiring every LATER window gets — see _new_document_window
 
     # The DECLARATIVE menu is macOS-only. It is the same table either way (app/menu_spec.py), but on
     # Windows the menu is drawn by the web layer INSIDE the title bar, and handing pywebview a menu
@@ -321,7 +628,7 @@ def main(argv: list[str] | None = None):
     # The setting is written unconditionally: only the cocoa backend reads it (winforms has no
     # default menus at all), and the answer would be "no" on any backend that later did.
     webview.settings["SHOW_DEFAULT_MENUS"] = False
-    menu = build_menu(window, api) if IS_MAC else []
+    menu = build_menu(api) if IS_MAC else []
     # trace window teardown so a "vanished window" is attributed: did a close event fire, or did
     # the run loop just end? (logged to crash.log alongside the faulthandler/exception hooks)
     for _evname in ("closing", "closed"):
@@ -424,6 +731,10 @@ def _warn_on_unsaved_close(window, api):
             # close_all_child_windows' {"ok": …} dict raises "unhashable type: 'dict'" and dumps a
             # traceback on every close.  The teardown itself still ran — the add() is what blew up —
             # but the noise is real, so swallow the result here.
+            try:
+                api.record_last_doc()   # …and remember this window's document (or that it had none) for the next launch — see main()'s startup fallback
+            except Exception as exc:  # noqa: BLE001 — a state-write hiccup must never hold up a close
+                print(f"[state] last document: {exc}", file=sys.stderr)
             api.close_all_child_windows()
         events.closed += _close_children
 

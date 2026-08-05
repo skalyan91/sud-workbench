@@ -36,7 +36,7 @@ function renumberAfterDelete(i,delSid){ let target=delSid, expected=bumpSid(delS
     DOC[j].sid=target; target=expected; expected=bumpSid(expected); } }
 function insertAt(index){ openSheet(sheetInsert(index)); }   // items 23/24: the "Insert text" dialog, inserting BEFORE block `index` — the same sheet the toolbar's + and ⌘T open (addTextSheet), which was a native child window until the two paths were merged. It reads insertCtx() (js/io/bridge.js) itself: whether to offer a language picker, and which translation languages a parallel text may be written in
 function doInsert(index,text){ pushUndo(); const sid=autoInsertSid(index), tokens=buildTokens(text);
-  DOC.splice(index,0,{sid,text:text.trim(),tokens}); cascadeSids(index); sel={s:index,t:1};
+  DOC.splice(index,0,{sid,text:text.trim(),tokens}); cascadeSids(index); sel={s:index,t:0};   // the BLOCK, not its first token — the bridge-backed doInsert (js/io/bridge.js) states the reasoning; the two paths must not leave different selections behind for the same command
   if(typeof invalidateColW==="function") invalidateColW();   // a new sentence shifts every following sentence's margin numbering (marginNumWidth) — simplest to rescan wholesale rather than reason about how far the shift reaches
   if(typeof invalidateDiaCache==="function") invalidateDiaCache();   // …and shifts every following sentence's INDEX — js/core/document.js's notation-switch cache is keyed on si, and a splice makes every si past `index` name a different sentence than whatever was cached under it
   morphAfterReparse(DOC[index]);   // the new tokens carry no MSeg/MGloss — seed the morphemic tiers the same way every other sentence got them (no FEATS here, so MSeg seeds from the forms and MGloss stays empty), inside this same undo step
@@ -59,6 +59,95 @@ function moveSent(from,to){ if(to<0||to>DOC.length)return; pushUndo(); if(from<t
   if(typeof invalidateColW==="function") invalidateColW();   // reordering shifts the margin numbering of everything between the old and new position
   if(typeof invalidateDiaCache==="function") invalidateDiaCache();   // …and every si between the old and new position now names a different sentence — see doInsert's own note on why this cache can't tolerate that the way colW does
   refresh(); }
+/* ── SENTENCE-RANGE OPERATIONS ────────────────────────────────────────────────────────────────────────────────
+   Delete and merge both act on the shift-selected range (js/core/prefs.js's blockRange) when there is one, and
+   on the focused sentence alone when there is not — so the same ⌘⌫ that always deleted one sentence deletes six
+   when six are selected, and no second command had to be invented for it. */
+function delSents(lo,hi){ pushUndo();
+  const sids=[]; for(let k=lo;k<=hi;k++) if(DOC[k]) sids.push(DOC[k].sid);
+  DOC.splice(lo,hi-lo+1);
+  // Renumber ONCE, from the first hole, rather than per sentence: renumberAfterDelete walks everything after
+  // the index it is given, so calling it in a loop would walk the tail of the document once per deletion.
+  if(AUTONUM) renumberAfterDelete(lo,sids[0]);
+  clearBlockRange();
+  sel=DOC.length?{s:Math.min(lo,DOC.length-1),t:1}:{s:-1,t:0};
+  if(typeof setCurBlock==="function") setCurBlock(sel.s);
+  if(typeof invalidateColW==="function") invalidateColW();
+  if(typeof invalidateDiaCache==="function") invalidateDiaCache();
+  refresh(); }
+/* Join DOC[lo..hi] into one sentence.
+   THE LATER ROOTS BECOME `parataxis`, not a second `root`. CoNLL-U allows exactly one root per sentence, so
+   simply concatenating would produce a file the app's own validator rejects — and `parataxis` is what SUD (and
+   UD before it) uses for clauses set side by side without one governing the other, which is precisely what two
+   sentences pushed together are. The relation is a real one in DEPREL_DEFAULT, so it round-trips and can be
+   re-labelled by hand afterwards if the annotator wants something else.
+   Everything that carries a token id moves with the tokens: heads, the enhanced DEPS graph, multi-word-token
+   ranges (and the range string in their raw `_cols`), and empty nodes with their own decimal ids. That list is
+   the same one remapTokenRefs documents for the within-sentence case; here the shift is uniform, so it is done
+   directly rather than through a map.
+   ⚠ NOT called `mergeSents`, which is the bridge-level command in js/io/bridge.js. These files share ONE global
+   scope, so a `function mergeSents` here and a `window.mergeSents=` there are the same binding — the assignment
+   wins (it runs later) and the command's own `mergeSents(r.lo,r.hi)` call would have recursed into itself
+   forever. `delSents`/`window.deleteSent` escaped it only by accident of naming. */
+function mergeSentRange(lo,hi){
+  if(hi<=lo||!DOC[lo]||!DOC[hi]) return;
+  pushUndo();
+  const first=DOC[lo];
+  const rootOf=s=>{ const k=(s.tokens||[]).findIndex(t=>String(t.head)==="0"); return k<0?0:k+1; };
+  const firstRoot=rootOf(first);
+  for(let n=hi-lo;n>0;n--){
+    const s=DOC[lo+1]; if(!s){ break; }
+    const off=first.tokens.length;
+    (s.tokens||[]).forEach(t=>{
+      const h=parseInt(t.head,10);
+      if(!isNaN(h)&&h>0) t.head=String(h+off);
+      else { t.head=String(firstRoot||1); if(!t.deprel||t.deprel==="root") t.deprel="parataxis"; }
+      if(t.deps&&t.deps!=="_") t.deps=shiftDeps(t.deps,off,firstRoot||1);
+    });
+    (s.mwt||[]).forEach(m=>{ m.from+=off; m.to+=off;
+      if(m._cols) m._cols[0]=m.from+"-"+m.to; });
+    (s.empties||[]).forEach(e=>{ e.after=(e.after||0)+off;
+      if(e.id!=null){ const parts=String(e.id).split("."); parts[0]=String((parseInt(parts[0],10)||0)+off); e.id=parts.join("."); }
+      // An empty node is a full ten-column row kept verbatim: its ID is column 0 and its edges are column 8
+      // (HEAD, column 6, is "_" for an empty node — it exists only in the enhanced graph). Shifting the id and
+      // leaving the edges behind would have left every empty node pointing at whatever token now holds its old
+      // head's number, which after a merge is a different word in a different clause.
+      if(e._cols){ e._cols[0]=String(e.id);
+        if(e._cols[8]&&e._cols[8]!=="_") e._cols[8]=shiftDeps(e._cols[8],off,firstRoot||1); } });
+    first.tokens=first.tokens.concat(s.tokens||[]);
+    first.mwt=(first.mwt||[]).concat(s.mwt||[]);
+    first.empties=(first.empties||[]).concat(s.empties||[]);
+    const a=(first.text||"").trim(), b=(s.text||"").trim();
+    first.text=a&&b?(a+" "+b):(a||b);
+    // The first sentence keeps its own id, comments and translations: it is the one that survives, and a merge
+    // is not a new sentence. The absorbed sentence's `# text` is the only thing that has to come across.
+    DOC.splice(lo+1,1);
+  }
+  delete first._tsp; delete first._stxWB; delete first.orthoLine;   // every cached alignment/rendering is about the OLD text
+  clearBlockRange();
+  sel={s:lo,t:1};
+  if(typeof setCurBlock==="function") setCurBlock(lo);
+  if(typeof invalidateColW==="function") invalidateColW();
+  if(typeof invalidateDiaCache==="function") invalidateDiaCache();
+  markDirty(); refresh();
+  if(typeof toast==="function") toast("Merged "+(hi-lo+1)+" sentences"); }
+/* Shift every token id inside an enhanced-DEPS string ("3:nsubj|5.1:comp:obj") by `off`. Empty-node ids carry a
+   decimal part, which shifts on its integer half only — the same rule the empty nodes themselves take above.
+   `newRoot` re-points head 0, which does NOT shift and must not simply survive: the enhanced graph allows one
+   root per sentence exactly as the basic layer does, so an absorbed sentence's `0:root` has to become the same
+   `parataxis` on the first sentence's root that its basic head became — otherwise a merge produces a file whose
+   basic layer validates and whose DEPS column carries two roots. Omit it (as delSents' callers do) to leave
+   head 0 alone. */
+function shiftDeps(deps,off,newRoot){
+  return String(deps).split("|").map(p=>{
+    const i=p.indexOf(":"); if(i<0) return p;
+    const id=p.slice(0,i), rel=p.slice(i+1), parts=id.split(".");
+    const head=parseInt(parts[0],10);
+    if(isNaN(head)) return p;
+    if(head===0 && newRoot) return String(newRoot)+":"+(rel==="root"?"parataxis":rel);
+    parts[0]=String(head>0?head+off:head);
+    return parts.join(".")+":"+rel;
+  }).join("|"); }
 function delSent(i){ pushUndo(); const delSid=DOC[i]&&DOC[i].sid; DOC.splice(i,1);
   if(AUTONUM) renumberAfterDelete(i,delSid);   // keep the numbering continuous across the deletion
   sel=DOC.length?{s:Math.min(i,DOC.length-1),t:1}:{s:-1,t:0};
@@ -74,7 +163,51 @@ function insertToken(si,pos){ pushUndo(si); if(typeof touchColW==="function") to
   toks.splice(pos,0,tok("","","X","","",0,"root"));   // sensible defaults (UPOS X, head 0 = root, so deprel "root" to match)
   remapMWT(s,toks);   // renumber onto the original components → an edge insert stays outside the MWT
   remapTokenRefs(s,idMapAfter(oldIds,toks));   // every token survives an insert, so nothing is dropped — the ids after `pos` simply move up, and DEPS / empty-node anchors move with them
-  sel={s:si,t:pos+1}; refresh(); }
+  sel={s:si,t:pos+1}; refresh(); focusNewToken(si,pos+1); }
+/* PUT THE CARET IN THE NEW TOKEN'S FORM FIELD. An inserted token is empty by construction — that is
+   what makes it an insert rather than a copy — so there is exactly one thing the user can do next,
+   and leaving them to hunt for a zero-width glyph to click is the app declining to do it for them.
+   AFTER the render, not before: `refresh()` rebuilds the block, so a field focused first is detached
+   by the time the user types into it. One frame is enough — `refresh` is synchronous, and the rAF
+   simply lets the layout it triggered settle before `makeEditable` measures the element.
+   `editNodeInline` rather than a bare `.focus()`, because it is the one entry point that knows WHICH
+   element is the form field in the current notation (a goeswith continuation has its own; under a
+   Sanskrit script the editable field is the row beneath the glyph) and it wires up the tier
+   navigation, the ITRANS conversion and `afterFormEdit` on commit — none of which a raw focus does.
+   It falls back to the grid cell by itself when no node is drawn, so the outline and grid views are
+   covered without a second path here.
+   IT WAITS FOR THE RENDER RATHER THAN ASSUMING A FRAME. `refresh()` does not necessarily paint
+   synchronously — a rAF-scheduled rebuild is the normal path — so a single rAF here opened the
+   editor over the PRE-INSERT diagram and the rebuild that followed took the focus straight back. The
+   loop below waits for the new token's own element to exist before touching anything, and gives up
+   after a few frames rather than spinning: failing to focus is a small disappointment, and holding a
+   callback alive against a document the user has moved on from is not. */
+function focusNewToken(si,tokId){
+  if(typeof editNodeInline!=="function") return;
+  let tries=0;
+  const attempt=()=>{ const s=DOC[si];
+    if(!s||tokId<1||tokId>s.tokens.length) return;
+    if(s.tokens[tokId-1].form) return;   // not the empty token we just made (an intervening edit) → leave the user alone
+    const drawn=(typeof formElOf==="function") ? formElOf(si,tokId) : null;
+    if(!drawn && ++tries<8){ requestAnimationFrame(attempt); return; }   // the rebuild hasn't landed yet
+    if(document.querySelector(".nodeedit")) return;   // an editor is already open (the user got there first)
+    /* SCROLL TO IT FIRST, and this is load-bearing rather than a courtesy. `makeEditable` hides its
+       field outright when the token it covers is clipped out of view (elClippedOut → visibility:
+       hidden), and focus() on a hidden element is a no-op in every browser — so inserting a token
+       below the fold opened an editor that was invisible AND unfocused, which is worse than not
+       opening one. Revealing the token first means the field is visible by the time it is focused.
+       revealTok is the same call the tier navigation uses when arrow-keying onto an off-screen
+       token, so an inserted token arrives the way a navigated-to one does — and the editor opens a
+       FRAME LATER, because `place()` measures the token's position and the scroll revealTok asks for
+       has not been applied yet when it returns. Measured: an inserted token's form element sat 5px
+       above the .diagram scroller's top edge, which is enough for the containment test to call it
+       clipped, and opening the editor in the same turn read that stale position. */
+    if(typeof revealTok==="function") revealTok(si,tokId);
+    requestAnimationFrame(()=>{ const s2=DOC[si];
+      if(!s2||tokId<1||tokId>s2.tokens.length||s2.tokens[tokId-1].form) return;
+      if(document.querySelector(".nodeedit")) return;
+      editNodeInline(si,tokId); }); };
+  requestAnimationFrame(attempt); }
 /* ── RE-INDEXING WHAT THE HEAD COLUMN ISN'T ────────────────────────────────────────────────────────────────────
    Three things carry token ids besides `head`, and no structural edit used to touch any of them:
      · a token's DEPS — the enhanced graph, "3:nsubj|5.1:comp:obj". Authoritative whenever it came from a file:
@@ -145,7 +278,28 @@ function deleteToken(si,idx){ const s=DOC[si]; if(s.tokens.length<=1)return toas
    them, so an enhanced arc into one of them still has somewhere to land. */
 function mergeTokens(si,from,to){ const s=DOC[si]; if(!s)return; const toks=s.tokens;
   if(!(to>from)||from<1||to>toks.length) return toast("Select two or more adjacent tokens to merge");
-  if(!isSpacelessLang()) return toast("Merging is for languages written without spaces — use a goeswith relation instead");   // guarded HERE too, not just on the menu rows: this is the one entry point every caller shares
+  /* ⚠ THE GATE IS "NO INTERVENING SPACE", NOT "A SPACELESS LANGUAGE" — the condition itself rather than a
+     proxy for it. It used to refuse outside `SPACELESS_LANGS`, which asked the wrong question in both
+     directions: it forbade merging `do`+`n't` in English, where the two are written solid and a merge takes
+     nothing away, and it would have allowed one across a real space in Chinese. What actually matters is
+     whether the sentence puts a space between the tokens, which every file states per token — MISC
+     `SpaceAfter=No` — so the test is that, per adjacent pair, and no language list is consulted at all.
+     WHAT THE TEST BUYS is the invariant the old restriction bought by accident: a merge changes no CHARACTER
+     of the sentence. With the components written solid their concatenation is the substring `# text` already
+     holds, so the running line needs nothing spliced and cannot come to disagree with the tokens. Across a
+     space it would, which is the real reason to decline there — `goeswith` annotates that split without
+     destroying anything, and it is what UD asks for.
+     …AND INSIDE ONE MULTI-WORD TOKEN the pairs are solid by construction: the components are pieces of ONE
+     orthographic word whose surface the RANGE spells, so the line never spelt them apart to begin with.
+     remapMWT shrinks the range around the survivor (and drops it if only one piece is left). */
+  if(!mergeIsSolid(s,from,to)) return toast("Only tokens written with no space between them can be merged — use a goeswith relation across a space");   // guarded HERE too, not just on the menu rows: this is the one entry point every caller shares
+  const inOneMWT=(s.mwt||[]).some(m=>from>=m.from&&to<=m.to);
+  /* The components' PAUSA forms, for the Sanskrit fusion below — MISC `Unsandhied` where there is one, the
+     form otherwise, which is the rule app/sa_notation.py's csl_forms follows for the same reason: feeding a
+     sandhied surface back through a sandhi generator applies the rules twice. Read BEFORE the splice, while
+     the components still exist. */
+  const saPausa=(inOneMWT&&isSanskritLang())?toks.slice(from-1,to).map(t=>miscKV(t.misc,"Unsandhied")||t.form||""):null;
+  const saLemmas=saPausa?toks.slice(from-1,to).map(t=>((t.lemma&&t.lemma!=="_")?t.lemma:"")):null;
   pushUndo(si); if(typeof touchColW==="function") touchColW(si,si+1);
   const oldIds=new Map(); toks.forEach((t,i)=>oldIds.set(t,i+1));
   toks.forEach(t=>{const h=parseInt(t.head,10); t._ht=(h>=1&&h<=toks.length)?toks[h-1]:0;});   // heads by identity
@@ -165,17 +319,36 @@ function mergeTokens(si,from,to){ const s=DOC[si]; if(!s)return; const toks=s.to
   remapTokenRefs(s,idMapAfter(oldIds,toks,from));   // `from` is the survivor's id: every consumed component's DEPS references and empty-node anchors fold onto it
   if(survivor.deps&&survivor.deps!=="_"){ const kept=survivor.deps.split("|").filter(p=>{ const i=p.indexOf(":"); return i<0||p.slice(0,i)!==String(from); });
     survivor.deps=kept.length?kept.join("|"):"_"; }   // …which can leave a SELF-LOOP where one consumed component had an enhanced arc to another. It described a relation inside a word that no longer has an inside
-  /* `# text` is deliberately NOT respliced, though afterFormEdit would on an ordinary form edit: the tokeniser
-     split a string the file spells correctly, so the running sentence still says exactly what it said. And
-     afterFormEdit's other half — a background re-parse of the edited token — is the one operation guaranteed to
-     split the survivor straight back apart. The transliteration caches cleared above refill on the render below. */
+  /* `# text` is deliberately NOT respliced, and the gate above is what makes that safe rather than merely
+     convenient: with no space between any two components, their concatenation is the substring the line
+     already holds, so the sentence still says exactly what it said. Nor is afterFormEdit's other half done —
+     a background re-parse of the survivor, which is the one operation guaranteed to split it straight back
+     apart. The transliteration caches cleared above refill on the render below. */
   const n=to-from+1;
   markDirty(); selRange=null; sel={s:si,t:from}; preserveScroll(renderDoc);
   if(typeof pick==="function") pick(si,from,false);
   if(show.translit&&typeof fillTranslit==="function") fillTranslit();
+  /* …and in SANSKRIT, INSIDE A RANGE, the surface is not the concatenation: components are stored in pausa
+     and two of them written as one are written with the sandhi between them (`sat`+`ādi` → `sadādi`).
+     ⚠ ONLY inside a range, because that is the one place the app DERIVES the spelling rather than reading it:
+     a standalone token's form is what `# text` says it is (which is why the concatenation is safe there), and
+     re-deriving it by sandhi would put a spelling in the file that the line contradicts. Inside a range the
+     line spells the RANGE, whose own re-fusion sandhiMwtForms owns. Fire-and-forget off the bridge, exactly
+     as that call is — the concatenation stands in until it lands, and is the answer if it never does. */
+  if(saPausa&&typeof sandhiMergeForm==="function") sandhiMergeForm(si,from,saPausa,saLemmas);
   toast(`${n} tokens merged into one — check its lemma and features`); }
+/* Is the run `from..to` written SOLID — no space anywhere between two of its tokens? The one question Merge
+   turns on. `SpaceAfter=No` states it per token, so no language list is consulted; two pieces of ONE
+   multi-word token are solid by construction (the line spells the range, never the pieces), and the gap after
+   a range is recorded on the RANGE's own line rather than on its last component — which is what a pair
+   straddling a range's edge has to be asked about. */
+function mergeIsSolid(s,from,to){ if(!s||!s.tokens) return false; const mwt=s.mwt||[];
+  const at=k=>mwt.find(m=>k>=m.from&&k<=m.to);
+  for(let i=from;i<to;i++){ const a=at(i);
+    if(a&&a===at(i+1)) continue;
+    if(!spaceAfterNo(a?{misc:(a._cols&&a._cols[9])||""}:s.tokens[i-1])) return false; }
+  return true; }
 window.mergeTokensShortcut=function(){ if(sel.s<0) return;
-  if(!isSpacelessLang()) return toast("Merging is for languages written without spaces — use a goeswith relation instead");
   if(selRange&&selRange.s===sel.s&&selRange.to>selRange.from) mergeTokens(sel.s,selRange.from,selRange.to);
   else toast("Select two or more tokens (shift-click their id cells) to merge"); };
 function reorderToken(si,from,to){ const s=DOC[si],toks=s.tokens; if(from===to||from===to-1)return; pushUndo(si); if(typeof touchColW==="function") touchColW(si,si+1);
@@ -218,7 +391,14 @@ function setAsRoot(si,tokId){ const s=DOC[si]; if(!s||tokId<1||tokId>s.tokens.le
   xt.head="0"; syncSharedFeat(xt,s); xt.deprel=withDepBase(xt.deprel,"root");
   // Task B: no regenTok — re-rooting is purely structural and must never trigger a gloss/MGloss recompute (see
   // the matching note on setDiagramHead, js/diagram/diagram-edit.js).
-  markDirty(); sel={s:si,t:tokId}; preserveScroll(renderDoc); pick(si,tokId,false); toast(`Token ${tokId} is now the root`); }
+  /* ⚠ RE-ROOTING DOES NOT SELECT. Selecting a node is a READER's gesture — a click, or a rectangle
+     drag — and no command may make one on their behalf: reached from the right-click menu (or the
+     relation chooser's "root" row, which delegates here), this used to move the selection onto
+     whatever token was under the cursor, so a menu invoked on one token silently deselected another.
+     The command is structural and says nothing about what the reader is looking at. `sel` and pick()
+     are therefore left exactly as they were; only the re-render remains, which is all the screen
+     needs. */
+  markDirty(); preserveScroll(renderDoc); toast(`Token ${tokId} is now the root`); }
 // re-attach `tokId` to the previous/next valid head in token order (dir<0 = previous) — skips itself and its own subtree
 function stepHead(si,tokId,dir){ const s=DOC[si]; if(!s||tokId<1||tokId>s.tokens.length)return; const toks=s.tokens, dep=toks[tokId-1];
   if(depBase(dep.deprel)==="root")return toast("The root has no head");
@@ -485,12 +665,18 @@ function selMWTof(s){ if(!s)return null; const multi=selRange&&selRange.s===sel.
 function menuState(){ const has=sel.s>=0&&sel.t>0, s=has?DOC[sel.s]:null;
   const multi=!!(selRange&&selRange.s===sel.s&&selRange.to>selRange.from);
   const formsMWT=!!selMWTof(s);            // the selected tokens already form / sit inside an MWT
-  const inmwt=has&&!!mwtAtSel(s,sel.t);
+  const isRange=multi&&!!(s&&(s.mwt||[]).some(m=>m.from===selRange.from&&m.to===selRange.to));   // …and they ARE one, exactly
   return {has, zone:has?UIZONE:"", rtl:!!(s&&sentRTL(s)),
           group:multi&&!formsMWT,          // Group: only a fresh multi-token selection that isn't already an MWT
-          merge:multi&&!formsMWT&&isSpacelessLang(),   // Merge: Group's selection, narrowed to the languages a segmenter can mis-split (SPACELESS_LANGS in js/core/state.js) — elsewhere a wrongly split word is a stray space in the file, which `goeswith` annotates rather than destroys. A selection that already forms an MWT has Flatten instead, the same collapse with the range's own surface form
-          ungroup:formsMWT, flatmwt:formsMWT,   // Ungroup / Flatten: only when the selection forms (or sits in) an MWT
-          convmwt:has&&!multi&&!inmwt,      // Split: only a single, un-grouped token
+          merge:multi&&!formsMWT&&mergeIsSolid(s,selRange.from,selRange.to),   // Merge: Group's selection, narrowed to a run written with no space in it — the condition itself, in any language (see mergeTokens). A selection that already forms an MWT has Flatten instead, the same collapse with the range's own surface form
+          /* …and Flatten / Ungroup need the selection to BE the range, not merely to sit inside one — matching
+             the context menu, where those two are the multi-word token's OWN controls and a component's menu
+             carries none of them (mwtTokenItems). They act on the range, so what has to be selected is the
+             range: shift-select its tokens, or right-click its form. `formsMWT` was the looser test, true for
+             any single component, which is what put the range's controls on a token's menu in the first place. */
+          ungroup:isRange, flatmwt:isRange,
+          convmwt:has&&!multi,              // Split: a single token — INCLUDING one already inside a range, which divides that component in place and grows the range around it (convertTokenToMWT's `host` branch) rather than being a second, nested multi-word token
+
           foreign:has&&selHasFeat("Foreign"), typo:has&&selHasFeat("Typo"),
           reported:has&&isReported(s.tokens[(selRange&&selRange.s===sel.s&&selRange.to>selRange.from?rangeHead(s,selRange.from,selRange.to):sel.t)-1]),   // item 7: the checkmark reflects the node the command would actually write to — the head of the selection
    // items 2/3: the native Edit-menu rows are checkable — the checkmark mirrors the selection's current marker FEATS

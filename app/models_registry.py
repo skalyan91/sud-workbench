@@ -37,6 +37,18 @@ GITHUB_API = f"https://api.github.com/repos/{SUD_REPO}/releases"
 # Wiktionary → MGloss lookup for every language, and nothing in that feature's UI would connect the
 # two, so it reads as the definition lookup having quietly broken.
 BUNDLED_SUD = {"en_sud_ewt"}
+# Models the release still carries but this app no longer supports, hidden from the Model Manager.
+# `sa_sud_vedic_ufal_csl` reads and writes Clay-Sanskrit-Library notation — a `# text` whose sandhi
+# is MARKED rather than undone, so no token form is a substring of the running sentence. Supporting
+# it meant a whole reversal engine (`app/sa_csl.py` + its vendored transform) to recover the spans
+# that notation destroys. `sa_sud_vedic_ufal_dcs` supersedes it: it takes ordinary IAST or
+# Devanagari, keeps CSL strictly internal, and publishes real source offsets, so the app aligns
+# Sanskrit by literal match like every other language. Both were listed for a while; leaving the old
+# one selectable would offer a model whose output this app can no longer read. Filtered rather than
+# deleted from the release, because an asset that exists and is unlisted is a decision we can revisit
+# — and because a user who has it INSTALLED still sees it (`list_installed` is a separate scan), so
+# it can be removed rather than silently orphaned.
+DEPRECATED_SUD = {"sa_sud_vedic_ufal_csl"}
 # Per-model UAS/LAS accuracy: SUD scores live in the repo README's scores table; Stanza (UD) scores
 # come from the official performance page.  Both are fetched + cached (TTL) and re-fetched on refresh.
 SUD_README_URL = f"https://raw.githubusercontent.com/{SUD_REPO}/main/README.md"
@@ -434,7 +446,7 @@ def list_available(refresh: bool | str = False) -> list[dict]:
     for rel in _fetch_releases(refresh):
         for asset in rel.get("assets", []):
             entry = parse_asset(asset.get("name", ""))
-            if not entry:
+            if not entry or entry["package"] in DEPRECATED_SUD:
                 continue
             entry["asset_url"] = asset.get("browser_download_url")
             entry["size"] = asset.get("size")
@@ -778,10 +790,68 @@ def _parse_install_steps(msg: str) -> list[list[str]]:
     return steps
 
 
-def _ensure_tokenizer_deps(package: str, progress=None) -> dict:
+def _unsatisfied_requirements(wheel: str) -> list[str]:
+    """The wheel's own ``Requires-Dist`` specs that this environment does not already satisfy.
+
+    Until the Chinese char-segmenter landed, every SUD model needed nothing but spaCy, so
+    :func:`download` could pass ``--no-deps`` and stop thinking about it. ``zh_sud_gsd_simp_trad``
+    now declares ``jieba>=0.42.1`` — a genuine runtime import, not an optional backend — and the
+    flag dropped it silently, leaving a correctly pip-installed model that raised
+    ``ModuleNotFoundError`` the moment anything loaded it.
+
+    ``--no-deps`` still earns its place: without it pip re-resolves spaCy and its whole tree INTO
+    the extras dir, where the copy would shadow the core venv's. So rather than drop the flag, we
+    honour the declaration ourselves — read what the wheel asks for, discard what is already
+    satisfied, and install only the remainder. spaCy itself is never installed here for that same
+    shadowing reason; a model needing a newer spaCy than the core pins is a packaging error we want
+    surfaced as a load failure, not papered over with a second copy on ``sys.path``.
+    """
+    import importlib
+    import zipfile
+    from importlib.metadata import PackageNotFoundError
+    from importlib.metadata import version as dist_version
+    try:
+        from packaging.requirements import InvalidRequirement, Requirement
+    except ImportError:      # packaging comes in with spaCy; without it, decline rather than guess
+        return []
+    try:
+        with zipfile.ZipFile(wheel) as z:
+            name = next(n for n in z.namelist() if n.endswith(".dist-info/METADATA"))
+            meta = z.read(name).decode("utf-8", "replace")
+    except Exception:        # noqa: BLE001 — unreadable wheel: the install itself will report it
+        return []
+    importlib.invalidate_caches()   # EXTRAS_DIR was just added to sys.path by extras.activate()
+    out: list[str] = []
+    for line in meta.splitlines():
+        if not line.startswith("Requires-Dist:"):
+            continue
+        spec = line.split(":", 1)[1].strip()
+        try:
+            req = Requirement(spec)
+        except InvalidRequirement:
+            continue
+        if req.marker is not None and not req.marker.evaluate():
+            continue         # e.g. `; sys_platform == "win32"` evaluated on macOS
+        if req.name.lower() == "spacy":
+            continue
+        try:
+            have = dist_version(req.name)
+        except PackageNotFoundError:
+            have = None
+        if have is not None and (not req.specifier
+                                 or req.specifier.contains(have, prereleases=True)):
+            continue
+        out.append(spec)
+    return out
+
+
+def _ensure_tokenizer_deps(package: str, progress=None, declared=()) -> dict:
     """After a SUD model is installed, make sure its raw-text tokeniser dependency is
     present by probing the model and running whatever install steps its ImportError
-    declares (pip installs into this venv + any data-fetch console script it provides)."""
+    declares (pip installs into this venv + any data-fetch console script it provides).
+
+    ``declared`` is the wheel's own unsatisfied ``Requires-Dist`` list, used as a fallback when the
+    ImportError carries no runnable command — see the note at that branch."""
     import importlib
     venv_bin = os.path.dirname(sys.executable)
     env = dict(os.environ)
@@ -796,6 +866,15 @@ def _ensure_tokenizer_deps(package: str, progress=None) -> dict:
             return {"ok": True}
         except ImportError as exc:
             steps = _parse_install_steps(str(exc))
+            if not steps and declared:
+                # The message carried no runnable command. Reading prose is the weaker contract of
+                # the two and only ever worked because spaCy writes helpful errors ("spacy-pkuseg
+                # not installed. … `pip install …`"); a tokeniser bundled in the model wheel just
+                # does `import jieba` and raises a bare ModuleNotFoundError, which says what is
+                # missing but not how to get it. So fall back to what the wheel DECLARED — a
+                # statement of fact rather than a sentence to be parsed.
+                steps = [[sys.executable, "-m", "pip", "install", "--no-input", *declared]]
+                declared = ()   # one attempt only, or a spec that cannot install loops the retry
             if not steps:
                 return {"ok": False, "error": str(exc)}
             for step in steps:
@@ -847,6 +926,7 @@ def download(model_id: str, progress=None) -> dict:
             return {"error": f"no downloadable asset for {model_id}"}
         url, filename = found
         tmp = os.path.join(CACHE_DIR, filename)
+        declared: list[str] = []
         try:
             note(0, "Downloading wheel…")
             req = urllib.request.Request(url, headers={"User-Agent": "SUD-Workbench"})
@@ -863,13 +943,23 @@ def download(model_id: str, progress=None) -> dict:
             note(None, "Installing…")
             # Install into the USER extras dir (like the on-demand tiers), never the app's own
             # site-packages — so a read-only/relocated bundle still works and the shared install
-            # isn't mutated. --no-deps: the model only needs spaCy, which is in the core; its
-            # tokeniser backend (if any) is handled by _ensure_tokenizer_deps below.
+            # isn't mutated. --no-deps keeps pip from re-resolving spaCy and its whole tree into
+            # the extras dir (the copy would shadow the core venv's), so anything the model
+            # genuinely declares has to be installed deliberately — see _unsatisfied_requirements.
             from . import extras
             extras.activate()   # EXTRAS_DIR on sys.path so the just-installed model imports
             subprocess.run([sys.executable, "-m", "pip", "install", "--no-input", "--upgrade",
                             "--no-deps", "--target", EXTRAS_DIR, tmp],
                            check=True, capture_output=True, text=True)
+            declared = _unsatisfied_requirements(tmp)
+            if declared:
+                note(None, "Installing model requirements…")
+                try:
+                    subprocess.run([sys.executable, "-m", "pip", "install", "--no-input",
+                                    "--target", EXTRAS_DIR, *declared],
+                                   check=True, capture_output=True, text=True)
+                except subprocess.CalledProcessError:
+                    pass    # not fatal here: _ensure_tokenizer_deps retries and reports the warning
         except subprocess.CalledProcessError as exc:
             return {"error": f"pip install failed: {exc.stderr or exc}"}
         except Exception as exc:  # noqa: BLE001
@@ -881,7 +971,8 @@ def download(model_id: str, progress=None) -> dict:
                 pass
         _invalidate_parse_cache()
         note(None, "Checking tokeniser…")   # install the model's raw-text tokeniser backend if it needs one
-        dep = _ensure_tokenizer_deps(model_id.split(":", 1)[1], progress=progress)
+        dep = _ensure_tokenizer_deps(model_id.split(":", 1)[1], progress=progress,
+                                     declared=declared)
         note(100, "Installed")
         result = {"ok": True, "id": model_id}
         if not dep.get("ok"):

@@ -16,6 +16,7 @@ UPOS filter (which is applied on read, not baked into the cached fetch)."""
 from __future__ import annotations
 
 import re
+import unicodedata
 from concurrent.futures import ThreadPoolExecutor
 from urllib.parse import quote
 
@@ -95,21 +96,87 @@ def _decap(text: str, upos: str) -> str:
     return text[0].lower() + text[1:]
 
 
-def _pos_matches(entry_upos: str | None, head_upos: str, wanted: str) -> bool:
-    """Whether a candidate applies to a token tagged ``wanted``, at BOTH levels Wiktionary offers:
-    the dictionary entry's own part-of-speech heading, and — since a condensed subtree can end up
-    headed by a different word class than the whole entry — that subtree's re-parsed head.
+def _blank(text: str) -> bool:
+    """Would this candidate render as an EMPTY, pickable row? True when nothing survives taking out
+    whitespace and the Unicode FORMAT characters (category Cf — the bidi marks, the zero-widths).
+    Wiktionary writes an affix joiner as "+‎" with a left-to-right mark on it ("contraction of zu +‎
+    dem"), and _condense's comma/semicolon split hands the piece holding just that mark back as a
+    candidate of its own. Apte's reader drops such rows too (`app.apte._local`'s isalnum filter);
+    this one tests Cf instead so a genuine one-character gloss — "." for 。 — still shows.
+    Only reachable now that entries stating no word class are no longer filtered away
+    (:func:`_pos_matches`): "Contraction" is one of the headings that used to hide them."""
+    return not any(not ch.isspace() and unicodedata.category(ch) != "Cf" for ch in text)
+
+
+def _ok_upos(wanted: str) -> set[str]:
+    """The word classes a token tagged ``wanted`` accepts from a dictionary.
     A PROPN token also takes NOUN entries: Wiktionary heads a "Proper noun" section only where the
     word is EXCLUSIVELY one, so a name that is also a common noun (Rose, Baker, Sun) has its senses
     under "Noun", and a PROPN token would otherwise be told its own dictionary has nothing to say.
     Deliberately NOT symmetric — a NOUN token is not offered PROPN entries, which was not asked for
     and would put "the capital of England" under an ordinary common-noun lookup."""
+    return {wanted, "NOUN"} if wanted == "PROPN" else {wanted}
+
+
+def _pos_matches(entry_upos: str | None, head_upos: str, wanted: str) -> bool:
+    """Whether a candidate applies to a token tagged ``wanted``, at BOTH levels Wiktionary offers:
+    the dictionary entry's own part-of-speech heading, and — since a condensed subtree can end up
+    headed by a different word class than the whole entry — that subtree's re-parsed head.
+    This is the STRICT tier, and the only one used whenever it yields anything at all; see
+    :func:`_pos_plausible` for the fallback and :func:`lookup` for the policy joining them.
+    ``entry_upos is None`` (a section with no part-of-speech heading, i.e. every Chinese sense) has
+    no entry-level claim to test, so the re-parsed head alone decides. Distinct from ``""`` on
+    purpose: "" is a heading that exists and did not map, which at this tier is read as evidence the
+    entry is something else."""
     if not wanted:
         return True
-    ok = {wanted, "NOUN"} if wanted == "PROPN" else {wanted}
+    ok = _ok_upos(wanted)
     if entry_upos is None:
-        return not head_upos or head_upos in ok   # the entry declares NO part of speech, so there is no entry-level claim to test — only the re-parsed head can speak. Distinct from "" on purpose: "" is a heading that exists and did not map, which is still evidence the entry is something else. See _definitions_glosses.
+        return not head_upos or head_upos in ok
     return entry_upos in ok and (not head_upos or head_upos in ok)
+
+
+def _pos_plausible(entry_upos: str | None, wanted: str) -> bool:
+    """The FALLBACK tier: is there anything in what the dictionary actually STATES that rules this
+    sense out for a token tagged ``wanted``?  Only ever consulted when :func:`_pos_matches` left a
+    lookup with nothing (see :func:`lookup`) — where the choice is not between a good match and a
+    worse one but between a worse one and telling the user their own dictionary is silent.
+
+    An explicit contrary heading still excludes, because Wiktionary's headings are reliable: a page
+    that files a word only under "Verb" really is saying it is not a noun, and that is worth
+    reporting as "no definitions found". What no longer excludes is the two kinds of SILENCE, since
+    neither is evidence the word is something other than ``wanted``:
+      * ``entry_upos is None`` — no part-of-speech heading at all, because the language doesn't
+        split its section by word class (every Chinese sense — see _DEFS_SECTION_LANGS). The strict
+        tier falls back on the re-parsed head of an ENGLISH paraphrase, a poor proxy for a Chinese
+        word's own class: it hid 沒 from an ADV token because "not have" heads as a VERB.
+      * ``entry_upos == ""`` — a heading that exists and names no UD word class: "Phrase" (Latin
+        *carpe diem*), "Participle" (German *gelesen*), "Contraction" (French *des*, German *zum*),
+        "Han character", "Romanization". `_WIKI_POS_TO_UPOS` has no entry for any of them, so
+        `entry_upos in ok` was false for every possible `wanted` and those senses were unreachable
+        from every tagged token in every language. "Contraction" says the entry is a fusion, not
+        that it isn't the adposition the token is tagged as.
+    …and the re-parsed head, which at this tier only ORDERS (:func:`_head_rank`)."""
+    if not wanted or not entry_upos:
+        return True
+    return entry_upos in _ok_upos(wanted)
+
+
+def _head_rank(head_upos: str, wanted: str) -> int:
+    """0 for a sense to show first, 1 for one to show after it — how the FALLBACK tier orders what
+    it admits (in the strict tier every survivor already agrees, so this is a no-op there).
+    A candidate ranks 0 when the phrase it condensed to is headed by the class the token carries, or
+    when nothing is known about that head; 1 when the two disagree.
+
+    Ordering is all it does there, because rejecting on it tests an ENGLISH PARAPHRASE rather than
+    the word: 編程 is a Chinese noun whose one sense reads "programming", which `en_sud_ewt` tags
+    VERB, so a NOUN token was told its dictionary had nothing — the entry heading said "Noun" and
+    was overruled by a gerund. `run` under a SYM token went the same way. An unknown head (``""`` —
+    the unparsed fallback, when `en_sud_ewt` isn't installed) ranks 0: no information is not a
+    disagreement."""
+    if not wanted or not head_upos:
+        return 0
+    return 0 if head_upos in _ok_upos(wanted) else 1
 
 
 def available() -> bool:
@@ -363,16 +430,44 @@ def _condense(text: str) -> list[dict]:
     return out
 
 
+# en.wiktionary language sections whose senses live under a "Definitions" heading rather than under
+# part-of-speech headings, keyed by the language code this app uses → that section's own h2 text.
+# ONE Chinese section covers Mandarin, Cantonese, Hokkien and the rest, which do not share a
+# part-of-speech split, so the wiki files their senses under a shared "Definitions" heading instead.
+# The /page/definition/ endpoint keys entries off POS headings, so it emits no entry for these pages
+# AT ALL — 在 comes back as {"ja": …, "other": …} where "other" is Old Korean, and the Chinese
+# section is simply absent. Not a language-code mismatch: there is no "zh" key to find.
+# The same table doubles as "which languages are written in Han and file their senses under the
+# TRADITIONAL spelling" — see _search_form, which folds a simplified headword before querying.
+_DEFS_SECTION_LANGS = {"zh": "Chinese", "lzh": "Chinese", "yue": "Chinese", "cmn": "Chinese",
+                       "nan": "Chinese", "hak": "Chinese", "wuu": "Chinese", "gan": "Chinese",
+                       "hsn": "Chinese", "cdo": "Chinese", "zh-hans": "Chinese", "zh-hant": "Chinese"}
+
+
 def _search_form(word: str, lang: str) -> str:
     """The term to actually query Wiktionary with.  Sanskrit tokens in this app are STORED as
     IAST romanisation regardless of the sentence's own script (app.translit's "stored=iast"
     convention — see its Sanskrit orthography rendering), but Wiktionary indexes Sanskrit
-    entries under their Devanagari headword, so an IAST lemma needs converting first."""
+    entries under their Devanagari headword, so an IAST lemma needs converting first.
+
+    Chinese is the same problem in a different script: **en.wiktionary keeps every Chinese sense on
+    the TRADITIONAL spelling**, and gives a simplified one only a `{{zh-see}}` soft-redirect box
+    pointing at it — no senses, no part-of-speech heading, no `<ol>`. So 编程 404s from
+    /page/definition/ and yields nothing from :func:`_definitions_glosses`, while 編程 answers with
+    "programming". OpenCC (already a core dependency, via app.translit's Traditional orthography)
+    converts phrase-first, so it picks the right one of a one-to-many pair from context
+    (发 → 髮 in 头发, 發 in 发现). Where it still lands on a spelling the wiki doesn't file the word
+    under, :func:`_zh_see_target` chases the page's own pointer instead."""
     if lang == "sa":
         from . import translit
         deva = translit.orthography(word, "sa", "Devanagari")
         if isinstance(deva, str) and deva:
             return deva
+    if lang in _DEFS_SECTION_LANGS:
+        from . import translit
+        trad = translit.orthography(word, lang, "traditional")
+        if isinstance(trad, str) and trad:
+            return trad
     return word
 
 
@@ -425,16 +520,45 @@ def _sanskrit_root_glosses(search_form: str) -> list[str]:
     return []
 
 
-# en.wiktionary language sections whose senses live under a "Definitions" heading rather than under
-# part-of-speech headings, keyed by the language code this app uses → that section's own h2 text.
-# ONE Chinese section covers Mandarin, Cantonese, Hokkien and the rest, which do not share a
-# part-of-speech split, so the wiki files their senses under a shared "Definitions" heading instead.
-# The /page/definition/ endpoint keys entries off POS headings, so it emits no entry for these pages
-# AT ALL — 在 comes back as {"ja": …, "other": …} where "other" is Old Korean, and the Chinese
-# section is simply absent. Not a language-code mismatch: there is no "zh" key to find.
-_DEFS_SECTION_LANGS = {"zh": "Chinese", "lzh": "Chinese", "yue": "Chinese", "cmn": "Chinese",
-                       "nan": "Chinese", "hak": "Chinese", "wuu": "Chinese", "gan": "Chinese",
-                       "hsn": "Chinese", "cdo": "Chinese", "zh-hans": "Chinese", "zh-hant": "Chinese"}
+def _zh_see_target(search_form: str, language: str) -> str:
+    """The headword a Chinese SOFT-REDIRECT page points at ("" if the page carries none, or doesn't
+    exist).  A simplified — or merely variant — spelling gets no senses of its own on en.wiktionary:
+    its language section is a single `{{zh-see}}` box, "For pronunciation and definitions of 编程 –
+    see 編程 (“programming”)", and nothing else.  That is exactly the page shape /page/definition/
+    404s on and :func:`_definitions_glosses` finds no `<ol>` in, so this is the second chance
+    :func:`_search_form`'s OpenCC fold gets when it lands on the wrong spelling — or on a variant
+    pair OpenCC doesn't normalise at all (着 → 著), where there is nothing for it TO fold.
+
+    The target is read out of the box's Parsoid ``data-mw`` — the template call itself, whose first
+    argument IS the headword — rather than out of the rendered prose, which cannot be parsed
+    reliably: the box links the source spelling CHARACTER BY CHARACTER (编, 程) and marks the target
+    with no class the two cases share, so both "the first link" and "the first link that isn't a
+    self-link" pick a source character on one page or the other.
+
+    The box can sit either directly under the language's own h2 (编程) or inside a "Definitions"
+    subsection (汉), so the whole language section is searched — Parsoid nests subsections inside
+    it, which is what makes one `find` cover both."""
+    soup = _fetch_html(search_form)
+    if soup is None:
+        return ""
+    import json
+    for sec in soup.find_all("section"):
+        h = sec.find(["h2", "h3", "h4", "h5", "h6"])
+        if not h or h.name != "h2" or h.get_text(strip=True) != language:
+            continue
+        table = sec.find("table", class_="zh-see")
+        if table is None:
+            return ""
+        try:
+            for part in json.loads(table.get("data-mw") or "{}").get("parts") or []:
+                params = ((part or {}).get("template") or {}).get("params") or {}
+                target = ((params.get("1") or {}).get("wt") or "").strip()
+                if target:
+                    return target
+        except Exception:  # noqa: BLE001 — an unparsable/absent data-mw just means no chase
+            return ""
+        return ""
+    return ""
 
 
 def _definitions_glosses(search_form: str, language: str) -> list[str]:
@@ -506,19 +630,11 @@ def _noun_genders(search_form: str, language: str) -> list[str | None]:
     return out
 
 
-def _fetch(word: str, lang: str) -> dict:
-    """Every condensed candidate for (word, lang), UNFILTERED — cached per (word, lang) so looking
-    the same word up under a different UPOS (two tokens sharing a lemma but tagged differently,
-    e.g. "record" as NOUN vs VERB) re-filters cheaply instead of re-fetching/re-parsing."""
-    key = (word.lower(), lang)
-    cached = _CACHE.get(key)
-    if cached is not None:
-        return cached
-    if not available():
-        result = {"candidates": [], "error": "requests/beautifulsoup4 are not installed"}
-        _CACHE[key] = result
-        return result
-    search_form = _search_form(word, lang)
+def _collect(search_form: str, lang: str) -> dict:
+    """Every condensed candidate on ONE page title, uncached and UNFILTERED, from all three places a
+    language's senses can live (the /page/definition/ endpoint, a "Definitions" section, a Sanskrit
+    "Root" section).  Split out of :func:`_fetch` so a page that turns out to be a soft redirect can
+    be re-run against the headword it points at (see :func:`_zh_see_target`)."""
     candidates = []
     error = None
     lang_heading = None   # the page's own heading text for this language (e.g. "Sanskrit", "French") — an exact, unambiguous anchor id, straight from the API's own "language" field
@@ -568,10 +684,44 @@ def _fetch(word: str, lang: str) -> dict:
             for sub in _condense(gloss):
                 candidates.append({"text": sub["text"], "entry_upos": "VERB", "head_upos": sub["upos"], "gender": None})
     if error is not None:
-        return {"candidates": [], "error": error, "page_url": None}   # NOT cached — a transient failure shouldn't stick forever
+        return {"candidates": [], "error": error, "page_url": None}
     page_url = (f"https://en.wiktionary.org/wiki/{quote(search_form, safe='')}#{quote(lang_heading, safe='')}"
                 if lang_heading else None)   # the language section's own anchor — unambiguous (one h2 per language per page), unlike a bare POS anchor which can be "Verb_2" on a multi-etymology page
-    result = {"candidates": candidates, "error": None, "page_url": page_url}
+    return {"candidates": candidates, "error": None, "page_url": page_url}
+
+
+def _fetch(word: str, lang: str) -> dict:
+    """Every condensed candidate for (word, lang), UNFILTERED — cached per (word, lang) so looking
+    the same word up under a different UPOS (two tokens sharing a lemma but tagged differently,
+    e.g. "record" as NOUN vs VERB) re-filters cheaply instead of re-fetching/re-parsing.
+    An errored fetch is NOT cached — a transient failure (offline, a timeout) shouldn't stick."""
+    key = (word.lower(), lang)
+    cached = _CACHE.get(key)
+    if cached is not None:
+        return cached
+    if not available():
+        result = {"candidates": [], "error": "requests/beautifulsoup4 are not installed"}
+        _CACHE[key] = result
+        return result
+    search_form = _search_form(word, lang)
+    result = _collect(search_form, lang)
+    if not result["candidates"] and result["error"] is None and lang in _DEFS_SECTION_LANGS:
+        # A Chinese page with no senses is usually not a missing word but a soft redirect to the
+        # spelling the senses are filed under, so follow the page's own pointer before giving up —
+        # the fold in _search_form gets the common case, this gets the rest (a variant pair OpenCC
+        # leaves alone, or a one-to-many simplified character it resolved the other way). Both the
+        # spelling asked for and the one queried are probed, since either can be the redirecting
+        # page; each costs one HTML fetch, and only on a lookup that has already come back empty.
+        for probe in dict.fromkeys((search_form, word)):   # deduped: an unfolded word is its own search form
+            target = _zh_see_target(probe, _DEFS_SECTION_LANGS[lang])
+            if not target or target == search_form:
+                continue
+            alt = _collect(target, lang)
+            if alt["candidates"]:
+                result = alt
+                break
+    if result["error"] is not None:
+        return result
     _CACHE[key] = result
     return result
 
@@ -582,8 +732,11 @@ def lookup(word: str, lang: str, upos: str = "") -> dict:
     UPOS tag, e.g. "NOUN"/"VERB" — blank ⇒ no restriction) at BOTH levels: the dictionary entry's
     own stated part of speech, and — since a condensed subtree can end up headed by a different
     word than the entry's whole headword — that subtree's own re-parsed head (:func:`_pos_matches`,
-    where a PROPN token also takes NOUN entries).  Each surviving sense is decapitalised unless the
-    token is a PROPN (:func:`_decap`).
+    where a PROPN token also takes NOUN entries).  **Only when that leaves NOTHING** is the test
+    widened, to what the dictionary doesn't actually rule out (:func:`_pos_plausible`, ordered by
+    :func:`_head_rank`) — the same "an empty result is more often a gap in the source than a real
+    'this word is never a NOUN'" policy :func:`app.apte.lookup` has always applied.  Each surviving
+    sense is decapitalised unless the token is a PROPN (:func:`_decap`).
     Returns ``{"definitions": [{"text","gender_ud","gender_abbr"}, …], "page_url": "…" or None}`` —
     `gender_ud`/`gender_abbr` are only present on NOUN candidates whose headword carries a
     recognised gender (a UD Gender value + this app's own Leipzig abbreviation for it, e.g.
@@ -600,9 +753,26 @@ def lookup(word: str, lang: str, upos: str = "") -> dict:
         return {"definitions": [], "error": fetched["error"]}
     out = []
     seen: set[tuple[str, str]] = set()
-    for c in fetched["candidates"]:
-        if not _pos_matches(c["entry_upos"], c["head_upos"], wanted):
-            continue
+    kept = [c for c in fetched["candidates"] if not _blank(c["text"])]   # a blank row is dropped BEFORE the tiers, so one can't leave the strict tier "non-empty" with nothing to show and suppress the fallback
+    picked = [c for c in kept if _pos_matches(c["entry_upos"], c["head_upos"], wanted)]
+    if wanted and not picked:
+        # NOTHING SURVIVED THE STRICT TEST → widen, rather than report the word's own dictionary as
+        # silent about it. Same policy app.apte.lookup has always applied, and second-tier ONLY: a
+        # lookup that matched anything at all never sees this, so an ordinary NOUN lookup is not
+        # diluted by senses the dictionary filed elsewhere. What the widening admits is the two
+        # kinds of silence (:func:`_pos_plausible`) — an entry with no part-of-speech heading, or
+        # one whose heading names no UD class — and NOT an explicit contrary heading, which is a
+        # real claim and stays excluded. Wiktionary being asked about a verb-only word still
+        # answers "no definitions found".
+        picked = [c for c in kept if _pos_plausible(c["entry_upos"], wanted)]
+        # …ordered by whether the condensed phrase's own head agrees with the token's class
+        # (:func:`_head_rank`). A STABLE sort on a two-valued key, so it only lifts the agreeing
+        # senses past the disagreeing ones and leaves the dictionary's own order — meaningful,
+        # Wiktionary listing a word's senses roughly by centrality — intact within each run. It
+        # sorts BEFORE the dedup below, so where one gloss condenses out of two senses it is the
+        # better-ranked copy that survives, not whichever the page happened to print first.
+        picked.sort(key=lambda c: _head_rank(c["head_upos"], wanted))
+    for c in picked:
         d = {"text": _decap(c["text"], wanted)}   # …decapitalised HERE, where the sense is finalised for display/MGloss, not in the cached fetch: the cache is per (word, lang) and re-read under whichever UPOS the token carries, and PROPN is the one that keeps its capital
         gender_ud = _WIKI_GENDER_TO_UD.get((c.get("gender") or "").strip().lower())
         if gender_ud:

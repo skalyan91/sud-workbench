@@ -57,7 +57,7 @@ async function loadTranslitSchemes(lang){ lang=lang||""; _trLangLoaded=lang; TRA
     // an extra uninstalled since the choice was made would otherwise be restored and romanise nothing.
     TRANSLIT_SCHEME=(want && TRANSLIT_SCHEMES.some(s=>s.id===want&&s.available)) ? want : (avail[0]||TRANSLIT_SCHEMES[0]).id; show.translit=true;
     STORED_SCHEME=(wantStored && stored.some(s=>s.id===wantStored)) ? wantStored : (stored[0]?stored[0].id:TRANSLIT_SCHEME);   // Stored ⊆ Displayed; default = first stored scheme
-    if(isSanskritLang(lang)) show.translit=orthoScript();   // item 27(c): Sanskrit's stored form IS the IAST, so the IAST transliteration row is shown ONLY when a real (non-Latin) script is selected; loadOrthoSchemes re-runs this gate once ORTHO_SCHEME is resolved
+    if(isSanskritLang(lang)) show.translit=saTransRow();   // item 27(c): the IAST row is shown ONLY where the glyph above it is NOT already romanised — see saTransRow; loadOrthoSchemes re-runs this gate once ORTHO_SCHEME is resolved
     if(want==="") { show.translit=false; TRANSLIT_SCHEME=""; }   // a RECORDED "Displayed: None" — the off-state trPick's own off-row writes, mirrored here so it survives the reopen. LAST, so it also wins over the Sanskrit script-gate above: that gate decides whether the row COULD show, this decides that the user asked it not to. "" only ever reaches this point as a deliberate choice — prefTranslit returns null, not "", when nothing is recorded.
   }
   updateTranslitPill(); updateStoredPill(); clearTranslitCache();
@@ -87,10 +87,24 @@ function sizePill(p, strings){ if(!_pillGauge){ _pillGauge=document.createElemen
    label states both, in that order, so the answer is on the status bar without opening anything. */
 function updateTranslitPill(){ const p=document.getElementById("translitPill"); if(!p)return;
   if(!TRANSLIT_SCHEMES.length){ p.hidden=true; return; }   // no transliteration schemes at all → no pill
-  const dis=isSanskritLang() && !orthoScript();   // item 6: Sanskrit with no real script → the IAST row can't show, but KEEP the pill visible (disabled), don't remove it
-  p.hidden=false; p.classList.toggle("disabled",dis); p.classList.toggle("pickable",!dis);
-  p.title=dis?"Transliteration — select a script to show the IAST row":"Transliteration — displayed row and stored Misc value";
-  const d=(show.translit&&TRANSLIT_SCHEME)?trSchemeLabel(TRANSLIT_SCHEME):"None",
+  /* ⚠ THE PILL IS NEVER DISABLED while there are schemes to pick. It used to go dead whenever the ROW
+     could not be drawn (`isSanskritLang() && !saTransRow()`), which was defensible when IAST was
+     Sanskrit's only displayed scheme: no row, nothing to choose. CSL made that false — and worse,
+     self-locking, since Script=Latin + Displayed=IAST hides the row, disables the pill, and leaves no
+     way back to the menu that offers CSL. The Stored column is a live choice in that state too, and it
+     has nothing to do with whether the row is drawn.
+     Whether the row APPEARS stays saTransRow()'s business; whether a CHOICE EXISTS is this pill's, and
+     the answer is yes as long as TRANSLIT_SCHEMES is non-empty — which line 89 has already established. */
+  const noRow=isSanskritLang() && !saTransRow();
+  p.hidden=false; p.classList.remove("disabled"); p.classList.add("pickable");
+  p.title=noRow?"Transliteration — the row is hidden here (it would repeat the line above); pick CSL to show one"
+               :"Transliteration — displayed row and stored Misc value";
+  /* …and the label names the scheme that is CHOSEN, not the one that is DRAWN. Reading it off
+     show.translit made the pill say "None" for a scheme the user had just picked, because the row
+     happened to be redundant — which reads as the choice not having taken. TRANSLIT_SCHEME==="" is the
+     real off-state (trPick's own off-row writes both, as do loadTranslitSchemes' two paths), so it is
+     the honest thing to test. */
+  const d=TRANSLIT_SCHEME?trSchemeLabel(TRANSLIT_SCHEME):"None",
         st=(typeof STORED_SCHEME!=="undefined"&&STORED_SCHEME)?storedLabel(STORED_SCHEME):"None",
         lbl=p.querySelector("#translitPillLabel");
   if(lbl)lbl.textContent = d===st ? "Translit: "+d : "Translit: "+d+" · "+st;   // displayed · stored, the same order as the menu's two columns — but when they name the SAME scheme (the common case: Displayed defaults TO Stored — see the "Displayed IS Stored" note in translit-load.js), say it once rather than "X · X". The label span only — the trailing chevron svg is a persistent sibling.
@@ -137,6 +151,20 @@ function trCell(kind,sc,offered){
   r.setAttribute("aria-label",(kind==="d"?"Displayed":"Stored")+": "+sc.label);   // the ACCESSIBLE name stays unabbreviated — the visual header is short for layout, which is no reason for a screen reader to hear "Disp."
   r.addEventListener("change",()=>{ if(kind==="d") trPick(sc.id); else storedPick(sc.id); });
   cell.appendChild(r); return cell; }
+/* The tag on an unavailable scheme, shared by BOTH menus (the transliteration grid below and the
+   Script list in orRender). `needs` — from app/translit.py's _scheme_needs — names the extras tier
+   that would supply the missing engine or table, and where there is one the tag becomes a LINK to
+   that tier's row in Manage Models. A scheme the user can have is a different thing from one nobody
+   can have, and a flat "unavailable" said both. Where `needs` is empty the tag stays inert text, and
+   that is right: Mongolian (traditional) is off because no correct converter exists, so a link
+   offering to install one would be a lie. Python decides which is which; this only draws it.
+   A <button>, not a styled span: it is a control, and the keyboard has to be able to reach it. */
+function naTag(sc){ if(!sc.needs){ const s=document.createElement("span"); s.className="trna"; s.textContent="unavailable"; return s; }
+  const b=document.createElement("button"); b.type="button"; b.className="trna trna-link"; b.textContent="install";
+  b.title="Install the support this needs — opens Manage Models";
+  b.addEventListener("click",e=>{ e.preventDefault(); e.stopPropagation(); trClose(); orClose();
+    if(typeof manageModels==="function") manageModels(sc.needs); });
+  return b; }
 function trRender(){ const m=trEl(); m.innerHTML="";
   const grid=document.createElement("div"); grid.className="trgrid";
   const head=t=>{ const h=document.createElement("span"); h.className="trghead"; h.textContent=t; grid.appendChild(h); };
@@ -147,7 +175,7 @@ function trRender(){ const m=trEl(); m.innerHTML="";
      mean "off". A rule drawn across a table that already answers the question is one more thing to read. */
   rows.forEach(sc=>{
     const nm=document.createElement("span"); nm.className="trname"; nm.textContent=sc.label;
-    if(sc.id&&!sc.available){ nm.classList.add("trdim"); const na=document.createElement("span"); na.className="trna"; na.textContent="unavailable"; nm.appendChild(na); }
+    if(sc.id&&!sc.available){ nm.classList.add("trdim"); nm.appendChild(naTag(sc)); }
     grid.appendChild(nm);
     const ok=!sc.id||sc.available;
     grid.appendChild(trCell("d",sc, ok && (sc.id ? true : isSanskritLang())));
@@ -157,7 +185,15 @@ function trRender(){ const m=trEl(); m.innerHTML="";
 function trPick(id){ trClose();
   if(!id){ if(show.translit||TRANSLIT_SCHEME){ show.translit=false; TRANSLIT_SCHEME=""; updateTranslitPill(); if(DOC.length)preserveScroll(renderDoc); } if(DOCLANG)PREFS.translit[DOCLANG]=""; savePrefs(); toast("Displayed transliteration off"); return; }   // RECORD the off-state as "", don't delete the key: turning the row off is a deliberate choice (this row is Sanskrit-only — see trRender), and deleting made it indistinguishable from "never chose", so the next open silently turned the row back on. prefTranslit reads key-presence for exactly this distinction.
   if(show.translit&&TRANSLIT_SCHEME===id) return;   // no change → no-op
-  TRANSLIT_SCHEME=id; show.translit=true; updateTranslitPill(); clearTranslitCache(); fillTranslit(); if(DOC.length)preserveScroll(renderDoc);
+  TRANSLIT_SCHEME=id;
+  /* …and whether the ROW is drawn is saTransRow's call for Sanskrit, not an unconditional yes. Forcing
+     it on here is what put a second line under an IAST-stored sentence whose glyph is already Latin —
+     the same words twice, which is precisely what saTransRow exists to prevent and what every OTHER
+     entry point (loadTranslitSchemes, setLang, orPick) already asks it. Picking a plain romanisation
+     under a Latin glyph therefore draws no row, by design; picking CSL does, because CSL respells the
+     sentence rather than repeating it. */
+  show.translit=isSanskritLang()?saTransRow():true;
+  updateTranslitPill(); clearTranslitCache(); fillTranslit(); if(DOC.length)preserveScroll(renderDoc);
   if(DOCLANG){ PREFS.translit[DOCLANG]=id; savePrefs(); }
   toast("Displayed transliteration: "+trSchemeLabel(id)); }
 function openTranslitMenu(x,y){ const m=trEl(); trRender(); m.classList.add("show"); setPillMenuOpen("translitPill",true);
@@ -220,30 +256,137 @@ let ORTHO_SCHEMES=[];   // cached [{id,label,available}] for the current DOCLANG
 let ORTHO_SCHEME="";    // chosen orthography id ("" ⇒ Original / no re-rendering)
 let _orLangLoaded=null;
 function clearOrthoCache(){ DOC.forEach(s=>{ s.tokens.forEach(t=>{ t.ortho=""; }); (s.mwt||[]).forEach(m=>{ m.ortho=""; m.miast=""; }); s.orthoLine=""; }); }   // s.orthoLine = the block-initial running text fused by external sandhi then scripted (item 27b); invalidated on a script/language change
-// Sanskrit is stored ROMANISED (IAST), so its Script menu offers no "Original" row — "Original" there would
-// be that romanisation, not a script. It lists None + the Indic scripts, and None is its DEFAULT (item 17
-// revised this: the diagram no longer auto-scripts Sanskrit into Devanagari) — see orthoDefault below.
 function isSanskritLang(lang){ const b=((lang!=null?lang:DOCLANG)||"").toLowerCase().split(/[-_]/)[0]; return b==="sa"||b==="san"; }
-/* ── ITRANS → IAST for typed Sanskrit (item 1) ────────────────────────────────────────────────────
-   This app stores Sanskrit as IAST, which needs diacritics no keyboard carries, so what gets typed
-   is ITRANS — kRiShNa, raamaayaNa, sha~Nkara, and a leading ^ for this repo's sandhi-coalescence
-   circumflexes (^a → â, ^e → ê; see app/sa_csl.py). Every Sanskrit input field runs its value
-   through here on commit.
+/* ── which script the DOCUMENT is stored in ───────────────────────────────────────────────────────
+   Sanskrit is DIGRAPHIC IN STORAGE: `sa_sud_vedic_ufal_dcs` takes IAST or Devanagari and puts back
+   whichever it was given, so a file's FORM/LEMMA columns are in one script or the other and nothing
+   in the file says which. That fact decides four things, so it is worth a global rather than four
+   inline sniffs: whether "Original" already shows a script (and so whether the IAST row beneath is
+   worth showing), which script a re-fused MWT form has to come back in, what ITRANS input converts
+   TO, and whether the diagram's form editor edits the glyph or the row beneath it.
+
+   "" = Latin, which is also the answer for every other language, so a caller may read it
+   unconditionally. Read off the FORMS (Api.doc_script), never off a preference or a comment: it is
+   a property of the file, and a reader's display choice must not be able to contradict it. */
+let DOCSCRIPT="";
+const _DEVA_RE=/[ऀ-ॿ]/;
+async function loadDocScript(){
+  const forms=[];
+  for(const s of (DOC||[])){ for(const t of (s.tokens||[])){ if(t.form){ forms.push(t.form); if(forms.length>=40) break; } } if(forms.length>=40) break; }
+  if(!isSanskritLang()||!forms.length){ DOCSCRIPT=""; return DOCSCRIPT; }
+  // The local test answers the only two scripts the parser emits, and answers them with no round
+  // trip; the bridge is asked because a hand-built file could be in any Brahmic script and only
+  // Python has the detector. Design mode (no bridge) keeps the local answer rather than none.
+  DOCSCRIPT=_DEVA_RE.test(forms.join("")) ? "Devanagari" : "";
+  if(hasBridge()&&DOCLANG){ try{ const r=await window.pywebview.api.doc_script(forms, DOCLANG); if(r&&r.script!=null) DOCSCRIPT=r.script; }catch(e){} }
+  return DOCSCRIPT; }
+/* The script the MAIN GLYPH is currently drawn in, for Sanskrit: the selected Script where one is
+   selected, else the document's own. "" means Latin. `saGlyphLatin` is the question every caller
+   actually has — "is what the reader is looking at romanised?" — and it is NOT the same as "is a
+   script selected": a Devanagari file under "Original" shows a script with none selected, and an
+   IAST file under "Latin" shows none with one selected. */
+function saGlyphScript(){ if(!isSanskritLang()) return "";
+  return (ORTHO_SCHEME&&ORTHO_SCHEME!=="none") ? ORTHO_SCHEME : DOCSCRIPT; }
+function saGlyphLatin(){ const g=saGlyphScript(); return !g||g==="iast"; }
+/* Is the chosen SCRIPT a no-op on this file? "Latin" over an IAST-STORED document renders each
+   token to the spelling it already has, so the derived top line is character-for-character `# text` —
+   and drawing it displaces the real text into the row below, where it reads as the same line twice.
+   That is the "unnecessary running transliteration" under Script=Latin: not a transliteration at all,
+   just the text copied. A DEVANAGARI-stored file is untouched by this — there IAST genuinely romanises,
+   so the displacement earns its place. Nothing else is affected: every Brahmic script changes the
+   glyphs, and "Original" never displaced anything. */
+function saScriptNoop(){ if(!isSanskritLang() || saCslTop()) return false;
+  // A rendering into the script the file is ALREADY WRITTEN IN changes nothing, whichever script that is:
+  // "Latin" over an IAST-stored file, Devanagari over a Devanagari-stored one. Both drew a derived top
+  // line identical to `# text` and pushed the real text into the row beneath, where it read as the same
+  // line twice — measured on samples/brihat_jataka_devanagari.conllu, whose row beneath the Devanagari
+  // was character-for-character the Devanagari above it. "" storage means IAST, hence the default.
+  return ORTHO_SCHEME === (DOCSCRIPT || "iast"); }
+/* …unless CSL is what would fill it. Asking for Latin as the SCRIPT and CSL as the transliteration is
+   asking for the sentence itself in CSL — the two choices name one Latin line, and drawing plain IAST
+   above a CSL row would be the same sentence twice in two spellings. So the derived top line comes back
+   for this case, with CSL in it, and the editable `# text` sits beneath as it does under any script.
+   Only for a LATIN script: under Devanagari the glyph is Devanagari and CSL takes a row of its own. */
+function saCslTop(){ return isSanskritLang() && TRANSLIT_SCHEME==="csl" && ORTHO_SCHEME==="iast"; }
+/* Does the Sanskrit transliteration row belong under the glyph?  Only where it would SAY SOMETHING
+   the glyph does not already say. For IAST that means a non-Latin glyph above it, or the row merely
+   repeats the word — the test this replaced was "is a script selected", right only while every
+   Sanskrit file was stored in IAST.
+   ⚠ CSL IS THE EXCEPTION, and leaving it out is what made picking CSL appear to do nothing at all.
+   CSL is not a romanisation of the glyph, it is the SAME text with its junctions written: `vartma`
+   shows `vartm"`, `iti` shows `êty`, and a compound's seams come apart. Under a Latin glyph that is
+   a different string, not a repetition — so on an IAST-stored file (where the glyph IS Latin and the
+   gate below is false) the row was hidden, the scheme was filled into a row nobody could see, and
+   the only visible effect of choosing CSL was the toast. Ask what the ROW would show, not what
+   script the glyph is in. */
+function saTransRow(){ return isSanskritLang() && (TRANSLIT_SCHEME==="csl" || !saGlyphLatin()); }
+/* ── A SANSKRIT MWT'S NEIGHBOURS ────────────────────────────────────────────────────────────────
+   An orthographic word's first and last segments are shaped by the words either side of it, so
+   fusing a range's own components spells both ends in pausa — the one way a running text never
+   spells them. Every caller that re-fuses a range needs the same three facts, and they must agree:
+   sandhiMwtForms (js/io/bridge.js) rewrites the stored FORM, fillOrtho (js/lang/translit-load.js)
+   the SCRIPT rendering of the same word, and the two disagreeing is visible as a glyph that does
+   not match the form under it. Hence one helper, here, in the module both load after.
+   A neighbour is an ORTHOGRAPHIC word — the containing MWT's form where the adjacent token is
+   inside one — since that is the unit sandhi applies between. A daṇḍa is stepped OVER rather than
+   stopping the search, because visarga sandhi crosses it (`…hṛtkroḍavāsobhṛto |⏎bastir…` takes its
+   -o from `bastir`); `pause` reports that one stood in the way, which is what -m → -ṃ needs, since
+   that assimilation does NOT cross a pause (`…arajyotiṣām |` keeps its -m). See app/translit.py's
+   _boundary_sandhi for the rules the two flags feed. */
+const SA_DANDA=["|","||","।","॥","‖","।।"];
+/* ── CSL JOINS ITS PIECES DIFFERENTLY FROM EVERY OTHER SCHEME ──────────────────────────────────
+   CSL exists to write the junctions rather than the fusion, and once a junction is MARKED the pieces
+   either side of it are written apart — that is the whole point of the marks. So a CSL line does not
+   take its spacing from `# text` (which shows the fusion) the way the script line and every ordinary
+   romanisation do. Read straight off this repository's own pre-DCS CSL text, which is what the sample
+   used to carry (`git show 7c60890:samples/brihat_jataka.conllu`):
+       mūrtitve parikalpitaḥ śaśa-bhṛto vartm" â-punar-janmanām |
+       lokānāṃ pralay'-ôdbhava-sthiti-vibhuś c' ânekadā yaḥ śrutau |
+   · between two WORDS — a space, even where the text fused them: `vartm" â-punar-…`, `c' ânekadā`,
+     `ātm" êty`. Written solid (`vartm'âpunar…`) the mark cannot be told from a letter.
+   · between COMPOUND MEMBERS of one word — a hyphen: `śaśa-bhṛto`, `ātma-vidāṃ`, `aneka-kiraṇas`,
+     and `pralay'-ôdbhava-sthiti-vibhuś`, which shows both marks meeting.
+   `mwtSepOf` is preferred where the file itself showed a separator; DCS text writes its orthographic
+   words solid, so it usually has none and this default supplies CSL's own. `-` NOT `|`, on that
+   evidence — and `|` is this text's daṇḍa besides, so a compound seam spelt with one would read as a
+   verse break. `_STX_PH` in js/io/bridge.js treats both as separators, so switching is one character. */
+const SA_CSL_SEP="-";
+function saCslSep(m){ return (typeof mwtSepOf==="function"?mwtSepOf(m):(m&&m.sep))||SA_CSL_SEP; }
+function saMwtContext(s,m){
+  const mwtAt=k=>(s.mwt||[]).find(x=>k>=x.from&&k<=x.to);
+  const walk=(k,step)=>{ let pause=false;
+    for(let n=0;n<8;n++){ if(k<1||k>s.tokens.length) return ["",pause];
+      const g=mwtAt(k), w=g?(g.form||""):((s.tokens[k-1]||{}).form||"");
+      if(!w) return ["",pause];
+      if(SA_DANDA.indexOf(w)<0) return [w,pause];
+      pause=true; k=(g?(step>0?g.to:g.from):k)+step; }
+    return ["",pause]; };
+  const nx=walk(m.to+1,+1);
+  return {prev:walk(m.from-1,-1)[0], next:nx[0], pause:nx[1]}; }
+/* ── ITRANS → the document's script, for typed Sanskrit (item 1) ──────────────────────────────────
+   Neither storage script is typeable on an ordinary keyboard — IAST needs diacritics with no keys,
+   Devanagari needs an IME — so what gets typed is ITRANS: kRiShNa, raamaayaNa, sha~Nkara. Every
+   Sanskrit input field runs its value through here on commit, and it lands in DOCSCRIPT, so the
+   same keystrokes give `kṛṣṇa` in an IAST file and `कृष्ण` in a Devanagari one.
    ONE gate, in Python (app/itrans.py's looks_itrans), so no two call sites can disagree about what
    counts as ITRANS: a word must be pure ASCII (an IAST diacritic proves it is already IAST) AND
-   carry an ITRANS-only spelling (aa/ii/uu, sh/Sh, ~n/~N, a .-digraph, a NON-INITIAL capital from
-   T D N S R M H, or a ^ vowel). A word that reads the same either way — "rama", "deva" — is left
-   exactly as typed, because converting it could only be a no-op or a corruption.
+   carry an ITRANS-only spelling (aa/ii/uu, sh/Sh, ~n/~N, a .-digraph, or a NON-INITIAL capital from
+   T D N S R M H A I U E O). A word that reads the same either way — "rama", "deva" — is left
+   exactly as typed for an IAST document, because converting it could only be a no-op or a
+   corruption; for a Devanagari one it is still converted, since there the two readings agree and
+   leaving it alone would put a Latin word in a Devanagari file.
    The whole thing is a no-op for any other language and with no bridge, so a caller never has to
    ask whether it applies: `v = await itransFix(v)` and commit whatever comes back. */
 async function itransFix(text){
   if(!text || !isSanskritLang() || !hasBridge()) return text;   // gate here as well as in Python: no round-trip at all for the 99 % of documents this can't touch
-  try{ const r=await window.pywebview.api.itrans_to_iast(text, DOCLANG||""); return (r&&r.converted!=null)?r.converted:text; }
+  try{ const r=await window.pywebview.api.itrans_to_iast(text, DOCLANG||"", DOCSCRIPT||""); return (r&&r.converted!=null)?r.converted:text; }
   catch(e){ return text; } }   // bridge/engine failure ⇒ keep what was typed, never lose the input
-// The Script pill's DEFAULT for a language, i.e. what it shows when nothing is remembered: "" (Original —
-// the stored glyphs untouched) everywhere except Sanskrit, whose stored form is already Latin (IAST), so its
-// default is "none" (item 17: show that IAST as-is rather than auto-scripting it into Devanagari).
-function orthoDefault(lang){ return isSanskritLang(lang)?"none":""; }
+// The Script pill's DEFAULT for a language, i.e. what it shows when nothing is remembered: "" — Original,
+// the stored glyphs untouched. Sanskrit used to default to "none" instead, because its stored form was
+// Latin by definition and "Original" would have named a romanisation rather than a script. It can now be
+// stored in Devanagari, so "Original" is a real answer there too — and the right one, since a file opens
+// showing what it says.
+function orthoDefault(lang){ return ""; }
 // Resolve the Script pill for a language load. `want` is the remembered choice — the per-language
 // preference — or null for "nothing remembered at all" (prefOrtho's key-absent case).
 // EVERY branch returns a value, deliberately: ORTHO_SCHEME is a page-global, and the older conditional form
@@ -251,8 +394,8 @@ function orthoDefault(lang){ return isSanskritLang(lang)?"none":""; }
 // document in any language that happened to accept it (and into a language with no Script menu at all).
 function orthoResolve(lang,want){
   if(want==null) return orthoDefault(lang);            // never chose → the language default
-  if(want==="none") return "none";                     // "None" is a SYNTHETIC menu row (never present in ORTHO_SCHEMES), so it has to be matched HERE — testing it against the scheme list is what made a remembered None fall through and never come back
-  if(want==="") return isSanskritLang(lang)?"none":""; // a deliberate "Original"; Sanskrit's menu has no Original row (its stored form IS the romanisation) → its own default
+  if(want==="none") return isSanskritLang(lang)?"":"none";   // "None" is a SYNTHETIC menu row (never present in ORTHO_SCHEMES), so it has to be matched HERE — testing it against the scheme list is what made a remembered None fall through and never come back. Sanskrit no longer OFFERS the row (its "Latin" scheme says the same thing and says it as a script), so a None remembered from before that change resolves to Original rather than to a row the menu can't tick.
+  if(want==="") return "";                             // a deliberate "Original"
   return ORTHO_SCHEMES.some(s=>s.id===want&&s.available) ? want : orthoDefault(lang); }   // a real script id, honoured only while it is actually available — an uninstalled extra falls back for THIS load without forgetting the preference (only orPick ever rewrites it), so the script returns once the extra is back
 async function loadOrthoSchemes(lang){ lang=lang||""; _orLangLoaded=lang; ORTHO_SCHEMES=[];
   if(hasBridge()&&lang){ try{ const r=await window.pywebview.api.orthography_schemes(lang); if(_orLangLoaded!==lang)return; ORTHO_SCHEMES=(r&&r.schemes)||[]; }catch(e){ ORTHO_SCHEMES=[]; } }
@@ -263,8 +406,9 @@ async function loadOrthoSchemes(lang){ lang=lang||""; _orLangLoaded=lang; ORTHO_
   // can straddle an adopt). `want` is therefore simply what the user last chose, or null if they never have.
   const want=prefOrtho(lang);
   ORTHO_SCHEME=orthoResolve(lang,want); syncSchemeAttr();   // an UNCONDITIONAL assignment — see orthoResolve
-  if(isSanskritLang(lang)) show.translit=orthoScript();   // item 27(c): the IAST transliteration row/pill is gated on a real script; Sanskrit's default (None) ⇒ no row
+  if(isSanskritLang(lang)) show.translit=saTransRow();   // item 27(c): the IAST transliteration row/pill is gated on the glyph being non-Latin, not on a script being SELECTED — a Devanagari-stored file wants the row under "Original"
   updateOrthoPill(); updateTranslitPill(); clearOrthoCache();
+  if(typeof syncGlossUI==="function") syncGlossUI();   // the Glossing drawer's morphemic row is gated on macronAvailable() for Latin, which is a view of the list just loaded — so it is refreshed HERE, where that list changes, and cannot be left describing the previous language's (or the pre-install) answer
   if(DOC.length) preserveScroll(renderDoc);
   if(ORTHO_SCHEME) fillOrtho();
   if(isSanskritLang(lang)&&show.translit) fillTranslit(); }
@@ -296,14 +440,59 @@ function syncSchemeAttr(){ const d=document.getElementById("doc"); if(!d) return
      — this is a strict superset of the old scoping, not a behaviour change for the diagram itself. */
   const root=document.documentElement;
   if(ORTHO_SCHEME==="Ranjana" && typeof TOKEN_STACK==="string") root.style.setProperty("--token-font",'"Nithya Ranjana", '+TOKEN_STACK);
-  else root.style.removeProperty("--token-font"); }
+  else root.style.removeProperty("--token-font");
+  d.style.setProperty("--script-mag",String(scriptMag()));   // …and how big the GLYPHS are drawn, for the scripts that need the room (see ORNAMENTAL_SCRIPTS). On #doc, which is where refreshFontStacks reads it back to keep canvas measurement in step with the paint
+}
+/* ── THE ORNAMENTAL SCRIPTS ARE DRAWN AT DOUBLE SIZE ───────────────────────────────────────────────
+   Rañjanā, Soyombo, Siddhaṃ and Balinese are not everyday scripts here: they are used for titles, seals,
+   temple inscriptions, mantras and manuscript ornament, and their letters carry decoration — heavy
+   head-strokes, stacked conjuncts, flags and finials — that is simply not resolvable at a 15px body size.
+   Every other script in the list is (or was) a running hand for ordinary text and reads perfectly well at
+   the size the rest of the app uses.
+   ⚠ Judgement, not a property of the data, which is why it is a list rather than something derived — and
+   the list has been corrected once already: **Zanabazar Square is NOT in it**. It was created as a
+   practical script for writing Mongolian, Tibetan and Sanskrit, and its square construction is a
+   letterform, not ornament. Siddhaṃ and Balinese are, on the other side: Siddhaṃ survives almost entirely
+   as bīja and mantra calligraphy, and Balinese as ornamented palm-leaf and temple lettering.
+   Javanese and Tibetan joined them: Javanese is Balinese's sibling in construction and use (the same
+   ornamented palm-leaf hand, the same stacked pasangan below the line), and Tibetan writes Sanskrit as
+   dbu-can with stacked subjoined consonants and a heavy head-line — legible at a body size for Tibetan
+   prose, but not for the conjunct-dense Sanskrit this app sets in it.
+   ONLY THE GLYPHS SCALE. The transliteration, POS, gloss and relation rows around them are Latin
+   annotation and are legible already — doubling those would be a zoom, which the app has (⌘+) and which
+   the reader did not ask for. */
+const ORNAMENTAL_SCRIPTS=new Set(["Ranjana","Soyombo","Siddham","Balinese","Javanese","Tibetan"]);
+function scriptMag(){ return ORNAMENTAL_SCRIPTS.has(ORTHO_SCHEME)?2:1; }
 function orSchemeLabel(id){ const s=ORTHO_SCHEMES.find(x=>x.id===id); return s?s.label:""; }
+/* WHAT THE "no scheme" ROW IS CALLED, which is not the same question in every language. Everywhere else the
+   Script menu picks a WRITING SYSTEM, and declining to pick one is "Original" — the stored glyphs. Latin's
+   only entry is not a writing system at all but a second SPELLING of the one it has (vowel length, see
+   _SCRIPT_SCHEMES["la"] in app/translit.py), so the menu is a two-state choice about macrons and naming
+   its off-state after the absence of a script says nothing a reader of Latin would recognise.
+   `isLatinLang` and not a check for "does this language's only scheme happen to be `macron`": the naming is
+   a fact about Latin, and a second Latin scheme later must not silently rename the row back. */
+function isLatinLang(lang){ return ((lang!=null?lang:DOCLANG)||"").toLowerCase().split(/[-_]/)[0]==="la"; }
+/* IS THERE A MACRONISER HERE? Read off the loaded scheme list rather than asked separately, so the one
+   answer drives the Script menu's own row, the MSeg tier's availability (js/io/bridge.js) and the
+   macronised segmentation itself — three features that must not be able to disagree about whether Latin
+   vowel length is knowable in this install. `available` is `app/translit.py`'s `_scheme_available`, which
+   for `macron` is `macron.available()`: a file test over the fetched Morpheus table. */
+function macronAvailable(){ return isLatinLang() && ORTHO_SCHEMES.some(s=>s.id==="macron"&&s.available); }
+/* …and a tier that has just been installed says so, from whichever window installed it
+   (Api._notify_extra_installed → _broadcast_all). Re-loading both scheme lists is the whole remedy: the
+   frontend's ONLY stale fact is the per-language answer it cached, and loadOrthoSchemes/loadTranslitSchemes
+   re-ask the bridge and re-render the pills and the document off the fresh one. Everything downstream —
+   macronAvailable, the Glossing drawer's Latin gate, fillOrtho's cache — reads through those, so nothing
+   else has to be told. */
+window.__extraInstalled=function(){ if(!DOCLANG) return;
+  try{ loadOrthoSchemes(DOCLANG); loadTranslitSchemes(DOCLANG); }catch(e){} };
+function orthoOffLabel(){ return isLatinLang()?"Without macrons":"Original"; }
 function updateOrthoPill(){ const p=document.getElementById("orthoPill"); if(!p)return;
   if(!ORTHO_SCHEMES.length){ p.hidden=true; return; }
   p.hidden=false; p.classList.add("pickable");
   const lbl=document.getElementById("orthoPillLabel");   // the label span only — the trailing chevron svg is a persistent sibling
-  if(lbl)lbl.textContent="Script: "+(ORTHO_SCHEME==="none"?"None":(ORTHO_SCHEME?orSchemeLabel(ORTHO_SCHEME):"Original"));
-  sizePill(p, ["Script: None", "Script: Original", ...ORTHO_SCHEMES.map(s=>"Script: "+s.label)]); }
+  if(lbl)lbl.textContent="Script: "+(ORTHO_SCHEME==="none"?"None":(ORTHO_SCHEME?orSchemeLabel(ORTHO_SCHEME):orthoOffLabel()));
+  sizePill(p, ["Script: None", "Script: "+orthoOffLabel(), ...ORTHO_SCHEMES.map(s=>"Script: "+s.label)]); }
 let _orMenu=null;
 function orEl(){ if(_orMenu)return _orMenu; const m=document.createElement("div"); m.className="trmenu"; document.body.appendChild(m);
   m.addEventListener("mousedown",e=>e.preventDefault()); _orMenu=m; return m; }
@@ -311,24 +500,58 @@ function orClose(){ setPillMenuOpen("orthoPill",false); if(_orMenu)_orMenu.class
 function orRender(){ const m=orEl(); m.innerHTML="";
   // item 11: "Original" (default, stored form) + "None" (→ displayed transliteration becomes the main glyph) + the scripts.
   // Sanskrit is stored in Latin (IAST) so "Original" would just be a romanisation, not a script → list scripts only.
-  const rows=isSanskritLang()?[{id:"none",label:"None",available:true}].concat(ORTHO_SCHEMES):[{id:"",label:"Original",available:true},{id:"none",label:"None",available:true}].concat(ORTHO_SCHEMES);   // item 17: Sanskrit offers None (default, IAST as-is) + the Indic scripts, but no "Original" (its stored form IS the IAST)
+  // Sanskrit gets "Original" like everyone else — its stored script is now a real question, not a
+  // constant — but NOT the "None" row. "None" means "show the displayed transliteration as the main
+  // glyph", and Sanskrit's only displayed transliteration is IAST, which the schemes list already
+  // offers by name as "Latin". Two rows doing one thing, one of them naming it after the
+  // absence of a script when it IS one, is worse than one.
+  /* …and Latin gets no "None" row either, for the same reason Sanskrit doesn't: "None" means "promote the
+     displayed transliteration to the main glyph", and Latin has no displayed transliteration to promote —
+     the row would name a state it cannot reach. That leaves exactly the two-state choice the macron scheme
+     is: "Without macrons" (orthoOffLabel) and "With macrons". */
+  const off=(isSanskritLang()||isLatinLang())?[{id:"",label:orthoOffLabel(),available:true}]
+                            :[{id:"",label:"Original",available:true},{id:"none",label:"None",available:true}];
+  const rows=off.concat(ORTHO_SCHEMES);
   let pg=null;
   rows.forEach(s=>{ const grp=(s.id===""||s.id==="none"); if(pg!==null&&grp!==pg)trMenuSep(m); pg=grp;   // hairline between the Original/None off-rows and the actual scripts
     const b=document.createElement("button"); b.type="button"; b.className="trrow";
     const ck=document.createElement("span"); ck.className="ck"; ck.textContent=(s.id===ORTHO_SCHEME)?"✓":""; b.appendChild(ck);
     const nm=document.createElement("span"); nm.className="trname"; nm.textContent=s.label; b.appendChild(nm);
-    if(s.id&&!s.available){ b.disabled=true; const na=document.createElement("span"); na.className="trna"; na.textContent="unavailable"; b.appendChild(na); }
+    /* ⚠ NO "install" TAG IN THIS MENU — THE ROW IS THE TARGET. Every row here is a whole button that
+       already means "make the document look like this", so an unavailable one wants no second, smaller
+       control glued to its right edge to say the one thing that stands between the reader and that:
+       clicking "With macrons" when there are no macrons to be had should simply take them to where
+       macrons come from. So the row keeps its click, and the click opens Manage Models at the tier that
+       would supply it. (The transliteration table keeps `naTag`, and rightly: its rows are not buttons
+       at all but a NAME beside two radio cells, so there is nothing there to click and the tag has to
+       carry the affordance itself.) A row with no `needs` — a scheme nothing installable would repair —
+       is disabled as before: there is nowhere to be taken. */
+    if(s.id&&!s.available){ b.classList.add("trdim");
+      if(s.needs){ b.title="Not available yet — opens Manage Models";
+        b.addEventListener("click",()=>{ orClose(); if(typeof manageModels==="function") manageModels(s.needs); }); }
+      else b.disabled=true; }
     else b.addEventListener("click",()=>orPick(s.id));
     m.appendChild(b); }); }
-function orPick(id){ orClose(); id=id||""; if(id===ORTHO_SCHEME) return;
+/* ⚠ AND THE READING POSITION SURVIVES THE SWITCH. Picking an ornamental script doubles every glyph in
+   the document, so every block above the viewport changes height and the scroll offset that meant
+   "here" before the switch means somewhere else after it — the reader is dropped pages away from the
+   sentence they were reading. `withTopChrome` is the instrument for exactly this (see its own note: the
+   zoom and the options bar use it for the identical reason, and the whole mutation must sit INSIDE the
+   capture or it measures the state it is about to restore). Guarded, because js/core/scroll.js loads
+   after this module. */
+function orPick(id){ if(typeof withTopChrome==="function") return withTopChrome(()=>_orPick(id));
+  return _orPick(id); }
+function _orPick(id){ orClose(); id=id||""; if(id===ORTHO_SCHEME) return;
   ORTHO_SCHEME=id; syncSchemeAttr();
-  if(isSanskritLang()) show.translit=orthoScript();   // item 27(c): the IAST transliteration row/pill follows script-selected (real script ⇒ show IAST beneath; None/Original ⇒ hide)
+  if(isSanskritLang()) show.translit=saTransRow();   // item 27(c): the IAST transliteration row/pill follows the GLYPH (non-Latin ⇒ show IAST beneath; Latin/an IAST-stored Original ⇒ hide)
   updateTranslitPill(); updateOrthoPill(); clearOrthoCache();
   if((ORTHO_SCHEME && ORTHO_SCHEME!=="none")||isSanskritLang()) fillOrtho();   // a script fetches its rendering; Sanskrit also fuses MWT sandhi under None (item 18)
   if((!ORTHO_SCHEME||ORTHO_SCHEME==="none") && DOC.length) preserveScroll(renderDoc);   // None/Original: re-render NOW to revert the glyphs (the cache was just cleared). fillOrtho only re-renders when it FETCHED something, so a script→None switch on a sentence with no MWTs would otherwise leave the stale script glyphs on screen.
   if(isSanskritLang()&&show.translit) fillTranslit();   // fill the IAST row now that a script is active
   if(DOCLANG){ PREFS.ortho[DOCLANG]=ORTHO_SCHEME; savePrefs(); }   // store ALL THREE kinds of choice verbatim — a script id, "none", and "" (Original). Deleting the key on Original (what this did before) left a deliberate Original indistinguishable from "never chose", so it could not be restored for a language whose default is not Original — see prefOrtho.
-  toast(ORTHO_SCHEME==="none"?"Script: None (transliteration as main)":(ORTHO_SCHEME?("Script: "+orSchemeLabel(ORTHO_SCHEME)):"Original script")); }
+  toast(ORTHO_SCHEME==="none"?"Script: None (transliteration as main)"
+        :(ORTHO_SCHEME?("Script: "+orSchemeLabel(ORTHO_SCHEME))
+        :(isLatinLang()?orthoOffLabel():"Original script"))); }   // …and the toast says what the row the user just picked said (see orthoOffLabel)
 function openOrthoMenu(x,y){ const m=orEl(); orRender(); m.classList.add("show"); setPillMenuOpen("orthoPill",true);
   const w=m.offsetWidth,h=m.offsetHeight;
   m.style.left=Math.max(8,Math.min(x,innerWidth-w-8))+"px";

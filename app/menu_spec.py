@@ -114,15 +114,25 @@ MENUS: list[dict] = [
     {"title": "File", "items": [
         item("New", "window.doNew && doNew()",
              key="n", mods=("cmd", "shift"), sf="square.and.pencil", fluent="Add"),   # ⇧⌘N — ⌘N is now New Window (item 14)
-        # item 14: fresh window + empty doc (a DETACHED second process — pywebview is single-window)
+        # a fresh window + empty doc, in THIS process (app/__main__.py's _new_document_window)
         item("New Window", "window.__newWindow && __newWindow()", action="new_window",
              key="n", mods=("cmd",), sf="macwindow.badge.plus", fluent="NewWindow"),
+        # …and the same document window opened AS A TAB of the current one. ⌘T is the system-wide
+        # convention for it, and the tab bar's own + button raises this too (AppKit sends
+        # newWindowForTab: — see the category in app/mac/shell.py), so the two entry points cannot
+        # drift. macOS-only in effect: Windows has no window tabbing, and menu_spec.visibility keeps
+        # the row out of the in-window menu bar there (see WIN_HIDE).
+        item("New Tab", "window.__newTab && __newTab()", action="new_tab",
+             key="t", mods=("cmd",), sf="plus.rectangle.on.rectangle", fluent="TabAdd"),
         item("Open…", "window.doOpen && doOpen()", key="o", mods=("cmd",), sf="folder", fluent="OpenFolderHorizontal"),
         item("Open Recent", submenu="recent", sf="clock.arrow.circlepath", fluent="Recent"),   # submenu parent (no key-equivalent)
         item("Append…", "window.doAppend && doAppend()",
              key="o", mods=("cmd", "shift"), sf="plus.rectangle.on.folder", fluent="FolderAdd"),
+        # ⇧⌘T, not ⌘T: New Tab above took the plain chord, which is what ⌘T means in every document
+        # app on the platform, and the audit below refuses to let two live rows share one. Insert Text
+        # keeps the same letter one modifier along, so the pairing is still legible.
         item("Insert Text…", "window.addTextSheet && addTextSheet()",
-             key="t", mods=("cmd",), sf="text.badge.plus", fluent="InsertTextBox"),
+             key="t", mods=("cmd", "shift"), sf="text.badge.plus", fluent="InsertTextBox"),
         SEP,
         item("Import UD…", "window.doImportUD && doImportUD()",
              key="i", mods=("cmd", "shift"), sf="square.and.arrow.down.on.square", fluent="Import"),   # ⇧⌘I — ⌘I is now Mark as Foreign
@@ -171,7 +181,12 @@ MENUS: list[dict] = [
         item("Ungroup Multi-word Token", "window.ungroupMWTShortcut && ungroupMWTShortcut()",
              key="g", mods=("cmd", "shift"), sf="arrow.left.and.line.vertical.and.arrow.right",
              fluent="ArrowMaximize", vis="ungroup"),
-        item("Split into Multi-word Token…", "window.convertTokenMWT && convertTokenMWT()",
+        # No ellipsis: a form that spells its own division needs no prompt.  "=" divides the token into
+        # the components of a MULTI-WORD TOKEN (one orthographic word, several tokens); whitespace
+        # divides it into SEPARATE tokens with no range at all (splitTokenAtSpaces, js/editing/
+        # context-menu.js).  The title names the commoner case only — a native NSMenu item cannot
+        # re-title itself per selection, so the diagram/grid row does that instead (SPLIT_ROW).
+        item("Split into Multi-word Token", "window.convertTokenMWT && convertTokenMWT()",
              key="s", mods=("cmd", "alt"), sf="square.split.2x1", fluent="SplitHorizontal", vis="convmwt"),   # ⌥⌘S — "split"
         # MOVED off ⌥⌘F, which Find and Replace above now holds. The collision was not survivable:
         # AppKit matches a key equivalent against the FIRST eligible item in menu order, and Find and
@@ -254,9 +269,22 @@ MENUS: list[dict] = [
         item("Move Sentence Down", "window.moveSentDown && moveSentDown()",
              key=DOWN, mods=("ctrl", "cmd"), win_mods=("shift", "cmd"),
              sf="arrow.down", fluent="ArrowDown", vis="blockOnly"),   # ⌃⌘↓
+        item("Merge Sentences", "window.mergeSents && mergeSents()",
+             key="m", mods=("alt", "cmd"), sf="arrow.triangle.merge", fluent="Merge",
+             vis="blockOnly"),   # ⌥⌘M — needs a shift-selected RANGE; with one sentence it says so rather than acting.
+        # ⌥⌘M reads as Merge Tokens' ⌃⌘M one scope up, and on Windows the two ARE one chord: ⌥⌘ and ⌃⌘
+        # both land on Ctrl+Alt (see the module docstring), so Ctrl+Alt+M has to serve both. That is
+        # allowed here and nowhere near it, because the pair is disjoint BY CONSTRUCTION rather than by
+        # a mode argument: "merge" needs `multi`, a token RANGE, which only setRange builds and which
+        # always leaves sel.t at a real token id; "blockOnly" is sel.t<=0. No selection satisfies both.
+        # Hence the fifth entry in _DISJOINT_VIS rather than a `win_mods` override — an override would
+        # have had to invent a fourth-modifier chord (⇧⌘M is Manage Models, ⇧⌘ is spent on the sentence
+        # arrows) for a collision the selection rules already resolve.
         item("Delete Sentence", "window.deleteSent && deleteSent()",
-             key=BACKSPACE, mods=("cmd",), sf="trash", fluent="Delete", vis="blockOnly"),   # ⌘⌫ — same context-delete as tokens
+             key=BACKSPACE, mods=("cmd",), sf="trash", fluent="Delete", vis="blockOnly"),   # ⌘⌫ — same context-delete as tokens; deletes the whole shift-selected RANGE when there is one, which is why no second item exists for it
         SEP,
+        item("Sentence URL…", "window.editSentUrl && editSentUrl()",
+             key="u", mods=("cmd",), sf="link", fluent="Link"),   # ⌘U — the block-control icon's twin; always available, since every sentence can carry a source URL
         item("Reset Parse", "window.resetParse && resetParse()",
              key="r", mods=("cmd",), sf="arrow.clockwise", fluent="ArrowClockwise"),   # ⌘R (always enabled → intercepts before the web view's reload)
         item("Export Diagram as SVG…", "window.exportSentSVG && exportSentSVG()",
@@ -474,14 +502,18 @@ def toggle_fs_toolbar_mirror() -> bool:
 # Windows after ⌘→Ctrl and ⌃/⌥ BOTH → Alt (js/core/platform.js `_MOD_WIN`; the ⌥⌘/⌃⌘ collapse is
 # forced — five ⌘-families over there, four here).
 #
-# A shared chord is only reported where BOTH rows can be visible at once.  FOUR pairs share one on
-# purpose (the same four on each platform): a sentence command and a token command that take
-# mutually exclusive selections — a block with no token vs a token — i.e. Move Sentence Up/Down
-# against Move Token Up/Down on ⌃⌘↑↓, and Insert Sentence Before/After against Insert Token
-# Above/Below on ⌥⌘↑↓.  Those are the pairs whose `vis` rules are disjoint by construction, and
-# nothing else is excused: a clash between two rows that a wrapping "they're different modes"
-# argument would cover is exactly the clash that goes unnoticed for months.
-_DISJOINT_VIS = {frozenset(("blockOnly", "grid")), frozenset(("blockOnly", "diagram"))}
+# A shared chord is only reported where BOTH rows can be visible at once.  FIVE pairs share one on
+# purpose: a sentence command and a token command that take mutually exclusive selections — a block
+# with no token vs a token — i.e. Move Sentence Up/Down against Move Token Up/Down on ⌃⌘↑↓, Insert
+# Sentence Before/After against Insert Token Above/Below on ⌥⌘↑↓ (those four on both platforms), and
+# Merge Sentences against Merge Tokens, which is a separate chord here (⌥⌘M / ⌃⌘M) and one over there.
+# Those are the pairs whose `vis` rules are disjoint by construction, and nothing else is excused: a
+# clash between two rows that a wrapping "they're different modes" argument would cover is exactly the
+# clash that goes unnoticed for months.  Read `menuState()` in js/editing/edit-ops.js before adding a
+# sixth — the test is whether ONE selection can set both flags, not whether the two commands feel
+# unrelated.
+_DISJOINT_VIS = {frozenset(("blockOnly", "grid")), frozenset(("blockOnly", "diagram")),
+                 frozenset(("blockOnly", "merge"))}
 _WIN_MOD = {"cmd": "ctrl", "ctrl": "alt", "alt": "alt", "shift": "shift"}   # ⌃ and ⌥ both land on Alt
 
 

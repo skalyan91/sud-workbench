@@ -13,15 +13,17 @@ import os
 import re
 import sys
 import threading
+import time
 from pathlib import Path
 from typing import Any
 
 import webview
 
-from . import convert, detect, io_conllu, itrans, menu_spec, model, models_registry, parse, toolbox_import
+from . import appearance, convert, detect, io_conllu, itrans, menu_spec, model, models_registry, parse, toolbox_import
 from .paths import APP_DATA
 
 _STATE_FILE = os.path.join(APP_DATA, "state.json")   # small persisted app state (recent files, …)
+_SNAP_FILE = os.path.join(APP_DATA, "launch_snapshot.jpg")   # the last view of the launch document — a FILE, not a field in state.json, which save_scroll rewrites on every scroll and would otherwise carry a few hundred kB of base64 each time
 _MAX_RECENT = 10
 
 IS_MAC = sys.platform == "darwin"
@@ -50,6 +52,19 @@ def _esc(s: str) -> str:
 
 
 _DATA_DIR = Path(__file__).parent / "data"
+
+
+# ── the POS hint carried into the romanisation engines ────────────────────────────────────────────
+# A Han character is heteronymic BY PART OF SPEECH as often as by anything else — 行 reads háng as a
+# NOUN ("row, line") and xíng as a VERB ("to walk") — so the frontend now sends each token's own UPOS
+# alongside its form. The hint REORDERS/selects among the readings an engine already has; it never
+# filters, so an unknown or absent tag must land on exactly the answer the app gave before it existed.
+# Passed straight through to app.translit, which treats an absent/empty tag as "no opinion" and returns
+# exactly the POS-blind answer — so no guard is needed here for a caller that names none. (There WAS one
+# while the two halves of this feature were landing separately: it inspected translit's signature and
+# dropped the argument against a build that predated it. Deliberately removed once both landed in the same
+# commit, because it would have gone on silently degrading to POS-blind if `upos` were ever dropped from
+# translit again — turning a regression into a behaviour nobody would think to report.)
 
 
 # a well-formed gloss-map key is a single "Feature=Value" pair (no separators/whitespace either side of "=")
@@ -239,6 +254,32 @@ class Api:
         _save_state(state)
         self._notify_recent_changed()
 
+    # ── the document to reopen on next launch (persisted in _STATE_FILE) ─────
+    def record_last_doc(self) -> None:
+        """Remember what this window had open, so the next launch reopens it (see
+        :func:`app.__main__.main`'s startup fallback).  Called from the window's ``closed``
+        handler, which is what makes "the LAST CLOSED window" the thing recorded: every window has a
+        handler of its own and writes as it goes, so the last to close is the last to write.  That
+        holds however many windows the app has open — they share one process now (see
+        ``_new_document_window``), but they never shared one Api, and this reads `self.path`.
+
+        Writes ``None`` for a window that had no file open, so closing an empty window is how you
+        ask for an empty one next time — that is the "unless the last closed window was empty"
+        half of the rule, and it is why this records on CLOSE rather than tracking `path` as it
+        changes: a second, empty window opening would otherwise erase what the first has open.
+        An UNTITLED window with unsaved content also records ``None``, because there is no file to
+        reopen — the recovery story for that is Save, not this."""
+        state = _load_state()
+        state["last_doc"] = os.path.abspath(self.path) if self.path else None
+        _save_state(state)
+
+    @staticmethod
+    def last_doc() -> str | None:
+        """The remembered document from the last window to close, or None — filtered to one that
+        is still on disk, so a file moved or deleted between sessions just starts empty."""
+        p = _load_state().get("last_doc")
+        return p if isinstance(p, str) and p and os.path.exists(p) else None
+
     def _notify_recent_changed(self) -> None:
         """Ask __main__ to live-rebuild the native Open Recent submenu (best-effort)."""
         cb = getattr(self, "_recent_menu_refresh", None)
@@ -271,6 +312,98 @@ class Api:
         if not isinstance(fp, dict):
             return None
         return fp.get(os.path.abspath(path))
+
+    def capture_snapshot(self, chrome=0) -> dict:
+        """Remember what this document LOOKS like, for the next launch to show while it reloads.
+
+        The picture is only ever shown again for the very same view (see get_state): same file,
+        unmodified, same window size, same scroll anchor. Anything else and it is ignored rather than
+        stretched or shown against the wrong document — a placeholder that lies is worse than a blank.
+        Throttled hard: it is called on scroll-settle, and a WebKit snapshot of a full window is not
+        free. macOS only (it is WKWebView's API); a no-op elsewhere, where the cover stays plain."""
+        if sys.platform != "darwin" or self.window is None or not self.path:
+            return {"ok": False}
+        now = time.time()
+        if now - getattr(self, "_snap_t", 0.0) < 8.0:
+            return {"ok": False, "throttled": True}
+        self._snap_t = now
+        try:
+            from .mac import shell as mac_shell
+            data = mac_shell.snapshot_webview(self.window)
+            if not data:
+                return {"ok": False}
+            ap = os.path.abspath(self.path)
+            st = os.stat(ap)
+            os.makedirs(APP_DATA, exist_ok=True)
+            # ATOMIC: temp file + rename. Written in place, a process that dies mid-write (a crash, a
+            # kill, a logout) leaves a TRUNCATED jpeg — which passes every check here, is handed to the
+            # page, and decodes to nothing, so the next launch shows a blank cover for no visible
+            # reason and logs no refusal. os.replace is atomic within a filesystem.
+            tmp = _SNAP_FILE + ".part"
+            with open(tmp, "wb") as fh:
+                fh.write(data)
+            os.replace(tmp, _SNAP_FILE)
+            state = _load_state()
+            state["launch_snap"] = {
+                "path": ap, "mtime": int(st.st_mtime), "size": st.st_size,
+                "chrome": float(chrome or 0),          # …so the picture is hung from the same place the cover starts
+                "w": int(self.window.width or 0), "h": int(self.window.height or 0),
+                "scroll": self._saved_scroll(ap),      # the anchor restoreScrollPos will put the reader back at
+            }
+            _save_state(state)
+            return {"ok": True, "bytes": len(data)}
+        except Exception as exc:  # noqa: BLE001 — cosmetic; never break a scroll
+            print(f"[snapshot] capture: {exc}", file=sys.stderr)
+            return {"ok": False}
+
+    def launch_snapshot(self) -> Any:
+        """The picture of this document's last view, as a data URI, or None.
+
+        ITS OWN BRIDGE CALL, deliberately not a field in get_state: get_state returns the DOCUMENT,
+        and by the time it resolves the frontend HAS the real thing and is about to render it — a
+        picture handed over then is applied and cleared in the same turn, which is exactly what the
+        first version of this did (and why it never appeared). Asked for separately at the top of
+        bootBridge, it lands while get_state is still in flight and covers the render that follows.
+
+        Handed over ONLY for provably the same view: this file, unmodified (mtime + size), the same
+        window size, and the same scroll anchor the reader will be restored to. Any mismatch returns
+        None and the boot cover stays plain — a placeholder that lies is worse than a blank one.
+        """
+        path = self.path
+        if sys.platform != "darwin" or not path:
+            return None
+        try:
+            snap = _load_state().get("launch_snap")
+            if not isinstance(snap, dict):
+                return None
+            ap = os.path.abspath(path)
+            def _no(why):    # a refusal is normal, but a SILENT one is undiagnosable — this is the
+                print(f"[snapshot] not shown: {why}", file=sys.stderr)   # only record of which test failed
+                return None
+            if snap.get("path") != ap:
+                return _no(f"stored for {snap.get('path')!r}, opening {ap!r}")
+            if not os.path.exists(_SNAP_FILE):
+                return _no("no image file")
+            st = os.stat(ap)
+            if snap.get("mtime") != int(st.st_mtime) or snap.get("size") != st.st_size:
+                return _no("the document changed under it")   # the picture is of something else now
+            if self.window is not None and (snap.get("w") != int(self.window.width or 0)
+                                            or snap.get("h") != int(self.window.height or 0)):
+                # a differently-sized window would scale it, and a scaled screenshot of text looks broken
+                return _no(f"window is {self.window.width}x{self.window.height}, picture is {snap.get('w')}x{snap.get('h')}")
+            if snap.get("scroll") != self._saved_scroll(ap):
+                # the reader will land somewhere else; showing this one would jump
+                return _no(f"scroll anchor {snap.get('scroll')} vs {self._saved_scroll(ap)}")
+            import base64
+            with open(_SNAP_FILE, "rb") as fh:
+                uri = "data:image/jpeg;base64," + base64.b64encode(fh.read()).decode("ascii")
+            # …and the document's NAME rides along. Without it the picture of a full document sits
+            # under a title bar still reading "untitled.conllu", which is the one thing that gives
+            # the trick away. Naming the file this early is not a guess: it is the file being opened.
+            return {"uri": uri, "chrome": snap.get("chrome") or 0, "name": os.path.basename(ap), "path": ap}
+        except Exception as exc:  # noqa: BLE001
+            print(f"[snapshot] restore: {exc}", file=sys.stderr)
+            return None
 
     def save_scroll(self, pos) -> dict:
         """Persist the last scroll anchor (top-visible sentence-block index) for
@@ -460,7 +593,27 @@ class Api:
             self._apply_menu(st)
         return {"ok": True}
 
-    def _apply_menu(self, st: dict):
+    def is_key_window(self) -> bool:
+        """Is THIS window the one the menu bar currently belongs to?  True when there is no way to
+        tell (Windows, Linux, no NSWindow yet, a PyObjC hiccup): the single-window case must never
+        be able to talk itself out of applying its own state.
+
+        Only meaningful on macOS — see ``_apply_menu``'s own note on why Linux never calls this at
+        all."""
+        win = getattr(self.window, "native", None)
+        if win is None:
+            return True
+        try:
+            import AppKit
+            app = AppKit.NSApp
+            key = (app.keyWindow() if app is not None else None) or (app.mainWindow() if app is not None else None)
+            if key is None:
+                return True
+            return int(key.windowNumber()) == int(win.windowNumber())
+        except Exception:  # noqa: BLE001
+            return True
+
+    def _apply_menu(self, st: dict, force: bool = False):
         """Push one selection-state report onto the live native menu items — ``NSMenuItem`` on
         macOS, ``Gtk.MenuItem``/``Gtk.CheckMenuItem`` on Linux (the Windows in-window bar applies
         the same state itself; see ``sync_menu``'s own docstring).
@@ -470,7 +623,21 @@ class Api:
         predicates rather than a hand-copied restatement of them.  What stays is the per-platform
         widget call: AppKit hides a row, GTK disables it (`Gio.Menu`/`Gtk.MenuItem` can't cleanly
         hide an individual row at runtime the way AppKit can — "disable, don't hide" is normal GTK
-        convention, not a workaround)."""
+        convention, not a workaround).
+
+        ONE MENU BAR, SEVERAL WINDOWS (macOS only): every window's frontend pushes its own selection
+        state (a render, a click, a Tab), and there is a single NSMenu for ALL of them — so a
+        BACKGROUND window's push would hide or show rows according to a selection the user cannot
+        see. Only the key window may write there. Nothing is lost by the others returning early:
+        each caches its state in ``_last_menu_state`` (see the wrapper in mac/shell.py) and the menu
+        delegate re-applies whichever window is key at the moment a menu opens — which is also why
+        that delegate passes ``force``: it has already resolved the key window and must not be
+        second-guessed here. LINUX HAS NO SUCH SHARING TO GUARD AGAINST — ``app/linux/shell.py``
+        builds one real ``Gtk.MenuBar`` PER WINDOW (attached to that window's own
+        ``Gtk.ApplicationWindow``), so ``self._menu`` there is already scoped to the one window
+        asking; gating it on key-window status would be solving a problem Linux doesn't have."""
+        if IS_MAC and not force and not self.is_key_window():
+            return
         m = self._menu or {}
         rtl = bool(st.get("rtl"))
         for title, show in menu_spec.visibility(st).items():
@@ -591,8 +758,50 @@ class Api:
         from .win import dwm
         return {"ok": bool(dwm.caption_action(self.window, str(what or "")))}
 
+    def options_bar_state(self, shown: bool = False) -> dict:
+        """The options bar is APP-WIDE, not per document: opening it in one window opens it in every
+        other one. Broadcast rather than persisted-and-read-on-open, so the change is immediate in
+        windows that are already up; each receiving page applies it through window.__setOptionsBar,
+        which does NOT come back here (that would ping-pong between windows)."""
+        cb = getattr(self, "_broadcast", None)
+        if cb is None:
+            return {"ok": False}
+        try:
+            cb("window.__setOptionsBar && __setOptionsBar(%s)" % ("true" if shown else "false"))
+            return {"ok": True}
+        except Exception as exc:  # noqa: BLE001
+            return {"error": str(exc)}
+
+    def titlebar_reserve(self, height: float = 0) -> dict:
+        """The options bar's measured height, so the shell can reserve it INSIDE the native title-bar
+        band (macOS) — which is what puts the bar ABOVE a window-tab bar rather than below it; see
+        app.mac.shell.set_titlebar_reserve. Reported by syncChrome (js/ui/wiring.js) whenever the
+        bar's height changes, 0 when it is closed or the chrome is collapsed in full screen.
+        A no-op off macOS: Windows has no titlebar accessories and no window tabbing."""
+        if sys.platform != "darwin" or self.window is None:
+            return {"ok": False}
+        try:
+            from .mac import shell as mac_shell
+            mac_shell.set_titlebar_reserve(self.window, float(height or 0))
+            return {"ok": True}
+        except Exception as exc:  # noqa: BLE001
+            return {"error": str(exc)}
+
+    def new_tab(self) -> dict:
+        """Another document window, opened as a TAB of the current one (macOS window tabbing).  Same
+        hand-over shape as :meth:`new_window` below; on a platform without tabbing the callable is
+        absent and this reports unavailable rather than silently opening a separate window."""
+        cb = getattr(self, "_new_tab", None)
+        if cb is None:
+            return {"error": "unavailable"}
+        try:
+            cb()
+            return {"ok": True}
+        except Exception as exc:  # noqa: BLE001
+            return {"error": str(exc)}
+
     def new_window(self) -> dict:
-        """Spawn a second app process (a fresh, empty document).  The callable is handed over by
+        """Open another document window (a fresh, empty document).  The callable is handed over by
         app/__main__.py at startup — the same pattern as _recent_menu_refresh — so api.py carries no
         shell code.  The macOS menu calls that function directly; the Windows menu bar comes here."""
         cb = getattr(self, "_new_window", None)
@@ -656,6 +865,50 @@ class Api:
         ``reason`` when the requested model/engine can't run."""
         return parse.parse(text, model_id)
 
+    def parse_texts(self, texts: list, model_id: str = "") -> dict:
+        """`parse_text` over a LIST, in one bridge call — what a multi-sentence paste needs.
+
+        Inserting a pasted passage used to cost two awaited round-trips per sentence (tokenize, then
+        parse_text), so an 80-sentence paste made 160 of them, each re-entering the pipeline for one
+        string. `parse.parse_many` resolves the model once and lets the engine batch: spaCy through
+        `nlp.pipe`, and Stanza with a SINGLE grew UD→SUD conversion across the whole list, which its
+        worker pool then runs in parallel. Entries come back in the order given, each in exactly
+        `parse_text`'s shape (including a per-entry `reason` when the engine could not run)."""
+        return {"results": parse.parse_many(list(texts or []), model_id)}
+
+    def parse_tokens(self, forms: list[str], model_id: str = "",
+                     upos: list[str] | None = None) -> dict:
+        """Re-parse a sentence whose TOKENISATION IS FIXED — one token per entry of ``forms``.
+
+        What the frontend needs after a Form or UPOS edit, where the heads, relations and annotation
+        tiers hang off the existing tokens and an answer with a different token count is unusable.
+        Asking `parse_text(" ".join(forms))` instead silently produced exactly that in any spaceless
+        script — see `parse.parse_pretokenized`, which explains the failure it removes.
+
+        ``upos`` carries the reader's OWN word classes, so a retag re-derives the features for the class
+        that was chosen instead of returning the model's unchanged opinion of the same sentence — see
+        `parse._force_upos`."""
+        return parse.parse_pretokenized(forms or [], model_id, upos or None)
+
+    def token_scores(self, forms: list[str], model_id: str = "",
+                     upos: list[str] | None = None) -> dict:
+        """The pipeline's RUNNERS-UP for one sentence — what it ranked second, and by how much.
+
+        Every component scores a whole inventory and the editor has only ever shown the argmax.  This
+        hands back the rest: per token, the candidate heads the parser weighed against each other, the
+        relation it would use for each of those arcs, and the morphologizer's distribution over word
+        classes.  See `parse.analysis_scores` for how a head distribution is recovered from a
+        transition-based parser at all, and why Stanza answers ``scored: False``."""
+        return parse.analysis_scores(forms or [], model_id, upos or None)
+
+    def arc_scores(self, forms: list[str], model_id: str, child: int, head: int) -> dict:
+        """"If ``child`` hung off ``head``, what would you call that edge?" (both 1-based).
+
+        The counterfactual companion to `token_scores`, for the arc a reader has just made by hand and
+        the parser never considered — so there is no recorded deliberation to read.  See
+        `parse.arc_label_scores`, which states plainly what a synthesised state can and cannot claim."""
+        return parse.arc_label_scores(forms or [], model_id, int(child), int(head))
+
     def tokenize(self, text: str, model_id: str = "") -> dict:
         """FAST first step of the interactive parse sequence (tokenise → transliterate → parse):
         tokenise ONLY, so the tokens and their transliterations paint before the heavy parse. The
@@ -712,9 +965,16 @@ class Api:
         from . import fonts
         return fonts.clear()
 
-    def transliterate(self, forms: list[str], lang: str, scheme: str = "") -> dict:
+    def transliterate(self, forms: list[str], lang: str, scheme: str = "",
+                      upos: list[str] | None = None) -> dict:
+        """``upos`` is OPTIONAL and PARALLEL to ``forms`` — the CoNLL-U tag each form was seen under, so a
+        heteronym is romanised as the part of speech it actually is (行 = háng as a NOUN, xíng as a VERB).
+        The frontend keys its own de-duplication on (form, upos) for the same reason — one entry per
+        distinct SURFACE would let whichever 行 was reached first decide the reading for all of them; a
+        batch that names no tags at all is the call this endpoint has always taken."""
         from . import translit
-        return {"translit": translit.transliterate_many(forms, lang, scheme), "lang": lang, "scheme": scheme}
+        return {"translit": translit.transliterate_many(forms, lang, scheme, upos),
+                "lang": lang, "scheme": scheme}
 
     def set_doc_language(self, lang: str = "") -> dict:
         """The frontend reports the document's language whenever it changes (js/lang/translit.js's
@@ -723,26 +983,49 @@ class Api:
         self._doclang = str(lang or "")
         return {"ok": True}
 
-    def itrans_to_iast(self, text: str, lang: str = "") -> dict:
-        """The ONE entry point for typed-Sanskrit input: ITRANS in, IAST out.  Every input field that
-        can receive a Sanskrit word routes through this, so the notation gate is decided in exactly one
-        place (app.itrans.looks_itrans) and can never drift between call sites.
+    def itrans_to_iast(self, text: str, lang: str = "", script: str = "") -> dict:
+        """The ONE entry point for typed-Sanskrit input: ITRANS in, the DOCUMENT'S script out.  Every
+        input field that can receive a Sanskrit word routes through this, so the notation gate is
+        decided in exactly one place (app.itrans.looks_itrans) and can never drift between call sites.
 
         Returns ``{"converted", "changed"}``.  A non-Sanskrit ``lang``, a word with no ITRANS-only
         spelling in it, or a missing aksharamukha all come back unchanged rather than raising — the
         caller can commit the result unconditionally.  ``lang`` empty ⇒ the language the frontend last
         reported (set_doc_language), which is what a caller with no DOCLANG of its own falls back on;
         with neither known the answer is "not Sanskrit" — an unknown language must leave the text as typed, never
-        guess Sanskrit and rewrite it."""
-        return itrans.convert(text or "", lang or self._doclang or "und")
+        guess Sanskrit and rewrite it.
 
-    def token_readings(self, form: str, lang: str, scheme: str = "") -> dict:
+        ``script`` is the document's own storage script ("Devanagari", or "" for an IAST document) —
+        see `doc_script` for where the frontend gets it. The method keeps its old name because it is
+        the bridge's published surface and every call site passes through it; what it converts TO is
+        now the file's business rather than a constant."""
+        return itrans.convert(text or "", lang or self._doclang or "und", script or "")
+
+    def doc_script(self, forms: list[str], lang: str = "") -> dict:
+        """Which script a Sanskrit document STORES its text in: ``{"script": "Devanagari"|""}``.
+
+        Read off a sample of the document's own forms, because that is where the answer is — a file
+        is in whatever script the parser that made it was fed, and no preference, comment or filename
+        records it. "" means Latin, which is also the answer for every non-Sanskrit language,
+        so a caller can ask unconditionally. Cheap enough to ask on open and on every parse: it stops
+        at the first Brahmic form."""
+        from . import translit
+        base = (lang or self._doclang or "").lower().split("-")[0].split("_")[0]
+        if base not in ("sa", "san"):
+            return {"script": ""}
+        return {"script": translit.sa_stored_script(forms or [])}
+
+    def token_readings(self, form: str, lang: str, scheme: str = "", upos: str = "") -> dict:
         """The ORDERED candidate romanisations of one token in ``scheme`` — the heteronym choices for
         the CJK languages (Han characters are heteronymic; Japanese kanji carry several on'yomi/
         kun'yomi). ``readings[0]`` is what the app is currently displaying, so the caller can tick it.
-        Empty list ⇒ only one possible reading (nothing to choose) or a language/scheme with none."""
+        Empty list ⇒ only one possible reading (nothing to choose) or a language/scheme with none.
+        ``upos`` (optional) is this token's own tag: it REORDERS the candidates so the one the flyout
+        offers first is the one its part of speech calls for (行 as a NOUN leads with háng), and drops
+        none of them — the whole point of the flyout is that every reading stays pickable."""
         from . import translit
-        return {"readings": translit.readings(form, lang, scheme), "lang": lang, "scheme": scheme}
+        return {"readings": translit.readings(form, lang, scheme, upos),
+                "lang": lang, "scheme": scheme}
 
     def translit_derive(self, forms: list[str], stored: list[str], lang: str, src: str = "", dst: str = "") -> dict:
         """Re-express each hand-corrected STORED romanisation (``stored[i]``, of surface form ``forms[i]``,
@@ -771,36 +1054,101 @@ class Api:
         from . import translit
         return {"schemes": translit.orthography_schemes(lang), "lang": lang}
 
-    def orthography(self, forms: list[str], lang: str, scheme: str = "") -> dict:
+    def orthography(self, forms: list[str], lang: str, scheme: str = "",
+                    upos: list[str] | None = None, feats: list[str] | None = None,
+                    lemmas: list[str] | None = None) -> dict:
+        """Same optional POS hint as ``transliterate`` above, parallel to ``forms``: a script rendering can
+        be reading-dependent too (a Traditional/Simplified variant pair, a kana spell-out), so the layer
+        that picks a reading is given the same evidence.  An MWT range sends nothing — its span covers
+        several tokens and so has no one part of speech to report.
+
+        ``feats``/``lemmas`` are parallel too, and exist for Latin macronisation, which needs the whole
+        morphological analysis rather than just the class: the lookup is keyed on (form, upos, feats),
+        and the lemma's ending supplies the declension wherever FEATS carries no ``InflClass``.  Sending
+        the form alone reaches only the morphology-blind level of the table, which is how nominative
+        ``Gallia`` acquires an ablative macron.  Every other language ignores both."""
         from . import translit
-        return {"ortho": translit.orthography_many(forms, lang, scheme), "lang": lang, "scheme": scheme}
+        return {"ortho": translit.orthography_many(forms, lang, scheme, upos, feats, lemmas),
+                "lang": lang, "scheme": scheme}
 
     def sanskrit_mwt(self, groups: list[list[str]], lang: str, scheme: str = "",
-                     lemma_groups: list[list[str]] | None = None, word_sep: str = "") -> dict:
+                     lemma_groups: list[list[str]] | None = None, word_sep: str = "",
+                     prevs: list[str] | None = None, nexts: list[str] | None = None,
+                     pauses: list[bool] | None = None,
+                     bounds: list[list[bool]] | None = None) -> dict:
         """Reconstruct each Sanskrit multi-word token's surface form from its component words,
         fusing the joins by external sandhi, then render the fused form in ``scheme`` (a script).
         ``groups`` = one component-form list per MWT; ``lemma_groups`` (optional, parallel) supplies
         each component's CoNLL-U lemma as an r-stem signal for visarga sandhi.  ``word_sep`` = the
-        separator kept at a NON-fusing junction: "" for a spaceless MWT (the default), " " for the
-        block-initial running line so an un-coalescing junction (e.g. ``eke vāñchanti``) stays two
-        words.  Returns the scripted forms + the fused IAST."""
+        separator kept at a NON-fusing junction: "" for a spaceless MWT (the default), " " for a
+        running stretch so an un-coalescing junction (e.g. ``eke vāñchanti``) stays two words.
+
+        Returns ``{"form", "ortho"}``: ``form`` is the fused surface IN THE DOCUMENT'S OWN SCRIPT —
+        what belongs in the range's FORM column, Devanagari for a Devanagari file and IAST for an
+        IAST one — and ``ortho`` is the same fusion rendered in the reader's chosen script.  (It was
+        ``iast`` until a file could be stored in Devanagari, at which point the name would have been
+        a lie half the time.)  A parse never needs this: the tokeniser reports the range's surface
+        as the raw substring it came from.  It is for an EDIT — retyping a component means the
+        orthographic word above it has to be re-derived, and only sandhi can say what it becomes."""
         from . import translit
         groups = groups or []
         lg = lemma_groups or []
-        iast = [translit.sandhi_join(g, lang, lg[i] if i < len(lg) else None, word_sep) for i, g in enumerate(groups)]
-        ortho = [translit.sandhi_to_script(g, lang, scheme, lg[i] if i < len(lg) else None, word_sep) for i, g in enumerate(groups)]
-        return {"ortho": ortho, "iast": iast, "lang": lang, "scheme": scheme}
+        # ``prevs``/``nexts`` are the neighbouring ORTHOGRAPHIC words, one per group — what lets the
+        # fusion finish the range's outer edges by non-coalescent external sandhi instead of leaving
+        # them in pausa (see translit._boundary_sandhi). Absent ⇒ "", i.e. exactly the old behaviour,
+        # so an older caller and the running-line path are unaffected.
+        pv, nx, pz = prevs or [], nexts or [], pauses or []
+        # ``bounds`` (parallel to ``groups``, one flag per COMPONENT) marks the bound compound members —
+        # FEATS Compound=Yes — so a junction inside a compound is fused as compound-INTERNAL rather than
+        # as one between two words. Absent ⇒ every junction external, i.e. exactly the old behaviour.
+        bd = bounds or []
+        form = [translit.sandhi_join(g, lang, lg[i] if i < len(lg) else None, word_sep,
+                                     pv[i] if i < len(pv) else "", nx[i] if i < len(nx) else "",
+                                     bool(pz[i]) if i < len(pz) else False,
+                                     bd[i] if i < len(bd) else None)
+                for i, g in enumerate(groups)]
+        ortho = [translit.sandhi_to_script(g, lang, scheme, lg[i] if i < len(lg) else None, word_sep,
+                                           pv[i] if i < len(pv) else "", nx[i] if i < len(nx) else "",
+                                           bool(pz[i]) if i < len(pz) else False,
+                                           bd[i] if i < len(bd) else None)
+                 for i, g in enumerate(groups)]
+        return {"ortho": ortho, "form": form, "lang": lang, "scheme": scheme}
 
-    def sanskrit_running(self, texts: list[str], lang: str, scheme: str = "") -> dict:
-        """Item 6 (rev): the block-initial Sanskrit running line, built from each sentence's RAW
-        ``# text`` (not the token forms) by the gluing algorithm — strip apostrophes/hyphens/word-
-        internal pipes (so hyphen-/pipe-separated compound members fuse), glue every consonant-final
-        word onto the next, then render in ``scheme`` (a script).  Operating on the raw text is what
-        makes the hyphen/pipe gluing work: the tokeniser has already dropped those markers from the
-        forms.  Returns one scripted running line per input text."""
+    def sanskrit_desandhi(self, form: str, lang: str = "", lemma: str = "",
+                          nxt_word: str = "", pause_after: bool = False, upos: str = "") -> dict:
+        """The pausa spelling of ``form`` — its non-coalescent external sandhi with ``nxt_word`` undone.
+
+        The mirror image of ``sanskrit_mwt``, and wanted at the opposite moment: that one FUSES a range's
+        components into the orthographic word a running text spells, this one gives back the citation form
+        one of those components has to be STORED as.  A token that is its own orthographic word keeps its
+        sandhied surface in FORM, but a token inside a multi-word token is stored in pausa — so splitting
+        one into a range has to hand the LAST component the ending the following word had imposed on it
+        (`janmanāṃ` → `janmanām`, `bhṛto` → `bhṛtaḥ`).  Only the last: the interior junctions are
+        compound-internal, and the left edge's sandhi is written on the word before this one.
+
+        ``upos`` decides WHICH form that is, and the two answers are different: DCS records an
+        INDECLINABLE's pausa column as its citation form (tato → tatas, punar → punar) and an INFLECTED
+        word's as its pausa spelling (kratuś → kratuḥ, bastir → bastiḥ).  Both are visible in
+        samples/brihat_jataka.conllu, which is where the rule came from.
+
+        Declines rather than guesses — see translit.desandhi_final, which verifies every candidate against
+        the forward transform and returns the form untouched where the reversal is ambiguous.  Measured on
+        both Sanskrit samples: reverting the ending and re-fusing it reproduces the original surface for
+        68 of 68 ranges, 28 of which it actually changes."""
         from . import translit
-        ortho = [translit.sanskrit_running_line(t or "", lang, scheme) for t in (texts or [])]
-        return {"ortho": ortho, "lang": lang, "scheme": scheme}
+        return {"form": translit.desandhi_final(form or "", lang or "sa", lemma or None,
+                                                nxt_word or "", bool(pause_after), upos or "")}
+
+    def sanskrit_csl(self, sents: list[dict]) -> dict:
+        """Each sentence's tokens spelt in Clay-Sanskrit-Library notation → ``{"csl": [[…], …]}``.
+
+        A SENTENCE at a time, unlike every other transliteration call, because a CSL mark records
+        what happened BETWEEN two words: ``vartmā`` is only ``vartm"`` because ``apunar`` follows it,
+        so no per-form batch can answer it. Each entry is
+        ``{forms, unsandhied, feats, lemmas, mwt}`` — see :mod:`app.sa_notation` for why the pausa
+        forms rather than the stored ones are the input, and what the lemma is read for."""
+        from . import sa_notation
+        return {"csl": sa_notation.csl_many(sents or [])}
 
     def translit_available(self) -> dict:
         from . import translit
@@ -813,13 +1161,60 @@ class Api:
         for Sanskrit, Wiktionary for everything else.  Both modules return the same dict — the
         frontend reads `definitions`/`page_url`/`error` identically either way, and names the source
         it is showing from `source`/`page_label` rather than assuming Wiktionary."""
-        from . import apte, wiktionary
+        from . import apte, appledict, wiktionary
+        # SANSKRIT IS APTE'S, FIRST AND UNCONDITIONALLY. Apple does ship a Sanskrit–English OUP
+        # dictionary, so this is NOT a consequence of the Apple-only restriction in appledict — it is
+        # its own rule, by user decision: Apte's 1957 revised edition is a scholarly dictionary of the
+        # classical language, vendored, offline, and indexed in SLP1 against the spellings this app
+        # stores. Asking macOS first would have quietly displaced it wherever the OUP dictionary
+        # happened to have the headword.
         if apte.is_sanskrit(language):
             return apte.lookup(word, language, upos)
+        # THEN APPLE'S OWN DICTIONARIES, where macOS has one that indexes this language and defines in
+        # English. They are already installed, professionally edited (Oxford, Duden, Sanseido) and need
+        # no network, so on the languages they cover they beat Wiktionary below. Nothing is removed
+        # behind them: this is macOS-only and Apple has a dictionary for very few of the languages a
+        # treebank is written in, so a miss falls through to exactly what answered before.
+        try:
+            if appledict.available():
+                appledict.set_overrides(_load_state().get("apple_dict_langs") or {})
+                got = appledict.lookup(word, language)
+                if got.get("entry"):
+                    return appledict.as_senses(got, word, upos)
+        except Exception:  # noqa: BLE001 — an unreadable bundle must never cost the flyout its answer
+            pass
         r = wiktionary.lookup(word, language, upos)
         r.setdefault("source", "Wiktionary")
         r.setdefault("page_label", "Open on Wiktionary")
         return r
+
+    def apple_dictionaries(self, lang: str = "") -> dict:
+        """Every macOS dictionary this machine has, with what it indexes and what it defines in
+        English — for a settings list where the user can label the ones that declare nothing.
+
+        ``needsLanguage`` marks exactly those: a bundle whose Info.plist names no languages and whose
+        entry ids carry no direction, which is common for a hand-installed one. There is no honest
+        way to infer it (see `appledict._OVERRIDES`), so the UI asks. Empty list off macOS."""
+        from . import appledict
+        if not appledict.available():
+            return {"dictionaries": [], "available": False}
+        appledict.set_overrides(_load_state().get("apple_dict_langs") or {})
+        return {"dictionaries": appledict.dictionaries(lang), "available": True}
+
+    def set_apple_dictionary_language(self, key: str, lang: str = "") -> dict:
+        """Assign (or, with an empty ``lang``, clear) the headword language of one dictionary.
+        Keyed on its CFBundleIdentifier, or its name when it has none. Persisted in state.json."""
+        from . import appledict
+        state = _load_state()
+        m = dict(state.get("apple_dict_langs") or {})
+        if lang:
+            m[str(key)] = str(lang)
+        else:
+            m.pop(str(key), None)
+        state["apple_dict_langs"] = m
+        _save_state(state)
+        appledict.set_overrides(m)
+        return {"ok": True, "languages": m}
 
     def wiktionary_lookup(self, word: str, language: str = "", upos: str = "") -> dict:
         """Back-compat alias — the flyout is no longer Wiktionary-only (see definition_lookup)."""
@@ -1080,9 +1475,30 @@ class Api:
                     job["note"] = "Installed"
                     if result.get("warning"):
                         job["warning"] = result["warning"]
+                    self._notify_extra_installed(feature)
 
         threading.Thread(target=worker, daemon=True).start()
         return {"job_id": job_id}
+
+    def _notify_extra_installed(self, feature: str) -> None:
+        """A TIER THAT HAS JUST ARRIVED IS USABLE NOW, not after a relaunch.
+
+        Nothing on THIS side caches its absence — ``macron.available()`` is a file test,
+        ``extras.available`` re-probes, and the data-tier install already drops the parser cache — but
+        the frontend does: each document window loads ``orthography_schemes(lang)`` once per language
+        switch and keeps the answer, so "With macrons" went on reading unavailable in a window that had
+        been open the whole time.  That is the reported "I wasn't able to use it until a restart".
+
+        Pushed to EVERY document window (``_broadcast_all``, not ``_broadcast``): the Model Manager
+        shares the ``Api`` of the window that opened it, which is precisely the window the ordinary
+        broadcast leaves out."""
+        cb = getattr(self, "_broadcast_all", None)
+        if cb is None:
+            return
+        try:
+            cb("window.__extraInstalled && __extraInstalled(%s)" % json.dumps(feature))
+        except Exception as exc:  # noqa: BLE001
+            print(f"[extras] notify: {exc}", file=sys.stderr)
 
     # ── secondary native windows (item 23) ────────────────────────────────────
     # Help / About / Model Manager / Toolbox / Gloss Mappings are REAL windows (not in-page scrim sheets).
@@ -1104,7 +1520,7 @@ class Api:
                 win = webview.create_window(
                     title, html=html, js_api=self,
                     width=width, height=height, min_size=min_size,
-                    background_color="#1e1e1e", text_select=True,
+                    background_color=appearance.window_bg(), text_select=True,   # Help / About / Model Manager, same as the document windows
                 )
                 self._child_windows[key] = win
                 try:
@@ -1175,10 +1591,15 @@ class Api:
         return self._open_window("about", "About SUD Workbench",
                                  self._about_html(version), 380, 380, (340, 400))
 
-    def open_models_window(self) -> dict:
-        """Open the Model Manager as a real window (item 23)."""
+    def open_models_window(self, focus: str = "") -> dict:
+        """Open the Model Manager as a real window (item 23).
+
+        ``focus`` names an extras tier to scroll to and flash on arrival.  It is what makes the
+        Script/transliteration menus' "install" link on an unavailable scheme lead somewhere: the
+        tiers sit under every model in a scrolling list, so opening the window on its own would
+        leave the reader to find the row that answers the thing they just clicked."""
         return self._open_window("models", "Manage Models",
-                                 self._models_html(), 660, 580, (420, 400))
+                                 self._models_html(focus), 660, 580, (420, 400))
 
     def open_glossmap_window(self) -> dict:
         """Open the gloss↔FEATS mapping editor as a real window (item 12): mirrors
@@ -1263,12 +1684,48 @@ class Api:
         # document's own language as the frontend last reported it (set_doc_language). This is also the
         # language the document ADOPTS — see __applyInsertPayload on the other side.
         main_lang = str(m.get("lang") or "").strip() or self._doclang or ""
-        # ITRANS → IAST BEFORE the text crosses to the main window, which is where it is sentencised,
-        # tokenised and parsed: the tokeniser (and any Sanskrit model behind it) must see the notation
-        # the document is stored in, and a re-conversion after tokenisation would have to be applied
-        # to every token separately and could no longer see the word boundaries the typist wrote.
-        # A no-op for every non-Sanskrit document — see itrans_to_iast.
-        main_text = itrans.convert(str(m.get("text") or ""), main_lang or "und")["converted"] if main_on else ""
+        # ── WHICH SCRIPT THE TYPED SANSKRIT IS STORED IN ────────────────────────────────────────
+        # A Sanskrit file stores its text in ONE script (translit.sa_stored_script reads it off the
+        # forms), and text typed into it has to land in that script.  Three inputs, and only one of
+        # them is convertible both ways:
+        #   a Brahmic script  → storable only as Devanagari, which is the script the model reads.
+        #                       The script the user TYPED becomes what the reader sees, since that is
+        #                       plainly the script they want the document displayed in.
+        #   IAST (diacritics) → storable only as IAST.
+        #   plain ASCII       → ITRANS, which `convert` turns into EITHER; never refused.
+        # A mismatch is REFUSED rather than silently converted: turning a Devanagari paste into IAST
+        # (or the reverse) rewrites the user's text into a notation they did not choose, and doing it
+        # to a whole insert is not something a toast afterwards can undo.
+        # An EMPTY document has no storage script yet, so it takes whichever the first insert brings.
+        raw_main = str(m.get("text") or "")
+        stored = str(payload.get("docScript") or "")          # "" ⇒ IAST; the frontend's DOCSCRIPT
+        empty = bool(payload.get("docEmpty"))
+        target, show_script, refusal = stored, "", ""
+        if main_on and raw_main.strip() and itrans.is_sanskrit(main_lang):
+            typed = itrans.detect_script(raw_main)
+            if typed and typed != "IAST":                     # a Brahmic script
+                if not empty and stored != "Devanagari":
+                    refusal = ("This document stores its text in IAST, so " + typed + " cannot be "
+                               "inserted into it. Type in ITRANS or IAST, or start a new document.")
+                target, show_script = "Devanagari", typed
+                # …and the text itself is transliterated INTO Devanagari here, because `convert` below
+                # only ever converts ITRANS and would pass Kannada or Thai through untouched — leaving
+                # storage in the typed script, which is the one thing the model cannot read.
+                raw_main = itrans.to_devanagari(raw_main, typed)
+            elif typed == "IAST":
+                if not empty and stored == "Devanagari":
+                    refusal = ("This document stores its text in Devanagari, so IAST cannot be "
+                               "inserted into it. Type in ITRANS (it converts) or in a Brahmic script.")
+                target = ""
+            # plain ASCII (ITRANS) falls through on `target = stored`, convertible either way
+        if refusal:
+            return {"ok": False, "error": refusal}
+        # ITRANS → the document's script BEFORE the text crosses to the main window, which is where it
+        # is sentencised, tokenised and parsed: the tokeniser (and any Sanskrit model behind it) must
+        # see the notation the document is stored in, and a re-conversion after tokenisation would have
+        # to be applied to every token separately and could no longer see the word boundaries the
+        # typist wrote.  A no-op for every non-Sanskrit document — see itrans.convert.
+        main_text = itrans.convert(raw_main, main_lang or "und", target)["converted"] if main_on else ""
 
         raw_pars = [p for p in (payload.get("parallels") or []) if isinstance(p, dict)]
         try:                          # where the new blocks land; None (or unusable) ⇒ append, which is
@@ -1323,6 +1780,11 @@ class Api:
                          # document was EMPTY and this dialog chose its language (see best_installed_model)
                          "model": self._model_for_language(main_lang, groups) if main_on else ""},
                 "parallels": parallels, "adoptLang": adopt, "naive": naive,
+                # The script the user TYPED IN, when that was a Brahmic one. The text itself is stored
+                # as Devanagari (the only script the model reads), so this is the DISPLAY choice the
+                # insert implies: somebody who pastes Kannada wants to read Kannada, not Devanagari.
+                # "" for every other case, and the frontend then leaves the Script pill alone.
+                "showScript": show_script,
             }
             self._eval_quiet(main, "window.__applyInsertPayload && window.__applyInsertPayload(%s)"
                              % json.dumps(data))
@@ -1633,9 +2095,14 @@ class Api:
     <script>document.addEventListener('keydown',function(e){if(e.key==='Escape'){e.preventDefault();try{window.pywebview.api.close_child_window('about');}catch(_){}}});</script>
     </body></html>""")
 
-    def _models_html(self) -> str:
+    def _models_html(self, focus: str = "") -> str:
+        # `focus` is an extras tier KEY, and it is JSON-encoded into the page rather than
+        # interpolated raw: it arrives from the frontend (translit.js's `needs`), and this page is
+        # built by string concatenation, so a quote in it would otherwise break out of the literal.
         return (
-            "<!DOCTYPE html><html><head><meta charset=\"utf-8\"><script>" + self._confirm_js() + "</script><style>" + self._base_css() + """
+            "<!DOCTYPE html><html><head><meta charset=\"utf-8\"><script>" + self._confirm_js()
+            + "var FOCUS=" + json.dumps(str(focus or "")) + ";"
+            + "</script><style>" + self._base_css() + """
     body{display:flex;flex-direction:column;padding:16px;gap:11px}
     .sub{font-size:12.5px;color:var(--muted)}
     .bar{display:flex;gap:8px;align-items:center}
@@ -1666,6 +2133,14 @@ class Api:
     .row + .row{box-shadow:inset 0 1px 0 0 transparent}
     .row + .row::before{content:"";position:absolute;inset-inline:10px;top:0;height:1px;background:var(--label-quinary);pointer-events:none}
     .row:hover{background:var(--hover)}
+    /* The row a Script/transliteration menu sent the reader here to find. A brief accent wash rather
+       than a persistent highlight: it answers "which of these?" and then gets out of the way, and
+       nothing in this list is selectable, so a lasting mark would claim a state the list has not got.
+       Reduced motion gets the same wash held still — the point is WHICH ROW, and a pulse is only one
+       way of saying it. */
+    @keyframes rowflash{0%{background:transparent}18%{background:color-mix(in srgb,var(--accent) 22%,transparent)}100%{background:transparent}}
+    .row.flash{animation:rowflash 1.9s ease-out 1}
+    @media (prefers-reduced-motion: reduce){.row.flash{animation:none;background:color-mix(in srgb,var(--accent) 14%,transparent)}}
     .mi{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}   /* Leading Accessory: Title over Subtitle, gap 2 — the kit's own value, confirmed against node 2302:6718 */
     .mi .nm{font-size:13.5px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
     /* the Row's SUBTITLE, straight off the kit: SF Pro Medium 11 / line-height 14, filled Labels/Secondary.
@@ -1682,9 +2157,19 @@ class Api:
     .prog{height:4px;border-radius:2px;background:var(--line);overflow:hidden;margin-top:4px}
     .prog i{display:block;height:100%;width:0;background:var(--accent);transition:width .25s}
     .foot{display:flex;justify-content:space-between;align-items:center;gap:8px}
+    /* The filter row: the search takes the space, the toggle only what its label needs. `.on` is the
+       PRESSED state — an accent-tinted fill rather than a second colour of its own, so it reads as the
+       same control held down; aria-pressed carries the same fact for assistive tech. */
+    .bar input{flex:1;min-width:0}
+    .bar #instonly{flex:0 0 auto;white-space:nowrap}
+    .bar #instonly.on{background:color-mix(in srgb,var(--accent) 20%,transparent);border-color:color-mix(in srgb,var(--accent) 45%,transparent);color:var(--head)}
+    /* a note qualifying a whole GROUP (the Stanza group needs the grew backend to parse at all) — under
+       its heading, ahead of the rows it applies to. */
+    .gwarn{margin:2px 8px 6px;padding:7px 9px;border-radius:7px;font-size:11.5px;line-height:1.45;
+           background:color-mix(in srgb,var(--accent-orange,#d08700) 15%,transparent)}
     </style></head><body>
     <div class="sub">Download and remove SUD (spaCy) and UD (Stanza) parser models.</div>
-    <div class="bar"><input id="q" type="search" placeholder="Search language…" spellcheck="false" autocomplete="off"></div>
+    <div class="bar"><input id="q" type="search" placeholder="Search language…" spellcheck="false" autocomplete="off"><button class="sec sm" id="instonly" aria-pressed="false" title="Show only the models installed on this machine">Installed only</button></div>
     <div id="list">Loading…</div>
     <div class="foot">
       <button class="sec" id="refresh">Refresh</button>
@@ -1695,6 +2180,8 @@ class Api:
     var EXTRAS=[];   // optional heavy-dependency tiers (installed on demand)
     var TRAIN={};    // model id → training-set sentences, filled in by pollTrain as the sweep resolves them
     var KEEP_SCROLL=0;   // list scroll offset carried across a re-render (item 17)
+    var INST_ONLY=false;   // the "Installed only" filter — a VIEW state of this window, not a stored preference
+    var GREW=null;         // grewpy + backend: null until probed, then true/false (see the Stanza note in draw())
     function api(){return window.pywebview&&window.pywebview.api;}
     function esc(s){return (s||'').replace(/[&<>]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;'}[c];});}
     function fmtN(n){return String(n).replace(/\\B(?=(\\d{3})+(?!\\d))/g,',');}
@@ -1718,7 +2205,9 @@ class Api:
     // at the string start or after any non-letter/non-digit. The query is regex-escaped: it is typed text, and
     // a stray '(' would otherwise throw out of the keystroke handler and freeze the field.
     function wpRe(q){return new RegExp('(?:^|[^\\\\p{L}\\\\p{N}])'+String(q).replace(/[.*+?^${}()|[\\]\\\\]/g,'\\\\$&'),'u');}
-    function match(e,q){return !q||wpRe(q).test((e.label||'').toLowerCase())||(e.lang||'').toLowerCase()===q;}
+    // The two filters COMPOSE: "Installed only" narrows the set the language search then searches, so a
+    // search made inside it still means what it says.
+    function match(e,q){return (!INST_ONLY||e.installed)&&(!q||wpRe(q).test((e.label||'').toLowerCase())||(e.lang||'').toLowerCase()===q);}
     async function load(refresh){var host=document.getElementById('list'); if(!api()){host.textContent='Model management is available in the desktop app.';return;}
       KEEP_SCROLL=host.scrollTop;   // remember scroll before 'Loading…' clears it (item 17)
       host.textContent='Loading…';
@@ -1727,6 +2216,9 @@ class Api:
       AVAIL=r.available||[];
       AVAIL.forEach(function(e){if(e.train_sents)TRAIN[e.id]=e.train_sents;});   // whatever the disk cache already knew, shown immediately
       try{var ex=await api().list_extras(); EXTRAS=(ex&&ex.extras)||[];}catch(e){EXTRAS=[];}
+      // …and whether grew can run, which decides whether the Stanza group is usable at all. Probed here
+      // rather than per row: conversion_available spawns the OCaml backend on its first call.
+      try{var g=await api().conversion_available(); GREW=!!(g&&g.grewpy&&g.backend);}catch(e){}
       draw(); pollTrain(!!refresh);}
     function draw(){var host=document.getElementById('list'); var keep=host.scrollTop||KEEP_SCROLL; KEEP_SCROLL=0;
       var q=(document.getElementById('q').value||'').trim().toLowerCase(); host.innerHTML='';
@@ -1734,11 +2226,31 @@ class Api:
         var h=document.createElement('div');h.className='gh';h.textContent=title;host.appendChild(h);
         rows.forEach(function(e){host.appendChild(row(e));});}
       grp('SUD · spaCy','sud'); grp('UD · Stanza','stanza');
-      if(!q && EXTRAS.length){   // optional heavy-dependency tiers — always shown, not filtered by the language search
+      /* …AND WHY EVERY STANZA MODEL WOULD BE INERT, said BEFORE a 400 MB download rather than after.
+         Stanza emits UD and this app stores SUD, so parse._parse_stanza_ud_to_sud runs the conversion
+         grammar on EVERY Stanza parse — which needs grewpy AND its OCaml backend. Without the backend the
+         models download perfectly and then do nothing at all, which is exactly how the fault was reported.
+         GREW===null means never probed, and says nothing rather than raising a false alarm. */
+      if(GREW===false && AVAIL.some(function(e){return e.engine==='stanza'&&match(e,q);})){
+        var w=document.createElement('div');w.className='gwarn';
+        w.textContent='Stanza models produce UD, which this app converts to SUD with grew — and the grew backend is not available here, so they will parse nothing. Reinstall the app, or install it yourself with: brew install opam && opam init && opam install grewpy_backend';
+        var hs=[].slice.call(host.querySelectorAll('.gh')).filter(function(x){return x.textContent==='UD · Stanza';});
+        if(hs.length&&hs[0].nextSibling)host.insertBefore(w,hs[0].nextSibling); else host.appendChild(w);}
+      if(!q && !INST_ONLY && EXTRAS.length){   // optional heavy-dependency tiers — not filtered by the language search, and out of scope entirely under "Installed only", which is a question about MODELS
         var eh=document.createElement('div');eh.className='gh';eh.textContent='Optional language support';host.appendChild(eh);
         EXTRAS.forEach(function(t){host.appendChild(extraRow(t));});}
       host.scrollTop=keep;   // restore the pre-render scroll offset (item 17)
-      if(!host.children.length) host.textContent=q?'No matches.':'No models found (offline?). Try Refresh.';}
+      // "No matches" under a filter the reader set themselves is a dead end; naming the filter says what to undo.
+      if(!host.children.length) host.textContent=INST_ONLY?(q?'No installed models match.':'No models installed yet.'):(q?'No matches.':'No models found (offline?). Try Refresh.');
+      revealFocus();}
+    // A tier named by open_models_window(focus) — the row a Script/transliteration menu's "install"
+    // link was pointing at. Consumed ONCE: this list re-draws after every install and on Refresh, and
+    // a flash that fired again each time would be pointing at a row the reader has already dealt with.
+    // The scroll is `nearest`, so a row already on screen does not move under the pointer.
+    function revealFocus(){if(!FOCUS)return; var el=document.querySelector('#list .row[data-tier="'+FOCUS+'"]');
+      FOCUS=''; if(!el)return;
+      try{el.scrollIntoView({block:'nearest'});}catch(_){el.scrollIntoView();}
+      el.classList.add('flash');}
     function row(e){var row=document.createElement('div');row.className='row';row.setAttribute('data-mid',e.id);
       var info=document.createElement('div');info.className='mi';
       var meta=[e.version?('v'+e.version):null,e.size?(Math.round(e.size/1e6)+' MB'):null].filter(Boolean).join(' · ');
@@ -1771,6 +2283,7 @@ class Api:
       var r; try{r=await api().remove_model(e.id);}catch(err){return;}
       if(r.error)return; try{api().child_refresh_models();}catch(_){} load(false);}
     function extraRow(t){var row=document.createElement('div');row.className='row';
+      row.setAttribute('data-tier',t.id);   // what revealFocus() looks the focused tier up by
       var info=document.createElement('div');info.className='mi';
       info.innerHTML='<span class="nm">'+esc(t.label||t.id)+'</span>'+(t.note?'<small>'+esc(t.note)+'</small>':'');
       var right=document.createElement('div');right.className='right';
@@ -1789,6 +2302,10 @@ class Api:
         setTimeout(tick,500);};
       tick();}
     document.getElementById('q').addEventListener('input',draw);
+    // The toggle re-filters IN PLACE — the listing is already loaded, so it costs no bridge call.
+    (function(){var b=document.getElementById('instonly');
+      b.onclick=function(){INST_ONLY=!INST_ONLY;
+        b.classList.toggle('on',INST_ONLY); b.setAttribute('aria-pressed',String(INST_ONLY)); draw();};})();
     document.getElementById('refresh').onclick=function(){load(true);};
     document.getElementById('close').onclick=function(){try{api().close_child_window('models');}catch(_){}};
     document.addEventListener('keydown',function(e){if(e.key==='Escape'){e.preventDefault();try{api().close_child_window('models');}catch(_){}}});

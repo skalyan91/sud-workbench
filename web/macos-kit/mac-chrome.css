@@ -96,8 +96,15 @@
      throughout every pass (most recently 1px × 5/8 = 0.625px) — moved in lockstep with that layer's radius
      each time so the two merged-state surfaces (this rule and `.viewbar`) always stay byte-identical. */
   .titlebar::after{content:none; position:absolute; left:0; right:0; top:0; bottom:0; pointer-events:none; z-index:-1}
+  html.tabbed .titlebar,
   .window:has(.viewbar:not(.hidden)) .titlebar{border-bottom-width:0}   /* border REMOVED (not just transparent): ::after stops at the padding box, so a transparent .5px border left a hairline of raw document between the two bars */
+  html.tabbed .titlebar > .tb-blur,
   .window:has(.viewbar:not(.hidden)) .titlebar > .tb-blur{display:none}
+  /* …AND WHENEVER A WINDOW-TAB BAR IS UP (html.tabbed, set from app/mac/shell.py). Same reasoning as
+     the options bar directly below the title bar: the scroll-edge ramp exists to fade the toolbar into
+     a document scrolling under it, and with an opaque native bar between the two there is no such
+     transition to make — the ramp then reads as a smear against a hard edge. Flat merged surface instead. */
+  html.tabbed .titlebar::after,
   .window:has(.viewbar:not(.hidden)) .titlebar::after{content:"";
     -webkit-mask-image:none; mask-image:none; backdrop-filter:saturate(180%) blur(0.625px); -webkit-backdrop-filter:saturate(180%) blur(0.625px); background:var(--tb-tint)}   /* ONE layer at the same recipe as .viewbar — not two stacked flats (that compounds alpha/blur and read more opaque than the bar below). background:var(--tb-tint) is the same token .viewbar uses (both now read --tb-merged-tint, mac-tokens.css), so the two surfaces paint byte-identical fills.
      SEAM CHECK (asked for explicitly — two independently-composited backdrop-filter regions meeting at a shared
@@ -432,6 +439,11 @@
   .sblock.findcur mark.findhit{background:var(--warn); color:#fff}
   .sid-in.findsidhit{background:color-mix(in srgb,var(--warn) 32%,transparent)!important}
 
+  /* …AND NO BOTTOM BORDER WHEN A WINDOW-TAB BAR IS UNDER IT (html.tabbed, set from app/mac/shell.py).
+     That border is the seam between the options bar and the DOCUMENT; with a tab bar in between there
+     is no such seam to draw, and the bar below brings its own NSTitlebarSeparatorView — two rules a
+     few pixels apart, which reads as a double line rather than as a boundary. */
+  html.tabbed .viewbar{border-bottom-width:0}
   .viewbar{position:absolute; left:0; right:0; top:var(--tbH,44px); z-index:20; display:flex; align-items:center; gap:10px; padding:6px 16px; background:var(--tb-merged-tint,var(--toolbar-bg,rgba(246,246,248,.80))); -webkit-backdrop-filter:saturate(180%) blur(0.625px); backdrop-filter:saturate(180%) blur(0.625px); border-bottom:.5px solid var(--viewbar-border,var(--hairline)); flex-wrap:wrap}   /* fix 3: the options bar OVERLAYS the document too — pinned directly below the titlebar (top = the JS-measured --tbH) so the doc scrolls UNDER it and is blurred through; its drawer popovers stay above the document */   /* item 7: 20px → 5px, so this bar reads as the SAME material as the title bar directly above it (measured 50.8px of edge smear vs the title bar's 12.27px — see "THE OPTIONS BAR IS NOT EXEMPT" in the scroll-edge block up top, which is where the claim that it could keep 20px is refuted). One layer at 5px lands on the title bar's ::before+::after stack at 1.5+5; saturate(180%) untouched, as there */   /* background NOW MATCHES `.titlebar::after`'s merged-state fill byte-for-byte (both read --tb-merged-tint, mac-tokens.css) rather than each independently reading --toolbar-bg — the two bars must merge into what reads as ONE surface with no seam at the shared border, so an identical recipe on both sides of that border is the baseline requirement (see the win-inactive override right below for the unfocused-window case, which the titlebar's own --tb-tint switches to the same way). */   /* Tracks `.titlebar::after`'s own blur 1:1 across every pass this session (currently 0.625px, the 5/8 ratio to the progressive stack's 1px strongest layer) so the two merged-state surfaces stay byte-identical (see that rule's comment for the derivation). */
   /* .viewbar's own win-inactive background swap (mirroring .titlebar.win-inactive's old --tb-tint
      override) removed for the same reason — see that rule's own note above. .viewbar now keeps its
@@ -501,6 +513,18 @@
   .drawer-pop > label.chk + label.chk{margin-top:-10px}   /* cancels the pop's own 10px gap between CONSECUTIVE toggles so they tile like a Form Group's rows; a heading or separator between two of them keeps its gap */
   .drawer-group-h{font-size:9.5px; font-weight:700; letter-spacing:.05em; text-transform:uppercase; color:var(--muted); margin:0 2px 1px; padding-top:10px; border-top:.5px solid var(--menu-sep)}   /* item 3: subtle group heading + separator in the drawer */   /* THE RULE IS CENTRED IN ITS OWN GAP, on request. It sat 16px below the last checkbox of the group above and 6px above its own heading text — measured, and the asymmetry is not obvious from the values, because the space ABOVE is the .drawer-pop's own 10px flex `gap` PLUS this margin-top, while the space BELOW is the padding-top alone. Dropping margin-top to 0 leaves the 10px gap, and 10px of padding matches it: 10 above, 10.5 below. Change the pop's gap and this padding has to follow it. Ink is --menu-sep, the shared in-surface separator (was --hairline, which light mode raised to 90% black — a black rule across a translucent menu). */
   .drawer-pop .drawer-group-h:first-child{margin-top:0; padding-top:0; border-top:none}
+  /* ── THE TWO RAISING DROP ZONES (js/diagram/diagram-edit.js) ──────────────────────────────────────────────
+     Raised over a valid edge while a predicate is being dragged onto it, because the gesture is ambiguous by
+     nature: the same drop can mean "this argument is my raised subject" or "…my raised object", and nothing in
+     the two tokens can say which. Stacked subject-over-object, matching the order the two ghosts read in.
+     pointer-events:none throughout — the drop is resolved by hit-testing these rects in JS (raiseZoneAt), not by
+     the browser, so the zones must never intercept the pointer or elementFromPoint would return one of THEM
+     instead of the edge underneath and the whole drop would be lost. */
+  .rzones{position:fixed; z-index:70; display:flex; flex-direction:column; gap:2px; pointer-events:none}
+  .rzone{font:600 10.5px/1 var(--ui-font); letter-spacing:.01em; text-align:center; padding:5px 6px; border-radius:6px;
+    color:var(--label-secondary); background:var(--menu-bg,rgba(250,250,252,.92)); border:.5px solid var(--menu-sep);
+    box-shadow:var(--lg-menu-shadow,0 2px 10px rgba(0,0,0,.18)); white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
+  .rzone.on{color:#fff; background:var(--accent); border-color:transparent}   /* the zone the pointer is in — the drop lands here */
   .drawer-sep{border:none; border-top:.5px solid var(--menu-sep); margin:3px 1px; width:100%}   /* the options-bar drawers are menus too — same separator ink as .ctx hr above */
   /* item 13: "Edit mappings…" action inside the Glossing pop (NOT a .drawer-btn, so the pop's toggle handler ignores it) */
   .gm-editbtn{height:26px; padding:0 10px; border-radius:7px; border:.5px solid var(--pill-border); background:var(--pill-bg,var(--field-bg)); color:var(--text); font:inherit; font-size:12px; font-weight:600; cursor:pointer; text-align:left; white-space:nowrap}
@@ -550,8 +574,29 @@
   .ctx.defctx{min-width:0}   /* Wiktionary "Definitions of …" flyout: shrink to its widest row instead of the shared 224px floor — most senses are much narrower than that */
   .ctx button{position:relative; display:flex; width:calc(100% + 14px); margin:0 -7px; align-items:baseline; justify-content:space-between; gap:16px; background:transparent; border:none; -webkit-user-select:none; user-select:none;   /* a right-click (to open a relation's deep-feature submenu) must never start a text selection */
     color:var(--label-primary,var(--text)); font:inherit; font-weight:510; font-size:13px; line-height:16px; padding:4px 7px; border-radius:6px; cursor:pointer; text-align:left; white-space:nowrap}   /* 24px row: 16 line + 2×4 pad. The row's own box is widened 7px past the container's 12px inset on each side (Figma's Submenu "BG" layer: inset -7px) so the hover fill reaches 5px from the menu edge, while its OWN 7px padding pulls the TEXT back in to the container's 12px inset — net text position unchanged from a plain 12px inset, only the hover hit/fill area is wider */
-  .ctx button:hover{background:var(--fill-secondary,#e6e6e6)}   /* native macOS context-menu hover is a neutral vibrant gray, NOT the blue accent — text colour is unchanged on hover (Figma's "Clean Up By" example row keeps the same dark label over the gray fill) */
-  .ctx button.danger{color:var(--bad)} .ctx button.danger:hover{background:var(--fill-secondary,#e6e6e6)}
+  /* A HOVERED ROW TAKES THE SELECTED-GRID-ROW ACCENT, on request — the same fill, by the same
+     derivation, as `table.grid tbody tr:is(.sel,.mwtsel) td::before` in styles/app.css: a perceptual
+     step off whatever --accent currently is. TWO STEPS, ONE PER APPEARANCE, exactly as that rule has
+     — light oklch l×.882 c×.958 (tuned so the default system blue lands on rgb(0,100,225)), dark
+     l×.827 c×.915. Sharing one step across both was tried and reverted: the light step darkens the
+     accent to sit on a white ground, and macOS already hands dark a LIGHTER blue (#0a84ff against
+     #007aff), so applying it there darkens an already-lightened accent and stops looking like a
+     native menu. Two declarations per rule, fallback first: a browser without relative-colour
+     oklch() takes the plain accent rather than nothing.
+     This DEPARTS from the platform, deliberately and knowingly: a native macOS context-menu row
+     highlights in a neutral vibrant gray (Figma's "Clean Up By" row keeps its dark label over that
+     fill), which is what this was. The app's own selection register won out over matching AppKit —
+     one accented-row appearance across the grid, the outline and the menus.
+     The label goes WHITE with it, exactly as the grid row's cells do, since the dark label it kept
+     over the gray fill is unreadable on a saturated accent. That white reaches nearly everything on
+     its own: the label, the .subarr chevron (background-color:currentColor), the .ck tick, and
+     .expand (which dims by OPACITY, not by a colour of its own, so it stays a fraction of whatever
+     ink the row carries). Only .kbd names an explicit colour, so only it is restated below. */
+  .ctx button:hover{background:var(--accent); background:oklch(from var(--accent) calc(l * .882) calc(c * .958) h); color:#fff}
+  @media (prefers-color-scheme:dark){ .ctx button:hover{background:var(--accent); background:oklch(from var(--accent) calc(l * .827) calc(c * .915) h)} }   /* dark's own step — see the note above */
+  .ctx button:hover .kbd{color:#fff; opacity:.72}   /* the shortcut stays the quieter half of the row — an opacity off the row's own white, not a second colour, so it dims by the same rule on a .danger row */
+  .ctx button.danger{color:var(--bad)} .ctx button.danger:hover{background:var(--accent); background:oklch(from var(--accent) calc(l * .882) calc(c * .958) h); color:#fff}
+  @media (prefers-color-scheme:dark){ .ctx button.danger:hover{background:var(--accent); background:oklch(from var(--accent) calc(l * .827) calc(c * .915) h)} }   /* …and the destructive row takes the same per-appearance step as its ordinary twin */   /* …white too: red-on-accent is the one pairing that reads worse than either alone, and AppKit whitens a destructive item's label under a highlight for the same reason */
   .ctx button:disabled{color:var(--label-tertiary); pointer-events:none}   /* a row that is shown but inert (e.g. the grid column chooser's obligatory ID/Form rows, which still carry their checkmark). Labels-Vibrant/Tertiary, the same ink AppKit dims a disabled menu item to — an explicit colour rather than an opacity on the whole row, so the leading .ck tick dims WITH the label instead of a second time on top of it. pointer-events:none also drops the hover fill, which `:disabled` alone would not */
   .ctx button:disabled .ck{opacity:1}   /* …and the tick is already the dimmed ink above; the base .ck's own .9 would compound it */
   .ctx .kbd{font-size:13px; font-weight:510; color:var(--menu-shortcut); direction:ltr; unicode-bidi:isolate}   /* Figma macOS 26 kit, pulled live from the file: 13px/510 (SAME size/weight as the row label, not smaller), Labels-Vibrant/Tertiary — an explicit dim color rather than an opacity fraction of the row's own ink, so it reads the same neutral gray even on a .danger (red) row, matching native macOS. Keep ⌘/arrow shortcuts in LTR order even under an RTL menu */

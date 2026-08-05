@@ -55,6 +55,7 @@ requests
 beautifulsoup4
 pypinyin
 aksharamukha
+indic-transliteration   # the Sanskrit parser's OWN Devanagari→IAST front end (sa_sud_vedic_ufal_dcs's tokeniser imports it for Devanagari input, and the wheel does not declare it); MIT, pure Python, ~0.7 MB
 ToJyutping
 opencc-python-reimplemented
 hangul-romanize

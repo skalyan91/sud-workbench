@@ -91,7 +91,7 @@ function bracketsWrapped(si){
   const AV=Math.max(160, AVAILW/FS-22-Math.ceil(3*FS));   // item 4: the per-line wrap budget. Reserve the fixed 22px inline-end margin PLUS a zoom-scaled pad (×FS) for the last token's text-shadow casing halo, so a line breaks early enough that the rightmost token's form/POS/relation glyphs never touch the port edge at higher zoom (zoom:var(--fs))
   const box=document.createElement("div"); box.className="text-conv bwrap softcase"; box.dir=RTL?"rtl":"ltr";
   box.style.setProperty("--relpad",(show.labels?(13.3+descent(WORD_F)):0)+"px");               // reserved space above the form for the relation row. Copies projWrapped's deprel→form offset EXACTLY (20px + the form's descender depth): the HTML box model seats the form baseline ~6.7px lower inside its line box than the label's centre, so the flat "20" nominal maps to ~13.3, and +descent(WORD_F) adds the projWrapped descender fold on top — landing the relation centre the same distance above the form baseline as the wrapped stemma
-  box.style.setProperty("--undpad",((hasTr(t)?18+descent(POS_F):0)+(belowTierN()*(18+descent(POS_F)))+(show.pos?18+descent(POS_F):0))+"px");            // reserved space below for the transliteration + gloss + POS rows (Item 1/8: EVERY below-row folds in descent(POS_F) — matching belowStack's descender-matched per-row step — via the .otrans/.gloss/.bwpos margin-top set below; the reserve grows to match so the stack bottom stays at the same depth as the flat/arc views) — 18+descent(POS_F) per row, matching the flat renderer's baseline step. hasTr (actual translit presence), NOT show.translit, so an English sentence reserves no phantom translit row — keeping the token's stack bottom at the SAME depth as the arc/flat views, so a cross-line arc's upper endpoint (tokBot + clearance) lands where arcsWrapped puts it (stackBot + clearance)
+  box.style.setProperty("--undpad",((hasTr(t)?belowGap():0)+(belowTierN()*(belowGap()))+(show.pos?belowGap():0))+"px");            // reserved space below for the transliteration + gloss + POS rows (Item 1/8: EVERY below-row folds in descent(POS_F) — matching belowStack's descender-matched per-row step — via the .otrans/.gloss/.bwpos margin-top set below; the reserve grows to match so the stack bottom stays at the same depth as the flat/arc views) — belowGap() per row, matching the flat renderer's baseline step. hasTr (actual translit presence), NOT show.translit, so an English sentence reserves no phantom translit row — keeping the token's stack bottom at the SAME depth as the arc/flat views, so a cross-line arc's upper endpoint (tokBot + clearance) lands where arcsWrapped puts it (stackBot + clearance)
   if(selTok>=0) box.style.setProperty("--washcol",selCol);
   let anyInt=false; for(let i=0;i<n;i++) if(isInt(i)){anyInt=true;break;}
   if(anyInt) box.classList.add("hasint");            // headroom above the first line for interrupter arcs
@@ -110,7 +110,7 @@ function bracketsWrapped(si){
   const wordSpan=i=>{ const grp=document.createElement("span"); grp.className="bwtok"+(sel.s===si&&sel.t===OID(i)?" sel":""); grp.dataset.s=si; grp.dataset.tok=OID(i); grp.style.cursor="pointer"; grp.style.width=wordW(i)+"px"; grp.addEventListener("click",()=>pick(si,OID(i)));   // reserve the widest-row width (rel/POS/translit are absolute, so JS sizes the box as the flex column did before) — a firm `width` (not `minWidth`): wordW already reserves the BOLD width too, so the box never needs to grow when a token is selected; it bolds in place, centred, exactly like unwrapped brackets
     if(selDesc.has(i)) grp.classList.add("inspan");   // in the selected constituent → covered by the continuous wash (drawn as a per-line overlay after layout)
     if(isInt(i)){ grp.classList.add("bwint"); grp.dataset.inthead=OID(head[i]-1); grp.dataset.intrel=t[i].deprel; grp.dataset.intcol=relColor(t[i].deprel); }
-    { const ghosts=ghostsByOrigin[i].map(([tg,rel])=>OID(tg)+":"+rel);   // ghost targets: pairs of (OTHER token, relation label to show on that dashed arc) — Shared=Yes → one per other conjunct, labelled with this token's OWN deprel; Subj-raising → one, always labelled "subj" (positionBracketAnnots draws them)
+    { const ghosts=ghostsByOrigin[i].map(([tg,rel])=>OID(tg)+":"+rel);   // ghost targets: pairs of (OTHER token, relation label to show on that dashed arc) — Shared=Yes → one per other conjunct, labelled with this token's OWN deprel; Subject-raising → one, always labelled "subj" (positionBracketAnnots draws them)
       if(ghosts.length) grp.dataset.ghostheads=ghosts.join(","); }
     if(mwtComp.has(i)) grp.classList.add("bwmwt");
     if(repOff[i]) grp.style.top=(-repOff[i])+"px";   // item 11: .bwtok is position:relative, so a NEGATIVE `top` steps the whole token cell (form + its below-stack) UP off the line visually; interrupter arcs/ties measured from offsetTop follow it (offsetTop includes `top`), so a reported token's arcs lift with it
@@ -124,7 +124,7 @@ function bracketsWrapped(si){
     const below=[];
     { const rt=trTxt(t[i]); if(rt){ const tr=document.createElement("span"); tr.className="otrans"+(trRowEdit()?" tr-edit":"")+frnUp(t[i]); tr.textContent=rt; tr.style.marginTop=descent(POS_F)+"px"; htmlSeamMark(tr,t[i],"translit"); below.push(tr); } }   // Item 8: the translit row gains the same descender-matched top gap (+descent(POS_F)) the POS row carries, matching belowStack's per-row step (the .bwund flex column steps 18px per row; this margin folds in the label-font descender)
     belowTiers().forEach(tier=>{ const txt=tierText(t[i],tier); const gs=document.createElement("span"); gs.className="gloss gl-edit"+(txt?"":" gl-empty")+frnUp(t[i]); gs.dataset.tier=tier; gs.tabIndex=0; setGlossText(gs,tier,txt||"…"); gs.style.marginTop=descent(POS_F)+"px"; if(tier==="mseg"||tier==="mgloss")htmlSeamMark(gs,t[i],tier); below.push(gs); });   // Item 8: each gloss / morphemic-gloss tier gains the same +descent(POS_F) top gap as the POS row; between translit and POS. The segmentation AND morphemic-gloss rows both take the seam mark as an out-of-flow child (both per-morpheme, unlike the lexical gloss row), so .bwund's flex column still centres each row on its own real text — drawn even where THIS tier is the "…" placeholder (not gated on txt), so a seam MSeg marks cleanly never silently vanishes from MGloss just because that one morpheme isn't glossed yet (see the note beside the SVG twin of this call in diagram-core.js)
-    if(show.pos&&t[i].upos){ const p=document.createElement("span"); p.className="bwpos"; p.textContent=posDisp(t[i]); p.title=posTitle(t[i].upos); p.style.marginTop=descent(POS_F)+"px"; below.push(p); }   // Item 1: descent(POS_F) extra top gap above the POS row (the .bwund flex column steps 18px per row; this margin folds in the label-font descender so wrapped brackets match belowStack's new 18+descent(POS_F) POS step)
+    if(show.pos&&t[i].upos){ const p=document.createElement("span"); p.className="bwpos"; p.textContent=posDisp(t[i]); p.title=posTitle(t[i].upos); p.style.marginTop=descent(POS_F)+"px"; below.push(p); }   // Item 1: descent(POS_F) extra top gap above the POS row (the .bwund flex column steps 18px per row; this margin folds in the label-font descender so wrapped brackets match belowStack's new belowGap() POS step)
     if(below.length){ const und=document.createElement("span"); und.className="bwund"; below.forEach(e=>und.appendChild(e)); wf.appendChild(und); }   // POS/translit nested IN the form → centres under the form, not the wider slot (matters when the form is flush-left on a leadhead line)
     return grp; };
   /* THE INDENT IS PRINTED, NOT COMPUTED. A continuation line has to start exactly where the content just inside
@@ -291,6 +291,36 @@ function bezPt(P,t){ const m=1-t; return [m*m*m*P[0][0]+3*m*m*t*P[1][0]+3*m*t*t*
 function bezInDir(P,back){ const tip=P[3]; let p=P[2];
   for(let k=1;k<=24;k++){ p=bezPt(P,1-k/24); if(Math.hypot(p[0]-tip[0],p[1]-tip[1])>=back) return p; }
   return p; }
+/* ── a drawn edge as a de-collision obstacle (item 6, second clause: ghost LABEL vs REAL EDGE) ────────────────
+   A ghost is built to read as sitting BEHIND the real annotation — dashed, dimmed, and drawing no .arc-casing of
+   its own precisely so it never occludes what it crosses (see drawBump's caller and the .arc-ghost note in
+   app.css). Its LABEL contradicts that on its own: drawLabel gives every .lbl the opaque 3px paint-order casing,
+   so wherever a ghost label lands it ERASES a label-sized bite out of whatever is behind it — and when that is a
+   real arc, the ghost has occluded the very thing it is meant to defer to. Hence the ghost-label lift also has to
+   clear the real EDGES, not only the real labels.
+   The test must be against the edge's STROKE, not its bounding box: the bbox of a bump is mostly the empty room
+   UNDER the arch, which is exactly where the labels of the arcs nested inside it belong. So an edge becomes a
+   polyline flattened from the very cubic it was drawn from, and the test is segment-vs-box. A straight edge (root
+   stub, un-bowed cross-line arc) is passed as the degenerate cubic [A,A,B,B], which bezPt traces as that exact
+   segment — so there is ONE obstacle shape here, not two. */
+const EDGE_FLAT=14;                              // chords per cubic. These are shallow arcs (crown 0.75·h over a chord ≥ 2·cotθ·h wide), so 14 chords stay a fraction of a pixel off the curve at any size drawn here; and the sagitta error can only make the test slightly PERMISSIVE (chord inside the arch), never invent a collision that isn't there.
+function edgeObstacle(P){ const pts=[]; for(let k=0;k<=EDGE_FLAT;k++) pts.push(bezPt(P,k/EDGE_FLAT));
+  const [y0,y1]=bezYExtent(P), [x0,x1]=bezXExtent(P); return {pts,x0,x1,y0,y1}; }   // bbox from the curve's TRUE extents (the same extrema solve arcCtrlChord fits its S with), for the cheap reject below
+// One segment vs one axis-aligned box: Liang–Barsky parametric clip — no allocation and no trig, because this runs
+// per candidate label position per edge. p===0 is the segment running parallel to that pair of box edges: it is
+// inside iff it starts inside (q>=0), which is what makes a vertical root stub test correctly.
+function segHitsBox(ax,ay,bx,by,L,R,T,B){ let t0=0,t1=1; const dx=bx-ax, dy=by-ay;
+  const clip=(p,q)=>{ if(p===0) return q>=0;
+    const r=q/p; if(p<0){ if(r>t1) return false; if(r>t0) t0=r; } else { if(r<t0) return false; if(r<t1) t1=r; } return true; };
+  return clip(-dx,ax-L)&&clip(dx,R-ax)&&clip(-dy,ay-T)&&clip(dy,B-ay); }
+function boxHitsEdges(edges,cx,cy,hx,hy){ const L=cx-hx,R=cx+hx,T=cy-hy,B=cy+hy;
+  return edges.some(e=>{ if(e.x1<L||e.x0>R||e.y1<T||e.y0>B) return false;   // most edges are nowhere near a given label — reject on the precomputed bbox before touching a single chord
+    for(let k=1;k<e.pts.length;k++) if(segHitsBox(e.pts[k-1][0],e.pts[k-1][1],e.pts[k][0],e.pts[k][1],L,R,T,B)) return true;
+    return false; }); }
+// How far a label box must stay off an edge's CENTRELINE: the two are drawn as HALOES, not hairlines, and it is
+// the haloes that must not meet — the edge's opaque casing half-width (the same (stroke+3.5)/2 fanStep keeps
+// between two fanned arcs) plus half the label's own 3px .lbl casing stroke.
+function edgePad(){ const st=parseFloat(css("--arc-stroke"))||1.7; return (st+3.5)/2+1.5; }
 // same take-off angle θ, measured from HORIZONTAL — matching arcCtrl/arcCtrlRaised (their handles are
 // horizontal/vertical-decomposed, so a horizontal chord trivially reads θ off horizontal too) — for an
 // ARBITRARY chord A→B, used by the cross-line arcs so they curve with the identical endpoint angles as
@@ -364,6 +394,7 @@ function drawBump(g,x1,x2,arcZone,top,NR,AH,col,arrow,startY,morph,ends){
   const te=arrow?trimT(P,1,AH-AEXT):1, sl=(arrow&&te>0.001&&te<0.999)?subCurve(P,0,te):P;   // stop the line at the arrowhead base
   const dstr=`M ${sl[0][0]} ${sl[0][1]} C ${sl[1][0]} ${sl[1][1]}, ${sl[2][0]} ${sl[2][1]}, ${sl[3][0]} ${sl[3][1]}`;
   const ink=arcInk(col);   // stroke/arrowhead recede toward bg; drawBump's caller keeps col for the label
+  g.__edgeP=P;   // the UNTRIMMED control points, parked on the group for the ghost-label de-collision (edgeObstacle above). Untrimmed because `sl` stops at the arrowhead BASE while the head itself fills on to P[3] — the obstacle is the whole drawn edge, head included. Recorded rather than re-derived at the reading end, and rather than parsed back out of `d`, because an edge may be REDRAWN after this (growCrossArcs re-solves a whole band; decollide grows a root stub) and the reader must see the final geometry, not the first attempt.
   g.appendChild(E("path",{class:"arc-casing",d:dstr}));
   if(arrow) g.appendChild(E("path",{class:"ah-casing",d:arrowPath(P[2],P[3],AH,AH_OUTSET)}));
   g.appendChild(E("path",{class:"arc-path"+(morph?" morph-edge":""),d:dstr,stroke:ink}));
@@ -382,12 +413,14 @@ function drawCrossLine(g,frm,tip,col,AH,casing,gap,openTop,morph){
   const ink=arcInk(col);   // stroke/arrowhead recede toward bg (no label drawn here)
   if(Math.atan2(Math.abs(tip[1]-frm[1]),Math.abs(tip[0]-frm[0]))>=ARC_ANGLE){
     const b=backoff(tip,frm,AH), d=`M ${frm[0]} ${frm[1]} L ${b[0]} ${b[1]}`;
+    g.__edgeP=[frm,frm,tip,tip];   // same obstacle record drawBump keeps (see there): the straight branch as the degenerate cubic edgeObstacle traces as a segment — frm→TIP, not frm→b, so the arrowhead's own reach counts as edge
     if(casing){ g.appendChild(E("path",{class:"arc-casing",d})); g.appendChild(E("path",{class:"ah-casing",d:arrowPath(frm,tip,AH,AH_OUTSET)})); }
     g.appendChild(E("path",{class:"arc-path"+(morph?" morph-edge":""),d,stroke:ink}));
     g.appendChild(E("path",{class:"ah",d:arrowPath(frm,tip,AH),fill:ink}));
   } else {
     const P=arcCtrlChord(frm,tip,chordSide(frm,tip),gap,openTop);   // S-curve, angle-preservingly scaled to fit the inter-line gap; drawn to the tip so the arrowhead stays attached
     const d=`M ${P[0][0]} ${P[0][1]} C ${P[1][0]} ${P[1][1]}, ${P[2][0]} ${P[2][1]}, ${P[3][0]} ${P[3][1]}`;
+    g.__edgeP=P;   // as above — and it MATTERS that this is written on every redraw: growCrossArcs re-runs this very call on the same <g> with a raised endpoint and a widened band, so a copy taken at the first draw would describe an arc that is no longer there
     const aFrm=bezInDir(P,AH+2);   // Item 10: aim the arrowhead along the curve's REAL incoming direction near the tip — the true tangent for a bowed arc, the chord for a near-straight one — NOT the bare P[2]→P[3] end tangent, which for a nearly-straight S points off at the take-off angle θ and rotates the head wrongly
     if(casing){ g.appendChild(E("path",{class:"arc-casing",d})); g.appendChild(E("path",{class:"ah-casing",d:arrowPath(aFrm,P[3],AH,AH_OUTSET)})); }
     g.appendChild(E("path",{class:"arc-path"+(morph?" morph-edge":""),d,stroke:ink}));
@@ -550,7 +583,7 @@ function arcsWrapped(si){
         if(band<need) r.arcZone+=need-band; }
       r.wordY=r.arcZone+WORD_OFF;
       r.rTop=r.arcZone-0.75*r.maxH;   // root stub rises to the VISIBLE apex of the tallest arc IN THIS ROW (post-wrap)
-      r.stackBot=r.wordY+(hasTr(t)?18+descent(POS_F):0)+(belowTierN()*(18+descent(POS_F)))+(show.pos?18+descent(POS_F):0);   // reserve the transliteration + gloss + POS rows below the word (Item 1/8: every below-row folds in descent(POS_F), matching belowStack's descender-matched step)
+      r.stackBot=r.wordY+(hasTr(t)?belowGap():0)+(belowTierN()*(belowGap()))+(show.pos?belowGap():0);   // reserve the transliteration + gloss + POS rows below the word (Item 1/8: every below-row folds in descent(POS_F), matching belowStack's descender-matched step)
       const rt=rowTies(D,r.s,r.e), hasMwt=rt.mwt.length||rt.xpos.length; r.tieBot=r.stackBot+(hasMwt?mwtDepth(D):0);   // item 1: an ExtPos bracket reserves the same row depth an MWT tie does
       prevBot=r.tieBot; yCur=r.tieBot+ROWGAP; });
     return yCur; };
@@ -603,8 +636,9 @@ function arcsWrapped(si){
       g.appendChild(E("path",{class:"ah-casing",d:arrowPath(frm,tip,AH,AH_OUTSET)}));
       const rp=E("path",{class:"arc-path",d:`M ${X} ${top} L ${b[0]} ${b[1]}`,stroke:ink}); g.appendChild(rp);
       g.appendChild(E("path",{class:"ah",d:arrowPath(frm,tip,AH),fill:ink}));
+      g.__edgeP=[frm,frm,tip,tip];   // the stub as an obstacle for the ghost labels, in drawBump's own record shape (degenerate cubic = the segment); down to TIP, so the arrowhead counts. Re-stated after decollide below, which may grow this very stub up to a lifted root label
       g.style.cursor="pointer"; g.addEventListener("click",()=>pick(si,OID(i))); svg.appendChild(g);
-      if(show.labels) rlabs.push({dep:OID(i),mx:X,apex:top,text:t[i].deprel||"root",col,level:r.maxH+100,root:true,rootPath:rp,rootBottomY:b[1]}); }
+      if(show.labels) rlabs.push({dep:OID(i),mx:X,apex:top,text:t[i].deprel||"root",col,level:r.maxH+100,root:true,rootPath:rp,rootBottomY:b[1],tip}); }
     r.arcsIn.slice().sort((a,b)=>b.h-a.h||catRank(t[a.dep].deprel)-catRank(t[b.dep].deprel)).forEach(a=>{
       const top=r.arcZone-a.h, g=E("g",{class:"arc","data-s":si,"data-dep":OID(a.dep),"data-head":OID(a.head)});
       const apex=drawBump(g,r.LX(a.head)+(a.offH||0),r.LX(a.dep)+(a.offD||0),r.arcZone,top,NR,AH,relColor(t[a.dep].deprel),true,null,isMorphRel(t[a.dep].deprel),repArcEnds(rep,r.arcZone,a.head,a.dep,a.h));   // item 11: per-endpoint baselines from the SHARED repArcEnds — the same call arcs() makes in the flat view, so a reported subtree's arcs lift with its words here too
@@ -613,6 +647,11 @@ function arcsWrapped(si){
       if(show.labels){ rlabs.push({dep:OID(a.dep),mx,apex,text:t[a.dep].deprel,col:relColor(t[a.dep].deprel),level:a.h,g}); }   // carry the arc group so a lifted label's leader draws in its z-layer
       boxes.push({x:mx,y:apex,hx:2,hy:2}); });
     if(show.labels) decollide(rlabs,boxes,svg,si);   // de-collide the whole row's labels together (matches the flat view)
+    // …and a root stub that just GREW to reach its lifted label is a taller obstacle than the one recorded at draw
+    // time. Re-state it from decollide's own condition (L.fy<L.y0 → the stub was rewritten to start at the label's
+    // bottom edge), so the ghost labels below meet the stub that is actually on screen.
+    if(show.labels) rlabs.forEach(L=>{ if(!L.root||!L.rootPath) return; const g=L.rootPath.parentNode, ty=(L.fy<L.y0-0.5)?L.fy+L.hh:L.apex;
+      if(g) g.__edgeP=[[L.mx,ty],[L.mx,ty],L.tip,L.tip]; });
     // tokens + below stack (drawn last → on top of the cross-line edges)
     r.idx.forEach(i=>{ const tk=t[i], X=r.LX(i), lw=r.lw[i-r.s], g=E("g",{class:"tok-group"+(sel.s===si&&sel.t===OID(i)?" sel":""),"data-s":si,"data-tok":OID(i)});
       const wy=repBase(rep,r.wordY,i);   // item 11: reported-speech step UP off the line — the same shared repBase the arc endpoints above went through, so word and arc leave the line together
@@ -630,7 +669,7 @@ function arcsWrapped(si){
       drawHangsSVG(svg,tk,X,wy,WORD_F,"tok-word",si,boxes,OID(i)); drawLeadsSVG(svg,tk,X,wy,WORD_F,"tok-word",si,boxes,OID(i)); });   // folded punctuation (and item 6's correct form) beside the word
     mwtTie(svg, r.c.map(x=>x+r.offX), r.wform, rowTies(D,r.s,r.e), r.stackBot+5, boxes, si);
   });
-  // Ghost edges (Shared=Yes AND Subj-raising): dashed, dimmed — decorative, not a diagram element of their own,
+  // Ghost edges (Shared=Yes AND Subject-raising): dashed, dimmed — decorative, not a diagram element of their own,
   // but still: (item 7) fan-shared with the real arcs at any token they land on (never the reverse), (item 2)
   // counted toward fitTight's boxes, (item 3) highlighted when their dependent is selected, (item 6) their
   // labels decollided against the real ones — only ghost labels ever move.
@@ -654,6 +693,14 @@ function arcsWrapped(si){
       drawCrossLine(g,frm,tip,col,AH,false,[repBase(rep,rowOf(up).stackBot,up),repBase(rep,rowOf(lo).wordY,lo)-ASC]);   // item 11: same report-lifted band bounds crossGeom() gives the real cross-line arcs
       g.querySelectorAll(".arc-path").forEach(pp=>pp.classList.add("arc-ghost")); g.querySelectorAll(".ah").forEach(pp=>pp.classList.add("ah-ghost"));
       svg.appendChild(g); ghostG.push({g,mx:(upP[0]+loP[0])/2,apex:(upP[1]+loP[1])/2,rel,col}); } });
+  // Every REAL edge in this diagram, as the flattened obstacles the ghost-label pass below lifts off. Read off the
+  // groups themselves — the control points drawBump/drawCrossLine/the root stub recorded as they drew — and read
+  // HERE, at the end, because that is the only point at which they are all final: growCrossArcs may have re-solved
+  // a whole band of cross-line arcs and decollide may have grown a root stub, both AFTER their first draw.
+  // `g.arc` also settles which edges count, structurally: the ghosts are `.ghost-g` and so are not in this list at
+  // all, which is the intended asymmetry — a ghost label may still sit on a ghost edge, its own included. Ghosts
+  // are what defer to the real annotation; they need not defer to each other.
+  const realEdges=(show.labels&&ghostG.length)?[...svg.querySelectorAll("g.arc")].map(g=>g.__edgeP).filter(Boolean).map(edgeObstacle):[], EPAD=edgePad();   // built only where there is a ghost to place — a sentence with none (the overwhelming majority) pays nothing for this
   // ghost labels: vertical-lift decollision against `boxes` (every real label is already final by this point —
   // read, never altered) — only the ghost labels themselves move (item 6). Each ghost's OWN crown box is pushed
   // to `boxes` only AFTER its label is placed (not during the drawing loop above) — pushing it first made every
@@ -661,6 +708,14 @@ function arcsWrapped(si){
   if(show.labels) ghostG.forEach(({g,mx,apex,rel,col})=>{ const half=meas(rel,POS_F)/2+3, hh=7, y0=apex-8;
     let y=y0, guard=0;
     while(guard++<40 && boxes.some(b=>Math.abs(b.x-mx)<b.hx+half && Math.abs(b.y-y)<b.hy+hh)) y-=hh*2+3;
+    // …then keep lifting off any REAL EDGE the label would land on top of (see edgeObstacle): a ghost label carries
+    // drawLabel's opaque casing, so parked on a real arc it erases a bite out of it, which is precisely the
+    // occlusion a ghost is built never to commit. Same step, and the label-box test comes along for the ride so a
+    // higher slot can't land back on a real label. Bounded SEPARATELY from the pass above and FALLING BACK to its
+    // answer: the label pass always terminates (above every label there is open sky), but an edge pass need not —
+    // a stub or a tall bump can run the whole height of the diagram beside the label's x — and a ghost label
+    // parked a hundred pixels up on a leader reads far worse than one grazing an arc.
+    for(let k=0,ya=y;k<10;k++){ if(!(boxes.some(b=>Math.abs(b.x-mx)<b.hx+half && Math.abs(b.y-ya)<b.hy+hh) || boxHitsEdges(realEdges,mx,ya,half+EPAD,hh+EPAD))){ y=ya; break; } ya-=hh*2+3; }
     if(y<y0-0.5) g.insertBefore(E("line",{class:"leader leader-ghost",x1:mx,y1:y+hh,x2:mx,y2:apex,stroke:arcInk(col)}),g.firstChild);   // item 6   /* the drained ink, NOT the full relation colour: the ghost EDGE is stroked with arcInk(col) while this leader took `col` raw, so at the same .72 opacity the leader read as the strongest part of a ghost — the one thing it is least meant to be. arcInk is what every other ghost stroke already passes through. */
     drawLabel(g,mx,y,rel,col); const lb=g.lastElementChild; if(lb)lb.classList.add("lbl-ghost"); boxes.push({x:mx,y,hx:half,hy:hh}); boxes.push({x:mx,y:apex,hx:2,hy:2}); });
   fitTight(svg,boxes);
@@ -772,7 +827,7 @@ function projWrapped(si,kind){
   const anyMwt=rows.some(r=>{ const rt=rowTies(D,r.s,r.e); return rt.mwt.length||rt.xpos.length; });
   // one uniform row height. With deprels above, the word gets an equal gap above (deprel) and below (POS), and the
   // whole stack sits with equal padding at the top and bottom of the row.
-  const PADV=8, belowH=(hasTr(t)?18+descent(POS_F):0)+(belowTierN()*(18+descent(POS_F)))+(show.pos?18+descent(POS_F):0);   // Item 1/8: every below-row (translit, each gloss, POS) folds in descent(POS_F), matching belowStack's descender-matched step
+  const PADV=8, belowH=(hasTr(t)?belowGap():0)+(belowTierN()*(belowGap()))+(show.pos?belowGap():0);   // Item 1/8: every below-row (translit, each gloss, POS) folds in descent(POS_F), matching belowStack's descender-matched step
   const RELDESC=descent(WORD_F);   // fold the token form's descender depth into the deprel→word step (as the arc view / unwrapped stemma do between levels), so descenders clear below the deprel
   const wordY = deprelsAbove ? (PADV+8+20+RELDESC) : ASC, yDep = wordY-(20+RELDESC), stackBot = wordY+belowH;   // deprel 20px + descent(WORD_F) above the word: the extra descender depth is clearance BELOW the label (deprel y stays at PADV+8, word drops by the descent); top clearance unchanged
   const oneRowH=Math.ceil(stackBot+descent(WORD_F)+(anyMwt?mwtDepth(D)+18:0)+(deprelsAbove?PADV:10));
@@ -835,7 +890,7 @@ function wpDraw(box){ const wp=box._wp; if(!wp) return;
   // handful of tokens sx<<1 and neighbouring nodes can land closer together than the flat r:10 below reaches —
   // their circles then overlap, and since SVG hit-testing gives the point to whichever shape is PAINTED LAST (this
   // loop, in token order), a click/drag aimed dead-centre at token i instead grabs token i+1 the moment their
-  // circles cross. That silently misdirects a Subj-raising or Shared-conjunct drag onto the wrong node — the exact
+  // circles cross. That silently misdirects a Subject-raising or Shared-conjunct drag onto the wrong node — the exact
   // "nothing happens" a user sees, since the SOURCE token is wrong from the first pointerdown, not the drop —
   // confirmed by a synthetic CDP drag landing on tok 18 ("really") when aimed at tok 17's own measured centre
   // ("he") in a 26-token sentence. Clamp each node's own radius to at most half its distance to the NEAREST other
@@ -861,6 +916,7 @@ function wpDraw(box){ const wp=box._wp; if(!wp) return;
     g.appendChild(E("path",{class:"edge edge-ghost",d:`M ${a1[0]} ${a1[1]} L ${a2[0]} ${a2[1]}`,stroke:ink}));
     if(wp.showLbl){ drawLabel(g,(NX(e.d)+NX(e.h))/2,(NY(e.d)+NY(e.h))/2,e.rel,relColor(e.rel)); const lb=g.lastElementChild; if(lb)lb.classList.add("lbl-ghost"); }
     svg.appendChild(g); });
+  ghostsBehind(svg);   // …and behind the real edges above, as everywhere else. Called HERE and not only from wrap(): this svg is (re)filled by wpDraw long after the box was wrapped — from the post-layout pass in js/core/document.js — so the one call in wrap() never sees these ghosts
   wpDrawProj(box);
 }
 // projection lines: node → its word, only for whichever row currently sits at the top of the scrolled token box
@@ -889,7 +945,15 @@ function wpDrawProj(box){ const wp=box._wp, px=box._px; if(!wp||!px) return;
     const el=rowSvg.querySelector(`.edge-g[data-dep="${oid}"] text.lbl`)||rowSvg.querySelector(`.tok-group[data-tok="${oid}"] .tok-word`);
     if(!el) return px.bh; let by; try{ by=el.getBBox().y; }catch(e){ return px.bh; }
     return Math.max(px.bh, px.bh+by+3); };   // 3px past the glyph top = the same small overlap y1=px.bh gives a bare token
-  wp.rows[ri].forEach(({i,x})=>{ const x0=NXp[i], y0=NYp[i], y1=capOf(wp.oid[i]), yhit=treeY(x), D=Math.max(2, y1-(yhit>-Infinity?yhit:y0)),
+  /* ⚠ EVERY MEASUREMENT FIRST, THEN EVERY APPEND — never interleaved. capOf() calls getBBox(), which forces a
+     synchronous layout of everything invalidated since the last one; appending a path invalidates. Done in one
+     loop that did both, each token's getBBox re-laid-out the WHOLE document, so the cost was one full layout PER
+     TOKEN of the visible row rather than one for the row. MEASURED on a 40-sentence Chinese file (long sentences,
+     so every stemma wraps and this path runs for all 16 windowed blocks): getBBox alone was 9.6 s of an 18.9 s
+     profile — 51 % of a renderDoc that took 7–9 SECONDS — and every one of those calls came from here. Splitting
+     the loop is the whole fix; the arithmetic below is unchanged. */
+  const caps=wp.rows[ri].map(({i})=>capOf(wp.oid[i]));
+  wp.rows[ri].forEach(({i,x},ci)=>{ const x0=NXp[i], y0=NYp[i], y1=caps[ci], yhit=treeY(x), D=Math.max(2, y1-(yhit>-Infinity?yhit:y0)),
       k=Math.min((y1-y0)/2, D/2);
     pg.appendChild(E("path",{class:"proj",d:`M ${x} ${y1} C ${x} ${y1-k}, ${x0} ${y0+k}, ${x0} ${y0}`})); }); }   // drawn word→node (bottom to top): identical curve, but the dash pattern now anchors at the baseline word so a dot sits cleanly on it (partial dash lands at the node), matching the icon and the unwrapped stemma
 // selecting a token in a wrapped stemma/hierarchy scrolls its (possibly off-screen) token row into view
@@ -903,7 +967,7 @@ function wpRevealSel(){ if(sel.s<0||sel.t<=0) return;
 
 function tree(si){
   const D=displaySent(DOC[si]), t=D.tokens, n=t.length, OID=k=>D.map[k]+1, sent={tokens:t}; RTL=D.rtl;
-  const {children,root,head}=structure(sent),belowReserve=(trLayer()?18+descent(POS_F):0)+(belowTierN()*(18+descent(POS_F))),LV=48+belowReserve,TOP=18,A=16,B=7;         // item 2: the level height = a CONSTANT 48 (the stemma's LV) + the below-stack reserve, and the outgoing edge attaches just below that reserve (parentEndY) — so an edge is always LV−belowReserve−A−B = 48−16−7 = 25 tall, EXACTLY the stemma's, no matter how many annotation tiers are shown. belowReserve uses the SAME 18+descent(POS_F) per-row step the tiers are drawn at, so it cancels cleanly (Item 8: each tier row folds in descent(POS_F))
+  const {children,root,head}=structure(sent),belowReserve=(trLayer()?belowGap():0)+(belowTierN()*(belowGap())),LV=48+belowReserve,TOP=18,A=16,B=7;         // item 2: the level height = a CONSTANT 48 (the stemma's LV) + the below-stack reserve, and the outgoing edge attaches just below that reserve (parentEndY) — so an edge is always LV−belowReserve−A−B = 48−16−7 = 25 tall, EXACTLY the stemma's, no matter how many annotation tiers are shown. belowReserve uses the SAME belowGap() per-row step the tiers are drawn at, so it cancels cleanly (Item 8: each tier row folds in descent(POS_F))
   const SPW=meas(" ",WORD_F), NGAP=SPW+4;                              // node gap matches the stemma column gap
   // tidy layout: leaves packed with the stemma's node gap; a parent is centred over its children. Adjacent
   // siblings are then pushed apart (whole subtree shifted) only as far as their nodes AND their incoming
@@ -912,7 +976,7 @@ function tree(si){
   const hgw=i=>tailW(t[i],NODE_F);                                    // real-width room for the node's folded-punctuation satellites (to its inline-end)
   const ldw=i=>leadW(t[i],NODE_F);                                    // item 2: room for right-merging leads (inline-start)
   const elw=i=>(show.labels&&i!==root)?meas(t[i].deprel,POS_F):0;      // incoming edge-label width
-  // Subj=Generic: give each predicate a VIRTUAL LEAF CHILD (index n, n+1, … one per generic-subj token) in a
+  // Subject=Generic: give each predicate a VIRTUAL LEAF CHILD (index n, n+1, … one per generic-subj token) in a
   // SEPARATE copy of the tree used ONLY for layout (place()/depth) — so it's positioned by the SAME recursive
   // subtree-packing every other dependent uses, exactly like any other token, rather than squeezed into a linear
   // reading-order gap (which "contorted" it relative to its real siblings). Real edges/ghosts/node-drawing stay
@@ -940,7 +1004,7 @@ function tree(si){
   const orientGhost=(origin,target)=>depth[origin]<depth[target]?{d:target,h:origin}:{d:origin,h:target};
   const ghostEdges=ghostPairs.map(([o,tg,rel])=>{ const {d,h}=orientGhost(o,tg);
     return {d,h,rel,origin:o,y1:ny(depth[d])-A,y2:parentEndY(h)}; });
-  const maxD=Math.max(0,...depth),total=Math.max(2,...x.map((xx,i)=>xx+lw2(i)/2+hgw2(i)))+6,H=TOP+maxD*LV+16+(trLayer()?18+descent(POS_F):0)+(belowTierN()*(18+descent(POS_F)));   // Item 8: the bottom tier tail folds in descent(POS_F) per row, matching belowStack. lw2/hgw2 (not nw/hgw) so a ∅ pushed to the canvas edge still gets cropped in
+  const maxD=Math.max(0,...depth),total=Math.max(2,...x.map((xx,i)=>xx+lw2(i)/2+hgw2(i)))+6,H=TOP+maxD*LV+16+(trLayer()?belowGap():0)+(belowTierN()*(belowGap()));   // Item 8: the bottom tier tail folds in descent(POS_F) per row, matching belowStack. lw2/hgw2 (not nw/hgw) so a ∅ pushed to the canvas edge still gets cropped in
   if(RTL) for(let i=0;i<N;i++) x[i]=total-x[i];   // mirror the tidy tree for right-to-left (N, not n — the ∅ mirrors too)
   const svg=E("svg",{class:"tree",width:total,height:H,viewBox:`0 0 ${total} ${H}`}); const boxes=[];
   // edges as ONE cased unit (Item 21): pre-compute stroke path + arrowhead, draw all casings behind, then strokes on top
@@ -957,7 +1021,7 @@ function tree(si){
   if(show.labels) edges.forEach(e=>{ const mx=(x[e.d]+x[e.h])/2, my=e.midY;   // pass 2: all labels in front of all edges
     const lg=E("g",{class:"edge-g","data-s":si,"data-dep":OID(e.d),"data-head":OID(e.h)}); drawLabel(lg,mx,my,e.rel,relColor(e.rel));
     lg.style.cursor="pointer"; lg.addEventListener("click",()=>pick(si,OID(e.d))); svg.appendChild(lg); boxes.push({x:mx,y:my,hx:meas(e.rel,POS_F)/2+2,hy:7}); });
-  // Subj=Generic: computed here (positions only) so it can fold into the SAME horizontal label-decollision pass
+  // Subject=Generic: computed here (positions only) so it can fold into the SAME horizontal label-decollision pass
   // as the real ghost edges below — a disconnected decollision pass is what let its label collide with a real one.
   const genericEntries=genericToks.map(i=>{ const vi=vOf[i], gx=x[vi], gy=ny(depth[vi]);
     return {i,gx,gy,y1:gy-A,y2:parentEndY(i)}; });
@@ -974,7 +1038,7 @@ function tree(si){
     boxes.push({x:(dEnd[0]+hEnd[0])/2,y:(dEnd[1]+hEnd[1])/2,hx:Math.abs(hEnd[0]-dEnd[0])/2,hy:Math.abs(hEnd[1]-dEnd[1])/2+2});   // item 2
     if(show.labels){ const L=ghostLabAt.get(e); drawLabel(g,L.mx,L.my,e.rel,relColor(e.rel)); const lb=g.lastElementChild; if(lb)lb.classList.add("lbl-ghost"); boxes.push({x:L.mx,y:L.my,hx:meas(e.rel,POS_F)/2+2,hy:7}); }
     svg.appendChild(g); });
-  // item 2 (redesign): Subj=Generic — the ∅ is a virtual TOKEN, positioned by the SAME recursive subtree-packing
+  // item 2 (redesign): Subject=Generic — the ∅ is a virtual TOKEN, positioned by the SAME recursive subtree-packing
   // as any other dependent (x[vOf[i]]/depth[vOf[i]], computed above via children2) — not editable/interactable/
   // grid-visible, but arranged exactly like a real dependent of its head, never contorted to a linear position.
   genericEntries.forEach(ge=>{ const i=ge.i, col=relColor("subj"), ink=arcInk(col);
@@ -988,13 +1052,13 @@ function tree(si){
     const lbl=E("text",{class:"node-lbl"+italDeco(t[i]),x:x[i],y:ny(depth[i])}); lbl.textContent=bform(t[i]); const tw=fmeas(t[i],NODE_F);   // host form only
     const hit=E("rect",{class:"tok-hit tok-wash",x:x[i]-Math.max(26,tw/2+4),y:ny(depth[i])-A,width:Math.max(52,tw+8),height:A+B});   // node box = its own wash region
     g.appendChild(hit);
-    { const rt=trTxt(t[i]); if(rt){ const ty=ny(depth[i])+18+descent(POS_F); const e=E("text",{class:"translit"+frnUp(t[i]),x:x[i],y:ty,"text-anchor":"middle"}); e.textContent=rt; if(trRowEdit())e.classList.add("tr-edit"); g.appendChild(e); boxes.push({x:x[i],y:ny(depth[i])+14,hx:meas(rt,trFont(t[i]))/2,hy:7}); svgSeamMark(g,t[i],x[i],ty,meas(rt,trFont(t[i]))/2,trFont(t[i]),boxes,null,"translit"); } }   // Item 8: same descender-matched top gap (18+descent(POS_F)) the other renderers give the translit row
-    belowTiers().forEach((tier,ti)=>{ const gy=ny(depth[i])+(trTxt(t[i])?18+descent(POS_F):0)+(ti+1)*(18+descent(POS_F)), txt=tierText(t[i],tier), dtxt=txt||"…"; const e=E("text",{class:"gloss gl-edit"+(txt?"":" gl-empty")+frnUp(t[i]),x:x[i],y:gy,"text-anchor":"middle","data-tier":tier,tabindex:"0"}); setGlossText(e,tier,dtxt); g.appendChild(e); boxes.push({x:x[i],y:gy-4,hx:meas(dtxt,trFont(t[i]))/2,hy:7});
+    { const rt=trTxt(t[i]); if(rt){ const ty=ny(depth[i])+belowGap(); const e=E("text",{class:"translit"+frnUp(t[i]),x:x[i],y:ty,"text-anchor":"middle"}); e.textContent=rt; if(trRowEdit())e.classList.add("tr-edit"); g.appendChild(e); boxes.push({x:x[i],y:ny(depth[i])+14,hx:meas(rt,trFont(t[i]))/2,hy:7}); svgSeamMark(g,t[i],x[i],ty,meas(rt,trFont(t[i]))/2,trFont(t[i]),boxes,null,"translit"); } }   // Item 8: same descender-matched top gap (belowGap()) the other renderers give the translit row
+    belowTiers().forEach((tier,ti)=>{ const gy=ny(depth[i])+(trTxt(t[i])?belowGap():0)+(ti+1)*(belowGap()), txt=tierText(t[i],tier), dtxt=txt||"…"; const e=E("text",{class:"gloss gl-edit"+(txt?"":" gl-empty")+frnUp(t[i]),x:x[i],y:gy,"text-anchor":"middle","data-tier":tier,tabindex:"0"}); setGlossText(e,tier,dtxt); g.appendChild(e); boxes.push({x:x[i],y:gy-4,hx:meas(dtxt,trFont(t[i]))/2,hy:7});
       if(tier==="mseg"||tier==="mgloss") svgSeamMark(g,t[i],x[i],gy,(tier==="mgloss"?measGloss(dtxt,tierFont(tier,t[i])):meas(dtxt,tierFont(tier,t[i])))/2,tierFont(tier,t[i]),boxes,null,tier); });   // gloss / morphemic tiers under the node (hierarchy has no per-node POS row) — the segmentation AND morphemic-gloss rows carry the seam mark (both per-morpheme, drawn off the "…" placeholder's own width where this tier isn't annotated for this token — see the note beside diagram-core.js's belowStack); the lexical gloss row doesn't
     g.appendChild(lbl); gwFormSVG(g,lbl,t[i],x[i],ny(depth[i]),NODE_F,"node-lbl",si,boxes);   // goeswith: the continuation parts join the head on the node row, so the ONE translit/gloss stack drawn above spans the whole word
     if(gwOf(t[i]).length){ const ids=[OID(i)].concat(gwOf(t[i]).map(p=>p.oid));
       g.setAttribute("data-gw",ids.join(" "));
-      const STEP=18+descent(POS_F), nodeBot=ny(depth[i])+(trTxt(t[i])?STEP:0)+belowTierN()*STEP;   // this node's OWN below-stack bottom — the hierarchy has no shared word row, so each node stacks its rows itself
+      const STEP=belowGap(), nodeBot=ny(depth[i])+(trTxt(t[i])?STEP:0)+belowTierN()*STEP;   // this node's OWN below-stack bottom — the hierarchy has no shared word row, so each node stacks its rows itself
       gwSlurSVG(svg,x[i]-tw/2,x[i]+tw/2,nodeBot+5+tieLead(),si,ids,boxes); }   // the hierarchy draws no ties at all (an MWT has no place in a dependency tree), so the slur is seated here directly — by the SAME "+5, then tieLead()" rule mwtTie is handed in every other notation, just measured from this node's own stack bottom
     svgMarks(g,x[i],ny(depth[i]),t[i],NODE_F); svgFormSeamMark(g,t[i],x[i],ny(depth[i]),NODE_F,boxes);   // Item 11: node form appended LAST → paints on TOP of the translit/gloss stack; item 4: marks in front of it, then the seam mark off its inline end
     g.style.cursor="pointer"; g.addEventListener("click",()=>pick(si,OID(i))); svg.appendChild(g);
@@ -1065,7 +1129,7 @@ function brackets(si){
   const RF='600 15px '+LIVE_TOKEN_STACK, WBOLD='640 15px '+LIVE_TOKEN_STACK, gap=5;
   const seq=[]; for(let p=0;p<n;p++){
     opens[p].forEach(o=>seq.push({t:"o",glyph:"[",col:o.col,owner:o.owner}));   // the predicate's OWN incoming brackets (from its real head) open first
-    if(hasGenericSubj(t,p)){ const col=relColor("subj");   // Subj=Generic: its OWN small bracket pair, nested INSIDE the predicate's own brackets (opened after them, closed before its word) — a real seq entry (not an interrupter-style arc), so it gets uniform inter-item spacing on BOTH sides like any other bracketed unit
+    if(hasGenericSubj(t,p)){ const col=relColor("subj");   // Subject=Generic: its OWN small bracket pair, nested INSIDE the predicate's own brackets (opened after them, closed before its word) — a real seq entry (not an interrupter-style arc), so it gets uniform inter-item spacing on BOTH sides like any other bracketed unit
       seq.push({t:"o",glyph:"[",col,owner:null,ghost:true}); seq.push({t:"g",i:p}); seq.push({t:"c",glyph:"]",col,owner:null,ghost:true}); }
     seq.push({t:"w",i:p}); closes[p].forEach(o=>seq.push({t:"c",glyph:"]",col:o.col,owner:o.owner})); }
   const relOf=i=>(show.labels && !interrupt.has(i)) ? (i===root ? (t[i].deprel||"root") : t[i].deprel) : null;   // deprel shown above each non-displaced token — INCLUDING the root (shows "root", like wrapped brackets)
@@ -1075,7 +1139,7 @@ function brackets(si){
       ww=Math.max(fw, show.pos?meas(posDisp(t[it.i]),POS_F):0, trLayer()?meas(trTxt(t[it.i]),trFont(t[it.i])):0, glossSlotW(t[it.i])); const r=relOf(it.i); if(r) ww=Math.max(ww,meas(r,POS_F));   // item 3: fold in the gloss/MSeg/MGloss row width (glossSlotW → 0 when no gloss tier is shown) so a long gloss under a SHORT form — typically an MWT component (sat/ādi) with a long MSeg/MGloss — can't crowd its neighbour. The stemma/arc/wrapped-bracket layouts already reserve this; unwrapped brackets was the last one missing it.
       ld=leadW(t[it.i],WORD_F);   // item 2: right-merging leads sit before the word
       it.x=x+ld+ww/2; wx[it.i]=it.x; wlo[it.i]=it.x-ww/2; whi[it.i]=it.x+ww/2; }
-    else if(it.t==="g"){ ww=Math.max(meas("∅",WORD_F), show.labels?meas("subj",POS_F):0); it.x=x+ww/2; genericX[it.i]=it.x; }   // Subj=Generic: a real seq slot of its own — same uniform `gap` on both sides any bracketed unit gets, reserved wide enough for its own "subj" label above it
+    else if(it.t==="g"){ ww=Math.max(meas("∅",WORD_F), show.labels?meas("subj",POS_F):0); it.x=x+ww/2; genericX[it.i]=it.x; }   // Subject=Generic: a real seq slot of its own — same uniform `gap` on both sides any bracketed unit gets, reserved wide enough for its own "subj" label above it
     else { ww=meas("[",RF); it.x=x+ww/2; } it.w=ww; x+=ld+ww+(it.t==="w"?tailW(t[it.i],WORD_F):0)+gap; });   // reserve real-width room after a word for its folded-punctuation satellites (before the following close bracket)
   const total=x+2;
   if(RTL){ seq.forEach(it=>{ it.x=total-it.x; if(it.t==="o")it.t="c"; else if(it.t==="c")it.t="o"; });   // mirror the sequence; swap only the open/close ROLE (for span logic), keeping the original glyph
@@ -1088,7 +1152,7 @@ function brackets(si){
   // with the real interrupters — see .ghost-g). Heights count toward maxAH so a tall ghost never clips the top.
   // ghostPairsFor gives [originIdx,targetIdx,rel] — `d` (dependent) is the origin, `h` (head) is the target.
   const ghostArcs=ghostPairsFor(t).map(([o,tg,rel])=>({d:o,h:tg,rel,hgt:arcHgt(Math.abs(wx[o]-wx[tg]),38)}));
-  // Subj=Generic no longer folds in here: it's drawn as its own small bracket pair in the seq itself (see the seq
+  // Subject=Generic no longer folds in here: it's drawn as its own small bracket pair in the seq itself (see the seq
   // construction above), not as an interrupter-style ghost arc — a real dependent's own bracket, not a decorative bump.
   const maxAH=Math.max(12,...np.map(a=>a.hgt),...ghostArcs.map(a=>a.hgt));
   const RELDESC=descent(WORD_F);   // deprel→form gap copies the wrapped stemma (projWrapped) EXACTLY: 20px + the form's descender depth (projWrapped is now the authoritative reference, not the old flat-tuned "20")
@@ -1176,7 +1240,7 @@ function brackets(si){
       g.style.cursor="pointer"; g.addEventListener("click",()=>pick(si,OID(it.i))); svg.appendChild(g);
       boxes.push({x:it.x,y:wy-8,hx:it.w/2,hy:12});
       drawHangsSVG(svg,t[it.i],it.x,wy,WORD_F,"tok-word",si,boxes,OID(it.i)); drawLeadsSVG(svg,t[it.i],it.x,wy,WORD_F,"tok-word",si,boxes,OID(it.i));   // folded punctuation (and item 6's correct form) beside the word, before the following close bracket
-    } else if(it.t==="g"){   // Subj=Generic: the ∅ — a real seq slot, drawn like any bracketed single-token dependent (its own label above, its own glyph on the word row), dimmed via .ghost-g. NEVER highlighted via the predicate's own selection — the predicate is this relation's HEAD, not its dependent, and the ∅ dependent has no real token of its own to select instead
+    } else if(it.t==="g"){   // Subject=Generic: the ∅ — a real seq slot, drawn like any bracketed single-token dependent (its own label above, its own glyph on the word row), dimmed via .ghost-g. NEVER highlighted via the predicate's own selection — the predicate is this relation's HEAD, not its dependent, and the ∅ dependent has no real token of its own to select instead
       const i=it.i, col=relColor("subj"), g=E("g",{class:"ghost-g","data-s":si});
       const wy=yWord-rep[i], rly=relY-rep[i];
       if(show.labels){ drawLabel(g,it.x,rly,"subj",col); const lb=g.lastElementChild; if(lb)lb.classList.add("lbl-ghost"); boxes.push({x:it.x,y:rly,hx:meas("subj",POS_F)/2+2,hy:7}); }
@@ -1194,7 +1258,7 @@ function brackets(si){
 function outline(si){const D=displaySent(DOC[si]), t=D.tokens, n=t.length, OID=k=>D.map[k]+1, sent={tokens:t},{children,root}=structure(sent); RTL=D.rtl;
   const kids=children;   // a Shared=Yes token nests under its literal head, same as any other dependent — no redirection
   // Ghost rows: a semi-transparent copy of a token's row under every OTHER conjunct in its coordination
-  // (Shared=Yes, labelled with the token's own deprel) or under its re-derived Subj-raising target (labelled
+  // (Shared=Yes, labelled with the token's own deprel) or under its re-derived Subject-raising target (labelled
   // "subj", regardless of the token's own actual deprel — the raising relationship, not its real attachment) —
   // alongside its one real (fully-opaque) row under wherever it's actually attached.
   // ghostsAt is indexed by TARGET (the row a ghost nests under); each entry names its ORIGIN (gi, the token
@@ -1246,7 +1310,7 @@ function outline(si){const D=displaySent(DOC[si]), t=D.tokens, n=t.length, OID=k
       const gpos=document.createElement("span"); gpos.className="opos"; gpos.textContent=posDisp(t[gi]); gpos.title=posTitle(t[gi].upos); grow.appendChild(gpos);
       grow.style.cursor="pointer"; grow.addEventListener("click",()=>pick(si,OID(gi)));
       box.appendChild(grow); });
-    if(hasGenericSubj(t,i)){ const grow=document.createElement("div"); grow.className="oline oline-ghost";   // item 2: Subj=Generic — a real ROW, like any other token, nested under its head; never selectable/editable (nothing real to click)
+    if(hasGenericSubj(t,i)){ const grow=document.createElement("div"); grow.className="oline oline-ghost";   // item 2: Subject=Generic — a real ROW, like any other token, nested under its head; never selectable/editable (nothing real to click)
       grow.style.marginInlineStart=((d+1)*22)+"px";
       if(show.labels){ const relEl=document.createElement("span"); relEl.className="orel"; setRelLabel(relEl,"subj"); relEl.title=relTitle("subj");
         if(show.colour) relEl.style.color=relColor("subj"); grow.appendChild(relEl); }
@@ -1254,6 +1318,28 @@ function outline(si){const D=displaySent(DOC[si]), t=D.tokens, n=t.length, OID=k
       box.appendChild(grow); }
     })(root,0,[],[]);
   return box;}
-function wrap(svg){const d=document.createElement("div"); d.className="diagram"; d.appendChild(svg); return d;}
+/* A GHOST DRAWS BEHIND EVERY REAL EDGE — one z-order pass here rather than reordered appends in five
+   renderers. A ghost duplicates an attachment the diagram already draws for real (Shared=Yes
+   coordination, Subject-raising, the Subject=Generic ∅), so wherever a ghost and a real edge cross,
+   the real one has to be the one that reads as continuous — and a real edge carries a casing whose
+   whole job is to occlude what it passes over, which it could not do while the ghost was painted
+   after it. Every renderer appends its ghosts AFTER its real edges, because a ghost label is placed
+   by decolliding against the real labels' FINAL positions, and that ordering is what put them in
+   front: SVG has no z-index, paint order IS document order.
+   Moving the `.ghost-g` GROUP carries the ghost's label and its leader line with it — both are its
+   own children (see the drawLabel/insertBefore pairs in each renderer) — so the three move as the
+   one object they read as.
+   Only ghosts that sit AFTER the first real edge move, and they keep their order among themselves,
+   so nothing else in the stack shifts: the projection lines and baseline words a ghost already
+   draws over stay behind it, and the token/node layer every renderer appends last stays in front. */
+const GHOST_LAYER=".ghost-g,.proj-ghost";
+const REAL_EDGE_LAYER=".arc,.edge-g,.edge-cases";   // every notation's real dependency layer, and GROUPS only — an .arc/.edge-g <g> holds its own stroke, arrowhead, casing, label and leader, so this one selector covers all four things a ghost has to go behind. (The paths inside are .arc-path/.arc-casing/…, which `.arc` does not match: class selectors match whole tokens.)
+function ghostsBehind(svg){
+  if(!svg||!svg.children) return;
+  const kids=[...svg.children], ai=kids.findIndex(el=>el.matches(REAL_EDGE_LAYER));
+  if(ai<0) return;   // nothing real to sit behind — a single-token sentence, or the bracket/outline notations, which draw no edges at all
+  for(let i=ai+1;i<kids.length;i++) if(kids[i].matches(GHOST_LAYER)) svg.insertBefore(kids[i],kids[ai]);
+}
+function wrap(svg){ghostsBehind(svg); const d=document.createElement("div"); d.className="diagram"; d.appendChild(svg); return d;}
 function esc(s){return (s||"").replace(/[&<>]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;"}[c]));}
 

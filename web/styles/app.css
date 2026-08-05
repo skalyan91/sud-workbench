@@ -50,7 +50,14 @@
   .fsbtn:hover{background:color-mix(in srgb,var(--accent) 10%,var(--field-bg))}
   .fontctl #fsVal{font-size:11px; color:var(--muted); min-width:36px; display:grid; place-items:center; padding:0 8px; font-variant-numeric:tabular-nums}   /* restore horizontal padding around the % */
 
-  .doc{flex:1; overflow:auto; min-height:0; padding:calc(var(--tbH,44px) + var(--vbH,0px)) 0 44px; scroll-padding-top:calc(var(--tbH,44px) + var(--vbH,0px))}   /* the document scrolls UNDER the translucent titlebar and options bar and is blurred through them, which is the whole point of the glass — so the scroller starts at the top of the window and its top PADDING is what puts the first block below the bars. (Briefly this was a margin instead, which did start the scrollbar below the bars but also cut the document off at a hard line.) */
+  /* HOW FAR DOWN THE PAGE'S OWN CONTENT STARTS: the lower of (title bar + options bar) and a
+     window-tab bar's bottom edge (--tabH, from app/mac/shell.py; 0 when no bar is up, which collapses
+     this to --tbH). NOTHING IS ADDED BEYOND THE BAR — the document begins where the bar ends, exactly
+     as it begins where the options bar ends. An earlier version padded the document by the 12px that
+     sits ABOVE the bar too, to centre it in its band; that made the bar look inset compared with the
+     options bar, which is the reference. */
+  .body{--top-chrome:max(calc(var(--tbH,44px) + var(--vbH,0px)),var(--tabH,0px))}   /* ON .body, NOT :root — that is where syncChrome (js/ui/wiring.js) sets --tbH/--vbH, and a custom property's var()s are substituted where the property is DECLARED, not where it is used: declared on :root this read --tbH as its 44px fallback and mis-sized the reservation, since the real toolbar is 54. --tabH comes from documentElement and inherits down to here. */
+  .doc{flex:1; overflow:auto; min-height:0; padding:var(--top-chrome) 0 44px; scroll-padding-top:var(--top-chrome)}   /* --tabH: WHERE A NATIVE WINDOW-TAB BAR ENDS (its bottom edge in page coordinates, 0 when there is none), measured in app/mac/shell.py and taken here as a FLOOR — max(), not a sum — because the page must simply start below whichever is lower, the web toolbar or the bar. Same intent as --vbH: real chrome above the page, so the viewport shrinks by it rather than being overlapped. THE DOCUMENT MOVES DOWN, THE TOOLBAR DOES NOT: the bar sits at the BOTTOM of the title-bar band, directly above the content (AppKit's own numbers, read bottom-up: a 102-tall NSTitlebarContainerView with NSToolbarView at y=36 h=66 — i.e. the toolbar keeps the top 66 and the bar takes the lowest 36). Giving .titlebar a matching `top` was tried and is wrong: it slides the web toolbar down INTO the bar, which then paints over it. 0 unless this window is in a tab group showing its bar. */   /* the document scrolls UNDER the translucent titlebar and options bar and is blurred through them, which is the whole point of the glass — so the scroller starts at the top of the window and its top PADDING is what puts the first block below the bars. (Briefly this was a margin instead, which did start the scrollbar below the bars but also cut the document off at a hard line.) */
   /* …and the SCROLLBAR alone is held below the chrome. A scroller's track runs its full height, so with the
      document correctly passing under the bars the bar ran up behind them too, ending above the content it
      scrolls. `margin-top` on the track piece is the one lever that insets a track without moving the scroller,
@@ -75,7 +82,7 @@
   :root{--sbw:11px}
   .doc{padding-inline-start:var(--sbw)}
   .doc::-webkit-scrollbar{width:var(--sbw); background:transparent}
-  .doc::-webkit-scrollbar-track{background:transparent; margin-top:calc(var(--tbH,44px) + var(--vbH,0px))}
+  .doc::-webkit-scrollbar-track{background:transparent; margin-top:var(--top-chrome)}
   .doc::-webkit-scrollbar-thumb{background:color-mix(in srgb,var(--text) 28%,transparent); border-radius:6px; border:3px solid transparent; background-clip:content-box}
   .doc::-webkit-scrollbar-thumb:hover{background:color-mix(in srgb,var(--text) 44%,transparent); background-clip:content-box}
   /* item 10: full-screen auto-hide of the toolbar + options bar. NEW rules (not edits to the .titlebar/.viewbar
@@ -190,6 +197,15 @@
   .np-html{position:absolute; inset-inline-end:100%; margin-inline-end:1px; top:0; white-space:pre; pointer-events:none}
   .np-grid{position:absolute; inset-inline-start:1px; top:50%; transform:translateY(-50%); font-size:12px; line-height:1; pointer-events:none}   /* the grid Form cell has 8px of inline padding, which is where this sits — inside the cell but clear of the input's own text */
   .sblock.no-grid{padding-bottom:0}   /* grids off → the diagram is the last thing in the block, so its OWN bottom gap (the .diagram's 13px padding, or the equivalent baked into .bwrap/.outline/.wrapproj) is the only space that belongs below it. The block's 14px bottom padding exists to sit BELOW the grid; with no grid it would stack on top of the diagram's own gap and read as a too-large bottom. Dropping it to 0 for EVERY notation leaves exactly one normal bottom gap under the diagram, consistent across stemma/hierarchy/arcs/brackets/outline AND the wrapped variants */
+  /* A SENTENCE RANGE (shift-click). Deliberately a WASH and nothing else — no re-tinted --occlude, no casing
+     change, none of the machinery the FOCUSED block below carries. Those exist so the diagram's halos blend
+     with the focused ground, which is a per-block rendering concern; a range is a transient selection over
+     several blocks, and giving each of them the focused block's full treatment would leave nothing to mark
+     which one the keyboard is actually on. So the range says "these are chosen" and .sel-block still says
+     "this one is current" on top of it — the two compose, in either order, because only the background stacks.
+     --block-sel is the focused block's own tint, halved: present enough to read as a group, quiet enough that
+     the focused member still reads as the focus. */
+  .sblock.rng-block{background:color-mix(in srgb,var(--block-sel) 55%,transparent)}
   .sblock.sel-block{background:var(--block-sel); --occlude:color-mix(in srgb,var(--accent) 5%,var(--content-bg)); --block-occlude:color-mix(in oklch, color-mix(in srgb,var(--accent) 5%,var(--content-bg)) 50%, var(--content-bg) 50%);
     --focus-ground:color-mix(in srgb,var(--accent) 5%,var(--content-bg));   /* the SAME colour as --occlude just above, under a second name, so a descendant that must REDECLARE --occlude can still reach the focused ground without forming a self-referential cycle — .softcase is the one such descendant (see the residue note in the .dim-* block) */
     --casing:var(--occlude)}   /* arc/leader casing (--block-occlude) = the OKLCH midpoint between the focused-block background and the plain (unfocused) background — a notch less tinted than the full focused bg. Unfocused blocks keep --block-occlude at content-bg (midpoint of content-bg with itself). */   /* focused block → the text halo IS the focused background colour (= --occlude, the opaque equivalent of content-bg + the block-sel tint), not a lifted version, so casing blends with the focused background */
@@ -199,7 +215,27 @@
     border:1px solid transparent; border-radius:5px; padding:3px 6px; outline:none}
   .sid-in:hover{border-color:var(--field-border)} .sid-in:focus{border-color:var(--accent); background:var(--field-bg)}
   .stext{flex:1; min-width:0; position:relative; z-index:2; font-size:var(--stext-fs); font-weight:462;   /* weight curve @13px = --stext-fs, see the :root comment */ line-height:1.4; color:var(--text-2); white-space:pre-wrap; overflow-wrap:anywhere; border-radius:3px; padding:1px 3px; margin:-1px -1px}   /* item 12: pre-wrap preserves the user's typed line breaks (Shift+Enter) in the sentence display */   /* Item 16: the block-initial sentence line paints ABOVE its transliteration/original (.strans, z-index:1) and translation (.tgrid, z-index:1) rows, so a casing halo or tight spacing that overlaps never lets a lower row cover the sentence */   /* item 5: pin line-height so a Han/CJK line box (whose font `normal` metric is taller) can't inflate the .shead row and shift the centre-aligned control icons — icon position stays script-independent */
-  .stext.stext-script{margin-inline-start:0}   /* SUPERSEDED BUT KEPT AS THE PRE-MEASUREMENT DEFAULT: renderDoc's text-row alignment pass now measures every one of these rows against the Form field's own text x and writes the correction as an inline margin, so the script line and the transliteration below it land on one column by measurement rather than by the arithmetic below — which was right about the 1px but could only ever be right at one window width (see formTextTarget on the ID column's share of the table's slack). The original derivation, still the reason this starts at 0 rather than at .stext's −1px:  */   /* item 20: LEFT-ALIGN the script top line's text with the transliteration/original input (.strans-orig, marginInlineStart:idW+8, padding:1px 3px) below it. In the .shead flex row .stext text-left = num idW + shead gap 8 + stext margin-left −1 + stext pad-left 3 = idW+10; the translit line's text-left = its marginInlineStart (idW+8) + pad-left 3 = idW+11 — so the script line sat 1px to the left. Removing the base −1px inline-start margin (from margin:-1px -1px) for the script line only puts .stext text-left at idW+8+0+3 = idW+11, exactly matching the translit. Scoped to the SCRIPT top line (.stext-script); the normal editable .stext keeps its −1px margin, so its layout and the diagram alignment are untouched. */
+  .stext.stext-script{margin-inline-start:0; font-size:calc(var(--stext-fs) * var(--script-mag,1));
+    /* …AND IT IS TOP-ALIGNED IN THE ROW, THEN PULLED UP BY ITS OWN ASCENDER. `.shead` is baseline-aligned,
+       which is right while every item is set at one size; a script at double size then hangs its whole
+       extra height ABOVE the row and towers over the number beside it. `align-self:flex-start` puts the
+       tall box's TOP at the row top instead — but these faces reserve enormous ascents for their stacked
+       marks (measured: Kawi 1.10em, Balinese 1.36em, against a Latin face's ~1.07), most of it empty, so
+       top-aligning the BOX alone would drop the letters far below the number. The line is therefore
+       lifted by exactly the EMPTY height above its letters — the font's height above the baseline minus
+       the SHIROREKHA where the script hangs its letters from one, and minus the cap height where it does
+       not — which puts the head-line on the row top and lets the unused ascent overflow into the gap
+       above the block, where nothing is drawn.
+       ⚠ `--script-lift` is MEASURED, not tabulated, and ONE measurement answers both cases:
+       `scriptLiftEm()` (js/diagram/diagram-core.js) subtracts the sample character's INK top from the
+       font's own ascent, and the ink top of a plain consonant IS the shirorekha in a script that has one
+       and the letter top in a script that has not.
+       `position:relative` moves the ink without moving the box, so the margin-bottom gives the shift back
+       to the flow — otherwise the line would lean into the transliteration row under it. Every term is
+       exactly 0 at mag 1, which is every document but the ornamental scripts. */
+    align-self:var(--script-align,baseline); position:relative;
+    top:calc(-1 * var(--script-lift,0) * var(--stext-fs) * var(--script-mag,1));
+    margin-bottom:calc(var(--script-lift,0) * var(--stext-fs) * var(--script-mag,1))}   /* …and the running line is the SCRIPT too, so it takes the ornamental magnification with the diagram glyphs (--script-mag, syncSchemeAttr in js/lang/translit.js). Nothing measures this row — it is ordinary flowing HTML — so unlike the diagram faces it needs no counterpart in refreshFontStacks. */   /* SUPERSEDED BUT KEPT AS THE PRE-MEASUREMENT DEFAULT: renderDoc's text-row alignment pass now measures every one of these rows against the Form field's own text x and writes the correction as an inline margin, so the script line and the transliteration below it land on one column by measurement rather than by the arithmetic below — which was right about the 1px but could only ever be right at one window width (see formTextTarget on the ID column's share of the table's slack). The original derivation, still the reason this starts at 0 rather than at .stext's −1px:  */   /* item 20: LEFT-ALIGN the script top line's text with the transliteration/original input (.strans-orig, marginInlineStart:idW+8, padding:1px 3px) below it. In the .shead flex row .stext text-left = num idW + shead gap 8 + stext margin-left −1 + stext pad-left 3 = idW+10; the translit line's text-left = its marginInlineStart (idW+8) + pad-left 3 = idW+11 — so the script line sat 1px to the left. Removing the base −1px inline-start margin (from margin:-1px -1px) for the script line only puts .stext text-left at idW+8+0+3 = idW+11, exactly matching the translit. Scoped to the SCRIPT top line (.stext-script); the normal editable .stext keeps its −1px margin, so its layout and the diagram alignment are untouched. */
   .stext.stext-stacked{line-height:2; margin-top:calc(-0.3em - 1px)}   /* item 9 (rev): KEEP line-height:2 so Grantha's stacked conjuncts/vowel marks have room, but pull the tall line box UP with a negative top margin so its extra top-leading overflows into the gap ABOVE the block instead of inflating the .shead row (which shifted the baseline-aligned number/ID + block controls). -0.3em ≈ half the extra leading (2 − 1.4 = 0.6em), plus the base -1px .stext top margin. Renamed from .stext-grantha: Javanese and Balinese share the same stacked-diacritic problem (their vowel signs/panjingan-style conjuncts stack above and below the base consonant the same way Grantha's do) and now get the identical treatment. Kawi joined the three in document.js's class-on-render check when it was reinstated into _AKSHARA_SCRIPTS: without line-height:2 a subjoined Kawi conjunct on one line of a multi-line verse visibly overlapped the line below it. Zanabazar Square joined afterward on user report from the real app (a synthetic CDP test during its own reinstatement read as clean, but WebKit disagreed). NOTE: verify in the app's WebKit that the controls re-align and the conjuncts aren't clipped by the block above. */
   .stext,.strans,.tg-lname,.tg-text{text-shadow:0 0 2px var(--casing),0 0 2px var(--casing),0 0 3px var(--casing)}   /* item 19: give the block-initial text rows (sentence text, transliteration/original, per-language translations) the SAME legibility casing halo the diagram uses — the HTML equivalent (mirroring .bwform / .oline's text-shadow:0 0 2px,0 0 2px,0 0 3px var(--casing)) of the SVG paint-order stroke:var(--casing) on .tok-pos/.translit/.lbl. A subtle content-background-coloured halo, not a visible outline; .strans covers both .strans and .strans-orig. Grid cells and the POS/deprel spans are excluded — they carry their own casing. */
   .stext mark.findhit,.strans mark.findhit,.tg-text mark.findhit{text-shadow:none}   /* …but NOT through a find hit. The halo is three background-coloured shadows behind every glyph; over the amber <mark> (macos-kit/mac-chrome.css) they read as a pale fur around each letter of the match, which is exactly the run you most need to read cleanly. The <mark> supplies its own contrast, so it needs no casing — and dropping it HERE, on the mark alone, leaves the surrounding sentence's halo untouched. .strans covers .strans-orig; markInEl only ever wraps text nodes, so this cannot reach anything else. */
@@ -348,8 +384,21 @@
   .tdrow:hover{background:var(--block-sel)}
   .tdname{flex:1 1 auto; white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
   .tdcode{flex:none; font-size:11px; color:var(--muted); font-variant-numeric:tabular-nums}
-  .strans{font-size:13px; font-weight:462;   /* weight curve @13px */ position:relative; z-index:1; font-style:italic; color:var(--muted); font-family:var(--token-font); margin:-1px 0 3px; padding:1px 3px; box-sizing:border-box; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; unicode-bidi:isolate}   /* item 11: same 1px 3px padding as .stext so the transliteration text-left aligns with the sentence */   /* Item 16: z-index:1 → the translit/original line sits BELOW the block-initial sentence (.stext, z-index:2) */
-  .strans.strans-orig{white-space:pre-wrap; overflow-wrap:anywhere; overflow:visible; text-overflow:clip; cursor:text; border-radius:3px; padding:1px 3px}   /* item 3: editable original # text in the translit slot (under a script orthography); item 12: pre-wrap preserves typed line breaks */
+  .strans{font-size:13px; font-weight:462;   /* weight curve @13px */ position:relative; z-index:1; font-style:italic; color:var(--muted); font-family:var(--token-font); margin:-1px 0 3px; padding:1px 3px; box-sizing:border-box; white-space:pre-wrap; overflow-wrap:anywhere; overflow:visible; text-overflow:clip; unicode-bidi:isolate}   /* item 11: same 1px 3px padding as .stext so the transliteration text-left aligns with the sentence */   /* Item 16: z-index:1 → the translit/original line sits BELOW the block-initial sentence (.stext, z-index:2) */
+  /* IT WRAPS, AS THE SENTENCE ABOVE IT DOES. This row was `overflow:hidden; text-overflow:ellipsis;
+     white-space:nowrap`, so a long sentence's transliteration was cut off at the block's right edge
+     with an ellipsis while the `# text` it romanises (.stext: pre-wrap + overflow-wrap:anywhere)
+     wrapped onto as many lines as it needed — the two rows are one reading, and only one of them was
+     readable in full. The wrapping properties are now the SAME THREE .stext carries, and are stated
+     here rather than only on .strans-orig, which had them all along (that line is an editable `# text`
+     in the transliteration slot, so it always wrapped: the plain derived transliteration beside it
+     was the odd one out).
+     What the row does NOT lose is its right-edge alignment: applyTransInset (js/io/bridge.js) still
+     sets margin-inline-end so the row ends level with .stext, and with wrapping that inset is what
+     the text wraps AT — the same column the sentence wraps in, rather than a clip boundary. The
+     height caps measure the row after that sweep (see the note above applyTransInset), so the extra
+     lines are accounted for rather than overrunning the block. */
+  .strans.strans-orig{cursor:text; border-radius:3px; padding:1px 3px}   /* item 3: editable original # text in the translit slot (under a script orthography). Its wrapping (incl. item 12's pre-wrap, which preserves typed line breaks) now comes from .strans above, which shares it */
   .strans.strans-orig:hover{background:var(--field-bg)}
   .strans.strans-orig:focus{outline:none; background:var(--field-bg); box-shadow:0 0 0 1px var(--accent)}
   .sctrl{display:flex; gap:10px; margin-inline-start:0; margin-inline-end:-2px; align-self:flex-start; font-size:var(--stext-fs); height:calc(var(--stext-fs) * 1.4); align-items:center; transform:translateY(calc(0.5em - 0.5ex))}   /* item 10: pinned to the FIRST header line — flex-start + a fixed one-line-height box overlay the box on .stext's first line box, so the controls don't drift down when .stext wraps to 2+ lines. font-size = --stext-fs so em/ex track the SENTENCE-TEXT metrics; the +(0.5em − 0.5ex) downward nudge drops the icons off the line-box centre toward the text baseline. *//* margin-inline-start:0, NOT auto — an auto margin here absorbs whatever slack .stext{flex:1} doesn't need (auto margins are resolved BEFORE flex-grow distributes remaining space), pushing the controls to the row's far right and leaving a large, width-dependent gap after the sentence ID while the gap BEFORE it (link icon → ID) stayed the small fixed 8px shead gap — exactly the unevenness the .url-ctl comment below's own "gap(ID text → first ctrl box) = 15, equal" math already assumes this is 0 to get. */
@@ -378,7 +427,7 @@
   .wrap-rule{border:none; border-top:1px dashed var(--hairline); margin:0}
   .cont-chev{fill:var(--dia-muted); opacity:.75}   /* continuation chevron where an arc crosses a wrap */
   svg.tree{display:block}
-  .tok-word{font-size:15px; fill:var(--text); font-family:var(--token-font);
+  .tok-word{font-size:calc(15px * var(--script-mag,1)); font-weight:var(--script-wght,400); fill:var(--text); font-family:var(--token-font);
     paint-order:stroke; stroke:var(--casing); stroke-width:3.5px; stroke-linejoin:round}
   .tok-pos{font-size:15px; font-weight:400; font-feature-settings:"c2sc" 1; fill:var(--tie-hue); font-family:var(--token-font);   /* POS tags: same size + weight as the transliteration (TRANS_F/.translit, 15px normal) — c2sc renders the (already all-caps) tag as small caps instead of relying on a bumped weight/shrunk size for the "tag" register. No letter-spacing: 15px is the tracking curve's own reference size (TOK_REF_SIZE, trackCurve()), where it's 0 — was a flat .02em. cpsp dropped: it's calibrated for genuine full-height capitals, not the c2sc-substituted small-cap glyph forms, and over-spaced them. POS luminance = the subj/comp/mod deprel labels': --c-other is the palette's neutral member, derived at their SAME L≈0.656 (and matching dark contrast), so POS sits at the same lightness as the coloured labels in both themes */
     paint-order:stroke; stroke:var(--casing); stroke-width:3px; stroke-linejoin:round}
@@ -388,10 +437,10 @@
   .mwt-tie,.mwt-tie-h{fill:none; stroke:color-mix(in srgb, var(--tie-hue), var(--content-bg) var(--edge-mix))}   /* surface-form tie under a multi-word token, coloured like an "other"-relation arc: same color-mix(--c-other, --content-bg, --edge-mix) formula arcInk() applies to a relColor(), so the bracket reads as the SAME ink as a neutral arc/arrowhead instead of the plainer --dia-muted (still true as a claim about HUE, but the LIGHTNESS gap it leans on has narrowed a lot since --dia-muted became black-at-50 % flattened: OKLab L .508 → .600 against --c-other's .655, i.e. Δ.147 → Δ.055. Re-measure before citing this as a contrast argument) */
   .mwt-tie{stroke-width:var(--arc-stroke)}   /* the vertical end-pins keep the full --arc-stroke weight */
   .mwt-tie-h{stroke-width:calc(var(--arc-stroke) * .75)}   /* the horizontal bar is drawn thinner than the pins: per psychophysics (the horizontal–vertical illusion), a horizontal line reads heavier than a vertical one of identical physical width, so it needs LESS width to read as the same weight */
-  .mwt-form{font-size:15px; fill:var(--text); font-family:var(--token-font); text-anchor:middle;
+  .mwt-form{font-size:calc(15px * var(--script-mag,1)); font-weight:var(--script-wght,400); fill:var(--text); font-family:var(--token-font); text-anchor:middle;
     paint-order:stroke; stroke:var(--casing); stroke-width:3.5px; stroke-linejoin:round}   /* the MWT surface form is a token → sized/weighted/cased EXACTLY like .tok-word (15px, full --text, no bold) */
   .mwt-tie-cas{fill:none; stroke:var(--casing); stroke-width:5px; stroke-linejoin:round; stroke-linecap:round; pointer-events:none}   /* Item 18: casing halo behind the MWT bracket, pinned to the SHARED --casing (the background-mixed text-halo colour every other diagram element uses via paint-order:stroke) so the MWT bracket's casing matches the arcs/labels instead of the plainer --block-occlude */
-  .mwt-cas{font-size:15px; font-family:var(--token-font); text-anchor:middle; fill:var(--block-occlude); stroke:var(--block-occlude); stroke-width:5px; paint-order:stroke; stroke-linejoin:round; pointer-events:none}   /* opaque occlusion blob behind the MWT surface form, so an arc/line passing behind it is cleanly occluded (matches arc/ah-casing's --block-occlude) */
+  .mwt-cas{font-size:calc(15px * var(--script-mag,1)); font-weight:var(--script-wght,400); font-family:var(--token-font); text-anchor:middle; fill:var(--block-occlude); stroke:var(--block-occlude); stroke-width:5px; paint-order:stroke; stroke-linejoin:round; pointer-events:none}   /* opaque occlusion blob behind the MWT surface form, so an arc/line passing behind it is cleanly occluded (matches arc/ah-casing's --block-occlude) */
   /* ── the GOESWITH tie: U+203F ‿ UNDERTIE (see the goeswith block in js/diagram/diagram-core.js for why that
      character, and for the font-coverage check against the pruned core Noto set the packaging scripts ship) ──
      GREY, deliberately not the --tie-hue an MWT bracket takes: the MWT tie is coloured like a neutral arc because
@@ -399,7 +448,7 @@
      grey (--dia-muted, the transliteration row's own ink) puts it at the register of a mark rather than of a
      relation. Set in --token-font, the stack every other glyph in the view resolves through, so the tie comes
      from the SAME face as the word it ties. `fill`, never a stroke — see the selection note below. */
-  .gw-tie{font-size:26px; font-style:normal; font-family:var(--token-font); fill:var(--dia-muted); stroke:none; pointer-events:none}   /* font-style:normal is LOAD-BEARING, not tidiness. In the outline the tie is drawn INSIDE the form cell (gwSlurHTML appends .gw-h to the .oform), so a FOREIGN goeswith word — whose form cell carries .tok-ital — passed its italics straight down to the mark and slanted it. The undertie is a MARK, not text: it belongs to the join between the two halves, not to either word, and it must render at its resting face whatever the word around it is set in. (The SVG notations never showed this: there the tie is appended to the diagram root, outside any token cell, and inherits nothing.) */
+  .gw-tie{font-size:calc(26px * var(--script-mag,1)); font-weight:var(--script-wght,400); font-style:normal; font-family:var(--token-font); fill:var(--dia-muted); stroke:none; pointer-events:none}   /* font-style:normal is LOAD-BEARING, not tidiness. In the outline the tie is drawn INSIDE the form cell (gwSlurHTML appends .gw-h to the .oform), so a FOREIGN goeswith word — whose form cell carries .tok-ital — passed its italics straight down to the mark and slanted it. The undertie is a MARK, not text: it belongs to the join between the two halves, not to either word, and it must render at its resting face whatever the word around it is set in. (The SVG notations never showed this: there the tie is appended to the diagram root, outside any token cell, and inherits nothing.) */
   /* The casing halo: a cased copy of the same glyph UNDER the tie, so an arc crossing it breaks cleanly — the
      job .mwt-tie-cas does for the MWT bracket. Two things here are not the usual recipe, and both are forced by
      the horizontal stretch (textLength + lengthAdjust, see gwSlurSVG):
@@ -411,7 +460,7 @@
       · fill:none, so the halo is an OUTLINE of the glyph rather than a filled copy of it. A filled copy paints
         --casing across the glyph's own interior, which the tie then has to cover exactly — and does not, once
         the two are scaled independently. */
-  .gw-tie-cas{font-size:26px; font-style:normal; font-family:var(--token-font); fill:none;   /* the casing copy has to trace the SAME outline as the mark above it, so it takes the same upright face (see .gw-tie) — an italic halo under an upright glyph would show as a slanted ghost */ stroke:var(--casing); stroke-width:4px; stroke-linejoin:round; stroke-linecap:round; vector-effect:non-scaling-stroke; pointer-events:none}
+  .gw-tie-cas{font-size:calc(26px * var(--script-mag,1)); font-weight:var(--script-wght,400); font-style:normal; font-family:var(--token-font); fill:none;   /* the casing copy has to trace the SAME outline as the mark above it, so it takes the same upright face (see .gw-tie) — an italic halo under an upright glyph would show as a slanted ghost */ stroke:var(--casing); stroke-width:4px; stroke-linejoin:round; stroke-linecap:round; vector-effect:non-scaling-stroke; pointer-events:none}
   .gw-g.sel .gw-tie{fill:var(--accent)}   /* SELECTION IS THE ACCENT AND NOTHING ELSE — the fill changes, the glyph does not. No font-weight, no font-size, no stroke: the tie is measured (gwTieBox/gwDepth) at the resting face and the tie layer above it reserves exactly that, so any geometric selection cue here would both break the standing invariant and shift the tie stack. Lights up when EITHER half of the word is selected (applySel reads data-gw), because the mark belongs to the join rather than to either part. */
   .gwunit{position:relative}   /* HTML notations: the containing block for the out-of-flow tie below (.gw-h) */
   .gwpart{margin-inline-start:.166em}   /* the gap between two parts of one goeswith word: a THIN SPACE, the same one the SVG notations seat by (gwGap/GW_SP in js/diagram/diagram-core.js). Butted flush, "with"+"out" reads as the single word "without" and there is nothing left to say two separately editable fields are there; a word space apart, it reads as two words. STATIC FALLBACK ONLY — gwFormHTML overrides this inline with the width the FONT gives U+2009, measured on the canvas like every other width in this layout. .166em is that width in Noto Sans (166/1000 em), so the two agree in the face the app ships and the declaration is honest on its own. */
@@ -471,7 +520,7 @@
   .bwbr{font-family:var(--token-font); font-size:15px; font-weight:700; margin:0; vertical-align:baseline}   /* SAME as the unwrapped brackets' BRK (700 15px) — don't inherit the 13px .text-conv base. NO side margins: a bracket next to a TOKEN then leans on the token's own 1px margin + 3px padding alone, so the bracket↔token ink gap (~5px) matches the unwrapped flat view's ~4.8px gap=5 spacing — the old 1px side margins added a spurious ~1px, making wrapped brackets sit LOOSER than flat. Share the form's baseline, exactly as the flat brackets do (there the "[" and the word are both SVG text on the same y): the form then sits at the same height against the glyph as in flat. vertical-align:middle keyed off the parent's x-height, which raised the glyph (forms read as sitting too high) and drifted between engines */
   .bwclose{font-family:var(--token-font); font-size:13.5px; font-weight:444;   /* weight curve @13.5px */ letter-spacing:.0084em;   /* tracking curve @13.5px */ color:var(--muted); margin-inline-end:3px; unicode-bidi:isolate}   /* head repeated (muted) beside a closing bracket */
   .bwrel{position:absolute; left:0; right:0; top:0; text-align:center; font-family:var(--token-font); font-size:11px; font-weight:545;   /* weight curve @11px, matching .lbl — was a flat 600 */ letter-spacing:.0248em;   /* tracking curve @11px, matching .lbl/.orel */ color:var(--dia-muted); unicode-bidi:isolate}   /* relation, in the reserved space above the form */
-  .bwform{position:relative; z-index:3; display:inline-block; font-family:var(--token-font); font-size:15px; color:var(--text); margin:0; unicode-bidi:isolate}   /* SAME 15px as the unwrapped brackets' WORD_F — wrapping must not shrink the form. z-index:3 (Item 23 + Item 28) → the form paints ABOVE the deprel label (.bwrel, below), any neighbour's annotation, AND the .bwannot interrupter-arc/MWT overlay (z-index:2), so where a wide label/POS or an arc meets a token the TOKEN glyph wins (the arc tucks behind the glyph; its casing/halo behaviour is otherwise unchanged). Positioning context for the relation (above) and POS/translit (below), so they track the form, not the slot */
+  .bwform{position:relative; z-index:3; display:inline-block; font-family:var(--token-font); font-size:calc(15px * var(--script-mag,1)); font-weight:var(--script-wght,400); color:var(--text); margin:0; unicode-bidi:isolate}   /* SAME 15px as the unwrapped brackets' WORD_F — wrapping must not shrink the form. z-index:3 (Item 23 + Item 28) → the form paints ABOVE the deprel label (.bwrel, below), any neighbour's annotation, AND the .bwannot interrupter-arc/MWT overlay (z-index:2), so where a wide label/POS or an arc meets a token the TOKEN glyph wins (the arc tucks behind the glyph; its casing/halo behaviour is otherwise unchanged). Positioning context for the relation (above) and POS/translit (below), so they track the form, not the slot */
   .bwpos{font-family:var(--token-font); font-size:15px; font-weight:400; font-feature-settings:"c2sc" 1; color:var(--tie-hue); margin-inline-start:6px; unicode-bidi:isolate}   /* size/weight now matches the transliteration (15px normal) with c2sc small caps, mirroring .tok-pos/.opos/.node-cat. No letter-spacing: 15px is the tracking curve's reference size (0). cpsp dropped — see .tok-pos. Item 2: the LUMINANCE (colour) also matches the unwrapped-bracket POS — --c-other (the palette's neutral member at the subj/comp/mod deprel L), exactly as .opos/.tok-pos use — so wrapped-bracket POS tags read at the same lightness as the flat-bracket ones instead of the plainer --dia-muted (still true as a claim about HUE, but the LIGHTNESS gap it leans on has narrowed a lot since --dia-muted became black-at-50 % flattened: OKLab L .508 → .600 against --c-other's .655, i.e. Δ.147 → Δ.055. Re-measure before citing this as a contrast argument) */
   /* SELECTED TOKEN TEXT IS ACCENT-COLOURED, NEVER BOLDER. The accent carries the selection on its own, and the
      weight bump this used to add (font-weight:640) could not be made to pay for itself: every renderer lays its
@@ -755,11 +804,11 @@
   .dim-peri .tok-pos,.dim-peri .node-cat,.dim-peri .mwt-pos,.dim-peri .opos,.dim-peri .bwpos,
   .dim-out .tok-pos,.dim-out .node-cat,.dim-out .mwt-pos,.dim-out .opos,.dim-out .bwpos{fill:var(--dim-tie); color:var(--dim-tie)}
   .dim-peri .mwt-tie,.dim-peri .mwt-tie-h,.dim-out .mwt-tie,.dim-out .mwt-tie-h{stroke:var(--dim-edge)}   /* the MWT bracket is drawn in the arc ink, so it fades with the arcs, not with the forms it brackets */
-  .node-lbl{font-size:14px; fill:var(--text); text-anchor:middle; font-family:var(--token-font); letter-spacing:.0055em;   /* tracking curve @14px */
+  .node-lbl{font-size:calc(14px * var(--script-mag,1)); font-weight:var(--script-wght,400); fill:var(--text); text-anchor:middle; font-family:var(--token-font); letter-spacing:.0055em;   /* tracking curve @14px — stated for the UNMAGNIFIED size and deliberately NOT re-derived at 2×: letter-spacing suppresses the GSUB substitutions a Brahmic conjunct is built from, so a magnified script must carry the same tracking it does at rest. meas() divides by --script-mag to match (see _measOneUncached). */
     paint-order:stroke; stroke:var(--casing); stroke-width:3.5px; stroke-linejoin:round}
   .node-cat{font-size:15px; font-weight:400; font-feature-settings:"c2sc" 1; fill:var(--tie-hue); text-anchor:middle; font-family:var(--token-font);   /* matches the transliteration's size/weight (15px normal); c2sc small caps for the tag register, like .tok-pos/.opos/.bwpos; luminance matches --c-other (the subj/comp/mod deprel L), same as every other POS-tag rendering — was the odd one out on the plainer --dia-2. cpsp dropped — see .tok-pos */
     paint-order:stroke; stroke:var(--casing); stroke-width:3.5px}
-  .baseword{font-size:14px; fill:var(--text); text-anchor:middle; font-family:var(--token-font); letter-spacing:.0055em;   /* tracking curve @14px */
+  .baseword{font-size:calc(14px * var(--script-mag,1)); font-weight:var(--script-wght,400); fill:var(--text); text-anchor:middle; font-family:var(--token-font); letter-spacing:.0055em;   /* tracking curve @14px — stated for the UNMAGNIFIED size and deliberately NOT re-derived at 2×: letter-spacing suppresses the GSUB substitutions a Brahmic conjunct is built from, so a magnified script must carry the same tracking it does at rest. meas() divides by --script-mag to match (see _measOneUncached). */
     paint-order:stroke; stroke:var(--casing); stroke-width:3.5px; stroke-linejoin:round}   /* item 4: the wrapped stemma's baseline word row is a token FORM and was the one form rendering with no casing halo (audited across all five notations × wrap on/off) — .tok-word/.node-lbl/.mwt-form all carry 3.5px. It needs it more than most: the .proj dotted connectors land ON this row, so without a halo every line ran straight through the glyphs. Costs no layout width — a paint-order stroke paints outside the advance width and the renderers measure with meas() at the resting face either way */
   /* item 3 — FEATS Typo=Yes strikes the token form through. Set on the FORM element of every notation (the
      FORM_SEL family: .tok-word/.baseword/.node-lbl/.bwform/.oform, plus the folded-punctuation satellites) and on
@@ -936,12 +985,12 @@
      was blue text on blue. Every other view accents the text against the plain page and reads correctly, which
      is why this change stops here. --accent, not --row-sel: that token stays the old low-alpha wash for anything
      else that wants one. */
-  .oselrow{position:absolute; z-index:0; background:var(--accent); background:oklch(from var(--accent) calc(l * .827) calc(c * .915) h); border-radius:6px; pointer-events:none; display:none}   /* selected row — default, full subtree width; the SAME derivation as the grid's own selected row, and derived for the same reason (see the note beside table.grid tbody tr:is(.sel,.mwtsel)): this used to be the literal rgb(0,100,225) sampled from the system blue, which stayed blue under any other system accent while the row it mirrors followed it. Two declarations, fallback first, for the reason documented there */
-  @media (prefers-color-scheme:dark){ .oselrow{background:var(--accent); background:oklch(from var(--accent) calc(l * .827) calc(c * .915) h)} }   /* dark keeps the derived-darkening formula, unchanged */
+  .oselrow{position:absolute; z-index:0; background:var(--accent); background:oklch(from var(--accent) calc(l * .882) calc(c * .958) h); border-radius:6px; pointer-events:none; display:none}   /* selected row — default, full subtree width; the SAME derivation as the grid's own selected row, and derived for the same reason (see the note beside table.grid tbody tr:is(.sel,.mwtsel)). Two declarations, fallback first, for the reason documented there */
+  @media (prefers-color-scheme:dark){ .oselrow{background:var(--accent); background:oklch(from var(--accent) calc(l * .827) calc(c * .915) h)} }   /* dark's own step — see the note beside the grid's selected row */
   .ohovbox{position:absolute; z-index:0; background:var(--row-hover); border-radius:6px; pointer-events:none; display:none}                                 /* hover — same span as a row selection */
   .oreportbox{position:absolute; z-index:0; border:.5px solid color-mix(in srgb,var(--text) 18%,transparent); border-radius:7px; background:color-mix(in srgb,var(--content-bg) 55%,transparent); box-shadow:0 1px 4px rgba(0,0,0,.12),0 0 0 .5px rgba(0,0,0,.02); pointer-events:none}   /* item 7: a reported-speech subtree sits in a subtly drop-shadowed box (behind the rows, so it never shifts their horizontal alignment) */
   .orel{font-family:var(--token-font); font-size:11px; font-weight:545;   /* weight curve @11px, matching .lbl/.bwrel — was a flat 600 */ color:var(--dia-muted); margin-inline-end:9px; letter-spacing:.0248em;   /* tracking curve @11px, matching .lbl/.bwrel — was a flat .02em */ unicode-bidi:isolate}
-  .oform{font-family:var(--token-font); font-size:14px; color:var(--text); font-weight:400; letter-spacing:.0055em;   /* tracking curve @14px */ unicode-bidi:isolate; padding:0 1px}   /* matches every OTHER view's token-form weight (.tok-word/.node-lbl/.baseword/.bwform are all unset → 400); was 520, reading noticeably heavier here than the same word rendered as a diagram token */
+  .oform{font-family:var(--token-font); font-size:calc(14px * var(--script-mag,1)); font-weight:var(--script-wght,400); color:var(--text); font-weight:400; letter-spacing:.0055em;   /* tracking curve @14px */ unicode-bidi:isolate; padding:0 1px}   /* matches every OTHER view's token-form weight (.tok-word/.node-lbl/.baseword/.bwform are all unset → 400); was 520, reading noticeably heavier here than the same word rendered as a diagram token */
   .punctsat{font-family:var(--token-font); font-size:14px; color:var(--text); letter-spacing:.0055em;   /* tracking curve @14px */ unicode-bidi:isolate; cursor:pointer}   /* a folded punctuation mark rendered as its OWN selectable, unannotated inline element beside its host (outline / wrapped brackets); real horizontal space, no arc/deprel/POS of its own */
   .punctsat.sel{color:var(--accent)}   /* accent only, no weight bump — see the "selected token text" note beside .node.sel .node-lbl */
   #doc.zone-grid .punctsat.sel{color:var(--accent-dim)}
@@ -1159,16 +1208,19 @@
      mac-tokens.css. Reading --accent also picks up a live system-accent override for free (js/ui/colours.js
      rewrites that property, and used to have to rewrite --row-sel's alpha separately to match).
      LAST of the four states: the focused row outranks the range wash, hover and stripe alike. */
-  /* NOT the accent itself — macOS fills a selected row with a DARKENED accent (its own
-     `selectedContentBackgroundColor`: for the #007AFF system blue, #0059D1). DERIVED FROM --accent IN BOTH
-     APPEARANCES, on request, and no longer a literal in either: in OKLCh the darkened pair is L ×.827, C ×.915,
-     hue held, which reproduces rgb(0,91,208) from #007AFF — two units off the sampled rgb(0,89,209), i.e. under
-     any perceptual threshold — and darkens ANY other accent by the same perceptual step rather than a per-hue
-     guess. Light used to be the literal rgb(0,100,225), a measured sample of the system blue's own row fill;
-     that is nine units of blue away from what the formula gives, and it was wrong in the way that matters — a
-     user on a graphite, red or purple system accent got a BLUE selected row, because a sampled literal cannot
-     follow an accent it was sampled from. Reading --accent also picks up a live system-accent override for free
-     (js/ui/colours.js rewrites that property).
+  /* NOT the accent itself — a selected row takes a DARKENED accent. DERIVED FROM --accent IN BOTH
+     APPEARANCES and never a literal, but with A DIFFERENT STEP IN EACH (see the dark note below the
+     rule): in LIGHT the pair is L ×.882, C ×.958, hue held, which lands
+     rgb(0,100,225) exactly on the default system blue rgb(0,122,255) and steps ANY other accent down by the
+     same perceptual amount rather than by a per-hue guess (graphite → rgb(128,128,132), red → rgb(223,26,40),
+     purple → rgb(150,61,194)).
+     ⚠ TUNED TO A TARGET, NOT TO A SAMPLE, and the distinction is the whole reason this is arithmetic instead of
+     a colour. An earlier pair (L ×.827, C ×.915) was fitted to AppKit's own `selectedContentBackgroundColor`
+     (#0059D1) and read too dark on the light ground; rgb(0,100,225) is the value asked for, so the coefficients
+     are solved backwards from it. What must NOT come back is the literal itself — light carried
+     `rgb(0,100,225)` hardcoded once, and a user on a graphite, red or purple system accent then got a BLUE
+     selected row, because a sampled literal cannot follow the accent it was sampled from. Reading --accent also
+     picks up a live system-accent override for free (js/ui/colours.js rewrites that property).
      A TWO-DECLARATION PAIR (`background:var(--accent)` first, a real fallback, not a duplicate): relative colour
      syntax that an engine cannot parse drops THAT DECLARATION ONLY and leaves this one standing, so the row still
      fills with the plain accent instead of nothing. It has to be written as a literal here rather than behind a
@@ -1182,7 +1234,20 @@
      every one of its component rows, toggled together by applySel (js/core/document.js). It sits BELOW .rangesel
      in source order deliberately — an MWT selection is also a range selection, and this is the more specific
      reading of the same state, so it must win. */
-  table.grid tbody tr:is(.sel,.mwtsel) td::before{background:var(--accent); background:oklch(from var(--accent) calc(l * .827) calc(c * .915) h)}   /* ONE rule for both appearances now that neither is a literal — the darkening is a perceptual step off whatever --accent currently is, and that is as true in light as in dark. The @media block that used to override this in dark is gone with it, not merely emptied */
+  table.grid tbody tr:is(.sel,.mwtsel) td::before{background:var(--accent); background:oklch(from var(--accent) calc(l * .882) calc(c * .958) h)}   /* LIGHT: the step tuned to the measured target below */
+  /* DARK TAKES ITS OWN DERIVATION, and must keep one. The step above is tuned for a LIGHT ground —
+     it darkens the accent so a saturated fill sits correctly against white. Dark inverts that
+     premise: every native toolkit moves its selection accent the OTHER way there, because the fill
+     now has to separate from a dark ground rather than from a light one. macOS already ships a
+     lighter blue for dark (--accent is #007aff light, #0a84ff dark) and the Fluent kit's --accent is
+     shade-stepped per appearance in the same way (#005a9e light = WinUI's SystemAccentColorDark1,
+     #0078d4 dark = the base accent), so applying the LIGHT ground's darkening on top of an
+     already-lightened accent double-counts and lands somewhere neither toolkit uses.
+     .827/.915 is the step dark has always used and the one it is meant to keep; the light rule's
+     .882/.958 exists only to hit its own measured target (rgb(0,100,225) on the default blue). One
+     rule for both was tried and is what this replaces — it is a tidier file and a less faithful
+     window. */
+  @media (prefers-color-scheme:dark){ table.grid tbody tr:is(.sel,.mwtsel) td::before{background:var(--accent); background:oklch(from var(--accent) calc(l * .827) calc(c * .915) h)} }
   /* …which forces INVERSE INK. The cells carry muted greys (--text-2 / --muted) that fail outright on a
      saturated fill, and unlike the old wash there is no background showing through to keep them legible.
      Scoped to where the full accent ACTUALLY paints: with focus in the diagram the row falls back to the dim
@@ -1221,7 +1286,9 @@
      the app's established low-chroma recipe (accent mixed toward --muted), so the two states are derived the
      same way and differ in chroma alone: still "selected, in the other pane", never grey. */
   #doc.zone-grid .oselrow{background:color-mix(in srgb,var(--accent) 55%,var(--muted));
-    background:oklch(from color-mix(in srgb,var(--accent) 55%,var(--muted)) calc(l * .827) calc(c * .915) h)}
+    background:oklch(from color-mix(in srgb,var(--accent) 55%,var(--muted)) calc(l * .882) calc(c * .958) h)}
+  @media (prefers-color-scheme:dark){ #doc.zone-grid .oselrow{
+    background:oklch(from color-mix(in srgb,var(--accent) 55%,var(--muted)) calc(l * .827) calc(c * .915) h)} }   /* the mirrored band follows the focused fill into dark's own step, or the two states would be derived differently in one appearance */
   html.win-inactive #doc .oselrow{background:var(--row-sel-inactive)}                       /* …and an unfocused WINDOW greys it outright, exactly as the grid's row does */
   /* INVERSE INK on that band, in BOTH of its coloured states — focused and mirrored-from-the-grid alike. Only
      the grey inactive band below keeps ordinary ink. Every child of the row is listed because every one of them
@@ -1341,6 +1408,19 @@
   .trmenu .trcell{display:flex; align-items:center; justify-content:center; min-width:16px}
   .trmenu .trradio{margin:0; accent-color:var(--accent); cursor:pointer}   /* accent-color: the platform control, tinted to the app accent — nothing hand-drawn to keep in step with the OS */
   .trmenu .trna{flex:none; font-size:10.5px; color:var(--muted); font-style:italic}   /* "unavailable" tag on a scheme with no data */
+  /* …and its LIVE form, on a scheme an extras tier would supply (translit.js's naTag): the accent and
+     the underline say it is a target, which the italic grey deliberately does not. Not italic — this
+     one is a verb the user can act on, not a note about the row's state. `button` resets, because a
+     <button> was chosen for keyboard reach and brings a control's whole appearance with it. */
+  .trmenu .trna-link{appearance:none; -webkit-appearance:none; background:none; border:0; padding:0; margin:0;
+    font:inherit; font-size:10.5px; font-style:normal; color:var(--accent); text-decoration:underline;
+    text-underline-offset:2px; cursor:pointer}
+  .trmenu .trna-link:hover{opacity:.75}
+  .trmenu .trna-link:focus-visible{outline:2px solid var(--accent); outline-offset:2px; border-radius:3px}
+  /* On a HIGHLIGHTED script row the accent becomes the row's own fill, so an accent-coloured link on
+     top of it would vanish; the row's foreground is white there, as .trstored above already handles. */
+  .trmenu .trrow:hover .trna-link,.trmenu .trrow.hi .trna-link{color:#fff}
+  .trmenu .trrow.trdim{opacity:.7}   /* the Script list's unavailable rows dim as the grid's names do */
   .trmenu .trstored{flex:none; font-size:9.5px; font-weight:640; letter-spacing:.03em; text-transform:uppercase; color:var(--accent)}   /* item 1: a scheme that may be stored to MISC */
   .trmenu .trrow:hover .trstored,.trmenu .trrow.hi .trstored{color:#fff}
   .trmenu .trsep{height:.5px; background:var(--hairline-strong); margin:4px 8px; flex:none}   /* thin hairline between the menu's logical groups (off-rows vs schemes / stored-capable vs the rest), theme-aware like the titlebar group menu */
@@ -1497,17 +1577,68 @@
      real symbols here. */
   /* Manage Models sheet */
   .modelrow{display:flex; align-items:center; justify-content:space-between; gap:12px; padding:8px 2px; border-bottom:.5px solid var(--hairline)}
+  /* The row a Script/transliteration menu's "install" link sent the reader to find (revealExtraRow).
+     Same brief accent wash the native Manage Models window uses, for the sheet fallback. */
+  @keyframes mdlflash{0%{background:transparent} 18%{background:color-mix(in srgb,var(--accent) 22%,transparent)} 100%{background:transparent}}
+  .modelrow.flash{animation:mdlflash 1.9s ease-out 1}
+  @media (prefers-reduced-motion: reduce){ .modelrow.flash{animation:none; background:color-mix(in srgb,var(--accent) 14%,transparent)} }
   .modelrow .mi{display:flex; flex-direction:column; gap:2px; min-width:0}
   .modelrow .mi small{color:var(--muted); font-size:11px}
   .modelrow .mi .mts{font-variant-numeric:tabular-nums}   /* training-set size; empty until the background sweep resolves it */
   .modelrow .mi .mts:empty{display:none}
   .modelrow .mi .mts b{font-weight:600}   /* the FIGURE carries the emphasis, not its caption */
   .mgroup-h{font-size:11px; font-weight:700; letter-spacing:.04em; text-transform:uppercase; color:var(--muted); margin:12px 0 2px}
+  /* the Manage Models filter row: the language search takes the space, the "Installed only" toggle
+     takes only what its label needs. `align-items:stretch` so the button matches the field's height
+     rather than restating it — the field's own height is the kits' business, not this rule's. */
+  .mfilters{display:flex; align-items:stretch; gap:8px}
+  .mfilters #msearch{flex:1 1 auto; min-width:0}
+  .mfilters #minst{flex:0 0 auto; white-space:nowrap}
+  /* a note that qualifies a whole model GROUP (the Stanza group needs the grew backend to parse at all) —
+     sits directly under the heading, ahead of the rows it applies to. Tinted with the shared --warn token
+     (both kits define it, per scheme — systemOrange on macOS, SystemFillColorCaution on Windows) rather
+     than a colour of its own, exactly as the find highlight below does. */
+  .mnote{font-size:11.5px; line-height:1.45; color:var(--muted); margin:2px 0 6px; padding:7px 9px; border-radius:7px; background:var(--hairline)}
+  .mnote.mwarn{color:var(--text); background:color-mix(in srgb, var(--warn) 15%, transparent)}
   .mprog{height:4px; border-radius:3px; background:var(--hairline); overflow:hidden; margin-top:5px; width:120px}
   .mprog>i{display:block; height:100%; width:0; background:var(--c-subj); transition:width .18s}
   /* mSUD morph-internal (/m) relations render dashed + dimmer than syntactic relations */
   .morph-edge{stroke-dasharray:3 2; opacity:.72}
   .morph-lbl{opacity:.82; font-style:italic}
+  /* ── THE PIPELINE'S RANKING, SHOWN ─────────────────────────────────────────────────────────────
+     A relation/POS menu row faded by how likely the model thinks that option is (--pw, set by
+     weightMenuRows, js/editing/context-menu.js). Here rather than in either kit because it is not a
+     look: it is the app saying something about the annotation, and it must read identically under
+     Liquid Glass and Fluent. Opacity and nothing else — a dim row is still a row, and hovering
+     restores it in full so the option under the pointer is never the hard one to read. The transition
+     is what makes the ranking ARRIVE gracefully: the menu opens unweighted (it never waits on the
+     bridge) and settles a frame or two later, which would otherwise land as a flash. */
+  .ctx button[data-optval]{ opacity:var(--pw,1); transition:opacity .13s ease-out }
+  .ctx button[data-optval]:hover,.ctx button[data-optval]:focus-visible{ opacity:1 }
+  /* ── A FORM DRAWN AS HTML, because the engine will not shape its script in SVG ─────────────────
+     smpReshape (js/diagram/diagram-core.js) swaps the <text> for a <foreignObject><div class="fo-form">
+     carrying the SAME class list, so every selector that matched the text still matches. What does NOT
+     survive the swap is the SVG paint model, and this puts it back: `fill` becomes `color` (the fill
+     rules below are SVG-only and simply do not apply to HTML), and `paint-order:stroke` becomes the
+     text-shadow triple the HTML notations already use for the identical purpose (.bwform/.oline). The
+     box is positioned and sized by the swap itself, so nothing here may set a width, a margin or a
+     transform — the centring is the foreignObject's own x. */
+  .fo-form{color:var(--text); text-shadow:0 0 2px var(--casing),0 0 2px var(--casing),0 0 3px var(--casing);
+    unicode-bidi:isolate; pointer-events:none; text-align:center}   /* …and CENTRED, because an HTML block left-aligns and `text-anchor:middle` means nothing to it: the swap sizes the box to the text, but if that width is ever off the glyphs must still sit on the anchor rather than sliding to the box's left edge — which is exactly how a stale 83px box put a 39.85px word 20px to the left of its own POS tag */
+  foreignObject.tok-word,foreignObject.node-lbl,foreignObject.baseword,foreignObject.mwt-form{overflow:visible}
+  .fo-form.tok-ital{font-style:italic}
+  .fo-form.tok-typo{text-decoration-line:line-through}
+  #doc .sel>.fo-form,#doc .node.sel .fo-form,#doc .tok-group.sel .fo-form{color:var(--accent)}
+  #doc .dim-peri .fo-form,#doc .dim-out .fo-form{color:var(--dim-muted)}
+  /* diagram drag: the heads the PARSER weighed for the dragged token, washed in proportion to the mass
+     it gave each (--phl, set per node by paintHeadCandidates, js/diagram/diagram-edit.js). Deliberately
+     the same accent ink as .dtarget below and deliberately WEAKER: these are candidates, the drop target
+     is the choice. That is also why these rules come FIRST — .dtarget matches at equal specificity and
+     must win outright when the pointer is over a candidate, which is the common case. */
+  #doc .pcand text{ fill:color-mix(in srgb,var(--accent) calc(var(--phl,0) * 100%),var(--text)) }
+  #doc .pcand .tok-wash{ fill:color-mix(in srgb,var(--accent) calc(var(--phl,0) * 13%),transparent) }
+  #doc .bwtok.pcand{ background:color-mix(in srgb,var(--accent) calc(var(--phl,0) * 13%),transparent) }
+  #doc .bwtok.pcand .bwform{ color:color-mix(in srgb,var(--accent) calc(var(--phl,0) * 100%),var(--text)) }
   /* diagram drag: highlight the node under the pointer (reorder / set-head target) */
   #doc .dtarget text{ fill:var(--accent) }   /* accent only, no weight bump — same measurement problem as every other selection state (see the note beside .node.sel .node-lbl): the drop target is an ORDINARY token whose slot was measured at the normal weight, and bolding it mid-drag shifted the very glyph the pointer is aiming at. The accent fill is the whole cue here, backed by the .tok-wash below */
   #doc .dtarget .tok-wash{ fill:color-mix(in srgb,var(--accent) 15%,transparent) }   /* wash the word→POS cell only, never the arc/edge zone above (which the full-height .tok-hit still covers for clicks) */

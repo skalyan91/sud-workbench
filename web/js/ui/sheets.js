@@ -120,7 +120,7 @@ function openWherePop(anchor,folders,current,onPick){ closeWherePop();
   document.body.appendChild(m);
   const r=anchor.getBoundingClientRect(), mw=m.offsetWidth, mh=m.offsetHeight;
   const left=Math.max(6,Math.min(r.left, innerWidth-mw-8));
-  const top=Math.max(6,Math.min(r.bottom+4, innerHeight-mh-8));
+  const top=Math.max(menuTopBound(),Math.min(r.bottom+4, innerHeight-mh-8));
   m.style.left=left+"px"; m.style.top=top+"px";
   setTimeout(()=>{ document.addEventListener("mousedown",_wherePopOutside,true); document.addEventListener("keydown",_wherePopKey,true); },0); }
 // the real macOS "Do you want to keep this new document ‘Untitled’?" prompt — shown (instead of the plain
@@ -365,7 +365,15 @@ function sheetInsert(index){
        has sentences must keep its own language and parser. */
     if(adopt&&mainEnabled&&payload.main.lang) adoptInsertLang(payload.main.lang,mainInfo.model||"");
     closeSheet();   // every value is already read off the fields the close tears down
-    if(hasBridge()){ try{ window.pywebview.api.child_insert_text(payload); }catch(e){ toast("Insert failed: "+e); } return; }
+    /* The document's storage script and whether it HAS one yet travel with the payload: Python decides
+       whether the typed notation can be stored (Api.child_insert_text), and only this side knows both.
+       A refusal comes back as {ok:false,error} and is the one thing the caller has to say out loud —
+       the sheet has already closed, so silence would read as an insert that simply did nothing. */
+    payload.docScript=(typeof DOCSCRIPT!=="undefined")?(DOCSCRIPT||""):"";
+    payload.docEmpty=!DOC.length;
+    if(hasBridge()){ try{ Promise.resolve(window.pywebview.api.child_insert_text(payload))
+        .then(r=>{ if(r&&r.error) toast(r.error); })
+        .catch(e=>toast("Insert failed: "+e)); }catch(e){ toast("Insert failed: "+e); } return; }
     /* NO BRIDGE (browser design mode): do here the little that the Python worker would have done — the
        ITRANS conversion (itransFix is itself a no-op without a bridge) and the paragraph+sentence split of
        each parallel text — and then hand the SAME __applyInsertPayload the worker drives, so the two paths
@@ -424,7 +432,7 @@ function bindFeatInput(inp){
       FEATS_CATS.forEach(cat=>{ const gi=ms.filter(v=>FEATS_CAT[v]===cat); gi.forEach(v=>seen.add(v)); if(gi.length)groups.push({title:cat,items:gi}); });
       const rest=ms.filter(v=>!seen.has(v)); if(rest.length)groups.push({title:"Other (in document)",items:rest});
       acShowGrouped(inp,groups,pick); }
-    else { const descFn=(keyName&&UD_FEATS[keyName])?(v=>(FEATS_VDESC[keyName]||{})[v]||""):null; acShowCustom(inp,ms,pick,descFn); } };
+    else { const descFn=(keyName&&(UD_FEATS[keyName]||UD_MISC_VALS[keyName]))?(v=>(FEATS_VDESC[keyName]||{})[v]||""):null;   /* …and a MISC key with a known value set, which since Subject/Object moved out of FEATS is the only way their value glosses still reach the dropdown */ acShowCustom(inp,ms,pick,descFn); } };
   inp.addEventListener("input",openAC);
   inp.addEventListener("focus",openAC);
   inp.addEventListener("blur",()=>{ if(_acInput===inp)acCloseSoon(); });

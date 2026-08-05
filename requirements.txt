@@ -46,6 +46,12 @@ pykakasi              #   kana → phonemic Hepburn (long vowels doubled, from J
 cutlet                # Japanese → Kunrei / Modified Hepburn romaji (per-scheme transliteration menu)
 unidic-lite           #   MeCab dictionary cutlet reads for kanji readings
 aksharamukha          # Sanskrit → Indic scripts (Devanagari, Grantha, Siddham, …) — per-token script conversion
+indic-transliteration # the Sanskrit parser's OWN Devanagari→IAST front end. sa_sud_vedic_ufal_dcs
+                      # romanises Devanagari input with it before tokenising, and its wheel declares only
+                      # spaCy — so a Devanagari Sanskrit file would fail at the first parse without it.
+                      # NOT interchangeable with aksharamukha above: upstream evaluated aksharamukha for
+                      # this and rejected it (it renders । as '.', which breaks the model's own
+                      # danda-based sentence splitting, and it is AGPL against that project's MIT).
 ToJyutping            # Cantonese → Jyutping
 opencc-python-reimplemented   # simplified↔traditional Han conversion (Simplified/Traditional orthographies; folds simplified input for Chao's General Chinese)
 hangul-romanize       # Korean → romanisation (wiktra's Korean modules don't run on Lua 5.5)

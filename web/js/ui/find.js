@@ -154,7 +154,8 @@ function reHit(re,text){ re.lastIndex=0; return re.test(text||""); }   // the /g
    search, the bar's plain ⌘F included, is untouched.
    A sentence field with NO tokGet ("Sentence ID", "Sentence text") keeps filtering the SENTENCE, and
    that is the honest reading rather than a loose end: a sid is not a property of a token, and `# text`
-   is a single sandhied string no token is reliably a substring of (see app/sa_csl.py on why). So a
+   is a single string a token need not be a substring of at all (a sandhied Sanskrit line, a Typo=Yes
+   word spelt as written). So a
    mixed query of that kind returns the tokens the token criteria select, inside the sentences the
    sentence criteria match — an intersection of the two, each at the level where it means something. */
 function scanFind(){ const crits=compileCrits();
@@ -343,7 +344,7 @@ function openFieldMenu(anchor,fields,current,onPick){ closeFieldMenu();
   document.body.appendChild(m);
   const r=anchor.getBoundingClientRect(), mw=m.offsetWidth, mh=m.offsetHeight;
   m.style.left=Math.max(6,Math.min(r.left,innerWidth-mw-8))+"px";
-  m.style.top=Math.max(6,Math.min(r.bottom+4,innerHeight-mh-8))+"px";
+  m.style.top=Math.max(menuTopBound(),Math.min(r.bottom+4,innerHeight-mh-8))+"px";
   setTimeout(()=>{ document.addEventListener("mousedown",_ffOutside,true); document.addEventListener("keydown",_ffKey,true); },0); }
 // The chevron is the SAME inline SVG every other pull-down in the app draws (.drawer-btn's, verbatim) —
 // not the "⌄" text glyph this used to carry. Measured, at this button's 12px label: that glyph's INK is

@@ -3,7 +3,18 @@
 // keep the root invariant coupled: a token has head 0  ⟺  its deprel is "root"
 function afterHeadEdit(t,s){ if(parseInt(t.head,10)===0) t.deprel=withDepBase(t.deprel,"root"); else if(depBase(t.deprel)==="root") t.deprel=withDepBase(t.deprel,"udep");   // (keeps any @deep tail)
   if(s) syncSharedFeat(t,s);   // `s` = the token's sentence — pass it whenever the caller has it, so a rehead away from a conj head drops a stale Shared=Yes
-  normGoesWith(t,s); }   // …and a token that is ALREADY a goeswith continuation, dragged onto a new head, is a continuation of THAT word now: its dependents follow it there (see normGoesWith). Not a no-op even though the relation didn't change — the head did, and every consequence below hangs off the head
+  normGoesWith(t,s);   // …and a token that is ALREADY a goeswith continuation, dragged onto a new head, is a continuation of THAT word now
+  /* …AND THE RELATION IS RE-ASKED OF THE PARSER, because a relation describes an EDGE and the edge has
+     just moved: a `subj` dragged under a noun is no longer a statement about anything. The two rules
+     above are what follows from the head with CERTAINTY; this is the part that needs evidence, and it
+     is deliberately here rather than at the call sites — this function is already the documented one
+     funnel every head change passes through (the diagram drag, the grid's Head cell, Find & Replace
+     over Head, setAsRoot/stepHead), so a new path gets it for free and none can forget.
+     headSyncDeprel (js/io/bridge.js) adopts the parser's relation ONLY where the parser independently
+     chose the same head — see its own note. Async, best-effort, no undo entry of its own; guarded
+     because js/io/bridge.js loads after this module. */
+  if(s && typeof headSyncDeprel==="function"){ const si=DOC.indexOf(s), tokId=s.tokens.indexOf(t)+1;
+    if(si>=0&&tokId>0) headSyncDeprel(si,tokId); } }   // …and a token that is ALREADY a goeswith continuation, dragged onto a new head, is a continuation of THAT word now: its dependents follow it there (see normGoesWith). Not a no-op even though the relation didn't change — the head did, and every consequence below hangs off the head
 function afterDeprelEdit(t,s){ if(depBase(t.deprel)==="root"){ t.head="0"; if(s)syncSharedFeat(t,s); } else if(parseInt(t.head,10)===0) t.deprel=withDepBase(t.deprel,"root");
   normGoesWith(t,s); }
 /* ── ASSIGNING `goeswith` NORMALISES THE DEPENDENT ─────────────────────────────────────────────────────────────

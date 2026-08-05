@@ -363,8 +363,8 @@
     background:transparent; color:var(--label-primary); font:inherit; font-weight:var(--fw-normal);
     font-size:var(--fs-body); line-height:var(--lh-body); text-align:start; cursor:default; white-space:nowrap;
     transition:background-color var(--dur-fast) linear}
-  .fpitem:hover,.ctx button:hover,.acmenu .acrow:hover,.acmenu .acrow.hi{background:var(--subtle-hover); color:var(--label-primary)}
-  .fpitem:active,.ctx button:active,.acmenu .acrow:active{background:var(--subtle-press); color:var(--label-secondary)}
+  .fpitem:hover,.acmenu .acrow:hover,.acmenu .acrow.hi{background:var(--subtle-hover); color:var(--label-primary)}
+  .fpitem:active,.acmenu .acrow:active{background:var(--subtle-press); color:var(--label-secondary)}   /* `.ctx button` is no longer part of either selector — a context-menu row now highlights in the accent (see the .ctx block below). The menu-bar flyout rows and the autocomplete list keep the subtle fill: the request was about context menus, and these two are not that */
   .fpitem:hover .sfi{background-color:currentColor}
   .fpitem.cur{font-weight:var(--fw-semibold)}   /* SEMIBOLD, never bold: Segoe UI Variable's UI ramp is Regular + SemiBold only, and emphasis is a weight step */
   .fpitem .sfi,.ctx button .sfi{width:16px; height:16px; flex:none}
@@ -380,13 +380,39 @@
   .ctx hr.note-rule{margin:1px -2px 3px}
   /* the context menu's own extras */
   .ctx button{position:relative; justify-content:space-between; gap:16px; -webkit-user-select:none; user-select:none}
+  /* A HOVERED ROW TAKES THE SELECTED-GRID-ROW ACCENT, on request — the identical fill and derivation
+     the macOS kit now uses, and the identical one `table.grid tbody tr:is(.sel,.mwtsel) td::before`
+     paints in styles/app.css: a perceptual step off whatever --accent currently is. No light/dark
+     branch is needed (the step is relative, and --accent already differs per mode), and the plain
+     --accent fallback comes first for an engine without relative-colour oklch().
+     This is a smaller departure here than on macOS: WinUI's own MenuFlyoutItem hover IS a subtle
+     grey fill (SubtleFillColorSecondary), but an accent-filled row with white text is the shape WinUI
+     gives a SELECTED list item (AccentFillColorDefault + TextOnAccentFillColorPrimary), so the row
+     reads as a WinUI idiom either way.
+     Unlike the macOS kit, BOTH trailing inks name explicit colours here (.kbd → TextFillColorSecondary,
+     .expand → --label-secondary), so both are restated on hover; the .subarr chevron and the .ck tick
+     ride `currentColor`. :active keeps the accent rather than falling back to the shared grey press
+     fill — pressing a row must not look like leaving it. */
+  /* LIGHT vs DARK ARE DERIVED SEPARATELY, and on this platform the reason is written into the tokens:
+     WinUI resolves AccentFillColorDefaultBrush to SystemAccentColorDark1 in Light and to a LIGHTER
+     shade in Default(dark), and fluent-tokens.css follows that — --accent is #005a9e in light and
+     #0078d4 in dark. Darkening both by the light ground's step would take an already-stepped-down
+     light accent down twice and an already-stepped-UP dark one back where it started. So light gets
+     the step tuned to its own target (rgb(0,100,225) on the default blue) and dark keeps .827/.915. */
+  .ctx button:hover{background:var(--accent); background:oklch(from var(--accent) calc(l * .882) calc(c * .958) h); color:#fff}
+  .ctx button:active{background:var(--accent); background:oklch(from var(--accent) calc(l * .789) calc(c * .958) h); color:#fff}   /* one further step down, the same way AccentFillColorTertiary sits below Default. Kept as a RATIO of its own appearance's hover step (.74/.827 ≡ .789/.882), not as a fixed offset, so pressed sits the same distance below hover in either */
+  @media (prefers-color-scheme:dark){
+    .ctx button:hover{background:var(--accent); background:oklch(from var(--accent) calc(l * .827) calc(c * .915) h)}
+    .ctx button:active{background:var(--accent); background:oklch(from var(--accent) calc(l * .74) calc(c * .915) h)} }
+  .ctx button:hover .kbd,.ctx button:active .kbd,.ctx button:hover .expand,.ctx button:active .expand{color:#fff; opacity:.72}   /* still the quieter half of the row — an opacity off the row's own white rather than a second hue */
   .ctx button.danger{color:var(--bad)}
-  .ctx button.danger:hover{background:var(--subtle-hover)}
+  .ctx button.danger:hover{background:var(--accent); background:oklch(from var(--accent) calc(l * .882) calc(c * .958) h); color:#fff}   /* …white too: red-on-accent reads worse than either alone */
+  @media (prefers-color-scheme:dark){ .ctx button.danger:hover{background:var(--accent); background:oklch(from var(--accent) calc(l * .827) calc(c * .915) h)} }
   .ctx button:disabled{color:var(--label-tertiary); pointer-events:none}   /* MenuFlyoutItemForegroundDisabled → TextFillColorDisabledBrush; the same treatment .fpitem[disabled] already gets in the menubar, stated for the context menus' own rows (the grid column chooser's obligatory ID/Form rows). pointer-events:none also drops the hover fill, which `:disabled` alone would not */
   .ctx .kbd{font-size:var(--fs-body); font-weight:var(--fw-normal); color:var(--menu-shortcut); direction:ltr; unicode-bidi:isolate}   /* MenuFlyoutItemKeyboardAcceleratorTextForeground → TextFillColorSecondaryBrush, at the row's own size */
   .ctx .mlbl{direction:ltr; unicode-bidi:isolate}
   .ctx .expand{font-size:var(--fs-caption); color:var(--label-secondary); font-style:normal; white-space:nowrap; direction:ltr; unicode-bidi:isolate}
-  .ctx button:hover .expand{color:var(--label-secondary)}
+  /* (a hovered row's .expand is whitened with its .kbd, up in the hover block above — this rule is gone, not merely superseded) */
   .ctx .rightgrp{display:flex; align-items:center; align-self:center; gap:8px; flex:none; direction:ltr}
   .ctx .subarr{display:inline-block; width:12px; height:12px; flex:none; align-self:center; background-color:currentColor;
     -webkit-mask:var(--sf-chevronright) no-repeat center/contain; mask:var(--sf-chevronright) no-repeat center/contain}
@@ -491,6 +517,18 @@
   .drawer-group-h{font-size:var(--fs-caption); line-height:var(--lh-caption); font-weight:var(--fw-semibold);
     letter-spacing:normal; text-transform:none; color:var(--menu-hdr); margin:2px 4px 0; padding:6px 11px 2px; border-top:none}
   .drawer-pop .drawer-group-h:first-child{padding-top:4px}
+  /* ── THE TWO RAISING DROP ZONES (js/diagram/diagram-edit.js) ──────────────────────────────────────────────
+     Raised over a valid edge while a predicate is being dragged onto it, because the gesture is ambiguous by
+     nature: the same drop can mean "this argument is my raised subject" or "…my raised object", and nothing in
+     the two tokens can say which. Stacked subject-over-object, matching the order the two ghosts read in.
+     pointer-events:none throughout — the drop is resolved by hit-testing these rects in JS (raiseZoneAt), not by
+     the browser, so the zones must never intercept the pointer or elementFromPoint would return one of THEM
+     instead of the edge underneath and the whole drop would be lost. */
+  .rzones{position:fixed; z-index:70; display:flex; flex-direction:column; gap:2px; pointer-events:none}
+  .rzone{font:600 10.5px/1 var(--ui-font); letter-spacing:.01em; text-align:center; padding:5px 6px; border-radius:6px;
+    color:var(--label-secondary); background:var(--menu-bg,rgba(250,250,252,.92)); border:.5px solid var(--menu-sep);
+    box-shadow:var(--menu-shadow,0 2px 10px rgba(0,0,0,.18)); white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
+  .rzone.on{color:#fff; background:var(--accent); border-color:transparent}   /* the zone the pointer is in — the drop lands here */
   .drawer-sep{border:none; border-top:1px solid var(--menu-sep); margin:1px -2px; width:auto}   /* the shared in-surface separator, as in the macOS kit. (This kit's .drawer-group-h draws no rule of its own — it uses explicit .drawer-sep elements — so there is no group-heading border to repoint here.) */
   .gm-editbtn{height:32px; padding:0 11px; color:var(--label-primary); font:inherit; font-size:var(--fs-body);
     font-weight:var(--fw-normal); cursor:default; text-align:left; white-space:nowrap; margin:4px}

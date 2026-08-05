@@ -21,3 +21,6 @@ vendor/
 .claude/build-manual.log
 .claude/.last-build-stamp
 .claude/.build.lock
+# Real git worktrees (`git worktree list` knows them). Committing these would put a checkout of the
+# repo inside the repo; they belong to whoever created them and go away with `git worktree remove`.
+.claude/worktrees/

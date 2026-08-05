@@ -17,28 +17,27 @@
    where it does not verify we decorate NOTHING rather than decorate the wrong span.
 
    THREE STAGES, in this order of trust (measured over samples/: 14 of 20 sentences settle at stage
-   1, the 4 Sanskrit sentences of brihat_jataka.conllu at stage 2, and 2 more at stage 3):
+   1, including every Sanskrit sentence, and 2 at stage 2):
     1. DETERMINISTIC RECONSTRUCTION (alignUnitsToText, below) — match each unit's form literally at
        the next non-whitespace position. Needs no model, no bridge and no network, is exact wherever
        the forms really are substrings of the text, and is self-verifying: a literal match at the
        computed offset cannot be a mis-assignment. SpaceAfter=No is deliberately NOT consulted —
        skipping *optional* whitespace subsumes it and additionally survives a `# text` whose spacing
        the flags don't describe (the Chinese sample's "我 没有 问题。" against six spaceless tokens).
-    2. SANSKRIT CSL SANDHI REVERSAL (Api.token_spans → app/sa_csl.py). A Sanskrit `# text` is written
-       in Clay-Sanskrit-Library notation, i.e. the sandhied surface with the coalescences MARKED
-       ('/" on the left element, a circumflex/macron on the right) rather than undone — so
-       `śaśa-bhṛto` holds `śaśa`+`bhṛtaḥ` and `hor" êty` holds `horā`+`iti`, and stage 1 cannot find
-       one form of it. That marking is a reversible rewriting, so undoing it with the offsets kept
-       recovers each token's real span. It ranks ABOVE stage 3 because it is exact where it applies
-       (and it is what the Sanskrit tokeniser itself does, so a model would only reproduce it), and
-       BELOW stage 1 because it needs the bridge. It does NOT need a model.
-    3. THE TOKENISER'S OWN OFFSETS (same bridge call) — the general fallback. The tokeniser produced
+       (There was a stage 2 here: a Sanskrit `# text` used to be written in Clay-Sanskrit-Library
+       notation — the sandhied surface with its coalescences MARKED rather than undone, so that
+       `śaśa-bhṛto` held `śaśa`+`bhṛtaḥ` and no unit's form appeared in the line at all — and
+       reversing that marking with the offsets kept was the only way to align it. The Sanskrit model
+       now writes ordinary sandhied text and reports each multi-word token's range as the
+       orthographic word it came from, so every unit IS a substring of the line and stage 1 settles
+       it, in Devanagari as in IAST. The reversal engine went with the notation.)
+    2. THE TOKENISER'S OWN OFFSETS (a bridge call) — the general fallback. The tokeniser produced
        its units FROM this very text, so each carries a real character span (read off token.idx, or
        PUBLISHED as doc._.src_spans by a tokeniser that rewrites what it reads); the file's units are
        ALIGNED TO those, never replaced by them, because the file's tokenisation is the annotation
        and the model's is a second opinion about the same string. Needs an installed model, and the
        character-level alignment inside a divergent run is a best effort rather than a proof.
-   Stages 2 and 3 share one bridge call and are therefore both ASYNC — see requestTokenSpans. */
+   Stage 2 needs the bridge and is therefore ASYNC — see requestTokenSpans. */
 const _STX_WS=/\s/;   // JS \s already covers NBSP, the U+2000–200A spaces, U+202F/205F and the ideographic space U+3000 — every gap `# text` can hold between two units
 /* the sentence's SURFACE units in reading order: {form, ids:[1-based token ids], mwt}
    The FORM is the only surface a unit wears in `# text`. UD defines `# text` as the sentence as it was
@@ -48,6 +47,50 @@ const _STX_WS=/\s/;   // JS \s already covers NBSP, the U+2000–200A spaces, U+
    unaligned: decorating it would mean trusting offsets the file has already contradicted. (An earlier
    pass did accept the CorrectForm here, on the strength of samples/english.conllu s6 — but that sample
    was simply wrong, and has been fixed rather than accommodated.) */
+/* ONE ROW OF THE RUNNING SENTENCE, re-spelt unit by unit and spaced as `# text` spaces it.
+   `pick(unit)` says what to draw for an orthographic word — the SCRIPT rendering for the top line, the
+   transliteration for the row beneath — and everything else is shared, because the two rows differ only
+   in that choice and must not differ in anything else.
+   The whitespace is `# text`'s, never invented. Preferred source is the alignment stextSpans already
+   computes for the decoration pass: with a span per unit, the gap between two units is a literal slice
+   of the text, so a line break, a run of spaces and a SpaceAfter=No seam all come across without any of
+   them being reasoned about. Fallback, for a sentence with no spans (no bridge, or a text its tokens
+   cannot be aligned to): MISC SpaceAfter=No, as io_conllu rebuilds `# text`. A flat join(" ") — which is
+   what both rows used to do — put a space before every full stop, dropped the line breaks of a verse,
+   and made an unchanged romanisation LOOK different from the text it romanises, which is what kept the
+   duplicate transliteration row on screen (see trLayer's caller).
+   The unit walk matches sentUnits' exactly, and has to: stextSpans indexes its answer by that order. */
+function runningLine(s,si,pick,fixedGap){
+  const units=[]; let k=0; while(k<((s&&s.tokens)||[]).length){ const m=(s.mwt||[]).find(x=>x.from===k+1);
+    if(m){ units.push({mwt:m,last:Math.min(m.to,s.tokens.length)-1}); k=m.to; } else { units.push({tok:s.tokens[k],last:k}); k++; } }
+  if(!units.length) return "";
+  /* `fixedGap` replaces a FUSED junction with one separator, and CSL is why it exists: a scheme that MARKS
+     a junction writes the two pieces apart, so its line must not inherit the spacing of a text that shows
+     them run together. Taking the gaps verbatim produced `vartm'âpunarjanmanām` — the mark welded to the
+     next word, indistinguishable from a letter — where the notation asks for `vartm" â-punar-janmanām`.
+     ⚠ IT REPLACES THE GAP, IT DOES NOT FLATTEN IT. A gap carrying a NEWLINE is a verse line break, which
+     is a fact about the poem and not about sandhi, so it survives verbatim; only a gap with no line break
+     in it becomes the separator. Joining every unit with a plain space collapsed the four pādas of each
+     stanza onto one line. */
+  const al0=(typeof stextSpans==="function")?stextSpans(s,si,s.text||""):null;
+  if(fixedGap!=null){
+    /* `fixedGap` may be a FUNCTION of the next unit's rendered text rather than a plain separator, which is
+       what a spaceless script needs: a romanisation of Chinese has to be spaced (the source has no gaps to
+       inherit, so taking them verbatim ran the whole line together — `yǐnyánwǒzài…`), but pinyin still writes
+       its punctuation tight against the word before it. Deciding per junction from the FOLLOWING piece gets
+       both: no space before a comma, a space after it. The units' text is picked once here rather than twice
+       per junction — pick() can be a script conversion, and this is on the render path. */
+    const ok=al0&&al0.spans&&al0.spans.length===units.length&&al0.spans.every(Boolean);
+    const txt=units.map(u=>pick(u)||"");
+    const sepOf=(next,prev)=>(typeof fixedGap==="function")?(fixedGap(next,prev)||""):fixedGap;
+    return txt.map((t,n)=>{ if(n>=units.length-1) return t;
+      const raw=ok?(s.text||"").slice(al0.spans[n][1],al0.spans[n+1][0]):"";
+      return t+(/\n/.test(raw)?raw:sepOf(txt[n+1],t)); }).join(""); }
+  const al=al0;
+  const gaps=(al&&al.spans&&al.spans.length===units.length&&al.spans.every(Boolean))
+    ? units.map((_u,n)=>n<units.length-1 ? (s.text||"").slice(al.spans[n][1],al.spans[n+1][0]) : "")
+    : units.map((u,n)=>n<units.length-1 ? (spaceAfterNo(s.tokens[u.last])?"":" ") : "");
+  return units.map((u,n)=>(pick(u)||"")+gaps[n]).join(""); }
 function sentUnits(s){ const t=(s&&s.tokens)||[], mwt=(s&&s.mwt)||[], out=[]; let i=0;
   while(i<t.length){ const m=mwt.find(x=>x.from===i+1);
     if(m){ const ids=[]; for(let k=m.from;k<=Math.min(m.to,t.length);k++) ids.push(k); out.push({form:m.form||"",ids,mwt:true}); i=m.to; }   // an MWT is ONE unit: the text holds its surface form, not its components
@@ -74,13 +117,30 @@ function _stxSkipF(text,j){ while(j<text.length){ if(_STX_WS.test(text[j])) j++;
 function _stxSkipB(text,j){ while(j>0){ if(_STX_WS.test(text[j-1])) j--;
     else if(j>=2&&text[j-2]==="\\"&&text[j-1]==="n") j-=2;
     else break; } return j; }
+/* HOW A UNIT'S FORM IS MATCHED AGAINST THE LINE, and the one place the two may legitimately be spelt
+   differently: the DAṆḌA. These walks are handed whichever string the caller is painting — the RESTING
+   line is dandaDisp(text), where `||` and `//` have each been collapsed to the single character `‖` (and
+   `/` to `|`), while the line being EDITED is the raw text. A form column spelling that mark `||` therefore
+   matches the raw line and NOT the resting one, so the whole sentence failed stage 1, the bridge was asked,
+   and its "no" raised the tokenisation-mismatch badge — on a file that agrees with itself perfectly, and
+   which no amount of re-parsing could fix, since the tokeniser reproduces the same two characters.
+   Both spellings are admissible surfaces for the same mark, so try the collapsed one when the literal form
+   does not match. Strictly a WIDENING — a unit that matched before still matches first, and by its own
+   spelling — and the span is measured in whichever string was matched, so the offsets stay offsets into the
+   line the caller handed us. dandaDisp is a no-op outside Sanskrit (dandaScan returns null), so no other
+   language pays for this or can be affected by it. */
+function _stxMatchAt(text,form,j){                                        // → the matched length at j, or 0
+  if(text.lastIndexOf(form,j)===j) return form.length;                    // lastIndexOf(…,j)===j is startsWith-at-j without allocating
+  const d=(typeof dandaDisp==="function")?dandaDisp(form):form;
+  return (d!==form && text.lastIndexOf(d,j)===j) ? d.length : 0; }
 function alignUnitsToText(text,units){ if(!text||!units.length) return null;
   const skip=j=>_stxSkipF(text,j);
   let pos=0; const spans=[];
   for(const u of units){ if(!u.form) return null;                        // a formless unit can't be located → the whole walk is unverified
-    const j=skip(pos);                                                   // lastIndexOf(…,j)===j is startsWith-at-j without allocating
-    if(text.lastIndexOf(u.form,j)!==j) return null;                      // the FORM, and nothing else — see sentUnits on why a CorrectForm is not an admissible surface here
-    spans.push([j,j+u.form.length]); pos=j+u.form.length; }
+    const j=skip(pos);
+    const w=_stxMatchAt(text,u.form,j);                                  // the FORM, and nothing else — see sentUnits on why a CorrectForm is not an admissible surface here
+    if(!w) return null;
+    spans.push([j,j+w]); pos=j+w; }
   if(skip(pos)<text.length) return null;                                 // text left over past the last token → the two disagree; say so rather than decorate a prefix
   return spans; }
 /* THE WALK AROUND ONE UNIT — the same proof, with a hole in it where the edit is.
@@ -98,13 +158,18 @@ function alignUnitsAround(text,units,k){ if(!text||!units.length||k<0||k>=units.
   const spans=new Array(units.length);
   let pos=0;
   for(let i=0;i<k;i++){ const u=units[i]; if(!u.form) return null;
-    const j=_stxSkipF(text,pos); if(text.lastIndexOf(u.form,j)!==j) return null;
-    spans[i]=[j,j+u.form.length]; pos=j+u.form.length; }
+    const j=_stxSkipF(text,pos); const w=_stxMatchAt(text,u.form,j); if(!w) return null;   // daṇḍa-tolerant, exactly as the plain walk above — see _stxMatchAt
+    spans[i]=[j,j+w]; pos=j+w; }
   let end=text.length;
   for(let i=units.length-1;i>k;i--){ const u=units[i]; if(!u.form) return null;
-    const j=_stxSkipB(text,end), st=j-u.form.length;
-    if(st<pos||text.lastIndexOf(u.form,st)!==st) return null;
-    spans[i]=[st,j]; end=st; }
+    const j=_stxSkipB(text,end);
+    /* the BACKWARD walk has to know the length before it knows the start, so it tries each admissible
+       spelling's own length rather than assuming the form's — the same widening, read right to left. */
+    let st=-1,w=0;
+    for(const f of [u.form,(typeof dandaDisp==="function")?dandaDisp(u.form):u.form]){
+      const c=j-f.length; if(c>=pos&&text.lastIndexOf(f,c)===c){ st=c; w=f.length; break; } }
+    if(st<0) return null;
+    spans[i]=[st,st+w]; end=st; }
   const lo=_stxSkipF(text,pos), hi=_stxSkipB(text,end);
   if(hi<=lo) return null;                                                // nothing but whitespace where unit k should be → see above
   spans[k]=[lo,hi];
@@ -123,10 +188,36 @@ function tspKey(text,units){ return text+"\u0000"+units.map(u=>u.form).join("\u0
 function requestTokenSpans(si,key,text,units,s){
   if(!tspEligible()) return;                                             // see tspEligible: no bridge, or no stage that could answer here
   const tag=si+"\u0000"+key; if(_TSP_INFLIGHT.has(tag)) return; _TSP_INFLIGHT.add(tag);
+  /* ⚠ A UNIT'S SPAN NEVER INCLUDES THE WHITESPACE AROUND IT, and stages 2/3 can hand back one that does.
+     They locate a unit by its FORM, so a form the line does not spell — the moment the annotator types a
+     clitic seam into it, `śaśabhṛto` becoming `śaśa=bhṛto` — comes back one character longer than the word
+     it was matched against, and that extra character is the SPACE after it. Everything downstream then
+     reads the gap between two units as `text.slice(spans[n][1], spans[n+1][0])` and gets "", so the two
+     words are drawn welded: measured on the real sentence, span [22,31] became [22,32] and the CSL row
+     lost the separator between `śaśa=bhṛto` and `vartm'` while `# text` stayed perfectly intact — which is
+     why the file never showed it and why this took so long to corner.
+     Trimmed here, where the bridge's answer ENTERS, so every consumer is covered by one rule rather than
+     each having to distrust its own spans. WHITESPACE ONLY: a span that overlaps its neighbour by a LETTER
+     is the legitimate vowel-coalescence overlap paintStext's order guard already allows, and must survive
+     untouched. A span left empty by the trim becomes a hole, which is already a "we don't know". */
+  const trimSpans=sp=>Array.isArray(sp)?sp.map(x=>{ if(!x) return x; let a=x[0], b=x[1];
+    while(b>a && /\s/.test(text[b-1])) b--;
+    while(a<b && /\s/.test(text[a])) a++;
+    return b>a?[a,b]:null; }):sp;
   const done=spans=>{ _TSP_INFLIGHT.delete(tag); const st=DOC[si]; if(!st) return;
     if(!st._tsp||Object.keys(st._tsp).length>=_TSP_MAX) st._tsp={};   // cap: an edited sentence mints a new key each time, and a stale key can never be asked for again
-    st._tsp[key]=spans;
-    repaintStext(si); };                                               // decorate LATE rather than block the first render — the same shape as the readings flyout's late-arriving data. Repaint on FAILURE too (it used to return early): a settled "no" is what raises the tokenisation-mismatch badge, and without this repaint the badge waited for some unrelated render to put it up. Cannot loop — the key is now cached, so the next paint reads the answer instead of asking again
+    st._tsp[key]=trimSpans(spans);
+    repaintStext(si);
+    /* …AND THE ROWS DERIVED FROM THOSE SPANS, which repaintStext does not touch. runningLine takes the
+       gap between two units from `# text` when spans exist and falls back to SpaceAfter when they do
+       not — and SpaceAfter cannot express a VERSE LINE BREAK. So a sentence whose spans arrive late
+       draws its CSL (or script) line with plain spaces and no breaks, and keeps them until some
+       unrelated render happens to rebuild the block: the "the linebreaks only appear once I flip to a
+       different transliteration" shape, where flipping is simply the first thing that re-renders.
+       Only on a real answer — a settled failure leaves those rows exactly as they already are, since
+       the fallback is what they are already showing. scheduleDoc is rAF-debounced (js/ui/wiring.js),
+       so a document whose sentences all answer at once costs ONE render, not one per sentence. */
+    if(spans && typeof scheduleDoc==="function") scheduleDoc(); };                                               // decorate LATE rather than block the first render — the same shape as the readings flyout's late-arriving data. Repaint on FAILURE too (it used to return early): a settled "no" is what raises the tokenisation-mismatch badge, and without this repaint the badge waited for some unrelated render to put it up. Cannot loop — the key is now cached, so the next paint reads the answer instead of asking again
   Promise.resolve(window.pywebview.api.token_spans(text,units.map(u=>u.form),model||"",unitParts(s,units),DOCLANG||""))   // parts + language are stage 2's; stage 3 ignores both
     .then(r=>{ const sp=(r&&Array.isArray(r.spans)&&r.spans.length===units.length&&r.spans.some(Boolean))?r.spans:null; done(sp); })
     .catch(()=>done(null)); }
@@ -242,11 +333,11 @@ function stxWriteSpans(s,k){ if(!s||typeof s.text!=="string"||!s.text) return nu
   learnDanda(s); learnMwtSeps(s,units,spans,text);
   return {units,spans,text}; }
 /* WHICH SEPARATOR THIS COMPOUND IS WRITTEN WITH, remembered per MWT.
-   A Sanskrit `# text` spells a compound's members apart with EITHER a hyphen or a pipe, and the app treats
-   the two as interchangeable — Api.sanskrit_running strips "apostrophes/hyphens/word-internal pipes" alike
-   so that either spelling fuses. That is right for reading and wrong for writing: regenerating a stretch
-   has to give it back in the annotator's own convention, not in whichever one we happen to prefer. So the
-   mark is read off the text the first time the unit is located, and kept.
+   An orthographic word is written SOLID — that is what makes it one word, and it is what the parser's own
+   ranges are: `vartmāpunarjanmanām`, not `vartmā-punar-janmanām`. So the default is no separator at all.
+   But an edition may still spell a samāsa's members apart with a hyphen or a pipe as a reading aid, and
+   regenerating a stretch has to give it back in the annotator's own convention rather than in whichever one
+   we happen to prefer. So the mark is read off the text the first time the unit is located, and kept.
    COMPOUND-INTERNAL ONLY, which is what tells the two `|`s of a Sanskrit line apart: a bare `|` between two
    words is a verse daṇḍa (and a PUNCT token of its own, hence a unit of its own), so a mark counts only
    INSIDE one MWT's own span with no whitespace on either side of it — `śaśa-bhṛto` yes, `… janmanām |
@@ -262,7 +353,7 @@ function mwtSepIn(slice){ for(let i=1;i<slice.length-1;i++){ const c=slice[i];
     if(_STX_WS.test(slice[i-1])||_STX_WS.test(slice[i+1])) continue;              // whitespace beside it ⇒ a word separator or a daṇḍa, not a compound seam
     return c; }
   return ""; }
-function mwtSepOf(m){ return (m&&m.sep)||"-"; }                                   // the default is the hyphen: it is what every compound in samples/brihat_jataka.conllu and what upstream's own corpus transform (see app/sa_csl.py) writes
+function mwtSepOf(m){ return (m&&m.sep)||""; }                                    // no separator unless the line itself showed one: an orthographic word is written solid, which is the whole reason it is ONE multi-word token. (It defaulted to the hyphen while `# text` was in CSL notation, where every compound member carried one.)
 function learnMwtSeps(s,units,spans,text){ const mwt=(s&&s.mwt)||[]; if(!mwt.length) return;
   units.forEach((u,i)=>{ if(!u.mwt||!spans[i]) return;
     const m=mwt.find(x=>x.from===u.ids[0]); if(!m||m.sep) return;                 // first sighting only (see above)
@@ -401,8 +492,15 @@ function paintStext(el,si,disp,editing){
   setStextWarn(el,A.state==="bad");   // the badge rides on the SAME walk that decides the decorations — one answer, two consumers, so the two can never disagree about whether this line aligns
   if(!A.spans) return;
   const spans=A.spans.slice();
-  for(let i=0,last=0;i<spans.length;i++){ const sp=spans[i];   // monotonicity guard: stage 2's difflib windows are monotonic by construction, but a decoration drawn over an overlapping span would be drawn over the wrong words, so drop rather than trust
-    if(!sp||!(sp[0]>=last)||!(sp[1]>sp[0])||sp[1]>disp.length){ spans[i]=null; continue; } last=sp[1]; }
+  /* ORDER GUARD: a decoration drawn over a span that runs BACKWARDS from its neighbour is drawn over the
+     wrong words, so drop rather than trust. A span that starts ONE CHARACTER before the previous one ended
+     is allowed through, because that is not disorder but a fact about sandhi: a tokeniser that publishes
+     source spans reports a vowel COALESCENCE as an overlap, the fused vowel of `vartmā` + `apunar-` being
+     genuinely the last character of one word and the first of the next. Refusing it would cost the second
+     word its decoration at every coalescence in the text, and the alternative — a hole on one side — is
+     less true than letting both claim the character they share. Anything further back is still dropped. */
+  for(let i=0,last=0;i<spans.length;i++){ const sp=spans[i];
+    if(!sp||!(sp[0]>=last-1)||!(sp[1]>sp[0])||sp[1]>disp.length){ spans[i]=null; continue; } last=sp[1]; }
   /* A GOESWITH SEAM IS SET THIN. The unit is ONE word a stray space broke in two, so at rest the running
      sentence draws that space as U+2009 THIN SPACE: the halves read as the word they are, the slur in the
      diagram gets a typographic echo in the line, and the character is still a character — it can be selected
@@ -599,6 +697,58 @@ function setStextSel(el,a,b){ try{ const p=_stextPoint(el,a),q=_stextPoint(el,b)
        past, which is off by half a character on every click). Horizontal only, which is right for the
        single-line fields this is used on; a wrapped textarea falls back to the end.
    Returns true when it placed a caret, false when it could not — a caret is a nicety, never a reason to throw. */
+/* ── THE APP'S ZOOM IS `zoom`, AND THAT SPLITS THE MEASUREMENT APIs IN TWO ─────────────────────────
+   `.sblock{zoom:var(--fs)}` (app.css) is how ⌘+/⌘− scales the document, and it is a real scale on the
+   USED values, not a transform: a block laid out 714px wide paints 1142px wide at FS=1.6. Which means
+   the two families of measurement no longer agree, and mixing them silently multiplies by the zoom:
+
+     · getBoundingClientRect / clientX / deltaY   →  VIEWPORT px (the zoom already applied)
+     · offsetTop/Height, clientHeight, scrollTop, getComputedStyle lengths, canvas measureText
+                                                  →  the element's OWN px (unzoomed)
+
+   Probed on this Chrome AND on the WKWebView the app actually ships in, which agree: at zoom 1.5 a
+   300px-tall box reports rect.height 480 and offsetHeight 320, and getComputedStyle still reports the
+   AUTHORED font-size. So an expression that subtracts one family from the other has to convert, and
+   this is the conversion factor — `currentCSSZoom` is the resolved product of every ancestor's zoom
+   (Chrome 128+/Safari 18+, present in both engines probed), with an ancestor walk as the fallback so
+   an older engine degrades to the same number rather than to 1.
+   NOT simply `FS`: that is right only for a node inside `.sblock`, and callers here walk arbitrary
+   ancestor chains that leave it (#doc itself is never zoomed). */
+function cssZoomOf(el){ if(!el||el.nodeType!==1) return 1;
+  const z=el.currentCSSZoom; if(typeof z==="number"&&z>0) return z;
+  let f=1; for(let n=el;n&&n.nodeType===1;n=n.parentElement){ const v=parseFloat(getComputedStyle(n).zoom); if(v>0&&v!==1) f*=v; }
+  return f||1; }
+/* ⚠ …AND THE TWO ENGINES DO NOT AGREE ABOUT WHAT `getComputedStyle` REPORTS INSIDE ONE.
+   For ordinary HTML the two match and both report the AUTHORED length (probed: a 20px input with
+   11px padding inside `zoom:1.6` reads back 20/11 in Chrome and in WebKit alike). For SVG TEXT they
+   diverge — the diagram's own glyphs — where WebKit reports the authored size DIVIDED by the zoom
+   and Chrome reports it plain: a 14px form row inside FS=1.6 reads 8.75px in the shipping WKWebView
+   and 14px in Chrome; at FS=0.6 it reads 23.33px. Multiplying that by FS, as the inline editors did,
+   therefore lands exactly back on the AUTHORED size in WebKit — the field opened at 100 % over a
+   diagram drawn at 160 %, which is the reported "input fields still show at the original size".
+
+   So the factor is PROBED, not branched on the engine or on the SVG namespace: a hidden element with
+   an inline `font-size:100px` is put in the SAME zoom context as `el`, and what comes back says how
+   this engine reports a length there. Chrome answers 100 (factor 1); WebKit answers 100/z on SVG
+   (factor z). A future engine that does something else in some third context is measured, not
+   guessed at. Cached on (namespace, zoom) — every token in a document shares both — and short-
+   circuited at zoom 1, which is every document nobody has zoomed. */
+function cssLenScale(el){ if(!el||el.nodeType!==1) return 1;
+  const z=cssZoomOf(el); if(!(z>0)||Math.abs(z-1)<1e-6) return 1;
+  const svg=el.namespaceURI===SVGNS, key=(svg?"s":"h")+z;
+  if(cssLenScale._k===key) return cssLenScale._v;
+  const host=el.parentNode; let v=1;
+  if(host&&host.appendChild){
+    const p=svg?document.createElementNS(SVGNS,"text"):document.createElement("span");
+    p.setAttribute("style","font-size:100px;position:absolute;visibility:hidden;pointer-events:none");
+    try{ host.appendChild(p); const got=parseFloat(getComputedStyle(p).fontSize); if(got>0) v=100/got; }
+    catch(_){}
+    finally{ if(p.parentNode) p.parentNode.removeChild(p); } }
+  cssLenScale._k=key; cssLenScale._v=v; return v; }
+// …and the one thing every caller actually wants: the size to draw a floating (un-zoomed, body-level)
+// overlay at so it matches the text it covers. authored = computed × cssLenScale; visual = authored × zoom.
+function visualFontPx(el){ const cs=getComputedStyle(el);
+  return (parseFloat(cs.fontSize)||0)*cssLenScale(el)*cssZoomOf(el); }
 function caretAtPoint(el,x,y){ if(!el) return false;
   const tag=el.tagName;
   if(tag==="INPUT"||tag==="TEXTAREA"){
@@ -610,7 +760,14 @@ function caretAtPoint(el,x,y){ if(!el) return false;
       if(rtl||(tag==="TEXTAREA"&&v.indexOf("\n")>=0)){ el.setSelectionRange(v.length,v.length); return true; }   // RTL and multi-line need a 2-D solve this does not attempt — end of text is the honest fallback
       const cv=caretAtPoint._cv||(caretAtPoint._cv=document.createElement("canvas"));
       const cx=cv.getContext("2d"); cx.font=cs.font||(cs.fontStyle+" "+cs.fontWeight+" "+cs.fontSize+" "+cs.fontFamily);
-      const dx=x-(r.left+bordL+padL-(el.scrollLeft||0));
+      /* …CONVERTED INTO THE FIELD'S OWN px before it meets measureText's. `x` and `r.left` are viewport
+         px; the padding, the border, scrollLeft and every width `cx.measureText` is about to return are
+         the field's own. Left mixed, the click point ran `FS`× too far along the string: measured at
+         FS=1.6 a click on boundary 5 of "abcdefghij" placed the caret at 9, and at FS=0.6 at 3. Every
+         grid cell control lives inside `.sblock` and so is zoomed; the diagram's floating .nodeedit is
+         appended to <body> and is not, where cssZoomOf reports 1 and this is the old expression. */
+      const z=cssZoomOf(el);
+      const dx=(x-r.left)/z-bordL-padL+(el.scrollLeft||0);
       let best=0, bestD=Math.abs(dx);
       for(let i=1;i<=v.length;i++){ const d=Math.abs(cx.measureText(v.slice(0,i)).width-dx);
         if(d<bestD){ bestD=d; best=i; } }                                   // NEAREST boundary, so a click in the left half of a glyph lands before it
@@ -1239,7 +1396,8 @@ function buildBlock(i,ctx){ const s=DOC[i];
     const heads=[];
     if(hasNewdoc(s)) heads.push(boundHeading(s,"newdoc",NEWDOC_MARK,"document",ctx.NUM[i].newdoc));   // a `# newdoc` ALWAYS gets its heading; boundNumbers decides only whether a § goes in front of the title
     if(hasNewpar(s)) heads.push(boundHeading(s,"newpar",NEWPAR_MARK,"paragraph",ctx.NUM[i].newpar));   // document first, paragraph under it — the order the two rows stack in
-    const b=document.createElement("div"); b.className="sblock"+(curBlock()===i?" sel-block":"")+(show.grids?"":" no-grid")+(hasNewpar(s)?" nd-par":"")+(hasNewdoc(s)?" nd-doc":""); b.dataset.i=i;   // curBlock(), not sel.s: the focused-block tint marks the sentence being READ, which scrolling moves on its own without disturbing the selection (see the CURBLOCK note in js/core/prefs.js)
+    const _r=(typeof blockRange==="function")?blockRange():null;
+    const b=document.createElement("div"); b.className="sblock"+(curBlock()===i?" sel-block":"")+((_r&&i>=_r.lo&&i<=_r.hi)?" rng-block":"")+(show.grids?"":" no-grid")+(hasNewpar(s)?" nd-par":"")+(hasNewdoc(s)?" nd-doc":""); b.dataset.i=i;   // curBlock(), not sel.s: the focused-block tint marks the sentence being READ, which scrolling moves on its own without disturbing the selection (see the CURBLOCK note in js/core/prefs.js)
     b.dir=sentRTL(s)?"rtl":"ltr";   // RTL sentence → mirror the whole block: number, controls, grid columns
     const head=document.createElement("div"); head.className="shead";
     const num=document.createElement("span"); num.className="snum"; num.textContent=ctx.SNUM[i]; num.style.width=idW+"px";   // item 4: numbered within its paragraph / document / the file — see sentNumbers.   // match the grid ID column → diagram aligns with Form
@@ -1264,8 +1422,20 @@ function buildBlock(i,ctx){ const s=DOC[i];
     // editable sentence text (# text): commit on blur/Enter re-tokenises or re-parses the sentence (Item 4).
     // Item 3: under a SCRIPT orthography the top line shows the sentence in that script (read-only) and this
     // editable original moves DOWN into the transliteration slot (mirroring the per-token original-in-row rule).
-    const scriptTop=orthoScript();
-    let scriptTransLine=null;   // set below, IF scriptTop: the .strans-orig editable line this block's script .stext reveals+focuses when Displayed transliteration is "None" (assigned before either element's listeners can fire — both are wired synchronously within this same DOC.forEach iteration)
+    // …except where that rendering could not change anything — see saScriptNoop (js/lang/translit.js).
+    // Then the block renders exactly as under "Original": `# text` stays put and editable, and any
+    // transliteration row goes beneath it instead of taking its place.
+    const scriptTop=orthoScript() && !(typeof saScriptNoop==="function" && saScriptNoop());
+    /* A displayed scheme that RESPELLS the sentence rather than romanising it — CSL marks the junctions
+       (`vartm'âpunarjanmanām`), so it says something the glyph above does not, whatever script that glyph
+       is in. Under `scriptTop` it takes the visible row and the editable original collapses behind it;
+       computed here because both halves of that decision (the click-to-reveal wiring on the script line,
+       and the rows themselves) are in different blocks below and must not disagree. */
+    // CSL fills the TOP line when the chosen script is Latin (saCslTop) — the two choices name one line.
+    // Otherwise, under a real script, it takes a row of its own beneath the glyph.
+    const cslTop=(typeof saCslTop==="function") && saCslTop() && show.translit;
+    const cslRow=isSanskritLang() && TRANSLIT_SCHEME==="csl" && show.translit && !cslTop;
+    let scriptTransLine=null, fieldHost=null;   // fieldHost: the row the sentence field opens on — see the click handler on the script line   // set below, IF scriptTop: the .strans-orig editable line this block's script .stext reveals+focuses when Displayed transliteration is "None" (assigned before either element's listeners can fire — both are wired synchronously within this same DOC.forEach iteration)
     // item 30's daṇḍa DISPLAY transform now lives at module level (dandaDisp, top of this file) so the
     // late stage-2 alignment repaint can reproduce exactly what this render drew.
     const wireStext=el=>{ const raw=s.text||s.tokens.map(t=>t.form).join(" ")||"(empty)";
@@ -1306,22 +1476,90 @@ function buildBlock(i,ctx){ const s=DOC[i];
     // wireStext → paintStext and IS decorated (bar the above-the-line correction mark — see app.css).
     if(scriptTop){   // top = the sentence re-rendered in the orthography (read-only)
       let line;
-      if(isSanskritLang() && s.orthoLine){ line=s.orthoLine; }   // item 27(b): Sanskrit's running text is the WHOLE sentence fused by external sandhi then scripted (fillOrtho → s.orthoLine), not a naive per-word join
-      else { const parts=[]; let k=0; while(k<s.tokens.length){ const m=(s.mwt||[]).find(x=>x.from===k+1);
-        if(m){ parts.push(dispScheme(m.ortho||m.form,ORTHO_SCHEME)); k=m.to; } else { parts.push(dispScheme(s.tokens[k].ortho||s.tokens[k].form,ORTHO_SCHEME)); k++; } }
-        line=parts.join(" "); }
-      txt.textContent=line||s.text||"(empty)"; txt.title="Sentence in "+orSchemeLabel(ORTHO_SCHEME)+" (display)";
+      // cslTop FIRST: s.orthoLine is the whole sentence scripted from `# text` (fillOrtho), which for a
+      // Latin script is the text itself — it would win here and the CSL line would never be reached.
+      // bform, not topTransTxt: under cslTop the CSL IS the glyph (see bform), so topTransTxt rightly
+      // reports it as saying nothing the glyph does not and returns "" — which fell back to the plain
+      // form and put the unmarked sentence back on the line. The running line is the glyphs joined,
+      // exactly as it is for a Brahmic script; only the gap rule differs (marked junctions go apart).
+      if(cslTop) line=runningLine(s,i,u=>bform(u.mwt||u.tok)," ");
+      else if(isSanskritLang() && s.orthoLine){ line=s.orthoLine; }   // item 27(b): Sanskrit's running text is the WHOLE sentence fused by external sandhi then scripted (fillOrtho → s.orthoLine), not a naive per-word join
+      /* Every other language joins its own tokens, and the WHITESPACE BETWEEN THEM IS `# text`'s, not
+         something to invent. Preferred source: the alignment stextSpans already computes for the
+         decoration pass — with a span per unit, the gap between two units is a literal slice of
+         s.text, so a line break, a run of spaces and a SpaceAfter=No seam all come out right without
+         any of them being reasoned about separately. THAT IS WHAT PUTS THE VERSE BACK ON FOUR LINES:
+         `# text` carries real newlines (bridge.js restores them from the file's escaped "\n") and
+         .stext is white-space:pre-wrap, so the break renders — but a join can only ever emit what it
+         is told to, and it was told " ".
+         Fallback, when the sentence has no spans (no bridge, or a text its tokens cannot be aligned
+         to): MISC `SpaceAfter=No`, exactly as io_conllu rebuilds `# text`. A flat join(" ") put a
+         space before every full stop in the Latin macronised line ("partēs trēs ."). The gap after an
+         MWT is its LAST component's, the rule edit-ops.js's flattenMWT already states.
+         `spaceAfterNo` lives in js/diagram/diagram-core.js, which loads BEFORE this file — and this is
+         render-time code besides, so the classic-script forward-reference hazard does not apply. */
+      else line=runningLine(s,i,u=>dispScheme((u.mwt?(u.mwt.ortho||u.mwt.form):(u.tok.ortho||u.tok.form))||"",ORTHO_SCHEME));
+      txt.textContent=line||s.text||"(empty)";
+      txt.title="Sentence in "+(cslTop?trSchemeLabel(TRANSLIT_SCHEME):orSchemeLabel(ORTHO_SCHEME))+" (display)";
       txt.classList.add("stext-script");   // item 20: the script top line's text left edge is aligned to the transliteration input below it (see .stext.stext-script CSS)
       if(ORTHO_SCHEME==="Grantha"||ORTHO_SCHEME==="Javanese"||ORTHO_SCHEME==="Balinese"||ORTHO_SCHEME==="Kawi"||ORTHO_SCHEME==="ZanabazarSquare") txt.classList.add("stext-stacked");   // item 18: Grantha's stacked vowel marks need extra vertical room → double-spaced (see .stext.stext-stacked CSS); Javanese and Balinese share the same stacked-diacritic problem, so they get the same treatment. Kawi too (added alongside its _AKSHARA_SCRIPTS reinstatement): verified by rendering a real 4-line Sanskrit verse (samples/brihat_jataka.conllu s1) at line-height:1.4 — a stacked/subjoined conjunct cluster on one line visibly overlapped the line below it, which line-height:2 clears. Zanabazar Square joined the set on user report from the real app (a synthetic @font-face CDP test during its own reinstatement read as clean at normal spacing, but the shipping WKWebView face disagreed) — trust the live report over that synthetic result. Tibetan is NOT in this set: it briefly rendered via TibetanMachineUnicode (a stacked-subjoined-consonant face needing the same double-spacing), but that font is never fetched by fontload.js's on-demand mechanism — Tibetan now goes through the SAME "Noto Sans <Script>" pipeline every other script does (see FONT_SCRIPTS, fontload.js), whose ordinary composed glyphs need no extra vertical room. ONLY the top script line; the editable translit/original below keeps normal spacing
       txt.addEventListener("mousedown",e=>e.stopPropagation());
+      /* ⚠ CSL EDITS IN PLACE, on the very line it is drawn on — the same contract a token has, where the
+         CSL glyph opens a field carrying the FORM. `.stext` already does exactly this dance in the
+         NON-script case: wireStext makes it contenteditable, paints a DISPLAY string at rest (the daṇḍa
+         substitution, item 30) and repaints the raw `# text` on focus, so what you edit is the file's own
+         string while what you read is the derived one. Wiring it here and then overwriting the resting
+         paint with the CSL reuses that whole mechanism — commit, Enter/Escape, undo, the re-tokenise —
+         instead of a second editing path beside it. The blur listener restores the CSL after an edit that
+         did NOT commit (wireStext's own blur repaints dataset.orig, which is the raw text, not the CSL);
+         a commit re-renders the block and recomputes the line anyway, so it needs no restoring. */
+      /* WHERE THE FIELD OPENS, in one rule: exactly where the value being edited is already shown.
+         `.strans-orig` is the editable `# text`; it is hidden whenever something else has taken the
+         slot (Displayed "None", or CSL — see its own `hidden` assignment below). So:
+           · row SHOWN  → the transliteration is on screen and the field belongs ON it. Clicking the
+                          script line just puts the caret there; the row is contenteditable in place,
+                          so nothing new is drawn and nothing appears BETWEEN the two lines.
+           · row HIDDEN → there is no transliteration to overlay, so the script line becomes the field
+                          itself — wireStext paints the derived line at rest and the raw `# text` on
+                          focus, which is the same mechanism the CSL line already uses and the same
+                          contract a token has (read the derived string, edit the underlying one).
+         One predicate for both halves, so they cannot disagree about which row is live. */
+      /* ⚠ `cslRow` does NOT belong in this test, and putting it here was the bug: a CSL row IS a
+         transliteration on screen, so the field belongs on IT, not on the script line above it. The
+         script line hosts the field only when NOTHING else is displayed to host it. */
+      /* ⚠ NOT GATED ON SANSKRIT. The rule above is about which ROW is on screen, not about which language
+         this is, and gating it left every other scripted language with no way to edit its own sentence:
+         Latin under "With macrons" shows the derived line here, has no transliteration row (so the
+         `.strans-orig` slot below is hidden), and the click-to-reveal affordance in the `else` branch is
+         Sanskrit-only — three things that each assumed one of the others would provide the field, and
+         between them provided none. Where a transliteration row IS shown it stays the host, in every
+         language, because `show.translit` is what the test turns on. */
+      const inPlace=cslTop||!show.translit;
+      if(inPlace){ const resting=line||s.text||"(empty)";
+        wireStext(txt); txt.textContent=resting;
+        txt.addEventListener("blur",()=>{ txt.textContent=resting; });   // a COMMIT re-renders the block and recomputes the line; this is the cancelled/unchanged case, which wireStext would otherwise leave showing the raw text
+        txt.style.cursor="text"; }
       // Sanskrit-only: Displayed transliteration "None" (trPick("")) collapses the .strans-orig edit line below
       // (see the scriptTransLine.hidden assignment further down) — the row the user asked to hide is also the
       // ONLY inline surface for editing `# text` in script mode (the script line itself is read-only, undecorated
       // re-rendering — the comment above this block). So clicking the visible script line re-reveals + focuses
       // it, the same "click the shown row to reach the value that isn't shown" affordance storedTrEditable's
       // callers already use for ambiguous stored transliterations (js/lang/translit-load.js editStoredTransInline).
-      if(isSanskritLang() && !show.translit){ txt.style.cursor="text"; txt.title+=" — click to edit the transliteration";
-        txt.addEventListener("click",()=>{ if(!scriptTransLine)return; scriptTransLine.hidden=false; alignInlineStart(scriptTransLine,b); capTransWidth(scriptTransLine); scriptTransLine.focus(); }); } }
+      // Gated on the row being HIDDEN, not on the reason it is hidden. "None" was one reason; CSL is now
+      // another (it takes the visible slot — see the scriptTransLine assignment below), and without this
+      // the original text became uneditable inline for as long as CSL was displayed.
+      else if(isSanskritLang()){ txt.style.cursor="text"; txt.title+=" — click to edit the transliteration";
+        // …onto whichever row is HOSTING the field — the editable `# text` where it is shown, the CSL row
+        // where that has taken its place. `fieldHost` is assigned as each is built, below.
+        /* ⚠ ONLY WHEN THE ROW IS HIDDEN. This affordance exists because a collapsed row is the only inline
+           surface for editing `# text` in script mode and there is otherwise no way to reach it — "click the
+           shown row to get at the value that isn't shown". Once the row IS shown it can be clicked directly,
+           and moving the caret out of the line under the pointer and into a different one is not what a click
+           on a read-only display line asks for: it steals a click the reader may have meant as a plain
+           deselect, and it does so precisely when the thing it would reveal is already in front of them. */
+        txt.addEventListener("click",()=>{ const h=fieldHost||scriptTransLine; if(!h||!h.hidden) return;
+          h.hidden=false; alignInlineStart(h,b); capTransWidth(h);
+          h.focus(); }); } }
     else wireStext(txt);
     const ctrl=document.createElement("div"); ctrl.className="sctrl";
     SCTRL(i).forEach(([g,ti,kbd,fn,d])=>{
@@ -1365,6 +1603,11 @@ function buildBlock(i,ctx){ const s=DOC[i];
       e.preventDefault(); });
     b.addEventListener("click",e=>{ if(e.target.closest(".sctrl")||e.target.closest("input")||e.target.closest("select")||e.target.closest(".gridbox")||e.target.closest(".sid-in"))return;   // .sid-in: a contenteditable span, not an <input> — its own mousedown/click stopPropagation already keeps events from reaching here (see buildBlock), but excluded here too for anything that reaches this handler by another path
       if(e.target.closest(".node,.tok-group,.arc,.edge-g,.oline,.brk,.bwtok,.bwbr,.mwt-form"))return;   // a token/bracket/MWT-tie handles its own selection
+      /* SHIFT EXTENDS A SENTENCE RANGE instead of deselecting. It is checked before pick() because pick
+         clears the range (an ordinary click starts a new selection, as it does in every list), and because
+         a shift-click must not also deselect the token — the range is a selection OF SENTENCES and leaving
+         the token selection alone is what lets ⌘⌫ tell the two apart. */
+      if(e.shiftKey && typeof extendBlockRange==="function"){ e.preventDefault(); extendBlockRange(i); return; }
       pick(i,0,false); });   // clicked empty diagram space → deselect any node
     b.addEventListener("contextmenu",e=>{ if(e.target.closest(".gridbox")||e.target.closest(".sctrl")||e.target.closest("input")||e.target.closest("select")||e.target.closest(".sid-in"))return;   // grid/controls have their own menus; .sid-in gets the browser's own contenteditable context menu, same as an <input> would have
       if(e.target.closest(".lbl,.orel,.tok-pos,.node-cat,.opos,.node,.tok-group,.oline,.bwtok,.mwt-form,.mwt-tr"))return;   // labels + nodes handled at the doc level   /* .mwt-form/.mwt-tr joined the list: the delegated handler on #doc raises the MWT's own menu for both rows, but THIS listener is on the .sblock and therefore runs FIRST (bubbling reaches the block before the document), so without the exclusion every right-click on a multi-word token built the whole sentence menu and threw it away a moment later — and, while sentMenu was broken, threw a TypeError on the way */
@@ -1379,16 +1622,65 @@ function buildBlock(i,ctx){ const s=DOC[i];
       heads.forEach(hd=>box.appendChild(hd)); b.appendChild(box); }
     b.appendChild(head);
     if(scriptTop){   // item 3: translit slot carries the EDITABLE original # text (the top line now holds the script)
+      /* ⚠ THE SLOT HOLDS THE EDITABLE ORIGINAL, NOT A TRANSLITERATION, and that is why CSL appeared to do
+         nothing under a script: there is no transliteration row on this branch for it to fill. Worse, with
+         "Latin" as the script the top line IS a romanisation, so an IAST-stored sentence had the
+         very same string twice — the derived line above and its own `# text` below.
+         A scheme that RESPELLS the sentence therefore gets a row of its own here (`cslRow`), and the
+         editable original goes back to being collapsed-and-click-revealable, which is what it is for. */
       const tl=document.createElement("div"); tl.className="strans strans-orig"; tl.style.marginInlineStart=(idW+8)+"px"; wireStext(tl);
-      tl.hidden=!show.translit;   // Sanskrit Displayed:"None" → the row is collapsed by default; the script .stext click handler above reveals + focuses it on demand
-      if(!tl.hidden) capTransWidth(tl);   // a hidden row is unmeasurable (0-width rect) — the reveal handler re-runs this itself once it's shown
-      tl.addEventListener("blur",()=>{ if(!show.translit) tl.hidden=true; });   // …and re-collapses on blur, still gated on Displayed:"None" — if the user changed the Displayed scheme away from None WHILE this row was open, show.translit is now true and the row stays, exactly as a fresh render would leave it
-      scriptTransLine=tl; b.appendChild(tl); }
+      // Collapsed whenever the visible line above is NOT this row's own value: Displayed "None"
+      // (nothing to show), CSL-in-a-row under a real script, and CSL-as-the-line under a Latin one.
+      // In that last case the sentence on screen IS the CSL, so a permanently open row beneath it
+      // would be the same sentence twice — the editable original belongs one click away, which is
+      // exactly what the .stext handler above provides (and what it opens is the IAST `# text`).
+      tl.hidden=!show.translit||cslRow||cslTop;
+      tl.setAttribute("data-capw","1"); if(!tl.hidden) applyTransInset(tl);   // swept with the translations grid, synchronously, so the height the caps measure is the height that is drawn   // a hidden row is unmeasurable (0-width rect) — the reveal handler re-runs this itself once it's shown
+      tl.addEventListener("blur",()=>{ if(!show.translit||cslRow||cslTop) tl.hidden=true; });   // …and re-collapses on blur, still gated on Displayed:"None" — if the user changed the Displayed scheme away from None WHILE this row was open, show.translit is now true and the row stays, exactly as a fresh render would leave it
+      scriptTransLine=tl; if(!tl.hidden) fieldHost=tl; b.appendChild(tl);
+      if(cslRow){ const cl=document.createElement("div"); cl.className="strans"; cl.style.marginInlineStart=(idW+8)+"px";
+        const cslResting=runningLine(s,i,u=>u.mwt?(topTransTxt(u.mwt)||u.mwt.form):(topTransTxt(u.tok)||u.tok.form)," ");
+        /* THE CSL ROW IS THE FIELD when it is the transliteration on screen — same contract as everywhere
+           else: it reads as CSL and edits the raw `# text` beneath it. Without this the row was inert and
+           the field fell back to the script line above, which is what the report was about. */
+        wireStext(cl); cl.textContent=cslResting;
+        cl.addEventListener("blur",()=>{ cl.textContent=cslResting; });   // a commit re-renders and recomputes; this is the cancelled case
+        cl.title="Sentence in "+trSchemeLabel(TRANSLIT_SCHEME)+" (display) — click to edit the text";
+        cl.style.cursor="text"; fieldHost=cl;
+        capTransWidth(cl); b.appendChild(cl); } }
     else if(trLayer()){   // romanisation OR a Latin-output orthography → a plain whole-sentence line under the text (no displacement)
-      const parts=[]; let k=0; while(k<s.tokens.length){ const m=(s.mwt||[]).find(x=>x.from===k+1);   // show each multi-word token once, not its component words
-        if(m){ parts.push(topTransTxt(m)||m.form); k=m.to; } else { parts.push(topTransTxt(s.tokens[k])||s.tokens[k].form); k++; } }
-      const line=parts.join(" ").trim(), base=(s.text||s.tokens.map(t=>t.form).join(" ")).trim();
-      if(line && line!==base){ const tl=document.createElement("div"); tl.className="strans"; tl.style.marginInlineStart=(idW+8)+"px"; tl.textContent=line; capTransWidth(tl); b.appendChild(tl); } }
+      /* NO ROW WHERE IT WOULD ONLY REPEAT THE LINE ABOVE IT — an IAST romanisation of an IAST-stored
+         Sanskrit file says nothing the running text has not already said, and neither does "Original"
+         over a Latin original. That was always the intent of the `line!==base` test; it could not work
+         while the two strings were built by different rules, because a join(" ") of the very same words
+         differs from `# text` at every full stop and every line break of a verse. Built the same way,
+         an unchanged romanisation now compares EQUAL and the row is correctly dropped — while CSL, which
+         genuinely respells the sentence (`vartm'âpunarjanmanām`), still differs and still shows. */
+      const csl=isSanskritLang()&&TRANSLIT_SCHEME==="csl";
+      /* A SPACELESS SCRIPT'S ROMANISATION HAS TO BE SPACED, and the line above it cannot say where. The gaps
+         are otherwise taken verbatim from `# text`, which is right for every language that writes word
+         breaks — the romanisation then lines up with the sentence above it, break for break — but Chinese,
+         Japanese, Thai and the rest have no gaps to inherit, so the pinyin ran together into one unreadable
+         string (`yǐnyán` + `wǒ` + … with nothing between them). The SpaceAfter fallback could not have saved
+         it either: in those languages nearly every token carries SpaceAfter=No, which is true of the source
+         and says nothing about its romanisation.
+         isSpacelessLang (js/core/state.js) is a LANGUAGE test, not the per-run character test app/parse.py
+         uses, and that is the right one here: this is a document-wide display convention, not a judgement
+         about one stretch of text. */
+      const spaceless=(typeof isSpacelessLang==="function")&&isSpacelessLang();
+      /* …and the separator is decided by BOTH sides, because punctuation takes its space on one side only and
+         which side depends on the mark: a comma or a closing bracket hugs the word BEFORE it, an opening
+         bracket or quote hugs the word AFTER it. Keying on the following piece alone put the space on the
+         wrong side of every opening mark (`túlíng« AI Agent»` for `túlíng «AI Agent»`). Ps/Pi are the opening
+         and initial-quote categories, Pe/Pf their closing partners — so an opening mark is the one kind of
+         punctuation that still takes a space in front of it. */
+      const gap = csl ? " " : (spaceless ? ((next,prev)=>
+        /[\p{Ps}\p{Pi}]$/u.test(prev||"") ? ""                                   // just opened a bracket/quote → the next word hugs it
+        : (/^[\p{P}\p{S}]/u.test(next||"") && !/^[\p{Ps}\p{Pi}]/u.test(next||"")) ? ""   // a closing or ordinary mark hugs the word before it
+        : " ") : null);
+      const line=runningLine(s,i,u=>u.mwt?(topTransTxt(u.mwt)||u.mwt.form):(topTransTxt(u.tok)||u.tok.form), gap);
+      const base=(s.text||s.tokens.map(t=>t.form).join(" "));
+      if(line.trim() && line.trim()!==base.trim()){ const tl=document.createElement("div"); tl.className="strans"; tl.style.marginInlineStart=(idW+8)+"px"; tl.textContent=line; capTransWidth(tl); b.appendChild(tl); } }
     if(TRANS_LANGS.size) b.appendChild(renderBlockTrans(i));   // item 13: a field per enabled translation language, just above the diagram
     if(show.graphs) b.appendChild(diaSentence(i,ctx));   // notation-switch cache: same node reused (and re-highlighted by applySel below) if THIS sentence, under THIS conv + view-state, was already built — see the "NOTATION-SWITCH DIAGRAM CACHE" note above computeWindow
     if(show.grids) b.appendChild(renderGrid(i));
@@ -1418,6 +1710,7 @@ function renderDoc(){
   pruneDiaCache(winLo,winHi);   // drop every cached diagram outside the range this render is about to (re)build — see the "NOTATION-SWITCH DIAGRAM CACHE" note above buildBlock. AFTER computeWindow (winLo/winHi just moved), BEFORE the buildBlock loop below reads the cache
   computeColW();
   const host=document.getElementById("doc"); host.textContent="";
+  if(DOC.length) clearBootSkeleton();   // …and the boot skeleton goes the moment there is a real block to put in its place (index.html; a no-op once it has)
   host.lang=bcp47Tag();   // BCP-47 tag → inherits to every token/diagram/grid text so the browser picks locale-correct Cyrillic/Han glyphs (locl + system-font region); re-run on every language/script change
   host.classList.toggle("ortho-script", TRANSLIT_SCHEME==="zhuyin");   // a non-Latin DISPLAYED transliteration (Zhuyin) in the row → drop the romanisation italics
   host.classList.toggle("script-form", typeof iastFormEdit==="function"&&iastFormEdit());   // Sanskrit under a real script → every token FORM on screen is a derived rendering of the stored IAST, not an editable field, so it takes the pointing hand (app.css). The MWT/goeswith glyphs set the same cursor inline via formCursor(), being SVG text with their own click contract
@@ -1475,6 +1768,14 @@ function renderDoc(){
   const topSpacer=document.createElement("div"); topSpacer.className="winspacer winspacer-before"; topSpacer.setAttribute("aria-hidden","true");
   if(winLo>0) host.insertBefore(topSpacer,host.firstChild);
   for(let i=winLo;i<winHi;i++) buildBlock(i,ctx);   // ONLY the windowed range — see the virtualization note above buildBlock
+  /* THE ROW WIDTHS MUST BE FINAL BEFORE ANY HEIGHT IS MEASURED, and this is the first point at which every
+     block is in the DOM. The translations grid and the script-mode transliteration line are each pulled in to
+     the sentence text's right edge, and narrowing a row REWRAPS it — so its height is not knowable until that
+     inset has been applied. It used to be applied a frame LATER, which handed both height-cap passes below a
+     translations grid measured at its full pre-inset width (measured on a two-language block: 158px tall at
+     1115px wide, 194px once inset to 821px) and so over-granted the diagram and grid by the difference, letting
+     the block overrun the viewport it was supposed to fit. One sweep here serves both passes. */
+  applyTransInsets();
   const _rendered=host.querySelectorAll(".sblock");
   /* ── THE 60/40 RESERVATION IS OF WHAT THE DIAGRAM AND GRID CAN ACTUALLY HAVE, PER BLOCK ────────────────────
      --cap-dia / --cap-grid were 60 % and 40 % of `dh` — the whole document viewport — which over-reserves by
@@ -1496,6 +1797,13 @@ function renderDoc(){
      costs a few px of cap on the blocks that wrap, never a wrong final layout.)
      .diagram.wrapproj is untouched by construction: its `max-height:none` (app.css) outranks .diagram's
      var(--cap-dia) whatever this writes, and its height is driven explicitly at layout time. */
+  /* READ EVERYTHING, THEN WRITE EVERYTHING. The budget below reads computed styles and offsetHeights
+     for every block and each of its children, and used to write --cap-dia/--cap-grid at the end of
+     each block's own turn — which dirties style and layout for the NEXT block's reads, so the browser
+     recalculated once per block instead of once for the pass. Same arithmetic, same values, in two
+     phases: the profile put this pass (document.js:1506 + its `outer` helper) at ~360ms of a ~750ms
+     script budget after the measurement cache landed. */
+  const _budget=[];
   _rendered.forEach(b=>{
     const bcs=getComputedStyle(b);
     let chrome=parseFloat(bcs.paddingTop||0)+parseFloat(bcs.paddingBottom||0)+parseFloat(bcs.borderTopWidth||0)+parseFloat(bcs.borderBottomWidth||0);
@@ -1516,6 +1824,8 @@ function renderDoc(){
     // The 140px floor is the same one the authoritative pass below uses, so a block whose chrome alone overflows
     // the viewport still leaves both scrollers a usable minimum instead of collapsing them.
     const avail=Math.max(140, dh/FS-chrome);
+    _budget.push([b,avail]); });
+  _budget.forEach(([b,avail])=>{   // …the writes, now that every read is done
     b.style.setProperty("--cap-dia",Math.round(avail*0.6)+"px");
     b.style.setProperty("--cap-grid",Math.round(avail*0.4)+"px"); });
   if(_rendered.length){ let _h=0; _rendered.forEach(b=>_h+=b.getBoundingClientRect().height); AVG_BLOCK_H=_h/_rendered.length; }   // remeasure every render — blocks vary a lot in height (a 3-token sentence vs. a wrapped Sanskrit verse with translations), so this is only ever an estimate (see the virtualization note above)
@@ -1579,6 +1889,16 @@ function renderDoc(){
   // so two of them simply stack in flow and no measurement is needed to make that happen.)
   /* align each diagram / outline so its leftmost drawn content sits under the text of the Form column
      (measured, so it's exact regardless of each renderer's internal offset) */
+  /* THREE PHASES, NOT ONE PER BLOCK. This zeroes a diagram's padding, measures where its leftmost ink
+     lands, and writes the padding that pulls it under the Form column — and doing all three per block
+     meant every block's measurement flushed layout for the write the previous block had just made.
+     Measured by wrapping the layout-flushing DOM APIs: this line alone made 2,223 getBoundingClientRect
+     calls in one load, the largest single source in the app, and the Safari timeline for the same load
+     showed 4,657 forced layouts totalling 3.9 s. Split, the whole document costs ONE flush: every write
+     happens, then every read, then every write. The emphasis dance below is unchanged in meaning (the
+     comment it carries still applies) — it just runs across all blocks at once, which is safe for the
+     same reason it was safe per block: nothing paints in between. */
+  const _align=[];
   document.querySelectorAll("#doc .sblock").forEach(b=>{ const dg=b.querySelector(".diagram, .text-conv"); if(!dg) return;
     dg.style.paddingLeft="0px"; dg.style.paddingRight="0px";   // getBoundingClientRect is in scaled (zoomed) viewport px; padding is set in unscaled CSS px → divide by FS
     const rtl=b.dir==="rtl", els=[...dg.querySelectorAll("svg text, .oline, .bwline2")];
@@ -1592,16 +1912,18 @@ function renderDoc(){
     // casing colour and nothing else. Scoped to `dg`, so the grid's own row classes are untouched.)
     const emph=[...dg.querySelectorAll(".sel,.rng")].map(e=>({e,s:e.classList.contains("sel"),r:e.classList.contains("rng")}));
     emph.forEach(({e})=>e.classList.remove("sel","rng"));
-    let prop=null,val=null;
-    const target=formTextTarget(b,rtl);   // the SAME target the text rows above are aligned to — one measurement, two consumers, so the sentence and its diagram can never disagree about where the column starts (this was written out twice, once here per direction; the fallback for a hidden grid is the same too)
-    if(rtl){   // align the rightmost drawn content under the Form column's start (right) edge
-      let maxR=-Infinity; els.forEach(el=>{const r=el.getBoundingClientRect().right; if(r>maxR)maxR=r;});
-      if(maxR>-Infinity){ prop="paddingRight"; val=Math.max(0,Math.round((maxR-target)/FS))+"px"; }
+    _align.push({b,dg,rtl,els,emph,prop:null,val:null}); });
+  _align.forEach(a=>{   // …every read, with the writes above already flushed exactly once
+    const target=formTextTarget(a.b,a.rtl);   // the SAME target the text rows above are aligned to — one measurement, two consumers, so the sentence and its diagram can never disagree about where the column starts (this was written out twice, once here per direction; the fallback for a hidden grid is the same too)
+    if(a.rtl){   // align the rightmost drawn content under the Form column's start (right) edge
+      let maxR=-Infinity; a.els.forEach(el=>{const r=el.getBoundingClientRect().right; if(r>maxR)maxR=r;});
+      if(maxR>-Infinity){ a.prop="paddingRight"; a.val=Math.max(0,Math.round((maxR-target)/FS))+"px"; }
     } else {
-      let minLeft=Infinity; els.forEach(el=>{const l=el.getBoundingClientRect().left; if(l<minLeft)minLeft=l;});
-      if(minLeft<Infinity){ prop="paddingLeft"; val=Math.max(0,Math.round((target-minLeft)/FS))+"px"; } }
-    emph.forEach(({e,s,r})=>{ if(s)e.classList.add("sel"); if(r)e.classList.add("rng"); });   // emphasis back on before anything can paint
-    if(prop) dg.style[prop]=val; });
+      let minLeft=Infinity; a.els.forEach(el=>{const l=el.getBoundingClientRect().left; if(l<minLeft)minLeft=l;});
+      if(minLeft<Infinity){ a.prop="paddingLeft"; a.val=Math.max(0,Math.round((target-minLeft)/FS))+"px"; } } });
+  _align.forEach(a=>{
+    a.emph.forEach(({e,s,r})=>{ if(s)e.classList.add("sel"); if(r)e.classList.add("rng"); });   // emphasis back on before anything can paint
+    if(a.prop) a.dg.style[a.prop]=a.val; });
   // Item 6 (safety net): the wrapproj token strip is HARD-clipped at the diagram's right edge, and the alignment above
   // shifts it right by the Form-column indent. projWrapped already bounds the strip width to the clip-safe port, but if
   // an unusually wide indent (a long ID column, RTL, or a very wide row-edge token) would still push the strip past the
@@ -1619,40 +1941,7 @@ function renderDoc(){
   stxWrapRoom();   // running-sentence above-the-line marks: give the room to the WRAPPED lines that need it (see stxWrapRoom). Here rather than in paintStext because the blocks are still detached while that runs — and BEFORE the per-block height caps below, so the extra leading is inside the header height they measure
   // per-block height caps: the block ≤ 100% of the document viewport; the diagram gets 60% and the grid 40% of
   // what remains after the sentence header, block padding, AND the gaps around/between the diagram and grid
-  document.querySelectorAll("#doc .sblock").forEach(b=>{
-    const shead=b.querySelector(".shead"), dg=b.querySelector(".diagram,.text-conv"), gw=b.querySelector(".gwrap");
-    const cs=getComputedStyle(b), pad=parseFloat(cs.paddingTop||0)+parseFloat(cs.paddingBottom||0),
-          bord=parseFloat(cs.borderTopWidth||0)+parseFloat(cs.borderBottomWidth||0), cap=(dh-sheetGapAbove(b)-sheetGapBelow(b)-stickyHeadH(b))/FS;   // item 10: a block at the edge of a sheet is charged the page-ground gap beside it, so block+gap fill the viewport rather than overflowing it by the gap. The gaps are OUTSIDE .sblock{zoom:FS} → real px, so they come off dh before the ÷FS. Both 0 unpaged.   // …and the same charge for the STICKY boundary headings that dominate this block (stickyHeadH): pinned, they own the top of the viewport for as long as the block is in it, so block + gaps + headings must fill exactly one viewport between them. Real px too, for the same reason — the heading carries its own zoom:FS.   // a full block's border-box exactly fills the viewport. dh is REAL px; the block is inside .sblock{zoom:FS}, whose offset*/scroll* measurements below are LOCAL (unzoomed) px, so express the cap in LOCAL px too (÷FS) — then heights set here render ×FS to exactly the viewport. Recomputed each render → correct at every zoom (no-op at FS=1).
-    b.style.maxHeight=cap+"px";
-    const shH=shead?shead.offsetHeight:0;
-    /* …and the boundary heading, which is now IN FLOW at the top of the block (see .bmarks in app.css) and so
-       takes real height off what the diagram and grid have to share. Missing this is invisible until a block that
-       opens a document sits at the viewport's height cap: the heading pushes the grid's last rows past the bottom
-       edge, and only that one block in the file is wrong. Its margins count too — they are the space it opens. */
-    const bm=b.querySelector(".bmarks"), bmCS=bm?getComputedStyle(bm):null,
-          bmH=bm?bm.offsetHeight+(parseFloat(bmCS.marginTop||0)+parseFloat(bmCS.marginBottom||0)):0;
-    const tg=b.querySelector(".tgrid"), tgH=tg?tg.offsetHeight+parseFloat(getComputedStyle(tg).marginTop||0):0;   // the translations grid sits just above the diagram → reserve its height so it (and the diagram) stay in view (Item 6)
-    const gapHead=(dg&&shead)?Math.max(0,dg.offsetTop-(shead.offsetTop+shH)-tgH):0;   // whitespace gap above the diagram; the trans grid (if present) sits in this span → subtract its height so it isn't double-counted (it's charged once via tgH below)
-    const gapMid=(dg&&gw)?Math.max(0,gw.offsetTop-(dg.offsetTop+dg.offsetHeight)):0;   // the diagram↔grid gap, excluded
-    const addBtn=b.querySelector(".addtok"), addH=addBtn?addBtn.offsetHeight+parseFloat(getComputedStyle(addBtn).marginTop||0):0;   // the "Add token" button sits below the scrollable grid frame → reserve its height so it (and the block's bottom padding) stay in view
-    const avail=Math.max(140, cap-shH-bmH-pad-bord-gapHead-gapMid-addH-tgH);   // subtract the border ONCE so content fills to exactly the viewport, no more, no less
-    // allocate by natural content height: the diagram gets up to 2/3 and the grid up to 1/3, but if one needs
-    // less than its share the other may expand into the leftover (so neither scrolls while there's room).
-    // A wrapped stemma/hierarchy reports its wanted height (scaled tree + one token row) via data-dia-nat.
-    const wrapproj=dg&&dg.classList.contains("wrapproj");
-    // natural heights as BORDER-box (scrollHeight is padding-box): add each element's border so a cap set to the
-    // natural fully contains the content — otherwise a .5px+.5px grid border leaves it 1px scrollable (phantom)
-    const diaNat=dg?(wrapproj?(+dg.dataset.diaNat||dg.scrollHeight):(dg.scrollHeight+dg.offsetHeight-dg.clientHeight)):0, gridNat=gw?(gw.scrollHeight+gw.offsetHeight-gw.clientHeight):0;
-    const g=Math.min(gridNat, Math.max(avail/3, avail-diaNat)), d=Math.min(diaNat, avail-g);
-    if(wrapproj){ const stem=dg.querySelector(".wp-stem"), toksEl=dg.querySelector(".wp-toks"), wp=dg._wp,
-        dcs=getComputedStyle(dg), dpad=parseFloat(dcs.paddingTop||0)+parseFloat(dcs.paddingBottom||0), one=(wp&&wp.oneRowH)?wp.oneRowH:(toksEl?toksEl.offsetHeight:0),   // the true one-row height (not offsetHeight, which can't be trusted mid-layout) → the token strip is always kept to exactly one row so it stays a scroller
-        dd=Math.round(d), content=dd-dpad;                       // the diagram's content box (consistent rounding, so nothing spills)
-      const treeRoom=Math.max(24, content-one);                  // reserve the ONE token row first → its POS line never clips (grid or no grid)
-      dg.style.height=dd+"px";
-      if(stem) stem.style.height=treeRoom+"px";                  // tree fills all the room above the tokens (its own bottom level already leaves a gap over the token line); no extra "air" below the tokens → the space under the single visible token line is just the diagram's normal bottom padding, not a reserved inter-row gap
-      if(toksEl){ toksEl.style.marginBottom="0px"; toksEl.style.height=one+"px"; }   // pin the strip to one row so its N rows overflow and it scrolls, grids on or off
-    } else if(dg) dg.style.maxHeight=Math.round(d)+"px";
-    if(gw) gw.style.maxHeight=Math.round(g)+"px"; });
+  document.querySelectorAll("#doc .sblock").forEach(b=>{ capBlock(b,dh); observeBlockHeader(b); });
   document.querySelectorAll("#doc .diagram.wrapproj").forEach(wpDraw);   // draw the tree (+ projections) now the box has its final size
   positionBracketWash();
   positionBracketAnnots();
@@ -1858,13 +2147,13 @@ function positionBracketAnnots(){ document.querySelectorAll("#doc .bwrap").forEa
     svg.appendChild(E("path",{class:"mwt-tie-cas",d:tieD}));   // occlusion halo behind the tie (matches the SVG-view mwtTie)
     svg.appendChild(E("path",{class:"mwt-tie",d:`M ${x0} ${yb} L ${x0} ${yb+dp+0.421875} M ${x1} ${yb+dp+0.421875} L ${x1} ${yb}`}));   // end-pins: the full weight — each extends 0.421875px (half the bar's own .75·--arc-stroke width, now 1.125px — item 1) PAST the bar's centreline so its (thicker) stroke fully covers the corner the (thinner) bar's stroke reaches, instead of butting flush and leaving a notch
     svg.appendChild(E("path",{class:"mwt-tie-h",d:`M ${x0} ${yb+dp} L ${x1} ${yb+dp}`}));   // the horizontal bar, drawn thinner — per psychophysics, a horizontal stroke reads heavier than a vertical one of the same width
-    const fyb=yb+dp+20, STEP=18+descent(POS_F);
+    const fyb=yb+dp+20, STEP=belowGap();
     if(m.kind==="xpos"){ drawTieLabel(svg,mx,fyb,m.pos,"mwt-pos","mwt-pos-cas",POS_F,null); tagXPosLabel(svg.lastElementChild,si0,m); return; }   // item 1: an ExtPos-only bracket — the value itself is the label, in the POS register
     const mfd=bform(m); let ly=fyb;
     const iastRow=iastFormEdit();   // Sanskrit + a real script → the surface form is edited on the IAST ROW, never on the derived glyph; same contract (and same {data-s, data-mwtfrom} tagging) as the SVG views' mwtTie
     { const mrt=trTxt(m); if(mrt){ ly+=STEP; const tr=E("text",{class:"translit mwt-tr"+(iastRow?" mwt-tr-edit":""),x:mx,y:ly,"text-anchor":"middle"}); tr.textContent=mrt; svg.appendChild(tr);
       if(si0>=0&&m.fromTok!=null){ tr.setAttribute("data-s",si0); tr.setAttribute("data-mwtfrom",m.fromTok); }   /* tagged in EVERY language, so the row's right-click resolves to its MWT rather than falling through to the ordinary token menu — see the fuller note on the same line in js/diagram/diagram-core.js. The .mwt-tr-edit class above stays gated on iastRow, because that is what the click-to-EDIT handler matches. */
-      if(iastRow&&si0>=0&&m.fromTok!=null){ tr.style.cursor="text"; svgTip(tr,"multi-word token — click to edit the surface form (the script glyph above is derived from it)"); } } }   // cursor:text matches mwtTie and the other click-to-edit diagram texts (.tr-edit/.gl-edit/.cform): clicking opens a field, not a button   // item 6: the MWT form→translit gap is a full inter-tier step (18+descent(POS_F)) — matching a NON-MWT token and the SVG mwtTie.   // Item 9: draw the MWT transliteration row FIRST so the MWT form (and its backing) below paints ON TOP where they crowd — consistent with the SVG mwtTie and .stext-over-.strans
+      if(iastRow&&si0>=0&&m.fromTok!=null){ tr.style.cursor="text"; svgTip(tr,"multi-word token — click to edit the surface form (the script glyph above is derived from it)"); } } }   // cursor:text matches mwtTie and the other click-to-edit diagram texts (.tr-edit/.gl-edit/.cform): clicking opens a field, not a button   // item 6: the MWT form→translit gap is a full inter-tier step (belowGap()) — matching a NON-MWT token and the SVG mwtTie.   // Item 9: draw the MWT transliteration row FIRST so the MWT form (and its backing) below paints ON TOP where they crowd — consistent with the SVG mwtTie and .stext-over-.strans
     if(m.pos){ drawTieLabel(svg,mx,ly+STEP,m.pos,"mwt-pos","mwt-pos-cas",POS_F,null); tagXPosLabel(svg.lastElementChild,si0,m); }   // item 1: the coinciding-span case — the MWT bracket simply gains the ExtPos as a POS annotation instead of a second bracket over the same tokens
     const cas=E("text",{class:"mwt-cas",x:mx,y:fyb,"text-anchor":"middle"}); cas.textContent=mfd; cas.setAttribute("aria-hidden","true"); svg.appendChild(cas);   // opaque backing behind the reconstructed word (and over the translit row above)
     const fe=E("text",{class:"mwt-form",x:mx,y:fyb,"text-anchor":"middle"}); fe.textContent=mfd;
@@ -1878,10 +2167,10 @@ function positionBracketAnnots(){ document.querySelectorAll("#doc .bwrap").forEa
     if(si0>=0&&m.fromTok!=null){ tg.setAttribute("data-s",si0); tg.setAttribute("data-mwtfrom",m.fromTok); tg.setAttribute("data-mwtto",m.toTok); }
     while(svg.childNodes.length>mark0) tg.appendChild(svg.childNodes[mark0]);   // index mark0 keeps naming the next node to move → order preserved
     svg.appendChild(tg); });
-  // Ghost arcs (Shared=Yes and Subj-raising): dashed, dimmed. Within-line → a plain bump; cross-line → the SAME
+  // Ghost arcs (Shared=Yes and Subject-raising): dashed, dimmed. Within-line → a plain bump; cross-line → the SAME
   // straight-vs-Hobby-spline logic drawCrossLine gives the real cross-line arcs. data-ghostheads packs "oid:rel"
   // pairs — each ghost target carries its OWN relation label (Shared=Yes ghosts show the dependent's own deprel;
-  // Subj-raising always "subj"). Item 7: fanned against the SAME buckets wArcs/cArcs just resolved (never the
+  // Subject-raising always "subj"). Item 7: fanned against the SAME buckets wArcs/cArcs just resolved (never the
   // reverse). Item 6: labels decollided against wlabs/clabs (already finalized above) — only ghost labels move.
   const ghostPairs=[];
   ghostToks.forEach(dep=>dep.dataset.ghostheads.split(",").forEach(pair=>{ const [ghOid,rel]=pair.split(":"); ghostPairs.push({dep,ghOid,rel}); }));
@@ -1968,7 +2257,7 @@ function scrollRowToGridTop(row){ if(!row) return;
   scrollNearest(row);
   const wrap=row.closest&&row.closest(".gwrap"); if(!wrap) return;
   const wr=wrap.getBoundingClientRect(), rr=row.getBoundingClientRect();
-  wrap.scrollTop+=(rr.top-(wr.top+gridHeadH(wrap)))/FS;   // rects are SCALED viewport px, scrollTop is unscaled CSS px — the same /FS convention the tie geometry uses
+  wrap.scrollTop+=(rr.top-(wr.top+gridHeadH(wrap)))/cssZoomOf(wrap);   // rects are SCALED viewport px, scrollTop is unscaled CSS px — cssZoomOf rather than the bare FS this used to divide by, so the two scroll paths (here and scrollNearest) ask the DOM the same question rather than one of them assuming the wrap is inside .sblock
 }
 function scrollNearest(el){ if(!el) return;
   el=scrollRowOf(el);
@@ -1978,15 +2267,23 @@ function scrollNearest(el){ if(!el) return;
     if(/(auto|scroll)/.test(cs.overflowY) && node.scrollHeight>node.clientHeight){
       const nr=node.getBoundingClientRect(), er=el.getBoundingClientRect();   // re-measured each iteration: a nudge on an INNER container shifts el's rect for the NEXT (outer) one
       const stick=(node.id==="doc"&&typeof stickyHeadH==="function")?stickyHeadH((el.closest&&el.closest(".sblock"))||el):gridHeadH(node);   // the document scroller's top is additionally occluded by whatever boundary headings are PINNED over this element's block — scroll-padding-top only clears the toolbar, so without this a token brought to the top of the page lands underneath its own document/paragraph heading. The grid's own scroller is occluded the same way by its sticky column header
-      const top=nr.top+(parseFloat(cs.scrollPaddingTop)||0)+stick, bot=nr.bottom-(parseFloat(cs.scrollPaddingBottom)||0);
-      if(er.top<top) node.scrollTop-=(top-er.top);
-      else if(er.bottom>bot) node.scrollTop+=(er.bottom-bot);
+      /* …AND THE NUDGE IS CONVERTED INTO THE SCROLLER'S OWN px (see cssZoomOf above). Every scroller
+         this walk meets except `#doc` itself lives inside `.sblock{zoom:var(--fs)}` — the grid's
+         .gwrap, a wide diagram, a wrapped stemma's .wp-toks — so the delta measured off two rects is
+         `z`× the scrollTop it has to become. Measured on a capped grid: at FS=0.6, scrolling to the
+         last row under-shot by 34px and left the row off screen entirely. gridHeadH is already
+         viewport px (it is a rect height), so only the computed scroll-padding needs scaling up. */
+      const z=cssZoomOf(node);
+      const top=nr.top+(parseFloat(cs.scrollPaddingTop)||0)*z+stick, bot=nr.bottom-(parseFloat(cs.scrollPaddingBottom)||0)*z;
+      if(er.top<top) node.scrollTop-=(top-er.top)/z;
+      else if(er.bottom>bot) node.scrollTop+=(er.bottom-bot)/z;
     }
     node=node.parentElement;
   }
 }
 function setRange(s,anchor,focus){ selRange={s,anchor,focus,from:Math.min(anchor,focus),to:Math.max(anchor,focus)}; }
 function pick(s,t,scroll=true,reflow=true){ sel={s,t}; CURBLOCK=s;   // selecting a token IS arriving at its block, so the two stay in step here; only the scroll spy moves one without the other (see the CURBLOCK note in js/core/prefs.js)
+  if(typeof clearBlockRange==="function") clearBlockRange();   // an ordinary click starts a new selection, so it drops any sentence range — the same rule every list follows
   if(typeof updateFileBlock==="function")updateFileBlock();   // keep the "Sentence X of Y" subtitle in step with the selection
   if(s<0||s>=DOC.length){ sel={s:-1,t:0}; selRange=null; syncMenu(); return; }   // empty document / no selection
   if(selRange && (s!==selRange.s || t<selRange.from || t>selRange.to)) selRange=null;   // a click outside the multi-selection clears it
@@ -2051,7 +2348,7 @@ function applySel(){
   document.querySelectorAll("#doc tbody tr[data-mwtfrom]").forEach(tr=>tr.classList.toggle("mwtsel",mwtGroupSel(+tr.dataset.s,+tr.dataset.mwtfrom,+tr.dataset.mwtto)));   // live, like every other toggle here: a reflow=false pick (a grid click, Tab navigation) changes the selection without re-rendering, and the group's highlight has to follow it in that same pass
   document.querySelectorAll("#doc .node,#doc .tok-group,#doc .bwtok").forEach(g=>g.classList.toggle("sel",+g.getAttribute("data-s")===sel.s&&(gwHolds(g,sel.t)||elInSpan(g,mwtSpan))));   // gwHolds, not a bare data-tok test: a goeswith cell draws a whole WORD (two or more tokens sharing one annotation stack), so selecting EITHER half lights the whole word — see the goeswith block in js/diagram/diagram-core.js. For every other cell it IS the bare data-tok test.   // .bwtok (wrapped brackets) was missing here — a selection change via a reflow=false path (e.g. grid-cell focus) left its bold highlight stuck on the PREVIOUS token until an unrelated full render happened
   const selDep=gwUnitId(sel.s,sel.t);   // a goeswith continuation's word wears the HEAD's incoming relation — see gwUnitId. Without this, selecting the second half of a word accented its two forms, its shared POS and its slur but left the very relation label above them plain, which is exactly the "a form whose annotations stayed behind" the rule below exists to prevent
-  document.querySelectorAll("#doc .arc,#doc .edge-g,#doc .ghost-g").forEach(g=>g.classList.toggle("sel",g.hasAttribute("data-dep")&&+g.getAttribute("data-s")===sel.s&&+g.getAttribute("data-dep")===selDep));   // ghost edges carry the SAME data-s/data-dep contract as a real edge — without this they only picked up .sel on a full re-render, lagging behind every OTHER selection highlight (which this live class-toggle pass already updates instantly). hasAttribute guard: a ghost-g with NO data-dep at all (e.g. the Subj=Generic ∅, which has no real token of its own) must never match — +null coerces to 0, which used to false-match whenever sel.s===0 (sentence 1) && sel.t===0 (nothing selected), the common initial state
+  document.querySelectorAll("#doc .arc,#doc .edge-g,#doc .ghost-g").forEach(g=>g.classList.toggle("sel",g.hasAttribute("data-dep")&&+g.getAttribute("data-s")===sel.s&&+g.getAttribute("data-dep")===selDep));   // ghost edges carry the SAME data-s/data-dep contract as a real edge — without this they only picked up .sel on a full re-render, lagging behind every OTHER selection highlight (which this live class-toggle pass already updates instantly). hasAttribute guard: a ghost-g with NO data-dep at all (e.g. the Subject=Generic ∅, which has no real token of its own) must never match — +null coerces to 0, which used to false-match whenever sel.s===0 (sentence 1) && sel.t===0 (nothing selected), the common initial state
   document.querySelectorAll("#doc .oline").forEach(g=>{ g.classList.toggle("sel",+g.dataset.s===sel.s&&(gwHolds(g,sel.t)||elInSpan(g,mwtSpan)));   // …and the MWT span for the same reason the cell pass above takes it: an outline ROW is that notation's token cell, so every component of a selected MWT lights there too.   // gwHolds for the same reason as the cell pass above: an outline row that draws a whole goeswith word lights for EITHER of its parts
     g.classList.toggle("insub", +g.dataset.s===sel.s && (g.dataset.anc||"").split(" ").includes(String(sel.t))); });
   document.querySelectorAll("#doc .punctsat").forEach(g=>g.classList.toggle("sel",+g.dataset.s===sel.s&&(+g.dataset.tok===sel.t||elInSpan(g,mwtSpan))));   // HTML folded-punctuation satellites (outline / wrapped brackets) — a satellite is drawn AS PART OF its token's cell, so it follows that token into an MWT selection rather than staying plain beside a lit form
@@ -2067,7 +2364,7 @@ function applySel(){
   // multi-selection: highlight every selected token and its relation edge in the diagram + grid
   const inR=(s,tk)=>selRange&&s===selRange.s&&tk>=selRange.from&&tk<=selRange.to;
   document.querySelectorAll("#doc .tok-group,#doc .node,#doc .oline,#doc .bwtok,#doc .punctsat").forEach(g=>g.classList.toggle("rng",inR(+g.dataset.s,+g.dataset.tok)));
-  document.querySelectorAll("#doc .arc,#doc .edge-g,#doc .ghost-g").forEach(g=>g.classList.toggle("rng",g.hasAttribute("data-dep")&&inR(+g.getAttribute("data-s"),+g.getAttribute("data-dep"))));   // item 3: .ghost-g joins the RANGE pass for the same reason it already joins the .sel pass above — a ghost now takes the selection accent, and a range is the selection generalised, so a ghost whose dependent falls inside a marquee must light with it. hasAttribute guard, exactly as the .sel pass documents: a ghost with NO data-dep (the Subj=Generic ∅) must never match, and +null coerces to 0.
+  document.querySelectorAll("#doc .arc,#doc .edge-g,#doc .ghost-g").forEach(g=>g.classList.toggle("rng",g.hasAttribute("data-dep")&&inR(+g.getAttribute("data-s"),+g.getAttribute("data-dep"))));   // item 3: .ghost-g joins the RANGE pass for the same reason it already joins the .sel pass above — a ghost now takes the selection accent, and a range is the selection generalised, so a ghost whose dependent falls inside a marquee must light with it. hasAttribute guard, exactly as the .sel pass documents: a ghost with NO data-dep (the Subject=Generic ∅) must never match, and +null coerces to 0.
   document.querySelectorAll("#doc tbody tr").forEach(tr=>tr.classList.toggle("rangesel",inR(+tr.dataset.s,+tr.dataset.tok)));
   // Three-level emphasis (see selEmphasis above and the .dim-peri/.dim-out note in styles/app.css): the periphery
   // of the selected token's subtree recedes one step, everything outside that subtree two. Deliberately toggled
@@ -2268,4 +2565,94 @@ function positionHoverBox(row){ const box=row.closest(".outline"), hb=box&&box.q
   const {L,W}=bandLW(box,row);
   hb.style.display="block"; hb.style.left=L+"px"; hb.style.top=(row.offsetTop-2)+"px"; hb.style.width=W+"px"; hb.style.height=(row.offsetHeight+4)+"px"; }
 function dim(){}   /* hover dimming removed */
+/* ONE BLOCK'S SHARE OF THE VIEWPORT — split out of the render pass so it can be re-run for a single
+   block when its HEADER changes height, which happens without a re-render: the running sentence is
+   edited (and wraps), its transliteration wraps with it, a translation field grows a line. Whatever
+   the header takes comes off what the diagram and grid may have, so a header that grows after the
+   render left the two of them still sized for the old one — overflowing the block's own cap.
+   observeBlockHeader below watches exactly those three rows and calls this again. */
+function capBlock(b,dh){
+    const shead=b.querySelector(".shead"), dg=b.querySelector(".diagram,.text-conv"), gw=b.querySelector(".gwrap");
+    const cs=getComputedStyle(b), pad=parseFloat(cs.paddingTop||0)+parseFloat(cs.paddingBottom||0),
+          bord=parseFloat(cs.borderTopWidth||0)+parseFloat(cs.borderBottomWidth||0), cap=(dh-sheetGapAbove(b)-sheetGapBelow(b)-stickyHeadH(b))/FS;   // item 10: a block at the edge of a sheet is charged the page-ground gap beside it, so block+gap fill the viewport rather than overflowing it by the gap. The gaps are OUTSIDE .sblock{zoom:FS} → real px, so they come off dh before the ÷FS. Both 0 unpaged.   // …and the same charge for the STICKY boundary headings that dominate this block (stickyHeadH): pinned, they own the top of the viewport for as long as the block is in it, so block + gaps + headings must fill exactly one viewport between them. Real px too, for the same reason — the heading carries its own zoom:FS.   // a full block's border-box exactly fills the viewport. dh is REAL px; the block is inside .sblock{zoom:FS}, whose offset*/scroll* measurements below are LOCAL (unzoomed) px, so express the cap in LOCAL px too (÷FS) — then heights set here render ×FS to exactly the viewport. Recomputed each render → correct at every zoom (no-op at FS=1).
+    const shH=shead?shead.offsetHeight:0;
+    /* …and the boundary heading, which is now IN FLOW at the top of the block (see .bmarks in app.css) and so
+       takes real height off what the diagram and grid have to share. Missing this is invisible until a block that
+       opens a document sits at the viewport's height cap: the heading pushes the grid's last rows past the bottom
+       edge, and only that one block in the file is wrong. Its margins count too — they are the space it opens. */
+    const bm=b.querySelector(".bmarks"), bmCS=bm?getComputedStyle(bm):null,
+          bmH=bm?bm.offsetHeight+(parseFloat(bmCS.marginTop||0)+parseFloat(bmCS.marginBottom||0)):0;
+    const tg=b.querySelector(".tgrid"), tgH=tg?tg.offsetHeight+parseFloat(getComputedStyle(tg).marginTop||0):0;   // the translations grid sits just above the diagram → reserve its height so it (and the diagram) stay in view (Item 6)
+    const gapHead=(dg&&shead)?Math.max(0,dg.offsetTop-(shead.offsetTop+shH)-tgH):0;   // whitespace gap above the diagram; the trans grid (if present) sits in this span → subtract its height so it isn't double-counted (it's charged once via tgH below)
+    const gapMid=(dg&&gw)?Math.max(0,gw.offsetTop-(dg.offsetTop+dg.offsetHeight)):0;   // the diagram↔grid gap, excluded
+    const addBtn=b.querySelector(".addtok"), addH=addBtn?addBtn.offsetHeight+parseFloat(getComputedStyle(addBtn).marginTop||0):0;   // the "Add token" button sits below the scrollable grid frame → reserve its height so it (and the block's bottom padding) stay in view
+    /* ⚠ AND WHERE THE HEADER LEAVES TOO LITTLE, THE BLOCK GROWS — it is not capped at one viewport and
+       the panes squeezed to fit inside it. A running sentence set in an ornamental script at 2× is the
+       case that forced this: `.stext-stacked` gives it line-height 2 so stacked conjuncts clear, the
+       magnification doubles the font, and the two multiply — measured on a four-line verse, a 216px
+       header, and 61px more for the boundary heading a `newdoc`/`newpar` block carries. Against a 438px
+       viewport that drove `avail` onto its floor and left the diagram 93px and the grid 47px, both
+       scrolling inside a block that had room for neither. The arithmetic was right; the input was simply
+       a header half a viewport tall.
+       So the floor is honoured by making the BLOCK taller rather than by taking the room out of the
+       panes. `chrome + avail` is exactly `cap` whenever the header leaves the floor or more, so every
+       block that fits today is untouched — only one that could not fit grows, and the page scrolls
+       through it as it already does for any block with both panes open. */
+    const chrome=shH+bmH+pad+bord+gapHead+gapMid+addH+tgH;   // subtract the border ONCE so content fills to exactly the viewport, no more, no less
+    const avail=Math.max(140, cap-chrome);
+    b.style.maxHeight=(chrome+avail)+"px";
+    // allocate by natural content height: the diagram gets up to 2/3 and the grid up to 1/3, but if one needs
+    // less than its share the other may expand into the leftover (so neither scrolls while there's room).
+    // A wrapped stemma/hierarchy reports its wanted height (scaled tree + one token row) via data-dia-nat.
+    const wrapproj=dg&&dg.classList.contains("wrapproj");
+    // natural heights as BORDER-box (scrollHeight is padding-box): add each element's border so a cap set to the
+    // natural fully contains the content — otherwise a .5px+.5px grid border leaves it 1px scrollable (phantom)
+    const diaNat=dg?(wrapproj?(+dg.dataset.diaNat||dg.scrollHeight):(dg.scrollHeight+dg.offsetHeight-dg.clientHeight)):0, gridNat=gw?(gw.scrollHeight+gw.offsetHeight-gw.clientHeight):0;
+    const g=Math.min(gridNat, Math.max(avail/3, avail-diaNat)), d=Math.min(diaNat, avail-g);
+    if(wrapproj){ const stem=dg.querySelector(".wp-stem"), toksEl=dg.querySelector(".wp-toks"), wp=dg._wp,
+        dcs=getComputedStyle(dg), dpad=parseFloat(dcs.paddingTop||0)+parseFloat(dcs.paddingBottom||0), one=(wp&&wp.oneRowH)?wp.oneRowH:(toksEl?toksEl.offsetHeight:0),   // the true one-row height (not offsetHeight, which can't be trusted mid-layout) → the token strip is always kept to exactly one row so it stays a scroller
+        dd=Math.round(d), content=dd-dpad;                       // the diagram's content box (consistent rounding, so nothing spills)
+      const treeRoom=Math.max(24, content-one);                  // reserve the ONE token row first → its POS line never clips (grid or no grid)
+      dg.style.height=dd+"px";
+      if(stem) stem.style.height=treeRoom+"px";                  // tree fills all the room above the tokens (its own bottom level already leaves a gap over the token line); no extra "air" below the tokens → the space under the single visible token line is just the diagram's normal bottom padding, not a reserved inter-row gap
+      if(toksEl){ toksEl.style.marginBottom="0px"; toksEl.style.height=one+"px"; }   // pin the strip to one row so its N rows overflow and it scrolls, grids on or off
+    } else if(dg) dg.style.maxHeight=Math.round(d)+"px";
+    if(gw) gw.style.maxHeight=Math.round(g)+"px"; }
 
+/* THE BOOT SKELETON, DISMISSED (its markup and the reasoning are in index.html). Called from
+   renderDoc once a render has sentences in it, and unconditionally from bootBridge
+   (js/core/init.js) once the launch document has arrived — because "the document is empty"
+   is also an answer, and the skeleton must not outlive it. Idempotent: after the first call
+   there is no element and every later call is one failed lookup. */
+let BOOTSKEL_GONE=false;
+function clearBootSkeleton(){ if(BOOTSKEL_GONE) return; BOOTSKEL_GONE=true;
+  const sk=document.querySelector(".bootskel"); if(!sk) return;
+  sk.classList.add("gone"); setTimeout(()=>sk.remove(),200); }   // a fade, not a cut: when the cover is showing the LAST view of this document (the launch snapshot), the real one lands within a pixel or two of it, and a hard swap makes that near-match read as a flicker
+/* THE VIEWPORT A BLOCK IS CAPPED AGAINST, re-applied. `blocks` is the set to re-cap, or every block
+   when omitted — which is what a change in the CHROME's height needs: opening the options bar (or
+   collapsing the chrome in full screen) moves .doc's top padding, so every block's share of the
+   viewport changes at once, with no re-render to recompute it. Called from syncChrome (js/ui/wiring.js)
+   as well as from the per-block observer below. */
+function recapBlocks(blocks){
+  const host=document.querySelector(".doc"); if(!host) return;
+  const padTop=parseFloat(getComputedStyle(host).paddingTop||0);
+  const dh=Math.max(160, host.clientHeight-padTop);   // the same viewport the render pass measures (see AVAILH)
+  AVAILH=dh;   // …and keep the shared figure in step, since it is what the next render starts from
+  (blocks||document.querySelectorAll("#doc .sblock")).forEach(blk=>{ if(blk.isConnected) capBlock(blk,dh); });
+}
+/* …and the watch itself: ONE ResizeObserver for the whole document, observing each block's header
+   rows (.shead — the running sentence and its own wrap marks — .strans, and .tgrid). Re-capping is
+   cheap and touches only maxHeight on the diagram/grid, neither of which is observed, so this cannot
+   feed itself. Coalesced into one rAF so a burst (a field growing while its neighbour reflows) costs
+   one pass, and the whole thing is a no-op where ResizeObserver is missing. */
+let BLOCK_RO=null, BLOCK_RO_PEND=null;
+function observeBlockHeader(b){
+  if(typeof ResizeObserver!=="function") return;
+  if(!BLOCK_RO) BLOCK_RO=new ResizeObserver(ents=>{
+    const blocks=new Set();
+    ents.forEach(e=>{ const blk=e.target.closest&&e.target.closest(".sblock"); if(blk&&blk.isConnected)blocks.add(blk); });
+    if(!blocks.size||BLOCK_RO_PEND) return;
+    BLOCK_RO_PEND=requestAnimationFrame(()=>{ BLOCK_RO_PEND=null; recapBlocks(blocks); });
+  });
+  b.querySelectorAll(":scope > .shead, :scope > .strans, :scope > .tgrid").forEach(el=>{ try{ BLOCK_RO.observe(el); }catch(_){} });
+}

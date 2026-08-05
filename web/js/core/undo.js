@@ -125,5 +125,21 @@ document.getElementById("doc").addEventListener("click",e=>{ if(e.target===e.cur
 // context-aware insert/delete: a token when a token is selected, else the whole sentence block
 function insertAboveSel(){ if(sel.s<0)return; if(sel.t>0) insertToken(sel.s,sel.t-1); else insertAt(sel.s); }
 function insertBelowSel(){ if(sel.s<0)return; if(sel.t>0) insertToken(sel.s,sel.t); else insertAt(sel.s+1); }
-function deleteSel(){ if(sel.s<0)return; if(sel.t>0) deleteToken(sel.s,sel.t-1); else delSent(sel.s); }
+/* ⌘⌫ — and the SENTENCE half delegates rather than re-deciding.
+   This used to call `delSent(sel.s)`, which deletes exactly ONE sentence and knows nothing about a
+   shift-selected RANGE — so selecting five blocks and pressing the shortcut deleted one, and not even
+   the focused one: `sel.s` is where the range STARTED (extendBlockRange moves CURBLOCK and leaves the
+   token selection alone), so what went was the FIRST block of the five. That is a second, divergent
+   implementation of a command that already exists: `window.deleteSent` (js/io/bridge.js) is what the
+   native Delete Sentence menu item runs, and it reads blockRange(), raises the "Delete N sentences?"
+   confirmation for a range, and falls back to `delSent(curBlock())` for a lone block. Two copies of
+   one command drift, and these had; this keeps the token half (which is genuinely this function's
+   own) and hands the sentence half to the one implementation.
+   Guarded and looked up late: js/io/bridge.js loads after this module, and this only ever runs from a
+   keystroke. `curBlock()` rather than `sel.s` for the single case comes with it, which is also the
+   better answer — a viewport move changes the block being read without touching the selection. */
+function deleteSel(){ if(sel.s<0)return;
+  if(sel.t>0){ deleteToken(sel.s,sel.t-1); return; }
+  if(typeof window.deleteSent==="function"){ window.deleteSent(); return; }
+  delSent(sel.s); }
 
