@@ -131,7 +131,6 @@ function trEl(){ if(_trMenu)return _trMenu; const m=document.createElement("div"
   m.addEventListener("mousedown",e=>e.preventDefault());   // clicking a row must not dismiss the menu (via the document mousedown) before its click fires
   _trMenu=m; return m; }
 function trClose(){ setPillMenuOpen("translitPill",false); if(_trMenu)_trMenu.classList.remove("show"); }
-function trMenuSep(m){ const d=document.createElement("div"); d.className="trsep"; m.appendChild(d); }   // a hairline between the .trmenu's logical groups
 /* TWO COLUMNS OF RADIO BUTTONS over one shared list of schemes. The two settings do not offer the same options,
    and the grid says so by leaving a cell EMPTY rather than by disabling a control:
      · "None" is a DISPLAYED choice only in Sanskrit, whose IAST row is optional beneath the script glyph
@@ -197,6 +196,7 @@ function trPick(id){ trClose();
   if(DOCLANG){ PREFS.translit[DOCLANG]=id; savePrefs(); }
   toast("Displayed transliteration: "+trSchemeLabel(id)); }
 function openTranslitMenu(x,y){ const m=trEl(); trRender(); m.classList.add("show"); setPillMenuOpen("translitPill",true);
+  if(typeof snapListRows==="function") snapListRows(m,".trname");   // trRender builds a GRID (.trname/.trcell per scheme), not the flex .trrow list orRender uses below — .trname is the one element emitted exactly once per row. Floor the menu's height to whole rows before anything below measures it
   const w=m.offsetWidth,h=m.offsetHeight;   // opens upward, above the status-bar pill (like the language picker)
   m.style.left=Math.max(8,Math.min(x,innerWidth-w-8))+"px";
   if(y-h-6>=8){ m.style.top=""; m.style.bottom=(innerHeight-(y-6))+"px"; }
@@ -408,12 +408,12 @@ async function loadOrthoSchemes(lang){ lang=lang||""; _orLangLoaded=lang; ORTHO_
   ORTHO_SCHEME=orthoResolve(lang,want); syncSchemeAttr();   // an UNCONDITIONAL assignment — see orthoResolve
   if(isSanskritLang(lang)) show.translit=saTransRow();   // item 27(c): the IAST transliteration row/pill is gated on the glyph being non-Latin, not on a script being SELECTED — a Devanagari-stored file wants the row under "Original"
   updateOrthoPill(); updateTranslitPill(); clearOrthoCache();
-  if(typeof syncGlossUI==="function") syncGlossUI();   // the Glossing drawer's morphemic row is gated on macronAvailable() for Latin, which is a view of the list just loaded — so it is refreshed HERE, where that list changes, and cannot be left describing the previous language's (or the pre-install) answer
+  if(typeof syncGlossUI==="function") syncGlossUI();   // the Glossing drawer's own per-language state is a view of the list just loaded — so it is refreshed HERE, where that list changes, and cannot be left describing the previous language's answer
   if(DOC.length) preserveScroll(renderDoc);
   if(ORTHO_SCHEME) fillOrtho();
   if(isSanskritLang(lang)&&show.translit) fillTranslit(); }
 // Mirrors ORTHO_SCHEME onto #doc as a data attribute (general hook, currently informational/for
-// devtools — mirrors the ORTHO_SCHEME==="Grantha"/"Javanese"/"Balinese"/"Kawi"/"ZanabazarSquare" → .stext-stacked JS-added-CLASS
+// devtools — mirrors the ORTHO_SCHEME==="Grantha"/"Javanese"/"Balinese"/"Kawi"/"ZanabazarSquare"/"Tibetan" → .stext-stacked JS-added-CLASS
 // pattern document.js uses for stacked-diacritic line-height) AND, for the one scheme that actually
 // needs it, an inline --token-font override on #doc: Nithya Ranjana's cmap reuses plain Devanagari
 // codepoints (see fonts.css's @font-face comment), so the ordinary "first stack family with a glyph"
@@ -441,52 +441,56 @@ function syncSchemeAttr(){ const d=document.getElementById("doc"); if(!d) return
   const root=document.documentElement;
   if(ORTHO_SCHEME==="Ranjana" && typeof TOKEN_STACK==="string") root.style.setProperty("--token-font",'"Nithya Ranjana", '+TOKEN_STACK);
   else root.style.removeProperty("--token-font");
-  d.style.setProperty("--script-mag",String(scriptMag()));   // …and how big the GLYPHS are drawn, for the scripts that need the room (see ORNAMENTAL_SCRIPTS). On #doc, which is where refreshFontStacks reads it back to keep canvas measurement in step with the paint
+  d.style.setProperty("--script-mag",String(scriptMag()));   // …and how big the GLYPHS are drawn (see INDIC_SCRIPTS). On #doc, which is where refreshFontStacks reads it back to keep canvas measurement in step with the paint
 }
-/* ── THE ORNAMENTAL SCRIPTS ARE DRAWN AT DOUBLE SIZE ───────────────────────────────────────────────
-   Rañjanā, Soyombo, Siddhaṃ and Balinese are not everyday scripts here: they are used for titles, seals,
-   temple inscriptions, mantras and manuscript ornament, and their letters carry decoration — heavy
-   head-strokes, stacked conjuncts, flags and finials — that is simply not resolvable at a 15px body size.
-   Every other script in the list is (or was) a running hand for ordinary text and reads perfectly well at
-   the size the rest of the app uses.
-   ⚠ Judgement, not a property of the data, which is why it is a list rather than something derived — and
-   the list has been corrected once already: **Zanabazar Square is NOT in it**. It was created as a
-   practical script for writing Mongolian, Tibetan and Sanskrit, and its square construction is a
-   letterform, not ornament. Siddhaṃ and Balinese are, on the other side: Siddhaṃ survives almost entirely
-   as bīja and mantra calligraphy, and Balinese as ornamented palm-leaf and temple lettering.
-   Javanese and Tibetan joined them: Javanese is Balinese's sibling in construction and use (the same
-   ornamented palm-leaf hand, the same stacked pasangan below the line), and Tibetan writes Sanskrit as
-   dbu-can with stacked subjoined consonants and a heavy head-line — legible at a body size for Tibetan
-   prose, but not for the conjunct-dense Sanskrit this app sets in it.
+/* ── EVERY INDIC SCRIPT IS DRAWN AT 1.5× SIZE ──────────────────────────────────────────────────────
+   Superseded: this used to be a curated subset ("the ornamental scripts" — Rañjanā, Soyombo, Siddhaṃ,
+   Balinese, Javanese, Tibetan) picked by eye for scripts whose decoration — heavy head-strokes, stacked
+   conjuncts, flags and finials — was judged not to resolve at a 15px body size, on the theory that
+   everyday scripts like Devanagari or Bengali read fine at that size because they are ordinary running
+   hands. On request, that judgement call is gone: ALL of _AKSHARA_SCRIPTS (app/translit.py) — every
+   Indic/Brahmic script this app can render Sanskrit in, not just the decorative ones — carries fine
+   detail (conjunct stacking, vowel-sign placement, subscript/superscript marks) that benefits from the
+   extra room, so the whole list gets it uniformly rather than by curated exception.
+   1.5×, not 2×: enough room for detail to resolve without crowding neighbouring lines as hard as a full
+   doubling did.
    ONLY THE GLYPHS SCALE. The transliteration, POS, gloss and relation rows around them are Latin
-   annotation and are legible already — doubling those would be a zoom, which the app has (⌘+) and which
-   the reader did not ask for. */
-const ORNAMENTAL_SCRIPTS=new Set(["Ranjana","Soyombo","Siddham","Balinese","Javanese","Tibetan"]);
-function scriptMag(){ return ORNAMENTAL_SCRIPTS.has(ORTHO_SCHEME)?2:1; }
+   annotation and are legible already — magnifying those too would be a zoom, which the app has (⌘+) and
+   which the reader did not ask for.
+   ⚠ KEPT IN SYNC BY HAND with _AKSHARA_SCRIPTS' scheme ids (app/translit.py) — there is no bridge call
+   this fires early enough to derive it from at the point scriptMag() first needs an answer, so a script
+   added there needs the identical id added here. */
+const INDIC_SCRIPTS=new Set(["Devanagari","Balinese","Bengali","Bhaiksuki","Burmese","Cham","Grantha",
+  "Gujarati","Javanese","Kannada","Kawi","Khmer","Malayalam","Nandinagari","Newa","Oriya","Ranjana",
+  "Sharada","Siddham","Sinhala","Soyombo","TaiTham","Telugu","Thai","Tibetan","Tirhuta","ZanabazarSquare"]);
+/* The scripts whose stacked/subjoined marks need real extra room, not just the magnification bump every
+   INDIC_SCRIPTS member gets — mirrors document.js's own .stext-stacked condition (which used to restate
+   this list as a bare ORTHO_SCHEME OR-chain; centralised here so the diagram's own below-token spacing
+   — belowGap(), js/diagram/diagram-core.js — can consult the SAME set rather than drift from it by hand).
+   Grantha/Javanese/Balinese/Kawi/ZanabazarSquare joined on measured or live-reported overlap; Tibetan
+   rejoined the same way (see document.js's own note on each). */
+const STACKING_SCRIPTS=new Set(["Grantha","Javanese","Balinese","Kawi","ZanabazarSquare","Tibetan"]);
+function isLzhLang(lang){ const b=((lang!=null?lang:DOCLANG)||"").toLowerCase().split(/[-_]/)[0]; return b==="lzh"; }
+/* Literary Chinese magnifies too, on request — its Han glyphs run to the same dense, fine-stroke
+   complexity (rare/archaic characters, more strokes per square than the simplified everyday set) that
+   is the whole rationale above for the Indic scripts. Scoped to lzh specifically, not Chinese generally
+   — the user asked for Literary Chinese by name, and modern zh/yue were not part of the request. Only
+   while Han is actually what's drawn: ORTHO_SCHEME "none" and the LATIN_ORTHO schemes (gr, General
+   Chinese, Jyutping) put a romanisation on the main line instead, which is Latin annotation exactly
+   like the rows this whole block already keeps unmagnified — TRANSFORM_ORTHO's simplified/traditional
+   and the default "" (Original) both still draw Han, so those stay in. */
+function scriptMag(){
+  if(INDIC_SCRIPTS.has(ORTHO_SCHEME)) return 1.5;
+  if(isLzhLang() && ORTHO_SCHEME!=="none" && !(typeof LATIN_ORTHO!=="undefined" && LATIN_ORTHO.has(ORTHO_SCHEME))) return 1.5;
+  return 1; }
 function orSchemeLabel(id){ const s=ORTHO_SCHEMES.find(x=>x.id===id); return s?s.label:""; }
-/* WHAT THE "no scheme" ROW IS CALLED, which is not the same question in every language. Everywhere else the
-   Script menu picks a WRITING SYSTEM, and declining to pick one is "Original" — the stored glyphs. Latin's
-   only entry is not a writing system at all but a second SPELLING of the one it has (vowel length, see
-   _SCRIPT_SCHEMES["la"] in app/translit.py), so the menu is a two-state choice about macrons and naming
-   its off-state after the absence of a script says nothing a reader of Latin would recognise.
-   `isLatinLang` and not a check for "does this language's only scheme happen to be `macron`": the naming is
-   a fact about Latin, and a second Latin scheme later must not silently rename the row back. */
-function isLatinLang(lang){ return ((lang!=null?lang:DOCLANG)||"").toLowerCase().split(/[-_]/)[0]==="la"; }
-/* IS THERE A MACRONISER HERE? Read off the loaded scheme list rather than asked separately, so the one
-   answer drives the Script menu's own row, the MSeg tier's availability (js/io/bridge.js) and the
-   macronised segmentation itself — three features that must not be able to disagree about whether Latin
-   vowel length is knowable in this install. `available` is `app/translit.py`'s `_scheme_available`, which
-   for `macron` is `macron.available()`: a file test over the fetched Morpheus table. */
-function macronAvailable(){ return isLatinLang() && ORTHO_SCHEMES.some(s=>s.id==="macron"&&s.available); }
 /* …and a tier that has just been installed says so, from whichever window installed it
    (Api._notify_extra_installed → _broadcast_all). Re-loading both scheme lists is the whole remedy: the
    frontend's ONLY stale fact is the per-language answer it cached, and loadOrthoSchemes/loadTranslitSchemes
-   re-ask the bridge and re-render the pills and the document off the fresh one. Everything downstream —
-   macronAvailable, the Glossing drawer's Latin gate, fillOrtho's cache — reads through those, so nothing
-   else has to be told. */
+   re-ask the bridge and re-render the pills and the document off the fresh one. */
 window.__extraInstalled=function(){ if(!DOCLANG) return;
   try{ loadOrthoSchemes(DOCLANG); loadTranslitSchemes(DOCLANG); }catch(e){} };
-function orthoOffLabel(){ return isLatinLang()?"Without macrons":"Original"; }
+function orthoOffLabel(){ return "Original"; }
 function updateOrthoPill(){ const p=document.getElementById("orthoPill"); if(!p)return;
   if(!ORTHO_SCHEMES.length){ p.hidden=true; return; }
   p.hidden=false; p.classList.add("pickable");
@@ -505,23 +509,18 @@ function orRender(){ const m=orEl(); m.innerHTML="";
   // glyph", and Sanskrit's only displayed transliteration is IAST, which the schemes list already
   // offers by name as "Latin". Two rows doing one thing, one of them naming it after the
   // absence of a script when it IS one, is worse than one.
-  /* …and Latin gets no "None" row either, for the same reason Sanskrit doesn't: "None" means "promote the
-     displayed transliteration to the main glyph", and Latin has no displayed transliteration to promote —
-     the row would name a state it cannot reach. That leaves exactly the two-state choice the macron scheme
-     is: "Without macrons" (orthoOffLabel) and "With macrons". */
-  const off=(isSanskritLang()||isLatinLang())?[{id:"",label:orthoOffLabel(),available:true}]
+  const off=isSanskritLang()?[{id:"",label:orthoOffLabel(),available:true}]
                             :[{id:"",label:"Original",available:true},{id:"none",label:"None",available:true}];
   const rows=off.concat(ORTHO_SCHEMES);
-  let pg=null;
-  rows.forEach(s=>{ const grp=(s.id===""||s.id==="none"); if(pg!==null&&grp!==pg)trMenuSep(m); pg=grp;   // hairline between the Original/None off-rows and the actual scripts
+  rows.forEach(s=>{
     const b=document.createElement("button"); b.type="button"; b.className="trrow";
     const ck=document.createElement("span"); ck.className="ck"; ck.textContent=(s.id===ORTHO_SCHEME)?"✓":""; b.appendChild(ck);
     const nm=document.createElement("span"); nm.className="trname"; nm.textContent=s.label; b.appendChild(nm);
     /* ⚠ NO "install" TAG IN THIS MENU — THE ROW IS THE TARGET. Every row here is a whole button that
        already means "make the document look like this", so an unavailable one wants no second, smaller
        control glued to its right edge to say the one thing that stands between the reader and that:
-       clicking "With macrons" when there are no macrons to be had should simply take them to where
-       macrons come from. So the row keeps its click, and the click opens Manage Models at the tier that
+       clicking a script that needs a tier not yet installed should simply take them to where that tier
+       comes from. So the row keeps its click, and the click opens Manage Models at the tier that
        would supply it. (The transliteration table keeps `naTag`, and rightly: its rows are not buttons
        at all but a NAME beside two radio cells, so there is nothing there to click and the tag has to
        carry the affordance itself.) A row with no `needs` — a scheme nothing installable would repair —
@@ -532,7 +531,7 @@ function orRender(){ const m=orEl(); m.innerHTML="";
       else b.disabled=true; }
     else b.addEventListener("click",()=>orPick(s.id));
     m.appendChild(b); }); }
-/* ⚠ AND THE READING POSITION SURVIVES THE SWITCH. Picking an ornamental script doubles every glyph in
+/* ⚠ AND THE READING POSITION SURVIVES THE SWITCH. Picking an ornamental script magnifies every glyph in
    the document, so every block above the viewport changes height and the scroll offset that meant
    "here" before the switch means somewhere else after it — the reader is dropped pages away from the
    sentence they were reading. `withTopChrome` is the instrument for exactly this (see its own note: the
@@ -551,8 +550,9 @@ function _orPick(id){ orClose(); id=id||""; if(id===ORTHO_SCHEME) return;
   if(DOCLANG){ PREFS.ortho[DOCLANG]=ORTHO_SCHEME; savePrefs(); }   // store ALL THREE kinds of choice verbatim — a script id, "none", and "" (Original). Deleting the key on Original (what this did before) left a deliberate Original indistinguishable from "never chose", so it could not be restored for a language whose default is not Original — see prefOrtho.
   toast(ORTHO_SCHEME==="none"?"Script: None (transliteration as main)"
         :(ORTHO_SCHEME?("Script: "+orSchemeLabel(ORTHO_SCHEME))
-        :(isLatinLang()?orthoOffLabel():"Original script"))); }   // …and the toast says what the row the user just picked said (see orthoOffLabel)
+        :"Original script")); }
 function openOrthoMenu(x,y){ const m=orEl(); orRender(); m.classList.add("show"); setPillMenuOpen("orthoPill",true);
+  if(typeof snapListRows==="function") snapListRows(m,".trrow");   // floor the menu's height to whole rows before anything below measures it
   const w=m.offsetWidth,h=m.offsetHeight;
   m.style.left=Math.max(8,Math.min(x,innerWidth-w-8))+"px";
   if(y-h-6>=8){ m.style.top=""; m.style.bottom=(innerHeight-(y-6))+"px"; }

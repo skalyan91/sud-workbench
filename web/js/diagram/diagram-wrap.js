@@ -85,13 +85,13 @@ function bracketsWrapped(si){
   const selTok=(sel.s===si&&sel.t>0)?D.map.indexOf(sel.t-1):-1, selCol=selTok>=0?relColor(t[selTok].deprel):"";   // span highlighting: the selected constituent
   const selDesc=new Set(); if(selTok>=0) (function d(i){selDesc.add(i); children[i].forEach(d);})(selTok);   // TREE descendants → an interrupter displayed within isn't part of the constituent
   const relBelow=i=>show.labels&&i!==root&&!isInt(i);   // an interrupter's relation rides its arc, not the row below
-  const wordW=i=>{ let w=Math.max(fmeas(t[i],WORD_F),fmeas(t[i],WORD_F_BOLD)); if(relBelow(i))w=Math.max(w,meas(t[i].deprel,POS_F)); if(show.pos&&t[i].upos)w=Math.max(w,meas(posDisp(t[i]),POS_F)); {const rt=trTxt(t[i]); if(rt)w=Math.max(w,meas(rt,trFont(t[i])));} w=Math.max(w,glossSlotW(t[i])); return w+8; };   // fold in the gloss-tier row width (glossSlotW → 0 when no gloss tier is shown) so a wide morphemic gloss can't crowd its neighbour — the SAME inclusion the stemma/arc layouts already make (item: gloss crowding, wrapped brackets only)   // the token cell's width = its widest row (host form only; its folded-punctuation satellites are separate inline spans AFTER the cell). Bold width reserved for EVERY token (not just the selected one) so selecting one bolds it IN PLACE (see the firm `width` — not `minWidth` — this feeds below) instead of pushing the surrounding brackets outward, matching unwrapped brackets' fixed-slot behaviour
+  const wordW=i=>{ let w=fmeas(t[i],WORD_F); if(relBelow(i))w=Math.max(w,meas(t[i].deprel,POS_F)); if(show.pos&&t[i].upos)w=Math.max(w,meas(posDisp(t[i]),POS_F)); {const rt=trTxt(t[i]); if(rt)w=Math.max(w,meas(rt,trFont(t[i])));} w=Math.max(w,glossSlotW(t[i])); return w+8; };   // fold in the gloss-tier row width (glossSlotW → 0 when no gloss tier is shown) so a wide morphemic gloss can't crowd its neighbour — the SAME inclusion the stemma/arc layouts already make (item: gloss crowding, wrapped brackets only)   // the token cell's width = its widest row (host form only; its folded-punctuation satellites are separate inline spans AFTER the cell)
   const hangWpx=i=>tailW(t[i],WORD_F);   // width of the token's folded-punctuation satellites (added to the fit maths so lines account for their real space)
   const fw=Array(n).fill(-1), flatW=i=>{ if(fw[i]>=0)return fw[i]; let w=brW+wordW(i)+hangWpx(i); dchildren[i].forEach(c=>w+=G+flatW(c)); return fw[i]=w+G+brW; };
-  const AV=Math.max(160, AVAILW/FS-22-Math.ceil(3*FS));   // item 4: the per-line wrap budget. Reserve the fixed 22px inline-end margin PLUS a zoom-scaled pad (×FS) for the last token's text-shadow casing halo, so a line breaks early enough that the rightmost token's form/POS/relation glyphs never touch the port edge at higher zoom (zoom:var(--fs))
+  const AV=Math.max(160, AVAILW/FS-22-Math.ceil(3*FS)-4);   // item 4: the per-line wrap budget. Reserve the fixed 22px inline-end margin PLUS a zoom-scaled pad (×FS) for the last token's text-shadow casing halo, so a line breaks early enough that the rightmost token's form/POS/relation glyphs never touch the port edge at higher zoom (zoom:var(--fs)). The trailing -4 is a SEPARATE margin against a different hazard: wordW's per-token widths are measured through meas()/fmeas() (an SVG <text> + getComputedTextLength(), see diagram-core.js), but a wrapped-bracket line renders as ordinary HTML <span>s under .bwline2{white-space:nowrap} — a different text-layout engine that can shape a few px wider than the SVG measurement said, and nowrap means the line cannot recover by breaking. A small constant slack here costs one word breaking slightly earlier than it strictly had to; not reserving it costs an occasional line rendering wider than AVAILW with nowrap forbidding any recovery. See the matching overflow-x:hidden on .text-conv.bwrap (app.css) for the case this slack doesn't catch.
   const box=document.createElement("div"); box.className="text-conv bwrap softcase"; box.dir=RTL?"rtl":"ltr";
   box.style.setProperty("--relpad",(show.labels?(13.3+descent(WORD_F)):0)+"px");               // reserved space above the form for the relation row. Copies projWrapped's deprel→form offset EXACTLY (20px + the form's descender depth): the HTML box model seats the form baseline ~6.7px lower inside its line box than the label's centre, so the flat "20" nominal maps to ~13.3, and +descent(WORD_F) adds the projWrapped descender fold on top — landing the relation centre the same distance above the form baseline as the wrapped stemma
-  box.style.setProperty("--undpad",((hasTr(t)?belowGap():0)+(belowTierN()*(belowGap()))+(show.pos?belowGap():0))+"px");            // reserved space below for the transliteration + gloss + POS rows (Item 1/8: EVERY below-row folds in descent(POS_F) — matching belowStack's descender-matched per-row step — via the .otrans/.gloss/.bwpos margin-top set below; the reserve grows to match so the stack bottom stays at the same depth as the flat/arc views) — belowGap() per row, matching the flat renderer's baseline step. hasTr (actual translit presence), NOT show.translit, so an English sentence reserves no phantom translit row — keeping the token's stack bottom at the SAME depth as the arc/flat views, so a cross-line arc's upper endpoint (tokBot + clearance) lands where arcsWrapped puts it (stackBot + clearance)
+  box.style.setProperty("--undpad",belowReserveH(hasTr(t),belowTierN(),show.pos)+"px");            // reserved space below for the transliteration + gloss + POS rows (Item 1/8: EVERY below-row folds in descent(POS_F) — matching belowStack's descender-matched per-row step — via the .otrans/.gloss/.bwpos margin-top set below; the reserve grows to match so the stack bottom stays at the same depth as the flat/arc views) — belowGap() per row, matching the flat renderer's baseline step. hasTr (actual translit presence), NOT show.translit, so an English sentence reserves no phantom translit row — keeping the token's stack bottom at the SAME depth as the arc/flat views, so a cross-line arc's upper endpoint (tokBot + clearance) lands where arcsWrapped puts it (stackBot + clearance)
   if(selTok>=0) box.style.setProperty("--washcol",selCol);
   let anyInt=false; for(let i=0;i<n;i++) if(isInt(i)){anyInt=true;break;}
   if(anyInt) box.classList.add("hasint");            // headroom above the first line for interrupter arcs
@@ -477,8 +477,32 @@ function growCrossArcs(clabs,AH,boxes,si,seed){
 function arcsWrapped(si){
   const D=displaySent(DOC[si]); RTL=D.rtl; const t=D.tokens, n=t.length, OID=k=>D.map[k]+1;
   const ROW=parseFloat(css("--arc-row")),NR=parseFloat(css("--arc-node-r")),AH=parseFloat(css("--arrow"));
-  const POSGAP=16, WORD_OFF=POSGAP+descent(WORD_F), TOP=14, gap=8, SP=meas(" ",WORD_F), ROWGAP=16, ASC=11, DESC=descent(WORD_F);   // Item 1 (revert of item 15): POSGAP back to its ORIGINAL 16 (item 15 had bumped it 16→20 so the arc-endpoint clearance WORD_OFF/XGAP/PGAP matched the deprel-label-baseline height). The arc view returns to its natural endpoint height; brackets/wrapped-stemma keep the item-15 offset.
-  const {w}=linear({tokens:t}), heads=t.map(x=>parseInt(x.head,10)), budget=Math.max(140,AVAILW/FS-16);   // unzoomed px (block is zoomed by FS); margin so a wide POS at a row end never overflows the port
+  /* Item 1 (revert of item 15): POSGAP back to its ORIGINAL 16 (item 15 had bumped it 16→20 so the
+     arc-endpoint clearance WORD_OFF/XGAP/PGAP matched the deprel-label-baseline height). The arc view
+     returns to its natural endpoint height; brackets/wrapped-stemma keep the item-15 offset.
+     ⚠ THE EXISTING +descent(WORD_F) TERM ONLY PARTIALLY COMPENSATES FOR MAGNIFICATION — it grows with
+     WORD_F's own size (so it isn't the flat-16 problem flat arcs() had), but descent is the wrong half
+     of the glyph: what eats into the arc's clearance from above is the extra ASCENT a magnified glyph
+     gains, not its descent. Measured on a real lzh sentence, this row's gap still fell from 12.0px
+     unmagnified to 9.6px at 1.5× — smaller than flat arcs()'s pre-fix 50% collapse, but still shrinking.
+     The same extra term belowGap() and flat arcs()'s WORD_OFF use closes it: exactly the old formula
+     whenever TOK_MAG is 1. */
+  const POSGAP=16, WORD_OFF=POSGAP+descent(WORD_F)+(TOK_MAG>1?ascent(WORD_F)*(1-1/TOK_MAG):0), TOP=14, gap=8, SP=meas(" ",WORD_F), ROWGAP=16, ASC=11, DESC=descent(WORD_F);
+  const {w}=linear({tokens:t}), heads=t.map(x=>parseInt(x.head,10)), budget=Math.max(140,AVAILW/FS-16-20*TOK_MAG);   // unzoomed px (block is zoomed by FS); margin so a wide POS at a row end never overflows the port
+  /* ⚠ AND A SECOND MARGIN, FOR WHAT THE ROW-PACKING CANNOT SEE. `budget` is fit against `w[]` — token/POS/
+     translit SLOT widths only. `fitTight(svg,boxes)` (diagram-core.js, called once this function's arcs and
+     their DE-COLLIDED labels are actually drawn) then resizes the finished SVG to the true bounding box of
+     everything on it, with NO reference back to `budget` — a label pushed outward to clear its neighbour, or
+     a tall arc's endpoint fan, can extend past a row's own token-based width, and fitTight EXPANDS rather
+     than clips to avoid cutting off content nothing budgeted room for. Measured on a real 12-token Javanese
+     row (mag 1.5): packed to 1130 against a budget of 1129 — the row-fit itself was barely over — but
+     fitTight's own final width was 1157, 27px more, from arc/label geometry the packing step never priced
+     in at all. That geometry scales with the MAGNIFIED token spacing arcs span, which is why this reads as
+     a Javanese-specific "badly" rather than the few px every other wrapped notation can be out by — so the
+     margin scales with TOK_MAG rather than being the flat constant every other wrap budget uses. 20×TOK_MAG
+     is a working margin, not a proof: unlike bracketsWrapped's `white-space:nowrap` (where ANY overrun is
+     unrecoverable), a row still THIS wide after the margin has `.diagram.wrapped{overflow-x:hidden}` (below)
+     as a hard backstop, so an under-tuned margin costs a clipped edge, never a broken layout. */
   const cross=k=>{let cc=0; for(let i=0;i<n;i++){const h=heads[i]-1; if(h<0)continue; const lo=Math.min(i,h),hi=Math.max(i,h); if(lo<k&&hi>=k)cc++;} return cc;};
   // greedy break by each UNIT's full slot width (word, POS tag AND transliteration right edges are all in w[i]); an MWT
   // group is ATOMIC — it never splits across a line and its fused surface form is reserved against the budget
@@ -583,7 +607,7 @@ function arcsWrapped(si){
         if(band<need) r.arcZone+=need-band; }
       r.wordY=r.arcZone+WORD_OFF;
       r.rTop=r.arcZone-0.75*r.maxH;   // root stub rises to the VISIBLE apex of the tallest arc IN THIS ROW (post-wrap)
-      r.stackBot=r.wordY+(hasTr(t)?belowGap():0)+(belowTierN()*(belowGap()))+(show.pos?belowGap():0);   // reserve the transliteration + gloss + POS rows below the word (Item 1/8: every below-row folds in descent(POS_F), matching belowStack's descender-matched step)
+      r.stackBot=r.wordY+belowReserveH(hasTr(t),belowTierN(),show.pos);   // reserve the transliteration + gloss + POS rows below the word (Item 1/8: every below-row folds in descent(POS_F), matching belowStack's descender-matched step)
       const rt=rowTies(D,r.s,r.e), hasMwt=rt.mwt.length||rt.xpos.length; r.tieBot=r.stackBot+(hasMwt?mwtDepth(D):0);   // item 1: an ExtPos bracket reserves the same row depth an MWT tie does
       prevBot=r.tieBot; yCur=r.tieBot+ROWGAP; });
     return yCur; };
@@ -719,7 +743,16 @@ function arcsWrapped(si){
     if(y<y0-0.5) g.insertBefore(E("line",{class:"leader leader-ghost",x1:mx,y1:y+hh,x2:mx,y2:apex,stroke:arcInk(col)}),g.firstChild);   // item 6   /* the drained ink, NOT the full relation colour: the ghost EDGE is stroked with arcInk(col) while this leader took `col` raw, so at the same .72 opacity the leader read as the strongest part of a ghost — the one thing it is least meant to be. arcInk is what every other ghost stroke already passes through. */
     drawLabel(g,mx,y,rel,col); const lb=g.lastElementChild; if(lb)lb.classList.add("lbl-ghost"); boxes.push({x:mx,y,hx:half,hy:hh}); boxes.push({x:mx,y:apex,hx:2,hy:2}); });
   fitTight(svg,boxes);
-  return wrap(svg);
+  /* ⚠ fitTight (just above) can still widen past `budget` — see its own note on `budget` for why this is
+     accepted rather than chased to zero — so this notation gets the SAME hard backstop bracketsWrapped's
+     `white-space:nowrap` needed: `.wrapped` (app.css) clips this .diagram's horizontal overflow silently
+     instead of pushing the page wider or leaving a horizontal scrollbar on a view whose whole point is not
+     needing one. Its own `max-height:none` is load-bearing, not incidental — see its comment; dropping it
+     re-introduces a real regression (a tall wrapped diagram rendering squashed to a sliver), not a cosmetic
+     one. `wrap()` is shared with wrapDiagram's own plain (unwrapped) fallback, which must NOT get this
+     treatment — genuinely wide unwrapped content is supposed to scroll — so the class is added here, after
+     wrap() returns, not inside it. */
+  const d=wrap(svg); d.classList.add("wrapped"); return d;
 }
 
 /* ---- wrapped (projection) layout for stemma / hierarchy ----
@@ -827,7 +860,7 @@ function projWrapped(si,kind){
   const anyMwt=rows.some(r=>{ const rt=rowTies(D,r.s,r.e); return rt.mwt.length||rt.xpos.length; });
   // one uniform row height. With deprels above, the word gets an equal gap above (deprel) and below (POS), and the
   // whole stack sits with equal padding at the top and bottom of the row.
-  const PADV=8, belowH=(hasTr(t)?belowGap():0)+(belowTierN()*(belowGap()))+(show.pos?belowGap():0);   // Item 1/8: every below-row (translit, each gloss, POS) folds in descent(POS_F), matching belowStack's descender-matched step
+  const PADV=8, belowH=belowReserveH(hasTr(t),belowTierN(),show.pos);   // Item 1/8: every below-row (translit, each gloss, POS) folds in descent(POS_F), matching belowStack's descender-matched step
   const RELDESC=descent(WORD_F);   // fold the token form's descender depth into the deprel→word step (as the arc view / unwrapped stemma do between levels), so descenders clear below the deprel
   const wordY = deprelsAbove ? (PADV+8+20+RELDESC) : ASC, yDep = wordY-(20+RELDESC), stackBot = wordY+belowH;   // deprel 20px + descent(WORD_F) above the word: the extra descender depth is clearance BELOW the label (deprel y stays at PADV+8, word drops by the descent); top clearance unchanged
   const oneRowH=Math.ceil(stackBot+descent(WORD_F)+(anyMwt?mwtDepth(D)+18:0)+(deprelsAbove?PADV:10));
@@ -967,12 +1000,12 @@ function wpRevealSel(){ if(sel.s<0||sel.t<=0) return;
 
 function tree(si){
   const D=displaySent(DOC[si]), t=D.tokens, n=t.length, OID=k=>D.map[k]+1, sent={tokens:t}; RTL=D.rtl;
-  const {children,root,head}=structure(sent),belowReserve=(trLayer()?belowGap():0)+(belowTierN()*(belowGap())),LV=48+belowReserve,TOP=18,A=16,B=7;         // item 2: the level height = a CONSTANT 48 (the stemma's LV) + the below-stack reserve, and the outgoing edge attaches just below that reserve (parentEndY) — so an edge is always LV−belowReserve−A−B = 48−16−7 = 25 tall, EXACTLY the stemma's, no matter how many annotation tiers are shown. belowReserve uses the SAME belowGap() per-row step the tiers are drawn at, so it cancels cleanly (Item 8: each tier row folds in descent(POS_F))
+  const {children,root,head}=structure(sent),belowReserve=belowReserveH(trLayer(),belowTierN(),false),LV=48+belowReserve,TOP=18,A=16,B=7;         // item 2: the level height = a CONSTANT 48 (the stemma's LV) + the below-stack reserve, and the outgoing edge attaches just below that reserve (parentEndY) — so an edge is always LV−belowReserve−A−B = 48−16−7 = 25 tall, EXACTLY the stemma's, no matter how many annotation tiers are shown. belowReserve uses the SAME belowGap() per-row step the tiers are drawn at, so it cancels cleanly (Item 8: each tier row folds in descent(POS_F))
   const SPW=meas(" ",WORD_F), NGAP=SPW+4;                              // node gap matches the stemma column gap
   // tidy layout: leaves packed with the stemma's node gap; a parent is centred over its children. Adjacent
   // siblings are then pushed apart (whole subtree shifted) only as far as their nodes AND their incoming
   // edge labels require — same word-space collision rule as the stemma, without padding every node.
-  const lw=i=>Math.max(fmeas(t[i],NODE_F), fmeas(t[i],NODE_F_BOLD), trLayer()?meas(trTxt(t[i]),trFont(t[i])):0, glossSlotW(t[i]));    // node slot = its widest row: host form, the transliteration/original row, OR the gloss tiers. Folding the transliteration in (the stemma/arc/bracket layouts already do) is what DE-COLLIDES adjacent transliterations in the hierarchy — sibling separation reserves the full annotation width, and since the gap is driven per-node it spaces each level independently while a sole child stays centred (vertical) under its parent (item 13). Bold width (.node.sel .node-lbl) reserved for EVERY node, not just the selected one — no reflow-on-select path exists here, so the slot must already fit either state
+  const lw=i=>Math.max(fmeas(t[i],NODE_F), trLayer()?meas(trTxt(t[i]),trFont(t[i])):0, glossSlotW(t[i]));    // node slot = its widest row: host form, the transliteration/original row, OR the gloss tiers. Folding the transliteration in (the stemma/arc/bracket layouts already do) is what DE-COLLIDES adjacent transliterations in the hierarchy — sibling separation reserves the full annotation width, and since the gap is driven per-node it spaces each level independently while a sole child stays centred (vertical) under its parent (item 13)
   const hgw=i=>tailW(t[i],NODE_F);                                    // real-width room for the node's folded-punctuation satellites (to its inline-end)
   const ldw=i=>leadW(t[i],NODE_F);                                    // item 2: room for right-merging leads (inline-start)
   const elw=i=>(show.labels&&i!==root)?meas(t[i].deprel,POS_F):0;      // incoming edge-label width
@@ -1004,7 +1037,7 @@ function tree(si){
   const orientGhost=(origin,target)=>depth[origin]<depth[target]?{d:target,h:origin}:{d:origin,h:target};
   const ghostEdges=ghostPairs.map(([o,tg,rel])=>{ const {d,h}=orientGhost(o,tg);
     return {d,h,rel,origin:o,y1:ny(depth[d])-A,y2:parentEndY(h)}; });
-  const maxD=Math.max(0,...depth),total=Math.max(2,...x.map((xx,i)=>xx+lw2(i)/2+hgw2(i)))+6,H=TOP+maxD*LV+16+(trLayer()?belowGap():0)+(belowTierN()*(belowGap()));   // Item 8: the bottom tier tail folds in descent(POS_F) per row, matching belowStack. lw2/hgw2 (not nw/hgw) so a ∅ pushed to the canvas edge still gets cropped in
+  const maxD=Math.max(0,...depth),total=Math.max(2,...x.map((xx,i)=>xx+lw2(i)/2+hgw2(i)))+6,H=TOP+maxD*LV+16+belowReserveH(trLayer(),belowTierN(),false);   // Item 8: the bottom tier tail folds in descent(POS_F) per row, matching belowStack. lw2/hgw2 (not nw/hgw) so a ∅ pushed to the canvas edge still gets cropped in
   if(RTL) for(let i=0;i<N;i++) x[i]=total-x[i];   // mirror the tidy tree for right-to-left (N, not n — the ∅ mirrors too)
   const svg=E("svg",{class:"tree",width:total,height:H,viewBox:`0 0 ${total} ${H}`}); const boxes=[];
   // edges as ONE cased unit (Item 21): pre-compute stroke path + arrowhead, draw all casings behind, then strokes on top
@@ -1052,13 +1085,14 @@ function tree(si){
     const lbl=E("text",{class:"node-lbl"+italDeco(t[i]),x:x[i],y:ny(depth[i])}); lbl.textContent=bform(t[i]); const tw=fmeas(t[i],NODE_F);   // host form only
     const hit=E("rect",{class:"tok-hit tok-wash",x:x[i]-Math.max(26,tw/2+4),y:ny(depth[i])-A,width:Math.max(52,tw+8),height:A+B});   // node box = its own wash region
     g.appendChild(hit);
-    { const rt=trTxt(t[i]); if(rt){ const ty=ny(depth[i])+belowGap(); const e=E("text",{class:"translit"+frnUp(t[i]),x:x[i],y:ty,"text-anchor":"middle"}); e.textContent=rt; if(trRowEdit())e.classList.add("tr-edit"); g.appendChild(e); boxes.push({x:x[i],y:ny(depth[i])+14,hx:meas(rt,trFont(t[i]))/2,hy:7}); svgSeamMark(g,t[i],x[i],ty,meas(rt,trFont(t[i]))/2,trFont(t[i]),boxes,null,"translit"); } }   // Item 8: same descender-matched top gap (belowGap()) the other renderers give the translit row
-    belowTiers().forEach((tier,ti)=>{ const gy=ny(depth[i])+(trTxt(t[i])?belowGap():0)+(ti+1)*(belowGap()), txt=tierText(t[i],tier), dtxt=txt||"…"; const e=E("text",{class:"gloss gl-edit"+(txt?"":" gl-empty")+frnUp(t[i]),x:x[i],y:gy,"text-anchor":"middle","data-tier":tier,tabindex:"0"}); setGlossText(e,tier,dtxt); g.appendChild(e); boxes.push({x:x[i],y:gy-4,hx:meas(dtxt,trFont(t[i]))/2,hy:7});
+    const dropY=ny(depth[i])+STACK_DROP;   // seeds the ONE gap from the glyph (node-lbl) row down to whichever row is drawn first below it — same one-time STACK_DROP belowStack() seeds with y0+STACK_DROP; every later belowGap() step here stays the plain, un-bumped one
+    { const rt=trTxt(t[i]); if(rt){ const ty=dropY+belowGap(); const e=E("text",{class:"translit"+frnUp(t[i]),x:x[i],y:ty,"text-anchor":"middle"}); e.textContent=rt; if(trRowEdit())e.classList.add("tr-edit"); g.appendChild(e); boxes.push({x:x[i],y:ny(depth[i])+14,hx:meas(rt,trFont(t[i]))/2,hy:7}); svgSeamMark(g,t[i],x[i],ty,meas(rt,trFont(t[i]))/2,trFont(t[i]),boxes,null,"translit"); } }   // Item 8: same descender-matched top gap (belowGap()) the other renderers give the translit row
+    belowTiers().forEach((tier,ti)=>{ const gy=dropY+(trTxt(t[i])?belowGap():0)+(ti+1)*(belowGap()), txt=tierText(t[i],tier), dtxt=txt||"…"; const e=E("text",{class:"gloss gl-edit"+(txt?"":" gl-empty")+frnUp(t[i]),x:x[i],y:gy,"text-anchor":"middle","data-tier":tier,tabindex:"0"}); setGlossText(e,tier,dtxt); g.appendChild(e); boxes.push({x:x[i],y:gy-4,hx:meas(dtxt,trFont(t[i]))/2,hy:7});
       if(tier==="mseg"||tier==="mgloss") svgSeamMark(g,t[i],x[i],gy,(tier==="mgloss"?measGloss(dtxt,tierFont(tier,t[i])):meas(dtxt,tierFont(tier,t[i])))/2,tierFont(tier,t[i]),boxes,null,tier); });   // gloss / morphemic tiers under the node (hierarchy has no per-node POS row) — the segmentation AND morphemic-gloss rows carry the seam mark (both per-morpheme, drawn off the "…" placeholder's own width where this tier isn't annotated for this token — see the note beside diagram-core.js's belowStack); the lexical gloss row doesn't
     g.appendChild(lbl); gwFormSVG(g,lbl,t[i],x[i],ny(depth[i]),NODE_F,"node-lbl",si,boxes);   // goeswith: the continuation parts join the head on the node row, so the ONE translit/gloss stack drawn above spans the whole word
     if(gwOf(t[i]).length){ const ids=[OID(i)].concat(gwOf(t[i]).map(p=>p.oid));
       g.setAttribute("data-gw",ids.join(" "));
-      const STEP=belowGap(), nodeBot=ny(depth[i])+(trTxt(t[i])?STEP:0)+belowTierN()*STEP;   // this node's OWN below-stack bottom — the hierarchy has no shared word row, so each node stacks its rows itself
+      const STEP=belowGap(), nodeBot=dropY+(trTxt(t[i])?STEP:0)+belowTierN()*STEP;   // this node's OWN below-stack bottom — the hierarchy has no shared word row, so each node stacks its rows itself
       gwSlurSVG(svg,x[i]-tw/2,x[i]+tw/2,nodeBot+5+tieLead(),si,ids,boxes); }   // the hierarchy draws no ties at all (an MWT has no place in a dependency tree), so the slur is seated here directly — by the SAME "+5, then tieLead()" rule mwtTie is handed in every other notation, just measured from this node's own stack bottom
     svgMarks(g,x[i],ny(depth[i]),t[i],NODE_F); svgFormSeamMark(g,t[i],x[i],ny(depth[i]),NODE_F,boxes);   // Item 11: node form appended LAST → paints on TOP of the translit/gloss stack; item 4: marks in front of it, then the seam mark off its inline end
     g.style.cursor="pointer"; g.addEventListener("click",()=>pick(si,OID(i))); svg.appendChild(g);

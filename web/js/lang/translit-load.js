@@ -180,41 +180,14 @@ async function fillTranslit(){ if(!hasBridge()||!DOCLANG) return;   // translite
   // makes js/core/document.js's notation-switch cache safe to compose with translit staying properly async.
   if(any){ if(typeof invalidateDiaCache==="function") invalidateDiaCache(); renderUnlessEditing(); } }   // renderUnlessEditing, not preserveScroll(renderDoc): this pass is asynchronous and lands whenever the bridge answers, which may be while the reader is typing in a diagram field — and a full re-render destroys the field they are in. The cache is dropped either way, so the refreshed rows appear on the editor's own commit render (js/ui/wiring.js)
 
-/* ── THE SCRIPT RENDERINGS THAT ARE KEYED ON MORE THAN THE FORM ────────────────────────────────────
-   Every other Script scheme answers about a SPELLING (optionally disambiguated by the word class —
-   see trUpos): 编程 is 編程 whatever else the token says. Latin macronisation is the exception, and
-   the whole reason `Api.orthography` grew `feats`/`lemmas` beside `upos` at all: `Gallia` nominative
-   and `Galliā` ablative are ONE spelling with two answers, separated only by FEATS, and app/macron.py
-   reads the lemma too (it is what tells an a-stem from an o-stem where InflClass is absent).
-
-   Two consequences follow, and both used to be missing.
-   · The BATCH KEY has to carry them. Keyed on (surface, upos) alone, the de-duplication handed every
-     token sharing a spelling and a tag whichever FEATS the FIRST of them happened to have — so one
-     `Gallia` in a document decided the macrons of all of them, which is exactly the collision the
-     extra two arguments were threaded to prevent.
-   · A CACHED RENDERING GOES STALE when any of the four change, not only the form. t.ortho used to be
-     dropped on a form edit (afterFormEdit) and on a retag (uposSyncTranslit) and nowhere else, so
-     correcting a FEATS or a lemma left the macronised line answering the previous analysis — with
-     nothing on screen to say so, since the bare form is a legitimate macronisation too.
-   Rather than teach each of the dozen-odd FEATS/lemma write sites to invalidate, the rendering
-   carries the KEY IT WAS COMPUTED FOR (`t._orthoKey`) and fillOrtho refills whatever no longer
-   matches. One mechanism, and a new write site cannot forget to use it. */
-function orthoNeedsMorph(){ return isLatinLang() && !!ORTHO_SCHEME && ORTHO_SCHEME!=="none"; }
-function orthoLemOf(t){ return (t&&t.lemma&&t.lemma!=="_")?t.lemma:""; }
-function orthoKeyOf(t){ const base=trKey(t.form,trUpos(t));
-  return orthoNeedsMorph() ? base+" "+(t.feats||"")+" "+orthoLemOf(t) : base; }
-function orthoStale(t,k){ return !t.ortho || (orthoNeedsMorph() && t._orthoKey!==k); }
-/* …and the trigger. markDirty (js/io/bridge.js) is the one funnel EVERY document edit passes through,
-   so hanging the re-render off it is what makes "any attribute of any token" true rather than a list
-   of the attributes someone remembered. Debounced, because a single gesture marks the document dirty
-   several times over (a grid commit, its featsSyncGloss, its background re-parse), and skipped while
-   an inline field is open — fillOrtho ends in a full re-render, which would take the keyboard out
-   from under the reader; the next markDirty (the commit's own) re-arms it. */
-let _orthoMorphT=null;
-function scheduleOrthoMorph(){ if(!orthoNeedsMorph()) return;   // one language, one scheme: every other document pays a boolean
-  clearTimeout(_orthoMorphT);
-  _orthoMorphT=setTimeout(()=>{ if(typeof INLINE_EDIT_OPEN!=="undefined"&&INLINE_EDIT_OPEN){ scheduleOrthoMorph(); return; }
-    fillOrtho(); },120); }   // fillOrtho is a no-op unless a token's stamp actually moved, and re-renders only if it filled something
+/* ── STALENESS FOR SCRIPT RENDERINGS ─────────────────────────────────────────────────────────────
+   A cached rendering (t.ortho) goes stale when the SURFACE or the WORD CLASS changes — a Script
+   scheme can be reading-dependent (see trUpos: Chinese heteronym-by-POS is the live example), so a
+   rendering computed for one tag must not be handed to a token that has since been retagged. The
+   rendering carries the KEY IT WAS COMPUTED FOR (`t._orthoKey`) and fillOrtho refills whatever no
+   longer matches, rather than teaching every form/retag write site to invalidate by hand. */
+function orthoKeyOf(t){ return trKey(t.form,trUpos(t)); }
+function orthoStale(t,k){ return !t.ortho || t._orthoKey!==k; }
 // ── orthography (display-only glyph re-rendering; token.ortho, never written to MISC) ──────────
 async function fillOrtho(){ if(!hasBridge()||!DOCLANG) return;
   const skt=isSanskritLang();   // Sanskrit MWT surface forms are RECONSTRUCTED from components with external sandhi (below), not converted from the stored m.form
@@ -222,23 +195,14 @@ async function fillOrtho(){ if(!hasBridge()||!DOCLANG) return;
   if(!scriptOn && !skt) return;   // Original / None for a non-Sanskrit language → stored form, nothing to fetch
   let any=false;
   if(scriptOn){   // fetch the SCRIPT rendering for single tokens (and MWTs for non-Sanskrit)
-    const need=new Map();   // orthoKeyOf: (surface, upos) as the transliteration passes use — plus FEATS + lemma where the scheme reads them (see the note above fillOrtho). A script rendering can be reading-dependent, so it must not be shared between two tokens spelt alike but analysed differently
-    const want=(k,txt,u,fe,le)=>{ if(!need.has(k)) need.set(k,[txt,u,fe||"",le||"",k]); };
-    const lemOf1=orthoLemOf;
-    DOC.forEach(s=>{ s.tokens.forEach(t=>{ const k=orthoKeyOf(t); if(t.form&&orthoStale(t,k))want(k,t.form,trUpos(t),t.feats,lemOf1(t)); }); if(!skt)(s.mwt||[]).forEach(m=>{ if(m.form&&!m.ortho)want(trKey(m.form,""),m.form,""); }); });   // an MWT range has no one UPOS (see fillTranslit) → no opinion, and no FEATS or lemma either
+    const need=new Map();   // orthoKeyOf: (surface, upos) as the transliteration passes use. A script rendering can be reading-dependent, so it must not be shared between two tokens spelt alike but tagged differently
+    const want=(k,txt,u)=>{ if(!need.has(k)) need.set(k,[txt,u,k]); };
+    DOC.forEach(s=>{ s.tokens.forEach(t=>{ const k=orthoKeyOf(t); if(t.form&&orthoStale(t,k))want(k,t.form,trUpos(t)); }); if(!skt)(s.mwt||[]).forEach(m=>{ if(m.form&&!m.ortho)want(trKey(m.form,""),m.form,""); }); });   // an MWT range has no one UPOS (see fillTranslit) → no opinion
     if(need.size){ const batch=[...need.values()]; let r;
-      // feats/lemma ride along beside upos for the Latin `macron` scheme, which is keyed on the whole
-      // morphological analysis rather than on the class: the form alone reaches only the
-      // morphology-blind level of the lookup, where nominative `Gallia` picks up an ablative macron.
-      // Batched on (surface, upos) as before, so the extra two are taken from the FIRST token that
-      // asked for that key — which is exactly right, since two tokens sharing a surface and a tag
-      // that disagree on FEATS are a homograph the table cannot separate anyway.
-      try{ r=await window.pywebview.api.orthography(batch.map(x=>x[0]),DOCLANG,ORTHO_SCHEME,batch.map(x=>x[1]),
-                                                    batch.map(x=>x[2]||""),batch.map(x=>x[3]||"")); }catch(e){ return; }
-      const map={}; batch.forEach((x,i)=>{ const v=(r&&r.ortho&&r.ortho[i])||""; if(v)map[x[4]]=v; });   // x[4] = the key the entry was queued under, so the answer comes back to exactly the tokens that asked
+      try{ r=await window.pywebview.api.orthography(batch.map(x=>x[0]),DOCLANG,ORTHO_SCHEME,batch.map(x=>x[1])); }catch(e){ return; }
+      const map={}; batch.forEach((x,i)=>{ const v=(r&&r.ortho&&r.ortho[i])||""; if(v)map[x[2]]=v; });   // x[2] = the key the entry was queued under, so the answer comes back to exactly the tokens that asked
       DOC.forEach(s=>{ s.tokens.forEach(t=>{ const k=orthoKeyOf(t), v=(t.form&&orthoStale(t,k))?map[k]:""; if(v){ t.ortho=v; t._orthoKey=k; } }); if(!skt)(s.mwt||[]).forEach(m=>{ const v=m.form&&!m.ortho?map[trKey(m.form,"")]:""; if(v) m.ortho=v; }); });   // the stamp rides WITH the value: a rendering and the analysis it was computed for can never be separated
-      any=true; }
-    if(orthoNeedsMorph() && laMwtCompose()) any=true; }   // …and the multi-word tokens, whose surface no lexicon lists — see laMwtCompose
+      any=true; } }
   if(skt){   // items 9/18: fuse each Sanskrit MWT's component forms by external sandhi — scheme="" gives the fused IAST
     const scheme=scriptOn?ORTHO_SCHEME:"";   // item 18: sandhi applies even with NO script (None/Original) → fused IAST as the surface form
     const lemOf=t=>((t.lemma&&t.lemma!=="_")?t.lemma:"");   // the CoNLL-U lemma is an r-stem signal for visarga sandhi (punar, antar, …)
@@ -279,78 +243,6 @@ async function fillOrtho(){ if(!hasBridge()||!DOCLANG) return;
         if(r2&&r2.ortho){ srefs.forEach((s,i)=>{ if(r2.ortho[i]){ s.orthoLine=r2.ortho[i]; any=true; } }); } } } }
   if(any){ if(typeof invalidateDiaCache==="function") invalidateDiaCache(); renderUnlessEditing(); syncDocFonts(); } }   // renderUnlessEditing for the same reason fillTranslit uses it: an async refill must not pull the keyboard out of an open inline field   // wholesale, same reasoning as fillTranslit's own invalidateDiaCache call above: t.ortho/m.ortho/s.orthoLine feed bform()'s glyph directly, and this pass runs over the whole DOC asynchronously with no si of its own — BUG FIX: switching the Script picker (orPick) or loading a language whose remembered Script preference is a real script (loadOrthoSchemes) populates t.ortho/m.ortho/s.orthoLine with a script this document never used before — but until now nothing then asked fontload.js to fetch that script's face. syncDocFonts() is normally only called from the document-load paths (bridge.js/formats.js/init.js), all of which run BEFORE a script is ever picked, so docScripts()'s scan (which reads t.ortho, among other fields) saw no non-Latin text yet and the newly-chosen script's Noto face was NEVER requested this session. The page just fell through the CSS font stack to whatever the browser could resolve for those codepoints — on a machine with no native coverage for the script (the common case for anything rarer than Devanagari), that is either a patchwork of per-glyph system substitutes or the missing-glyph box, and canvas measureText() (meas(), used for every diagram width) does NOT do the same per-glyph fallback substitution DOM/SVG text painting does, so the measured slot and the painted glyphs disagree → clipped token forms. Calling syncDocFonts() here (AFTER t.ortho/m.ortho/s.orthoLine are populated, so the scan actually sees the new script) fetches the face if needed; ensureScriptFont() already re-renders via preserveScroll(renderDoc) once the face lands (see fontload.js), so this self-corrects without a special-cased second render pass here.
 
-/* ── LATIN VOWEL LENGTH, AS SOMETHING OTHER THAN A SCRIPT ──────────────────────────────────────────
-   `macron` is a Script scheme (js/lang/translit.js), i.e. a DISPLAY preference: turn the pill off and
-   the glyphs go back to the bare spelling the file holds. The MORPHEME SEGMENTATION is not a display
-   preference — it is annotation, it is stored in MISC MSeg, and a Latin segmentation that does not say
-   `dī-vīsa` is a different claim from one that does. So the tier carries the macrons WHATEVER the pill
-   says, and this is the pass that supplies them.
-   ⚠ THE MACRONS ARE OVERLAID ON THE SEGMENTATION, NOT SEGMENTED FROM. Feeding macronised strings into
-   msegSegment looked like the obvious route and is wrong: quantity ALTERNATES across a paradigm, so
-   `dīvīsa` against its lemma `dīvidō` shares only `dīv` where the bare pair shares `divi` — the extra
-   information makes the shared-material match SHORTER and moves the boundary. The letters decide where
-   the cut goes; the marks are then written onto the letters that survived it. That is sound because
-   macronisation is LENGTH-PRESERVING (macron.py emits precomposed ā ē ī ō ū — verified over the table),
-   so the two strings index each other character for character.
-   Cached per token under the key `Api.orthography` is actually keyed on — surface, UPOS, FEATS and lemma
-   — because vowel length is a function of the whole analysis (`Gallia` Nom vs `Galliā` Abl), the same
-   reason orthoKeyOf carries them. */
-function macronNeeded(){ return isLatinLang() && !macronAvailable(); }   // this document is Latin and nothing here can macronise it
-function stripQuantity(s){ return (s||"").normalize("NFD").replace(/[̄̆]/g,"").normalize("NFC"); }   // combining macron + breve, off the DECOMPOSED string so precomposed ā and a+U+0304 go alike (app/macron.py's _strip_quantity, said in JS)
-/* ⚠ A MULTI-WORD TOKEN'S MACRONS COME FROM ITS COMPONENTS, because no lexicon holds its surface.
-   `macrons.txt` lists WORDS and never host+clitic, so `armaque` is simply absent from it and the whole
-   fused form came back bare — which is what put an unmacronised word in the middle of an otherwise
-   macronised diagram and running line. The components are words: `arma` and `que` each answer, each with
-   its own UPOS/FEATS/lemma behind the answer (which the fused surface could never have had — the range
-   has no one analysis, see the `want` call above), and concatenating them is exact.
-   THE JOIN IS CHECKED BEFORE IT IS TRUSTED. An MWT's surface is not always its components glued together
-   — French `du` is `de`+`le` — so the composed string is accepted only where stripping the quantities off
-   it reproduces the stored form. Where it doesn't, m.ortho keeps whatever the blind whole-surface request
-   gave it and the word shows bare, which is the honest answer.
-   Keyed on the components' own renderings, so a component whose analysis (and therefore whose vowel
-   length) has just changed carries the range with it. */
-function laMwtCompose(){ let any=false;
-  DOC.forEach(s=>(s.mwt||[]).forEach(m=>{ if(!m.form) return;
-    const cts=s.tokens.slice(m.from-1,m.to); if(!cts.length) return;
-    const parts=cts.map(t=>t.ortho||t.form||""), key=parts.join(" ");
-    if(m._orthoKey===key) return;                       // nothing beneath it moved
-    m._orthoKey=key;
-    const joined=parts.join("");
-    if(stripQuantity(joined).toLowerCase()!==stripQuantity(m.form).toLowerCase()) return;   // not a plain concatenation → this is not the composed form of that word
-    if(joined!==m.ortho){ m.ortho=joined; any=true; } }));
-  return any; }
-function laMacKeyOf(t){ return trKey(t.form,trUpos(t))+" "+(t.feats||"")+" "+orthoLemOf(t); }
-function laMacStale(t){ return !!t.form && t._laMacKey!==laMacKeyOf(t); }
-// overlay `mac` (the macronised spelling of the same letters) onto a segmentation of the bare form
-function msegOverlayMacrons(seg,mac){ if(!seg||!mac) return seg;
-  const S=Array.from(seg), M=Array.from(mac); let j=0, out="";
-  for(const ch of S){ if(ch==="-"){ out+="-"; continue; } out+=(j<M.length?M[j]:ch); j++; }
-  return j===M.length?out:seg; }   // the two disagreed on length after all → keep the bare segmentation rather than shift every mark by one
-async function fillLaMacron(){ if(!hasBridge()||!isLatinLang()||!macronAvailable()) return false;
-  const need=new Map();
-  const want=t=>{ const k=laMacKeyOf(t); if(!need.has(k)) need.set(k,[t.form,trUpos(t),t.feats||"",orthoLemOf(t),k]); };
-  DOC.forEach(s=>s.tokens.forEach(t=>{ if(laMacStale(t)) want(t); }));
-  if(!need.size) return false;
-  const batch=[...need.values()]; let r;
-  try{ r=await window.pywebview.api.orthography(batch.map(x=>x[0]),DOCLANG,"macron",batch.map(x=>x[1]),
-                                                batch.map(x=>x[2]),batch.map(x=>x[3])); }catch(e){ return false; }
-  const map={}; batch.forEach((x,i)=>{ const v=(r&&r.ortho&&r.ortho[i])||""; if(v)map[x[4]]=v; });
-  let any=false;
-  DOC.forEach(s=>s.tokens.forEach(t=>{ if(!laMacStale(t))return; const k=laMacKeyOf(t), v=map[k];
-    if(v){ t._laMac=v; t._laMacKey=k; any=true; } }));
-  return any; }
-/* …and the two together: fetch the lengths, then re-derive every segmentation that was ours to derive.
-   msegRefill's own provenance guard is what keeps a hand-typed MSeg out of this — the marks arriving is
-   not new evidence about where a reader chose to cut. Debounced off markDirty for the same reason
-   scheduleOrthoMorph is (one gesture dirties the document several times over), and skipped while an
-   inline field is open. */
-let _laMacT=null;
-function scheduleLaMacron(){ if(!MORPH_ON||!isLatinLang()||!macronAvailable()) return;
-  clearTimeout(_laMacT);
-  _laMacT=setTimeout(async()=>{ if(typeof INLINE_EDIT_OPEN!=="undefined"&&INLINE_EDIT_OPEN){ scheduleLaMacron(); return; }
-    if(!await fillLaMacron()) return;
-    let any=false; DOC.forEach(s=>s.tokens.forEach(t=>{ if(msegRefill(t)) any=true; }));
-    if(any){ markDirty(); renderUnlessEditing(); } },120); }
 // ── MISC Translit/LTranslit (romanisation), written ONLY on a parse / secondary-annotation pass ──
 // Set/replace/remove a Key=Value in a CoNLL-U MISC string, preserving the other pairs and their order.
 function setMiscKV(misc,key,val){ const empty=(!misc||misc==="_"); let parts=empty?[]:misc.split("|"); let done=false;

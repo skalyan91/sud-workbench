@@ -149,6 +149,29 @@ const _mtxt=document.createElementNS("http://www.w3.org/2000/svg","text");
 _mtxt.setAttribute("xml:space","preserve");
 _msvg.appendChild(_mtxt);
 function _measMount(){ const h=document.documentElement||document.body; if(h&&!_msvg.isConnected) h.appendChild(_msvg); }
+/* ⚠ CANVAS measureText() IS NOT A RELIABLE STAND-IN FOR WHAT foreignObject ACTUALLY PAINTS — it is a
+   SEPARATE font-resolution step, and the two can genuinely disagree about which underlying font file an
+   ambiguous family name resolves to. Measured on a real machine: fontCovers() (fontload.js) correctly
+   found LOCAL system coverage for "Noto Sans Grantha" and skipped downloading the app's own copy — the
+   right call, avoiding a redundant fetch — but canvas's `font` resolution and the DOM/SVG text-layout
+   engine's resolution picked DIFFERENT underlying faces for that family name on this system, with
+   materially different Grantha advance widths. smpReshape used to size every foreignObject from
+   _measCanvas(), baking in canvas's number permanently — which is what actually gets painted only when
+   canvas and DOM agree, and did not here: columns reserved 40+px more than the glyph actually needed,
+   and (worse) a seam mark measured against the SAME wrong number sat far from the neighbour whose real,
+   DOM-painted position never matched canvas's guess. Only reachable for the SMP/foreignObject path (the
+   ONE case where a canvas number gets used for something the DOM will independently paint) — regular SVG
+   <text> measurement (_measRaw, above) has no such second opinion to disagree with, because SVG paints
+   the very string it measured.
+   The fix: measure through the SAME mechanism that will actually paint the glyph — a live, attached HTML
+   element, not canvas — so there is no second font-resolution step left to disagree with the first.
+   Needs a REAL, connected box for the same reason _msvg does (see its own note): an unconnected element
+   may not fully lay out text either. */
+const _mdiv=document.createElement("div");
+_mdiv.setAttribute("aria-hidden","true");
+_mdiv.style.cssText="position:absolute;left:-99999px;top:0;white-space:pre;visibility:hidden;pointer-events:none";
+function _measMountHTML(){ const h=document.documentElement||document.body; if(h&&!_mdiv.isConnected) h.appendChild(_mdiv); }
+function _measDOM(s,f){ _measMountHTML(); _mdiv.style.font=f; _mdiv.textContent=s||""; return _mdiv.getBoundingClientRect().width; }
 // gwTieBox/descent/xHeight (below) stayed on canvas measureText rather than moving to the SVG path above: all
 // three measure a FIXED, script-independent reference glyph (U+203F undertie; Latin "gjpqy"/"x" for vertical
 // metrics) that resolves to the same Latin-covering face — usually the stack's plain "Noto Sans" — no matter
@@ -158,6 +181,7 @@ function _measMount(){ const h=document.documentElement||document.body; if(h&&!_
 // risk for a reserve this narrow.
 const _cv=document.createElement("canvas").getContext("2d");
 _measMount(); if(!_msvg.isConnected) document.addEventListener("DOMContentLoaded",_measMount);
+_measMountHTML(); if(!_mdiv.isConnected) document.addEventListener("DOMContentLoaded",_measMountHTML);
 /* TOKEN_STACK / MONO_STACK — the BASE family lists (~150 Noto script faces + the CJK/system tail). They are
    NOT written out here any more: the identical two lists are the KIT's own --token-font/--mono-font
    (macos-kit/mac-tokens.css, redeclared by the Fluent kit), a second hand-maintained copy in JS could only
@@ -201,14 +225,12 @@ _lazyFont("LIVE_TOKEN_STACK",()=>TOKEN_STACK); _lazyFont("LIVE_MONO_STACK",()=>M
    why a canvas font string cannot read the property itself). 1 everywhere except the ornamental Sanskrit
    scripts. It multiplies the TOKEN-FORM faces only — WORD_F/NODE_F/MWT_F and the goeswith tie — never the
    POS, transliteration or gloss rows, which are Latin annotation drawn at the app's own body size. */
-let TOK_MAG=1, TOK_WGHT=400, TOK_TRACK=0, TOK_ASC=1;
-// The magnified faces carry the weight the curve asks for at THEIR size (magWeight/magTrack below). A weight
-// token in the shorthand is what makes meas() measure the face the CSS actually paints — without it the slot is
-// sized from Regular while a variable face renders at 200, and every ornamental token sits in the wrong box.
-function magFont(px,wght){ const w=(wght!=null?wght:TOK_WGHT);
-  return (w!==400?w+' ':'')+(px*TOK_MAG)+'px '+LIVE_TOKEN_STACK; }   // `wght` overrides for the BOLD reserve pair, which must not inherit the curve weight AND carry a second weight token
+let TOK_MAG=1, TOK_WGHT=400, TOK_TRACK=0, TOK_ASC=1, TOK_MID=0, STACK_DROP=0;
+// TOK_WGHT stays 400 for magnified faces now (see magTrack's own note on why the weight curve was dropped for
+// them), so this omits a weight token and lets the face render at its own resting weight.
+function magFont(px){ const w=TOK_WGHT;
+  return (w!==400?w+' ':'')+(px*TOK_MAG)+'px '+LIVE_TOKEN_STACK; }
 _lazyFont("WORD_F",()=>magFont(15)); _lazyFont("NODE_F",()=>magFont(14));
-_lazyFont("WORD_F_BOLD",()=>magFont(15,640)); _lazyFont("NODE_F_BOLD",()=>magFont(14,640));   // the weight .sel USED to bold a selected token's form to — stemma/tree/arcs reserve width to the WIDER of the two so a token's hit/wash box never needs to change size on selection (no reflow-on-select trigger exists for these views, unlike brackets). Selection no longer changes weight at all (see the "selected token text" note in app.css beside .node.sel .node-lbl: the wrapped/HTML views had no such reserve, so the bump shifted and clipped their layout). The reserves are kept rather than removed — they cost a couple of px of slot width and dropping them would re-space every diagram — so this pair now buys headroom, not a bold state
 _lazyFont("POS_F",()=>'15px '+LIVE_TOKEN_STACK); _lazyFont("GRID_F",()=>'462 13px '+LIVE_MONO_STACK); _lazyFont("HEAD_F",()=>'500 11px '+uiFont()); _lazyFont("HEAD_F_REQ",()=>'700 11px '+uiFont());   // TWO heading faces now, because the band is drawn in two weights: HEAD_F is the OPTIONAL columns' SF Pro Medium (500) and HEAD_F_REQ the obligatory ID/Form columns' Bold (700) — see `table.grid th` / `table.grid th.th-req` in styles/app.css. scanColW/pillColW pick per column; measuring every heading with one weight under-sized ID and Form by the Medium→Bold width difference   // HEAD_F is the GRID HEADING face, and its only consumers are scanColW/pillColW (js/grid/grid.js). It must match `table.grid th` in styles/app.css exactly, which is now title case in the UI font at 11px/590 — NOT --token-font, so it is the one string here built off uiFont() (js/core/platform.js, which resolves --ui-font to a plain family list; a canvas font string can't carry a var()) rather than off LIVE_TOKEN_STACK, and refreshFontStacks' token/mono-stack invalidation therefore doesn't apply to it. uiFont() caches its own DOM read, so calling it from a lazy getter costs nothing after the first   // POS tags: same size + weight (normal, i.e. no weight token here) as the transliteration (TRANS_F) — upright rather than italic; c2sc small-caps do the visual "tag" styling now, not a bumped weight/shrunk size. GRID_F: weight curve @12.65px (matches table.grid's own CSS weight — was unweighted/400, measuring narrower than the grid actually renders)
 _lazyFont("TRANS_F",()=>'italic 15px '+LIVE_TOKEN_STACK); _lazyFont("TRANS_UP_F",()=>'15px '+LIVE_TOKEN_STACK); _lazyFont("MWT_F",()=>WORD_F);   /* the MWT surface form measures/renders exactly like a normal token form (WORD_F, 15px). TRANS_UP_F: the same row set UPRIGHT — what a Foreign=Yes token's transliteration renders in (see trFont/.frn-up) */
 _lazyFont("GRID_ITAL_F",()=>'italic 462 13px '+LIVE_MONO_STACK);   // GRID_F's own italic: what a Foreign=Yes token's Form cell renders in (see .tok-ital / gridFormFont), so its width is measured correctly (esp. RTL). Weight curve @12.65px, matching GRID_F
@@ -230,27 +252,44 @@ function weightCurve(px){ return Math.round(Math.max(400,Math.min(900,400*TOK_RE
 // same formula run the other direction)
 const TRACK_K=.08;
 function trackCurve(px){ return +(TRACK_K*-Math.log(px/TOK_REF_SIZE)).toFixed(4); }
+/* ITALIC TEXT GETS AN ADDITIONAL, FLAT TRACKING BUMP — oblique letterforms lean into their neighbours at the
+   SAME letter-spacing an upright face reads fine at, so every italic consumer (transliteration, the MSeg
+   tier, a Foreign=Yes form) carries this on top of whatever trackCurve(px) already gives its own size, at
+   every size — unlike trackCurve, ITALIC_TRACK does not vary with px; it is a correction for the SLANT, not
+   for the SIZE, so one flat em value applies whatever size the italic text is set at. Kept OUT of trackCurve
+   itself (not folded into TRACK_K) because most callers of trackCurve are upright and must not get it. */
+const ITALIC_TRACK=.02;
+function italicTrackOf(f){ return /(?:^|\s)italic(?:\s|$)/.test(f||"")?ITALIC_TRACK:0; }
 /* ── WHAT THE MAGNIFICATION DOES TO WEIGHT AND TRACKING ─────────────────────────────────────────────
-   An ornamental script is drawn at 2× (TOK_MAG), and BOTH curves above have something to say about text
-   at that size — the whole point of a curve is that it keeps reading right as the size moves.
+   Magnified Indic-script text (up to 1.5×, TOK_MAG) is drawn at its face's ORDINARY weight — no lightening
+   curve — which is a REVERSAL of an earlier design, not the original one, so it is worth stating why.
 
-   ⚠ WEIGHT FOLLOWS THE CURVE PAST ITS OWN FLOOR. `weightCurve` clamps at 400 because every ordinary
-   consumer is at or below the 15px reference, where the curve is heading UP; a 30px glyph is the first
-   thing in this app on the other side of it, and clamping there would set ornamental letters at the same
-   400 as body text while every other size in the app is compensated. So this is the same formula
-   (weight ∝ 1/size, i.e. 400/mag) with the floor dropped to 100 — the lightest a variable face can
-   answer. A STATIC face simply has nothing lighter to give and renders its Regular, which is what "as
-   far as possible" means here: ask for the curve, take what the face has, never synthesise.
+   ⚠ WEIGHT USED TO FOLLOW A CURVE, AND WAS TAKEN OFF IT ON REPORT. The earlier `magWeight(mag)` asked for
+   400/mag (a 30px glyph read the same visual weight as 20px body text would if both came off one variable
+   axis), floored at 100 rather than the ordinary curve's 400 — reasoning that a magnified glyph is the one
+   case in the app past the 15px reference, where the curve is already heading up, so its own floor had to
+   drop with it. That reasoning assumed every consumer was a variable face with a full weight axis to draw
+   from; it is not. Only the curated six "ornamental" scripts (Rañjanā, Soyombo, Siddhaṃ, Balinese, Javanese,
+   Tibetan) were ever tested against this, and INDIC_SCRIPTS (js/lang/translit.js) is now all 27 —
+   Devanagari, Bengali, Kannada, Telugu, Thai and the rest, mostly STATIC Noto Sans <Script> families with
+   Regular and nothing else. Asking a static face for "267" (400/1.5) is not "the lightest it has" the way
+   asking a variable face is — a static face either substitutes its one weight silently (harmless) or, on
+   fonts that DO carry a second static weight nearby, resolves to the WRONG one, which is worse than doing
+   nothing. Rather than special-case "does this specific script's font have a real weight axis" — data this
+   app does not have at the point TOK_WGHT is set — magnified text simply keeps its face's own weight now,
+   for every script alike. `magFont`'s own weight-token logic (just above) already treats 400 as "no token
+   needed", so this is the natural inert state, not a new branch.
 
-   ⚠ AND TRACKING FOLLOWS IT TOO — this is a BUG FIX, not a refinement. The CSS glyph rules carry the
-   tracking curve as a literal for their UNMAGNIFIED size (.0055em at 14px), while `_measOneUncached`
-   reads the size out of the font string and computes `trackCurve` for the MAGNIFIED one. At mag 2 the
-   two disagree by 0.08·ln 2 ≈ .0554em per character, and measurement is what sizes the slot: measured on
-   the real diagram, Balinese forms were laid out up to 12.5 px wider or 8.3 px narrower than they paint.
-   The delta is expressed in EM so one published value serves every rule whatever its own base size, and
-   `trackCurve(base) + magTrack(mag)` is identically `trackCurve(base × mag)` — the identity that makes
-   the CSS and meas() agree by construction rather than by two hand-kept literals. */
-function magWeight(mag){ return Math.max(100,Math.min(900,Math.round(400/(mag>0?mag:1)))); }
+   ⚠ TRACKING IS UNCHANGED, AND STAYS FOLLOWING THE CURVE — this exemption is about WEIGHT specifically,
+   not about magnification generally. The CSS glyph rules carry the tracking curve as a literal for their
+   UNMAGNIFIED size (.0055em at 14px), while `_measOneUncached` reads the size out of the font string and
+   computes `trackCurve` for the MAGNIFIED one. At mag 2 the two disagree by 0.08·ln 2 ≈ .0554em per
+   character, and measurement is what sizes the slot: measured on the real diagram, Balinese forms were
+   laid out up to 12.5 px wider or 8.3 px narrower than they paint. The delta is expressed in EM so one
+   published value serves every rule whatever its own base size, and `trackCurve(base) + magTrack(mag)` is
+   identically `trackCurve(base × mag)` — the identity that makes the CSS and meas() agree by construction
+   rather than by two hand-kept literals. Letter-spacing has no analogue of "the font doesn't have that
+   value" — every face honours whatever spacing it is asked for — so nothing here forced the same retreat. */
 function magTrack(mag){ return mag>0&&mag!==1 ? +(TRACK_K*-Math.log(mag)).toFixed(4) : 0; }
 /* The ORNAMENTAL FACE'S OWN ascent, in em — measured, not tabulated, because it is the one number here
    that is a property of the font rather than of the arithmetic, and the faces differ enormously (Kawi
@@ -264,28 +303,63 @@ function magTrack(mag){ return mag>0&&mag!==1 ? +(TRACK_K*-Math.log(mag)).toFixe
    reserve their ascent for stacked vowel signs that most words never use, so aligning the BOX top drops
    the letters far below the number beside them, and lifting by exactly this puts the head-line on the row
    top.
-   ⚠ ONE MEASUREMENT ANSWERS BOTH CASES. `actualBoundingBoxAscent` is the INK top of the sample character:
-   for Devanagari, Javanese, Balinese, Tibetan and the rest that is the shirorekha, because the head-line
-   IS the highest ink of a plain consonant; for a script without one it is the top of the letter, i.e. its
-   cap height. So the "if present, otherwise" is a property of the glyph rather than a branch here.
+   ⚠ MEASURED AGAINST THE TALLEST TOKEN ON SCREEN, NOT ONE ARBITRARY CHARACTER — a single-character sample
+   (the first non-Latin character found, whatever it happened to be) undercounts a REPHA or any other mark
+   that only forms once its whole cluster is shaped: a Nithya Ranjana "मूर्तित्वे" measures
+   actualBoundingBoxAscent 81.40 (of a 100 fontBoundingBoxAscent) as a WHOLE WORD — the र्त repha reaching
+   almost to the font's own top — against 65.40 for "म" measured alone, or for "र्त" measured out of the
+   context that triggers the substitution. Lifting by the single-character number (h−65.40) put the repha
+   16% of the em ABOVE the row top it was supposed to land ON; lifting by the whole-word number (h−81.40)
+   does not, and still lifts a plain, repha-less word most of the way there rather than stranding it at the
+   unlifted box top. So every token's `ortho` on screen is measured as its own full string (shaping intact,
+   `actualBoundingBoxAscent` still answers both the shirorekha and the cap-height case) and the SHORTEST
+   needed lift — the tallest ink — wins: any other token would have to poke above the winner's own
+   head-line to need less, and none needs more than what the winner already sets.
    Returned as an em FACTOR, not px, so the CSS can apply it against whatever size the line is set at. */
 function scriptLiftEm(){
   if(TOK_MAG===1) return 0;
-  const ch=scriptSampleChar(); if(!ch) return 0;
-  try{ _cv.font="100px "+scriptFamilyPrefix()+LIVE_TOKEN_STACK; const m=_cv.measureText(ch);
-    const h=m.fontBoundingBoxAscent, ink=m.actualBoundingBoxAscent;
-    return (h>0&&ink>0&&h>ink)?(h-ink)/100:0; }catch(_){ return 0; } }
-// the first character of the script actually on screen, and the family to name ahead of the stack for it
-function scriptSampleChar(){
-  for(const s of (typeof DOC!=="undefined"?DOC:[])){ for(const t of (s.tokens||[])){
-      const o=t.ortho||""; for(const c of o){ if(c>" "&&!/[\u0020-\u024F]/.test(c)) return c; } } }
-  return ""; }
+  try{
+    _cv.font="100px "+scriptFamilyPrefix()+LIVE_TOKEN_STACK;
+    let h=0, maxInk=-1;
+    for(const s of (typeof DOC!=="undefined"?DOC:[])){ for(const t of (s.tokens||[])){
+        const o=t.ortho||""; if(!o) continue;
+        const m=_cv.measureText(o);
+        if(m.fontBoundingBoxAscent>0 && m.actualBoundingBoxAscent>maxInk){ h=m.fontBoundingBoxAscent; maxInk=m.actualBoundingBoxAscent; } } }
+    return (h>0&&maxInk>=0&&h>maxInk)?(h-maxInk)/100:0;
+  }catch(_){ return 0; } }
 function scriptFamilyPrefix(){ return (typeof fontStackName==="function"&&ORTHO_SCHEME)?("'"+fontStackName(ORTHO_SCHEME)+"', "):""; }
+/* STACKING SCRIPTS' subjoined/stacked marks can reach well below what ANY Latin descender does — the
+   sample belowGap()'s existing descent(f) measures ("gjpqy") is Latin, and WORD_F never leads with the
+   script family (magFont), so descent(WORD_F) answers the SAME small Latin number no matter which script
+   is actually on screen. belowGap()'s magnification term only ever compensates for the font being
+   BIGGER, never for a subjoined consonant genuinely reaching DEEPER — the same gap .stext-stacked exists
+   to close for the running line, here for the diagram's own below-token stack (POS/translit/gloss).
+   Scoped to STACKING_SCRIPTS (js/lang/translit.js, the same set .stext-stacked uses) — an everyday Indic
+   running hand has no such reach, and adding this to belowGap() for every script would just open air
+   nothing needs. Measured against the DEEPEST ink actually on screen, not one sample character — same
+   reasoning as scriptLiftEm()'s own ascent measurement: a subjoined cluster only reaches its full depth
+   once shaped as a whole word. Returns the EXTRA px beyond what descent(WORD_F) already gives, so
+   belowGap() can simply add it; 0 outside a stacking script or with nothing yet to measure. Cached into
+   STACK_DROP by refreshFontStacks(), like TOK_ASC/scriptLiftEm() beside it — belowGap() runs far too
+   often (every renderer's draw AND reserve) to re-scan the whole document on each call. */
+function stackDropExtra(){
+  if(!(typeof STACKING_SCRIPTS!=="undefined" && STACKING_SCRIPTS.has(ORTHO_SCHEME))) return 0;
+  try{
+    _cv.font="100px "+scriptFamilyPrefix()+LIVE_TOKEN_STACK;
+    let maxInk=-1;
+    for(const s of (typeof DOC!=="undefined"?DOC:[])){ for(const t of (s.tokens||[])){
+        const o=t.ortho||""; if(!o) continue;
+        const m=_cv.measureText(o);
+        if(m.actualBoundingBoxDescent>maxInk) maxInk=m.actualBoundingBoxDescent; } }
+    if(maxInk<0) return 0;
+    const px=parseFloat(WORD_F)||TOK_REF_SIZE*TOK_MAG;
+    return Math.max(0,(maxInk/100)*px-descent(WORD_F));
+  }catch(_){ return 0; } }
 function scriptAscentEm(){
   if(TOK_MAG===1) return 1;
   let ch="";
   outer: for(const s of (typeof DOC!=="undefined"?DOC:[])){ for(const t of (s.tokens||[])){
-      const o=t.ortho||""; for(const c of o){ if(c>" "&&!/[ -ɏ]/.test(c)){ ch=c; break outer; } } } }
+      const o=t.ortho||""; for(const c of o){ if(c>" "&&!/[\u0020-\u024F]/.test(c)){ ch=c; break outer; } } } }
   if(!ch) return 1;
   /* ⚠ THE SCRIPT'S OWN FAMILY HAS TO LEAD THE STACK. Measured: canvas `fontBoundingBoxAscent` reports the
      metrics of the FIRST family in the font list whatever face actually shapes the text — a Kawi character
@@ -296,6 +370,17 @@ function scriptAscentEm(){
   const fam=(typeof fontStackName==="function"&&ORTHO_SCHEME)?("'"+fontStackName(ORTHO_SCHEME)+"', "):"";
   try{ _cv.font="100px "+fam+LIVE_TOKEN_STACK; const m=_cv.measureText(ch);
     const a=m.fontBoundingBoxAscent; return (a>0&&isFinite(a))?a/100:1; }catch(_){ return 1; } }
+/* HOW FAR THE FONT'S OWN VERTICAL MIDPOINT (its ascent-plus-descent box, halved) sits above the baseline, as
+   a ratio of its size — `(fontBoundingBoxAscent−fontBoundingBoxDescent)/2`, at a 100px reference. This is a
+   property of the FONT alone, not of any particular glyph (measured against a bare "m": swapping in any
+   other character changes nothing, since ascent/descent are metrics of the face, not the character), and it
+   scales exactly linearly with size — the one thing that makes the seam-mark fix below a closed form rather
+   than a second measurement. See svgSeamMark's own note for what it is for. */
+function scriptMidEm(){
+  if(TOK_MAG===1) return 0;
+  try{ _cv.font="100px "+scriptFamilyPrefix()+LIVE_TOKEN_STACK; const m=_cv.measureText("m");
+    const a=m.fontBoundingBoxAscent, d=m.fontBoundingBoxDescent;
+    return (a>0&&isFinite(a))?(a-d)/200:0; }catch(_){ return 0; } }
 // gloss-tier measurement fonts — must match the CSS at .gloss / .gloss[data-tier=…]: lexical gloss now shares
 // MGloss's own upright 13.2px (matches --stext-fs, the block-initial sentence size); MSeg is 15px italic (word-like).
 // Used to size token/node slots so a wide gloss can't crowd its neighbour (item 13).
@@ -419,10 +504,18 @@ function smpReshape(root){
     if(!SMP_RE.test(s)) continue;
     if(!any){ if(svgShapesSMP()) return; any=true; }        // probe ONCE, and only when there is SMP text to draw
     const cs=getComputedStyle(el), f=cs.font||((cs.fontWeight!=="400"?cs.fontWeight+" ":"")+cs.fontSize+" "+cs.fontFamily);
-    const w=_measCanvas(s,f); if(!(w>0)) continue;
+    const w=_measDOM(s,f); if(!(w>0)) continue;
     const x=parseFloat(el.getAttribute("x"))||0, y=parseFloat(el.getAttribute("y"))||0;
     let asc=parseFloat(cs.fontSize)||15, h=asc*2;
-    try{ _cv.font=f; const m=_cv.measureText(s); if(m.fontBoundingBoxAscent>0){ asc=m.fontBoundingBoxAscent; h=asc+(m.fontBoundingBoxDescent||asc*0.3); } }catch(_){}
+    /* actualBoundingBox*, not fontBoundingBox*: the latter is the font's whole em-box, sized for
+       marks THIS word may not carry, and reserving it verbatim is what left visible dead space above
+       and (mostly) below a reshaped word — measured on a real Kawi word, fontBoundingBoxAscent/Descent
+       25/20 against actualBoundingBoxAscent/Descent 22.9/12.6, i.e. a 47px box around ~35px of ink,
+       worse at magnification since the gap scales with it. overflow:visible is already set below, so
+       there is no clipping risk in trusting the tighter, string-specific box. */
+    try{ _cv.font=f; const m=_cv.measureText(s);
+      if(m.actualBoundingBoxAscent+m.actualBoundingBoxDescent>0){ asc=m.actualBoundingBoxAscent; h=asc+(m.actualBoundingBoxDescent||asc*0.3); }
+      else if(m.fontBoundingBoxAscent>0){ asc=m.fontBoundingBoxAscent; h=asc+(m.fontBoundingBoxDescent||asc*0.3); } }catch(_){}
     const fo=document.createElementNS("http://www.w3.org/2000/svg","foreignObject");
     for(const a of el.attributes) if(a.name!=="x"&&a.name!=="y"&&a.name!=="text-anchor") fo.setAttribute(a.name,a.value);
     fo.setAttribute("x",(x-w/2)+""); fo.setAttribute("y",(y-asc)+"");
@@ -442,7 +535,7 @@ function _measOneUncached(s,f,extraCss){
   // 15px reference (WORD_F/POS_F/…) keep 0 — trackCurve(15)===0 — so this is a no-op for those.
   /* ⚠ AND THE TRACKING IS COMPUTED AT THE UNMAGNIFIED SIZE, because that is what the CSS states.
      The glyph rules carry the curve as a literal for their resting size (.0055em at 14px, none at 15px)
-     and deliberately do NOT re-derive it at 2×: letter-spacing suppresses the GSUB substitutions a
+     and deliberately do NOT re-derive it at the magnified size: letter-spacing suppresses the GSUB substitutions a
      Brahmic conjunct is built from, so a magnified script has to keep the tracking it has at rest or it
      stops shaping. Deriving trackCurve from the MAGNIFIED size here is therefore measuring something the
      paint never does — measured on the real diagram, Balinese forms were laid out up to 12.5px wider or
@@ -450,13 +543,15 @@ function _measOneUncached(s,f,extraCss){
      are magnified (15/14/26 × mag), and every other font string reaching this line is unmagnified. */
   const pxm=f.match(/(\d+(?:\.\d+)?)px/); let px=pxm?parseFloat(pxm[1]):TOK_REF_SIZE;
   if(TOK_MAG>1 && [15,14,26].some(b=>Math.abs(px-b*TOK_MAG)<0.01)) px/=TOK_MAG;
-  const track=trackCurve(px);   // the font SIZE, not just parseFloat(f)'s naive "first leading number in the whole shorthand" — that read the WEIGHT off GLOSS_F/MGLOSS_F ("455 13.2px …", a font-weight number ahead of the size) as if it were the size, feeding trackCurve(455) instead of trackCurve(13.2): a wildly wrong negative letter-spacing (~-0.27em) that compressed every MGloss/Gloss measurement to roughly half its actual rendered width — layout (stemmaLayout's lw, glossSlotW) reserved half the space these tiers actually need, and adjacent tokens' MGloss text visibly overlapped. MSEG_F/MSEG_UP_F/WORD_F-class strings never hit this: "italic 15px …" has no leading digit (parseFloat → NaN → the SAME 15px fallback the size actually is), and a bare "15px …" parses correctly by luck alone — only a WEIGHT-prefixed shorthand exposed the bug
+  const track=trackCurve(px)+italicTrackOf(f);   // the font SIZE, not just parseFloat(f)'s naive "first leading number in the whole shorthand" — that read the WEIGHT off GLOSS_F/MGLOSS_F ("455 13.2px …", a font-weight number ahead of the size) as if it were the size, feeding trackCurve(455) instead of trackCurve(13.2): a wildly wrong negative letter-spacing (~-0.27em) that compressed every MGloss/Gloss measurement to roughly half its actual rendered width — layout (stemmaLayout's lw, glossSlotW) reserved half the space these tiers actually need, and adjacent tokens' MGloss text visibly overlapped. MSEG_F/MSEG_UP_F/WORD_F-class strings never hit this: "italic 15px …" has no leading digit (parseFloat → NaN → the SAME 15px fallback the size actually is), and a bare "15px …" parses correctly by luck alone — only a WEIGHT-prefixed shorthand exposed the bug   // + italicTrackOf(f): the flat oblique-letterform bump, added on top of the size curve for any font string that opens with "italic " — see ITALIC_TRACK's own note
   _mtxt.style.cssText="white-space:pre;font:"+f+(track?(";letter-spacing:"+track+"em"):"")+(extraCss||"");   // white-space FIRST so the font shorthand can't reset it; pairs with the xml:space attribute set above — see that note for why a bare " " otherwise measures 0
   _mtxt.textContent=s||"";
   let w=0; try{ w=_mtxt.getComputedTextLength(); }catch(_){ w=0; }
-  /* …and where the SVG cannot shape this string, its width describes a rendering nobody will see.
-     Canvas is what the HTML fallback (foreignObject) paints, so it is the width to lay out against. */
-  if(SMP_RE.test(s||"")&&!svgShapesSMP()){ const c=_measCanvas(s,f); if(c>0) return c; }
+  /* …and where the SVG cannot shape this string, its width describes a rendering nobody will see. A live
+     DOM element is what the HTML fallback (foreignObject) paints — see _measDOM's own note on why this is
+     no longer canvas — so it is the width to lay out against. No track/letter-spacing here: smpReshape
+     never applies either to the painted div (`font:`+f alone), so matching that means passing `f` as-is. */
+  if(SMP_RE.test(s||"")&&!svgShapesSMP()){ const c=_measDOM(s,f); if(c>0) return c; }
   return w; }
 function _measRaw(s,f){ _mtxt.style.cssText="white-space:pre;font:"+f; _mtxt.textContent=s||"";
   try{ return _mtxt.getComputedTextLength(); }catch(_){ return 0; } }
@@ -490,20 +585,23 @@ function refreshFontStacks(){
   if(d){ const cs=getComputedStyle(d);
     const t=cs.getPropertyValue("--token-font").trim(), m=cs.getPropertyValue("--mono-font").trim();
     if(t) LIVE_TOKEN_STACK=t; if(m) LIVE_MONO_STACK=m;
-    /* …AND HOW BIG THE GLYPHS ARE. `--script-mag` is the ornamental-script magnification (2 for
-       Rañjanā/Soyombo/Zanabazar Square — see ORNAMENTAL_SCRIPTS, js/lang/translit.js), published on #doc
+    /* …AND HOW BIG THE GLYPHS ARE. `--script-mag` is the Indic-script magnification (1.5 for every
+       script in INDIC_SCRIPTS, js/lang/translit.js — every _AKSHARA_SCRIPTS scheme, app/translit.py), published on #doc
        by syncSchemeAttr. Read back HERE, off the same element and in the same breath as the font stacks,
        because a canvas `font` string cannot carry a var(): every slot width in every notation comes from
        meas() against these strings, so a paint that scaled without the measurement following it would lay
        out 15px boxes and draw 30px letters in them. Read, never assumed — the CSS is the authority and
        this is its mirror. */
     const g=parseFloat(cs.getPropertyValue("--script-mag")); if(g>0) TOK_MAG=g;
-    /* …AND THE THREE THINGS THAT FOLLOW FROM IT, derived HERE and published back so the CSS and the
-       measurement strings cannot disagree about any of them. Each is stated in the units its consumer
-       needs, and each is exactly its no-op value at mag 1. */
-    TOK_WGHT=magWeight(TOK_MAG);
+    /* …AND WHAT FOLLOWS FROM IT, derived HERE and published back so the CSS and the measurement strings
+       cannot disagree about any of them. Each is stated in the units its consumer needs, and each is
+       exactly its no-op value at mag 1. TOK_WGHT is NOT one of them any more — see magTrack's own note
+       above for why weight stopped following a curve — so it stays at its declared 400 and this publish
+       is now always the same value the CSS fallback already gives; kept rather than removed so every
+       `var(--script-wght,400)` consumer need not be re-audited for one that IS, in fact, always 400. */
     d.style.setProperty("--script-wght",String(TOK_WGHT));
     TOK_ASC=scriptAscentEm(); d.style.setProperty("--script-asc",TOK_ASC.toFixed(3));
+    TOK_MID=scriptMidEm();   // svgSeamMark's own vertical re-centring against the magnified word beside it — JS-internal only, no CSS consumer
     d.style.setProperty("--script-lift",scriptLiftEm().toFixed(4));
     /* ⚠ AND THE ALIGNMENT ITSELF IS ONLY THE ORNAMENTAL ONE. `.stext-script` carried
        `align-self:flex-start` unconditionally, which is a no-op ONLY if the lift beside it is
@@ -523,7 +621,8 @@ function refreshFontStacks(){
   // brackets/outline all measure through this same meas()/WORD_F/NODE_F/POS_F/… family, so a font-stack change
   // invalidates their output exactly as it invalidates colW's, for the same reason.
   if(fchg && typeof invalidateDiaCache==="function") invalidateDiaCache();
-  WORD_F=magFont(15); NODE_F=magFont(14); WORD_F_BOLD=magFont(15,640); NODE_F_BOLD=magFont(14,640);
+  WORD_F=magFont(15); NODE_F=magFont(14);
+  STACK_DROP=stackDropExtra();   // needs WORD_F (just assigned) and descent(), which itself needs no font-stack refresh — see the function's own note; cached because belowGap() runs far too often to re-scan DOC per call
   POS_F='15px '+LIVE_TOKEN_STACK; GRID_F='462 13px '+LIVE_MONO_STACK; HEAD_F='500 11px '+uiFont(); HEAD_F_REQ='700 11px '+uiFont();   // HEAD_F/HEAD_F_REQ ride along on this refresh only for uniformity — it is built off --ui-font, not off either LIVE_ stack (see its lazy definition above), so nothing this function reacts to can actually change it
   TRANS_F='italic 15px '+LIVE_TOKEN_STACK; TRANS_UP_F='15px '+LIVE_TOKEN_STACK; MWT_F=WORD_F;
   GRID_ITAL_F='italic 462 13px '+LIVE_MONO_STACK;
@@ -556,14 +655,25 @@ function svgSeamMark(parent,tk,cx,y,halfEnd,font,boxes,halfStart,row){ if(!paren
      GLOSS_F, all unmagnified), so that is the one row this un-scales; the offset arithmetic below then
      measures the mark in the face it is actually drawn in, or the mark and the gap it is placed in
      would disagree. */
-  let f=font.replace(/^italic\s+/,"");
-  if(row==="form"&&TOK_MAG!==1) f=f.replace(/(?:^|\s)(\d+(?:\.\d+)?)px/,(mm,px)=>" "+(parseFloat(px)/TOK_MAG)+"px").replace(/^\s*\d+\s+/,"").trim();
+  let f=font.replace(/^italic\s+/,""), markY=y;
+  if(row==="form"&&TOK_MAG!==1){
+    f=f.replace(/(?:^|\s)(\d+(?:\.\d+)?)px/,(mm,px)=>{
+      /* ⚠ AND THE MARK IS RE-CENTRED ON THE WORD IT SITS BESIDE, NOT LEFT ON ITS BASELINE. Sharing `y`
+         (the word's baseline) is right when the two are the same size, but a small unmagnified mark and
+         a large magnified word have DIFFERENT baseline-to-visual-centre distances even in the identical
+         font — that distance is `(fontBoundingBoxAscent−fontBoundingBoxDescent)/2`, and it scales exactly
+         with size, so the word's own centre sits `TOK_MID × wordPx` above baseline while the mark's sits
+         only `TOK_MID × wordPx/TOK_MAG` above it. The mark is shifted up by the difference — closed form,
+         no second measurement, because TOK_MID (scriptMidEm) is a ratio of the FACE, not of either size. */
+      markY=y-TOK_MID*parseFloat(px)*(1-1/TOK_MAG);
+      return " "+(parseFloat(px)/TOK_MAG)+"px"; }).replace(/^\s*\d+\s+/,"").trim();
+  }
   [[seamPost(tk),1,halfEnd,"",seamPostToks(tk)],[seamPre(tk),-1,halfStart!=null?halfStart:halfEnd,"",seamPreToks(tk)],[seamMid(tk),1,halfEnd," seam-mid",seamMidToks(tk)]].forEach(([m,side,half,extra,toks])=>{
     if(!m) return;
     const w=meas(m,f), x=cx+(RTL?-side:side)*(half+w/2);
-    const e=E("text",{class:"seam-mark"+extra,x:x,y:y,"text-anchor":"middle"});   // anchored on its own CENTRE, never start/end: those two are relative to the inline base direction, so under RTL they'd flip and hang the mark back over the very text it sits beside
+    const e=E("text",{class:"seam-mark"+extra,x:x,y:markY,"text-anchor":"middle"});   // anchored on its own CENTRE, never start/end: those two are relative to the inline base direction, so under RTL they'd flip and hang the mark back over the very text it sits beside
     e.style.font=f; e.textContent=m; e.dataset.seamRow=row||"form"; if(toks)e.dataset.seamToks=toks; parent.appendChild(e);   // the row is what the centring pass measures BY (mid marks) and what the stylesheet colours by (all of them), so every mark carries it; data-seam-toks names the two tokens the seam joins, which is what applySel gives the accent from
-    boxes&&boxes.push({x:x,y:y-4,hx:w/2,hy:7}); }); }   // the mark reserves no SLOT width, but fitTight still has to see it, or a line-final one would crop off the diagram's own edge
+    boxes&&boxes.push({x:x,y:markY-4,hx:w/2,hy:7}); }); }   // the mark reserves no SLOT width, but fitTight still has to see it, or a line-final one would crop off the diagram's own edge
 // the seam marks on a token's FORM row: past the form's REAL DRAWN width AND that side's satellites (item 6's
 // correct form + the folded punctuation trailing it, the right-merging leads before it), so neither can land on
 // top of one of them.
@@ -572,8 +682,15 @@ function svgSeamMark(parent,tk,cx,y,halfEnd,font,boxes,halfStart,row){ if(!paren
 // NEVER BOLDER" note in styles/app.css), so that max() had become DEAD clearance: it hung every seam mark ~0.4-0.9px
 // (Noto Sans 15px, 400→640) further out than the glyph it continues from, on EVERY token, for a state that can no
 // longer occur — visible as a mark floating in the gap rather than reading as part of the word. Measured at the
-// drawn weight now. The SLOT reserves (WORD_F_BOLD/NODE_F_BOLD in linear/stemmaLayout/wordW) deliberately stay:
-// they size a COLUMN, not a mark, and dropping them would re-space every diagram — see WORD_F_BOLD's own note.
+// drawn weight now. The SLOT reserves (WORD_F_BOLD/NODE_F_BOLD in linear/stemmaLayout/wordW) used to be kept
+// anyway, on the theory that they cost only a couple of px — but for a magnified Indic script the bold width was
+// never a couple of px: canvas's synthetic bold for a face with no real bold weight is wildly inconsistent, and
+// measured on a real Kawi word it inflated the reserved slot by 60% (49.9px → 79.9px at weight 640, against
+// Latin's ordinary ~6.6% at the same weight — evidently losing ligation, not just thickening strokes). That
+// pushed the NEXT token's slot far past where its glyph actually sits, which is what put a form-row seam mark —
+// flush against the word it annotates — tens of px from the word that follows. Since nothing bolds any more,
+// there is no state left for the reserve to buy headroom against, so WORD_F_BOLD/NODE_F_BOLD are gone outright
+// rather than patched at this one measurement site.
 function svgFormSeamMark(parent,tk,cx,y,f,boxes){ const half=fmeas(tk,f)/2;
   svgSeamMark(parent,tk,cx,y,half+tailW(tk,f),f,boxes,half+leadW(tk,f),"form");
   // …and, on the same inline-START edge, the mid-sentence paragraph break (MISC NewPar=Yes). Past the seam PRE
@@ -1112,6 +1229,7 @@ function appendHangHTML(container,t,si,cls,oid){ const show=correctFormShown(t,s
     s.dataset.s=si; s.dataset.tok=oid; s.dataset.host=host; s.style.cursor="pointer";
     s.addEventListener("click",ev=>{ ev.stopPropagation(); pick(si,oid); }); container.appendChild(s); }); }
 function descent(f){_cv.font=f; const m=_cv.measureText("gjpqy"); return m.actualBoundingBoxDescent||3;}   // how far tokens hang below the baseline
+function ascent(f){_cv.font=f; const m=_cv.measureText("Ábgjyd漢"); return m.actualBoundingBoxAscent||11;}   // how far tokens reach above the baseline — descent()'s counterpart, mixed Latin+Han sample so it answers honestly for either
 /* ⚠ THE STEP FROM ONE BELOW-TOKEN ROW TO THE NEXT, WRITTEN ONCE.
    It was the literal expression `belowGap()` in fifteen places — every renderer's draw AND every
    renderer's reserve (stackH / belowH / stackBot / --undpad / tieLead / mwtDepth) — which is exactly the
@@ -1122,8 +1240,26 @@ function descent(f){_cv.font=f; const m=_cv.measureText("gjpqy"); return m.actua
    couple of pixels. The magnification's own extra descent is therefore added back here, at the one
    expression every consumer shares, so the draws and the reserves grow together and neither clipping nor
    misalignment is possible. Exactly `belowGap()` whenever TOK_MAG is 1, which is every document
-   but those. */
+   but those.
+   ⚠ STACK_DROP DOES NOT LIVE HERE. It was folded into this function on a first pass, which put it in
+   EVERY row-to-row step (translit→gloss, gloss→gloss, gloss→POS) instead of only the step that actually
+   needs it — the one from the GLYPH row itself down to the first annotation row, where a stacking
+   script's subjoined cluster genuinely reaches deeper than a Latin descender does. Every OTHER gap
+   (between two annotation rows, both plain Latin) got the same bump for no reason, inflating the whole
+   stack instead of just its top gap. STACK_DROP is now added ONCE, by whichever call reserves/draws the
+   first row below the glyphs (belowStack's `y0+STACK_DROP` seed, the hierarchy node's `dropY`, and the
+   MWT tie's own `r.dfy`→`r.dtr`/`r.dpos` step) — see stackDropExtra()'s own note for what it measures,
+   and belowReserveH() below for the one place the reserve math computes the same one-time addition. */
 function belowGap(){ return 18+descent(POS_F)+(TOK_MAG>1?descent(WORD_F)*(1-1/TOK_MAG):0); }
+// how many rows sit below the glyph line (translit + gloss/mgloss tiers + POS) — the ANNOTATION rows,
+// never the glyph row itself, which is why n can be 0 (a token with translit/glosses/POS all off).
+function belowRows(hasTr,tierCount,hasPos){ return (hasTr?1:0)+tierCount+(hasPos?1:0); }
+// total vertical reserve those rows need. n·belowGap() for the n row-to-row steps, PLUS STACK_DROP
+// exactly once — never per row — because it only ever compensates for the ONE gap between the glyph
+// line and the first thing drawn under it; every reserve site that used to fold STACK_DROP into each of
+// its belowGap() calls (stackH/belowH/stackBot/--undpad/the stemma's belowReserve+H) now goes through
+// this instead, so the reserve and the actual draw (belowStack et al.) can't drift apart.
+function belowReserveH(hasTr,tierCount,hasPos){ const n=belowRows(hasTr,tierCount,hasPos); return n*belowGap()+(n>0?STACK_DROP:0); }
 function xHeight(f){_cv.font=f; const m=_cv.measureText("x"); return m.actualBoundingBoxAscent||6;}   // the x-height of a (POS) glyph — subtracted from the inter-tier step to seat the MWT bracket (POS tags now render via c2sc small caps, whose visual height sits at x-height, not full cap height)
 // sizeSid() — the JS width-measurement this comment described — is GONE: .sid-in is a contenteditable
 // span now (js/core/document.js's buildBlock), not an <input>, and a span with no explicit width simply
@@ -1391,9 +1527,9 @@ function repArcEnds(rep,base,hi,di,h){ const y1=repBase(rep,base,hi), y2=repBase
 function linear(sent, depAbove){const gap=8,pad=2,SP=meas(" ",WORD_F),tk=sent.tokens;
   // the word's own ink-width alone — an MWT tie hugs THIS, not the wider annotated slot below (POS/translit/gloss
   // sit in their own independent row and shouldn't stretch a tie meant to visually group surface-form parts)
-  const wform=tk.map(t=>Math.max(fmeas(t,WORD_F), fmeas(t,WORD_F_BOLD)));
+  const wform=tk.map(t=>fmeas(t,WORD_F));
   // slot = widest of word and (when shown) POS/transliteration/above-token deprel; uniform spacing → same minimum gap as tokens
-  const w=tk.map((t,i)=>Math.max(wform[i], show.pos?meas(posDisp(t),POS_F):0, trLayer()?meas(trTxt(t),trFont(t)):0, depAbove?meas(t.deprel||"",POS_F):0, glossSlotW(t), 16));   // item 13: fold in the gloss-tier rows so a wide gloss can't crowd/overlap its neighbour. Bold width (.tok-word.sel) reserved for EVERY token, not just the selected one — the token that's bold can change without a layout re-run (no reflow-on-select path here, unlike brackets), so the slot must already fit either state
+  const w=tk.map((t,i)=>Math.max(wform[i], show.pos?meas(posDisp(t),POS_F):0, trLayer()?meas(trTxt(t),trFont(t)):0, depAbove?meas(t.deprel||"",POS_F):0, glossSlotW(t), 16));   // item 13: fold in the gloss-tier rows so a wide gloss can't crowd/overlap its neighbour
   const hg=tk.map(t=>tailW(t,WORD_F));   // real-width room reserved to each host's inline-end for its folded punctuation (node centre c[i] stays on the host, so arc endpoints are unchanged)
   const ld=tk.map(t=>leadW(t,WORD_F));   // item 2: room reserved at the host's inline-START for right-merging punctuation that leads it
   // Subject=Generic: reserve a virtual ∅-token band just BEFORE this token's own slot (not widening the slot itself,
@@ -1443,7 +1579,7 @@ function tidyLayout(size,root,childrenOf,{lw,hgw,ldw,elw,SPW,NGAP}){
   return x;
 }
 function stemmaLayout(sent,catNodes,posBelow){const pad=2, SP=meas(" ",WORD_F)+8;   // gap matches arc view; slot also fits the baseline POS tag so they don't crowd
-  const lw=sent.tokens.map(t=>Math.max(fmeas(t,WORD_F),fmeas(t,WORD_F_BOLD),catNodes?meas(posDisp(t)||"X",POS_F):fmeas(t,NODE_F),catNodes?0:fmeas(t,NODE_F_BOLD), posBelow?meas(posDisp(t)||"X",POS_F):0, trLayer()?meas(trTxt(t),trFont(t)):0, glossSlotW(t)));   // item 13: include the gloss-tier width so glosses stay spaced. Bold width reserved for the baseline word AND (when the node itself shows the word, not a POS category — catNodes' .node-cat never bolds on single selection) the node label too, for every token — see linear()'s own comment on why
+  const lw=sent.tokens.map(t=>Math.max(fmeas(t,WORD_F),catNodes?meas(posDisp(t)||"X",POS_F):fmeas(t,NODE_F), posBelow?meas(posDisp(t)||"X",POS_F):0, trLayer()?meas(trTxt(t),trFont(t)):0, glossSlotW(t)));   // item 13: include the gloss-tier width so glosses stay spaced
   const c=[]; let x=pad; sent.tokens.forEach((t,i)=>{ x+=genericSubjGapW(sent.tokens,i,catNodes?POS_F:NODE_F)+leadW(t,NODE_F); c.push(x+lw[i]/2); x+=lw[i]+tailW(t,NODE_F)+SP; });   // reserve inline-START room for right-merging leads (item 2) + inline-end room for trailing satellites; node centre stays on the host (arc endpoints unchanged). Subject=Generic: a virtual ∅-token band inserted just before, same idea as linear()
   const total=x-SP+pad;
   return {c,total,lw};   // caller mirrors after any label-spacing pass
@@ -1451,10 +1587,20 @@ function stemmaLayout(sent,catNodes,posBelow){const pad=2, SP=meas(" ",WORD_F)+8
 function mirror(c,total){ if(RTL) for(let i=0;i<c.length;i++) c[i]=total-c[i]; }   // in-place RTL flip of x-centres
 /* transliteration + POS stacked below a word baseline; returns the bottom y (pushes hit-boxes) */
 function hasTr(toks){ return trLayer() && toks.some(x=>trTxt(x)); }   // the transliteration row is active (romanisation, or originals under an orthography) → reserve it for every token (keeps POS aligned)
-function belowStack(g,x,y0,tk,boxes,trRow){ let y=y0;   // trRow: reserve the transliteration row even for a token that has none (so POS stays aligned across the sentence)
+function belowStack(g,x,y0,tk,boxes,trRow){ let y=y0+STACK_DROP;   // trRow: reserve the transliteration row even for a token that has none (so POS stays aligned across the sentence). +STACK_DROP seeds the gap from the glyph baseline to whichever row is drawn FIRST below it — the one gap a stacking script's subjoined depth actually needs — and every later belowGap() step in this function is the plain, un-bumped one (see belowGap's own note)
   const showTr = trRow!=null ? trRow : (trLayer() && !!trTxt(tk));
   if(showTr){ y+=belowGap(); const rt=trTxt(tk); if(rt){ const e=E("text",{class:"translit"+frnUp(tk),x:x,y:y,"text-anchor":"middle"}); e.textContent=rt; if(trRowEdit())e.classList.add("tr-edit"); g.appendChild(e); boxes&&boxes.push({x,y:y-4,hx:meas(rt,trFont(tk))/2,hy:7}); svgSeamMark(g,tk,x,y,meas(rt,trFont(tk))/2,trFont(tk),boxes,null,"translit"); } }   // Item 8: the translit row gains the SAME descender-matched top gap the POS row carries (+descent(POS_F), the label-font descender) so the row above's descenders don't crowd it; .tr-edit → click-to-edit the romanisation, or the STORED transliteration behind it (see trRowEdit). The romanisation is a WORD-LIKE row, so it carries the seam mark too — a word broken across tokens reads as broken on every row that spells it out
-  belowTiers().forEach(tier=>{ y+=belowGap(); const txt=tierText(tk,tier), dtxt=txt||"…"; const e=E("text",{class:"gloss gl-edit"+frnUp(tk),x:x,y:y,"text-anchor":"middle","data-tier":tier,tabindex:"0"}); setGlossText(e,tier,dtxt); if(!txt)e.classList.add("gl-empty"); g.appendChild(e); boxes&&boxes.push({x,y:y-4,hx:meas(dtxt,trFont(tk))/2,hy:7});
+  belowTiers().forEach(tier=>{ y+=belowGap(); const txt=tierText(tk,tier), dtxt=txt||"…"; const e=E("text",{class:"gloss gl-edit"+frnUp(tk),x:x,y:y,"text-anchor":"middle","data-tier":tier,tabindex:"0"}); setGlossText(e,tier,dtxt); if(!txt)e.classList.add("gl-empty"); g.appendChild(e);
+    /* ⚠ THE SAME FONT AND THE SAME measGloss() THE SEAM MARK BELOW ALREADY USES — this box feeds fitTight()
+       (js/diagram/diagram-core.js), which resizes the wrapped SVG's own viewBox to its drawn content, so a
+       box measured wrong here means the SVG can come out narrower than what MGloss actually draws — clipped
+       by .diagram.wrapped's overflow-x:hidden, since fitTight is the ONE pass standing between "the row-
+       packing budget accounted for glossSlotW" and "the finished SVG is actually wide enough". This used to
+       read meas(dtxt,trFont(tk)) — trFont() is the TRANSLITERATION font, not this tier's own, and plain
+       meas() ignores the c2sc/onum small-caps width adjustment measGloss() exists for (see measGloss's own
+       note: "MGloss text is almost always MOSTLY an abbreviation run"). Wrong font, wrong measurement, and
+       the seam mark one line down was already doing this correctly — this box just never matched it. */
+    boxes&&boxes.push({x,y:y-4,hx:(tier==="mgloss"?measGloss(dtxt,tierFont(tier,tk)):meas(dtxt,tierFont(tier,tk)))/2,hy:7});
     if(tier==="mseg"||tier==="mgloss") svgSeamMark(g,tk,x,y,(tier==="mgloss"?measGloss(dtxt,tierFont(tier,tk)):meas(dtxt,tierFont(tier,tk)))/2,tierFont(tier,tk),boxes,null,tier); });   // Item 8: each gloss / morphemic-gloss tier gains the SAME +descent(POS_F) top gap as the POS row, so all sub-token tiers share the descender-based breathing room; BELOW the transliteration and ABOVE the POS row; double-click or Enter to edit → MISC. The SEGMENTATION tier (mseg) and the MORPHEMIC GLOSS tier (mgloss) both take a seam mark — a mark drawn regardless of whether THIS tier happens to be annotated for this token (measured off the "…" placeholder's own width when it isn't), because the seam it decorates is a fact about the SEGMENTATION, not about this tier's own annotation coverage. Gating on `txt` used to silently drop the mark wherever MGloss was sparser than MSeg (a common, unremarkable state for hand-glossed data) — the row still shows a "…" cell there, so a boundary that MSeg draws cleanly would vanish from MGloss for that one seam while surviving on the very next one, reading as the mark randomly relocating/centring rather than a coverage gap. Both are PER-MORPHEME rows that a word-break genuinely interrupts; the lexical GLOSS tier (a single whole-word meaning, on request unchanged) does not
   if(show.pos && tk.upos){ y+=belowGap(); const pd=posDisp(tk); const e=E("text",{class:"tok-pos",x:x,y:y,"text-anchor":"middle"}); e.textContent=pd; svgTip(e,posTitle(tk.upos)); g.appendChild(e); boxes&&boxes.push({x,y,hx:meas(pd,POS_F)/2,hy:6}); }   // POS hover tooltip (Item 2). Item 1: +descent(POS_F) extra top gap on the POS step — the label font's (POS_F) descender depth, mirroring how the above-token rows fold in descent(WORD_F) — so the POS row isn't crowded by the descenders of the row above it. Every below-reserve that feeds a row height (stackH / belowH / stackBot / --undpad) folds in the SAME descent(POS_F), so POS stays aligned across renderers and nothing clips.
   return y;
@@ -1493,7 +1639,7 @@ function tieRows(D){ const gw=(D.gw||[]).map(g=>({from:g.at,to:g.at,ids:g.ids,ki
 function tieLead(){ const PIN=5; return show.pos ? belowGap()-xHeight(POS_F)-5-PIN : 8; }
 /* THE GAP ABOVE THE MULTI-WORD-TOKEN SURFACE FORM, held constant across the magnification. The literal
    20 seats a 15px form "a comfortable ~9px below the tie" — i.e. 20 minus that form's own ascent — so at
-   2× the ascent doubles and eats the whole gap, running the glyphs into the bracket above them. Adding
+   mag 1.5 the enlarged ascent eats into the gap, running the glyphs into the bracket above them. Adding
    the ascent's magnified excess, A × (mag − 1), keeps the INK top exactly where it sits for every
    non-ornamental script, which is what the reserve above it was tuned against. Same shape as
    belowGap()'s own magnification term, and the same reason: a draw and its reserve have to move
@@ -1508,8 +1654,8 @@ function tieLayout(D){ const rows=tieRows(D); if(!rows.length) return {rows:[],d
     inTier.forEach(r=>{ r.dy=top;
       if(r.kind==="gw"){ r.dfy=0; r.dtr=0; r.dpos=0; bot=Math.max(bot,top+gwDepth()); return; }   // a tie carries NO label (the relation is marked by the mark alone), so its row is only as deep as the glyph's own ink
       r.dfy=top+PIN+mwtFormLead();                                                        // tie body PIN below the top; the label baseline a further mwtFormLead() below it
-      r.dtr=(r.kind==="mwt"&&trTxt(r.m))?r.dfy+STEP:0;                                     // an MWT's own transliteration row
-      r.dpos=(r.kind==="mwt"&&r.pos)?((r.dtr||r.dfy)+STEP):0;                              // …and, on a coinciding pair, the ExtPos annotation LAST — form → translit → POS, the same order a plain token's below-stack uses
+      r.dtr=(r.kind==="mwt"&&trTxt(r.m))?r.dfy+STEP+STACK_DROP:0;                          // an MWT's own transliteration row — the FIRST row below the tie's own surface-form glyphs, so it's the one that gets STACK_DROP (once), same rule as belowStack's seed
+      r.dpos=(r.kind==="mwt"&&r.pos)?(r.dtr?r.dtr+STEP:r.dfy+STEP+STACK_DROP):0;           // …and, on a coinciding pair, the ExtPos annotation LAST — form → translit → POS, the same order a plain token's below-stack uses. STACK_DROP only if dtr didn't already spend it (no double-count when both rows are present)
       bot=Math.max(bot, r.dpos||r.dtr||r.dfy); });
     deepest=bot; top=bot+STEP; }                                                           // the next tier starts one inter-tier step below the deepest label of this one
   return {rows, depth:PIN+lead+deepest+1, lead}; }                                          // depth is measured from the below-stack bottom: +PIN for the y offset mwtTie is handed, +1 slack — for a lone plain MWT tie this reproduces the former fixed 39+descent−xHeight exactly
@@ -1652,7 +1798,8 @@ function rowTies(D,s0,e0){ const reb=o=>({...o,from:o.from-s0,to:o.to-s0});
 function htmlTieBottom(r){ const PIN=6, STEP=belowGap(), lead=5+tieLead();
   if(r.kind==="gw") return lead+r.dy+gwDepth();                            // the tie has no label under it — it reaches only as far as the glyph's own ink
   if(r.kind==="xpos") return lead+r.dy+PIN+20;                             // the ExtPos value IS the label
-  return lead+r.dy+PIN+20+((trLayer()&&trTxt(r))?STEP:0)+(r.pos?STEP:0); } // MWT surface form, then its transliteration row, then any ExtPos annotation
+  const n=belowRows((trLayer()&&trTxt(r)),0,!!r.pos);
+  return lead+r.dy+PIN+20+n*STEP+(n>0?STACK_DROP:0); }                     // MWT surface form, then its transliteration row, then any ExtPos annotation — STACK_DROP once (belowReserveH's math), for the same reason belowStack seeds it once rather than per row
 function mwtDepth(D){ return tieLayout(D).depth; }   // extra vertical room the bracket stack needs below the below-stack bottom. Item 1 made this tier-aware — one entry per bracket TIER, each as deep as the deepest label that tier carries (an MWT surface form, plus its transliteration row and/or an ExtPos annotation) — so an ExtPos bracket that pushes an overlapping MWT tie down a tier also grows every reserve that folds in mwtDepth (arcsWrapped's per-row tieBot, projWrapped, belowH) in lockstep. With a single plain MWT tie and no ExtPos it returns exactly the former fixed 39+descent(POS_F)−xHeight(POS_F) (39 with no POS row), +belowGap() for a transliteration row — the seating those constants were tuned for is unchanged.
 
 /* labels are always horizontal and centred on their edge (x-height middle); collision avoidance is
@@ -1675,7 +1822,23 @@ function fitViewBox(svg,boxes){const W0=+svg.getAttribute("width"),H0=+svg.getAt
 function fitTight(svg,boxes){ if(!boxes.length) return;
   let a=Infinity,b=-Infinity,c=Infinity,d=-Infinity;
   boxes.forEach(B=>{a=Math.min(a,B.x-B.hx);b=Math.max(b,B.x+B.hx);c=Math.min(c,B.y-B.hy);d=Math.max(d,B.y+B.hy);});
-  const M=6,x=Math.floor(a-M),y=Math.floor(c-M),w=Math.ceil(b-a+2*M),h=Math.ceil(d-c+2*M);
+  const M=6;
+  /* ⚠ A LEFT EDGE PAST THE ROW'S OWN NOMINAL START DOES NOT WIDEN THE VIEWPORT. Every row's own layout
+     (linear(), js/diagram/diagram-core.js) starts its first token at x=pad (a small positive number, not
+     0) — so under ordinary content `a` never goes negative on its own, and this clamp is a no-op. What
+     DOES go negative is an MWT tie/bracket whose surface FORM legitimately reaches left of its first
+     component's own nominal position — and letting that stretch the viewBox's left edge grows `w` by
+     exactly that much too, which is content this ROW's wrap-budget was never asked about. Reported live:
+     an MWT further down a wrapped block pushed the whole SVG's width out to the left, and since the
+     container width comes from the wrap budget (unchanged, still ignorant of this element), the SAME
+     row's RIGHT-side content — a wide MGloss on its last token — ran out of room and was clipped by
+     .diagram.wrapped's overflow-x:hidden. Preferred fix, on request, over reflowing the wrap decision to
+     account for it: let the overflow paint into the left margin instead (svg{overflow:visible} — see
+     .diagram.wrapped>svg in app.css) by simply not counting it toward the viewBox's own width. `b` (the
+     RIGHT edge) is NOT clamped the same way — fitTight expanding rightward for real content (MGloss
+     included) is the whole reason this function exists. */
+  const aFit=Math.max(0,a);
+  const x=Math.floor(aFit-M),y=Math.floor(c-M),w=Math.ceil(b-aFit+2*M),h=Math.ceil(d-c+2*M);
   svg.setAttribute("viewBox",`${x} ${y} ${w} ${h}`); svg.setAttribute("width",w); svg.setAttribute("height",h);}
 // De-collide edge labels by HORIZONTAL spreading, symmetric around each head: for a head's children, the
 // nearest child on each side (rightmost of the left group, leftmost of the right group) stays fixed, and the

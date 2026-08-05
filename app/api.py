@@ -1055,20 +1055,13 @@ class Api:
         return {"schemes": translit.orthography_schemes(lang), "lang": lang}
 
     def orthography(self, forms: list[str], lang: str, scheme: str = "",
-                    upos: list[str] | None = None, feats: list[str] | None = None,
-                    lemmas: list[str] | None = None) -> dict:
+                    upos: list[str] | None = None) -> dict:
         """Same optional POS hint as ``transliterate`` above, parallel to ``forms``: a script rendering can
         be reading-dependent too (a Traditional/Simplified variant pair, a kana spell-out), so the layer
         that picks a reading is given the same evidence.  An MWT range sends nothing — its span covers
-        several tokens and so has no one part of speech to report.
-
-        ``feats``/``lemmas`` are parallel too, and exist for Latin macronisation, which needs the whole
-        morphological analysis rather than just the class: the lookup is keyed on (form, upos, feats),
-        and the lemma's ending supplies the declension wherever FEATS carries no ``InflClass``.  Sending
-        the form alone reaches only the morphology-blind level of the table, which is how nominative
-        ``Gallia`` acquires an ablative macron.  Every other language ignores both."""
+        several tokens and so has no one part of speech to report."""
         from . import translit
-        return {"ortho": translit.orthography_many(forms, lang, scheme, upos, feats, lemmas),
+        return {"ortho": translit.orthography_many(forms, lang, scheme, upos),
                 "lang": lang, "scheme": scheme}
 
     def sanskrit_mwt(self, groups: list[list[str]], lang: str, scheme: str = "",
@@ -1161,60 +1154,16 @@ class Api:
         for Sanskrit, Wiktionary for everything else.  Both modules return the same dict — the
         frontend reads `definitions`/`page_url`/`error` identically either way, and names the source
         it is showing from `source`/`page_label` rather than assuming Wiktionary."""
-        from . import apte, appledict, wiktionary
-        # SANSKRIT IS APTE'S, FIRST AND UNCONDITIONALLY. Apple does ship a Sanskrit–English OUP
-        # dictionary, so this is NOT a consequence of the Apple-only restriction in appledict — it is
-        # its own rule, by user decision: Apte's 1957 revised edition is a scholarly dictionary of the
-        # classical language, vendored, offline, and indexed in SLP1 against the spellings this app
-        # stores. Asking macOS first would have quietly displaced it wherever the OUP dictionary
-        # happened to have the headword.
+        from . import apte, wiktionary
+        # SANSKRIT IS APTE'S, FIRST AND UNCONDITIONALLY. Apte's 1957 revised edition is a scholarly
+        # dictionary of the classical language, vendored, offline, and indexed in SLP1 against the
+        # spellings this app stores — by user decision, it always wins for Sanskrit.
         if apte.is_sanskrit(language):
             return apte.lookup(word, language, upos)
-        # THEN APPLE'S OWN DICTIONARIES, where macOS has one that indexes this language and defines in
-        # English. They are already installed, professionally edited (Oxford, Duden, Sanseido) and need
-        # no network, so on the languages they cover they beat Wiktionary below. Nothing is removed
-        # behind them: this is macOS-only and Apple has a dictionary for very few of the languages a
-        # treebank is written in, so a miss falls through to exactly what answered before.
-        try:
-            if appledict.available():
-                appledict.set_overrides(_load_state().get("apple_dict_langs") or {})
-                got = appledict.lookup(word, language)
-                if got.get("entry"):
-                    return appledict.as_senses(got, word, upos)
-        except Exception:  # noqa: BLE001 — an unreadable bundle must never cost the flyout its answer
-            pass
         r = wiktionary.lookup(word, language, upos)
         r.setdefault("source", "Wiktionary")
         r.setdefault("page_label", "Open on Wiktionary")
         return r
-
-    def apple_dictionaries(self, lang: str = "") -> dict:
-        """Every macOS dictionary this machine has, with what it indexes and what it defines in
-        English — for a settings list where the user can label the ones that declare nothing.
-
-        ``needsLanguage`` marks exactly those: a bundle whose Info.plist names no languages and whose
-        entry ids carry no direction, which is common for a hand-installed one. There is no honest
-        way to infer it (see `appledict._OVERRIDES`), so the UI asks. Empty list off macOS."""
-        from . import appledict
-        if not appledict.available():
-            return {"dictionaries": [], "available": False}
-        appledict.set_overrides(_load_state().get("apple_dict_langs") or {})
-        return {"dictionaries": appledict.dictionaries(lang), "available": True}
-
-    def set_apple_dictionary_language(self, key: str, lang: str = "") -> dict:
-        """Assign (or, with an empty ``lang``, clear) the headword language of one dictionary.
-        Keyed on its CFBundleIdentifier, or its name when it has none. Persisted in state.json."""
-        from . import appledict
-        state = _load_state()
-        m = dict(state.get("apple_dict_langs") or {})
-        if lang:
-            m[str(key)] = str(lang)
-        else:
-            m.pop(str(key), None)
-        state["apple_dict_langs"] = m
-        _save_state(state)
-        appledict.set_overrides(m)
-        return {"ok": True, "languages": m}
 
     def wiktionary_lookup(self, word: str, language: str = "", upos: str = "") -> dict:
         """Back-compat alias — the flyout is no longer Wiktionary-only (see definition_lookup)."""
@@ -1483,11 +1432,11 @@ class Api:
     def _notify_extra_installed(self, feature: str) -> None:
         """A TIER THAT HAS JUST ARRIVED IS USABLE NOW, not after a relaunch.
 
-        Nothing on THIS side caches its absence — ``macron.available()`` is a file test,
-        ``extras.available`` re-probes, and the data-tier install already drops the parser cache — but
-        the frontend does: each document window loads ``orthography_schemes(lang)`` once per language
-        switch and keeps the answer, so "With macrons" went on reading unavailable in a window that had
-        been open the whole time.  That is the reported "I wasn't able to use it until a restart".
+        Nothing on THIS side caches its absence — ``extras.available`` re-probes, and the data-tier
+        install already drops the parser cache — but the frontend does: each document window loads
+        ``orthography_schemes(lang)``/``translit_schemes(lang)`` once per language switch and keeps
+        the answer, so a scheme gated on a tier went on reading unavailable in a window that had been
+        open the whole time.  That is the reported "I wasn't able to use it until a restart".
 
         Pushed to EVERY document window (``_broadcast_all``, not ``_broadcast``): the Model Manager
         shares the ``Api`` of the window that opened it, which is precisely the window the ordinary

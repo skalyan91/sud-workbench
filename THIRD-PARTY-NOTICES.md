@@ -96,40 +96,16 @@ Digitisation of Apte is by the Cologne Digital Sanskrit Dictionaries project.
 | Component | File | Upstream | Licence |
 |---|---|---|---|
 | `toolbox.py` (SIL Toolbox/FLEx reader) | `_toolbox_vendor.py` | [acoli-repo/toolbox_py](https://github.com/acoli-repo/toolbox_py) @ `27bdaa3` | MIT |
-| `scripts/la_macronise.py` (Latin vowel-length lookup) | `_la_macron_vendor.py` | [SunflowerAI/sud-spacy-parsers](https://github.com/SunflowerAI/sud-spacy-parsers) @ `6997ed73` | MIT, Copyright (c) 2026 Sunflower AI |
 | `scripts/external_sandhi.py` (forward Sanskrit sandhi, CSL notation) | `_sa_sandhi_vendor.py` | [SunflowerAI/sud-spacy-parsers](https://github.com/SunflowerAI/sud-spacy-parsers) @ `6997ed73` | MIT, Copyright (c) 2026 Sunflower AI |
 
 Each file states its own provenance and the exact edits made in its module docstring — one import
-redirected to `collections.abc` in the first, the spaCy factory/extensions and the `Doc` entry point
-dropped in the second, and nothing at all in the third — it imports nothing and is copied verbatim.
+redirected to `collections.abc` in the first, and nothing at all in the second — it imports nothing
+and is copied verbatim.
 
 (`_sa_csl_vendor.py`, `scripts/sa_tokenizer.py`'s Sanskrit CSL de-sandhi, was vendored here until
 `sa_sud_vedic_ufal_dcs` replaced the CSL Sanskrit model. That notation is now internal to the model
 and never reaches a file, so nothing in this app has to REVERSE it — the third file above generates
 it FORWARD, for display only.)
-
-⚠ **The Latin macron data is FETCHED AT RUNTIME, never shipped.** `_la_macron_vendor.py` is only
-lookup *code*, which is Sunflower AI's own and MIT. The vowel lengths themselves come from
-**Morpheus** (Perseus Project, **CC BY-SA 3.0 US**) by way of the copy Johan Winge commits in
-**latin-macronizer** (**GPL-3.0**) as `latin_macronizer/macrons.txt`. `app/macron.py` downloads that
-file on demand into the user's Application Support directory and compiles it there — it is not in
-this repository, not in any build, and must not be added to either.
-
-That distinction is doing real work, not being pedantic: **GPL-3.0 restricts distribution, not
-use.** A file the user's own machine fetches from the upstream host, which never enters a build of
-this app, is the same arrangement `app/convert.py` has with the grew backend and `app/extras.py`
-has with the PyTorch tiers. Bundling it would raise a licence question; fetching it does not.
-
-(SUD-spaCy's own `build_la_macron.sh` produces a DIFFERENT table, harvested by macronising three
-CC BY-**NC**-SA treebanks. That one mixes NonCommercial keys with share-alike data and cannot be
-redistributed by anyone — upstream says so itself. `app/macron.py` still reads one if the user has
-built it, cascading it ahead of Morpheus for the words it covers, but it is never required.)
-
-| Data behind that feature | Origin | Licence |
-|---|---|---|
-| Morpheus vowel-length data | [PerseusDL/morpheus](https://github.com/PerseusDL/morpheus) | CC BY-SA 3.0 US |
-| latin-macronizer (the route to it) | [Alatius/latin-macronizer](https://github.com/Alatius/latin-macronizer) | GPL-3.0 |
-| SUD_Latin-ITTB / PROIEL / Perseus (the harvest keys) | Universal Dependencies | CC BY-NC-SA |
 
 ## Not vendored, but worth naming
 

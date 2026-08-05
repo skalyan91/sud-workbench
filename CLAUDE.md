@@ -273,6 +273,12 @@ EMPH no FEATS implies. **Measured byte-identical to a fresh `composeMGloss` — 
 edits. Idempotent. `regenTok(si,tok,{regloss:true})` now adds only `mglossReglossLexical` on top, since the word
 class is the one thing a FEATS change can never move.
 
+⚠ **The MGloss ordering puts the POS-SUBTYPE features right after Number** (`3SG.PERS`) — they used to
+trail every inflectional category. Placed after Clusivity, not between Number and Clusivity, because
+`1PL.INCL` is one agreement statement nothing may split; with no Clusivity the two readings coincide.
+They are also members of `MGLOSS_NOMINAL`, so they travel with the nominal block when Case moves it to
+the end — otherwise a case-marked pronoun glosses `PERS.3SG.NOM` instead of `3SG.PERS.NOM`.
+
 ⚠️ **Person and Number are written FUSED** (`3SG`, not `3.SG`), so agreement must arrive as ONE token — three
 cases, because the half already in the gloss keeps its own slot: neither present → one fused insert; one present →
 fuse ONTO it where it stands. Inserting the missing half beside its partner is what produced `walk-3.SG` from a
@@ -537,9 +543,19 @@ and `WORD_F_BOLD`/`NODE_F_BOLD` take an explicit override, since a shorthand can
 
 ⚠️ **A SEAM MARK IS NOT PART OF THE WORD**, so it does not magnify (`svgSeamMark` un-scales the FORM row only —
 every other row is handed an unmagnified face already). It is punctuation ABOUT the word, set in the app's own
-register; at 2× it drew a 30px hyphen beside the letters it annotates. Verified: 15px at mag 2 while the forms
-are 30px. ⚠️ **And the MWT surface form keeps its top margin** (`mwtFormLead`): the literal 20 seats a 15px form
-~9px below the tie, i.e. 20 minus that form's ascent, so at 2× the doubled ascent ate the gap. Adding
+register; at mag 1.5 it drew a ~22.5px hyphen beside the letters it annotates. Verified: 15px unscaled while the
+forms are 22.5px.
+⚠️ **AND RE-CENTRED ON THE WORD, NOT LEFT ON ITS BASELINE.** Sharing `y` (the word's baseline) is right when
+mark and word are the same size, but at DIFFERENT sizes the same font has a DIFFERENT baseline-to-visual-centre
+distance for each — `(fontBoundingBoxAscent−fontBoundingBoxDescent)/2`, which scales exactly with size. So the
+22.5px word's own centre sits further above baseline than the 15px mark's does, and leaving the mark on the
+shared baseline reads as sitting low against the enlarged letters beside it. `scriptMidEm()` measures that
+ratio ONCE (any character — it is a property of the face, not the glyph) as `TOK_MID`, and `svgSeamMark` shifts
+the mark up by `TOK_MID × wordPx × (1 − 1/mag)`: closed form, no second per-token measurement, and exactly 0 at
+mag 1. Measured against Nithya Ranjana (TOK_MID 0.400, a 22.5px word): 3.00px — matches the word/mark centre
+gap computed directly from both fonts' own ascent/descent to the same two decimal places.
+⚠️ **And the MWT surface form keeps its top margin** (`mwtFormLead`): the literal 20 seats a
+15px form ~9px below the tie, i.e. 20 minus that form's ascent, so at mag 1.5 the enlarged ascent ate the gap. Adding
 `A × (mag − 1)` holds the ink top where every non-ornamental script puts it — the same shape as `belowGap()`'s
 magnification term, and `bot` is computed from `dfy`, so the reserve follows for free.
 
@@ -553,12 +569,39 @@ Devanagari 0.90), which is why this is measured rather than tabulated.
 
 ⚠ **AND THE RUNNING LINE IS TOP-ALIGNED, THEN PULLED UP BY ITS OWN ASCENDER** (superseding the cap-height rule
 this block used to describe). `.shead` is baseline-aligned, which is right while everything in it is one size; a
-script at double size then hangs its extra height ABOVE the row. `align-self:flex-start` puts the tall box's top at
+script at magnified size then hangs its extra height ABOVE the row. `align-self:flex-start` puts the tall box's top at
 the row top — but these faces reserve enormous ascents for their stacked marks, most of it empty, so top-aligning
-the BOX alone drops the letters well below the number. The line is shifted back up by that ascent's magnified
-excess, `--script-asc` × `--stext-fs` × (mag − 1), and the empty ascent overflows into the gap above the block
-where nothing is drawn; a matching `margin-bottom` gives the shift back to the flow so the line cannot lean into
-the transliteration row. Every term is 0 at mag 1.
+the BOX alone drops the letters well below the number.
+⚠ **SUPERSEDED AGAIN, by a smaller and more accurate lift.** The line is now shifted up only as far as
+`scriptLiftEm()` (js/diagram/diagram-core.js) measures the SHIROREKHA to be — a token's
+`actualBoundingBoxAscent` (its own ink top) subtracted from `fontBoundingBoxAscent` (the font's full,
+mark-reserving ascent) — published as `--script-lift`, not the older `--script-asc` × (mag − 1) this
+paragraph used to describe (that shifted by the FULL magnified ascent, past the shirorekha, into the
+space reserved for stacked marks nothing on screen was using). `top:calc(-1 * --script-lift * --stext-fs
+* --script-mag)` puts the head-line — not the box top — at the row top; the empty ascent above it
+overflows into the gap above the block, where nothing is drawn.
+⚠ **MEASURED AGAINST THE TALLEST TOKEN ON SCREEN, NOT ONE ARBITRARY SAMPLE CHARACTER.** The first cut of
+`scriptLiftEm()` picked the first non-Latin character anywhere in `DOC` and measured only it — cheap, but
+wrong the moment that character's own cluster wasn't the tallest thing the line actually draws. A REPHA
+(र् before a consonant) only forms once its whole cluster is shaped: a Nithya Ranjana "मूर्तित्वे" measures
+`actualBoundingBoxAscent` 81.40 of a 100 `fontBoundingBoxAscent` as a WHOLE WORD — the र्त repha reaching
+almost to the font's own top — against 65.40 for "म" measured alone, or for "र्त" measured out of the
+context that triggers the substitution. Lifting by the single-character number (h−65.40) put the repha
+16% of the em ABOVE the row top it was supposed to land ON — the exact "shirorekha too high" this was
+built to fix, reappearing because the sample it measured against wasn't the one actually drawn. Every
+token's `ortho` on screen is now measured as its own full string (shaping intact) and the SHORTEST needed
+lift — the tallest ink — wins: any other token would have to poke above the winner's own head-line to
+need less, and a repha-free word simply lands a little below row-top rather than exactly on it, which is
+the safe side of the trade-off. Scanning every token costs ~30ms cold (three sentences' worth of Noto Sans
+Javanese tokens, once, when the scheme or magnification actually changes) and ~0.5ms warm on a
+subsequently-measured 3,000-token document — negligible next to renderDoc() itself.
+⚠ **AND `margin-bottom` MUST CARRY THE SAME SIGN AS `top`, NOT ITS OPPOSITE.** `position:relative` moves
+the PAINT without moving the box the FLOW reserves, so `top:-N` alone leaves flow still ending where the
+box's UNSHIFTED bottom was — an N-tall gap of dead space, not an overlap. A NEGATIVE `margin-bottom` of
+the same N pulls the flow's own "row ends here" back up by that same N, closing the gap; a POSITIVE one
+(the bug this read as `+`, until measured) adds to it, doubling it instead of closing it. Measured in
+isolation: `top:-N` alone → an N-tall gap where flow expected none; `top:-N` with `margin-bottom:+N` →
+2N; `top:-N` with `margin-bottom:-N` → 0, matching the unshifted layout. Every term is 0 at mag 1.
 
 ⚠ **A z-index cannot beat the native window-tab bar.** Every floating popup clamps its top to
 `menuTopBound()` (`js/core/scroll.js`) rather than to a bare `8`: the app's own titlebar is web content
@@ -753,18 +796,6 @@ chunk*: one space anywhere disarmed it and every CJK chunk was swallowed whole (
 and `lzh_sud_kyoto` reach the fallback — stock spaCy tokenisers publish nothing; the Stanza zh/ja
 pipelines have no `mwt` processor and were never affected). Dropping the chunk test also let the
 genuine single-chunk case through — a bare `don't` is one orthographic word, and an MWT.
-
-⚠ **A BREVE IS TAKEN OFF BEFORE THE PARSER SEES LATIN, AND PUT BACK AFTERWARDS.** A reader pastes Latin as
-a textbook prints it (`pŭella`, `ĭnstar`), and the treebanks spell Latin with no quantities at all — so every
-marked word arrives out of vocabulary and comes back mis-tagged and mis-lemmatised. `_debreve` strips the
-marks from the string handed to the pipeline and returns an INDEX MAP; `_reform` slices each token's FORM back
-out of the ORIGINAL text, so what the parser sees is bare and what is stored is what the reader wrote. Both
-halves are load-bearing: a written breve is a quantity the author WROTE, which `macron.py` honours as the one
-thing it never revises, so stripping it into the file would delete a statement. Gated on the LANGUAGE, not on
-the character — Turkish `ğ` is g-with-breve, and stripping it there would rewrite the language. Applied on the
-four spaCy entry points (`_parse_spacy_sud`, `_parse_spacy_sud_many`, `_spacy_tokenize`, `parse_pretokenized`);
-**Stanza is deliberately left alone** rather than half-done, since an MWT-expanded Stanza word carries
-`start_char = None` and the same restore is not available there.
 
 **SUD'S OWN MISC LAYER IS PREDICTED TOO**, by components of the model's own
 (`sud_subject`/`sud_subject_rule`, `sud_reported_rule`, `sud_idiom`), and it arrives on ONE spaCy
@@ -1057,140 +1088,6 @@ missing tier must surface as an offer to install, never an exception.
   concatenate to `vartmaa`, which is not a word in any script), and SpaceAfter comes from the raw
   text rather than from `doc.text`, which is the tokeniser's own reconstruction and puts spaces
   where the input had none.
-- `app/macron.py` (+ vendored `app/_la_macron_vendor.py`) — **Latin vowel length as a Script
-  option**, `divisa` → `dīvīsa`. Restoring a macron is a display question, not an annotation one:
-  the treebanks spell Latin without them and a file must round-trip byte-identically, so it feeds
-  the Script layer exactly as the Indic scripts do — the running sentence and the diagram glyphs
-  re-render while the grid, the input fields and the file keep the bare form. Nothing reaches MISC.
-  It is why `orthography` grew `feats`/`lemmas` beside the `upos` the Chinese readings already
-  threaded: the FORM alone reaches only the morphology-blind level, where nominative `Gallia` picks
-  up an ablative macron.
-  ⚠ **It is therefore the ONE Script scheme whose cached rendering is keyed on more than the form**,
-  and both halves of that used to be missing. `fillOrtho` batches on `orthoKeyOf(t)` — (surface, upos)
-  as every other scheme does, **plus FEATS and the lemma where the scheme reads them** — so two tokens
-  spelt and tagged alike but analysed differently stop sharing whichever one was reached first. And
-  each rendering carries the key it was computed for (`t._orthoKey`), so `fillOrtho` refills whatever
-  no longer matches instead of only what is empty. That stamp is what makes "a macron follows any edit
-  to the token" true: the trigger is `markDirty` — the one funnel every document edit passes through —
-  debounced, gated on `orthoNeedsMorph()`, and skipped while an inline field is open. Teaching the
-  dozen-odd FEATS/lemma write sites to invalidate was the alternative, and a new one would forget.
-  **The data is FETCHED, not shipped** — Morpheus (CC BY-SA 3.0 US) via the `macrons.txt` Johan
-  Winge commits in latin-macronizer (GPL-3.0), ~4 MB on the wire, downloaded on demand into
-  `APP_DATA` and compiled there in ~4 s. GPL restricts DISTRIBUTION, not USE, so a file the user's
-  machine fetches from upstream and that never enters a build is not ours to license — the same
-  posture `convert.py` takes toward the grew backend. ⚠ **Committing the built table is the standing
-  temptation and is the one thing that turns a use into a distribution.** It rides `extras.TIERS`
-  as a DATA tier (`module` instead of `pip`), so it appears in Manage Models with the torch tiers
-  and shares their job/progress plumbing rather than growing a second install path.
-  ⚠ **TWO TABLES CASCADE, and neither subsumes the other.** Measured, agreement with Alatius on
-  gold morphology — the harvested SUD-spaCy LUT (if the user has built one) against Morpheus:
-
-  | | harvest has the word | it does not |
-  |---|---|---|
-  | ITTB+PROIEL test | 98.23 % (92.1 % of tokens) | 52.46 % (7.9 %) |
-  | Morpheus, same split | 93.98 % | 90.42 % |
-
-  The harvest is near-perfect on its own vocabulary and close to a coin toss off it — upstream's
-  own "OOV levels are 71 % of all errors from 8 % of tokens", stated the other way round. Morpheus
-  covers 249,659 forms against 42,817. So `macronise` takes the harvest where it has a real entry
-  (`L1`/`L2`/`L3`, never its suffix guess) and Morpheus for everything else: **97.61 %** in-domain
-  against upstream's published 94.32 %, and on Perseus (classical poetry, where the harvest's OOV
-  share goes 7.9 % → 23.8 %) **97.24 %** cascaded against 87.02 % harvest-alone and 95.75 % for
-  Morpheus alone — which is what most users get, since the harvested table cannot be distributed.
-  Morphology is matched through a nine-slot key (`_ud_key` / `_ldt_key`) that renders UPOS+FEATS and
-  the Perseus/LDT nine-position tag into one alphabet, and lookup walks a LADDER of progressively
-  blanker keys rather than demanding one exact match — the tagger is imperfect (`cano` came back
-  ADJ, `fortes` VERB on a sample), and an exact key turns every mis-tag into a total miss. Each rung
-  is precomputed at build time and only where it is decisive, so a rung never answers a question it
-  cannot settle. `_PARADIGM` still applies on top: it is a statement about Latin, not a patch for a
-  bad harvest.
-  **`macron._extra_fixes` is this app's own extension of that paradigm override**, kept in `macron.py`
-  rather than in the vendored file for the reason `translit._POS_OVERRIDE` is kept out of the
-  Baxter–Sagart TSV: a re-vendor would revert an edit there. Every cell was **measured against
-  `macrons.txt` itself** (724,191 rows) and admitted only at **≥ 99.8 %** agreement — the infinitive
-  in `-e`/`-ī`, the gerund/gerundive in `-ō`/`-ī`, the supine `-ū`, first-singular `-ō`/`-ī`, the
-  2sg future passive `-ēris`/`-ēre`, the imperative `-ā`/`-ī`, `-mus`/`-tis`, the dative/ablative
-  plural `-īs` and `-ibus`, genitive/dative singular `-ī`, first-declension accusative plural `-ās`,
-  second-declension vocative `-e`, the comparative `-ius`. `PRON` is excluded (`mihi`, `tibi` measure
-  33.8 % long).
-  ⚠ **THE MSeg TIER CARRIES MACRONS, AND IS THEREFORE GATED ON THE MACRONISER.** Everything else about vowel
-  length is a Script scheme, i.e. a DISPLAY preference; a morpheme segmentation is annotation, it is stored in
-  MISC MSeg, and `dī-vīsa` is a different claim from `di-visa`. So the tier carries the marks whatever the Script
-  pill says (`fillLaMacron`/`scheduleLaMacron`, js/lang/translit-load.js, debounced off `markDirty` exactly as
-  `scheduleOrthoMorph` is), and for Latin the tier cannot be switched on at all without the table — the checkbox
-  is disabled (`syncGlossUI`), `setTier` refuses again at the command, and the Script menu's own "With macrons"
-  row is one click from installing it. ⚠ **The macrons are OVERLAID on the segmentation, never segmented from**:
-  quantity alternates across a paradigm, so `dīvīsa` against `dīvidō` shares only `dīv` where the bare pair shares
-  `divi` — feeding marked strings to `msegSegment` makes the shared match SHORTER and moves the boundary. Letters
-  decide the cut, marks are written onto the letters that survived it, which is sound because macronisation is
-  length-preserving (precomposed ā ē ī ō ū). ⚠ And `editTier`'s MSeg back-write **strips the quantities first** —
-  the FORM column never carries them and the file must round-trip byte-identically.
-  ⚠ **AN MWT's MACRONS COME FROM ITS COMPONENTS** (`laMwtCompose`), because `macrons.txt` lists WORDS and never
-  host+clitic: `armaque` is simply absent from it, so the fused surface came back bare in the middle of an
-  otherwise macronised diagram and running line. `arma` and `que` each answer, each with its own UPOS/FEATS/lemma
-  — which the range could never have had. The join is CHECKED before it is trusted (stripping the quantities off
-  it must reproduce the stored form), so French `du` = `de`+`le` is left alone rather than mis-composed.
-  ⚠ **`ae`/`oe` ARE SINGLE LETTERS IN LATIN**, and that supersedes the older "a cut may not split a vowel
-  SEQUENCE" rule *for Latin only* (`MSEG_DIGRAPHS`, js/io/bridge.js). The old rule was a crude statement of the
-  same intent — knowing no language's letters, it treated every vowel run as indivisible — and it walked
-  `Troiae`/`Troia`'s cut back through `oiae` to `Tr-oiae`. With the digraph inventory the only forbidden cut is
-  one falling inside `ae`/`oe`: `Troi-ae`, `puell-ae`, `poen-ae`. Every language NOT in that table keeps the
-  whole-run approximation, deliberately — it is what declines `said`/`say` (the cut moves to `s|aid` and a match
-  of `s` then fails the vowel test), and dropping it everywhere would have cost that for nothing.
-  ⚠ **The MGloss ordering puts the POS-SUBTYPE features right after Number** (`3SG.PERS`) — they used to
-  trail every inflectional category. Placed after Clusivity, not between Number and Clusivity, because
-  `1PL.INCL` is one agreement statement nothing may split; with no Clusivity the two readings coincide.
-  They are also members of `MGLOSS_NOMINAL`, so they travel with the nominal block when Case moves it to
-  the end — otherwise a case-marked pronoun glosses `PERS.3SG.NOM` instead of `3SG.PERS.NOM`.
-
-  ⚠ **A QUANTITY THE AUTHOR WROTE IS KEPT; EVERY OTHER VOWEL IS STILL DERIVED.** Everything else in the
-  module is inference — somebody else's lexicon plus rules right 99-point-something per cent of the time
-  — and a macron or breve someone has WRITTEN is not inference, so it is never revised. A **breve** is
-  the pointed case: an unmarked vowel says nothing (Latin is normally written with no quantities), so a
-  breve is the only way to say "short, and I mean it" — exactly the mark a reader reaches for to
-  contradict this module. It is honoured, and written back AS a breve; a bare vowel would delete the
-  statement. But a mark exempts only ITS OWN VOWEL. Part-marking is the normal way of writing Latin
-  quantities, and that cuts the opposite way from how it first looks: precisely BECAUSE part-marking is
-  normal, an unmarked vowel is not a claim of shortness but simply unmarked, so filling it in adds
-  information without contradicting anyone. `dīvisa` → `dīvīsa`; `dĭvisa` → `dĭvīsa`. (`_written_marks`
-  reads the marks by BASE-character index after NFD, so precomposed `ā`/`ĭ` and their decomposed
-  spellings are caught alike and an unrelated combining mark — a diaeresis — neither counts nor shifts
-  the ones after it; `_strip_quantity` removes both marks for the lookup, since a breve left in place
-  would make `ĭnstar` a string no lexicon can match.)
-  ⚠ **THE RULES COME IN TWO TIERS.** A cell measured **exceptionless** (100.00 %) applies always — a
-  paradigm cell is a fact the lexicon may never have been shown, and contradicting its morphology-blind
-  fallback is the point. A cell with *any* measured residue applies **only where the lookup had no entry
-  for that word**, because the residue words are almost by definition ones the lexicon knows. That split
-  was forced by the nominative `-us` rule (99.89 %), which applied unconditionally shortened `senectūs`,
-  `virtūs`, `servitūs` — the third-declension `-tūs` abstracts. **Gender does not separate those**,
-  measured: feminine `-tus` nominatives are only 14.3 % long, the rest being Greek feminine names.
-  ⚠ **A cell that fails the bar is usually UNDER-SPECIFIED, not unstatable**, and the conditioner is
-  most often the SPELLING or the LEMMA, neither of which UPOS+FEATS carries: the 2sg future passive goes
-  91.6 % → 100 % excluding `-bere` (the 1st/2nd b-future); the imperative 30.0 % → 100 % on `-ā`/`-ī`,
-  and its remaining `-e` 25.0 % → 99.56 % when `lemma == form + "o"` marks the 2nd conjugation;
-  accusative plural `-ās` 98.6 % → 100 % on an a-stem lemma; the vocative 90.9 % → 99.98 % on an o-stem
-  one. The **positive adverb in `-ē`** deserves its own line: the contrast is DERIVATIONAL (`longē` ←
-  `longus`), so the rule must know the adjective — an earlier attempt keyed it on the LEMMA being the
-  adjective, which is Morpheus's convention and **not UD's** (UD lemmatises an adverb to itself), so it
-  could never fire on this app's own parses and was dead code wearing a measurement. It now asks the
-  loaded table whether `stem + "us"` is a form. Still out, with figures: the fifth-declension ablative
-  (already `_PARADIGM`'s, keyed on `InflClass`), "an enclitic is short" (95.2 / 82.5 / 70.6 % — sunk by
-  `aequē`, `plēnē`), and `-r`/`-l`/`-d`, which under the same gate changed **0 words either way**.
-  ⚠ **NO ENCLITIC SPECIAL CASE, deliberately.** An `_enclitic_host` helper briefly split an unsplit
-  `armaque` and macronised the host, on the (correct) observation that `macrons.txt` lists WORDS and
-  never host+clitic. It was removed: an enclitic is a separate TOKEN, UD tokenises `armaque` as a
-  multi-word token over `arma` + `que`, and **the Latin tokeniser is the layer that should split it**.
-  Once it does, each piece arrives here as its own word and every rule works with no special case — and
-  the MWT shows up in the diagram and the file too, which a macronisation-only fix could never give.
-  Measured on a held-out 5 % of the forms: whole-token 44.45 % → **48.62 %**, per-vowel 81.18 % →
-  **83.61 %**, 432 words newly right against 1 newly wrong, and in-vocabulary now *improves* rather than
-  merely holding (99.01 % → 99.04 %) — which is what the two-tier gate bought.
-  **What remains is not addressable by rules.** Bucketed over the held-out OOV split by the position of
-  each wrong vowel: stem 12,428 of 31,277 · penult 269 of 6,972 · final 173 of 3,883. **96.6 % of wrong
-  vowels are STEM vowels and 98 % of errors are "too short"** — we fail to restore a macron rather than
-  invent one. Stem length is lexical; the endings, which are this table's business, are now 95.5 % right
-  at the final vowel and 96.1 % at the penult.
-
 Optional dependencies are always isolated behind a single module façade in `app/`, as those last
 five do — follow that when adding another.
 

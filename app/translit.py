@@ -29,7 +29,7 @@ _JANOME = None
 _KKS = None
 _KO = None
 _UROMAN = None
-_CACHE: dict[tuple[str, str, str, str, str, str], str] = {}   # (lang, scheme, text, upos, feats, lemma) → transliteration ⚠ the three hints are in the key: see _render_one
+_CACHE: dict[tuple[str, str, str, str], str] = {}   # (lang, scheme, text, upos) → transliteration ⚠ upos is in the key: see _render_one
 
 _DATA_DIR = os.path.join(os.path.dirname(__file__), "data")   # vendored, char-keyed datasets (offline)
 
@@ -1978,9 +1978,6 @@ def _scheme_available(base: str, sid: str) -> bool:
     if sid == "csl":                      # pure Python, no engine — only the vendored sandhi generator
         from . import sa_notation as _sa_notation
         return _sa_notation.available()
-    if sid == "macron":                   # Latin vowel length needs a lookup table this repo can't ship
-        from . import macron as _macron
-        return _macron.available()
     if sid == "iast" or (base == "sa"):   # IAST + all Indic scripts ride aksharamukha
         return _pkg("aksharamukha")
     eng = _ENGINES.get(sid)
@@ -1998,7 +1995,6 @@ def _scheme_available(base: str, sid: str) -> bool:
 # Checked against extras.TIERS at import (`_check_scheme_tiers`) so a renamed tier cannot silently
 # leave a dead link behind — the one failure mode this table can have.
 _SCHEME_TIER: dict[str, str] = {
-    "macron": "la_macron",     # Morpheus vowel lengths, fetched not shipped (app/macron.py)
     "kunrei": "japanese",      # cutlet + its dictionaries
     "hepburn": "japanese",
 }
@@ -2050,15 +2046,6 @@ _SA_SCRIPTS = [("iast", "Latin")] + list(_AKSHARA_SCRIPTS)
 _SCRIPT_SCHEMES: dict[str, list[tuple[str, str]]] = {
     "zh": _HANZI_CONV, "yue": _HANZI_CONV, "lzh": _HANZI_CONV,
     "sa": _SA_SCRIPTS,
-    # LATIN: not another writing system but another SPELLING of the one it has — vowel length, which
-    # classical orthography leaves unwritten and every teaching edition restores.  It belongs to the
-    # Script layer for the reason the Indic scripts do: it re-renders the glyphs a reader reads while
-    # the FORM column, the grid and the editors keep what the file says.  See `app/macron.py` for why
-    # it can list unavailable.
-    # …and it is LABELLED as the two-state choice it is, not as a script name: the menu's other row is
-    # "Without macrons" (js/lang/translit.js's orthoOffLabel, which also suppresses the "None" row for
-    # Latin), so "Latin (macronised)" beside it would have named the language rather than the choice.
-    "la": [("macron", "With macrons")],
     **{c: list(_SERBIAN_CONV) for c in _SERB},
     **{c: [("mn-traditional", "Mongolian (traditional)")] for c in _MONG},
 }
@@ -2355,7 +2342,7 @@ def _pos_render(text: str, base: str, scheme: str, upos: str) -> str:
 # The shapes the two public entry points take.  ``upos`` is deliberately a UNION and not an
 # overload set: every caller may omit it, one tag may stand for a whole batch, and a per-form list
 # is the batch case api.py sends — three call shapes that share one body, and `_hint_at` is the one
-# place that tells them apart.  ``feats`` and ``lemmas`` are the same shape and read the same way.
+# place that tells them apart.
 _Forms = str | list[str] | tuple[str, ...]
 _Rendered = str | list[str]
 _Upos = str | list[str] | tuple[str, ...] | None
@@ -2366,17 +2353,15 @@ def _hint_at(hint: _Hint, i: int) -> str:
     """The per-token hint for position ``i``: a LIST is read positionally (one value per form), a
     bare string applies to every form, and anything else — None, the default "" — means none at all.
 
-    Three hints now ride this shape, because three engines want different things about the token
-    beyond its surface: ``upos`` picks a Han graph's reading, and ``feats``/``lemma`` pick a Latin
-    word's vowel lengths (`macron`).  One helper rather than three, since the broadcast/positional
-    question is identical and only the payload differs."""
+    ``upos`` is the one hint left riding this shape (it used to be shared with the Latin macron
+    engine's ``feats``/``lemma`` hints, since removed) — a Han graph's reading is the remaining
+    consumer."""
     if isinstance(hint, (list, tuple)):
         return (hint[i] or "") if 0 <= i < len(hint) else ""
     return hint or ""
 
 
-def _render_one(text: str, lang: str, scheme: str, upos: str = "",
-                feats: str = "", lemma: str = "") -> str:
+def _render_one(text: str, lang: str, scheme: str, upos: str = "") -> str:
     """Shared engine dispatch for BOTH transliteration and orthography — they use the same engines,
     keyed by scheme id (scheme ids are globally unique across the two menus).  Cached per
     (lang, scheme, text, upos).
@@ -2389,14 +2374,12 @@ def _render_one(text: str, lang: str, scheme: str, upos: str = "",
     would be order-dependent and invisible: nothing errors, the value is a real reading of the
     graph, and it is simply the wrong one.  The key is a strict superset of the old one, so every
     untagged call still shares one entry with every other untagged call and the cache does not
-    fragment.  ``feats``/``lemma`` join the key on exactly the same argument — they change a Latin
-    word's macrons (`Gallia` Nom vs `Galliā` Abl), and every caller that omits them keeps sharing
-    one entry."""
+    fragment."""
     if not text or not lang:
         return ""
     base = _canon_lang(_norm(lang))
     scheme = scheme or _default_scheme(base)
-    key = (lang, scheme, text, upos, feats, lemma)
+    key = (lang, scheme, text, upos)
     if key in _CACHE:
         return _CACHE[key]
     try:
@@ -2406,13 +2389,6 @@ def _render_one(text: str, lang: str, scheme: str, upos: str = "",
                 out = _iast(text)
             elif scheme in _AKSHARA_IDS and base == "sa":
                 out = _sanskrit(text, scheme)
-            elif scheme == "macron" and base == "la":
-                # Latin vowel length.  Branched here rather than registered in `_ENGINES` because
-                # its engine is the only one that reads more than the surface: the table is keyed
-                # on (form, upos, feats), and the lemma supplies the declension where FEATS carries
-                # no InflClass.  An `_ENGINES` entry is a bare (text) → str and cannot say that.
-                from . import macron as _macron
-                out = _macron.macronise(text, upos, feats, lemma)
             elif scheme in _ENGINES:
                 out = _ENGINES[scheme][0](text)
             else:
@@ -2425,14 +2401,13 @@ def _render_one(text: str, lang: str, scheme: str, upos: str = "",
     return _CACHE[key]
 
 
-def _ortho_one(text: str, lang: str, scheme: str, upos: str,
-               feats: str = "", lemma: str = "") -> str:
+def _ortho_one(text: str, lang: str, scheme: str, upos: str) -> str:
     """One form re-rendered in an ORTHOGRAPHY scheme.  Split out so the scalar and the vector entry
     points below can each be typed exactly (``str`` / ``list[str]``) instead of sharing one
     ``str | list[str]`` body that pyright then has to widen at every call site."""
     if not scheme:
         return ""   # "Original" — no re-rendering
-    return _render_one(text, lang, scheme, upos, feats, lemma)
+    return _render_one(text, lang, scheme, upos)
 
 
 def transliterate(forms: _Forms, lang: str, scheme: str = "", upos: _Upos = "") -> _Rendered:
@@ -2442,29 +2417,20 @@ def transliterate(forms: _Forms, lang: str, scheme: str = "", upos: _Upos = "") 
     ``upos`` is an OPTIONAL UD tag ("NOUN", "VERB", …) — a single string applying to every form, or
     a LIST PARALLEL TO ``forms``.  Where the language and scheme support it (Chinese; see
     `_pos_render`) it selects which reading of a one-graph token to render; everywhere else, and
-    for every caller that omits it, nothing changes.
-
-    No ``feats``/``lemma`` here, deliberately: the only engine that reads them is `macron`, which is
-    a SCRIPT and never a romanisation — Latin has nothing to romanise from."""
+    for every caller that omits it, nothing changes."""
     if isinstance(forms, (list, tuple)):
         return [_render_one(f, lang, scheme, _hint_at(upos, i)) for i, f in enumerate(forms)]
     return _render_one(forms, lang, scheme, _hint_at(upos, 0))
 
 
-def orthography(forms: _Forms, lang: str, scheme: str = "", upos: _Upos = "",
-                feats: _Hint = "", lemmas: _Hint = "") -> _Rendered:
+def orthography(forms: _Forms, lang: str, scheme: str = "", upos: _Upos = "") -> _Rendered:
     """Re-render ``forms`` in the display-only ORTHOGRAPHY ``scheme`` (Zhuyin, GR, an Indic script, …).
     "" ⇒ Original (returns "" so the caller keeps the original glyphs).  ``upos`` as in
     `transliterate` — it reaches the Mandarin orthographies (Zhuyin, Gwoyeu Romatzyh), which are
-    driven by the same numbered-pinyin syllables, and is inert for the rest.  Never raises.
-
-    ``feats``/``lemmas`` are the same shape as ``upos`` and reach the Latin `macron` scheme alone,
-    where they are what separate ``Gallia`` (Nom) from ``Galliā`` (Abl).  Every other scheme ignores
-    them, and a caller that sends only forms still gets the table's form-only levels."""
+    driven by the same numbered-pinyin syllables, and is inert for the rest.  Never raises."""
     if isinstance(forms, (list, tuple)):
-        return [_ortho_one(f, lang, scheme, _hint_at(upos, i), _hint_at(feats, i), _hint_at(lemmas, i))
-                for i, f in enumerate(forms)]
-    return _ortho_one(forms, lang, scheme, _hint_at(upos, 0), _hint_at(feats, 0), _hint_at(lemmas, 0))
+        return [_ortho_one(f, lang, scheme, _hint_at(upos, i)) for i, f in enumerate(forms)]
+    return _ortho_one(forms, lang, scheme, _hint_at(upos, 0))
 
 
 # The two *_many entry points render the LIST case directly rather than delegating to the
@@ -2478,10 +2444,8 @@ def transliterate_many(forms: list[str], lang: str, scheme: str = "",
 
 
 def orthography_many(forms: list[str], lang: str, scheme: str = "",
-                     upos: list[str] | None = None, feats: list[str] | None = None,
-                     lemmas: list[str] | None = None) -> list[str]:
-    return [_ortho_one(f, lang, scheme, _hint_at(upos, i), _hint_at(feats, i), _hint_at(lemmas, i))
-            for i, f in enumerate(forms or [])]
+                     upos: list[str] | None = None) -> list[str]:
+    return [_ortho_one(f, lang, scheme, _hint_at(upos, i)) for i, f in enumerate(forms or [])]
 
 
 # ── heteronym readings (Chinese + Japanese) ───────────────────────────────────

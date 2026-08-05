@@ -96,7 +96,7 @@ function applySnap(x){ GLOSS_ON=!!x.glossOn; MORPH_ON=!!x.morphOn; syncGlossUI()
      translation fields each block draws. Guarded on the key being present so a snapshot taken before this was
      captured is left alone (same treatment as x.stored above), and the drawer is redrawn so its checkboxes
      agree with the set that is actually in force. */
-  if(Array.isArray(x.transLangs)){ const now=[...TRANS_LANGS].sort().join(" "), then=[...x.transLangs].sort().join(" ");
+  if(Array.isArray(x.transLangs)){ const now=[...TRANS_LANGS].sort().join(" "), then=[...x.transLangs].sort().join(" ");
     if(now!==then){ TRANS_LANGS=new Set(x.transLangs); if(typeof renderTransDrawer==="function") renderTransDrawer(); } }
   if(x.stored!==undefined && x.stored!==STORED_SCHEME){ STORED_SCHEME=x.stored; if(typeof updateStoredPill==="function")updateStoredPill(); }   // …and the stored transliteration scheme (undefined on a snapshot taken before this was captured — leave it alone then)
   const keepMwt=d=>(d.mwt||[]).forEach(m=>{ m._kept=1; });   // the snapshot restored each MWT's surface form along with its components — that form is AUTHORITATIVE, not a value to re-derive. _kept tells the opportunistic sandhi re-fuse (see the ortho fill in translit-load.js) to leave it alone, so undoing a re-fuse lands on exactly the form the document had before the edit instead of immediately recomputing it — and marking the file dirty again on its way out. A later component edit clears the tag and re-fuses normally (sandhiMwtForms).

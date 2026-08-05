@@ -195,6 +195,39 @@ function docTopInset(){
    old constant 8 in every case except the one it is for. Read off the INLINE style, the same place
    and for the same reason docTopInset does. */
 function menuTopBound(){ return Math.max(8, parseFloat(document.documentElement.style.getPropertyValue("--tabH"))||0); }
+/* A status-bar pull-down's max-height is a viewport-relative CSS cap (min(Npx,70vh) — see menuTopBound's
+   own kind of concern, "never overflow the top of the document viewport"), which on a short window can
+   land partway through a row: CSS has no way to floor a vh-derived length to a whole multiple of a row's
+   own height. Reads the list's ACTUAL RENDERED height, not getComputedStyle's max-height property — the
+   two disagree exactly in the case this exists for, a flex child (.lmlist inside .langmenu) compressed
+   below its own CSS cap by an outer viewport-relative constraint, where the property still reports its
+   unshrunk cap while the box itself is shorter.
+   ⚠ ROWS ARE NOT UNIFORM HEIGHT, so a single measured row times a floored count is the wrong shape — the
+   Script menu's rows carry an "unavailable" tier badge on some rows and not others (naTag), so the first
+   row's height is not every row's height, and floor(budget/firstRowHeight) could cut mid-row exactly as
+   often as it fixed it. This instead walks each row's own cumulative bottom edge and keeps the LAST one
+   that still fits the budget — correct for uniform rows (.lmlist) and heterogeneous ones (.trmenu) alike,
+   since it never assumes a repeating unit. scrollTop is reset first so "the budget" and "the rows" are
+   measured from the same top, not wherever a previous open happened to leave the scroll position. Call
+   after the list is populated and shown (so the real height reflects the current viewport) and before a
+   caller reads offsetHeight for positioning off it.
+   ⚠ THE CONTAINER'S OWN BOTTOM PADDING HAS TO BE RESERVED, NOT JUST THE LAST ROW's BOTTOM EDGE — box-sizing
+   is border-box here, so `budget` (the border-box height) already includes padding-top AND padding-bottom,
+   but a row-fit test against the raw budget lets a row's bottom land right at the padding-bottom's own
+   inner edge, leaving nothing after it: measured, a 6px top padding against a 0.5px (border-only) bottom
+   gap. Rows are tested against budget MINUS the bottom padding/border, and that same amount is added back
+   onto the final cut, so the visible gap below the last row matches the one above the first. */
+function snapListRows(list,rowSel){ if(!list) return;
+  list.style.maxHeight="";   // clear a previous call's snap first — these elements are cached/reused across opens, and measuring on top of a stale inline cap would only ever shrink further, never grow back when there's more room
+  list.scrollTop=0;
+  const rows=list.querySelectorAll(rowSel); if(!rows.length) return;
+  const cs=getComputedStyle(list), padBot=(parseFloat(cs.paddingBottom)||0)+(parseFloat(cs.borderBottomWidth)||0);
+  const budget=list.getBoundingClientRect().height; if(!(budget>0)) return;
+  const ceil=budget-padBot;
+  const top=list.getBoundingClientRect().top;
+  let cut=0;
+  for(const r of rows){ const b=r.getBoundingClientRect().bottom-top; if(b>ceil+0.5) break; cut=b; }
+  if(cut>0) list.style.maxHeight=Math.ceil(cut+padBot)+"px"; }
 /* ── THE READING POSITION SURVIVES A CHANGE IN THE TOP CHROME ────────────────────────────────────
    A tab bar appearing (or the options bar opening) makes the port shorter from the TOP. The blocks
    re-cap themselves to the new height, but the scroller does not move: the content point that was at

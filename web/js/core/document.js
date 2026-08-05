@@ -1494,15 +1494,15 @@ function buildBlock(i,ctx){ const s=DOC[i];
          is told to, and it was told " ".
          Fallback, when the sentence has no spans (no bridge, or a text its tokens cannot be aligned
          to): MISC `SpaceAfter=No`, exactly as io_conllu rebuilds `# text`. A flat join(" ") put a
-         space before every full stop in the Latin macronised line ("partēs trēs ."). The gap after an
-         MWT is its LAST component's, the rule edit-ops.js's flattenMWT already states.
+         space before every full stop in a script's running line where the file itself has none. The
+         gap after an MWT is its LAST component's, the rule edit-ops.js's flattenMWT already states.
          `spaceAfterNo` lives in js/diagram/diagram-core.js, which loads BEFORE this file — and this is
          render-time code besides, so the classic-script forward-reference hazard does not apply. */
       else line=runningLine(s,i,u=>dispScheme((u.mwt?(u.mwt.ortho||u.mwt.form):(u.tok.ortho||u.tok.form))||"",ORTHO_SCHEME));
       txt.textContent=line||s.text||"(empty)";
       txt.title="Sentence in "+(cslTop?trSchemeLabel(TRANSLIT_SCHEME):orSchemeLabel(ORTHO_SCHEME))+" (display)";
       txt.classList.add("stext-script");   // item 20: the script top line's text left edge is aligned to the transliteration input below it (see .stext.stext-script CSS)
-      if(ORTHO_SCHEME==="Grantha"||ORTHO_SCHEME==="Javanese"||ORTHO_SCHEME==="Balinese"||ORTHO_SCHEME==="Kawi"||ORTHO_SCHEME==="ZanabazarSquare") txt.classList.add("stext-stacked");   // item 18: Grantha's stacked vowel marks need extra vertical room → double-spaced (see .stext.stext-stacked CSS); Javanese and Balinese share the same stacked-diacritic problem, so they get the same treatment. Kawi too (added alongside its _AKSHARA_SCRIPTS reinstatement): verified by rendering a real 4-line Sanskrit verse (samples/brihat_jataka.conllu s1) at line-height:1.4 — a stacked/subjoined conjunct cluster on one line visibly overlapped the line below it, which line-height:2 clears. Zanabazar Square joined the set on user report from the real app (a synthetic @font-face CDP test during its own reinstatement read as clean at normal spacing, but the shipping WKWebView face disagreed) — trust the live report over that synthetic result. Tibetan is NOT in this set: it briefly rendered via TibetanMachineUnicode (a stacked-subjoined-consonant face needing the same double-spacing), but that font is never fetched by fontload.js's on-demand mechanism — Tibetan now goes through the SAME "Noto Sans <Script>" pipeline every other script does (see FONT_SCRIPTS, fontload.js), whose ordinary composed glyphs need no extra vertical room. ONLY the top script line; the editable translit/original below keeps normal spacing
+      if(typeof STACKING_SCRIPTS!=="undefined" && STACKING_SCRIPTS.has(ORTHO_SCHEME)) txt.classList.add("stext-stacked");   // item 18: Grantha's stacked vowel marks need extra vertical room → double-spaced (see .stext.stext-stacked CSS); Javanese and Balinese share the same stacked-diacritic problem, so they get the same treatment. Kawi too (added alongside its _AKSHARA_SCRIPTS reinstatement): verified by rendering a real 4-line Sanskrit verse (samples/brihat_jataka.conllu s1) at line-height:1.4 — a stacked/subjoined conjunct cluster on one line visibly overlapped the line below it, which line-height:2 clears. Zanabazar Square joined the set on user report from the real app (a synthetic @font-face CDP test during its own reinstatement read as clean at normal spacing, but the shipping WKWebView face disagreed) — trust the live report over that synthetic result. Tibetan REJOINED it the same way: the note that used to sit here reasoned from the FONT SWAP alone (TibetanMachineUnicode → Noto Sans Tibetan) that ordinary composed glyphs need no extra room, but a live report says the stacked/subjoined consonant clusters Noto Sans Tibetan draws still want it — the same "trust the live report over the synthetic one" call Zanabazar Square already established. ONLY the top script line; the editable translit/original below keeps normal spacing. STACKING_SCRIPTS lives in js/lang/translit.js (which loads before this file), so belowGap() (js/diagram/diagram-core.js) can give the diagram's own below-token spacing the same treatment without a second hardcoded list.
       txt.addEventListener("mousedown",e=>e.stopPropagation());
       /* ⚠ CSL EDITS IN PLACE, on the very line it is drawn on — the same contract a token has, where the
          CSL glyph opens a field carrying the FORM. `.stext` already does exactly this dance in the
@@ -1528,12 +1528,11 @@ function buildBlock(i,ctx){ const s=DOC[i];
          transliteration on screen, so the field belongs on IT, not on the script line above it. The
          script line hosts the field only when NOTHING else is displayed to host it. */
       /* ⚠ NOT GATED ON SANSKRIT. The rule above is about which ROW is on screen, not about which language
-         this is, and gating it left every other scripted language with no way to edit its own sentence:
-         Latin under "With macrons" shows the derived line here, has no transliteration row (so the
-         `.strans-orig` slot below is hidden), and the click-to-reveal affordance in the `else` branch is
-         Sanskrit-only — three things that each assumed one of the others would provide the field, and
-         between them provided none. Where a transliteration row IS shown it stays the host, in every
-         language, because `show.translit` is what the test turns on. */
+         this is: a scripted language with a derived running line but no transliteration row (so the
+         `.strans-orig` slot below is hidden) still needs somewhere to host the edit field, and the
+         click-to-reveal affordance in the `else` branch is Sanskrit-only — assuming one of the two would
+         always provide it is what left such a language with neither. Where a transliteration row IS
+         shown it stays the host, in every language, because `show.translit` is what the test turns on. */
       const inPlace=cslTop||!show.translit;
       if(inPlace){ const resting=line||s.text||"(empty)";
         wireStext(txt); txt.textContent=resting;
@@ -1560,7 +1559,15 @@ function buildBlock(i,ctx){ const s=DOC[i];
         txt.addEventListener("click",()=>{ const h=fieldHost||scriptTransLine; if(!h||!h.hidden) return;
           h.hidden=false; alignInlineStart(h,b); capTransWidth(h);
           h.focus(); }); } }
-    else wireStext(txt);
+    else { wireStext(txt);
+      /* Literary Chinese has no "script" to explicitly select — Han IS the stored/original text, so
+         scriptTop (orthoScript()) is false here and this line is the ordinary editable `# text`, not a
+         derived read-only script line. --script-mag is still 1.5 for it (scriptMag(), js/lang/translit.js
+         — scoped to lzh specifically), but nothing reads that variable outside .stext.stext-script, whose
+         OTHER rules (margin-inline-start:0, the ascent-lift compensation) are built for the Sanskrit
+         read-only-line case this isn't. .stext-mag is the same font-size scaling alone, with none of that
+         baggage. */
+      if(typeof isLzhLang==="function" && isLzhLang()) txt.classList.add("stext-mag"); }
     const ctrl=document.createElement("div"); ctrl.className="sctrl";
     SCTRL(i).forEach(([g,ti,kbd,fn,d])=>{
       if(g==="url") return;   // item 16: the URL control renders separately, BEFORE the number (below)
@@ -2151,10 +2158,11 @@ function positionBracketAnnots(){ document.querySelectorAll("#doc .bwrap").forEa
     if(m.kind==="xpos"){ drawTieLabel(svg,mx,fyb,m.pos,"mwt-pos","mwt-pos-cas",POS_F,null); tagXPosLabel(svg.lastElementChild,si0,m); return; }   // item 1: an ExtPos-only bracket — the value itself is the label, in the POS register
     const mfd=bform(m); let ly=fyb;
     const iastRow=iastFormEdit();   // Sanskrit + a real script → the surface form is edited on the IAST ROW, never on the derived glyph; same contract (and same {data-s, data-mwtfrom} tagging) as the SVG views' mwtTie
-    { const mrt=trTxt(m); if(mrt){ ly+=STEP; const tr=E("text",{class:"translit mwt-tr"+(iastRow?" mwt-tr-edit":""),x:mx,y:ly,"text-anchor":"middle"}); tr.textContent=mrt; svg.appendChild(tr);
+    let dropped=false;
+    { const mrt=trTxt(m); if(mrt){ ly+=STEP+STACK_DROP; dropped=true; const tr=E("text",{class:"translit mwt-tr"+(iastRow?" mwt-tr-edit":""),x:mx,y:ly,"text-anchor":"middle"}); tr.textContent=mrt; svg.appendChild(tr);
       if(si0>=0&&m.fromTok!=null){ tr.setAttribute("data-s",si0); tr.setAttribute("data-mwtfrom",m.fromTok); }   /* tagged in EVERY language, so the row's right-click resolves to its MWT rather than falling through to the ordinary token menu — see the fuller note on the same line in js/diagram/diagram-core.js. The .mwt-tr-edit class above stays gated on iastRow, because that is what the click-to-EDIT handler matches. */
-      if(iastRow&&si0>=0&&m.fromTok!=null){ tr.style.cursor="text"; svgTip(tr,"multi-word token — click to edit the surface form (the script glyph above is derived from it)"); } } }   // cursor:text matches mwtTie and the other click-to-edit diagram texts (.tr-edit/.gl-edit/.cform): clicking opens a field, not a button   // item 6: the MWT form→translit gap is a full inter-tier step (belowGap()) — matching a NON-MWT token and the SVG mwtTie.   // Item 9: draw the MWT transliteration row FIRST so the MWT form (and its backing) below paints ON TOP where they crowd — consistent with the SVG mwtTie and .stext-over-.strans
-    if(m.pos){ drawTieLabel(svg,mx,ly+STEP,m.pos,"mwt-pos","mwt-pos-cas",POS_F,null); tagXPosLabel(svg.lastElementChild,si0,m); }   // item 1: the coinciding-span case — the MWT bracket simply gains the ExtPos as a POS annotation instead of a second bracket over the same tokens
+      if(iastRow&&si0>=0&&m.fromTok!=null){ tr.style.cursor="text"; svgTip(tr,"multi-word token — click to edit the surface form (the script glyph above is derived from it)"); } } }   // cursor:text matches mwtTie and the other click-to-edit diagram texts (.tr-edit/.gl-edit/.cform): clicking opens a field, not a button   // item 6: the MWT form→translit gap is a full inter-tier step (belowGap()) — matching a NON-MWT token and the SVG mwtTie.   // Item 9: draw the MWT transliteration row FIRST so the MWT form (and its backing) below paints ON TOP where they crowd — consistent with the SVG mwtTie and .stext-over-.strans. +STACK_DROP once, only on whichever row is FIRST below the tie's own surface-form glyphs (mirrors tieLayout's r.dtr/r.dpos in diagram-core.js) — never on every step, which is the mistake this replaced
+    if(m.pos){ drawTieLabel(svg,mx,ly+STEP+(dropped?0:STACK_DROP),m.pos,"mwt-pos","mwt-pos-cas",POS_F,null); tagXPosLabel(svg.lastElementChild,si0,m); }   // item 1: the coinciding-span case — the MWT bracket simply gains the ExtPos as a POS annotation instead of a second bracket over the same tokens. STACK_DROP only if the translit row above didn't already spend it
     const cas=E("text",{class:"mwt-cas",x:mx,y:fyb,"text-anchor":"middle"}); cas.textContent=mfd; cas.setAttribute("aria-hidden","true"); svg.appendChild(cas);   // opaque backing behind the reconstructed word (and over the translit row above)
     const fe=E("text",{class:"mwt-form",x:mx,y:fyb,"text-anchor":"middle"}); fe.textContent=mfd;
     if(si0>=0&&m.fromTok!=null){ fe.setAttribute("data-s",si0); fe.setAttribute("data-mwtfrom",m.fromTok); fe.style.cursor=formCursor(); svgTip(fe,iastRow?"multi-word token — click to edit the surface form (on the IAST row below, which this glyph is derived from)":"multi-word token — click to edit the surface form"); }   // same click-to-edit contract as the SVG views' mwtTie: the delegated #doc click/contextmenu handlers key off data-s + data-mwtfrom. `_ties` already stores fromTok as OID(from−1) — the ORIGINAL token id editMWTInline looks up — so a display fold can't misaddress it. Without these attributes the WRAPPED bracket view was the one tie-drawing notation whose surface form couldn't be edited at all, and its right-click menu resolved si/from to NaN.
@@ -2587,9 +2595,9 @@ function capBlock(b,dh){
     const gapMid=(dg&&gw)?Math.max(0,gw.offsetTop-(dg.offsetTop+dg.offsetHeight)):0;   // the diagram↔grid gap, excluded
     const addBtn=b.querySelector(".addtok"), addH=addBtn?addBtn.offsetHeight+parseFloat(getComputedStyle(addBtn).marginTop||0):0;   // the "Add token" button sits below the scrollable grid frame → reserve its height so it (and the block's bottom padding) stay in view
     /* ⚠ AND WHERE THE HEADER LEAVES TOO LITTLE, THE BLOCK GROWS — it is not capped at one viewport and
-       the panes squeezed to fit inside it. A running sentence set in an ornamental script at 2× is the
+       the panes squeezed to fit inside it. A running sentence set in a magnified ornamental script is the
        case that forced this: `.stext-stacked` gives it line-height 2 so stacked conjuncts clear, the
-       magnification doubles the font, and the two multiply — measured on a four-line verse, a 216px
+       magnification enlarges the font too, and the two compound — measured on a four-line verse, a 216px
        header, and 61px more for the boundary heading a `newdoc`/`newpar` block carries. Against a 438px
        viewport that drove `avail` onto its floor and left the diagram 93px and the grid 47px, both
        scrolling inside a block that had room for neither. The arithmetic was right; the input was simply

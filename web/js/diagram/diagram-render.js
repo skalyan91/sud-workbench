@@ -117,7 +117,7 @@ function stemma(si,{proj,catNodes}){
     return {d,h,rel,origin:o,y1:ny(depth[d])-A,y2:ny(depth[h])+B}; });
   const total=Math.max(2,...c.map((cx,i)=>cx+lw[i]/2))+2;
   mirror(c,total);                                          // NOW flip for RTL, after label spacing is settled
-  const belowH=proj?((trLayer()?belowGap():0)+(belowTierN()*(belowGap()))+(show.pos?belowGap():0)):0, tieH=proj?mwtDepth(D):0;   // Item 1/8: every below-row (translit, each gloss, POS) folds in descent(POS_F), matching belowStack's descender-matched per-row step
+  const belowH=proj?belowReserveH(trLayer(),belowTierN(),show.pos):0, tieH=proj?mwtDepth(D):0;   // Item 1/8: every below-row (translit, each gloss, POS) folds in descent(POS_F), matching belowStack's descender-matched per-row step
   const rep=reportOffsets(D);   // item 7/11: the BASELINE word row is the stemma's "line", so that is what a reported subtree steps UP off; the depth-positioned nodes above stay put (their y ENCODES depth — nudging it would read as a layout error, not as a plane)
   const maxRep=Math.max(0,...rep);   // #3: the deepest reported raising (highest step off the line). The baseline drops by this — see baseY — so the gap is sized to the deepest reporting level
   const baseY=TOP+maxD*LV+(proj?LV+maxRep:0), lowest=proj?baseY:ny(maxD), H=lowest+16+belowH+tieH;   // baseline sits one level (LV) below the lowest node; #3: dropped a further maxRep so a token raised by its reported-speech step (by=baseY−rep[i]) STILL clears the lowest tier by the full LV — the most-raised token lands exactly one level below, the rest hang beneath it
@@ -217,7 +217,18 @@ function arcs(si){
   const rep=reportOffsets(D);   // item 7/11: per-token UPWARD step for reported speech (0 on the main line). Both the word AND its arc endpoint lift by rep[i], so the reported cluster floats OFF the line as one unit — the arc endpoints move with the words (item 11), not just the words under fixed arcs.
   const {c,w,wform,total}=linear(sent); mirror(c,total);
   const ROW=parseFloat(css("--arc-row")),NR=parseFloat(css("--arc-node-r")),SH=parseFloat(css("--arc-shoulder")),AH=parseFloat(css("--arrow"));
-  const TOP=8, WORD_OFF=16;   // small top headroom (matches the stemma's tight top). Item 1 (revert of item 15): the arc endpoints clear the tokens by the ORIGINAL flat 16px again — item 15 had raised this to POSGAP(20)+descent(WORD_F) to line the arc ends up with the deprel-label baseline in brackets/wrapped-stemma, but the user wants the arcs back at their natural height. Only the arc view reverts; brackets/wrapped-stemma keep the item-15 offset.
+  /* small top headroom (matches the stemma's tight top). Item 1 (revert of item 15): the arc endpoints
+     clear the tokens by the ORIGINAL flat 16px again — item 15 had raised this to POSGAP(20)+descent(WORD_F)
+     to line the arc ends up with the deprel-label baseline in brackets/wrapped-stemma, but the user wants
+     the arcs back at their natural height. Only the arc view reverts; brackets/wrapped-stemma keep the
+     item-15 offset. ⚠ AND THE FLAT 16 IS WHAT A MAGNIFIED SCRIPT EATS INTO: this gap is measured from the
+     arc's own geometry down to the WORD's baseline, so a token's ascent reaching further above that
+     baseline (Literary Chinese now magnifies its Han glyphs 1.5× — see scriptMag()) shrinks the arc's real
+     clearance by exactly however much extra ascent the glyph gained, the same shape belowGap() already
+     accounts for on the other side of the token. Measured on a real lzh sentence: the arc-to-glyph gap
+     fell from 8.4px unmagnified to 4.2px at 1.5× — visibly tight, though not yet touching. Exactly the
+     old flat 16 whenever TOK_MAG is 1, which is every document but the newly-magnified ones. */
+  const TOP=8, WORD_OFF=16+(TOK_MAG>1?ascent(WORD_F)*(1-1/TOK_MAG):0);
   const list=t.map((tk,i)=>({from:parseInt(tk.head,10),to:i+1,dep:tk.deprel}))
     .filter(a=>a.from!==a.to && a.from>=1 && a.from<=n)   // include punctuation edges
     .map(a=>({...a,lo:Math.min(a.from,a.to),hi:Math.max(a.from,a.to)}))
@@ -372,7 +383,7 @@ function arcs(si){
   /* label TEXTS last → in front of all arcs, their opaque casing occluding crossing edges cleanly */
   labs.forEach(L=>{ const lg=E("g",{class:"arc","data-s":si,"data-dep":L.dep}); lg.style.cursor="pointer"; lg.addEventListener("click",()=>pick(si,L.dep));
     drawLabel(lg,L.mx,L.fy,L.text,L.col); svg.appendChild(lg); });
-  const stackH=wordY+(trLayer()?belowGap():0)+(belowTierN()*(belowGap()))+(show.pos?belowGap():0)+8;   // hit-rect reach: cover the transliteration + gloss + POS rows below the word (Item 1/8: every below-row folds in descent(POS_F), matching belowStack's descender-matched step)
+  const stackH=wordY+belowReserveH(trLayer(),belowTierN(),show.pos)+8;   // hit-rect reach: cover the transliteration + gloss + POS rows below the word (Item 1/8: every below-row folds in descent(POS_F), matching belowStack's descender-matched step)
   let stackBot=wordY;
   t.forEach((tk,i)=>{const g=E("g",{class:"tok-group"+(sel.s===si&&sel.t===OID(i)?" sel":""),"data-s":si,"data-tok":OID(i)});
     const wy=repBase(rep,wordY,i);   // item 11: the word, its below-stack, its hit/wash band and its tail all lift by rep[i] — the SAME shared repBase the arc endpoint above went through — so the reported token and its arc float off the line together

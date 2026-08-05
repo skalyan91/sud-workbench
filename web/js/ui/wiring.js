@@ -14,7 +14,7 @@ function preserveScroll(fn){ const doc=document.getElementById("doc");
      The caret alone was already carried across; the VALUE was not, and the two cannot be separated.
      A grid cell commits on blur/Enter, not per keystroke, so while the reader is mid-word the model
      still holds the old string — and a background pass re-rendering underneath them (the re-parse a
-     form edit kicks off, the macron refill, an MWT re-fuse) rebuilt the cell FROM the model, threw
+     form edit kicks off, an MWT re-fuse) rebuilt the cell FROM the model, threw
      their half-typed word away, and then set a caret offset into a string they had never seen. That
      reads as the cursor jumping; it is actually the text vanishing under it.
      `_edited` is the grid's own "this cell has been typed in" flag (set on the first `input` event,
@@ -250,6 +250,7 @@ function lmPick(e){ lmClose(); const lang=e[1]||e[0];   // canonical UD code: 2-
 function setPillMenuOpen(pillId,open){ const p=document.getElementById(pillId); if(p)p.classList.toggle("menuopen",!!open); }
 function lmClose(){ if(_langMenu)_langMenu.classList.remove("show"); setPillMenuOpen("tokInfo",false); }
 function openLangMenu(x,y){ const m=lmEl(); _lmInput.value=""; lmFilter(""); m.classList.add("show"); setPillMenuOpen("tokInfo",true);
+  if(typeof snapListRows==="function") snapListRows(_lmList,".lmrow");   // floor the list's height to whole rows before anything below measures the menu off it
   const w=m.offsetWidth,h=m.offsetHeight;   // the pill sits in the bottom status bar → open the menu upward, above it
   const left=Math.max(8,Math.min(x,innerWidth-w-8)); m.style.left=left+"px";
   /* …and the head room is measured from menuTopBound (js/core/scroll.js), not from 8: this menu opens

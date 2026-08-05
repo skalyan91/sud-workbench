@@ -190,17 +190,9 @@ are disabled (surfaced as a toast). The conversion grammars are vendored from
   context-dependent scripts (Arabic and Persian DIN 31635, Hebrew ISO 259, Pīnyīn,
   Jyutping, Japanese kana → Hepburn, Korean) and uroman as a fallback. Sanskrit can be
   read in either of the two scripts a file may be stored in — IAST or Devanagari — and
-  displayed in any of 33 Brahmic scripts or romanised, whichever it is stored in. Latin
-  adds a **macronised** Script option, which restores the vowel lengths classical
-  orthography leaves unwritten (`divisa` → `dīvīsa`) in the running sentence and the
-  diagrams while the grid, the editors and the file keep the bare spelling. Multi-word tokens
-  are macronised from their **components** (`arma` + `que` → `ārmaque`), since no lexicon lists
-  a host with its clitic attached. The vowel-length data is Morpheus's, downloaded on first use
-  (~4 MB) rather than bundled; the Script menu's own row takes you to Manage Models when it
-  isn't there yet, and the option becomes usable the moment the download finishes. Breves you
-  type are kept — and are hidden from the parser, which has never seen a marked Latin word.
+  displayed in any of 33 Brahmic scripts or romanised, whichever it is stored in.
   The four **ornamental** Sanskrit scripts — Rañjanā, Soyombo, Siddhaṃ and Balinese — are drawn at
-  double size, since their decoration is not resolvable at the size an everyday script reads at, and
+  1.5× size, since their decoration is not resolvable at the size an everyday script reads at, and
   the running line then meets the sentence number at the top of the letters rather than at the
   baseline. A script line also joins a consonant-final word to the next one, as a Brahmic script does:
   `tad api` is drawn तदपि even though the romanisation beneath it keeps the space.
@@ -220,10 +212,9 @@ are disabled (surfaced as a toast). The conversion grammars are vendored from
   correcting a lemma re-derives `MSeg` and carries `MGloss` across with it, and typing a
   hyphen into `MSeg` splits a gloss that divides cleanly into a lexical and a grammatical
   part (`walk.PST` over `walk-ed` becomes `walk-PST`). Right-click a glossing abbreviation for the
-  other values of its feature — pick `DAT` over `GEN` and the token's FEATS follow. In Latin the
-  segmentation is written with its vowel lengths (`dī-vīsa`), `ae` and `oe` count as single letters
-  (`Troi-ae`), and the tier waits for the macron data rather than offering a length-blind reading of
-  where a boundary falls. The right-click menu on a token can look the word up — on Wiktionary, or,
+  other values of its feature — pick `DAT` over `GEN` and the token's FEATS follow. In Latin,
+  `ae` and `oe` count as single letters when the segmentation picks a boundary (`Troi-ae`, not
+  `Tr-oiae`). The right-click menu on a token can look the word up — on Wiktionary, or,
   for Sanskrit, in Apte's *Practical Sanskrit-English Dictionary* (revised ed. 1957,
   vendored from the Cologne digitisation, so it works offline) — and pre-fill the
   morphemic gloss from a chosen definition.
@@ -268,7 +259,6 @@ app/  __main__.py       pywebview bootstrap, application menu, and the AppKit/Py
       models_registry.py  available/installed models, GitHub-release + Stanza download
       extras.py         on-demand install of the heavy optional stacks (Stanza/JP/Arabic)
       translit.py       Latin transliteration, routed to a backend per language
-      macron.py         Latin vowel-length macronisation (display only; fetches Morpheus on demand)
       langid.py         offline language identification (vendored fastText lid.176)
       wiktionary.py     Wiktionary definition lookup (MediaWiki REST API)
       apte.py           Apte Sanskrit-English dictionary lookup (vendored index; C-SALT fallback)

@@ -17,7 +17,6 @@ from __future__ import annotations
 
 import difflib
 import os
-import unicodedata
 
 from . import convert
 from .paths import STANZA_DIR
@@ -57,26 +56,6 @@ def invalidate_cache() -> None:
     _STANZA_TOK_PIPES.clear()
 
 
-def _share_macron_table() -> None:
-    """Point the Latin model's own `la_macronise` at the table THIS APP manages.
-
-    The released Latin wheel carries `la_macronise` in its pipeline but ships no vowel-length data
-    (Morpheus is CC BY-SA, the model CC BY-NC-SA — see the SUD-spaCy repo's NOTICE.md), and looks
-    for a table in `~/.cache/sud-spacy/`. `app/macron.py` fetches and compiles exactly that table
-    into `paths.APP_DATA`, as the `la_macron` extras tier. Without this the two would want the same
-    4 MB download twice, in two places, and the component would sit in the pipeline warning that it
-    has no data while the app's copy of the same data was on disk a directory away.
-
-    `$LA_MORPHEUS_TABLE` is the component's own documented override, so this asks for nothing the
-    component does not already offer. Set unconditionally, and BEFORE the model is constructed
-    (`Morpheus.load` runs in the component's `__init__`): pointing at a table that does not exist
-    yet is the no-data case, which the component passes through unchanged, and the tier installing
-    later drops the model cache anyway (`invalidate_cache`), so the next load picks it up.
-    """
-    from . import macron   # local: keeps the import off every parse.py consumer's start-up path
-    os.environ.setdefault("LA_MORPHEUS_TABLE", macron.morpheus_table_path())
-
-
 def _load_spacy(package: str):
     if package in _SPACY_MODELS:
         return _SPACY_MODELS[package]
@@ -84,7 +63,6 @@ def _load_spacy(package: str):
         import spacy
     except ImportError as exc:
         raise ParserUnavailable("spaCy is not installed") from exc
-    _share_macron_table()
     try:
         nlp = spacy.load(package)
     except Exception as exc:  # noqa: BLE001
@@ -133,81 +111,13 @@ def _spacy_doc_to_sud(doc) -> tuple[list[dict], list[dict]]:
     return out, mwt
 
 
-_BREVE = "̆"
-
-
-def _is_latin(name: str) -> bool:
-    """Does this SUD package / Stanza language code name Latin?  ``la_sud_ittb_proiel_perseus`` and
-    ``la`` alike."""
-    return (name or "").split("_", 1)[0].split("#", 1)[0].lower() == "la"
-
-
-def _debreve(text: str) -> tuple[str, list[int] | None]:
-    """``text`` WITH ITS BREVES TAKEN OFF, plus a map from each surviving character back to the index
-    it came from — ``None`` when there was nothing to do (the overwhelmingly common case, and free).
-
-    ⚠ WHY, AND WHY ONLY LATIN.  A reader pastes Latin the way a textbook prints it — ``pŭella``,
-    ``ĭnstar`` — and the parser has never seen such a string: the treebanks spell Latin with no vowel
-    quantities at all, so every marked word is out of vocabulary and comes back mis-tagged, mis-lemmatised
-    and often mis-tokenised.  Taking the marks off before the pipeline runs turns those words back into
-    words it knows.  Gated on the language and not on the character, because a breve is not decoration
-    everywhere: Turkish ``ğ`` IS g-with-breve, and stripping it there would rewrite the language.
-
-    ⚠ AND THE READER'S SPELLING SURVIVES IT.  A written breve is a QUANTITY THE AUTHOR WROTE, which
-    `app/macron.py` honours as the one statement it will never revise — so it must reach the FORM column,
-    the file, and the macroniser.  Hence the index map rather than a bare replace: what the parser sees is
-    stripped, what is stored is sliced back out of the original text (`_reform`).  A lone combining breve
-    contributes no character of its own and simply rides along inside the slice of the letter it follows.
-
-    Applied on the spaCy (SUD) paths only — parse, parse_many, tokenize, parse_pretokenized.  Stanza is
-    deliberately left alone rather than half-done: its words carry ``start_char`` but an MWT-expanded one
-    carries ``None``, so the same restore is not simply available there, and stripping WITHOUT restoring
-    would delete a quantity the reader wrote.  Latin in this app is a SUD-spaCy language (it is where the
-    macron layer, the MSeg tier and `la_sud_ittb_proiel_perseus` all live), so that is where the marks
-    arrive."""
-    if not text or _BREVE not in unicodedata.normalize("NFD", text):
-        return text, None
-    out: list[str] = []
-    imap: list[int] = []
-    for i, ch in enumerate(text):
-        d = unicodedata.normalize("NFD", ch)
-        if d == _BREVE:
-            continue                      # a bare combining mark belongs to the letter before it
-        if _BREVE in d:
-            bare = unicodedata.normalize("NFC", d.replace(_BREVE, ""))
-            if len(bare) == 1:            # anything that does not recompose to ONE character would
-                ch = bare                 # desync the map — leave it alone rather than shift every index
-        out.append(ch)
-        imap.append(i)
-    imap.append(len(text))
-    return "".join(out), imap
-
-
-def _reform(tokens: list[dict], doc, text: str, imap: list[int] | None,
-            mwt: list[dict] | None = None) -> None:
-    """Put the ORIGINAL spelling back on each token's FORM, in place — see `_debreve`.
-
-    The slice runs to the start of the NEXT surviving character, so a breve sitting between two of them
-    goes to the token on its left, which is the letter it belongs to."""
-    if imap is None:
-        return
-    for tok, t in zip(tokens, doc):
-        a, b = imap[t.idx], imap[t.idx + len(t.text)]
-        tok["form"] = text[a:b]
-    if mwt:                               # …and a reconstructed range's surface, which is its components' glued together
-        for m in mwt:
-            m["form"] = "".join(tokens[i]["form"] for i in range(m["from"] - 1, m["to"]))
-
-
 def _parse_spacy_sud(text: str, package: str) -> tuple[list[dict], list[dict]]:
     nlp = _load_spacy(package)
-    fed, imap = _debreve(text) if _is_latin(package) else (text, None)
     try:
-        doc = nlp(fed)
+        doc = nlp(text)
     except Exception as exc:  # noqa: BLE001 — e.g. a raw-text tokeniser dependency isn't installed yet
         raise ParserUnavailable(str(exc)) from exc
     out, mwt = _spacy_doc_to_sud(doc)
-    _reform(out, doc, text, imap, mwt)
     return (out, mwt) if out else (whitespace_tokens(text), [])
 
 
@@ -223,13 +133,11 @@ def _spacy_tokenize(text: str, package: str) -> tuple[list[dict], list[bool], li
     NOT run here: nothing has tagged yet, so its PUNCT test has no input — the two published answers
     are the only ones available this early, which is why the preview used to return none at all."""
     nlp = _load_spacy(package)
-    fed, imap = _debreve(text) if _is_latin(package) else (text, None)   # …the tokeniser too: a marked word can be SPLIT differently (see _debreve)
     try:
-        doc = nlp.tokenizer(fed)
+        doc = nlp.tokenizer(text)
     except Exception as exc:  # noqa: BLE001
         raise ParserUnavailable(str(exc)) from exc
-    forms = ([text[imap[t.idx]:imap[t.idx + len(t.text)]] for t in doc] if imap is not None
-             else [t.text for t in doc])   # the reader's own spelling goes into the preview, as it does into the parse
+    forms = [t.text for t in doc]
     spaces = [t.whitespace_ != "" for t in doc]
     if not forms:
         return whitespace_tokens(text), [], []
@@ -753,16 +661,13 @@ def _parse_spacy_sud_many(texts: list[str], package: str) -> list[tuple]:
     reason this exists rather than a loop at the call site: the pipeline's components run over the
     whole batch at once instead of once per text."""
     nlp = _load_spacy(package)
-    la = _is_latin(package)
-    pairs = [_debreve(t) if la else (t, None) for t in texts]   # Latin quantities off before the pipeline, back on after — see _debreve
     try:
-        docs = list(nlp.pipe([p[0] for p in pairs]))
+        docs = list(nlp.pipe(texts))
     except Exception as exc:  # noqa: BLE001 — e.g. a raw-text tokeniser dependency isn't installed yet
         raise ParserUnavailable(str(exc)) from exc
     out = []
-    for text, (_fed, imap), doc in zip(texts, pairs, docs):
+    for text, doc in zip(texts, docs):
         toks, mwt = _spacy_doc_to_sud(doc)
-        _reform(toks, doc, text, imap, mwt)
         out.append((toks, mwt) if toks else (whitespace_tokens(text), []))
     return out
 
@@ -962,12 +867,7 @@ def parse_pretokenized(forms: list[str], model_id: str = "", upos: list[str] | N
                 raise ParserUnavailable(f"unknown model {model_id!r}")
         nlp = _load_spacy(name)
         from spacy.tokens import Doc
-        # …and the same de-breving here, one form at a time — the tokenisation is already decided, so
-        # there is no text to map back through and no re-tokenisation to protect against: the caller's
-        # own forms are restored verbatim below.  Without it every marked word reached the tagger as an
-        # unknown string and came back with the lemma and features of nothing (see _debreve).
-        words = [_debreve(f)[0] for f in forms] if _is_latin(name) else forms
-        doc = Doc(nlp.vocab, words=words)
+        doc = Doc(nlp.vocab, words=forms)
         for _pname, proc in nlp.pipeline:
             doc = proc(doc)
             if _pname == "morphologizer":
@@ -1132,10 +1032,7 @@ def _upos_scores(morphologizer, doc):
 
 def _score_doc(nlp, package, forms, upos=None):
     from spacy.tokens import Doc
-    # …de-breved exactly as `parse_pretokenized` does, or a marked Latin word reaches the model as an
-    # unknown string and its whole candidate ranking is a ranking for a word nobody wrote.
-    words = [_debreve(f)[0] for f in forms] if _is_latin(package) else forms
-    doc = Doc(nlp.vocab, words=words)
+    doc = Doc(nlp.vocab, words=forms)
     heads: list = []
     deprels: list = []
     uposd: list = []
@@ -1247,8 +1144,7 @@ def arc_label_scores(forms: list[str], model_id: str, child: int, head: int) -> 
         nlp = _load_spacy(name)
         from spacy.tokens import Doc
         import numpy as np
-        words = [_debreve(f)[0] for f in forms] if _is_latin(name) else forms
-        doc = Doc(nlp.vocab, words=words)
+        doc = Doc(nlp.vocab, words=forms)
         parser = None
         for pname, proc in nlp.pipeline:
             if pname == "parser":

@@ -10,15 +10,13 @@ Tiers (each behind a lazy ``try: import`` in ``translit`` / ``parse``):
   * ``stanza``   — Stanza UD parsers (pulls torch + transformers), ~1.1 GB
   * ``japanese`` — cutlet/fugashi/unidic-lite romanisation dictionaries, ~0.45 GB
   * ``arabic``   — CAMeL Tools Arabic morphology, ~0.3 GB
-  * ``la_macron`` — Latin vowel lengths (a DATA tier, not a pip one — see below), ~4 MB
 
-NOT EVERY TIER IS A PIP INSTALL. ``la_macron`` fetches a data file and compiles it, because what it
-needs is not a package: the Morpheus vowel-length table cannot be bundled with this app for
-licensing reasons and is not on PyPI in any form (see :mod:`app.macron`). A tier therefore declares
-EITHER ``pip`` + ``probe`` or ``module`` — the name of a module supplying its own
-``available()``/``install(progress)``/``status()`` — and :func:`install` dispatches on which. The
-alternative was a second parallel install/progress/UI path for one row in the same list, which is
-how two ways to do the same thing get built.
+NOT EVERY TIER HAS TO BE A PIP INSTALL. A tier declares EITHER ``pip`` + ``probe`` or ``module`` —
+the name of a module supplying its own ``available()``/``install(progress)``/``status()`` — and
+:func:`install` dispatches on which, for a tier whose asset isn't a package (e.g. a data file that
+can't be bundled for licensing reasons and isn't on PyPI in any form). No current tier uses the
+``module`` shape; the dispatch is kept as the extension point for the next one that needs it,
+rather than a second parallel install/progress/UI path bolted on when it's needed.
 """
 
 from __future__ import annotations
@@ -58,11 +56,6 @@ TIERS: dict[str, dict] = {
         "pip": ["camel-tools"],
         "probe": "camel_tools",
         "note": "CAMeL Tools Arabic morphology (~0.3 GB)",
-    },
-    "la_macron": {
-        "label": "Latin macrons",
-        "module": "macron",     # a DATA tier: app/macron.py owns its own fetch/build/status
-        "note": "Morpheus vowel lengths, fetched from latin-macronizer (~4 MB)",
     },
 }
 
@@ -147,11 +140,9 @@ def install(feature: str, progress=None) -> dict:
     mod = _data_module(tier)
     if mod is not None:
         r = mod.install(progress=progress)      # a data tier fetches and builds its own asset
-        # …and a loaded spaCy model may be holding the ABSENCE of that asset. The released Latin
-        # model's `la_macronise` reads the Morpheus table once, in its own __init__ (see
-        # `parse._share_macron_table`), so a model loaded before the table existed keeps
-        # macronising nothing until the process restarts. Dropping the model cache is what makes
-        # "install the tier, then parse" work in one session. Cheap: the next parse reloads.
+        # …and a loaded spaCy model may be holding a pipeline component built without that asset
+        # available yet, so drop the model cache once a data-tier install succeeds — the next parse
+        # reloads and picks it up, rather than waiting for a full relaunch.
         if r.get("ok"):
             try:
                 from . import parse

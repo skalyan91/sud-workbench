@@ -125,15 +125,7 @@ function setTitle(name){ if(name)DOCNAME=name;
 // stored-transliteration rewrite, a session restored from disk — which stay dirty regardless of the history.
 function markDirty(v=true){ if(!v) DIRTY_BASE=false;
   DIRTY=!!v&&(DIRTY_BASE||UNDO.length>0);
-  if(hasBridge())try{window.pywebview.api.set_dirty(DIRTY);}catch(e){} setTitle();
-  /* …and the SCRIPT renderings that are keyed on more than the form follow the edit that invalidated
-     them. Only Latin macronisation is (app/macron.py reads UPOS + FEATS + lemma), and this is the one
-     funnel every document edit passes through — so hanging the refresh here is what makes it true of
-     ANY attribute of any token rather than of the handful of edit sites someone thought to instrument.
-     Debounced and self-gating; a no-op in every other language. Guarded because js/lang/translit-load.js
-     loads AFTER this module. */
-  if(v && typeof scheduleOrthoMorph==="function") scheduleOrthoMorph();
-  if(v && typeof scheduleLaMacron==="function") scheduleLaMacron(); }   // …and the MSeg tier's own copy of those lengths, which is annotation rather than display and therefore does NOT follow the Script pill (see fillLaMacron)
+  if(hasBridge())try{window.pywebview.api.set_dirty(DIRTY);}catch(e){} setTitle(); }
 function markDirtyBase(){ DIRTY_BASE=true; markDirty(); }   // an unsaved change with no undo entry to show for it
 // Stamp the one scheme a DOCUMENT owns onto its first sentence: the transliteration its MISC Translit/LTranslit
 // is written in. The script and the displayed romanisation are the READER's, kept per-language in PREFS, and
@@ -980,19 +972,11 @@ function syncGlossUI(){ const g=document.querySelector('#toggles [data-t2="gloss
   // analysis are different things, and an mSUD document has as much use for the first as any other. (This used to
   // grey the checkbox out under mSUD on the reasoning that the morphemic gloss superseded it — it doesn't.)
   if(g){ g.checked=GLOSS_ON; g.disabled=false; const lab=g.closest("label"); if(lab){ lab.classList.remove("chk-off"); lab.title=""; } }
-  /* ⚠ THE MORPHEMIC TIER IS UNAVAILABLE FOR LATIN WITHOUT THE MACRONISER, and that is a statement about
-     what a Latin segmentation IS. A treebank spells Latin with no vowel lengths, so `divisa` divides into
-     morphemes only once something knows the word is `dīvīsa` — the boundary is a claim about the stem and
-     the ending, and a length-blind segmentation puts it in a place its author would not have chosen. The
-     tier therefore waits for the table rather than offering a worse version of itself; the checkbox says
-     so and the Script menu's own "With macrons" row is one click from installing it (js/lang/translit.js).
-     Gated on the LANGUAGE, not on the scheme being switched on: MSeg carries the macrons whatever the
-     Script pill is set to (see msegMacronise), because the segmentation is annotation and the pill is a
-     display preference. Every other language is untouched — macronNeeded() is false for all of them. */
-  if(m){ const need=(typeof macronNeeded==="function")&&macronNeeded(), lab=m.closest("label");
-    m.checked=MORPH_ON&&!need; m.disabled=need;
-    if(lab){ lab.classList.toggle("chk-off",need);
-      lab.title=need?"Latin morpheme glossing needs vowel lengths — install “Latin macrons” in Manage Models":""; } }
+  // The morphemic tier is available in every language, Latin included. Its segmentation was always
+  // computed from the BARE form (msegSegment never read vowel length — the removed macron overlay
+  // only decorated an already-determined boundary for display), so dropping that decoration changes
+  // nothing about where the boundary falls; Latin just reads like every other language now.
+  if(m){ m.checked=MORPH_ON; m.disabled=false; const lab=m.closest("label"); if(lab){ lab.classList.remove("chk-off"); lab.title=""; } }
   // item 3: the Show/Hide VISIBILITY checkboxes appear only when the tier is present, and reflect GLOSS_VIS / MORPH_VIS
   const gv=document.querySelector('#toggles [data-vis="gloss"]'), mv=document.querySelector('#toggles [data-vis="morph"]');
   if(gv){ gv.checked=GLOSS_VIS; const l=gv.closest("label"); if(l)l.style.display=GLOSS_ON?"":"none"; }
@@ -1620,12 +1604,6 @@ function detectXposMirrorsUpos(){
 // item 7: the Glossing drawer's two checkboxes toggle the tiers. Checking creates+shows (undoable);
 // unchecking DELETES the tier, confirming ONLY when it has data. All undoable via snap() (captures the flags + MISC).
 async function setTier(kind,on){ const flag=kind==="gloss"?GLOSS_ON:MORPH_ON; if(on===flag){ syncGlossUI(); return; }
-  /* …EXCEPT the morphemic tier in Latin with no macroniser, which the checkbox is already disabled for
-     (syncGlossUI) — this is the same refusal said again at the command, so the Edit-menu/keyboard route
-     and any restored preference cannot get in around the disabled control. The toast names the remedy
-     rather than the obstacle. */
-  if(on && kind==="morph" && typeof macronNeeded==="function" && macronNeeded()){
-    syncGlossUI(); toast("Latin morpheme glossing needs vowel lengths — install “Latin macrons” in Manage Models"); return; }
   if(on){ pushUndo();   // every tier is available in every format — mSUD adds the morph level alongside the lexical gloss, it doesn't rule it out (see syncGlossUI)
     if(kind==="gloss"){ GLOSS_ON=true;
       // cross-tier prefill: MGloss already exists (enabled first) → seed Gloss from MGloss's own lexical part
@@ -1633,7 +1611,6 @@ async function setTier(kind,on){ const flag=kind==="gloss"?GLOSS_ON:MORPH_ON; if
       if(MORPH_ON) DOC.forEach(s=>s.tokens.forEach(t=>{ if(miscKV(t.misc,"Gloss"))return;
         const lex=mglossLexicalPart(tierText(t,"mgloss")); if(lex) t.misc=setMiscKV(t.misc,"Gloss",lex.replace(/_/g,"-")); })); }
     else { MORPH_ON=true;
-      if(isLatinLang()&&typeof fillLaMacron==="function"){ try{ await fillLaMacron(); }catch(e){} }   // …with the vowel lengths ALREADY in hand, so the very first seeding reads `dī-vīsa` rather than seeding bare and being corrected a moment later by the debounced pass
       DOC.forEach(morphPrefillSent); }   // item 11b/12b: seed both morphemic tiers wherever they're empty — part of THIS undoable snapshot
     markDirty(); syncGlossUI(); preserveScroll(renderDoc);
     toast(kind==="gloss"?"Lexical gloss on — double-click or Enter on a gloss to edit":"Morphemic gloss on — MSeg seeded; double-click or Enter to edit"); return; }
@@ -1745,12 +1722,6 @@ function msegPrefillParts(t){ if(!t) return {seg:"",pre:false,post:false};
   const ftr=translitNeeded(DOCLANG)?(miscTranslit(t.misc)||t.translit||""):"";   // "" ⇒ this document's MSeg is in the native script (Latin-script language, or no romanisation available for this token)
   const lraw=(t.lemma&&t.lemma!=="_")?t.lemma:"";
   const parts=msegSegment(ftr||(t.form||""), ftr?(miscKV(t.misc,"LTranslit")||t.translitLemma||""):lraw);
-  /* …and Latin gets its VOWEL LENGTHS written onto the result. Overlaid, never segmented from — the
-     letters decide the cut and the marks follow it (see msegOverlayMacrons, js/lang/translit-load.js,
-     for why the other order moves the boundary). `t._laMac` is filled by fillLaMacron, so a token the
-     pass has not reached yet simply segments bare and picks the marks up on the next refill. */
-  if(parts.seg && !ftr && typeof isLatinLang==="function" && isLatinLang() && t._laMac)
-    parts.seg=msegOverlayMacrons(parts.seg,t._laMac);
   return parts; }
 // Put the segmentation's attachment hyphens on a composed MGloss — but only on a NONEMPTY one: a token whose
 // FEATS compose to nothing writes no MGloss at all (the `if(mg)` at every call site), and a bare "-" would be

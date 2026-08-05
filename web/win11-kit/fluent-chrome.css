@@ -351,10 +351,10 @@
     box-shadow:var(--lg-menu-shadow); padding:2px;
     -webkit-backdrop-filter:blur(30px) saturate(1.25); backdrop-filter:blur(30px) saturate(1.25)}
   .fpmenu{position:fixed; z-index:10000; min-width:190px}
-  .ctx{position:fixed; z-index:60; min-width:224px; display:none}
+  .ctx{position:fixed; z-index:60; min-width:224px; max-height:min(600px,70vh); overflow-y:auto; overscroll-behavior:none; display:none}   /* matches mac-chrome.css's own fix and reasoning: menuTopBound()-style position clamping only fixes WHERE a menu of known height opens, not a menu tall enough to run off the window regardless of where it opens */
   .ctx.show{display:block}
   .ctx.defctx{min-width:0}
-  .acmenu{position:fixed; z-index:70; display:none; max-height:280px; overflow-y:auto}
+  .acmenu{position:fixed; z-index:70; display:none; max-height:min(280px,70vh); overflow-y:auto; overscroll-behavior:none}
   .acmenu.show{display:block}
   /* the shared ROW: 4px side inset, 4px radius, 32 min-height, 11/8/11/9 padding */
   .fpitem,.ctx button,.acmenu .acrow{

@@ -844,15 +844,15 @@ function editTier(si,tokId,tier,clickXY){ const s=DOC[si]; if(!s||tokId<1||tokId
        hand-edited MSeg (its `cur!==t._msegPre` guard), and this edit has just made it one.
        "=" is left alone: it is the CLITIC seam, a character the form legitimately carries (openConvertMWT
        reads it), so stripping it would rewrite the word rather than un-segment it. Only "-" goes. */
-    /* ⚠ AND IN LATIN THE MARKS COME OFF FIRST. The MSeg tier carries vowel lengths (fillLaMacron,
-       js/lang/translit-load.js) while the FORM column never does — the treebanks spell Latin bare and
-       the file must round-trip byte-identically — so de-hyphenating `dī-vīsa` and writing it back
-       verbatim would put a macron in the form, in `# text`, and in the saved file. Stripping the
-       quantity marks (and only those: a breve is a written quantity too) leaves exactly the word the
-       reader re-spelt, and an edit that only moved the boundary then compares equal and writes nothing
-       at all, as it should. */
+    /* ⚠ DEFENSIVE: A HAND-TYPED VOWEL-LENGTH MARK COMES OFF BEFORE IT REACHES FORM. Nothing in this app
+       writes a macron/breve into the MSeg tier's text any more, but the FORM column must still never
+       carry one — the treebanks spell Latin bare and the file must round-trip byte-identically — so if
+       a reader types one in by hand while editing MSeg, de-hyphenating it and writing it back verbatim
+       would put that mark in the form, in `# text`, and in the saved file. Stripping it first leaves
+       exactly the bare word; an edit that only moved the boundary then compares equal and writes
+       nothing at all, as it should. */
     if(tier==="mseg"){ let bare=tierText(tk,"mseg").replace(/-/g,"");
-      if(bare && typeof isLatinLang==="function" && isLatinLang()) bare=bare.normalize("NFD").replace(/[̄̆]/g,"").normalize("NFC");   // combining macron + breve, taken off the DECOMPOSED string so precomposed ā and a+U+0304 are caught alike (the same rule macron.py's _strip_quantity applies on the Python side)
+      if(bare && (DOCLANG||"").toLowerCase().split(/[-_]/)[0]==="la") bare=bare.normalize("NFD").replace(/[̄̆]/g,"").normalize("NFC");   // combining macron + breve, taken off the DECOMPOSED string so precomposed ā and a+U+0304 are caught alike
       if(bare){
         if(typeof translitNeeded==="function" && translitNeeded(DOCLANG)){
           if((tk.translit||"")!==bare){ tk.translit=bare; tk.misc=setMiscKV(tk.misc,"Translit",bare); tk._trMisc=true; markDirty(); }
