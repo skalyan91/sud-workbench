@@ -1,0 +1,178 @@
+/*@module adwaita-kit/adwaita-tokens.css*/
+  /* GNOME/ADWAITA TOKEN SET — sourced from GTK3's real Adwaita theme, still a hand-picked SNAPSHOT
+     rather than the live theme (see Part 2 of the Linux chrome plan for the runtime-reading half,
+     which overrides a subset of these at startup via `window.__setGtkTheme`, pushed from
+     `app/linux/shell.py::read_theme_colors()` — anything that call doesn't answer for falls back to
+     the values below).
+     THE CONTRACT is the same as win11-kit/fluent-tokens.css's: this file must resolve every token
+     name macos-kit/mac-tokens.css declares, so styles/app.css needs no platform branching.
+
+     HOW THIS FILE IS BUILT: it `@import`s mac-tokens.css wholesale (guaranteeing 100% name
+     coverage, including all 41 `--sf-*` icon masks, byte-identical, with zero transcription risk)
+     and then overrides the subset that should actually look different — accent/surface/text
+     colours, radii, hairlines, shadows, the "glass" specular tokens GTK has no equivalent of.
+     Anything NOT overridden below (relation-category colours, layout metrics like
+     --arc-row/--grid-cell/--report-step, the mockup wallpaper) is deliberately left as macOS's
+     tuned value: those are document colours, not chrome.
+
+     PROVENANCE. Every colour below marked (SCSS) was read out of GTK3's own real Adwaita theme —
+     `gtk/theme/Adwaita/_colors.scss` on the `gtk-3-24` branch of `GNOME/gtk` (the actual theme
+     pywebview's GTK3 backend renders through; NOT libadwaita/GTK4's newer, visually different
+     Adwaita, which an earlier pass here mistakenly approximated from memory) — then run through
+     SASS's own `darken()`/`lighten()`/`mix()` (standard HSL delta / linear blend) exactly as that
+     file's own SCSS applies them, e.g. `darken(#3584e4, 20%)` for the dark-mode accent. GTK3's dark
+     Adwaita DARKENS its accent for the dark variant (`#3584e4` → `#15539e`); this app's own
+     mac-tokens.css instead BRIGHTENS its accent in dark mode — a real, sourced difference in
+     platform convention, not an inconsistency to "fix" toward macOS's choice.
+     Values NOT marked (SCSS) — the alpha-ramp shape of --label-*, the "faint" tier, the toolbar
+     button hover/press washes, the popover/dialog shadow depths, --r-control/--r-menu/--r-dialog —
+     have no single source in _colors.scss (some are genuinely structural choices GTK expresses
+     through node-specific CSS rather than a named colour, others were never remeasured against a
+     running GTK3 session); they stay this author's best-effort placeholder, same status as before.
+     PROVENANCE for `--good`/`--warn`/`--bad` in particular: this is where the earlier libadwaita-
+     memory pass was most wrong (`--warn` was `#e5a50a`, the SCSS's real value is `#f57900`; `--good`
+     was `#2ec27e` vs. the real `#33d17a`) — GTK3 Adwaita's named semantic colours are close to, but
+     not identical to, libadwaita's newer named palette. */
+  @import url("../macos-kit/mac-tokens.css");
+
+  :root{
+    /* Adwaita Sans / Adwaita Mono are libadwaita's (GTK4) default faces; GTK3's actual default is
+       Cantarell (bundled with GNOME since 3.x), so it leads here instead — Adwaita Sans stays as a
+       secondary preference for a GNOME 45+ desktop that has it installed, ahead of Noto Sans (this
+       app's own bundled fallback, same as the other two kits) and the generic system-ui/sans-serif
+       tail, which resolves to the mac/Windows name again when this is being PREVIEWED from one of
+       those platforms rather than run under real GTK. */
+    --ui-font:"Cantarell","Adwaita Sans","Noto Sans",system-ui,-apple-system,BlinkMacSystemFont,sans-serif;
+    --ui-mono:"Source Code Pro","Adwaita Mono","Noto Sans Mono",ui-monospace,monospace;
+
+    /* ACCENT (SCSS: $selected_bg_color / $selected_fg_color, _colors.scss light block). */
+    --accent:#3584e4; --accent-blue:#3584e4; --accent-weak:rgba(53,132,228,.15);
+    --accent-dim:color-mix(in srgb,color-mix(in srgb,var(--accent) 50%,var(--muted)) 80%,transparent);
+    /* SEMANTIC COLOURS (SCSS: $warning_color/$error_color/$success_color/$destructive_color, light). */
+    --good:#33d17a; --warn:#f57900; --bad:#cc0000; --accent-red:#e01b24;
+
+    /* SURFACES (SCSS: $bg_color, $base_color, $headerbar_color — light block). GTK3 Adwaita's
+       headerbar is `lighten($bg_color, 5%)`, which clamps straight to white at $bg_color's already
+       near-white lightness — so headerbar/toolbar read as pure white, one step brighter than the
+       window body, not the single flat tone an earlier libadwaita-memory pass assumed. There is no
+       scroll-edge blur ramp to tint either (--tb-ramp-tint/--tb-merged-tint stay macOS's values,
+       unused — see adwaita-chrome.css, which hides `.tb-blur` outright). */
+    --win-bg:#f6f5f4; --content-bg:#ffffff; --panel-bg:#f6f5f4;
+    --toolbar-bg:#ffffff; --toolbar-inactive-bg:#ffffff; --toolbar-solid:#ffffff;
+    --statusbar-bg:#f6f5f4;
+
+    /* TEXT (SCSS: $fg_color light). --label-* keeps the alpha-ramp SHAPE the mac/win kits both use
+       (not itself an SCSS value — GTK expresses insensitive/dim text as per-node CSS opacity rather
+       than one named ramp) but is now based on the real $fg_color ink instead of a flat near-black. */
+    --text:#2e3436; --text-2:#2e3436; --ink:var(--text);
+    --muted:#929595; --faint:#c6c6c4;   /* --muted = SCSS $insensitive_fg_color (mix($fg_color,$bg_color,50%)); --faint unsourced, lightened further for the lowest-emphasis tier */
+    --label-primary:rgba(46,52,54,0.85); --label-secondary:rgba(46,52,54,0.55);
+    --label-tertiary:rgba(46,52,54,0.25); --label-quaternary:rgba(46,52,54,0.10); --label-quinary:rgba(46,52,54,0.05);
+    --menu-hdr:#6e6e6e; --menu-shortcut:#a3a3a3;   /* unsourced — no menu-header-text category in _colors.scss */
+
+    /* HAIRLINES (SCSS: $borders_color = darken($bg_color,18%), $alt_borders_color = darken(…,24%) —
+       light block; computed via SASS's HSL darken(), not approximated). */
+    --hairline:#cdc7c2; --hairline-strong:#bfb8b1; --sep-line:rgba(46,52,54,.10);
+    --sheet-border:#cdc7c2; --field-border:#bfb8b1;
+    --grid-head-border:#cdc7c2; --grid-col-border:#bfb8b1;
+    --viewbar-border:#cdc7c2;
+
+    /* RADII — unsourced (GTK3 Adwaita expresses corner radius per-node in gtk-contained.css, not as
+       one named value); HIG-typical placeholders, unchanged pending a real per-node pass. */
+    --r-control:6px; --r-menu:12px; --r-dialog:12px;
+
+    /* TOOLBAR BUTTONS — unsourced (structural choice: GTK headerbar buttons are flat/mostly
+       borderless, which _colors.scss can't express as a single named colour). Reusing macos-kit's
+       `--pill-*` names for a completely different rendering intent, same as before. */
+    --pill-bg:transparent; --pill-border:transparent; --pill-highlight:transparent;
+    --pill-inactive-bg:transparent;
+    --pill-shadow:none;
+    --tbtn-hover:rgba(46,52,54,.07); --tbtn-press:rgba(46,52,54,.12); --tb-hover-ov:rgba(46,52,54,.07);
+    --seg-sel:rgba(46,52,54,.09);
+
+    /* MENUS / POPOVERS (SCSS: $menu_color = $base_color light → #ffffff). Shadow depth unsourced. */
+    --menu-bg:#ffffff; --menu-sep:rgba(46,52,54,.10);
+    --menu-shadow:0 4px 16px rgba(0,0,0,.18),0 0 0 1px rgba(0,0,0,.06);
+    --lg-menu-shadow:var(--menu-shadow); --lg-dialog-shadow:0 8px 28px rgba(0,0,0,.24);
+    --lg-glass-fill:#ffffff;   /* GTK popovers aren't glass — solid fill, so any consumer reaching this directly paints an opaque card instead of translucency */
+
+    /* FIELDS / EDIT SURFACES (SCSS: $base_color light → #ffffff). */
+    --field-bg:#ffffff; --field-focus:rgba(53,132,228,.15); --edit-bg:#ffffff;
+    --sheet-control-bg:rgba(46,52,54,.05); --sheet-control-bg-hover:rgba(46,52,54,.09);
+    --search-bg:#ffffff; --search-inset:inset 0 0 0 1px rgba(46,52,54,.12);
+
+    /* ROWS / SELECTION — derived from --accent, unsourced as a distinct category. */
+    --row-sel:rgba(53,132,228,.15); --row-sel-inactive:rgb(224,224,224);
+    --row-hover:rgba(46,52,54,.035); --row-stripe:rgba(46,52,54,.025);
+    --row-sel-dim:color-mix(in srgb,color-mix(in srgb,var(--accent) 50%,var(--muted)) 15%,transparent);
+
+    /* SHADOWS — unsourced (GTK's window/dialog shadow is a compositor effect, not a CSS value the
+       SCSS names). Softer/shallower than macOS's own Liquid-Glass drop, kept as a reasonable GTK-ish
+       approximation. */
+    --shadow:0 12px 32px -8px rgba(0,0,0,.28), 0 4px 10px -4px rgba(0,0,0,.18);
+    --edit-shadow:0 2px 8px rgba(0,0,0,.14);
+    --lg-button-shadow:0 1px 3px rgba(0,0,0,.12);
+
+    /* GLASS/SPECULAR — genuinely inapplicable rather than approximated: flat GTK chrome has no
+       rim-light/sheen/hotspot material at all, so these resolve to fully transparent — "a value
+       that makes its consumer paint nothing", the same move win11-kit's own README documents for
+       the two things a web page can't reproduce (Mica/background Acrylic). */
+    --glass-rim:transparent; --glass-rim-lo:transparent;
+    --glass-sheen:transparent; --glass-hotspot:transparent;
+  }
+
+  @media (prefers-color-scheme:dark){
+    :root{
+      /* SURFACES (SCSS dark block: $bg_color = darken(desaturate(#3d3846,100%),4%) → #353535,
+         $base_color = lighten(desaturate(#241f31,100%),2%) → #2d2d2d, $headerbar_color =
+         darken($bg_color,3%) → #2d2d2d — computed via SASS's desaturate()/darken()/lighten(), not
+         approximated). Notably LIGHTER than libadwaita's GTK4 dark (~#242424) — GTK3's real dark
+         Adwaita is a medium-dark grey, not the near-black the earlier libadwaita-memory pass used. */
+      --win-bg:#353535; --content-bg:#2d2d2d; --panel-bg:#353535;
+      --toolbar-bg:#2d2d2d; --toolbar-inactive-bg:#2d2d2d; --toolbar-solid:#2d2d2d;
+      --statusbar-bg:#353535;
+
+      /* ACCENT (SCSS dark: darken($selected_bg_color,20%) → #15539e) — GTK3 DARKENS the accent for
+         dark mode (the opposite of macOS's brighten-for-dark convention mac-tokens.css uses; see
+         this file's header note). */
+      --accent:#15539e; --accent-weak:rgba(21,83,158,.28);
+      /* SEMANTIC COLOURS (SCSS dark: darken($success_color,10%) → #26ab62; warning unchanged;
+         darken($destructive_color,10%) → #b2161d; error unchanged). */
+      --good:#26ab62; --warn:#f57900; --bad:#cc0000; --accent-red:#b2161d;
+
+      /* TEXT (SCSS dark: $fg_color → #eeeeec). */
+      --text:#eeeeec; --text-2:#eeeeec; --muted:#929291; --faint:#5c5c5c;   /* --muted = SCSS mix($fg_color,$bg_color,50%) dark */
+      --label-primary:rgba(238,238,236,0.85); --label-secondary:rgba(238,238,236,0.55);
+      --label-tertiary:rgba(238,238,236,0.25); --label-quaternary:rgba(238,238,236,0.10); --label-quinary:rgba(238,238,236,0.08);
+      --menu-hdr:#a0a0a0; --menu-shortcut:#5c5c5c;
+
+      /* HAIRLINES (SCSS dark: $borders_color = darken($bg_color,10%) → #1c1c1c, $alt_borders_color
+         = darken($bg_color,18%) → #070707). */
+      --hairline:#1c1c1c; --hairline-strong:#070707; --sep-line:rgba(238,238,236,.10);
+      --sheet-border:#1c1c1c; --field-border:#070707;
+      --grid-head-border:#1c1c1c; --grid-col-border:#070707;
+      --viewbar-border:#1c1c1c;
+
+      --tbtn-hover:rgba(238,238,236,.09); --tbtn-press:rgba(238,238,236,.14); --tb-hover-ov:rgba(238,238,236,.09);
+      --seg-sel:rgba(238,238,236,.12);
+
+      /* MENUS (SCSS dark: $menu_color = mix($bg_color,$base_color,20%) → #2f2f2f). */
+      --menu-bg:#2f2f2f; --menu-sep:rgba(238,238,236,.10);
+      --menu-shadow:0 4px 18px rgba(0,0,0,.5),0 0 0 1px rgba(255,255,255,.06);
+      --lg-menu-shadow:var(--menu-shadow); --lg-dialog-shadow:0 10px 32px rgba(0,0,0,.55);
+      --lg-glass-fill:#2f2f2f;
+
+      /* FIELDS (SCSS dark: $base_color → #2d2d2d). */
+      --field-bg:#2d2d2d; --field-focus:rgba(21,83,158,.30); --edit-bg:#333333;
+      --sheet-control-bg:rgba(238,238,236,.07); --sheet-control-bg-hover:rgba(238,238,236,.12);
+      --search-bg:#2d2d2d; --search-inset:inset 0 0 0 1px rgba(238,238,236,.14);
+
+      --row-sel:rgba(21,83,158,.30); --row-sel-inactive:rgb(66,66,66);
+      --row-hover:rgba(238,238,236,.045); --row-stripe:rgba(238,238,236,.035);
+      --row-sel-dim:color-mix(in srgb,color-mix(in srgb,var(--accent) 55%,var(--muted)) 20%,transparent);
+
+      --shadow:0 16px 40px -8px rgba(0,0,0,.6), 0 4px 12px -4px rgba(0,0,0,.5);
+      --edit-shadow:0 2px 10px rgba(0,0,0,.4);
+      --lg-button-shadow:0 1px 3px rgba(0,0,0,.4);
+    }
+  }

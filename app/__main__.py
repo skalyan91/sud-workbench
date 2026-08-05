@@ -48,6 +48,7 @@ INDEX = os.path.join(WEB_DIR, "index.html")
 
 IS_MAC = sys.platform == "darwin"
 IS_WIN = sys.platform == "win32"
+IS_LINUX = sys.platform.startswith("linux")
 
 # Arm a crash dumper + exit tracer. faulthandler catches hard SIGNALS (native-lib segfault /
 # SIGABRT). But a "window vanished" can also be a CLEAN exit (window closed / run-loop ended)
@@ -227,6 +228,9 @@ def main(argv: list[str] | None = None):
         # a transparent default page background is what lets the Mica backdrop show through at all.
         from .win import dwm as _dwm
         _dwm.prepare_environment()
+    elif IS_LINUX:
+        from .linux import shell as linux_shell
+        linux_shell.prepare_environment()   # no-op today — see app/linux/shell.py
     api = Api()
 
     # a file path passed on the command line (or by a macOS open-file event)
@@ -294,6 +298,9 @@ def main(argv: list[str] | None = None):
         # The in-window menu bar rebuilds its Open Recent flyout from api.recent_files() each time it
         # opens (js/ui/menubar.js), so there is nothing to retain and nothing to refresh here — the
         # native-NSMenu bookkeeping mac/shell.py needs exists only because pywebview has no rebuild API.
+    elif IS_LINUX:
+        from .linux import shell as linux_shell
+        linux_shell.install(window, api)   # no-op today — native GTK title bar/menu land in later phases
 
     # The DECLARATIVE menu is macOS-only. It is the same table either way (app/menu_spec.py), but on
     # Windows the menu is drawn by the web layer INSIDE the title bar, and handing pywebview a menu

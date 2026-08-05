@@ -8,17 +8,22 @@
    `document.write` rather than head.appendChild for exactly that second reason: it inserts at this
    script's own position in the source, so the kit stays ahead of app.css however this file is
    later reordered. There is no build step to resolve this at package time.
-   Detection order: an explicit ?platform= — browser design mode, and the ONLY way the Windows skin
-   can be reviewed from a Mac — then the real user agent. Python gets no vote: it can inject only
-   after load, which is far too late to choose a stylesheet. js/core/platform.js reads the result
-   back off <html data-platform> so look and behaviour cannot disagree. */
+   Detection order: an explicit ?platform= — browser design mode, and the ONLY way the Windows or
+   Linux skin can be reviewed from a Mac — then the real user agent. Python gets no vote: it can
+   inject only after load, which is far too late to choose a stylesheet. js/core/platform.js reads
+   the result back off <html data-platform> so look and behaviour cannot disagree.
+   "linux" loads adwaita-kit — a PLACEHOLDER kit (not sourced from libadwaita the way win11-kit was
+   sourced from WinUI 3; see adwaita-kit/README.md), picked over silently falling through to "mac"
+   (the previous behaviour here) so a real Linux user agent stops loading macOS's traffic lights and
+   glass toolbar with no native chrome behind them. */
 (function(){
-  var q=/[?&]platform=(mac|win)\b/.exec(location.search);
+  var q=/[?&]platform=(mac|win|linux)\b/.exec(location.search);
   var ua=(navigator.userAgentData&&navigator.userAgentData.platform)||navigator.platform||"";
-  var p=q?q[1]:(/win/i.test(ua)?"win":"mac");
+  var p=q?q[1]:(/win/i.test(ua)?"win":/linux/i.test(ua)?"linux":"mac");
   document.documentElement.dataset.platform=p;
   var kit=p==="win"?["win11-kit/fluent-tokens.css","win11-kit/fluent-chrome.css"]
-                   :["macos-kit/mac-tokens.css","macos-kit/mac-chrome.css"];
+         :p==="linux"?["adwaita-kit/adwaita-tokens.css","adwaita-kit/adwaita-chrome.css"]
+                     :["macos-kit/mac-tokens.css","macos-kit/mac-chrome.css"];
   for(var i=0;i<kit.length;i++) document.write('<link rel="stylesheet" href="'+kit[i]+'">');
 })();
 </script>

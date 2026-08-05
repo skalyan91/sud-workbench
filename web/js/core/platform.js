@@ -8,18 +8,27 @@
    the KIT STYLESHEET has to be chosen before first paint and a decision made down here would be
    far too late. This module only reads that decision back off <html data-platform>, so the look
    and the behaviour can never disagree about which platform we're on. */
-const PLATFORM = document.documentElement.dataset.platform === "win" ? "win" : "mac";
+const PLATFORM = document.documentElement.dataset.platform === "win" ? "win"
+                : document.documentElement.dataset.platform === "linux" ? "linux" : "mac";
 const IS_WIN = PLATFORM === "win";
+const IS_LINUX = PLATFORM === "linux";
+/* Linux keyboards have no Cmd key, and GTK/GNOME apps use the same Ctrl-based convention Windows
+   does — so everywhere below that asks "is this the non-mac chord", Linux reads as Windows-like
+   rather than as a third case. Kept as one flag rather than threading IS_WIN||IS_LINUX through
+   every call site, so a future Linux-specific accelerator convention (if GTK ever wants its own
+   label style, the way Windows spells "Ctrl+Shift+Z" where macOS draws "⇧⌘Z") is a one-line change
+   here instead of a grep-and-replace. */
+const IS_WIN_LIKE = IS_WIN || IS_LINUX;
 
 /* ── Accelerators ────────────────────────────────────────────────────────────
-   macOS names FOUR modifiers and writes them as glyphs with no separator (⇧⌘Z); Windows names
-   THREE and spells them out joined by "+" (Ctrl+Shift+Z). The interesting one is ⌃ (macOS
-   Control), which is a *different* modifier from ⌘ over there but has no distinct counterpart
-   here — so this app's five ⌃⌘ shortcuts (⌃⌘G/L/M/P/R) would collapse to an unpressable
-   "Ctrl+Ctrl+G" under the obvious ⌃→Ctrl mapping. Mapping ⌃→Alt instead keeps them as ordinary,
-   pressable Windows chords (Ctrl+Alt+G), which is also the convention Windows ports generally
-   follow. `cmdAltKey` below is the handler-side half of that same decision — change the two
-   together or the label will lie about the keystroke. */
+   macOS names FOUR modifiers and writes them as glyphs with no separator (⇧⌘Z); Windows (and,
+   here, Linux — see IS_WIN_LIKE above) names THREE and spells them out joined by "+"
+   (Ctrl+Shift+Z). The interesting one is ⌃ (macOS Control), which is a *different* modifier from
+   ⌘ over there but has no distinct counterpart here — so this app's five ⌃⌘ shortcuts (⌃⌘G/L/M/
+   P/R) would collapse to an unpressable "Ctrl+Ctrl+G" under the obvious ⌃→Ctrl mapping. Mapping
+   ⌃→Alt instead keeps them as ordinary, pressable chords (Ctrl+Alt+G), which is also the
+   convention Windows/Linux ports generally follow. `cmdAltKey` below is the handler-side half of
+   that same decision — change the two together or the label will lie about the keystroke. */
 const _MOD_WIN = { "⌘": "Ctrl", "⌃": "Alt", "⌥": "Alt", "⇧": "Shift" };
 const _MOD_ORDER = ["Ctrl", "Alt", "Shift"];        // Windows writes them in this order whatever order the macOS glyphs were in
 /* Non-modifier key glyphs. macOS prints the symbol, Windows prints the word. */
@@ -30,7 +39,7 @@ const _KEY_WIN = { "⌫": "Backspace", "⌦": "Delete", "⏎": "Enter", "↩": "
    these arrive as whole tooltips ("Show all annotation grids (⌃⌘G)"), not as bare key specs, so a
    whole-string parse would be wrong. On macOS this is the identity function and costs nothing. */
 function accel(s) {
-  if (!IS_WIN || !s) return s;
+  if (!IS_WIN_LIKE || !s) return s;
   return String(s)
     /* A run of modifier glyphs, plus the single key character that follows it (if any). The excluded
        characters are the ones that CANNOT be the key: whitespace, "," and ")" end an accelerator inside prose
@@ -62,7 +71,7 @@ function accel(s) {
    free. Idempotent (a rewritten string contains no glyphs left to match), so it is safe to call
    again on freshly-built subtrees; menus and sheets do exactly that. */
 function localiseAccel(root) {
-  if (!IS_WIN) return;
+  if (!IS_WIN_LIKE) return;
   const r = root || document;
   r.querySelectorAll("[title]").forEach(el => {
     const t = el.getAttribute("title"), w = accel(t); if (w !== t) el.setAttribute("title", w); });
@@ -74,8 +83,8 @@ function localiseAccel(root) {
    The command modifier is ⌘ (metaKey) on macOS and Ctrl on Windows, so a raw `e.metaKey` test
    silently does nothing on Windows. Every app shortcut goes through these two instead.
    `!e.altKey` in cmdKey is what keeps Ctrl+Alt+G from also firing the plain-Ctrl+G handler. */
-function cmdKey(e) { return IS_WIN ? (e.ctrlKey && !e.altKey) : e.metaKey; }
-function cmdAltKey(e) { return IS_WIN ? (e.ctrlKey && e.altKey) : (e.metaKey && e.ctrlKey); }
+function cmdKey(e) { return IS_WIN_LIKE ? (e.ctrlKey && !e.altKey) : e.metaKey; }
+function cmdAltKey(e) { return IS_WIN_LIKE ? (e.ctrlKey && e.altKey) : (e.metaKey && e.ctrlKey); }
 /* ⌥⌘ (the insert-token family: ⌥⌘↑/↓/←/→, ⌥⌘E, ⌥⌘F) — a DIFFERENT chord from ⌃⌘ on macOS, and cmdAltKey is
    not it (that one is ⌃⌘). ON WINDOWS THE TWO ARE THE SAME TEST, and that is not an oversight: this app uses
    five ⌘-family chords (⌘, ⇧⌘, ⌃⌘, ⌥⌘, ⌥⇧⌘) and Windows offers four (Ctrl, Ctrl+Shift, Ctrl+Alt,
@@ -84,7 +93,7 @@ function cmdAltKey(e) { return IS_WIN ? (e.ctrlKey && e.altKey) : (e.metaKey && 
    one) — since no other letter is in both families. Only the ⌥⌘ half has an in-page handler today
    (js/grid/columns.js); if the ⌃⌘ half ever gets one, ONE of the two needs a different Windows chord, in the
    handler AND in _MOD_WIN's labels, or Ctrl+Alt+Up will fire both. */
-function cmdOptKey(e) { return IS_WIN ? (e.ctrlKey && e.altKey) : (e.metaKey && e.altKey); }
+function cmdOptKey(e) { return IS_WIN_LIKE ? (e.ctrlKey && e.altKey) : (e.metaKey && e.altKey); }
 
 /* ── The kit's own font stacks, as a plain string ─────────────────────────────
    --ui-font / --ui-mono are CSS custom properties (macos-kit/mac-tokens.css, redeclared by the Fluent kit),
@@ -100,5 +109,19 @@ function _rootProp(name) {
 function uiFont() { return _uiFontCache || (_uiFontCache = _rootProp("--ui-font")) || "system-ui, sans-serif"; }
 function uiMono() { return _uiMonoCache || (_uiMonoCache = _rootProp("--ui-mono")) || "ui-monospace, monospace"; }
 
+/* Pushed by app/linux/shell.py::_push_theme once at startup and again on every live GTK3 theme
+   change (Gtk.Settings' notify:: signals — event-driven, see that file). Mirrors the
+   __accentChanged/__setSystemTheme convention app/mac/shell.py and app/win/shell.py already use:
+   an inline style on documentElement beats the kit stylesheet's own `:root` rule, so this
+   overrides web/adwaita-kit/adwaita-tokens.css's sourced-but-static defaults with whatever the
+   user's actual GTK3 theme resolves to, for exactly the custom properties the read answered —
+   anything it didn't (a theme that doesn't define a given named colour) is left alone, so the
+   kit's own sourced value keeps showing through undisturbed. */
+window.__setGtkTheme = function (colors) {
+  if (!colors) return;
+  for (const k in colors) document.documentElement.style.setProperty(k, colors[k]);
+};
+
 window.PLATFORM = PLATFORM;   // the native shell and the child windows reach the frontend through window.*
 window.accel = accel;
+window.IS_LINUX = IS_LINUX;

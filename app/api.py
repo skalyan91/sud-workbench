@@ -26,6 +26,7 @@ _MAX_RECENT = 10
 
 IS_MAC = sys.platform == "darwin"
 IS_WIN = sys.platform == "win32"
+IS_LINUX = sys.platform.startswith("linux")
 
 # The UI font stack for the CHILD windows (Help / About / Models / Gloss Mappings / Insert /
 # Toolbox). Those windows are generated HTML with no stylesheet of their own — they never load
@@ -443,10 +444,12 @@ class Api:
         """Frontend reports the selection state (token selected? which pane? RTL? group/ungroup available?);
         show only the relevant items, flip the head-stepping icons under RTL.
 
-        macOS only in effect: ``self._menu`` is the title → NSMenuItem map app/mac/shell.py's menu
-        wiring fills in, so on Windows there is nothing here to drive and the call returns early —
-        the in-window menu bar applies the very same state itself, from the very same table (see
-        ``menu_spec.visibility``), because the state never has to cross the bridge to reach it."""
+        macOS and Linux only in effect: ``self._menu`` is the title → native-menu-item map each
+        platform's own shell fills in (``app/mac/shell.py``'s NSMenuItem wiring, ``app/linux/
+        shell.py``'s Gtk.MenuItem wiring) — on Windows there is nothing here to drive and the call
+        returns early, because the in-window menu bar applies the very same state itself, from the
+        very same table (see ``menu_spec.visibility``), so the state never has to cross the bridge
+        to reach it."""
         if not self._menu:
             return {"ok": False}
         st = dict(state or {})
@@ -458,18 +461,26 @@ class Api:
         return {"ok": True}
 
     def _apply_menu(self, st: dict):
-        """Push one selection-state report onto the live NSMenuItems.
+        """Push one selection-state report onto the live native menu items — ``NSMenuItem`` on
+        macOS, ``Gtk.MenuItem``/``Gtk.CheckMenuItem`` on Linux (the Windows in-window bar applies
+        the same state itself; see ``sync_menu``'s own docstring).
 
         The RULES are no longer written here — ``menu_spec.visibility`` resolves them, and
-        ``menu_spec.CHECK_KEYS`` names the checkmarks, so the Windows menu bar applies the identical
-        predicates rather than a hand-copied restatement of them.  What stays is the AppKit half."""
+        ``menu_spec.CHECK_KEYS`` names the checkmarks, so every native menu applies the identical
+        predicates rather than a hand-copied restatement of them.  What stays is the per-platform
+        widget call: AppKit hides a row, GTK disables it (`Gio.Menu`/`Gtk.MenuItem` can't cleanly
+        hide an individual row at runtime the way AppKit can — "disable, don't hide" is normal GTK
+        convention, not a workaround)."""
         m = self._menu or {}
         rtl = bool(st.get("rtl"))
         for title, show in menu_spec.visibility(st).items():
             it = m.get(title)
             if it is not None:
                 try:
-                    it.setHidden_(not show)
+                    if IS_LINUX:
+                        it.set_sensitive(show)
+                    else:
+                        it.setHidden_(not show)
                 except Exception:  # noqa: BLE001
                     pass
         # items 2/3 — Foreign/Typo are TOGGLES, so their rows carry a checkmark reflecting the selection's own
@@ -480,7 +491,10 @@ class Api:
             it = m.get(title)
             if it is not None:
                 try:
-                    it.setState_(1 if st.get(key) else 0)
+                    if IS_LINUX:
+                        it.set_active(bool(st.get(key)))
+                    else:
+                        it.setState_(1 if st.get(key) else 0)
                 except Exception:  # noqa: BLE001
                     pass
         # head-stepping icons point toward the earlier/later token — flip them under RTL. Which glyph
@@ -560,9 +574,11 @@ class Api:
         which the split already yields as a chain entry of its own — so the row above it is the
         container of all drives, which Explorer calls **This PC**.  Naming a drive here instead was
         rejected: this is injected once at startup, and the letter belongs to whichever document is
-        open, so "C:\\" would be a lie for a file on D:."""
-        return {"sep": "\\" if IS_WIN else "/",
-                "rootName": "This PC" if IS_WIN else "Macintosh HD"}
+        open, so "C:\\" would be a lie for a file on D:.  Linux gets the generic "Computer" — there
+        is no one universal Linux equivalent of "Macintosh HD" (it varies by distro/file manager),
+        and a made-up specific name would be a bigger lie than a deliberately generic one."""
+        root = "This PC" if IS_WIN else "Macintosh HD" if IS_MAC else "Computer"
+        return {"sep": "\\" if IS_WIN else "/", "rootName": root}
 
     # ── window controls (Windows draws its own caption buttons in the web layer) ──
     def caption(self, what: str) -> dict:

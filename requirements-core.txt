@@ -21,6 +21,14 @@ pywebview==6.2.1
 #   why packaging/windows/sud-workbench.iss says ArchitecturesAllowed=x64compatible rather than
 #   naming arm64 as well.
 pythonnet; sys_platform == "win32"
+# pywebview's Linux backend is GTK3 + WebKit2GTK 4.1, reached through PyGObject's introspection
+# bridge — the counterpart of pyobjc-*/pythonnet above. Both packages below are pip-installable,
+# but the GTK3 runtime + gir1.2-webkit2-4.1 themselves are NOT (GObject-Introspection typelibs have
+# no PyPI wheel path) — those must already be present as system packages; see packaging/ for the
+# apt/dnf/pacman lines once that phase lands. Same environment-marker mechanism, so this changes
+# nothing for a macOS or Windows install.
+PyGObject; sys_platform == "linux"
+pycairo; sys_platform == "linux"
 conllu>=6.0
 
 # ── parsing (SUD spaCy only — thinc/CNN, no torch) ──────────────────────────

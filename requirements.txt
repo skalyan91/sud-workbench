@@ -9,6 +9,11 @@ pythonnet; sys_platform == "win32"   # the Windows half of that: WinForms + WebV
                       #   same reason as in requirements-core.txt (which is what the shipping
                       #   bundles install from) — keep the two files in step. No effect on macOS:
                       #   pip evaluates the marker and skips the line entirely.
+PyGObject; sys_platform == "linux"   # the Linux half: GTK3 + WebKit2GTK 4.1 through PyGObject's
+pycairo; sys_platform == "linux"     #   introspection bridge. Both are pip-installable, but the GTK3
+                      #   runtime + gir1.2-webkit2-4.1 themselves are NOT — those are system packages
+                      #   (GObject-Introspection typelibs have no PyPI wheel path) that must already
+                      #   be present; see packaging/ for the apt/dnf/pacman lines once that phase lands.
 conllu>=6.0           # available for reference; I/O here is hand-rolled for byte-stable round-trips
 
 # ── parsing (SUD spaCy + Stanza UD) ─────────────────────────────────────────

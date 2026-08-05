@@ -24,6 +24,14 @@ def _app_data() -> str:
     if sys.platform == "win32":
         base = os.environ.get("LOCALAPPDATA") or os.path.expanduser(r"~\AppData\Local")
         return os.path.join(base, "SUD Workbench")
+    if sys.platform.startswith("linux"):
+        # XDG base directory spec: user-specific data files. Same reasoning as LOCALAPPDATA above —
+        # everything under APP_DATA is a machine-local cache (Stanza models, pip'd extras tiers,
+        # release listings, fonts) plus a small UI state file, which is what $XDG_DATA_HOME (not
+        # $XDG_CONFIG_HOME) is for. Read the env var first, then fall back to the spec's default,
+        # since a non-standard data home is normal on managed/NixOS-style machines.
+        base = os.environ.get("XDG_DATA_HOME") or os.path.expanduser("~/.local/share")
+        return os.path.join(base, "SUD Workbench")
     return os.path.expanduser("~/Library/Application Support/SUD Workbench")
 
 
