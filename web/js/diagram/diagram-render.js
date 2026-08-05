@@ -67,6 +67,17 @@ function fanGhostArcs(realArcs,ghostArcs,spread){
     const dk=a.dkey??a.dk, dSide=Math.sign(a.xh-a.xd)||1, dK=dk+"|"+dSide;
     ghostSlot[dK]=(ghostSlot[dK]!=null?ghostSlot[dK]:(maxReal[dk]||0))+1; a.offD=dSide*ghostSlot[dK]*spread; }); }
 function renderSentence(si){
+  const el=_renderSentence(si);
+  /* …and then, where the engine cannot shape this script in SVG at all, swap every affected <text> for
+     an HTML one (smpReshape, js/diagram/diagram-core.js). Done HERE, on the finished element, rather
+     than at the nine sites that build a form: those sites differ per notation and each sets its own
+     data-* / cursor / tooltip afterwards, and a sweep over the result cannot miss one — including any
+     added later. A no-op on every engine and every script that shapes normally, which is all of them
+     but the supplementary-plane Brahmic ones on WebKit. */
+  if(typeof smpReshape==="function") smpReshape(el);
+  return el;
+}
+function _renderSentence(si){
   if(conv==="arcs") return arcs(si);
   if(conv==="tree") return tree(si);
   if(conv==="brackets") return brackets(si);

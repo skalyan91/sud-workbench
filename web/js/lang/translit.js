@@ -454,10 +454,14 @@ function syncSchemeAttr(){ const d=document.getElementById("doc"); if(!d) return
    practical script for writing Mongolian, Tibetan and Sanskrit, and its square construction is a
    letterform, not ornament. Siddhaṃ and Balinese are, on the other side: Siddhaṃ survives almost entirely
    as bīja and mantra calligraphy, and Balinese as ornamented palm-leaf and temple lettering.
+   Javanese and Tibetan joined them: Javanese is Balinese's sibling in construction and use (the same
+   ornamented palm-leaf hand, the same stacked pasangan below the line), and Tibetan writes Sanskrit as
+   dbu-can with stacked subjoined consonants and a heavy head-line — legible at a body size for Tibetan
+   prose, but not for the conjunct-dense Sanskrit this app sets in it.
    ONLY THE GLYPHS SCALE. The transliteration, POS, gloss and relation rows around them are Latin
    annotation and are legible already — doubling those would be a zoom, which the app has (⌘+) and which
    the reader did not ask for. */
-const ORNAMENTAL_SCRIPTS=new Set(["Ranjana","Soyombo","Siddham","Balinese"]);
+const ORNAMENTAL_SCRIPTS=new Set(["Ranjana","Soyombo","Siddham","Balinese","Javanese","Tibetan"]);
 function scriptMag(){ return ORNAMENTAL_SCRIPTS.has(ORTHO_SCHEME)?2:1; }
 function orSchemeLabel(id){ const s=ORTHO_SCHEMES.find(x=>x.id===id); return s?s.label:""; }
 /* WHAT THE "no scheme" ROW IS CALLED, which is not the same question in every language. Everywhere else the
@@ -528,7 +532,16 @@ function orRender(){ const m=orEl(); m.innerHTML="";
       else b.disabled=true; }
     else b.addEventListener("click",()=>orPick(s.id));
     m.appendChild(b); }); }
-function orPick(id){ orClose(); id=id||""; if(id===ORTHO_SCHEME) return;
+/* ⚠ AND THE READING POSITION SURVIVES THE SWITCH. Picking an ornamental script doubles every glyph in
+   the document, so every block above the viewport changes height and the scroll offset that meant
+   "here" before the switch means somewhere else after it — the reader is dropped pages away from the
+   sentence they were reading. `withTopChrome` is the instrument for exactly this (see its own note: the
+   zoom and the options bar use it for the identical reason, and the whole mutation must sit INSIDE the
+   capture or it measures the state it is about to restore). Guarded, because js/core/scroll.js loads
+   after this module. */
+function orPick(id){ if(typeof withTopChrome==="function") return withTopChrome(()=>_orPick(id));
+  return _orPick(id); }
+function _orPick(id){ orClose(); id=id||""; if(id===ORTHO_SCHEME) return;
   ORTHO_SCHEME=id; syncSchemeAttr();
   if(isSanskritLang()) show.translit=saTransRow();   // item 27(c): the IAST transliteration row/pill follows the GLYPH (non-Latin ⇒ show IAST beneath; Latin/an IAST-stored Original ⇒ hide)
   updateTranslitPill(); updateOrthoPill(); clearOrthoCache();

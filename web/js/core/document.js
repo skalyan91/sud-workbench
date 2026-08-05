@@ -2575,7 +2575,6 @@ function capBlock(b,dh){
     const shead=b.querySelector(".shead"), dg=b.querySelector(".diagram,.text-conv"), gw=b.querySelector(".gwrap");
     const cs=getComputedStyle(b), pad=parseFloat(cs.paddingTop||0)+parseFloat(cs.paddingBottom||0),
           bord=parseFloat(cs.borderTopWidth||0)+parseFloat(cs.borderBottomWidth||0), cap=(dh-sheetGapAbove(b)-sheetGapBelow(b)-stickyHeadH(b))/FS;   // item 10: a block at the edge of a sheet is charged the page-ground gap beside it, so block+gap fill the viewport rather than overflowing it by the gap. The gaps are OUTSIDE .sblock{zoom:FS} → real px, so they come off dh before the ÷FS. Both 0 unpaged.   // …and the same charge for the STICKY boundary headings that dominate this block (stickyHeadH): pinned, they own the top of the viewport for as long as the block is in it, so block + gaps + headings must fill exactly one viewport between them. Real px too, for the same reason — the heading carries its own zoom:FS.   // a full block's border-box exactly fills the viewport. dh is REAL px; the block is inside .sblock{zoom:FS}, whose offset*/scroll* measurements below are LOCAL (unzoomed) px, so express the cap in LOCAL px too (÷FS) — then heights set here render ×FS to exactly the viewport. Recomputed each render → correct at every zoom (no-op at FS=1).
-    b.style.maxHeight=cap+"px";
     const shH=shead?shead.offsetHeight:0;
     /* …and the boundary heading, which is now IN FLOW at the top of the block (see .bmarks in app.css) and so
        takes real height off what the diagram and grid have to share. Missing this is invisible until a block that
@@ -2587,7 +2586,21 @@ function capBlock(b,dh){
     const gapHead=(dg&&shead)?Math.max(0,dg.offsetTop-(shead.offsetTop+shH)-tgH):0;   // whitespace gap above the diagram; the trans grid (if present) sits in this span → subtract its height so it isn't double-counted (it's charged once via tgH below)
     const gapMid=(dg&&gw)?Math.max(0,gw.offsetTop-(dg.offsetTop+dg.offsetHeight)):0;   // the diagram↔grid gap, excluded
     const addBtn=b.querySelector(".addtok"), addH=addBtn?addBtn.offsetHeight+parseFloat(getComputedStyle(addBtn).marginTop||0):0;   // the "Add token" button sits below the scrollable grid frame → reserve its height so it (and the block's bottom padding) stay in view
-    const avail=Math.max(140, cap-shH-bmH-pad-bord-gapHead-gapMid-addH-tgH);   // subtract the border ONCE so content fills to exactly the viewport, no more, no less
+    /* ⚠ AND WHERE THE HEADER LEAVES TOO LITTLE, THE BLOCK GROWS — it is not capped at one viewport and
+       the panes squeezed to fit inside it. A running sentence set in an ornamental script at 2× is the
+       case that forced this: `.stext-stacked` gives it line-height 2 so stacked conjuncts clear, the
+       magnification doubles the font, and the two multiply — measured on a four-line verse, a 216px
+       header, and 61px more for the boundary heading a `newdoc`/`newpar` block carries. Against a 438px
+       viewport that drove `avail` onto its floor and left the diagram 93px and the grid 47px, both
+       scrolling inside a block that had room for neither. The arithmetic was right; the input was simply
+       a header half a viewport tall.
+       So the floor is honoured by making the BLOCK taller rather than by taking the room out of the
+       panes. `chrome + avail` is exactly `cap` whenever the header leaves the floor or more, so every
+       block that fits today is untouched — only one that could not fit grows, and the page scrolls
+       through it as it already does for any block with both panes open. */
+    const chrome=shH+bmH+pad+bord+gapHead+gapMid+addH+tgH;   // subtract the border ONCE so content fills to exactly the viewport, no more, no less
+    const avail=Math.max(140, cap-chrome);
+    b.style.maxHeight=(chrome+avail)+"px";
     // allocate by natural content height: the diagram gets up to 2/3 and the grid up to 1/3, but if one needs
     // less than its share the other may expand into the leftover (so neither scrolls while there's room).
     // A wrapped stemma/hierarchy reports its wanted height (scaled tree + one token row) via data-dia-nat.

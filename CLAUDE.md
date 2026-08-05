@@ -475,13 +475,90 @@ the literal `18+descent(POS_F)` in **fifteen** places — every renderer's draw 
 with about **1.6px** of slack (measured: ink bottom 166.0, POS row top 167.6). A doubled form eats it. The one
 expression now adds the magnification's own extra descent, so draws and reserves grow together; measured across
 all five notations at 2×, every row clears and nothing clips. Identical to the old expression at `TOK_MAG === 1`.
-⚠ **AND THE RUNNING LINE MEETS THE SENTENCE NUMBER AT THE CAP HEIGHT, NOT AT THE BASELINE.** `.shead` is
-baseline-aligned, which is right while everything in it is the same size; a script at double size then hangs its
-whole extra height ABOVE the row and towers over the number beside it. What reads as aligned is the top of the
-letters, so `.stext-script` is pushed down by capH(script) − capH(number) = 0.7 × `--stext-fs` × (mag − 1), with a
-matching `margin-bottom` giving the shift back to the flow so the line cannot lean into the transliteration row.
-Measured: the cap tops differ by 1.0px at mag 1 and 1.4px at mag 2, against the ~10px they would differ by without
-it. Both terms are 0 at mag 1.
+⚠ **WEBKIT DOES NOT SHAPE SUPPLEMENTARY-PLANE COMPLEX TEXT IN SVG `<text>`, AND THAT SUPERSEDES THE CLAIM
+BELOW THAT KAWI "COMES OUT CLEAN".** Measured in the shipping app, one Kawi word at 15px: **canvas 39.85,
+painted SVG 86.54, the `meas()` element 99.88** — and all three agree to 0.01 on the strings in the same
+sentence carrying NO combining marks. Canvas is the CONTROL, not a candidate: it is less than half the painted
+width because it is the only one of the three that forms the conjuncts and zeroes the marks. So the SVG paints
+these scripts UNSHAPED, about one advance per codepoint, and the "horizontal placement is off" report is that
+width — not a centring error, which measures 0.00 px. ⚠️ **WHAT DISTINGUISHES THE AFFECTED SCRIPTS IS NOT KNOWN.**
+It is NOT the plane, which was the first theory and is disproved: Siddhaṃ (U+11580–) and Soyombo (U+11A50–) are
+supplementary-plane too and have never shown it. One untested difference is how the face ARRIVES — Siddhaṃ and
+Soyombo come from `web/fonts` as `@font-face` webfonts, Kawi resolved to one installed in `~/Library/Fonts` — but
+that is a hypothesis, not a finding. **This is why `svgShapesSMP()` PROBES the condition rather than keying off a
+script list**: it compares what the engine will actually paint against what canvas shapes, so it stays right
+whatever the real cause turns out to be, and a script list built on a wrong theory would not have.
+⚠️ **Chrome shapes this correctly, so no headless test can see any of it** — every wrong turn here came from
+reasoning against Chrome. The Kawi note further down was verified in a synthetic CDP harness and is wrong for
+exactly the reason the Zanabazar Square note beside it gives: trust the live report.
+`svgShapesSMP()` PROBES it (canvas vs the measuring element, 2 % threshold — shaped and unshaped differ by
+50–120 %, so it cannot fire on rounding), memoised and re-probed on a font-stack change, so an engine that gains
+this simply reports agreement and nothing changes. Where it fails, `meas()` returns the CANVAS width (what the
+fallback actually paints) and `smpReshape` swaps each affected `<text>` for a `<foreignObject>` holding an HTML
+element — the same text path the running sentence uses, which is why that line always looked right while the
+diagram did not. Run from `renderSentence`, the one choke point every notation passes through, rather than at the
+nine sites that build a form: those differ per notation and each sets its own `data-*`/cursor/tooltip afterwards,
+and a sweep over the finished element cannot miss one.
+⚠️ **What a `foreignObject` does NOT inherit is the whole difficulty**: `text-anchor:middle` (the box is placed at
+x − w/2), `paint-order:stroke` (the casing becomes the text-shadow triple the HTML notations already use), the
+baseline (the element is seated by its own font ascent) and `fill` (`.fo-form` restores `color`, including the
+selected and dimmed states). The class list and every attribute ride along onto both nodes, or selection, dimming
+and the delegated click handlers stop matching.
+⚠️ **THE PROBE MUST BE CONSULTED BEFORE THE MEASUREMENT CACHE IS READ**, and putting it inside
+`_measOneUncached` — which a cache HIT skips — meant it never ran at all. `t.ortho` is filled ASYNCHRONOUSLY by
+fillOrtho, so at first layout there is no SMP string to probe, the width is taken optimistically as the unshaped
+81 px and CACHED; every later render hit that entry, `_measOneUncached` never ran, and the probe's own one-shot
+`clearMeasCache()` had nothing to trigger it. Measured symptom: `svgShapesSMP()` reporting false while `meas()`
+still returned 81 — an 83 px box holding 39.85 px of text, i.e. the form sitting **20 px left** of its own POS
+tag, and only ever on first load. It is consulted in `_measOne` now, on the way in.
+⚠️ **AND `.fo-form` IS CENTRED**, because an HTML block left-aligns and `text-anchor:middle` means nothing to it.
+With a correctly sized box that is invisible; it is what turned a stale width into a 20 px DISPLACEMENT rather
+than 20 px of slack around correctly-placed glyphs, so it stays as the structural guard.
+⚠️ **AND THE FORM IS THE ELEMENT'S OWN TEXT NODES, NOT ITS `textContent`.** An SVG tooltip is a `<title>` CHILD
+(`svgTip` — the title ATTRIBUTE surfaces nothing on SVG), so `textContent` returns the form concatenated with the
+hint, and the first cut painted the tooltip into the diagram beside the word. The `<title>` is carried onto the
+`foreignObject` so the tooltip survives the swap rather than being traded for the bug.
+
+⚠ **THE MAGNIFICATION CARRIES THE WEIGHT AND TRACKING CURVES WITH IT, AND NOT DOING SO WAS A REAL LAYOUT BUG.**
+`refreshFontStacks` now derives three terms from `--script-mag` and publishes them back on #doc, so the CSS and the
+canvas/SVG measurement strings cannot disagree about any of them: `--script-wght` (`magWeight`, the weight curve
+with its 400 floor dropped to 100 — a 30px glyph is the first thing in this app on the far side of the reference
+size, and a STATIC face simply renders its Regular, which is what "follow the curve as far as possible" means),
+`--script-track-d` (`magTrack`, the tracking curve's own term for the magnification, in em so one value serves
+every rule whatever its base size) and `--script-asc`. ⚠️ **The tracking half is a fix, not a refinement**: the
+glyph rules stated the curve as a literal for their UNMAGNIFIED size — and the 15px/26px faces stated none at all,
+15px being the curve's zero — while `_measOneUncached` reads the size out of the font string and computes
+`trackCurve` for the MAGNIFIED one. At 2× the two differed by 0.08·ln 2 ≈ .0554em per character, and measurement
+is what sizes the slot: **measured on the real diagram, Balinese forms were laid out up to 12.5px wider or 8.3px
+narrower than they paint; both now match to 0.00px.** `trackCurve(base) + magTrack(mag)` is identically
+`trackCurve(base × mag)`, which is the identity that keeps them in step by construction. The weight likewise has
+to ride the FONT STRINGS (`magFont`), or the slot is measured at Regular while a variable face paints at 200 —
+and `WORD_F_BOLD`/`NODE_F_BOLD` take an explicit override, since a shorthand cannot carry two weight tokens.
+
+⚠️ **A SEAM MARK IS NOT PART OF THE WORD**, so it does not magnify (`svgSeamMark` un-scales the FORM row only —
+every other row is handed an unmagnified face already). It is punctuation ABOUT the word, set in the app's own
+register; at 2× it drew a 30px hyphen beside the letters it annotates. Verified: 15px at mag 2 while the forms
+are 30px. ⚠️ **And the MWT surface form keeps its top margin** (`mwtFormLead`): the literal 20 seats a 15px form
+~9px below the tie, i.e. 20 minus that form's ascent, so at 2× the doubled ascent ate the gap. Adding
+`A × (mag − 1)` holds the ink top where every non-ornamental script puts it — the same shape as `belowGap()`'s
+magnification term, and `bot` is computed from `dfy`, so the reserve follows for free.
+
+⚠️ **`--script-asc` IS MEASURED, AND THE STACK ORDER DECIDES WHETHER THE MEASUREMENT IS TRUE.** Canvas
+`fontBoundingBoxAscent` reports the metrics of the FIRST family in the font list whatever face actually shapes the
+text: a Kawi character measured against the ordinary token stack answers **107** (Noto Sans Latin's ascent) and
+only answers Kawi's own **110** when `Noto Sans Kawi` is named first. `scriptAscentEm` therefore names the
+script's family ahead of the live stack; a face that will not resolve falls through to the Latin ascent, which is
+the shift this had before it was measured at all. The faces differ by a third of an em (Kawi 1.10, Javanese 1.12,
+Devanagari 0.90), which is why this is measured rather than tabulated.
+
+⚠ **AND THE RUNNING LINE IS TOP-ALIGNED, THEN PULLED UP BY ITS OWN ASCENDER** (superseding the cap-height rule
+this block used to describe). `.shead` is baseline-aligned, which is right while everything in it is one size; a
+script at double size then hangs its extra height ABOVE the row. `align-self:flex-start` puts the tall box's top at
+the row top — but these faces reserve enormous ascents for their stacked marks, most of it empty, so top-aligning
+the BOX alone drops the letters well below the number. The line is shifted back up by that ascent's magnified
+excess, `--script-asc` × `--stext-fs` × (mag − 1), and the empty ascent overflows into the gap above the block
+where nothing is drawn; a matching `margin-bottom` gives the shift back to the flow so the line cannot lean into
+the transliteration row. Every term is 0 at mag 1.
 
 ⚠ **A z-index cannot beat the native window-tab bar.** Every floating popup clamps its top to
 `menuTopBound()` (`js/core/scroll.js`) rather than to a bare `8`: the app's own titlebar is web content

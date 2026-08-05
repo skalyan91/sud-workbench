@@ -54,7 +54,7 @@
 40	‖	‖	PUNCT	PUNCT	Case=Acc|Gender=Neut|Number=Sing	34	punct	_	Unsandhied=‖|MSeg=‖|MGloss=ACC.SG.N
 
 # sent_id = s2
-# text = bhūyobhiḥ paṭubuddhibhiḥ paṭudhiyām horāphalajñāptaye |\nśabdanyāyasamanviteṣu bahuśaḥ śāstreṣu dṛṣṭeṣv api |\nhorātantramahārṇavaprataraṇe bhagnodyamānām aham |\nsvalpaṃ vṛttavicitram arthabahulaṃ śāstraplavaṃ prārabhe ||
+# text = bhūyobhiḥ paṭubuddhibhiḥ paṭudhiyāṃ horāphalajñāptaye |\nśabdanyāyasamanviteṣu bahuśaḥ śāstreṣu dṛṣṭeṣv api |\nhorātantramahārṇavaprataraṇe bhagnodyamānām aham |\nsvalpaṃ vṛttavicitram arthabahulaṃ śāstraplavaṃ prārabhe ||
 1	bhūyobhiḥ	bhūyas	NOUN	NOUN	Case=Ins|Gender=Neut|Number=Plur	4	mod	_	Unsandhied=bhūyobhiḥ|MSeg=bhūyobhiḥ|MGloss=INS.PL.N
 2-3	paṭubuddhibhiḥ	_	_	_	_	_	_	_	_
 2	paṭu	paṭu	ADJ	NOUN	Compound=Yes	4	mod	_	Unsandhied=paṭu|MSeg=paṭu
