@@ -342,15 +342,29 @@ function scriptFamilyPrefix(){ return (typeof fontStackName==="function"&&ORTHO_
    belowGap() can simply add it; 0 outside a stacking script or with nothing yet to measure. Cached into
    STACK_DROP by refreshFontStacks(), like TOK_ASC/scriptLiftEm() beside it — belowGap() runs far too
    often (every renderer's draw AND reserve) to re-scan the whole document on each call. */
+/* ⚠ SVG-MEASURED, NOT CANVAS — this is exactly the ambiguous-family-name trap the _measDOM comment above
+   describes for Grantha: fontCovers() finds LOCAL system coverage and skips the app's own download, and
+   canvas's font matcher and the SVG text-layout engine painting the diagram can independently resolve
+   that same family NAME to different underlying FILES with different subjoined-mark depths. Measured on
+   report: canvas's actualBoundingBoxDescent for a real Grantha word came back shallower than what the
+   diagram's own SVG <text> paints, so STACK_DROP computed from it silently undershot — the extra
+   below-token space this function exists to reserve just didn't appear, for the one script this bug was
+   originally diagnosed on. Unlike scriptAscentEm/scriptMidEm/scriptLiftEm below (which need
+   fontBoundingBoxAscent/Descent — the font's own EM-box metrics, with no SVG DOM equivalent), this
+   function only ever needed actualBoundingBoxDescent — pure INK depth — which _mtxt.getBBox() gives
+   directly, measured through the SAME element (and so the SAME font resolution) meas()/measGloss() paint
+   with. No capability lost, unlike those three. */
 function stackDropExtra(){
   if(!(typeof STACKING_SCRIPTS!=="undefined" && STACKING_SCRIPTS.has(ORTHO_SCHEME))) return 0;
   try{
-    _cv.font="100px "+scriptFamilyPrefix()+LIVE_TOKEN_STACK;
+    _mtxt.style.cssText="white-space:pre;font:100px "+scriptFamilyPrefix()+LIVE_TOKEN_STACK;
     let maxInk=-1;
     for(const s of (typeof DOC!=="undefined"?DOC:[])){ for(const t of (s.tokens||[])){
         const o=t.ortho||""; if(!o) continue;
-        const m=_cv.measureText(o);
-        if(m.actualBoundingBoxDescent>maxInk) maxInk=m.actualBoundingBoxDescent; } }
+        _mtxt.textContent=o;
+        let bbox; try{ bbox=_mtxt.getBBox(); }catch(_){ continue; }
+        const d=bbox.y+bbox.height;   // ink bottom, relative to the y=0 baseline — how far the descender actually reaches
+        if(d>maxInk) maxInk=d; } }
     if(maxInk<0) return 0;
     const px=parseFloat(WORD_F)||TOK_REF_SIZE*TOK_MAG;
     return Math.max(0,(maxInk/100)*px-descent(WORD_F));
@@ -372,13 +386,27 @@ function scriptAscentEm(){
     const a=m.fontBoundingBoxAscent; return (a>0&&isFinite(a))?a/100:1; }catch(_){ return 1; } }
 /* HOW FAR THE FONT'S OWN VERTICAL MIDPOINT (its ascent-plus-descent box, halved) sits above the baseline, as
    a ratio of its size — `(fontBoundingBoxAscent−fontBoundingBoxDescent)/2`, at a 100px reference. This is a
-   property of the FONT alone, not of any particular glyph (measured against a bare "m": swapping in any
-   other character changes nothing, since ascent/descent are metrics of the face, not the character), and it
-   scales exactly linearly with size — the one thing that makes the seam-mark fix below a closed form rather
-   than a second measurement. See svgSeamMark's own note for what it is for. */
+   property of the FONT alone, not of any particular glyph — true ONLY once "the font" is actually one face,
+   which is exactly what measuring a bare "m" cannot guarantee. ⚠ REPORTED WRONG FOR GRANTHA, and "m" is why:
+   a script-specific Noto face is not obliged to cover Latin at all, so canvas can resolve "m" through an
+   ENTIRELY DIFFERENT fallback family than the one actually shaping the script glyphs beside the seam mark —
+   not the ambiguous-family mismatch _measDOM/stackDropExtra's notes describe (two files sharing one name),
+   but the same failure mode _measDOM's family-ordering was built to dodge for scriptAscentEm ("a Kawi
+   character measured against the ordinary token stack answers 107 — Noto Sans Latin's ascent — and only
+   answers Kawi's own 110 when its family is named first"): the sample glyph has to be a character the
+   script's own face actually has to say. Live report: seam marks on Grantha sat at roughly cap-height
+   instead of centred on the word, which is what a MID computed from the wrong (shallower, Latin) face's
+   ascent/descent would produce. Now measured through a REAL character from the document's own orthography —
+   the identical DOC-scan scriptAscentEm uses just above, so the two functions can no longer disagree about
+   which face answers for this script. Scales exactly linearly with size, which is what makes the seam-mark
+   fix below a closed form rather than a second measurement. See svgSeamMark's own note for what it is for. */
 function scriptMidEm(){
   if(TOK_MAG===1) return 0;
-  try{ _cv.font="100px "+scriptFamilyPrefix()+LIVE_TOKEN_STACK; const m=_cv.measureText("m");
+  let ch="";
+  outer: for(const s of (typeof DOC!=="undefined"?DOC:[])){ for(const t of (s.tokens||[])){
+      const o=t.ortho||""; for(const c of o){ if(c>" "&&!/[ -ɏ]/.test(c)){ ch=c; break outer; } } } }
+  if(!ch) return 0;
+  try{ _cv.font="100px "+scriptFamilyPrefix()+LIVE_TOKEN_STACK; const m=_cv.measureText(ch);
     const a=m.fontBoundingBoxAscent, d=m.fontBoundingBoxDescent;
     return (a>0&&isFinite(a))?(a-d)/200:0; }catch(_){ return 0; } }
 // gloss-tier measurement fonts — must match the CSS at .gloss / .gloss[data-tier=…]: lexical gloss now shares
@@ -1836,10 +1864,30 @@ function fitTight(svg,boxes){ if(!boxes.length) return;
      account for it: let the overflow paint into the left margin instead (svg{overflow:visible} — see
      .diagram.wrapped>svg in app.css) by simply not counting it toward the viewBox's own width. `b` (the
      RIGHT edge) is NOT clamped the same way — fitTight expanding rightward for real content (MGloss
-     included) is the whole reason this function exists. */
+     included) is the whole reason this function exists.
+     ⚠ AND `overflow:visible` ALONE DOES NOT REACH THE SCREEN — svg{overflow:visible} only stops the SVG's
+     OWN viewport from clipping content outside its [0,w] box; `.diagram.wrapped` (the flex container wrap()
+     builds around the svg) still clips at ITS OWN edges via overflow-x:hidden, and that box starts flush
+     with the svg's left edge, with nothing reserved to its left for content the clamp just excluded. So the
+     clamped overflow painted straight into the NEXT clip boundary out — traded a right-edge MGloss clip for
+     an invisible-on-the-left MWT, reported live as "the same issue" surviving the first fix. `leftOverflow`
+     publishes exactly how far LEFT of the finished viewBox's own `x` the true content reaches, so
+     arcsWrapped's caller can give `.diagram.wrapped` a matching negative margin-left — shifting the
+     CONTAINER's own box (and so its clip boundary) left by that amount, which is what actually makes room
+     rather than merely un-hiding content the next box out clips anyway.
+     ⚠ MEASURED AGAINST `x` (the viewBox's OWN left edge, post-margin), NOT `aFit` — a first cut used
+     `aFit-a`, which forgets that `x` already sits `M` further left than `aFit` (the same margin every
+     unclamped diagram gets for free). That undercounted the shift by exactly `M`: content truly reaching to
+     a=-30 with aFit=0, M=6 gives x=-6, so the content sits 24px left of the svg's own box (x-a), not 30 —
+     `aFit-a` shifted the container 30px, 6px MORE than needed, which merely relocated the clip 6px left of
+     where it needed to be rather than removing it (verified on a synthetic repro: contentScreenX landed 24px
+     left of the shifted container's own left edge, still clipped, before this correction). `Math.max(0, …)`
+     is still required: for content only slightly negative (−M < a < 0) `x` sits to ITS left already, needing
+     no extra margin at all, and the naive `x-a` would otherwise go negative there. */
   const aFit=Math.max(0,a);
   const x=Math.floor(aFit-M),y=Math.floor(c-M),w=Math.ceil(b-aFit+2*M),h=Math.ceil(d-c+2*M);
-  svg.setAttribute("viewBox",`${x} ${y} ${w} ${h}`); svg.setAttribute("width",w); svg.setAttribute("height",h);}
+  svg.setAttribute("viewBox",`${x} ${y} ${w} ${h}`); svg.setAttribute("width",w); svg.setAttribute("height",h);
+  svg._leftOverflow=Math.max(0,x-a);}
 // De-collide edge labels by HORIZONTAL spreading, symmetric around each head: for a head's children, the
 // nearest child on each side (rightmost of the left group, leftmost of the right group) stays fixed, and the
 // outer children spread away from the head (their whole subtrees shift outward) by the minimum needed. Heads

@@ -752,7 +752,9 @@ function arcsWrapped(si){
      one. `wrap()` is shared with wrapDiagram's own plain (unwrapped) fallback, which must NOT get this
      treatment — genuinely wide unwrapped content is supposed to scroll — so the class is added here, after
      wrap() returns, not inside it. */
-  const d=wrap(svg); d.classList.add("wrapped"); return d;
+  const d=wrap(svg); d.classList.add("wrapped");
+  if(svg._leftOverflow>0) d.style.marginLeft="-"+svg._leftOverflow+"px";   // give the CONTAINER'S own clip box the room fitTight's left clamp excluded from the viewBox — see fitTight's own note
+  return d;
 }
 
 /* ---- wrapped (projection) layout for stemma / hierarchy ----
