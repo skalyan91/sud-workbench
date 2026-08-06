@@ -90,7 +90,22 @@ const FONT_SKIP_SCRIPTS=new Set(["Han","Hiragana","Katakana","Hangul","Bopomofo"
 function fontStackName(script){ const s=script.replace(/_/g,"");
   const n=FONT_NAME_FIX[s]||(s.charAt(0).toUpperCase()+s.slice(1).toLowerCase());
   return "Noto Sans "+n; }
-function fontRemoteName(script){ return "Noto Sans "+script.replace(/_/g," "); }
+/* ⚠ TIBETAN FETCHES THE SERIF FACE, UNDER THE SANS NAME. Noto Sans Tibetan has a decade-old, still-open
+   upstream bug (notofonts/nototools#38, filed 2015) in exactly the subjoined-consonant stacks Sanskrit
+   transliteration needs (GHA/DDHA/DHA/BHA/DZHA/KSSA and their sequences) — independently reproduced and
+   reported live here too ("a Tibetan font that actually supports the full range of Sanskrit conjuncts").
+   Noto SERIF Tibetan handles the same sequences correctly (independently verified: "accepts most input
+   from EWTS correctly", renders the ཨོྂ་ stack Sans cannot) and is on Google Fonts under its own name, so
+   the existing on-demand fetch (app/fonts.py → Google's CSS API) reaches it with no new infrastructure.
+   FONT_REMOTE_FIX changes ONLY what family is ASKED FOR; ensureScriptFont still declares the answer
+   under fontStackName's "Noto Sans Tibetan" (unchanged — the name every stack, this app's own and the
+   kit CSS's, already lists), so nothing downstream has to know or care that the glyphs are technically
+   from the Serif family. A real trade-off is being made here — Serif Tibetan does not visually match the
+   Sans register the rest of the token stack renders in — accepted deliberately because the alternative is
+   glyphs that mis-stack outright, and correctness of the text takes priority over house style for a
+   script this document-critical. */
+const FONT_REMOTE_FIX={Tibetan:"Noto Serif Tibetan"};
+function fontRemoteName(script){ return FONT_REMOTE_FIX[script]||("Noto Sans "+script.replace(/_/g," ")); }
 
 // The scripts we can fetch a face for: every Noto Sans <Script> family the font stacks name, under its
 // CANONICAL Unicode script name — the only spelling \p{Script=…} accepts (Old_Italic, not the squashed
