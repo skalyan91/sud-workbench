@@ -477,16 +477,17 @@ function growCrossArcs(clabs,AH,boxes,si,seed){
 function arcsWrapped(si){
   const D=displaySent(DOC[si]); RTL=D.rtl; const t=D.tokens, n=t.length, OID=k=>D.map[k]+1;
   const ROW=parseFloat(css("--arc-row")),NR=parseFloat(css("--arc-node-r")),AH=parseFloat(css("--arrow"));
-  /* ⚠ NO LONGER POSGAP(16) "clears ascenders" — the within-row touch height is now arcTouchAbovePx()
-     (diagram-core.js), the SAME shared measurement flat arcs() uses: a token's x-height for an ordinary
-     running script, its measured shirorekha/cap-height for a magnified Indic/lzh/ornamental one. This also
-     absorbs what the old (TOK_MAG>1?...) term here only partially fixed — that term compensated flat
-     arcs()'s OWN gap but was never ported to XGAP below, so a wrapped cross-row arc's clearance stayed
-     unmagnified-only; arcTouchAbovePx() is correct for both in one call, so XGAP now shares it too. The
-     +descent(WORD_F) term is independent of any of this (unrelated to the ascent/x-height question) and is
-     untouched. brackets/wrapped-stemma keep their own item-15 POSGAP(20)+descent(WORD_F) offset, aligned to
-     the deprel-label baseline rather than to the glyphs — left alone. */
-  const WORD_OFF=arcTouchAbovePx()+ARC_TOUCH_PAD+descent(WORD_F), TOP=14, gap=8, SP=meas(" ",WORD_F), ROWGAP=16, ASC=11, DESC=descent(WORD_F);
+  /* Item 1 (revert of item 15): POSGAP back to its ORIGINAL 16 (item 15 had bumped it 16→20 so the
+     arc-endpoint clearance WORD_OFF/XGAP/PGAP matched the deprel-label-baseline height). The arc view
+     returns to its natural endpoint height; brackets/wrapped-stemma keep the item-15 offset.
+     ⚠ THE EXISTING +descent(WORD_F) TERM ONLY PARTIALLY COMPENSATES FOR MAGNIFICATION — it grows with
+     WORD_F's own size (so it isn't the flat-16 problem flat arcs() had), but descent is the wrong half
+     of the glyph: what eats into the arc's clearance from above is the extra ASCENT a magnified glyph
+     gains, not its descent. Measured on a real lzh sentence, this row's gap still fell from 12.0px
+     unmagnified to 9.6px at 1.5× — smaller than flat arcs()'s pre-fix 50% collapse, but still shrinking.
+     The same extra term belowGap() and flat arcs()'s WORD_OFF use closes it: exactly the old formula
+     whenever TOK_MAG is 1. */
+  const POSGAP=16, WORD_OFF=POSGAP+descent(WORD_F)+(TOK_MAG>1?ascent(WORD_F)*(1-1/TOK_MAG):0), TOP=14, gap=8, SP=meas(" ",WORD_F), ROWGAP=16, ASC=11, DESC=descent(WORD_F);
   const {w}=linear({tokens:t}), heads=t.map(x=>parseInt(x.head,10)), budget=Math.max(140,AVAILW/FS-16-24*TOK_MAG);   // unzoomed px (block is zoomed by FS); margin so a wide POS at a row end never overflows the port
   /* ⚠ AND A SECOND MARGIN, FOR WHAT THE ROW-PACKING CANNOT SEE. `budget` is fit against `w[]` — token/POS/
      translit SLOT widths only. `fitTight(svg,boxes)` (diagram-core.js, called once this function's arcs and
@@ -530,7 +531,7 @@ function arcsWrapped(si){
     const {c,w:lw,wform,total}=linear({tokens:idx.map(i=>t[i])}); mirror(c,total); return {s,e,ord,idx,c,lw,wform,total}; });
   const svgW=Math.max(2,...rows.map(r=>r.total));
   const SPREAD=fanStep();
-  const XGAP=arcTouchAbovePx()+ARC_TOUCH_PAD+DESC, PGAP=Math.max(8,XGAP-ASC);   // clearance an arc leaves above a token — same arcTouchAbovePx() touch height WORD_OFF uses, not the old flat POSGAP
+  const XGAP=POSGAP+DESC, PGAP=Math.max(8,XGAP-ASC);   // clearance an arc leaves above a token
   // per-row X-layout + arc geometry (all yCur-independent). The VERTICAL stacking is deferred to placeRows() below,
   // because the inter-row gaps must first be GROWN to fit the cross-line arcs + their de-collided labels.
   const rep=reportOffsets(D);   // item 7: per-token reported-speech offsets, shared by every wrapped row
@@ -1009,7 +1010,7 @@ function wpRevealSel(){ if(sel.s<0||sel.t<=0) return;
 
 function tree(si){
   const D=displaySent(DOC[si]), t=D.tokens, n=t.length, OID=k=>D.map[k]+1, sent={tokens:t}; RTL=D.rtl;
-  const {children,root,head}=structure(sent),belowReserve=belowReserveH(trLayer(),belowTierN(),false),LV=48+belowReserve,TOP=18,A=arcTouchAbovePx()+ARC_TOUCH_PAD,B=7;         // item 2: the level height = a CONSTANT 48 (the stemma's LV) + the below-stack reserve, and the outgoing edge attaches just below that reserve (parentEndY). belowReserve uses the SAME belowGap() per-row step the tiers are drawn at, so it cancels cleanly (Item 8: each tier row folds in descent(POS_F)). ⚠ A used to be a flat 16 ("clears ascenders", unmagnified — this notation had NO magnification compensation at all before, unlike arcs()'s WORD_OFF), which made every edge EXACTLY LV−belowReserve−A−B = 48−16−7 = 25 tall, matching the stemma's own A=16/B=7 by construction. A is now arcTouchAbovePx() — the SAME per-script/per-magnification touch height flat arcs() uses, an incoming edge now reaching only to the node's own x-height/shirorekha rather than clearing its full ascent — so the edge height is correspondingly TALLER (by however much A shrank) and no longer pinned to 25 or to the stemma's own (still flat-16) figure; stemma is intentionally left unchanged (a structurally different notation — see arcs()'s own note) and the two notations' edge heights diverge exactly where this one shrank
+  const {children,root,head}=structure(sent),belowReserve=belowReserveH(trLayer(),belowTierN(),false),LV=48+belowReserve,TOP=18,A=16,B=7;         // item 2: the level height = a CONSTANT 48 (the stemma's LV) + the below-stack reserve, and the outgoing edge attaches just below that reserve (parentEndY) — so an edge is always LV−belowReserve−A−B = 48−16−7 = 25 tall, EXACTLY the stemma's, no matter how many annotation tiers are shown. belowReserve uses the SAME belowGap() per-row step the tiers are drawn at, so it cancels cleanly (Item 8: each tier row folds in descent(POS_F))
   const SPW=meas(" ",WORD_F), NGAP=SPW+4;                              // node gap matches the stemma column gap
   // tidy layout: leaves packed with the stemma's node gap; a parent is centred over its children. Adjacent
   // siblings are then pushed apart (whole subtree shifted) only as far as their nodes AND their incoming

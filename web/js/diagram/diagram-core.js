@@ -242,6 +242,17 @@ _mxh.setAttribute("aria-hidden","true");
 _mxh.style.cssText="position:absolute;left:-99999px;top:0;height:0;overflow:visible;visibility:hidden;pointer-events:none;width:1ex";
 function _measMountXH(){ const h=document.documentElement||document.body; if(h&&!_mxh.isConnected) h.appendChild(_mxh); }
 function xHeightPx(font){ _measMountXH(); _mxh.style.font=font; return parseFloat(getComputedStyle(_mxh).width)||0; }
+// CAP-HEIGHT's own counterpart, `width:1cap` in place of `1ex` — same technique, same probed-supported CSS unit
+// (see xHeightPx's own note: `cap` was checked live alongside `ex` before either was relied on). Kept as a
+// SEPARATE element/function rather than a font-string-swapped call into _mxh: xHeightPx's own note explains why
+// cap-height was the WRONG target for the seam-mark centring this file built _mxh for — a different caller
+// wanting the right one for A DIFFERENT question (snumCapHeightLiftEm, below) needs its own probe, not a
+// borrowed one with a second meaning bolted onto it.
+const _mch=document.createElement("div");
+_mch.setAttribute("aria-hidden","true");
+_mch.style.cssText="position:absolute;left:-99999px;top:0;height:0;overflow:visible;visibility:hidden;pointer-events:none;width:1cap";
+function _measMountCH(){ const h=document.documentElement||document.body; if(h&&!_mch.isConnected) h.appendChild(_mch); }
+function capHeightPx(font){ _measMountCH(); _mch.style.font=font; return parseFloat(getComputedStyle(_mch).width)||0; }
 // gwTieBox/descent/xHeight (below) stayed on canvas measureText rather than moving to the SVG path above: all
 // three measure a FIXED, script-independent reference glyph (U+203F undertie; Latin "gjpqy"/"x" for vertical
 // metrics) that resolves to the same Latin-covering face — usually the stack's plain "Noto Sans" — no matter
@@ -298,7 +309,7 @@ _lazyFont("LIVE_TOKEN_STACK",()=>TOKEN_STACK); _lazyFont("LIVE_MONO_STACK",()=>M
    why a canvas font string cannot read the property itself). 1 everywhere except the ornamental Sanskrit
    scripts. It multiplies the TOKEN-FORM faces only — WORD_F/NODE_F/MWT_F and the goeswith tie — never the
    POS, transliteration or gloss rows, which are Latin annotation drawn at the app's own body size. */
-let TOK_MAG=1, TOK_WGHT=400, TOK_TRACK=0, TOK_ASC=1, TOK_MID=0, STACK_DROP=0, TOK_LIFT=0, TOK_XH=0.5, TOK_OP=1;
+let TOK_MAG=1, TOK_WGHT=400, TOK_TRACK=0, TOK_ASC=1, TOK_MID=0, STACK_DROP=0, TOK_LIFT=0, TOK_OP=1, TOK_OP_RUN=1;
 // TOK_WGHT stays 400 for magnified faces now (see magTrack's own note on why the weight curve was dropped for
 // them), so this omits a weight token and lets the face render at its own resting weight.
 function magFont(px){ const w=TOK_WGHT;
@@ -312,11 +323,22 @@ function magFont(px){ const w=TOK_WGHT;
    failing) to correct. A small opacity reduction is the substitute — it works on every face alike,
    static or variable, unlike weight, and a few percent of transparency reads as "lighter", not as
    "faded", at these sizes. Proportional to the SAME (mag−1) shape every other magnification term in
-   this file uses (magTrack, mwtFormLead, the .strans gap fix) — 0 at mag 1 (byte-identical to a plain
-   document), a modest ~6% at 1.5× and ~12% at 2×. A judgement call on the exact curve, not a measured
-   physical quantity like scriptLiftEm()/xHeightEm() beside it — deliberately kept small ("a bit
-   semitransparent", the report this answers) rather than tuned toward some target contrast ratio. */
-function magOpacity(mag){ return mag>0 ? 1-.12*(mag-1) : 1; }
+   this file uses (magTrack, mwtFormLead, the .strans gap fix) — 0 at mag 1 for BOTH curves below
+   (byte-identical to a plain document), and each curve DIFFERS by (mag−1) too, not just between the
+   two contexts — 1.5× and 2× are never the same number as each other, on request.
+   ⚠ TWO CURVES, NOT ONE, ON REQUEST — running-sentence prose and an isolated diagram token are different
+   visual contexts and don't obviously want the same offset. A magnified diagram token sits alone amid a
+   lot of open space (arcs, POS/gloss rows, whitespace); a magnified running-sentence script sits inside a
+   dense run of continuous text the reader is already processing a lot of ink from. The diagram token's
+   isolation is what makes its extra weight stand out MORE by contrast, so it gets the stronger offset;
+   the running line's already-busy register can afford to keep slightly more of its own ink. Both are
+   judgement calls on the exact curve, not measured physical quantities like scriptLiftEm() beside them —
+   deliberately kept small ("a bit semitransparent", the report this answers) rather than tuned toward
+   some target contrast ratio, and the running/diagram SPLIT is equally a judgement call, not a measured
+   distinction — if the direction (diagram lighter than running) turns out backwards on report, that's a
+   one-line swap of which coefficient goes where, not a rederivation. */
+function magOpacityDia(mag){ return mag>0 ? 1-.12*(mag-1) : 1; }    // diagram: ~6% lighter at 1.5×, ~12% at 2×
+function magOpacityRun(mag){ return mag>0 ? 1-.06*(mag-1) : 1; }    // running sentence: half the diagram's offset — ~3% at 1.5×, ~6% at 2×
 _lazyFont("WORD_F",()=>magFont(15)); _lazyFont("NODE_F",()=>magFont(14));
 _lazyFont("POS_F",()=>'15px '+LIVE_TOKEN_STACK); _lazyFont("GRID_F",()=>'462 13px '+LIVE_MONO_STACK); _lazyFont("HEAD_F",()=>'500 11px '+uiFont()); _lazyFont("HEAD_F_REQ",()=>'700 11px '+uiFont());   // TWO heading faces now, because the band is drawn in two weights: HEAD_F is the OPTIONAL columns' SF Pro Medium (500) and HEAD_F_REQ the obligatory ID/Form columns' Bold (700) — see `table.grid th` / `table.grid th.th-req` in styles/app.css. scanColW/pillColW pick per column; measuring every heading with one weight under-sized ID and Form by the Medium→Bold width difference   // HEAD_F is the GRID HEADING face, and its only consumers are scanColW/pillColW (js/grid/grid.js). It must match `table.grid th` in styles/app.css exactly, which is now title case in the UI font at 11px/590 — NOT --token-font, so it is the one string here built off uiFont() (js/core/platform.js, which resolves --ui-font to a plain family list; a canvas font string can't carry a var()) rather than off LIVE_TOKEN_STACK, and refreshFontStacks' token/mono-stack invalidation therefore doesn't apply to it. uiFont() caches its own DOM read, so calling it from a lazy getter costs nothing after the first   // POS tags: same size + weight (normal, i.e. no weight token here) as the transliteration (TRANS_F) — upright rather than italic; c2sc small-caps do the visual "tag" styling now, not a bumped weight/shrunk size. GRID_F: weight curve @12.65px (matches table.grid's own CSS weight — was unweighted/400, measuring narrower than the grid actually renders)
 _lazyFont("TRANS_F",()=>'italic 15px '+LIVE_TOKEN_STACK); _lazyFont("TRANS_UP_F",()=>'15px '+LIVE_TOKEN_STACK); _lazyFont("MWT_F",()=>WORD_F);   /* the MWT surface form measures/renders exactly like a normal token form (WORD_F, 15px). TRANS_UP_F: the same row set UPRIGHT — what a Foreign=Yes token's transliteration renders in (see trFont/.frn-up) */
@@ -449,34 +471,35 @@ function scriptLiftEm(){
       lift=Math.max(0,lift+(200-(h+dsc))/200);
     }
     /* ⚠ GRANTHA GETS A DIFFERENT TARGET ENTIRELY, ON REPORT: "running-sentence Grantha should have its
-       x-height top-aligned with the sentence number" — not "head-line at row top" (the em-box target
-       above), which is a DIFFERENT quantity or, in this specific case, a merely NEARBY one. Measured live
-       (WKWebView, samples/brihat_jataka.conllu, Script=Grantha, 1.5×): the em-box lift above already
-       lands x-height 1.45px below .snum's own top — close, because Grantha's ascent/x-height ratio
-       happens to put the two targets near each other, but not the same thing, and the reader can see the
-       1.45px. `snumXHeightLiftEm()` measures the ACTUAL target directly (a synthetic, unlifted .shead
-       row — see its own note) rather than approximating it through ink depth, so it replaces the em-box
-       number outright for this one script rather than adding to it. Scoped BY NAME, exactly as the
-       Tibetan branch above is, and for the same reason: this target was only asked of Grantha, and
-       nothing here says another STACKING_SCRIPTS member's own em-box lift is currently wrong — Tibetan's
-       own lift was independently calibrated (and verified, live) to a 0.14px ink-to-row-top target just
-       one commit ago, and blindly generalising x-height-alignment to it would overwrite that with an
-       unmeasured, unrelated number: at Tibetan's current (zero) lift the unshifted x-height sits 7.67px
-       below .snum's top, so an x-height target would ask for a large POSITIVE lift there — undoing the
-       fix rather than agreeing with it. */
+       cap-height top-aligned with the sentence number" (corrected from an earlier report of this same
+       request that said x-height — the reader's own follow-up correction, not a measurement reversal) —
+       not "head-line at row top" (the em-box target above), which is a DIFFERENT quantity, and not
+       x-height either, which is shorter than cap-height and was the wrong register for a report that
+       means the row's NUMERALS: .snum sets ordinary lining figures, which occupy the cap-height band, not
+       the x-height one — the same distinction xHeightPx's own note draws for why cap-height was the WRONG
+       target for a seam mark's centring but is the RIGHT one for aligning against digits.
+       `snumCapHeightLiftEm()` measures the ACTUAL target directly (a synthetic, unlifted .shead row — see
+       its own note) rather than approximating it through ink depth, so it replaces the em-box number
+       outright for this one script rather than adding to it. Scoped BY NAME, exactly as the Tibetan
+       branch above is, and for the same reason: this target was only asked of Grantha, and nothing here
+       says another STACKING_SCRIPTS member's own em-box lift is currently wrong — Tibetan's own lift was
+       independently calibrated (and verified, live) to a 0.14px ink-to-row-top target two commits ago,
+       and blindly generalising cap-height-alignment to it would overwrite that with an unmeasured,
+       unrelated number. */
     if(ORTHO_SCHEME==="Grantha"){
-      const alt=snumXHeightLiftEm();
+      const alt=snumCapHeightLiftEm();
       if(alt!=null) lift=alt;
     }
     return lift;
   }catch(_){ return 0; } }
 /* THE ACTUAL ALIGNMENT TARGET FOR A SCRIPT WHOSE RUNNING LINE SHOULD MEET THE SENTENCE NUMBER AT
-   x-height (currently only Grantha — see scriptLiftEm's own note on why this isn't asked of every
-   STACKING_SCRIPTS member). scriptLiftEm's own em-box arithmetic (fontBoundingBoxAscent minus the
-   deepest ink on screen) answers a DIFFERENT question — "where does the shirorekha/cap-height line
-   land" — and the two only coincide by chance for a face whose ascent-to-x-height ratio happens to
-   match; measuring the target ITSELF, rather than a proxy for it, is what makes this exact rather than
-   approximately right.
+   cap-height (currently only Grantha — see scriptLiftEm's own note on why this isn't asked of every
+   STACKING_SCRIPTS member, and on why cap-height rather than x-height is the right register: .snum sets
+   ordinary lining figures, which read at cap-height, not x-height). scriptLiftEm's own em-box arithmetic
+   (fontBoundingBoxAscent minus the deepest ink on screen) answers a DIFFERENT question — "where does the
+   shirorekha/cap-height line land, as a property of the FONT" — a plausible-sounding proxy, but not
+   necessarily the same number as "where does THIS face's cap-height actually sit against a REAL row
+   holding .snum's digits", which is what this function measures directly instead of approximating.
    ⚠ WHY A SYNTHETIC ROW, NOT scriptLiftEm's canvas metrics: .snum's real position in the live .shead
    isn't a plain function of its own font's ascent — align-items:baseline resolves the row's shared
    baseline from EVERY item's own line-box (including .stext-script's line-height:2 when the script is
@@ -503,12 +526,12 @@ _msnumScript.appendChild(_msnumMark);
 _msnumSid.className="sid-in mono"; _msnumSid.textContent="s1";   // .sid-in is a THIRD baseline-aligned flex item in the real .shead (the URL button and block controls are the only two exempted, via their own align-self:flex-start) — its own font (var(--ui-mono), 13px/600) has different metrics from .snum's, and omitting it here measured 3px off the real row: align-items:baseline resolves ONE shared baseline from every participating item, not just the two this measurement cares about, so all of them have to be present for the resolved baseline to match the live row's.
 _msnum.appendChild(_msnumNum); _msnum.appendChild(_msnumScript); _msnum.appendChild(_msnumSid);
 function _measMountSnum(){ const doc=document.getElementById("doc"); if(doc&&_msnum.parentNode!==doc) doc.appendChild(_msnum); }
-function snumXHeightLiftEm(){
+function snumCapHeightLiftEm(){
   try{
     _measMountSnum();
     if(typeof STACKING_SCRIPTS!=="undefined"&&STACKING_SCRIPTS.has(ORTHO_SCHEME)) _msnumScript.classList.add("stext-stacked");
     else _msnumScript.classList.remove("stext-stacked");
-    // a representative glyph is enough — x-height is one number per font, unlike scriptLiftEm's own
+    // a representative glyph is enough — cap-height is one number per font, unlike scriptLiftEm's own
     // ink-depth measurement, which needs the single deepest cluster on screen
     let ch="";
     outer: for(const s of (typeof DOC!=="undefined"?DOC:[])){ for(const t of (s.tokens||[])){
@@ -517,15 +540,16 @@ function snumXHeightLiftEm(){
     const numRect=_msnumNum.getBoundingClientRect(), markRect=_msnumMark.getBoundingClientRect();
     const fontPx=parseFloat(getComputedStyle(_msnumScript).fontSize)||0;
     if(fontPx<=0) return null;
-    // CSS font shorthand is SIZE then FAMILY ("19.5px Foo"), not the reverse — xHeightPx() hands this
-    // straight to _mxh.style.font, and family-before-size is invalid, silently rejected, leaving _mxh at
+    // CSS font shorthand is SIZE then FAMILY ("19.5px Foo"), not the reverse — capHeightPx() hands this
+    // straight to _mch.style.font, and family-before-size is invalid, silently rejected, leaving _mch at
     // WHATEVER font a previous caller last set successfully (typically a 100px reference string from
-    // xHeightEm()/scriptMidEm() elsewhere in this file) — measured on report: exPx came back 53.6, the
-    // x-height ratio at the STALE 100px size, not this element's real 19.5px.
-    const exPx=xHeightPx(fontPx+"px "+getComputedStyle(_msnumScript).fontFamily);
-    if(exPx<=0) return null;
-    const xHeightTopY=markRect.top-exPx;   // baseline (markRect.top) minus the x-height, i.e. the top of the x-height band
-    return (xHeightTopY-numRect.top)/fontPx;   // positive → x-height sits below .snum's top → lift by this many em to close it
+    // scriptMidEm() elsewhere in this file) — measured on report (against the earlier xHeightPx()-based
+    // version of this function, the same class of bug applies identically here): a stale size reads the
+    // cap-height RATIO at the wrong reference size, not this element's real one.
+    const capPx=capHeightPx(fontPx+"px "+getComputedStyle(_msnumScript).fontFamily);
+    if(capPx<=0) return null;
+    const capHeightTopY=markRect.top-capPx;   // baseline (markRect.top) minus the cap-height, i.e. the top of the cap-height band
+    return (capHeightTopY-numRect.top)/fontPx;   // positive → cap-height sits below .snum's top → lift by this many em to close it
   }catch(_){ return null; } }
 function scriptFamilyPrefix(){ return (typeof fontStackName==="function"&&ORTHO_SCHEME)?("'"+fontStackName(ORTHO_SCHEME)+"', "):""; }
 /* STACKING SCRIPTS' subjoined/stacked marks can reach well below what ANY Latin descender does — the
@@ -637,19 +661,6 @@ function scriptMidEm(){
   if(TOK_MAG===1) return 0;
   const xh=xHeightPx("100px "+scriptFamilyPrefix()+LIVE_TOKEN_STACK);
   return xh>0?xh/200:0; }
-/* THE FULL X-HEIGHT, as an em ratio — the same `ex`-unit measurement scriptMidEm halves for a seam mark's
-   own centring, unhalved and, unlike scriptMidEm/scriptLiftEm beside it, NOT gated to TOK_MAG!==1: an
-   ordinary unmagnified running script has an x-height exactly as much as a magnified one does, and this is
-   the one consulted for EVERY script (arcTouchAbovePx below branches between this and scriptLiftEm's own
-   measurement, never skips either). Kept as its own function rather than a bare inline xHeightPx() call so
-   it is cached once per render into TOK_XH by refreshFontStacks, the same treatment TOK_ASC/TOK_MID/lift
-   get and for the identical reason: xHeightPx() forces a style read, and arcs()/arcsWrapped()/tree() would
-   otherwise each pay for it separately, per render, for every sentence. 0.5 is the floor a failed/empty
-   probe returns (matches an ordinary Latin face's own x-height/em ratio closely enough to be a safe no-op,
-   not a visible collapse to zero). */
-function xHeightEm(){
-  const xh=xHeightPx("100px "+scriptFamilyPrefix()+LIVE_TOKEN_STACK);
-  return xh>0?xh/100:0.5; }
 // gloss-tier measurement fonts — must match the CSS at .gloss / .gloss[data-tier=…]: lexical gloss now shares
 // MGloss's own upright 13.2px (matches --stext-fs, the block-initial sentence size); MSeg is 15px italic (word-like).
 // Used to size token/node slots so a wide gloss can't crowd its neighbour (item 13).
@@ -877,11 +888,11 @@ function refreshFontStacks(){
        is now always the same value the CSS fallback already gives; kept rather than removed so every
        `var(--script-wght,400)` consumer need not be re-audited for one that IS, in fact, always 400. */
     d.style.setProperty("--script-wght",String(TOK_WGHT));
-    TOK_OP=magOpacity(TOK_MAG); d.style.setProperty("--script-op",TOK_OP.toFixed(3));   // see magOpacity's own note: the opacity compensation weight stopped providing once most INDIC_SCRIPTS faces turned out static
+    TOK_OP=magOpacityDia(TOK_MAG); d.style.setProperty("--script-op",TOK_OP.toFixed(3));   // diagram tokens — see magOpacityDia's own note: the opacity compensation weight stopped providing once most INDIC_SCRIPTS faces turned out static
+    TOK_OP_RUN=magOpacityRun(TOK_MAG); d.style.setProperty("--script-op-run",TOK_OP_RUN.toFixed(3));   // the running sentence's OWN, gentler curve — same reasoning, different context, see magOpacityRun's own note
     TOK_ASC=scriptAscentEm(); d.style.setProperty("--script-asc",TOK_ASC.toFixed(3));
     TOK_MID=scriptMidEm();   // svgSeamMark's own vertical re-centring against the magnified word beside it — JS-internal only, no CSS consumer
-    TOK_LIFT=scriptLiftEm(); d.style.setProperty("--script-lift",TOK_LIFT.toFixed(4));   // cached into a plain JS global (not re-read back off the CSS var, which is colour-cache-adjacent and cleared on a different trigger) — arcTouchAbovePx() below is the new JS-internal consumer, same shape as TOK_MID
-    TOK_XH=xHeightEm();   // arcTouchAbovePx()'s OTHER half — see its own note for the TOK_MAG===1 vs !==1 split between this and TOK_LIFT
+    TOK_LIFT=scriptLiftEm(); d.style.setProperty("--script-lift",TOK_LIFT.toFixed(4));   // cached into a plain JS global (not re-read back off the CSS var, which is colour-cache-adjacent and cleared on a different trigger)
     /* ⚠ AND THE ALIGNMENT ITSELF IS ONLY THE ORNAMENTAL ONE. `.stext-script` carried
        `align-self:flex-start` unconditionally, which is a no-op ONLY if the lift beside it is
        non-zero: at mag 1 the lift is 0, so an unmagnified script line was top-aligned against a
@@ -1519,31 +1530,6 @@ function appendHangHTML(container,t,si,cls,oid){ const show=correctFormShown(t,s
     s.addEventListener("click",ev=>{ ev.stopPropagation(); pick(si,oid); }); container.appendChild(s); }); }
 function descent(f){_cv.font=f; const m=_cv.measureText("gjpqy"); return m.actualBoundingBoxDescent||3;}   // how far tokens hang below the baseline
 function ascent(f){_cv.font=f; const m=_cv.measureText("Ábgjyd漢"); return m.actualBoundingBoxAscent||11;}   // how far tokens reach above the baseline — descent()'s counterpart, mixed Latin+Han sample so it answers honestly for either
-/* HOW FAR ABOVE A TOKEN'S OWN BASELINE AN ARC ENDPOINT NOW TOUCHES DOWN — the visually dominant register a
-   reader parses first, not the font's full reserved ascent (what arcs()/arcsWrapped()/tree() all anchored
-   to before this: a flat 16, "clears ascenders", present in every one of them under a different local
-   name). Two references, reusing the SAME two measurements the rest of this file already trusts for this
-   exact distinction rather than a third, parallel guess:
-    · TOK_MAG===1 (an ordinary running script — everything scriptLiftEm() itself declines to correct, by
-      its own gate) → TOK_XH, the font's plain X-HEIGHT via the CSS `ex` unit. scriptMidEm's own comment
-      already establishes x-height as the right "main reading body" register for EITHER Latin lowercase or
-      an Indic akshara — not cap-height, not ink-centroid — so it needs no separate justification here.
-    · TOK_MAG!==1 (INDIC_SCRIPTS/lzh/the ornamental tier — everywhere scriptLiftEm() actually computes a
-      correction) → ascent(WORD_F) minus TOK_LIFT's own measured "empty reserve above the real ink", i.e.
-      exactly the script's shirorekha/cap-height line --script-lift already publishes for the running
-      line's top-alignment. Re-deriving x-height's own em ratio at this size and taking the HIGHER of the
-      two (Math.max) rather than switching references outright: TOK_LIFT can legitimately measure 0 (no
-      DOC scanned yet, or a script whose ink genuinely already reaches full ascent), and collapsing straight
-      to the full unlifted ascent in that transient/edge case would silently reopen the old flat-16-sized
-      gap this function exists to close, whereas x-height is always available as a floor no worse than the
-      TOK_MAG===1 case gets.
-   Magnification needs no separate compensating term the way the old flat-16 callers each had to add one by
-   hand: both ascent(WORD_F) and TOK_XH*px are measured against WORD_F's OWN (already magnified) pixel size,
-   so the correction falls out of the measurement rather than being patched on afterwards. */
-function arcTouchAbovePx(){
-  const px=parseFloat(WORD_F)||15, xh=TOK_XH*px;
-  return TOK_MAG===1 ? xh : Math.max(xh, ascent(WORD_F)-TOK_LIFT*px); }
-const ARC_TOUCH_PAD=2;   // small breathing room past the touch line itself — an arc's stroke+casing halo (--arc-stroke, --arc-shoulder) would otherwise sit flush against the ink with no anti-aliasing margin at all. Measured: the OLD flat 16 left almost exactly this much beyond a 15px Latin token's own measured ascent (ascent(WORD_F)≈14.16, 16−14.16≈1.84) — so 2 keeps the same order of small, deliberate headroom the old constant had, rather than a fresh guess
 /* ⚠ THE STEP FROM ONE BELOW-TOKEN ROW TO THE NEXT, WRITTEN ONCE.
    It was the literal expression `belowGap()` in fifteen places — every renderer's draw AND every
    renderer's reserve (stackH / belowH / stackBot / --undpad / tieLead / mwtDepth) — which is exactly the
