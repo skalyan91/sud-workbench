@@ -488,7 +488,7 @@ function arcsWrapped(si){
      The same extra term belowGap() and flat arcs()'s WORD_OFF use closes it: exactly the old formula
      whenever TOK_MAG is 1. */
   const POSGAP=16, WORD_OFF=POSGAP+descent(WORD_F)+(TOK_MAG>1?ascent(WORD_F)*(1-1/TOK_MAG):0), TOP=14, gap=8, SP=meas(" ",WORD_F), ROWGAP=16, ASC=11, DESC=descent(WORD_F);
-  const {w}=linear({tokens:t}), heads=t.map(x=>parseInt(x.head,10)), budget=Math.max(140,AVAILW/FS-16-20*TOK_MAG);   // unzoomed px (block is zoomed by FS); margin so a wide POS at a row end never overflows the port
+  const {w}=linear({tokens:t}), heads=t.map(x=>parseInt(x.head,10)), budget=Math.max(140,AVAILW/FS-16-24*TOK_MAG);   // unzoomed px (block is zoomed by FS); margin so a wide POS at a row end never overflows the port
   /* ⚠ AND A SECOND MARGIN, FOR WHAT THE ROW-PACKING CANNOT SEE. `budget` is fit against `w[]` — token/POS/
      translit SLOT widths only. `fitTight(svg,boxes)` (diagram-core.js, called once this function's arcs and
      their DE-COLLIDED labels are actually drawn) then resizes the finished SVG to the true bounding box of
@@ -502,7 +502,15 @@ function arcsWrapped(si){
      margin scales with TOK_MAG rather than being the flat constant every other wrap budget uses. 20×TOK_MAG
      is a working margin, not a proof: unlike bracketsWrapped's `white-space:nowrap` (where ANY overrun is
      unrecoverable), a row still THIS wide after the margin has `.diagram.wrapped{overflow-x:hidden}` (below)
-     as a hard backstop, so an under-tuned margin costs a clipped edge, never a broken layout. */
+     as a hard backstop, so an under-tuned margin costs a clipped edge, never a broken layout.
+     ⚠ 20×TOK_MAG WAS STILL UNDER-TUNED — reported live: a wrapped Javanese row's own LAST token's MGloss
+     ("-PRS.PTCP.GEN.PL.M") clipped by 4.9px, confirmed via the container's own getBoundingClientRect against
+     the clipped <text>'s — not the negative-x MWT case fitTight's own left-clamp/margin exists for (that
+     token had no left-side involvement at all: overLeft was -1045, nowhere near the container's edge). Bumped
+     20→24: at TOK_MAG=1.5 that is +6px more slack (46→52), comfortably covering the observed 4.9px with a
+     little room, without being so much larger it forces rows a whole token shorter than necessary in the
+     common case. Still "a working margin, not a proof" — the packing/fitTight split this note describes is
+     unchanged, just re-tuned against a second measured data point. */
   const cross=k=>{let cc=0; for(let i=0;i<n;i++){const h=heads[i]-1; if(h<0)continue; const lo=Math.min(i,h),hi=Math.max(i,h); if(lo<k&&hi>=k)cc++;} return cc;};
   // greedy break by each UNIT's full slot width (word, POS tag AND transliteration right edges are all in w[i]); an MWT
   // group is ATOMIC — it never splits across a line and its fused surface form is reserved against the budget
