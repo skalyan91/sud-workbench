@@ -678,6 +678,20 @@ function refreshFontStacks(){
 // is ("form" / "translit" / "mseg"), the one thing the centring pass can't work out for itself and what the
 // stylesheet colours by. The mark always renders upright (.seam-mark) — it belongs to the seam rather than to
 // either side of it — but takes its own row's foreground colour, so it reads at the strength that row is written in.
+// The mark's OWN ink vertical-centre, in px, at the size it will actually be drawn — measured through the
+// SAME live _mtxt element that paints it, in ITS OWN font (never script-prefixed: a seam mark is Latin
+// punctuation, not part of the word, and a script font that doesn't cover it falls through to whatever
+// LIVE_TOKEN_STACK resolves it to — see svgSeamMark's own note for why that fallback face is the one that
+// must be measured, not the word's). Returns an ABSOLUTE offset (unlike scriptMidEm's 100px-reference
+// ratio), since the caller already knows the mark's exact drawn size and has no reference scale to divide
+// out.
+function markMidPx(ch,font){
+  try{
+    _mtxt.style.cssText="white-space:pre;font:"+font;
+    _mtxt.textContent=ch;
+    const bbox=_mtxt.getBBox();
+    return (-bbox.y-(bbox.y+bbox.height))/2;   // (ink top − ink bottom)/2, both relative to the y=0 baseline
+  }catch(_){ return 0; } }
 function svgSeamMark(parent,tk,cx,y,halfEnd,font,boxes,halfStart,row){ if(!parent) return;
   /* ⚠ A SEAM MARK IS NOT PART OF THE WORD, so the ornamental magnification does not reach it. It is
      punctuation ABOUT the word — "this is where the orthographic word breaks" — set in the app's own
@@ -686,21 +700,24 @@ function svgSeamMark(parent,tk,cx,y,halfEnd,font,boxes,halfStart,row){ if(!paren
      GLOSS_F, all unmagnified), so that is the one row this un-scales; the offset arithmetic below then
      measures the mark in the face it is actually drawn in, or the mark and the gap it is placed in
      would disagree. */
-  let f=font.replace(/^italic\s+/,""), markY=y;
-  if(row==="form"&&TOK_MAG!==1){
-    f=f.replace(/(?:^|\s)(\d+(?:\.\d+)?)px/,(mm,px)=>{
-      /* ⚠ AND THE MARK IS RE-CENTRED ON THE WORD IT SITS BESIDE, NOT LEFT ON ITS BASELINE. Sharing `y`
-         (the word's baseline) is right when the two are the same size, but a small unmagnified mark and
-         a large magnified word have DIFFERENT baseline-to-visual-centre distances even in the identical
-         font — that distance is `(fontBoundingBoxAscent−fontBoundingBoxDescent)/2`, and it scales exactly
-         with size, so the word's own centre sits `TOK_MID × wordPx` above baseline while the mark's sits
-         only `TOK_MID × wordPx/TOK_MAG` above it. The mark is shifted up by the difference — closed form,
-         no second measurement, because TOK_MID (scriptMidEm) is a ratio of the FACE, not of either size. */
-      markY=y-TOK_MID*parseFloat(px)*(1-1/TOK_MAG);
-      return " "+(parseFloat(px)/TOK_MAG)+"px"; }).replace(/^\s*\d+\s+/,"").trim();
+  let f=font.replace(/^italic\s+/,""), wordPx=0;
+  const markMag=row==="form"&&TOK_MAG!==1;
+  if(markMag){
+    f=f.replace(/(?:^|\s)(\d+(?:\.\d+)?)px/,(mm,px)=>{ wordPx=parseFloat(px); return " "+(wordPx/TOK_MAG)+"px"; }).replace(/^\s*\d+\s+/,"").trim();
   }
   [[seamPost(tk),1,halfEnd,"",seamPostToks(tk)],[seamPre(tk),-1,halfStart!=null?halfStart:halfEnd,"",seamPreToks(tk)],[seamMid(tk),1,halfEnd," seam-mid",seamMidToks(tk)]].forEach(([m,side,half,extra,toks])=>{
     if(!m) return;
+    /* ⚠ AND THE MARK IS RE-CENTRED ON THE WORD IT SITS BESIDE, NOT LEFT ON ITS BASELINE — using EACH
+       FONT'S OWN centre, not one borrowed from the other. A first cut shared TOK_MID (the WORD's own
+       script-family ratio) between both terms, reasoning "the mark is measured in the face it is actually
+       drawn in" — true of its WIDTH (meas() below), false of this: the mark's face is whatever
+       LIVE_TOKEN_STACK falls through to for "-"/"꞊" (almost never the script family a Grantha/Javanese/…
+       word renders in), so applying the WORD's centring ratio to the MARK's own size answered a question
+       about the wrong font. Reported live: Grantha seam marks stayed at cap-height after that fix — the
+       shift it computed was real but tiny, because TOK_MID (a Grantha ratio) has no reason to resemble
+       the generic fallback face's own ratio. `markMidPx(m,f)` asks the MARK's own question in the MARK's
+       own (already-unmagnified) font; TOK_MID×wordPx asks the WORD's, at the word's magnified size. */
+    const markY=markMag?(y-TOK_MID*wordPx+markMidPx(m,f)):y;
     const w=meas(m,f), x=cx+(RTL?-side:side)*(half+w/2);
     const e=E("text",{class:"seam-mark"+extra,x:x,y:markY,"text-anchor":"middle"});   // anchored on its own CENTRE, never start/end: those two are relative to the inline base direction, so under RTL they'd flip and hang the mark back over the very text it sits beside
     e.style.font=f; e.textContent=m; e.dataset.seamRow=row||"form"; if(toks)e.dataset.seamToks=toks; parent.appendChild(e);   // the row is what the centring pass measures BY (mid marks) and what the stylesheet colours by (all of them), so every mark carries it; data-seam-toks names the two tokens the seam joins, which is what applySel gives the accent from
