@@ -393,12 +393,48 @@ function scriptLiftEm(){
   if(TOK_MAG===1) return 0;
   try{
     _cv.font="100px "+scriptFamilyPrefix()+LIVE_TOKEN_STACK;
-    let h=0, maxInk=-1;
+    let h=0, dsc=0, maxInk=-1;
     for(const s of (typeof DOC!=="undefined"?DOC:[])){ for(const t of (s.tokens||[])){
         const o=t.ortho||""; if(!o) continue;
         const m=_cv.measureText(o);
-        if(m.fontBoundingBoxAscent>0 && m.actualBoundingBoxAscent>maxInk){ h=m.fontBoundingBoxAscent; maxInk=m.actualBoundingBoxAscent; } } }
-    return (h>0&&maxInk>=0&&h>maxInk)?(h-maxInk)/100:0;
+        if(m.fontBoundingBoxAscent>0 && m.actualBoundingBoxAscent>maxInk){ h=m.fontBoundingBoxAscent; dsc=m.fontBoundingBoxDescent; maxInk=m.actualBoundingBoxAscent; } } }
+    if(!(h>0&&maxInk>=0&&h>maxInk)) return 0;
+    let lift=(h-maxInk)/100;
+    /* ⚠ FOR TIBETAN SPECIFICALLY, THE em-BOX LIFT ABOVE ISN'T THE WHOLE STORY — .stext-stacked
+       (document.js) ALSO sets line-height:2 on this same row (Tibetan is a STACKING_SCRIPTS member),
+       and that line-height has its OWN effect on where the baseline falls that the em-box arithmetic
+       above knows nothing about. A CSS line box centres the font's NATURAL height
+       (fontBoundingBoxAscent+Descent) inside the SPECIFIED line-height, splitting the difference as
+       half-leading above and below; the lift above implicitly assumes that half-leading is ~0, true
+       whenever the specified line-height roughly matches the font's natural size. Tibetan's own declared
+       ascent+descent is 2.815em (measured via fontTools against the vendored notoseriftibetan.ttf:
+       hhea/OS2 ascent 1.466em, descent 1.349em, agreeing across every metrics table the font carries) —
+       bigger than line-height:2 itself, which makes the half-leading NEGATIVE (content overflows the box
+       on both edges by (2.815−2)/2 ≈ 0.41em) and pulls the baseline UP by that much before the em-box
+       lift is even applied. The two stack: measured live (WKWebView, a baseline-marker span + the SAME
+       canvas metrics this function uses, against the five real deep clusters in this file's own
+       STACKING_SCRIPTS comment), the em-box lift alone (0.392em) put the real ink 7.5px ABOVE the row top
+       it was supposed to land ON — "Tibetan sits too high", the reported bug — because line-height:2's
+       own −0.41em head start was never subtracted before adding another +0.39em on top of it. Corrected,
+       the two terms net to −0.018em (0 after the floor below) — matching the live measurement (which
+       required no lift at all, to within 0.14px) almost exactly.
+       ⚠ SCOPED TO TIBETAN BY NAME, NOT TO STACKING_SCRIPTS AS A WHOLE, and that is a deliberate narrowing
+       from the general form of this correction, not an oversight: the same fontTools measurement run
+       against every other STACKING_SCRIPTS member's own vendored file (Grantha 1.29+0.534=1.824em,
+       Javanese 1.120+0.916=2.036em, Balinese 1.363+0.838=2.201em, Kawi 1.100+0.900=2.000em, Zanabazar
+       Square 1.621+0.821=2.442em) shows Tibetan is the only one whose declared metrics so drastically
+       overshoot line-height:2 that the sign of the correction is unambiguous and the live-measured
+       target (~0 lift) leaves no doubt. Live-testing the correction against a synthetic Grantha cluster
+       showed the SAME class of em-box overshoot already existing independently of this fix (and got
+       marginally larger under the general form) — a real question, but a DIFFERENT and unreported one,
+       and not this function's to guess an answer for on an untested script from a hand-built test word.
+       Applying the correction everywhere STACKING_SCRIPTS applies would have traded one measured fix for
+       four unmeasured ones. Ranjana's own hard-won repha calibration (this function's other big comment,
+       above) is untouched either way — it is not a STACKING_SCRIPTS member and never took line-height:2. */
+    if(ORTHO_SCHEME==="Tibetan" && dsc>0){
+      lift=Math.max(0,lift+(200-(h+dsc))/200);
+    }
+    return lift;
   }catch(_){ return 0; } }
 function scriptFamilyPrefix(){ return (typeof fontStackName==="function"&&ORTHO_SCHEME)?("'"+fontStackName(ORTHO_SCHEME)+"', "):""; }
 /* STACKING SCRIPTS' subjoined/stacked marks can reach well below what ANY Latin descender does — the
