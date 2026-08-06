@@ -172,6 +172,34 @@ _mdiv.setAttribute("aria-hidden","true");
 _mdiv.style.cssText="position:absolute;left:-99999px;top:0;white-space:pre;visibility:hidden;pointer-events:none";
 function _measMountHTML(){ const h=document.documentElement||document.body; if(h&&!_mdiv.isConnected) h.appendChild(_mdiv); }
 function _measDOM(s,f){ _measMountHTML(); _mdiv.style.font=f; _mdiv.textContent=s||""; return _mdiv.getBoundingClientRect().width; }
+/* THE HTML BASELINE, MEASURED THE ONLY WAY THAT CANNOT DISAGREE WITH WHAT smpReshape PAINTS: an actual
+   inline baseline-aligned marker, in an actual live DOM layout, read back with getBoundingClientRect().
+   ⚠ smpReshape used to ask CANVAS for this (measureText(s).actualBoundingBoxAscent) on the reasoning
+   that canvas is "the control" for these scripts — true for WIDTH (it composes the conjuncts SVG
+   cannot, verified against SVG's own unshaped width), which is a DIFFERENT claim from "canvas's
+   ascent/descent for this cluster matches what the HTML div will lay out", and nothing had verified
+   THAT one. Reported live: Grantha/Kawi tokens still jiggled after every token was moved onto the
+   foreignObject/HTML path (verifying the earlier detection fixes had worked) — so the remaining
+   inconsistency has to be in the ONE canvas-measured number smpReshape still uses to seat that div,
+   not in which tokens take the HTML path. The technique: a zero-size `<span>` with
+   `vertical-align:baseline` sits INLINE beside the real text, so the BROWSER's own line layout — not a
+   canvas guess about it — plants that span's own box exactly on the text's baseline; its top edge
+   relative to the container's is the ascent, for whatever this specific string/font pair actually laid
+   out to, shaping included. */
+const _mbase=document.createElement("div");
+_mbase.setAttribute("aria-hidden","true");
+_mbase.style.cssText="position:absolute;left:-99999px;top:0;white-space:pre;visibility:hidden;pointer-events:none;line-height:normal";
+const _mbaseText=document.createElement("span"), _mbaseMark=document.createElement("span");
+_mbaseMark.style.cssText="display:inline-block;width:0;height:0;vertical-align:baseline";
+_mbase.appendChild(_mbaseText); _mbase.appendChild(_mbaseMark);
+function _measMountBase(){ const h=document.documentElement||document.body; if(h&&!_mbase.isConnected) h.appendChild(_mbase); }
+// {asc, height}: the DOM's own answer to both numbers smpReshape used to ask canvas for — the ascent
+// (see the note above) AND the container's real laid-out height, so overflow:visible is the only thing
+// standing between a still-canvas-derived box and the ink, not just the vertical POSITION.
+function domBaseline(s,f){ _measMountBase(); _mbase.style.font=f; _mbaseText.textContent=s||"";
+  const c=_mbase.getBoundingClientRect(), m=_mbaseMark.getBoundingClientRect();
+  const px=parseFloat(f)||15, a=m.top-c.top;
+  return { asc: a>0?a:px, height: c.height>0?c.height:px*2 }; }   // a<=0/height<=0 (measurement failed, or an empty string) falls back to the font's own nominal size, the same floor smpReshape's own defaults already used
 /* X-HEIGHT, THE CSS WAY — CSS's `ex` unit (ancient — CSS1 — unlike the L4 `cap` unit this replaced)
    resolves to "the font's own x-height" through the SAME font-matching DOM/SVG text painting already
    goes through, so unlike every canvas-measured metric above and below, this one CANNOT disagree with
@@ -203,6 +231,7 @@ function xHeightPx(font){ _measMountXH(); _mxh.style.font=font; return parseFloa
 const _cv=document.createElement("canvas").getContext("2d");
 _measMount(); if(!_msvg.isConnected) document.addEventListener("DOMContentLoaded",_measMount);
 _measMountHTML(); if(!_mdiv.isConnected) document.addEventListener("DOMContentLoaded",_measMountHTML);
+_measMountBase(); if(!_mbase.isConnected) document.addEventListener("DOMContentLoaded",_measMountBase);
 _measMountXH(); if(!_mxh.isConnected) document.addEventListener("DOMContentLoaded",_measMountXH);
 /* TOKEN_STACK / MONO_STACK — the BASE family lists (~150 Noto script faces + the CJK/system tail). They are
    NOT written out here any more: the identical two lists are the KIT's own --token-font/--mono-font
@@ -507,11 +536,25 @@ function smpUnshaped(s){ return SMP_RE.test(s||""); }
 
    ⚠ WHAT A foreignObject DOES NOT INHERIT is the whole difficulty, and each piece is put back
    deliberately: `text-anchor:middle` does not exist for HTML, so the box is positioned at x − w/2 with
-   the width meas() reports (which, for exactly these strings, is already the CANVAS width — i.e. the
+   the width meas() reports (which, for exactly these strings, is already the DOM width — i.e. the
    width this HTML will actually paint); `paint-order:stroke` does not exist either, so the casing halo
    becomes the text-shadow triple the HTML notations already use (.bwform/.oline); and the baseline is
    not a property of the box, so the element is seated by its own font ascent so the glyphs land on the
    same baseline the SVG would have used.
+   ⚠ THE SEAT ITSELF USED TO BE A CANVAS GUESS (measureText(s).actualBoundingBoxAscent/Descent), on the
+   reasoning that canvas is "the control" for these scripts — true for WIDTH (it composes conjuncts SVG
+   cannot, verified against SVG's own unshaped width), which is a DIFFERENT claim from "canvas's ascent/
+   descent for this cluster matches what the div THIS FUNCTION ITSELF BUILDS will lay out", and nothing
+   had verified that one. Reported live: tokens still jiggled after every one of them was already on
+   this HTML path (ruling out "some SVG, some HTML" as the cause) — so the remaining inconsistency was in
+   the one still-canvas-derived number seating the div, not in which tokens reached it. domBaseline(s,f)
+   (js/diagram/diagram-core.js, beside _measDOM) answers the SAME question through an actual DOM layout
+   instead — a zero-size baseline-aligned marker sitting on the SAME line as the real text, so the
+   browser's own line layout plants it exactly on the baseline, whatever this string/font pair actually
+   shaped to. `line-height:normal` on BOTH the measuring element and the div built below, deliberately —
+   a mismatched line-height between the two would reintroduce exactly this bug via the CSS half-leading
+   model (extra line-height redistributes around the baseline, so measuring at one value and rendering
+   at another moves the very thing being measured).
    ⚠ THE CLASS AND EVERY ATTRIBUTE RIDE ALONG, on both the foreignObject and the inner div. Selection
    (applySel reads .tok-word/data-tok), dimming, the Typo/Foreign decorations and the delegated click
    handlers all match on those, and a swap that dropped them would trade a shaping bug for a dead
@@ -533,16 +576,7 @@ function smpReshape(root){
     const cs=getComputedStyle(el), f=cs.font||((cs.fontWeight!=="400"?cs.fontWeight+" ":"")+cs.fontSize+" "+cs.fontFamily);
     const w=_measDOM(s,f); if(!(w>0)) continue;
     const x=parseFloat(el.getAttribute("x"))||0, y=parseFloat(el.getAttribute("y"))||0;
-    let asc=parseFloat(cs.fontSize)||15, h=asc*2;
-    /* actualBoundingBox*, not fontBoundingBox*: the latter is the font's whole em-box, sized for
-       marks THIS word may not carry, and reserving it verbatim is what left visible dead space above
-       and (mostly) below a reshaped word — measured on a real Kawi word, fontBoundingBoxAscent/Descent
-       25/20 against actualBoundingBoxAscent/Descent 22.9/12.6, i.e. a 47px box around ~35px of ink,
-       worse at magnification since the gap scales with it. overflow:visible is already set below, so
-       there is no clipping risk in trusting the tighter, string-specific box. */
-    try{ _cv.font=f; const m=_cv.measureText(s);
-      if(m.actualBoundingBoxAscent+m.actualBoundingBoxDescent>0){ asc=m.actualBoundingBoxAscent; h=asc+(m.actualBoundingBoxDescent||asc*0.3); }
-      else if(m.fontBoundingBoxAscent>0){ asc=m.fontBoundingBoxAscent; h=asc+(m.fontBoundingBoxDescent||asc*0.3); } }catch(_){}
+    const {asc,height:h}=domBaseline(s,f);
     const fo=document.createElementNS("http://www.w3.org/2000/svg","foreignObject");
     for(const a of el.attributes) if(a.name!=="x"&&a.name!=="y"&&a.name!=="text-anchor") fo.setAttribute(a.name,a.value);
     fo.setAttribute("x",(x-w/2)+""); fo.setAttribute("y",(y-asc)+"");
@@ -550,7 +584,7 @@ function smpReshape(root){
     fo.style.overflow="visible";
     const d=document.createElementNS("http://www.w3.org/1999/xhtml","div");
     d.setAttribute("class","fo-form "+(el.getAttribute("class")||""));
-    d.style.cssText="font:"+f+";line-height:"+h+"px;white-space:pre";
+    d.style.cssText="font:"+f+";line-height:normal;white-space:pre";
     d.textContent=s;
     fo.appendChild(d);
     for(const ch of el.children) if(ch.tagName==="title") fo.appendChild(ch.cloneNode(true));   // the hover tooltip belongs to the token, not to the <text> we are discarding
