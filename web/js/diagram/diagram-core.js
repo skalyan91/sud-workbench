@@ -384,31 +384,34 @@ function scriptAscentEm(){
   const fam=(typeof fontStackName==="function"&&ORTHO_SCHEME)?("'"+fontStackName(ORTHO_SCHEME)+"', "):"";
   try{ _cv.font="100px "+fam+LIVE_TOKEN_STACK; const m=_cv.measureText(ch);
     const a=m.fontBoundingBoxAscent; return (a>0&&isFinite(a))?a/100:1; }catch(_){ return 1; } }
-/* HOW FAR THE FONT'S OWN VERTICAL MIDPOINT (its ascent-plus-descent box, halved) sits above the baseline, as
-   a ratio of its size — `(fontBoundingBoxAscent−fontBoundingBoxDescent)/2`, at a 100px reference. This is a
-   property of the FONT alone, not of any particular glyph — true ONLY once "the font" is actually one face,
-   which is exactly what measuring a bare "m" cannot guarantee. ⚠ REPORTED WRONG FOR GRANTHA, and "m" is why:
-   a script-specific Noto face is not obliged to cover Latin at all, so canvas can resolve "m" through an
-   ENTIRELY DIFFERENT fallback family than the one actually shaping the script glyphs beside the seam mark —
-   not the ambiguous-family mismatch _measDOM/stackDropExtra's notes describe (two files sharing one name),
-   but the same failure mode _measDOM's family-ordering was built to dodge for scriptAscentEm ("a Kawi
-   character measured against the ordinary token stack answers 107 — Noto Sans Latin's ascent — and only
-   answers Kawi's own 110 when its family is named first"): the sample glyph has to be a character the
-   script's own face actually has to say. Live report: seam marks on Grantha sat at roughly cap-height
-   instead of centred on the word, which is what a MID computed from the wrong (shallower, Latin) face's
-   ascent/descent would produce. Now measured through a REAL character from the document's own orthography —
-   the identical DOC-scan scriptAscentEm uses just above, so the two functions can no longer disagree about
-   which face answers for this script. Scales exactly linearly with size, which is what makes the seam-mark
-   fix below a closed form rather than a second measurement. See svgSeamMark's own note for what it is for. */
+/* HOW FAR THE VISUAL MIDPOINT OF A REAL SCRIPT CHARACTER'S INK sits above the baseline, as a ratio of size.
+   ⚠ STILL WRONG FOR GRANTHA AFTER THE "REAL CHARACTER" FIX ABOVE (reported live, seam marks still sat at
+   cap-height, not centred) — because canvas's font-matcher is a SEPARATE resolution step from the one that
+   paints the SVG glyph beside the mark, and it can resolve the identical ambiguous family name ("Noto Sans
+   Grantha", one system-installed, one the app would fetch) to a DIFFERENT underlying FILE regardless of
+   WHICH character is asked for. Picking a real character (previous cut) closes the "wrong face entirely"
+   failure mode (asking a script font for "m", which it may not cover, and getting some unrelated fallback's
+   metrics) but not this one — both failure modes were live for Grantha, and only the first got fixed.
+   `fontBoundingBoxAscent/Descent` (a font EM-box property) has no SVG DOM equivalent, so there is no way to
+   ask "what does this FONT'S own vertical centre look like" without canvas. What CAN be asked without it:
+   what does this CHARACTER'S own ink look like, through the SAME element (_mtxt) that paints it — exactly
+   the move stackDropExtra already made for descent alone. Trading the font's abstract EM-box for the real
+   character's ink bounds changes what "centred" means slightly (ink-centre vs design-centre), but ink is
+   arguably the more honest answer to "does this look centred" anyway, and it can no longer disagree with
+   the SVG paint by construction — there is no second resolution step left. */
 function scriptMidEm(){
   if(TOK_MAG===1) return 0;
   let ch="";
   outer: for(const s of (typeof DOC!=="undefined"?DOC:[])){ for(const t of (s.tokens||[])){
       const o=t.ortho||""; for(const c of o){ if(c>" "&&!/[ -ɏ]/.test(c)){ ch=c; break outer; } } } }
   if(!ch) return 0;
-  try{ _cv.font="100px "+scriptFamilyPrefix()+LIVE_TOKEN_STACK; const m=_cv.measureText(ch);
-    const a=m.fontBoundingBoxAscent, d=m.fontBoundingBoxDescent;
-    return (a>0&&isFinite(a))?(a-d)/200:0; }catch(_){ return 0; } }
+  try{
+    _mtxt.style.cssText="white-space:pre;font:100px "+scriptFamilyPrefix()+LIVE_TOKEN_STACK;
+    _mtxt.textContent=ch;
+    const bbox=_mtxt.getBBox();
+    const inkAscent=-bbox.y, inkDescent=bbox.y+bbox.height;   // ink top / ink bottom, relative to the y=0 baseline
+    return (inkAscent+inkDescent)>0?(inkAscent-inkDescent)/200:0;
+  }catch(_){ return 0; } }
 // gloss-tier measurement fonts — must match the CSS at .gloss / .gloss[data-tier=…]: lexical gloss now shares
 // MGloss's own upright 13.2px (matches --stext-fs, the block-initial sentence size); MSeg is 15px italic (word-like).
 // Used to size token/node slots so a wide gloss can't crowd its neighbour (item 13).
