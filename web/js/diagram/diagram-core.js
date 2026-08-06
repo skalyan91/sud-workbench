@@ -298,7 +298,7 @@ _lazyFont("LIVE_TOKEN_STACK",()=>TOKEN_STACK); _lazyFont("LIVE_MONO_STACK",()=>M
    why a canvas font string cannot read the property itself). 1 everywhere except the ornamental Sanskrit
    scripts. It multiplies the TOKEN-FORM faces only — WORD_F/NODE_F/MWT_F and the goeswith tie — never the
    POS, transliteration or gloss rows, which are Latin annotation drawn at the app's own body size. */
-let TOK_MAG=1, TOK_WGHT=400, TOK_TRACK=0, TOK_ASC=1, TOK_MID=0, STACK_DROP=0;
+let TOK_MAG=1, TOK_WGHT=400, TOK_TRACK=0, TOK_ASC=1, TOK_MID=0, STACK_DROP=0, TOK_LIFT=0, TOK_XH=0.5;
 // TOK_WGHT stays 400 for magnified faces now (see magTrack's own note on why the weight curve was dropped for
 // them), so this omits a weight token and lets the face render at its own resting weight.
 function magFont(px){ const w=TOK_WGHT;
@@ -434,8 +434,85 @@ function scriptLiftEm(){
     if(ORTHO_SCHEME==="Tibetan" && dsc>0){
       lift=Math.max(0,lift+(200-(h+dsc))/200);
     }
+    /* ⚠ GRANTHA GETS A DIFFERENT TARGET ENTIRELY, ON REPORT: "running-sentence Grantha should have its
+       x-height top-aligned with the sentence number" — not "head-line at row top" (the em-box target
+       above), which is a DIFFERENT quantity or, in this specific case, a merely NEARBY one. Measured live
+       (WKWebView, samples/brihat_jataka.conllu, Script=Grantha, 1.5×): the em-box lift above already
+       lands x-height 1.45px below .snum's own top — close, because Grantha's ascent/x-height ratio
+       happens to put the two targets near each other, but not the same thing, and the reader can see the
+       1.45px. `snumXHeightLiftEm()` measures the ACTUAL target directly (a synthetic, unlifted .shead
+       row — see its own note) rather than approximating it through ink depth, so it replaces the em-box
+       number outright for this one script rather than adding to it. Scoped BY NAME, exactly as the
+       Tibetan branch above is, and for the same reason: this target was only asked of Grantha, and
+       nothing here says another STACKING_SCRIPTS member's own em-box lift is currently wrong — Tibetan's
+       own lift was independently calibrated (and verified, live) to a 0.14px ink-to-row-top target just
+       one commit ago, and blindly generalising x-height-alignment to it would overwrite that with an
+       unmeasured, unrelated number: at Tibetan's current (zero) lift the unshifted x-height sits 7.67px
+       below .snum's top, so an x-height target would ask for a large POSITIVE lift there — undoing the
+       fix rather than agreeing with it. */
+    if(ORTHO_SCHEME==="Grantha"){
+      const alt=snumXHeightLiftEm();
+      if(alt!=null) lift=alt;
+    }
     return lift;
   }catch(_){ return 0; } }
+/* THE ACTUAL ALIGNMENT TARGET FOR A SCRIPT WHOSE RUNNING LINE SHOULD MEET THE SENTENCE NUMBER AT
+   x-height (currently only Grantha — see scriptLiftEm's own note on why this isn't asked of every
+   STACKING_SCRIPTS member). scriptLiftEm's own em-box arithmetic (fontBoundingBoxAscent minus the
+   deepest ink on screen) answers a DIFFERENT question — "where does the shirorekha/cap-height line
+   land" — and the two only coincide by chance for a face whose ascent-to-x-height ratio happens to
+   match; measuring the target ITSELF, rather than a proxy for it, is what makes this exact rather than
+   approximately right.
+   ⚠ WHY A SYNTHETIC ROW, NOT scriptLiftEm's canvas metrics: .snum's real position in the live .shead
+   isn't a plain function of its own font's ascent — align-items:baseline resolves the row's shared
+   baseline from EVERY item's own line-box (including .stext-script's line-height:2 when the script is
+   also a STACKING_SCRIPTS member, the exact half-leading effect the Tibetan branch above exists to
+   correct for), and reconstructing that arithmetic by hand for a second script risks the identical class
+   of bug. Building one real .shead — the SAME classes, so the SAME rules apply, laid out by the SAME
+   engine that lays out the live one — sidesteps re-deriving flex baseline math a second time: the
+   browser is asked the question directly instead of being modelled.
+   The row is measured with its OWN lift terms forced to 0 (`_msnum`'s inline style beats the class rule
+   with no !important needed), so what comes back is the row's natural, UNLIFTED offset — exactly the
+   quantity scriptLiftEm() needs to turn into a lift. Mounted inside #doc (not documentElement/body, like
+   _mmount above) for the same reason _mmount is: --script-mag and --token-font are set on #doc itself,
+   not :root, and a mount outside it would silently measure the unmagnified font. */
+const _msnum=document.createElement("div");
+_msnum.setAttribute("aria-hidden","true");
+_msnum.style.cssText="position:absolute;left:-99999px;top:0;visibility:hidden;pointer-events:none";
+_msnum.className="shead";
+const _msnumNum=document.createElement("span"), _msnumScript=document.createElement("span"), _msnumMark=document.createElement("span"), _msnumSid=document.createElement("span");
+_msnumNum.className="snum"; _msnumNum.textContent="1";
+_msnumScript.className="stext stext-script";
+_msnumScript.style.cssText="top:0;margin-bottom:0";   // beats .stext.stext-script's own top/margin-bottom unconditionally — plain inline style, no !important needed
+_msnumMark.style.cssText="display:inline-block;width:0;height:0;vertical-align:baseline";
+_msnumScript.appendChild(_msnumMark);
+_msnumSid.className="sid-in mono"; _msnumSid.textContent="s1";   // .sid-in is a THIRD baseline-aligned flex item in the real .shead (the URL button and block controls are the only two exempted, via their own align-self:flex-start) — its own font (var(--ui-mono), 13px/600) has different metrics from .snum's, and omitting it here measured 3px off the real row: align-items:baseline resolves ONE shared baseline from every participating item, not just the two this measurement cares about, so all of them have to be present for the resolved baseline to match the live row's.
+_msnum.appendChild(_msnumNum); _msnum.appendChild(_msnumScript); _msnum.appendChild(_msnumSid);
+function _measMountSnum(){ const doc=document.getElementById("doc"); if(doc&&_msnum.parentNode!==doc) doc.appendChild(_msnum); }
+function snumXHeightLiftEm(){
+  try{
+    _measMountSnum();
+    if(typeof STACKING_SCRIPTS!=="undefined"&&STACKING_SCRIPTS.has(ORTHO_SCHEME)) _msnumScript.classList.add("stext-stacked");
+    else _msnumScript.classList.remove("stext-stacked");
+    // a representative glyph is enough — x-height is one number per font, unlike scriptLiftEm's own
+    // ink-depth measurement, which needs the single deepest cluster on screen
+    let ch="";
+    outer: for(const s of (typeof DOC!=="undefined"?DOC:[])){ for(const t of (s.tokens||[])){
+        const o=t.ortho||""; for(const c of o){ if(c>" "){ ch=c; break outer; } } } }
+    _msnumScript.textContent=""; _msnumScript.appendChild(_msnumMark); _msnumScript.appendChild(document.createTextNode(ch||"a"));
+    const numRect=_msnumNum.getBoundingClientRect(), markRect=_msnumMark.getBoundingClientRect();
+    const fontPx=parseFloat(getComputedStyle(_msnumScript).fontSize)||0;
+    if(fontPx<=0) return null;
+    // CSS font shorthand is SIZE then FAMILY ("19.5px Foo"), not the reverse — xHeightPx() hands this
+    // straight to _mxh.style.font, and family-before-size is invalid, silently rejected, leaving _mxh at
+    // WHATEVER font a previous caller last set successfully (typically a 100px reference string from
+    // xHeightEm()/scriptMidEm() elsewhere in this file) — measured on report: exPx came back 53.6, the
+    // x-height ratio at the STALE 100px size, not this element's real 19.5px.
+    const exPx=xHeightPx(fontPx+"px "+getComputedStyle(_msnumScript).fontFamily);
+    if(exPx<=0) return null;
+    const xHeightTopY=markRect.top-exPx;   // baseline (markRect.top) minus the x-height, i.e. the top of the x-height band
+    return (xHeightTopY-numRect.top)/fontPx;   // positive → x-height sits below .snum's top → lift by this many em to close it
+  }catch(_){ return null; } }
 function scriptFamilyPrefix(){ return (typeof fontStackName==="function"&&ORTHO_SCHEME)?("'"+fontStackName(ORTHO_SCHEME)+"', "):""; }
 /* STACKING SCRIPTS' subjoined/stacked marks can reach well below what ANY Latin descender does — the
    sample belowGap()'s existing descent(f) measures ("gjpqy") is Latin, and WORD_F never leads with the
@@ -472,12 +549,43 @@ function stackDropExtra(){
   if(!(typeof DIAGRAM_STACKING_SCRIPTS!=="undefined" && DIAGRAM_STACKING_SCRIPTS.has(ORTHO_SCHEME))) return 0;
   try{
     _mtxt.style.cssText="white-space:pre;font:100px "+scriptFamilyPrefix()+LIVE_TOKEN_STACK;
+    _cv.font="100px "+scriptFamilyPrefix()+LIVE_TOKEN_STACK;
     let maxInk=-1;
     for(const s of (typeof DOC!=="undefined"?DOC:[])){ for(const t of (s.tokens||[])){
         const o=t.ortho||""; if(!o) continue;
-        _mtxt.textContent=o;
-        let bbox; try{ bbox=_mtxt.getBBox(); }catch(_){ continue; }
-        const d=bbox.y+bbox.height;   // ink bottom, relative to the y=0 baseline — how far the descender actually reaches
+        let d;
+        /* ⚠ KAWI, SCOPED BY NAME — the same narrowing DIAGRAM_STACKING_SCRIPTS itself already uses for
+           Tibetan, and for the same reason: WebKit does not shape SMP text in SVG <text> at all (see
+           SMP_RE/svgShapesSMP's own note below — the same limitation smpReshape swaps the FORM row's own
+           glyphs out for, via foreignObject), so THIS element's getBBox() is not real ink for Kawi text —
+           measured live, a bare Kawi base consonant and a genuine 3-consonant CONJOINER stack (U+11F42)
+           returned the IDENTICAL y/height, digit for digit, the same "font-metric constant, not glyph ink"
+           signature Tibetan's own getBBox() quirk had (fa2da8c), just via a different WebKit limitation
+           than that one's font-name-ordering bug — confirmed NOT that bug by re-measuring WITHOUT the
+           scriptFamilyPrefix() lead too (Tibetan's own fix): still constant for Kawi, so dropping the
+           prefix alone does not generalise here. Unlike Tibetan, Kawi's real need is not negligible —
+           canvas (the one of this app's three text paths that DOES shape SMP conjuncts, per the same note)
+           measures real, content-sensitive descent for the identical strings (~0em for an unstacked base
+           consonant → 0.415em for the 3-consonant stack, ~4px of genuine extra reach beyond descent(WORD_F)
+           at this size) — so excluding Kawi from DIAGRAM_STACKING_SCRIPTS the way Tibetan was would
+           under-reserve it, trading one wrong number for another; measuring THIS text through canvas
+           instead is the fix. ⚠ NOT keyed on SMP_RE.test(o) generally, even though Kawi's own bug IS an
+           SMP one — Grantha (U+11300–) and ZanabazarSquare (U+11A00–) are ALSO supplementary-plane and
+           ALSO members of this same STACKING_SCRIPTS set, and a first cut that switched on content alone
+           silently routed THEM onto this same canvas path too, moving their own STACK_DROP numbers
+           (measured live: Grantha 6.626→0, ZanabazarSquare 13.084→1.335 for one arbitrary two-character
+           probe string) with no live-measured deep-cluster evidence, for either script, that canvas is the
+           more correct answer for them the way it demonstrably is for Kawi. Scoping to the script BY NAME
+           is what keeps that untouched — exactly the same reasoning scriptLiftEm()'s own Tibetan-only
+           branch gives for not applying an unaudited correction to every script the general form would
+           technically also reach. */
+        if(ORTHO_SCHEME==="Kawi" && SMP_RE.test(o)){
+          const m=_cv.measureText(o); d=m.actualBoundingBoxDescent||0;
+        } else {
+          _mtxt.textContent=o;
+          let bbox; try{ bbox=_mtxt.getBBox(); }catch(_){ continue; }
+          d=bbox.y+bbox.height;   // ink bottom, relative to the y=0 baseline — how far the descender actually reaches
+        }
         if(d>maxInk) maxInk=d; } }
     if(maxInk<0) return 0;
     const px=parseFloat(WORD_F)||TOK_REF_SIZE*TOK_MAG;
@@ -515,6 +623,19 @@ function scriptMidEm(){
   if(TOK_MAG===1) return 0;
   const xh=xHeightPx("100px "+scriptFamilyPrefix()+LIVE_TOKEN_STACK);
   return xh>0?xh/200:0; }
+/* THE FULL X-HEIGHT, as an em ratio — the same `ex`-unit measurement scriptMidEm halves for a seam mark's
+   own centring, unhalved and, unlike scriptMidEm/scriptLiftEm beside it, NOT gated to TOK_MAG!==1: an
+   ordinary unmagnified running script has an x-height exactly as much as a magnified one does, and this is
+   the one consulted for EVERY script (arcTouchAbovePx below branches between this and scriptLiftEm's own
+   measurement, never skips either). Kept as its own function rather than a bare inline xHeightPx() call so
+   it is cached once per render into TOK_XH by refreshFontStacks, the same treatment TOK_ASC/TOK_MID/lift
+   get and for the identical reason: xHeightPx() forces a style read, and arcs()/arcsWrapped()/tree() would
+   otherwise each pay for it separately, per render, for every sentence. 0.5 is the floor a failed/empty
+   probe returns (matches an ordinary Latin face's own x-height/em ratio closely enough to be a safe no-op,
+   not a visible collapse to zero). */
+function xHeightEm(){
+  const xh=xHeightPx("100px "+scriptFamilyPrefix()+LIVE_TOKEN_STACK);
+  return xh>0?xh/100:0.5; }
 // gloss-tier measurement fonts — must match the CSS at .gloss / .gloss[data-tier=…]: lexical gloss now shares
 // MGloss's own upright 13.2px (matches --stext-fs, the block-initial sentence size); MSeg is 15px italic (word-like).
 // Used to size token/node slots so a wide gloss can't crowd its neighbour (item 13).
@@ -744,7 +865,8 @@ function refreshFontStacks(){
     d.style.setProperty("--script-wght",String(TOK_WGHT));
     TOK_ASC=scriptAscentEm(); d.style.setProperty("--script-asc",TOK_ASC.toFixed(3));
     TOK_MID=scriptMidEm();   // svgSeamMark's own vertical re-centring against the magnified word beside it — JS-internal only, no CSS consumer
-    d.style.setProperty("--script-lift",scriptLiftEm().toFixed(4));
+    TOK_LIFT=scriptLiftEm(); d.style.setProperty("--script-lift",TOK_LIFT.toFixed(4));   // cached into a plain JS global (not re-read back off the CSS var, which is colour-cache-adjacent and cleared on a different trigger) — arcTouchAbovePx() below is the new JS-internal consumer, same shape as TOK_MID
+    TOK_XH=xHeightEm();   // arcTouchAbovePx()'s OTHER half — see its own note for the TOK_MAG===1 vs !==1 split between this and TOK_LIFT
     /* ⚠ AND THE ALIGNMENT ITSELF IS ONLY THE ORNAMENTAL ONE. `.stext-script` carried
        `align-self:flex-start` unconditionally, which is a no-op ONLY if the lift beside it is
        non-zero: at mag 1 the lift is 0, so an unmagnified script line was top-aligned against a
@@ -1382,6 +1504,31 @@ function appendHangHTML(container,t,si,cls,oid){ const show=correctFormShown(t,s
     s.addEventListener("click",ev=>{ ev.stopPropagation(); pick(si,oid); }); container.appendChild(s); }); }
 function descent(f){_cv.font=f; const m=_cv.measureText("gjpqy"); return m.actualBoundingBoxDescent||3;}   // how far tokens hang below the baseline
 function ascent(f){_cv.font=f; const m=_cv.measureText("Ábgjyd漢"); return m.actualBoundingBoxAscent||11;}   // how far tokens reach above the baseline — descent()'s counterpart, mixed Latin+Han sample so it answers honestly for either
+/* HOW FAR ABOVE A TOKEN'S OWN BASELINE AN ARC ENDPOINT NOW TOUCHES DOWN — the visually dominant register a
+   reader parses first, not the font's full reserved ascent (what arcs()/arcsWrapped()/tree() all anchored
+   to before this: a flat 16, "clears ascenders", present in every one of them under a different local
+   name). Two references, reusing the SAME two measurements the rest of this file already trusts for this
+   exact distinction rather than a third, parallel guess:
+    · TOK_MAG===1 (an ordinary running script — everything scriptLiftEm() itself declines to correct, by
+      its own gate) → TOK_XH, the font's plain X-HEIGHT via the CSS `ex` unit. scriptMidEm's own comment
+      already establishes x-height as the right "main reading body" register for EITHER Latin lowercase or
+      an Indic akshara — not cap-height, not ink-centroid — so it needs no separate justification here.
+    · TOK_MAG!==1 (INDIC_SCRIPTS/lzh/the ornamental tier — everywhere scriptLiftEm() actually computes a
+      correction) → ascent(WORD_F) minus TOK_LIFT's own measured "empty reserve above the real ink", i.e.
+      exactly the script's shirorekha/cap-height line --script-lift already publishes for the running
+      line's top-alignment. Re-deriving x-height's own em ratio at this size and taking the HIGHER of the
+      two (Math.max) rather than switching references outright: TOK_LIFT can legitimately measure 0 (no
+      DOC scanned yet, or a script whose ink genuinely already reaches full ascent), and collapsing straight
+      to the full unlifted ascent in that transient/edge case would silently reopen the old flat-16-sized
+      gap this function exists to close, whereas x-height is always available as a floor no worse than the
+      TOK_MAG===1 case gets.
+   Magnification needs no separate compensating term the way the old flat-16 callers each had to add one by
+   hand: both ascent(WORD_F) and TOK_XH*px are measured against WORD_F's OWN (already magnified) pixel size,
+   so the correction falls out of the measurement rather than being patched on afterwards. */
+function arcTouchAbovePx(){
+  const px=parseFloat(WORD_F)||15, xh=TOK_XH*px;
+  return TOK_MAG===1 ? xh : Math.max(xh, ascent(WORD_F)-TOK_LIFT*px); }
+const ARC_TOUCH_PAD=2;   // small breathing room past the touch line itself — an arc's stroke+casing halo (--arc-stroke, --arc-shoulder) would otherwise sit flush against the ink with no anti-aliasing margin at all. Measured: the OLD flat 16 left almost exactly this much beyond a 15px Latin token's own measured ascent (ascent(WORD_F)≈14.16, 16−14.16≈1.84) — so 2 keeps the same order of small, deliberate headroom the old constant had, rather than a fresh guess
 /* ⚠ THE STEP FROM ONE BELOW-TOKEN ROW TO THE NEXT, WRITTEN ONCE.
    It was the literal expression `belowGap()` in fifteen places — every renderer's draw AND every
    renderer's reserve (stackH / belowH / stackBot / --undpad / tieLead / mwtDepth) — which is exactly the

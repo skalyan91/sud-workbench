@@ -217,18 +217,17 @@ function arcs(si){
   const rep=reportOffsets(D);   // item 7/11: per-token UPWARD step for reported speech (0 on the main line). Both the word AND its arc endpoint lift by rep[i], so the reported cluster floats OFF the line as one unit — the arc endpoints move with the words (item 11), not just the words under fixed arcs.
   const {c,w,wform,total}=linear(sent); mirror(c,total);
   const ROW=parseFloat(css("--arc-row")),NR=parseFloat(css("--arc-node-r")),SH=parseFloat(css("--arc-shoulder")),AH=parseFloat(css("--arrow"));
-  /* small top headroom (matches the stemma's tight top). Item 1 (revert of item 15): the arc endpoints
-     clear the tokens by the ORIGINAL flat 16px again — item 15 had raised this to POSGAP(20)+descent(WORD_F)
-     to line the arc ends up with the deprel-label baseline in brackets/wrapped-stemma, but the user wants
-     the arcs back at their natural height. Only the arc view reverts; brackets/wrapped-stemma keep the
-     item-15 offset. ⚠ AND THE FLAT 16 IS WHAT A MAGNIFIED SCRIPT EATS INTO: this gap is measured from the
-     arc's own geometry down to the WORD's baseline, so a token's ascent reaching further above that
-     baseline (Literary Chinese now magnifies its Han glyphs 1.5× — see scriptMag()) shrinks the arc's real
-     clearance by exactly however much extra ascent the glyph gained, the same shape belowGap() already
-     accounts for on the other side of the token. Measured on a real lzh sentence: the arc-to-glyph gap
-     fell from 8.4px unmagnified to 4.2px at 1.5× — visibly tight, though not yet touching. Exactly the
-     old flat 16 whenever TOK_MAG is 1, which is every document but the newly-magnified ones. */
-  const TOP=8, WORD_OFF=16+(TOK_MAG>1?ascent(WORD_F)*(1-1/TOK_MAG):0);
+  /* small top headroom (matches the stemma's tight top). ⚠ NO LONGER A FLAT 16 "clears ascenders" —
+     an arc endpoint now touches down at arcTouchAbovePx() (diagram-core.js): the token's own x-height for
+     an ordinary running script, or its measured shirorekha/cap-height for a magnified Indic/lzh/ornamental
+     one — the visually dominant register a reader parses first, not the font's full reserved ascent. This
+     supersedes the flat-16 + a hand-added magnification term the item-1/item-15 history below describes:
+     arcTouchAbovePx() is measured directly against WORD_F's own (possibly magnified) size, so the
+     correction it used to need bolting on separately falls out of the measurement itself.
+     Only the arc view uses THIS touch height; brackets/wrapped-stemma keep their own item-15
+     POSGAP(20)+descent(WORD_F) offset, aligned to the deprel-label baseline rather than to the glyphs —
+     a different, unrelated design choice, left untouched. */
+  const TOP=8, WORD_OFF=arcTouchAbovePx()+ARC_TOUCH_PAD;
   const list=t.map((tk,i)=>({from:parseInt(tk.head,10),to:i+1,dep:tk.deprel}))
     .filter(a=>a.from!==a.to && a.from>=1 && a.from<=n)   // include punctuation edges
     .map(a=>({...a,lo:Math.min(a.from,a.to),hi:Math.max(a.from,a.to)}))
