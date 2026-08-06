@@ -298,11 +298,25 @@ _lazyFont("LIVE_TOKEN_STACK",()=>TOKEN_STACK); _lazyFont("LIVE_MONO_STACK",()=>M
    why a canvas font string cannot read the property itself). 1 everywhere except the ornamental Sanskrit
    scripts. It multiplies the TOKEN-FORM faces only — WORD_F/NODE_F/MWT_F and the goeswith tie — never the
    POS, transliteration or gloss rows, which are Latin annotation drawn at the app's own body size. */
-let TOK_MAG=1, TOK_WGHT=400, TOK_TRACK=0, TOK_ASC=1, TOK_MID=0, STACK_DROP=0, TOK_LIFT=0, TOK_XH=0.5;
+let TOK_MAG=1, TOK_WGHT=400, TOK_TRACK=0, TOK_ASC=1, TOK_MID=0, STACK_DROP=0, TOK_LIFT=0, TOK_XH=0.5, TOK_OP=1;
 // TOK_WGHT stays 400 for magnified faces now (see magTrack's own note on why the weight curve was dropped for
 // them), so this omits a weight token and lets the face render at its own resting weight.
 function magFont(px){ const w=TOK_WGHT;
   return (w!==400?w+' ':'')+(px*TOK_MAG)+'px '+LIVE_TOKEN_STACK; }
+/* ⚠ OPACITY IS WHAT COMPENSATES FOR WEIGHT NO LONGER DOING SO. magTrack's own note above explains why
+   magnified glyphs render at their face's ordinary weight rather than a lightening curve — most of
+   INDIC_SCRIPTS is static faces with no lighter weight to ask for, so the earlier weight curve either
+   did nothing or resolved to the wrong static weight. That leaves a REAL visual effect unaddressed: a
+   script drawn 1.5–2× bigger AND at full, un-lightened weight reads heavier on the page than body text
+   at the same weight does, exactly the imbalance the weight curve was trying (and, for these faces,
+   failing) to correct. A small opacity reduction is the substitute — it works on every face alike,
+   static or variable, unlike weight, and a few percent of transparency reads as "lighter", not as
+   "faded", at these sizes. Proportional to the SAME (mag−1) shape every other magnification term in
+   this file uses (magTrack, mwtFormLead, the .strans gap fix) — 0 at mag 1 (byte-identical to a plain
+   document), a modest ~6% at 1.5× and ~12% at 2×. A judgement call on the exact curve, not a measured
+   physical quantity like scriptLiftEm()/xHeightEm() beside it — deliberately kept small ("a bit
+   semitransparent", the report this answers) rather than tuned toward some target contrast ratio. */
+function magOpacity(mag){ return mag>0 ? 1-.12*(mag-1) : 1; }
 _lazyFont("WORD_F",()=>magFont(15)); _lazyFont("NODE_F",()=>magFont(14));
 _lazyFont("POS_F",()=>'15px '+LIVE_TOKEN_STACK); _lazyFont("GRID_F",()=>'462 13px '+LIVE_MONO_STACK); _lazyFont("HEAD_F",()=>'500 11px '+uiFont()); _lazyFont("HEAD_F_REQ",()=>'700 11px '+uiFont());   // TWO heading faces now, because the band is drawn in two weights: HEAD_F is the OPTIONAL columns' SF Pro Medium (500) and HEAD_F_REQ the obligatory ID/Form columns' Bold (700) — see `table.grid th` / `table.grid th.th-req` in styles/app.css. scanColW/pillColW pick per column; measuring every heading with one weight under-sized ID and Form by the Medium→Bold width difference   // HEAD_F is the GRID HEADING face, and its only consumers are scanColW/pillColW (js/grid/grid.js). It must match `table.grid th` in styles/app.css exactly, which is now title case in the UI font at 11px/590 — NOT --token-font, so it is the one string here built off uiFont() (js/core/platform.js, which resolves --ui-font to a plain family list; a canvas font string can't carry a var()) rather than off LIVE_TOKEN_STACK, and refreshFontStacks' token/mono-stack invalidation therefore doesn't apply to it. uiFont() caches its own DOM read, so calling it from a lazy getter costs nothing after the first   // POS tags: same size + weight (normal, i.e. no weight token here) as the transliteration (TRANS_F) — upright rather than italic; c2sc small-caps do the visual "tag" styling now, not a bumped weight/shrunk size. GRID_F: weight curve @12.65px (matches table.grid's own CSS weight — was unweighted/400, measuring narrower than the grid actually renders)
 _lazyFont("TRANS_F",()=>'italic 15px '+LIVE_TOKEN_STACK); _lazyFont("TRANS_UP_F",()=>'15px '+LIVE_TOKEN_STACK); _lazyFont("MWT_F",()=>WORD_F);   /* the MWT surface form measures/renders exactly like a normal token form (WORD_F, 15px). TRANS_UP_F: the same row set UPRIGHT — what a Foreign=Yes token's transliteration renders in (see trFont/.frn-up) */
@@ -863,6 +877,7 @@ function refreshFontStacks(){
        is now always the same value the CSS fallback already gives; kept rather than removed so every
        `var(--script-wght,400)` consumer need not be re-audited for one that IS, in fact, always 400. */
     d.style.setProperty("--script-wght",String(TOK_WGHT));
+    TOK_OP=magOpacity(TOK_MAG); d.style.setProperty("--script-op",TOK_OP.toFixed(3));   // see magOpacity's own note: the opacity compensation weight stopped providing once most INDIC_SCRIPTS faces turned out static
     TOK_ASC=scriptAscentEm(); d.style.setProperty("--script-asc",TOK_ASC.toFixed(3));
     TOK_MID=scriptMidEm();   // svgSeamMark's own vertical re-centring against the magnified word beside it — JS-internal only, no CSS consumer
     TOK_LIFT=scriptLiftEm(); d.style.setProperty("--script-lift",TOK_LIFT.toFixed(4));   // cached into a plain JS global (not re-read back off the CSS var, which is colour-cache-adjacent and cleared on a different trigger) — arcTouchAbovePx() below is the new JS-internal consumer, same shape as TOK_MID
