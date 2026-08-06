@@ -444,25 +444,37 @@ function syncSchemeAttr(){ const d=document.getElementById("doc"); if(!d) return
   d.style.setProperty("--script-mag",String(scriptMag()));   // …and how big the GLYPHS are drawn (see INDIC_SCRIPTS). On #doc, which is where refreshFontStacks reads it back to keep canvas measurement in step with the paint
 }
 /* ── EVERY INDIC SCRIPT IS DRAWN AT 1.5× SIZE ──────────────────────────────────────────────────────
-   Superseded: this used to be a curated subset ("the ornamental scripts" — Rañjanā, Soyombo, Siddhaṃ,
-   Balinese, Javanese, Tibetan) picked by eye for scripts whose decoration — heavy head-strokes, stacked
-   conjuncts, flags and finials — was judged not to resolve at a 15px body size, on the theory that
-   everyday scripts like Devanagari or Bengali read fine at that size because they are ordinary running
-   hands. On request, that judgement call is gone: ALL of _AKSHARA_SCRIPTS (app/translit.py) — every
-   Indic/Brahmic script this app can render Sanskrit in, not just the decorative ones — carries fine
-   detail (conjunct stacking, vowel-sign placement, subscript/superscript marks) that benefits from the
-   extra room, so the whole list gets it uniformly rather than by curated exception.
-   1.5×, not 2×: enough room for detail to resolve without crowding neighbouring lines as hard as a full
-   doubling did.
-   ONLY THE GLYPHS SCALE. The transliteration, POS, gloss and relation rows around them are Latin
-   annotation and are legible already — magnifying those too would be a zoom, which the app has (⌘+) and
-   which the reader did not ask for.
+   Superseded once already: this used to be a curated subset ("the ornamental scripts" — Rañjanā,
+   Soyombo, Siddhaṃ, Balinese, Javanese, Tibetan) picked by eye for scripts whose decoration — heavy
+   head-strokes, stacked conjuncts, flags and finials — was judged not to resolve at a 15px body size, on
+   the theory that everyday scripts like Devanagari or Bengali read fine at that size because they are
+   ordinary running hands. On request, that judgement call was dropped in favour of ALL of
+   _AKSHARA_SCRIPTS (app/translit.py) — every Indic/Brahmic script this app can render Sanskrit in, not
+   just the decorative ones — getting the SAME 1.5× uniformly, on the reasoning that every one of them
+   carries fine detail (conjunct stacking, vowel-sign placement, subscript/superscript marks) that
+   benefits from the extra room.
+   ⚠ AND SUPERSEDED AGAIN — a THIRD tier, ORNAMENTAL_SCRIPTS (below), is back on request, at genuinely
+   2×, not another 1.5×: title/seal/inscription hands (Rañjanā, Soyombo, Bhaiksuki, Brahmi) whose
+   ornament is denser again than an everyday Brahmic running hand's stacking/vowel-sign detail — the SAME
+   "does this resolve at body size" judgement the ORIGINAL curated list made, just answered "no, needs
+   more than 1.5×" for these four specifically rather than "no, needs any magnification at all" for a
+   broader set. NOT the old list verbatim — Siddhaṃ/Balinese/Javanese/Tibetan stay at the uniform 1.5×,
+   Bhaiksuki and Brahmi (neither in the old curated set) join the 2× one.
+   ONLY THE GLYPHS SCALE, at every tier. The transliteration, POS, gloss and relation rows around them
+   are Latin annotation and are legible already — magnifying those too would be a zoom, which the app has
+   (⌘+) and which the reader did not ask for.
    ⚠ KEPT IN SYNC BY HAND with _AKSHARA_SCRIPTS' scheme ids (app/translit.py) — there is no bridge call
    this fires early enough to derive it from at the point scriptMag() first needs an answer, so a script
-   added there needs the identical id added here. */
-const INDIC_SCRIPTS=new Set(["Devanagari","Balinese","Bengali","Bhaiksuki","Burmese","Cham","Grantha",
+   added there needs the identical id added here. Brahmi was missing from this list entirely (reported
+   live) — getting no magnification at all, not even the uniform 1.5× every other _AKSHARA_SCRIPTS member
+   already had. */
+const INDIC_SCRIPTS=new Set(["Brahmi","Devanagari","Balinese","Bengali","Bhaiksuki","Burmese","Cham","Grantha",
   "Gujarati","Javanese","Kannada","Kawi","Khmer","Malayalam","Nandinagari","Newa","Oriya","Ranjana",
   "Sharada","Siddham","Sinhala","Soyombo","TaiTham","Telugu","Thai","Tibetan","Tirhuta","ZanabazarSquare"]);
+// The 2× tier — see INDIC_SCRIPTS' own note for why this exists alongside (not instead of) the uniform
+// 1.5×. A SUBSET of INDIC_SCRIPTS, so scriptMag() must check this FIRST: falling through to the 1.5×
+// branch for these four would silently cap them at the lower tier.
+const ORNAMENTAL_SCRIPTS=new Set(["Ranjana","Soyombo","Bhaiksuki","Brahmi"]);
 /* The scripts whose stacked/subjoined marks need real extra room, not just the magnification bump every
    INDIC_SCRIPTS member gets — mirrors document.js's own .stext-stacked condition (which used to restate
    this list as a bare ORTHO_SCHEME OR-chain; centralised here so the diagram's own below-token spacing
@@ -480,6 +492,7 @@ function isLzhLang(lang){ const b=((lang!=null?lang:DOCLANG)||"").toLowerCase().
    like the rows this whole block already keeps unmagnified — TRANSFORM_ORTHO's simplified/traditional
    and the default "" (Original) both still draw Han, so those stay in. */
 function scriptMag(){
+  if(ORNAMENTAL_SCRIPTS.has(ORTHO_SCHEME)) return 2;   // checked BEFORE the 1.5× tier below — a subset of INDIC_SCRIPTS, so order matters
   if(INDIC_SCRIPTS.has(ORTHO_SCHEME)) return 1.5;
   if(isLzhLang() && ORTHO_SCHEME!=="none" && !(typeof LATIN_ORTHO!=="undefined" && LATIN_ORTHO.has(ORTHO_SCHEME))) return 1.5;
   return 1; }
@@ -551,12 +564,30 @@ function _orPick(id){ orClose(); id=id||""; if(id===ORTHO_SCHEME) return;
   toast(ORTHO_SCHEME==="none"?"Script: None (transliteration as main)"
         :(ORTHO_SCHEME?("Script: "+orSchemeLabel(ORTHO_SCHEME))
         :"Original script")); }
+// The row for the currently-selected script — the ✓ each orRender row carries is the only marker,
+// since s.id isn't on the DOM node itself. scrollIntoView's OWN scroll container is the menu (it has
+// overflow-y:auto), so this works whatever the menu's eventual on-screen position ends up being;
+// block:"nearest" is a no-op when the row is already visible, which is the common case on a short list.
+function orScrollToSelected(m){ const rows=m.querySelectorAll(".trrow");
+  for(const r of rows){ const ck=r.querySelector(".ck"); if(ck&&ck.textContent==="✓"){ r.scrollIntoView({block:"nearest"}); return; } } }
 function openOrthoMenu(x,y){ const m=orEl(); orRender(); m.classList.add("show"); setPillMenuOpen("orthoPill",true);
   if(typeof snapListRows==="function") snapListRows(m,".trrow");   // floor the menu's height to whole rows before anything below measures it
   const w=m.offsetWidth,h=m.offsetHeight;
   m.style.left=Math.max(8,Math.min(x,innerWidth-w-8))+"px";
-  if(y-h-6>=8){ m.style.top=""; m.style.bottom=(innerHeight-(y-6))+"px"; }
-  else { m.style.bottom=""; m.style.top=Math.min(y+6,innerHeight-h-8)+"px"; } }
+  /* …and the head room is measured from menuTopBound, not a bare 8 — the same fix openLangMenu
+     (js/ui/wiring.js) already carries and for the same reason: this menu opens UPWARD out of the
+     status bar, so in a tabbed window it is one of the menus that can run into the native tab bar,
+     which no z-index can draw in front of. Three bands, exactly as openLangMenu's: room for the
+     WHOLE menu above → anchor by the bottom edge with no extra cap (the CSS min(500px,70vh) still
+     applies, so it never grows past what openLangMenu's own list allows either); a usable but
+     smaller band above → keep the upward anchor and cap maxHeight to exactly that band, so the list
+     scrolls inside it instead of running under the tab bar; no usable band at all → drop the menu
+     below the pill instead. */
+  const bound=(typeof menuTopBound==="function")?menuTopBound():8;
+  if(y-h-6>=bound){ m.style.top=""; m.style.maxHeight=""; m.style.bottom=(innerHeight-(y-6))+"px"; }
+  else if(y-6-bound>=120){ m.style.top=""; m.style.bottom=(innerHeight-(y-6))+"px"; m.style.maxHeight=(y-6-bound)+"px"; }
+  else { m.style.bottom=""; m.style.maxHeight=""; m.style.top=Math.max(bound,Math.min(y+6,innerHeight-h-8))+"px"; }
+  orScrollToSelected(m); }
 document.getElementById("orthoPill").addEventListener("click",e=>{ e.stopPropagation();
   if(_orMenu&&_orMenu.classList.contains("show")){ orClose(); return; }   // item 9: click-to-close on the trigger, exactly as #translitPill above
   const r=e.currentTarget.getBoundingClientRect(); openOrthoMenu(r.left,r.top); });

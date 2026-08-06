@@ -1524,6 +1524,11 @@ _AKSHARA_SCRIPTS = [   # (scheme id = aksharamukha target name, display label); 
     # no overlap into the line below even at the DEFAULT line-height (unlike Kawi/Grantha/Javanese/
     # Balinese, it does not need the .stext-stacked treatment). Both are reinstated below.
     ("Balinese", "Balinese"), ("Bengali", "Bengali"), ("Bhaiksuki", "Bhaiksuki"),
+    # Brahmi: the root script every other Brahmic script in this list descends from, and reported
+    # missing here entirely (not even at the uniform 1.5x every _AKSHARA_SCRIPTS member otherwise gets,
+    # web/js/lang/translit.js's INDIC_SCRIPTS). aksharamukha's "Brahmi" target verified working
+    # (IAST "dharma" -> "𑀥𑀭𑁆𑀫", U+11021 range, checked live rather than assumed).
+    ("Brahmi", "Brahmi"),
     ("Burmese", "Burmese"), ("Cham", "Cham"), ("Grantha", "Grantha"),
     ("Gujarati", "Gujarati"), ("Javanese", "Javanese"), ("Kannada", "Kannada"),
     ("Kawi", "Kawi"),
