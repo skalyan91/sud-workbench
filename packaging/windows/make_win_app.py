@@ -69,7 +69,17 @@ SRC_TREES = ("app", "web", "grammars")
 # script faces are over nine tenths of the payload for scripts most users never open.
 # nithyaranjana.otf is NOT a Noto face: it is bundled unconditionally because it isn't on Google
 # Fonts, so the on-demand fetch has nothing to ask for (see web/styles/fonts.css).
-CORE_FONTS = ("notosans.ttf", "notosans-italic.ttf", "notosansmono.ttf", "nithyaranjana.otf")
+# ⚠ THIS LIST HAD DRIFTED FROM make_bootstrap_app.sh/make_portable.sh's OWN — those two picked up six
+# more entries (the STACKING_SCRIPTS whose fontCovers() tofu probe is unreliable: Grantha, Javanese,
+# Balinese, Kawi, Zanabazar Square, and Tibetan, the last for a different reason — macOS's system
+# Kailasa face substituting silently rather than a same-named rival font, see web/styles/fonts.css's
+# own note) while this one never did, so a Windows build would have silently stripped all six and left
+# win11-kit's own @font-face declarations pointing at files that were never shipped. Kept in step here
+# rather than left to drift further, though — like everything else under packaging/windows/ — this
+# path has never actually been run on Windows; see CLAUDE.md's "Windows: what has never executed".
+CORE_FONTS = ("notosans.ttf", "notosans-italic.ttf", "notosansmono.ttf", "nithyaranjana.otf",
+              "notosansgrantha.ttf", "notosansjavanese.ttf", "notosansbalinese.ttf",
+              "notosanskawi.ttf", "notosanszanabazarsquare.ttf", "notoseriftibetan.ttf")
 
 # The PowerShell half of the first-launch bootstrap, staged into setup/. These are the direct
 # analogues of find_py.sh / setup_venv.sh / bootstrap.sh and keep the same MSG/PROGRESS/DONE marker

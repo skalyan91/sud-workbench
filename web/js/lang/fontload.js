@@ -64,48 +64,48 @@ if(typeof document!=="undefined"&&document.fonts&&document.fonts.addEventListene
       if(typeof invalidateDiaCache==="function") invalidateDiaCache();   // …the RENDERED diagrams too: the notation-switch cache (js/core/document.js) hands back an SVG laid out with the metrics of whatever face was in force when it was built, so a re-render alone would redraw nothing. Measured: token WIDTHS were identical across a font change while every token's x moved 4-5px, which is exactly a stale cropped diagram being reused
       if(typeof DOC!=="undefined"&&DOC.length&&typeof preserveScroll==="function"&&typeof renderDoc==="function") preserveScroll(renderDoc); },80); }); }   // 80ms: several faces of one document land in a burst (one per script), and each fires its own event — coalesce them into a single re-layout   // 80ms: several faces of one document land in a burst (one per script), and each fires its own event — coalesce them into a single re-layout
 // Scripts the CORE faces already cover, plus the ones with no Noto Sans family of their own.
-// ⚠ THE FIVE STACKING SCRIPTS (Grantha/Javanese/Balinese/Kawi/Zanabazar_Square) JOINED THIS LIST, and
-// that is a DIFFERENT reason than the rest of it: those five don't lack an on-demand path — they were
-// ON it, and fontCovers() (below) kept skipping the app's own copy for them, silently, because its tofu
-// probe only asks "does anything render this", never "is it the SAME font this app was measured
-// against". A same-named-but-different local font (a different vendor's Grantha, an older subset, …)
-// passes the probe and wins by DOM's own ordinary specificity rules over whatever fontCovers() decided
-// — except it can't disagree with a face THIS PAGE explicitly declares, which is what web/styles/
-// fonts.css now does for these five (see that file's own note — under 1 MB combined, and the files were
-// already vendored and tracked, just never wired up). Being here means docScripts() never calls
-// ensureScriptFont for them, exactly like Latin/Greek/Cyrillic: the font is simply always present and
-// always wins, so there is no "should we fetch" question left to ask, and no ambiguous system font left
-// to lose to. Tibetan (the sixth STACKING_SCRIPTS member, js/lang/translit.js) has no local file to
-// vendor and stays on the ordinary on-demand path below.
+// ⚠ ALL SIX STACKING SCRIPTS (Grantha/Javanese/Balinese/Kawi/Zanabazar_Square/Tibetan) ARE IN THIS
+// LIST, and that is a DIFFERENT reason than the rest of it: none of the six lack an on-demand path —
+// they were ON it, and fontCovers() (below) kept skipping the app's own copy for them, silently,
+// because its tofu probe only asks "does anything render this", never "is it the SAME font this app
+// was measured against". A same-named-but-different local font (a different vendor's Grantha, an
+// older subset, …) passes the probe and wins by DOM's own ordinary specificity rules over whatever
+// fontCovers() decided — except it can't disagree with a face THIS PAGE explicitly declares, which is
+// what web/styles/fonts.css now does for all six (see that file's own note). Being here means
+// docScripts() never calls ensureScriptFont for them, exactly like Latin/Greek/Cyrillic: the font is
+// simply always present and always wins, so there is no "should we fetch" question left to ask, and no
+// ambiguous system font left to lose to.
+// ⚠ TIBETAN'S PROBE FAILURE WASN'T "SAME NAME, DIFFERENT FONT" — IT WAS THE OS SUBSTITUTING ONE
+// UNASKED. Tibetan used to stay on the on-demand path on the theory that it merely had no local file to
+// bundle; live probing found fontCovers() returns true for it on a stock macOS install with nothing
+// named "Noto Sans/Serif Tibetan" registered at all — macOS ships Kailasa as its own system Tibetan
+// face and substitutes it automatically for any unmatched Tibetan codepoint, so the on-demand fetch
+// this comment used to describe (Noto SERIF Tibetan under the SANS name, dodging Noto Sans Tibetan's
+// decade-old subjoined-consonant-stacking bug, notofonts/nototools#38) never actually ran — the tofu
+// probe returned early before ever asking. Bundling Tibetan's own face outright, under its OWN real
+// name, is what fixes that: no probe to fool, and nothing in this app names "Noto Sans Tibetan" any
+// more (FONT_NAME_OVERRIDE below is what makes fontStackName answer "Noto Serif Tibetan" for it).
 const FONT_CORE_SCRIPTS=new Set(["Latin","Greek","Cyrillic","Common","Inherited","Unknown","Braille",
-  "Grantha","Javanese","Balinese","Kawi","Zanabazar_Square"]);
+  "Grantha","Javanese","Balinese","Kawi","Zanabazar_Square","Tibetan"]);
 // Unicode script name → the family name the font stacks use, where squashing the name doesn't give it.
 // (Everything else derives: "Canadian_Aboriginal" → "Noto Sans Canadianaboriginal", matching the
 // vendored faces; the Google Fonts side wants the spaced form, "Noto Sans Canadian Aboriginal".)
 const FONT_NAME_FIX={Nko:"NKo"};
+// Scripts whose family isn't "Noto Sans <Script>" at all — Tibetan is the one member, "Noto SERIF
+// Tibetan" (see FONT_CORE_SCRIPTS' own note just above for why). Consulted before the generic "Noto
+// Sans "+name derivation below, by both fontStackName (what the stacks/canvas measurement name it under)
+// and the @font-face fonts.css declares — the same family everywhere, so there is exactly one name for
+// this app to get right.
+const FONT_NAME_OVERRIDE={Tibetan:"Noto Serif Tibetan"};
 // CJK has no Noto Sans family in the stacks at all — the system faces (PingFang, Hiragino, Apple SD
 // Gothic Neo) cover it, steered to the right regional glyphs by the lang attribute renderDoc sets.
 const FONT_SKIP_SCRIPTS=new Set(["Han","Hiragana","Katakana","Hangul","Bopomofo"]);
 
-function fontStackName(script){ const s=script.replace(/_/g,"");
+function fontStackName(script){ if(FONT_NAME_OVERRIDE[script]) return FONT_NAME_OVERRIDE[script];
+  const s=script.replace(/_/g,"");
   const n=FONT_NAME_FIX[s]||(s.charAt(0).toUpperCase()+s.slice(1).toLowerCase());
   return "Noto Sans "+n; }
-/* ⚠ TIBETAN FETCHES THE SERIF FACE, UNDER THE SANS NAME. Noto Sans Tibetan has a decade-old, still-open
-   upstream bug (notofonts/nototools#38, filed 2015) in exactly the subjoined-consonant stacks Sanskrit
-   transliteration needs (GHA/DDHA/DHA/BHA/DZHA/KSSA and their sequences) — independently reproduced and
-   reported live here too ("a Tibetan font that actually supports the full range of Sanskrit conjuncts").
-   Noto SERIF Tibetan handles the same sequences correctly (independently verified: "accepts most input
-   from EWTS correctly", renders the ཨོྂ་ stack Sans cannot) and is on Google Fonts under its own name, so
-   the existing on-demand fetch (app/fonts.py → Google's CSS API) reaches it with no new infrastructure.
-   FONT_REMOTE_FIX changes ONLY what family is ASKED FOR; ensureScriptFont still declares the answer
-   under fontStackName's "Noto Sans Tibetan" (unchanged — the name every stack, this app's own and the
-   kit CSS's, already lists), so nothing downstream has to know or care that the glyphs are technically
-   from the Serif family. A real trade-off is being made here — Serif Tibetan does not visually match the
-   Sans register the rest of the token stack renders in — accepted deliberately because the alternative is
-   glyphs that mis-stack outright, and correctness of the text takes priority over house style for a
-   script this document-critical. */
-const FONT_REMOTE_FIX={Tibetan:"Noto Serif Tibetan"};
-function fontRemoteName(script){ return FONT_REMOTE_FIX[script]||("Noto Sans "+script.replace(/_/g," ")); }
+function fontRemoteName(script){ return FONT_NAME_OVERRIDE[script]||("Noto Sans "+script.replace(/_/g," ")); }
 
 // The scripts we can fetch a face for: every Noto Sans <Script> family the font stacks name, under its
 // CANONICAL Unicode script name — the only spelling \p{Script=…} accepts (Old_Italic, not the squashed
