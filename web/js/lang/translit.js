@@ -454,12 +454,18 @@ function syncSchemeAttr(){ const d=document.getElementById("doc"); if(!d) return
    carries fine detail (conjunct stacking, vowel-sign placement, subscript/superscript marks) that
    benefits from the extra room.
    ⚠ AND SUPERSEDED AGAIN — a THIRD tier, ORNAMENTAL_SCRIPTS (below), is back on request, at genuinely
-   2×, not another 1.5×: title/seal/inscription hands (Rañjanā, Soyombo, Bhaiksuki, Brahmi) whose
+   2×, not another 1.5×: title/seal/inscription hands (Rañjanā, Soyombo, Bhaiksuki, Siddhaṃ) whose
    ornament is denser again than an everyday Brahmic running hand's stacking/vowel-sign detail — the SAME
    "does this resolve at body size" judgement the ORIGINAL curated list made, just answered "no, needs
    more than 1.5×" for these four specifically rather than "no, needs any magnification at all" for a
-   broader set. NOT the old list verbatim — Siddhaṃ/Balinese/Javanese/Tibetan stay at the uniform 1.5×,
-   Bhaiksuki and Brahmi (neither in the old curated set) join the 2× one.
+   broader set. THREE OF THE FOUR are the original curated list's own membership coming back around:
+   Rañjanā, Soyombo and Siddhaṃ were all in it before the "uniform 1.5×" revision dropped the curated
+   list entirely, and land in the SAME place they started from — a differently-motivated but same-
+   verdict tier — while Balinese/Javanese/Tibetan (also in that original list) stay at the uniform 1.5×.
+   Bhaiksuki is the only genuinely NEW member, never having been in the old curated set. Brahmi was tried
+   here too and corrected back out on report: it is a plain early running hand, not a title/seal/
+   inscription script like the other four, and its letterforms carry no comparable ornament to lose at
+   body size — it belongs in the uniform 1.5× tier below and nowhere denser.
    ONLY THE GLYPHS SCALE, at every tier. The transliteration, POS, gloss and relation rows around them
    are Latin annotation and are legible already — magnifying those too would be a zoom, which the app has
    (⌘+) and which the reader did not ask for.
@@ -473,8 +479,9 @@ const INDIC_SCRIPTS=new Set(["Brahmi","Devanagari","Balinese","Bengali","Bhaiksu
   "Sharada","Siddham","Sinhala","Soyombo","TaiTham","Telugu","Thai","Tibetan","Tirhuta","ZanabazarSquare"]);
 // The 2× tier — see INDIC_SCRIPTS' own note for why this exists alongside (not instead of) the uniform
 // 1.5×. A SUBSET of INDIC_SCRIPTS, so scriptMag() must check this FIRST: falling through to the 1.5×
-// branch for these four would silently cap them at the lower tier.
-const ORNAMENTAL_SCRIPTS=new Set(["Ranjana","Soyombo","Bhaiksuki","Brahmi"]);
+// branch for these four would silently cap them at the lower tier. Brahmi is deliberately NOT a member
+// — see INDIC_SCRIPTS' note above — it stays at the uniform 1.5×.
+const ORNAMENTAL_SCRIPTS=new Set(["Ranjana","Soyombo","Bhaiksuki","Siddham"]);
 /* The scripts whose stacked/subjoined marks need real extra room, not just the magnification bump every
    INDIC_SCRIPTS member gets — mirrors document.js's own .stext-stacked condition (which used to restate
    this list as a bare ORTHO_SCHEME OR-chain; centralised here so the diagram's own below-token spacing
@@ -565,11 +572,32 @@ function _orPick(id){ orClose(); id=id||""; if(id===ORTHO_SCHEME) return;
         :(ORTHO_SCHEME?("Script: "+orSchemeLabel(ORTHO_SCHEME))
         :"Original script")); }
 // The row for the currently-selected script — the ✓ each orRender row carries is the only marker,
-// since s.id isn't on the DOM node itself. scrollIntoView's OWN scroll container is the menu (it has
-// overflow-y:auto), so this works whatever the menu's eventual on-screen position ends up being;
-// block:"nearest" is a no-op when the row is already visible, which is the common case on a short list.
+// since s.id isn't on the DOM node itself.
+/* ⚠ NOT scrollIntoView — it does not reliably honour `.trmenu`'s own padding. Browsers reserve BOTTOM
+   padding as genuine extra scrollable space at the very end of an overflow:auto container's scroll range,
+   but do NOT reserve TOP padding the same way at the start: at scrollTop 0 the top padding is just
+   ordinary space above the first row, and scrolls away like content the moment you move past it. That is
+   the exact asymmetry snapListRows already hand-rolls its own arithmetic to work around (see its comment
+   block above) rather than trust a browser default for — scrollIntoView gives no guarantee it replicates
+   that handling here either, and a row scrolled to the very top/bottom of the list can end up sitting
+   flush against the raw un-padded content edge instead of behind the padding buffer.
+   So this measures the row's offsets from the scrollable CONTENT's own origin (not the viewport, and not
+   whatever m.scrollTop happens to be right now — adding it back cancels it out) and writes m.scrollTop
+   directly, reserving padding-top/padding-bottom as a buffer on whichever edge the row is approached from.
+   A genuine no-op when the row is already fully visible WITH that buffer intact, so opening the menu on an
+   already-visible selection never causes a jump. */
 function orScrollToSelected(m){ const rows=m.querySelectorAll(".trrow");
-  for(const r of rows){ const ck=r.querySelector(".ck"); if(ck&&ck.textContent==="✓"){ r.scrollIntoView({block:"nearest"}); return; } } }
+  let sel=null;
+  for(const r of rows){ const ck=r.querySelector(".ck"); if(ck&&ck.textContent==="✓"){ sel=r; break; } }
+  if(!sel) return;
+  const mr=m.getBoundingClientRect(), rr=sel.getBoundingClientRect();
+  const top=rr.top-mr.top+m.scrollTop, bottom=rr.bottom-mr.top+m.scrollTop;   // row's top/bottom relative to the content's own origin
+  const cs=getComputedStyle(m);
+  const padTop=parseFloat(cs.paddingTop)||0, padBot=(parseFloat(cs.paddingBottom)||0)+(parseFloat(cs.borderBottomWidth)||0);
+  const visTop=m.scrollTop+padTop, visBot=m.scrollTop+m.clientHeight-padBot;
+  if(top>=visTop-0.5 && bottom<=visBot+0.5) return;   // fully visible, padding buffer intact → leave scrollTop alone
+  if(top<visTop) m.scrollTop=Math.max(0,top-padTop);   // approached from above: land it just clear of the top padding, not flush against the raw edge
+  else m.scrollTop=Math.max(0,Math.min(m.scrollHeight-m.clientHeight,bottom-m.clientHeight+padBot)); }   // approached from below: same, against the bottom padding
 function openOrthoMenu(x,y){ const m=orEl(); orRender(); m.classList.add("show"); setPillMenuOpen("orthoPill",true);
   if(typeof snapListRows==="function") snapListRows(m,".trrow");   // floor the menu's height to whole rows before anything below measures it
   const w=m.offsetWidth,h=m.offsetHeight;
@@ -584,9 +612,28 @@ function openOrthoMenu(x,y){ const m=orEl(); orRender(); m.classList.add("show")
      scrolls inside it instead of running under the tab bar; no usable band at all → drop the menu
      below the pill instead. */
   const bound=(typeof menuTopBound==="function")?menuTopBound():8;
-  if(y-h-6>=bound){ m.style.top=""; m.style.maxHeight=""; m.style.bottom=(innerHeight-(y-6))+"px"; }
-  else if(y-6-bound>=120){ m.style.top=""; m.style.bottom=(innerHeight-(y-6))+"px"; m.style.maxHeight=(y-6-bound)+"px"; }
-  else { m.style.bottom=""; m.style.maxHeight=""; m.style.top=Math.max(bound,Math.min(y+6,innerHeight-h-8))+"px"; }
+  /* ⚠ NEITHER branch below may set `m.style.maxHeight=""` the way openLangMenu's does — openLangMenu's
+     "room above" branch clears the OUTER wrapper's (`.langmenu`) maxHeight while the row-floor from
+     snapListRows lives on a DIFFERENT, inner element (`_lmList`, the `.lmlist` scroller), so clearing the
+     outer one leaves the inner snap untouched. Here `m` IS both the trmenu wrapper AND the element
+     snapListRows just floored two lines up — clearing its maxHeight would throw that floor away and fall
+     back to the raw CSS `min(500px,70vh)` cap, which lands mid-row on most window heights (a copy-paste of
+     openLangMenu's pattern onto a one-element menu instead of its two-element one — confirmed by reading
+     them side by side). So: leave `m.style.maxHeight` exactly as snapListRows left it in both the
+     full-room and drop-below branches — it is already the correctly whole-row-floored height under the
+     CSS cap, and touching it again can only make it wrong. */
+  if(y-h-6>=bound){ m.style.top=""; m.style.bottom=(innerHeight-(y-6))+"px"; }
+  else if(y-6-bound>=120){
+    // the constrained-band branch used to write `m.style.maxHeight=(y-6-bound)+"px"` straight from the
+    // pixel gap, with no re-flooring — the same partial-row defect the CSS cap has, just against a
+    // smaller number. Re-running snapListRows against that exact budget floors THIS band to a whole
+    // number of rows too, instead of only the unconstrained case above getting that treatment.
+    if(typeof snapListRows==="function") snapListRows(m,".trrow",y-6-bound);
+    m.style.top=""; m.style.bottom=(innerHeight-(y-6))+"px"; }
+  else { m.style.bottom=""; m.style.top=Math.max(bound,Math.min(y+6,innerHeight-h-8))+"px"; }   // drop-below: same reasoning as the full-room branch above — maxHeight is left as snapListRows's initial floor, not cleared
+  // `h` (captured above, before either branch) is only ever consulted for the BRANCH DECISION and for the
+  // drop-below branch's own top offset — neither of those runs after the constrained-band re-snap above,
+  // so there is no stale-`h` read left to fix once that branch has resized `m`.
   orScrollToSelected(m); }
 document.getElementById("orthoPill").addEventListener("click",e=>{ e.stopPropagation();
   if(_orMenu&&_orMenu.classList.contains("show")){ orClose(); return; }   // item 9: click-to-close on the trigger, exactly as #translitPill above

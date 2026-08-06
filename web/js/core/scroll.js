@@ -216,13 +216,25 @@ function menuTopBound(){ return Math.max(8, parseFloat(document.documentElement.
    but a row-fit test against the raw budget lets a row's bottom land right at the padding-bottom's own
    inner edge, leaving nothing after it: measured, a 6px top padding against a 0.5px (border-only) bottom
    gap. Rows are tested against budget MINUS the bottom padding/border, and that same amount is added back
-   onto the final cut, so the visible gap below the last row matches the one above the first. */
-function snapListRows(list,rowSel){ if(!list) return;
+   onto the final cut, so the visible gap below the last row matches the one above the first.
+   ⚠ OPTIONAL THIRD ARG — a BUDGET IN PX TO FLOOR AGAINST, in place of the container's own rendered height.
+   Every existing caller omits it and gets the old behaviour verbatim (measure `list` itself, post-CSS-cap).
+   It exists for a caller that already knows a SMALLER ceiling than the CSS max-height/70vh cap would give —
+   openOrthoMenu's constrained-band branch, which has `y-6-bound` px of actual screen room above the pill,
+   less than what the unconstrained menu would render at. Setting `m.style.maxHeight` to that raw figure
+   without re-flooring (the bug this parameter fixes) can still land mid-row, exactly as the un-floored CSS
+   cap could; passing the same figure here re-runs the same whole-row walk against IT instead of against the
+   element's natural height, so the smaller band gets the same whole-row/even-padding treatment the
+   full-room case already had. Same units as the no-arg path (border-box px) since both feed the identical
+   walk below. */
+function snapListRows(list,rowSel,budgetPx){ if(!list) return;
   list.style.maxHeight="";   // clear a previous call's snap first — these elements are cached/reused across opens, and measuring on top of a stale inline cap would only ever shrink further, never grow back when there's more room
   list.scrollTop=0;
   const rows=list.querySelectorAll(rowSel); if(!rows.length) return;
   const cs=getComputedStyle(list), padBot=(parseFloat(cs.paddingBottom)||0)+(parseFloat(cs.borderBottomWidth)||0);
-  const budget=list.getBoundingClientRect().height; if(!(budget>0)) return;
+  // an explicit budget is a screen-space constraint, not a measurement of `list` — using it in place of the
+  // rendered height is the whole point (see the param's own note above), so it bypasses getBoundingClientRect
+  const budget=(budgetPx!=null)?budgetPx:list.getBoundingClientRect().height; if(!(budget>0)) return;
   const ceil=budget-padBot;
   const top=list.getBoundingClientRect().top;
   let cut=0;
