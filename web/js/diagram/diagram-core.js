@@ -474,39 +474,32 @@ function _measOne(s,f,extraCss){
    Square) and for none of the BMP ones. Chrome shapes SMP in SVG, so NO headless test can see this —
    the same trap the Zanabazar Square note records, and the reason CLAUDE.md's claim that Kawi "comes
    out clean" was wrong: it was verified in a synthetic CDP harness.
-   PROBED PER STRING, never assumed and never generalised from one sample — see smpUnshaped's own note
-   for why "per script" (an earlier cut of this) was itself the bug. */
+   NO LONGER DETECTED AT ALL — see smpUnshaped's own note for the two detection strategies tried and
+   abandoned, in order. */
 const SMP_RE=/[\uD800-\uDBFF][\uDC00-\uDFFF]/;
-/* ⚠ PER STRING, NOT PER SCRIPT — reported live as "Kawi tokens sometimes jiggled, inconsistent
-   baseline" AFTER the two things that look like they should have fixed it: vendoring Kawi's own font
-   (removing the ambiguous-local-font-resolution class of bug the OTHER stacking scripts had) and, one
-   cut before this, keying the shaping verdict by ORTHO_SCHEME instead of one global scalar (itself a
-   real fix for a real bug — Grantha's `true` leaking onto Kawi, which needed `false` — see that fix's
-   own history in this file's blame). Neither touches THIS bug, because both still share the same false
-   premise: that "does SVG shape this SCRIPT" is a single yes/no fact. It is not — it is a fact about
-   ONE CLUSTER's specific consonant/mark combination, and WebKit's SVG shaper can compose some Kawi
-   conjuncts correctly while failing on others in the SAME document, the same way a human font's
-   ligature table covers some letter pairs and not others. The old svgShapesSMP() sampled the FIRST SMP
-   cluster it found anywhere in DOC, decided pass/fail from THAT ONE, and — through smpReshape's
-   `if(!any){ if(svgShapesSMP()) return; }` short-circuit — applied that single verdict to every SMP
-   string in the render. A lucky first sample (simple enough to shape) meant NOTHING got the
-   foreignObject correction, including later words whose OWN clusters genuinely fail to shape — which is
-   exactly "sometimes jiggled": some Kawi words shape fine and sit correctly, others don't and land on
-   unshaped per-codepoint advances instead. smpUnshaped asks the question per string instead, at both
-   call sites that used to share the cached verdict (_measOneUncached and smpReshape) — the SAME
-   SVG-vs-canvas comparison, just never extrapolated past the one string it was actually run against. */
-function smpUnshaped(s,f){
-  if(!SMP_RE.test(s||"")) return false;
-  const svgW=_measRaw(s,f), cvW=_measCanvas(s,f);
-  if(!(svgW>0&&cvW>0)) return false;   // nothing to compare yet (e.g. orthography not filled in) — not a verdict, just no evidence
-  return (Math.abs(svgW-cvW)/Math.max(svgW,cvW))>=0.02; }   // 2 %: shaped and unshaped differ by 50–120 % here, so this cannot fire on rounding
-/* ⚠ AND NO "RUN THE PROBE BEFORE THE CACHE IS READ" STEP IS NEEDED ANY MORE, unlike the per-script
-   version this replaced. That version's race — the first Kawi width measured optimistically before
-   fillOrtho had anything to probe, cached, and never corrected because the SAME global verdict was
-   consulted forever after — cannot occur here: smpUnshaped(s,f) is a pure function of the STRING being
-   measured, called fresh on every cache MISS in _measOneUncached, so an empty/placeholder string and
-   the real Kawi text that later replaces it are different cache keys with independently-correct
-   answers from the moment each is first measured. Nothing to poison, nothing to invalidate later. */
+/* ⚠ STOPPED TRYING TO DETECT THE FAILURE; JUST ASSUME IT, for any supplementary-plane text. Two
+   detection strategies were built and both were reported wrong on real documents:
+     1. Per-SCRIPT (svgShapesSMP, since removed): sample the first SMP cluster found anywhere in DOC,
+        cache one pass/fail per ORTHO_SCHEME, apply it to every string of that script. Wrong because
+        Grantha's verdict leaked onto Kawi across a shared font-stack string (fixed by keying on
+        ORTHO_SCHEME) and, separately, because shaping success isn't even a fact about the SCRIPT (fixed
+        by #2) — a lucky/unlucky first sample decided every other word's treatment.
+     2. Per-STRING (smpUnshaped, an SVG-vs-canvas width comparison run on each element's own text):
+        closed the "one sample for the whole script" gap in principle, verified mechanically (mocked
+        measurements proved two different strings COULD get two different verdicts) — and STILL reported
+        wrong live: Grantha, previously never reported as jiggling, started jiggling too. The comparison
+        itself is not trustworthy evidence — a WIDTH match is necessary but not sufficient for "shaped
+        correctly" (two renderings can agree on total advance while differing in per-glyph vertical
+        placement, which is exactly the "jiggled, inconsistent baseline" symptom, as opposed to the
+        horizontal "too far left" one the comparison was built to catch), and there is no cheap DOM
+        signal available that answers the real question ("did this paint as one composed cluster or as
+        loose codepoints") without literally rendering both ways and eyeballing them.
+     Given no available signal reliably answers "will this shape", the correct move is to stop asking:
+     supplementary-plane text (any script — the same failure is expected, on the same evidence, for
+     every SMP Brahmic script) is ALWAYS routed through the HTML fallback (smpReshape), which is the SAME
+     rendering path the running-sentence line already uses correctly. Simpler, and — unlike either
+     detection strategy — cannot be wrong about a case detection missed. */
+function smpUnshaped(s){ return SMP_RE.test(s||""); }
 /* ── …AND THE FORMS THAT CANNOT SHAPE ARE DRAWN AS HTML INSTEAD ─────────────────────────────────────
    A <foreignObject> carrying an ordinary HTML element shapes through the engine's normal text path,
    which handles these scripts correctly — it is the same path the running sentence uses, and the
@@ -523,10 +516,9 @@ function smpUnshaped(s,f){
    (applySel reads .tok-word/data-tok), dimming, the Typo/Foreign decorations and the delegated click
    handlers all match on those, and a swap that dropped them would trade a shaping bug for a dead
    token. `.fo-form` is what the stylesheet uses to restore the ink.
-   A no-op unless smpUnshaped(s,f) actually reports THIS element's own text failed to shape, so this
-   costs one regex per SMP-free element and one SVG-vs-canvas comparison per SMP-bearing one — never a
-   single verdict extrapolated to every element, which is the bug this replaced (see smpUnshaped's own
-   note: a lucky first sample used to wave every OTHER element through unexamined). */
+   Unconditional now for any element whose own text contains supplementary-plane characters — see
+   smpUnshaped's own note for why detecting the failure instead of assuming it was abandoned. Still a
+   no-op (one regex, no more) for every element that carries none. */
 function smpReshape(root){
   if(!root||!root.querySelectorAll) return;
   const texts=root.querySelectorAll("text");
@@ -537,9 +529,8 @@ function smpReshape(root){
      tooltip itself survives the swap rather than being traded for the bug. */
   const ownText=e=>{ let o=""; for(const n of e.childNodes) if(n.nodeType===3) o+=n.nodeValue; return o; };
   for(const el of texts){ const s=ownText(el);
-    if(!SMP_RE.test(s)) continue;
+    if(!smpUnshaped(s)) continue;
     const cs=getComputedStyle(el), f=cs.font||((cs.fontWeight!=="400"?cs.fontWeight+" ":"")+cs.fontSize+" "+cs.fontFamily);
-    if(!smpUnshaped(s,f)) continue;                         // THIS element's own text shapes fine — leave it as plain SVG, unlike every other element in the render
     const w=_measDOM(s,f); if(!(w>0)) continue;
     const x=parseFloat(el.getAttribute("x"))||0, y=parseFloat(el.getAttribute("y"))||0;
     let asc=parseFloat(cs.fontSize)||15, h=asc*2;
@@ -564,7 +555,6 @@ function smpReshape(root){
     fo.appendChild(d);
     for(const ch of el.children) if(ch.tagName==="title") fo.appendChild(ch.cloneNode(true));   // the hover tooltip belongs to the token, not to the <text> we are discarding
     el.parentNode&&el.parentNode.replaceChild(fo,el); } }
-function _measCanvas(s,f){ try{ _cv.font=f; return _cv.measureText(s||"").width; }catch(_){ return 0; } }
 function _measOneUncached(s,f,extraCss){
   // Mirror CSS letter-spacing for sizes that carry the tracking curve (.node-lbl/.baseword at 14px → .0055em,
   // etc.). Canvas measureText ignored it; SVG getComputedTextLength honours style.letterSpacing. Sizes at the
@@ -587,10 +577,8 @@ function _measOneUncached(s,f,extraCss){
      DOM element is what the HTML fallback (foreignObject) paints — see _measDOM's own note on why this is
      no longer canvas — so it is the width to lay out against. No track/letter-spacing here: smpReshape
      never applies either to the painted div (`font:`+f alone), so matching that means passing `f` as-is. */
-  if(smpUnshaped(s,f)){ const c=_measDOM(s,f); if(c>0) return c; }
+  if(smpUnshaped(s)){ const c=_measDOM(s,f); if(c>0) return c; }
   return w; }
-function _measRaw(s,f){ _mtxt.style.cssText="white-space:pre;font:"+f; _mtxt.textContent=s||"";
-  try{ return _mtxt.getComputedTextLength(); }catch(_){ return 0; } }
 function meas(s,f){ return _measOne(s,f); }
 // Gloss/MGloss-aware measurement: setGlossText wraps every Leipzig abbreviation run (glossAbbrSegments) in its own
 // .glabbr tspan, which turns on font-feature-settings "c2sc"/"onum" (small caps from capitals + old-style figures)
@@ -651,7 +639,7 @@ function refreshFontStacks(){
   // → the column-width cache's every cached measurement is now stale, so force a full rescan rather than trust
   // the (now wrong) cached widths forward.
   const fchg=(LIVE_TOKEN_STACK!==prevT||LIVE_MONO_STACK!==prevM||TOK_MAG!==prevG);   // a size change invalidates exactly what a family change does, and for the identical reason
-  if(fchg){ clearMeasCache(); }   // smpUnshaped(s,f) has no cache of its own to drop — clearMeasCache() alone is enough now, since every string re-measures (and so re-probes) fresh   // …and every cached text width, for the same reason: they were measured in the OLD families
+  if(fchg){ clearMeasCache(); }   // smpUnshaped is a plain regex test now, nothing of its own to invalidate — clearMeasCache() alone is enough   // …and every cached text width, for the same reason: they were measured in the OLD families
   if(fchg && typeof invalidateColW==="function") invalidateColW();
   // …and every renderer's own cached diagram (js/core/document.js's notation-switch cache): stemma/arcs/tree/
   // brackets/outline all measure through this same meas()/WORD_F/NODE_F/POS_F/… family, so a font-stack change
