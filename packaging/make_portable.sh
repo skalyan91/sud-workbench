@@ -71,13 +71,15 @@ strip_dev_fixture() {
 }
 strip_dev_fixture "$RES/appsrc"
 
-# Ship the CORE Noto faces only — Noto Sans regular + italic and Noto Sans Mono, the ones the
-# interface itself renders in (Latin/Greek/Cyrillic), ~5 MB. Every other script's face is fetched on
+# Ship the CORE Noto faces — Noto Sans regular + italic and Noto Sans Mono, the ones the interface
+# itself renders in (Latin/Greek/Cyrillic), ~5 MB — PLUS five STACKING_SCRIPTS faces (Grantha/Javanese/
+# Balinese/Kawi/Zanabazar Square, under 1 MB combined) that must never be left to the on-demand path's
+# own system-font check: see web/styles/fonts.css's note on why. Every OTHER script's face is fetched on
 # first need at runtime, onto machines that can't already draw the script: see web/js/lang/fontload.js
-# and app/fonts.py. That is what takes this bundle from 48 MB to ~7.5 MB (23.4 MB → 4.1 MB zipped) —
+# and app/fonts.py. Stripping down to this set is what takes this bundle from 48 MB to roughly ~8 MB —
 # the script fonts were over nine tenths of the download, for scripts most users never open.
 # The SOURCE tree's web/fonts/ is left untouched; only the built bundle drops these files.
-CORE_FONTS=(notosans.ttf notosans-italic.ttf notosansmono.ttf nithyaranjana.otf)   # nithyaranjana.otf: NOT a Noto face — bundled unconditionally because it isn't on Google Fonts (app/fonts.py's on-demand fetch has nothing to ask for), see web/styles/fonts.css
+CORE_FONTS=(notosans.ttf notosans-italic.ttf notosansmono.ttf nithyaranjana.otf notosansgrantha.ttf notosansjavanese.ttf notosansbalinese.ttf notosanskawi.ttf notosanszanabazarsquare.ttf)   # nithyaranjana.otf: NOT a Noto face — bundled unconditionally because it isn't on Google Fonts (app/fonts.py's on-demand fetch has nothing to ask for). The five notosans<script>.ttf files: bundled unconditionally so fontCovers()'s system-font tofu-probe can never shadow them with an ambiguous same-named local font — see web/styles/fonts.css's own note and FONT_CORE_SCRIPTS in web/js/lang/fontload.js
 FONTDIR="$RES/appsrc/web/fonts"
 if [ -d "$FONTDIR" ]; then
   echo "▶ keeping only the core Noto faces (script faces download on demand)…"

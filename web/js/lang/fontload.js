@@ -64,7 +64,21 @@ if(typeof document!=="undefined"&&document.fonts&&document.fonts.addEventListene
       if(typeof invalidateDiaCache==="function") invalidateDiaCache();   // …the RENDERED diagrams too: the notation-switch cache (js/core/document.js) hands back an SVG laid out with the metrics of whatever face was in force when it was built, so a re-render alone would redraw nothing. Measured: token WIDTHS were identical across a font change while every token's x moved 4-5px, which is exactly a stale cropped diagram being reused
       if(typeof DOC!=="undefined"&&DOC.length&&typeof preserveScroll==="function"&&typeof renderDoc==="function") preserveScroll(renderDoc); },80); }); }   // 80ms: several faces of one document land in a burst (one per script), and each fires its own event — coalesce them into a single re-layout   // 80ms: several faces of one document land in a burst (one per script), and each fires its own event — coalesce them into a single re-layout
 // Scripts the CORE faces already cover, plus the ones with no Noto Sans family of their own.
-const FONT_CORE_SCRIPTS=new Set(["Latin","Greek","Cyrillic","Common","Inherited","Unknown","Braille"]);
+// ⚠ THE FIVE STACKING SCRIPTS (Grantha/Javanese/Balinese/Kawi/Zanabazar_Square) JOINED THIS LIST, and
+// that is a DIFFERENT reason than the rest of it: those five don't lack an on-demand path — they were
+// ON it, and fontCovers() (below) kept skipping the app's own copy for them, silently, because its tofu
+// probe only asks "does anything render this", never "is it the SAME font this app was measured
+// against". A same-named-but-different local font (a different vendor's Grantha, an older subset, …)
+// passes the probe and wins by DOM's own ordinary specificity rules over whatever fontCovers() decided
+// — except it can't disagree with a face THIS PAGE explicitly declares, which is what web/styles/
+// fonts.css now does for these five (see that file's own note — under 1 MB combined, and the files were
+// already vendored and tracked, just never wired up). Being here means docScripts() never calls
+// ensureScriptFont for them, exactly like Latin/Greek/Cyrillic: the font is simply always present and
+// always wins, so there is no "should we fetch" question left to ask, and no ambiguous system font left
+// to lose to. Tibetan (the sixth STACKING_SCRIPTS member, js/lang/translit.js) has no local file to
+// vendor and stays on the ordinary on-demand path below.
+const FONT_CORE_SCRIPTS=new Set(["Latin","Greek","Cyrillic","Common","Inherited","Unknown","Braille",
+  "Grantha","Javanese","Balinese","Kawi","Zanabazar_Square"]);
 // Unicode script name → the family name the font stacks use, where squashing the name doesn't give it.
 // (Everything else derives: "Canadian_Aboriginal" → "Noto Sans Canadianaboriginal", matching the
 // vendored faces; the Google Fonts side wants the spaced form, "Noto Sans Canadian Aboriginal".)

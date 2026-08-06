@@ -71,3 +71,37 @@
      flyout and the lemma-editor prompt title are popups appended straight to <body>, siblings of #doc
      rather than descendants of it. <html> is the one ancestor common to both, and #doc still resolves
      the identical inherited value it always did (see syncSchemeAttr() in js/lang/translit.js). */
+
+  /* FIVE MORE core faces, bundled for a THIRD reason: the on-demand model's own premise — "ask the
+     system first, only fetch if nothing draws it" (fontCovers(), js/lang/fontload.js) — breaks down
+     specifically for these five STACKING_SCRIPTS (Grantha/Javanese/Balinese/Kawi/Zanabazar Square;
+     Tibetan has no local file to bundle and stays on the on-demand path). fontCovers() is a crude tofu
+     probe: it accepts ANY font that draws something non-blank, never checking it's the SAME font this
+     app's own canvas/SVG measurement code was written against. On a machine with some OTHER "Noto Sans
+     Grantha" already registered — a different vendor's copy, an older version, a different subsetting —
+     the probe passes, the app's own copy is never fetched, and every measurement in the diagram (below-
+     token reserve, seam-mark centring, …) ends up correct for THAT font's real metrics while looking
+     wrong to anyone who assumes it's measuring what fontload.js's own comments say it should be. That
+     was live and reproducible this session — every seam-mark centring fix landed self-consistent by
+     construction and still read wrong on screen, because "self-consistent" was never the question; which
+     font was actually resolving was. An @font-face the page itself declares always wins family-name
+     resolution over a same-named system font, in canvas AND in DOM/SVG alike — so bundling these five
+     removes the ambiguity outright rather than chasing another way to measure around it. Under 1 MB
+     combined (996 KB — Grantha 383 KB, Javanese 253 KB, Balinese 193 KB, Kawi 107 KB, Zanabazar Square
+     71 KB), nothing like the 44 MB the on-demand split exists to avoid. The five files already sat
+     vendored, tracked, and UNUSED under web/fonts/ (leftover from before the on-demand architecture) —
+     see CORE_FONTS in packaging/make_bootstrap_app.sh + make_portable.sh, which must keep them when they
+     strip web/fonts/ down to the core set, and FONT_CORE_SCRIPTS in js/lang/fontload.js, which is what
+     stops docScripts() routing these five through ensureScriptFont()/fontCovers() at all now that they
+     don't need to be asked for. */
+  /* Weight: Grantha and Zanabazar Square are STATIC faces (fontTools: no `fvar` table, OS/2
+     usWeightClass 400) — a single Regular weight, `font-weight:400` and plain `format("truetype")`.
+     Javanese/Balinese/Kawi ARE variable (have `fvar`), so those three keep the range + "-variations"
+     format the core faces use. Declaring a 100–900 range or the variations format against a static
+     file is the kind of mismatch a browser can refuse to load on, not merely render wrong — checked
+     per file rather than copied from the core block above. */
+  @font-face{font-family:"Noto Sans Grantha";font-style:normal;font-weight:400;font-display:swap;src:url("../fonts/notosansgrantha.ttf") format("truetype")}
+  @font-face{font-family:"Noto Sans Javanese";font-style:normal;font-weight:100 900;font-display:swap;src:url("../fonts/notosansjavanese.ttf") format("truetype-variations")}
+  @font-face{font-family:"Noto Sans Balinese";font-style:normal;font-weight:100 900;font-display:swap;src:url("../fonts/notosansbalinese.ttf") format("truetype-variations")}
+  @font-face{font-family:"Noto Sans Kawi";font-style:normal;font-weight:100 900;font-display:swap;src:url("../fonts/notosanskawi.ttf") format("truetype-variations")}
+  @font-face{font-family:"Noto Sans Zanabazarsquare";font-style:normal;font-weight:400;font-display:swap;src:url("../fonts/notosanszanabazarsquare.ttf") format("truetype")}
