@@ -663,6 +663,31 @@
   .ctx-sub.ctx-sub-foot{display:flex; flex-direction:column; overflow:hidden; padding-inline:0}   /* the 12px inset moves onto .ctx-sub-scroll/.ctx-sub-footer themselves below — each needs its OWN padding zone so the base .ctx button rule's -7px bleed (calibrated against exactly a 12px parent inset) lands safely inside it instead of overflowing a zero-padding wrapper and getting clipped by that wrapper's own overflow-x:hidden. Do NOT widen the bleed itself to compensate (a ±12px margin was tried here and reached the flyout's true edge, flush — losing the 5px-short-of-the-edge margin every OTHER context menu's hover fill keeps); matching the padding is enough, the existing ±7px trick already does the rest. */
   .ctx-sub.ctx-sub-foot>.ctx-sub-scroll{flex:1 1 auto; min-height:0; overflow-y:auto; overflow-x:hidden; overscroll-behavior:none; padding-inline:12px}
   .ctx-sub.ctx-sub-foot>.ctx-sub-footer{flex:none; padding-inline:12px}   /* the "Open on Wiktionary" link pinned to the flyout's own bottom edge instead of scrolling away with the (often many) senses above it. */
+  /* NO SCROLLBAR OF ANY KIND ON A MENU. Apple's HIG ("Menus" chapter, "Scrolling menu" section) describes
+     exactly one affordance for an overflowing NSMenu: a downward-pointing triangle at the bottom (an
+     upward one at the top, once scrolled) that appears and disappears as the user reaches each end —
+     never a scrollbar, classic OR the free auto-hiding overlay style. This app doesn't implement that
+     triangle affordance (a separate feature, not attempted here), but the absence of any scrollbar is
+     itself real, cited native behaviour, not a look this app is choosing over Apple's own — so every
+     menu-class surface below is exempted from both scrollbar styles.
+     ⚠ `display:none`, not merely a zeroed width, is what actually does it. An UNSTYLED overflow:auto
+     element gets WebKit's free native auto-hiding overlay scrollbar for nothing (see `.doc`'s own note
+     far above this file on why touching any `::-webkit-scrollbar-*` property at all switches an element
+     OUT of that mode and INTO the classic, author-styled one) — so a rule that only zeroed the classic
+     scrollbar's width would still show the overlay one transiently, on hover or mid-scroll, which is
+     not what a real NSMenu ever does. `display:none` removes the affordance outright in both modes.
+     Mac-only, deliberately: WinUI/Fluent menu flyouts are a different native convention — an expanding
+     rail scrollbar genuinely IS how a long Fluent flyout scrolls, and win11-kit's own extensive
+     ::-webkit-scrollbar rules (fluent-chrome.css) are a considered design choice, not an oversight to
+     match this one against. This file loads only on macOS, so putting the rule here is enough — no
+     [data-platform] guard needed, and nothing in it touches fluent-chrome.css or app.css.
+     .langmenu/.langmenu .lmlist/.trmenu/.tdlist are themselves DEFINED in the shared app.css (their box
+     model and colours are identical on both platforms and don't belong duplicated per kit) — but this
+     one property, on these classes, is legitimately mac-only, and app.css declares no
+     ::-webkit-scrollbar rule of its own for any of them to conflict with, so overriding it here rather
+     than forking those shared rules is the smaller change. */
+  .ctx::-webkit-scrollbar,.ctx-sub::-webkit-scrollbar,.ctx-sub-scroll::-webkit-scrollbar,.acmenu::-webkit-scrollbar,
+  .langmenu::-webkit-scrollbar,.langmenu .lmlist::-webkit-scrollbar,.trmenu::-webkit-scrollbar,.tdlist::-webkit-scrollbar{display:none}
   .ctx-sub.defctx .hdr{position:sticky; top:-5px; z-index:1; margin:0 -12px; padding-top:9px; padding-inline-start:12px; background:var(--lg-glass-fill,rgba(245,245,245,.67)); -webkit-backdrop-filter:blur(24px) saturate(180%); backdrop-filter:blur(24px) saturate(180%)}   /* the gender headings ("Masculine"/"Feminine"/…) grouping Wiktionary senses stay pinned to the flyout's top edge while their own group's senses scroll past underneath, like the sticky Wiktionary-link footer above. Scoped to .defctx (the definitions flyout) — the unrelated deep-feature submenu's single header doesn't need this. top/margin mirror the footer's bottom/margin trick to reach the container's true top edge; padding-inline-start (LOGICAL — under RTL a physical padding-left left the heading standing 12px further out than the senses it groups, since .ctx .hdr's own text-align:start had already moved its text to the other side) restores the 12px text inset that the -12px margin (needed for a full-bleed sticky background) would otherwise cancel, since .ctx.defctx .hdr already zeroes the base rule's own left padding in favour of the (now-cancelled) container inset; padding-top compensates the same way for the container's own 5px top inset */
   /* The definitions flyout is the ONE context menu whose rows are PROSE — an Apte or Wiktionary sense runs to a
      clause, not a label — and `.ctx.defctx{min-width:0}` above lets it shrink-to-fit, which for a long sense meant
