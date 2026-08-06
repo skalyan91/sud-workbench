@@ -485,9 +485,23 @@ function _measOne(s,f,extraCss){
    PROBED, never assumed, and memoised per font stack: a WebKit that gains SMP SVG shaping, or any
    other engine, simply reports agreement and nothing below changes behaviour. */
 const SMP_RE=/[\uD800-\uDBFF][\uDC00-\uDFFF]/;
-let _svgSmpOK=null;
+/* ⚠ KEYED BY SCRIPT, NOT ONE GLOBAL ANSWER — reported live as "Kawi is too far left", and it was this
+   cache, not the race described below (which already has its own fix, further down). Whether SVG
+   <text> shapes a given SMP script correctly is a property of WHICH FONT FILE ends up covering it, and
+   that varies BY SCRIPT even though LIVE_TOKEN_STACK (the stack STRING) never changes across an
+   ordinary script switch: Grantha and Kawi are both supplementary-plane, both draw through the SAME
+   ~150-font stack at the SAME magnification, so `fchg` below (which only fires on a LIVE_TOKEN_STACK/
+   TOK_MAG change) never resets between them — yet Grantha resolves to a webfont Google ships that
+   shapes fine, and Kawi resolves to a face this app finds locally installed that does not (see the
+   note below). A single scalar cached Grantha's `true` and handed it straight to Kawi, which needed
+   `false`. Keyed by ORTHO_SCHEME instead — the reset on a real font-stack change (line ~660) now
+   clears the whole map, since THAT genuinely can change every script's answer at once, but switching
+   between two scripts that happen to share a stack string no longer smuggles one's answer to the
+   other. */
+let _svgSmpOK={};
 function svgShapesSMP(){
-  if(_svgSmpOK!==null) return _svgSmpOK;
+  const cached=_svgSmpOK[ORTHO_SCHEME];
+  if(cached!==undefined) return cached;
   // A cluster that MUST shape: a consonant + virama + consonant of whatever SMP script is on screen.
   let cl="";
   for(const sn of (typeof DOC!=="undefined"?DOC:[])){ for(const t of (sn.tokens||[])){
@@ -495,7 +509,8 @@ function svgShapesSMP(){
   if(!cl){ return true; }                                   // nothing SMP on screen → nothing to decide yet
   const svgW=_measRaw(cl,WORD_F), cvW=_measCanvas(cl,WORD_F);
   if(!(svgW>0&&cvW>0)) return true;
-  _svgSmpOK=(Math.abs(svgW-cvW)/Math.max(svgW,cvW))<0.02;   // 2 %: shaped and unshaped differ by 50–120 % here, so this cannot fire on rounding
+  const ok=(Math.abs(svgW-cvW)/Math.max(svgW,cvW))<0.02;   // 2 %: shaped and unshaped differ by 50–120 % here, so this cannot fire on rounding
+  _svgSmpOK[ORTHO_SCHEME]=ok;
   /* ⚠ AND THE ANSWER ARRIVES AFTER THE FIRST LAYOUT HAS ALREADY MEASURED, which is a cache-poisoning
      race and was the whole of the "Kawi is too far left ON PAGE LOAD" report. The probe needs a real
      SMP string to compare, and `t.ortho` is filled by fillOrtho ASYNCHRONOUSLY — so at first layout
@@ -509,11 +524,12 @@ function svgShapesSMP(){
      ~/Library/Fonts, which document.fonts never reports, so nothing invalidated anything.
      Dropping the cache here is the fix — every width taken under the optimistic assumption describes a
      rendering that will not happen — and the re-render is what makes the LAYOUT follow, since the
-     positions already computed from those widths are equally stale. Once only: _svgSmpOK is set above,
-     so this branch cannot be reached a second time. */
-  if(!_svgSmpOK){ clearMeasCache();
+     positions already computed from those widths are equally stale. Once per script: this SCRIPT's
+     entry is set above, so this branch cannot be reached a second time for THIS ORTHO_SCHEME — but a
+     later switch to a different script probes fresh, which is the whole point of the keying change. */
+  if(!ok){ clearMeasCache();
     if(typeof requestAnimationFrame==="function") requestAnimationFrame(()=>{ if(typeof preserveScroll==="function"&&typeof renderDoc==="function") preserveScroll(renderDoc); }); }
-  return _svgSmpOK; }
+  return ok; }
 /* ── …AND THE FORMS THAT CANNOT SHAPE ARE DRAWN AS HTML INSTEAD ─────────────────────────────────────
    A <foreignObject> carrying an ordinary HTML element shapes through the engine's normal text path,
    which handles these scripts correctly — it is the same path the running sentence uses, and the
@@ -657,7 +673,7 @@ function refreshFontStacks(){
   // → the column-width cache's every cached measurement is now stale, so force a full rescan rather than trust
   // the (now wrong) cached widths forward.
   const fchg=(LIVE_TOKEN_STACK!==prevT||LIVE_MONO_STACK!==prevM||TOK_MAG!==prevG);   // a size change invalidates exactly what a family change does, and for the identical reason
-  if(fchg){ clearMeasCache(); _svgSmpOK=null; }   // …and re-probe SVG's SMP shaping: a different face can shape where the last one did not   // …and every cached text width, for the same reason: they were measured in the OLD families
+  if(fchg){ clearMeasCache(); _svgSmpOK={}; }   // …and re-probe SVG's SMP shaping for every script: a stack/size change can shape where the last one did not   // …and every cached text width, for the same reason: they were measured in the OLD families
   if(fchg && typeof invalidateColW==="function") invalidateColW();
   // …and every renderer's own cached diagram (js/core/document.js's notation-switch cache): stemma/arcs/tree/
   // brackets/outline all measure through this same meas()/WORD_F/NODE_F/POS_F/… family, so a font-stack change
