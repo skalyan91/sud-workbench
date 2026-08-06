@@ -172,6 +172,16 @@ _mdiv.setAttribute("aria-hidden","true");
 _mdiv.style.cssText="position:absolute;left:-99999px;top:0;white-space:pre;visibility:hidden;pointer-events:none";
 function _measMountHTML(){ const h=document.documentElement||document.body; if(h&&!_mdiv.isConnected) h.appendChild(_mdiv); }
 function _measDOM(s,f){ _measMountHTML(); _mdiv.style.font=f; _mdiv.textContent=s||""; return _mdiv.getBoundingClientRect().width; }
+/* A HIDDEN PARKING SPOT FOR AN ELEMENT THAT ISN'T ATTACHED YET BUT NEEDS getComputedStyle() TO ANSWER
+   FOR REAL — see smpReshape's own note for exactly which caller needs this and why: renderSentence()
+   calls smpReshape on the freshly-built diagram BEFORE its own caller (document.js) inserts it into
+   #doc, so every class-based CSS rule (the --token-font cascade every token's font actually comes from)
+   has nothing to match against yet, and getComputedStyle() reports empty strings rather than the real
+   values. Reused across calls, like every other _m* measuring element in this file. */
+const _mmount=document.createElement("div");
+_mmount.setAttribute("aria-hidden","true");
+_mmount.style.cssText="position:absolute;left:-99999px;top:0;pointer-events:none;visibility:hidden";
+function _measMountRoot(){ const h=document.documentElement||document.body; if(h&&!_mmount.isConnected) h.appendChild(_mmount); }
 /* THE HTML BASELINE, MEASURED THE ONLY WAY THAT CANNOT DISAGREE WITH WHAT smpReshape PAINTS: an actual
    inline baseline-aligned marker, in an actual live DOM layout, read back with getBoundingClientRect().
    ⚠ smpReshape used to ask CANVAS for this (measureText(s).actualBoundingBoxAscent) on the reasoning
@@ -232,6 +242,7 @@ const _cv=document.createElement("canvas").getContext("2d");
 _measMount(); if(!_msvg.isConnected) document.addEventListener("DOMContentLoaded",_measMount);
 _measMountHTML(); if(!_mdiv.isConnected) document.addEventListener("DOMContentLoaded",_measMountHTML);
 _measMountBase(); if(!_mbase.isConnected) document.addEventListener("DOMContentLoaded",_measMountBase);
+_measMountRoot(); if(!_mmount.isConnected) document.addEventListener("DOMContentLoaded",_measMountRoot);
 _measMountXH(); if(!_mxh.isConnected) document.addEventListener("DOMContentLoaded",_measMountXH);
 /* TOKEN_STACK / MONO_STACK — the BASE family lists (~150 Noto script faces + the CJK/system tail). They are
    NOT written out here any more: the identical two lists are the KIT's own --token-font/--mono-font
@@ -561,9 +572,29 @@ function smpUnshaped(s){ return SMP_RE.test(s||""); }
    token. `.fo-form` is what the stylesheet uses to restore the ink.
    Unconditional now for any element whose own text contains supplementary-plane characters — see
    smpUnshaped's own note for why detecting the failure instead of assuming it was abandoned. Still a
-   no-op (one regex, no more) for every element that carries none. */
+   no-op (one regex, no more) for every element that carries none.
+   ⚠ MUST BE CONNECTED, OR getComputedStyle() BELOW ANSWERS NOTHING. renderSentence() (js/diagram/
+   diagram-render.js) calls this on the diagram it just built, BEFORE ITS OWN CALLER (document.js's
+   diaSentence/buildBlock) inserts that element into the live #doc tree — so at this point `root`, and
+   every descendant, is completely detached. A detached element matches no class-based CSS rule (there
+   is nothing for a selector like `#doc .tok-word` to match against a subtree that isn't #doc's
+   descendant yet), so getComputedStyle(el).font/fontSize/fontFamily all come back "" — confirmed live,
+   not assumed (captured mid-loop against the real diagram: every one of those was empty for a token's
+   own form text). Reported live as SMP tokens seated visibly too low: the width/ascent this function
+   measures off that blank/garbage font string disagrees with the REAL font the div ends up painting in
+   moments later, via ordinary CSS inheritance, once #doc's real insertion actually happens — two
+   different fonts, one measured against, one painted in, the same class of bug this whole file has
+   spent the session chasing, just from a cause nothing here had considered. Mounting `root` into
+   `_mmount` (a hidden, always-present parking element — see its own note) TEMPORARILY, and ONLY if it
+   isn't already connected — a re-run on an already-live diagram (e.g. after an edit) must not move
+   anything that's already correctly placed — makes every getComputedStyle() below answer for real; the
+   `finally` detaches it again exactly as found, since the actual caller still owns where this element
+   belongs and inserts it itself moments later. */
 function smpReshape(root){
   if(!root||!root.querySelectorAll) return;
+  const mounted=!root.isConnected;
+  if(mounted){ _measMountRoot(); _mmount.appendChild(root); }
+  try{
   const texts=root.querySelectorAll("text");
   /* ⚠ THE FORM IS THE ELEMENT'S OWN TEXT NODES, NOT ITS `textContent`. An SVG hover tooltip is a
      <title> CHILD (svgTip — the title ATTRIBUTE surfaces nothing on SVG), so `textContent` returns the
@@ -588,7 +619,8 @@ function smpReshape(root){
     d.textContent=s;
     fo.appendChild(d);
     for(const ch of el.children) if(ch.tagName==="title") fo.appendChild(ch.cloneNode(true));   // the hover tooltip belongs to the token, not to the <text> we are discarding
-    el.parentNode&&el.parentNode.replaceChild(fo,el); } }
+    el.parentNode&&el.parentNode.replaceChild(fo,el); }
+  } finally { if(mounted&&root.parentNode===_mmount) _mmount.removeChild(root); } }
 function _measOneUncached(s,f,extraCss){
   // Mirror CSS letter-spacing for sizes that carry the tracking curve (.node-lbl/.baseword at 14px → .0055em,
   // etc.). Canvas measureText ignored it; SVG getComputedTextLength honours style.letterSpacing. Sizes at the
