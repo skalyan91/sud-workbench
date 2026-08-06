@@ -177,11 +177,22 @@ function _measDOM(s,f){ _measMountHTML(); _mdiv.style.font=f; _mdiv.textContent=
    calls smpReshape on the freshly-built diagram BEFORE its own caller (document.js) inserts it into
    #doc, so every class-based CSS rule (the --token-font cascade every token's font actually comes from)
    has nothing to match against yet, and getComputedStyle() reports empty strings rather than the real
-   values. Reused across calls, like every other _m* measuring element in this file. */
+   values. Reused across calls, like every other _m* measuring element in this file.
+   ⚠ MUST BE A DESCENDANT OF #doc SPECIFICALLY, NOT JUST "connected to some document" — reported live as
+   "SMP scripts are no longer 1.5×" after the first cut of this mount (parented under documentElement/
+   body). `.tok-word{font-size:calc(15px * var(--script-mag,1)); font-family:var(--token-font)}`
+   (app.css) — the ENTIRE magnified/script font is CSS custom-property driven, and both properties are
+   set on #doc itself (syncSchemeAttr, js/lang/translit.js), not :root — a mount point OUTSIDE #doc
+   inherits neither, so var(--script-mag,1) silently resolves to its 1 fallback instead of the real 1.5.
+   `document.getElementById("doc")` is re-checked on every call rather than cached once, because the
+   very first calls (before #doc's own markup has necessarily been reached, or in any harness that
+   builds it later) have nothing to find yet and must fall through to a plain top-level mount for that
+   one call — re-parenting into #doc the moment it exists corrects every call after. */
 const _mmount=document.createElement("div");
 _mmount.setAttribute("aria-hidden","true");
 _mmount.style.cssText="position:absolute;left:-99999px;top:0;pointer-events:none;visibility:hidden";
-function _measMountRoot(){ const h=document.documentElement||document.body; if(h&&!_mmount.isConnected) h.appendChild(_mmount); }
+function _measMountRoot(){ const doc=document.getElementById("doc"), h=doc||document.documentElement||document.body;
+  if(h&&_mmount.parentNode!==h) h.appendChild(_mmount); }
 /* THE HTML BASELINE, MEASURED THE ONLY WAY THAT CANNOT DISAGREE WITH WHAT smpReshape PAINTS: an actual
    inline baseline-aligned marker, in an actual live DOM layout, read back with getBoundingClientRect().
    ⚠ smpReshape used to ask CANVAS for this (measureText(s).actualBoundingBoxAscent) on the reasoning
