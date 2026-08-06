@@ -172,6 +172,27 @@ _mdiv.setAttribute("aria-hidden","true");
 _mdiv.style.cssText="position:absolute;left:-99999px;top:0;white-space:pre;visibility:hidden;pointer-events:none";
 function _measMountHTML(){ const h=document.documentElement||document.body; if(h&&!_mdiv.isConnected) h.appendChild(_mdiv); }
 function _measDOM(s,f){ _measMountHTML(); _mdiv.style.font=f; _mdiv.textContent=s||""; return _mdiv.getBoundingClientRect().width; }
+/* CAP-HEIGHT, THE CSS WAY — CSS Values/Units L4's `cap` unit resolves to "the font's own cap-height" through
+   the SAME font-matching DOM/SVG text painting already goes through, so unlike every canvas-measured
+   metric above and below, this one CANNOT disagree with what actually paints: there is no second
+   resolution step to diverge. Replaces the seam-mark centring math's earlier ink-based attempts (measure
+   some sample character's actual ink extent), which chased the wrong target twice over — first because
+   canvas's own resolution could differ from DOM's for an ambiguous family name, and even once that was
+   fixed by moving to _mtxt/getBBox(), because ink-centroid is NOISY per glyph: an Indic akshara with a
+   deep subjoined consonant reads its "middle" far lower than one without, so the answer swung with
+   whichever token happened to be sampled — Grantha too high, Javanese too low, on the SAME formula.
+   Reported by name ("the middle of the CAP HEIGHT"): what was wanted was never ink-centroid at all, but
+   the FONT's own cap-height — a stable, single-valued metric independent of which glyph is drawn, exactly
+   what `cap` was built to answer. Probed live in the shipping WKWebView (CSS.supports("width","1cap") →
+   true) before relying on it. `width:1cap` (not height — the box's OWN block axis holds font-size, and a
+   percentage/unit width against an ancestor with no % context would be meaningless; the INLINE axis has
+   no such ambiguity) resolves against the element's own font-size/font-family, read back via
+   getComputedStyle — an ordinary DOM measurement, not a canvas one. */
+const _mcap=document.createElement("div");
+_mcap.setAttribute("aria-hidden","true");
+_mcap.style.cssText="position:absolute;left:-99999px;top:0;height:0;overflow:visible;visibility:hidden;pointer-events:none;width:1cap";
+function _measMountCap(){ const h=document.documentElement||document.body; if(h&&!_mcap.isConnected) h.appendChild(_mcap); }
+function capHeightPx(font){ _measMountCap(); _mcap.style.font=font; return parseFloat(getComputedStyle(_mcap).width)||0; }
 // gwTieBox/descent/xHeight (below) stayed on canvas measureText rather than moving to the SVG path above: all
 // three measure a FIXED, script-independent reference glyph (U+203F undertie; Latin "gjpqy"/"x" for vertical
 // metrics) that resolves to the same Latin-covering face — usually the stack's plain "Noto Sans" — no matter
@@ -182,6 +203,7 @@ function _measDOM(s,f){ _measMountHTML(); _mdiv.style.font=f; _mdiv.textContent=
 const _cv=document.createElement("canvas").getContext("2d");
 _measMount(); if(!_msvg.isConnected) document.addEventListener("DOMContentLoaded",_measMount);
 _measMountHTML(); if(!_mdiv.isConnected) document.addEventListener("DOMContentLoaded",_measMountHTML);
+_measMountCap(); if(!_mcap.isConnected) document.addEventListener("DOMContentLoaded",_measMountCap);
 /* TOKEN_STACK / MONO_STACK — the BASE family lists (~150 Noto script faces + the CJK/system tail). They are
    NOT written out here any more: the identical two lists are the KIT's own --token-font/--mono-font
    (macos-kit/mac-tokens.css, redeclared by the Fluent kit), a second hand-maintained copy in JS could only
@@ -384,34 +406,24 @@ function scriptAscentEm(){
   const fam=(typeof fontStackName==="function"&&ORTHO_SCHEME)?("'"+fontStackName(ORTHO_SCHEME)+"', "):"";
   try{ _cv.font="100px "+fam+LIVE_TOKEN_STACK; const m=_cv.measureText(ch);
     const a=m.fontBoundingBoxAscent; return (a>0&&isFinite(a))?a/100:1; }catch(_){ return 1; } }
-/* HOW FAR THE VISUAL MIDPOINT OF A REAL SCRIPT CHARACTER'S INK sits above the baseline, as a ratio of size.
-   ⚠ STILL WRONG FOR GRANTHA AFTER THE "REAL CHARACTER" FIX ABOVE (reported live, seam marks still sat at
-   cap-height, not centred) — because canvas's font-matcher is a SEPARATE resolution step from the one that
-   paints the SVG glyph beside the mark, and it can resolve the identical ambiguous family name ("Noto Sans
-   Grantha", one system-installed, one the app would fetch) to a DIFFERENT underlying FILE regardless of
-   WHICH character is asked for. Picking a real character (previous cut) closes the "wrong face entirely"
-   failure mode (asking a script font for "m", which it may not cover, and getting some unrelated fallback's
-   metrics) but not this one — both failure modes were live for Grantha, and only the first got fixed.
-   `fontBoundingBoxAscent/Descent` (a font EM-box property) has no SVG DOM equivalent, so there is no way to
-   ask "what does this FONT'S own vertical centre look like" without canvas. What CAN be asked without it:
-   what does this CHARACTER'S own ink look like, through the SAME element (_mtxt) that paints it — exactly
-   the move stackDropExtra already made for descent alone. Trading the font's abstract EM-box for the real
-   character's ink bounds changes what "centred" means slightly (ink-centre vs design-centre), but ink is
-   arguably the more honest answer to "does this look centred" anyway, and it can no longer disagree with
-   the SVG paint by construction — there is no second resolution step left. */
+/* HALF THE FONT'S OWN CAP-HEIGHT, above the baseline, as a ratio of size — via the CSS `cap` unit
+   (capHeightPx, above), not ink.
+   ⚠ TWO EARLIER CUTS BOTH MEASURED INK, AND BOTH WERE WRONG, in OPPOSITE directions on report (Grantha
+   too high, Javanese too low — the same formula, so not a sign bug, a NOISE bug). The first sampled a
+   bare "m" (wrong face entirely for a script font with no Latin coverage); the second sampled a REAL
+   script character's ink extent through _mtxt/getBBox(), closing the face-resolution gap but not the
+   real problem: ink-centroid is a property of WHICH GLYPH happens to be sampled, not of the font. An
+   akshara with a deep subjoined consonant reads its ink "middle" far lower than a plain one does, so the
+   answer swung with whichever token the DOC-scan happened to land on first — different for every
+   document, unrelated to what "centred" is supposed to mean. What was actually wanted, asked for by
+   name: "the middle of the CAP HEIGHT" — a single-valued FONT metric, not a per-glyph ink measurement.
+   `cap` answers exactly that, through the same font resolution DOM/SVG painting already uses, so it
+   can't newly disagree with the paint the way canvas could, and it can't be noisy the way ink was —
+   every glyph in the font shares one cap-height. */
 function scriptMidEm(){
   if(TOK_MAG===1) return 0;
-  let ch="";
-  outer: for(const s of (typeof DOC!=="undefined"?DOC:[])){ for(const t of (s.tokens||[])){
-      const o=t.ortho||""; for(const c of o){ if(c>" "&&!/[ -ɏ]/.test(c)){ ch=c; break outer; } } } }
-  if(!ch) return 0;
-  try{
-    _mtxt.style.cssText="white-space:pre;font:100px "+scriptFamilyPrefix()+LIVE_TOKEN_STACK;
-    _mtxt.textContent=ch;
-    const bbox=_mtxt.getBBox();
-    const inkAscent=-bbox.y, inkDescent=bbox.y+bbox.height;   // ink top / ink bottom, relative to the y=0 baseline
-    return (inkAscent+inkDescent)>0?(inkAscent-inkDescent)/200:0;
-  }catch(_){ return 0; } }
+  const cap=capHeightPx("100px "+scriptFamilyPrefix()+LIVE_TOKEN_STACK);
+  return cap>0?cap/200:0; }
 // gloss-tier measurement fonts — must match the CSS at .gloss / .gloss[data-tier=…]: lexical gloss now shares
 // MGloss's own upright 13.2px (matches --stext-fs, the block-initial sentence size); MSeg is 15px italic (word-like).
 // Used to size token/node slots so a wide gloss can't crowd its neighbour (item 13).
@@ -678,20 +690,13 @@ function refreshFontStacks(){
 // is ("form" / "translit" / "mseg"), the one thing the centring pass can't work out for itself and what the
 // stylesheet colours by. The mark always renders upright (.seam-mark) — it belongs to the seam rather than to
 // either side of it — but takes its own row's foreground colour, so it reads at the strength that row is written in.
-// The mark's OWN ink vertical-centre, in px, at the size it will actually be drawn — measured through the
-// SAME live _mtxt element that paints it, in ITS OWN font (never script-prefixed: a seam mark is Latin
-// punctuation, not part of the word, and a script font that doesn't cover it falls through to whatever
-// LIVE_TOKEN_STACK resolves it to — see svgSeamMark's own note for why that fallback face is the one that
-// must be measured, not the word's). Returns an ABSOLUTE offset (unlike scriptMidEm's 100px-reference
-// ratio), since the caller already knows the mark's exact drawn size and has no reference scale to divide
-// out.
-function markMidPx(ch,font){
-  try{
-    _mtxt.style.cssText="white-space:pre;font:"+font;
-    _mtxt.textContent=ch;
-    const bbox=_mtxt.getBBox();
-    return (-bbox.y-(bbox.y+bbox.height))/2;   // (ink top − ink bottom)/2, both relative to the y=0 baseline
-  }catch(_){ return 0; } }
+// Half the MARK's OWN cap-height, in px, at the size it will actually be drawn — its OWN font (never
+// script-prefixed: a seam mark is Latin punctuation, not part of the word, and a script font that
+// doesn't cover it falls through to whatever LIVE_TOKEN_STACK resolves it to — see svgSeamMark's own
+// note for why that fallback face is the one that must be asked, not the word's). A FONT metric, not a
+// glyph one (see scriptMidEm's own note on why cap-height replaced ink here) — so, unlike the two ink-
+// based cuts this replaced, it no longer needs the actual mark TEXT at all, only its font.
+function markMidPx(font){ return capHeightPx(font)/2; }
 function svgSeamMark(parent,tk,cx,y,halfEnd,font,boxes,halfStart,row){ if(!parent) return;
   /* ⚠ A SEAM MARK IS NOT PART OF THE WORD, so the ornamental magnification does not reach it. It is
      punctuation ABOUT the word — "this is where the orthographic word breaks" — set in the app's own
@@ -700,24 +705,24 @@ function svgSeamMark(parent,tk,cx,y,halfEnd,font,boxes,halfStart,row){ if(!paren
      GLOSS_F, all unmagnified), so that is the one row this un-scales; the offset arithmetic below then
      measures the mark in the face it is actually drawn in, or the mark and the gap it is placed in
      would disagree. */
-  let f=font.replace(/^italic\s+/,""), wordPx=0;
+  let f=font.replace(/^italic\s+/,""), wordPx=0, markY=y;
   const markMag=row==="form"&&TOK_MAG!==1;
   if(markMag){
     f=f.replace(/(?:^|\s)(\d+(?:\.\d+)?)px/,(mm,px)=>{ wordPx=parseFloat(px); return " "+(wordPx/TOK_MAG)+"px"; }).replace(/^\s*\d+\s+/,"").trim();
-  }
-  [[seamPost(tk),1,halfEnd,"",seamPostToks(tk)],[seamPre(tk),-1,halfStart!=null?halfStart:halfEnd,"",seamPreToks(tk)],[seamMid(tk),1,halfEnd," seam-mid",seamMidToks(tk)]].forEach(([m,side,half,extra,toks])=>{
-    if(!m) return;
     /* ⚠ AND THE MARK IS RE-CENTRED ON THE WORD IT SITS BESIDE, NOT LEFT ON ITS BASELINE — using EACH
-       FONT'S OWN centre, not one borrowed from the other. A first cut shared TOK_MID (the WORD's own
+       FONT'S OWN cap-height, not one borrowed from the other. A first cut shared TOK_MID (the WORD's own
        script-family ratio) between both terms, reasoning "the mark is measured in the face it is actually
        drawn in" — true of its WIDTH (meas() below), false of this: the mark's face is whatever
        LIVE_TOKEN_STACK falls through to for "-"/"꞊" (almost never the script family a Grantha/Javanese/…
        word renders in), so applying the WORD's centring ratio to the MARK's own size answered a question
-       about the wrong font. Reported live: Grantha seam marks stayed at cap-height after that fix — the
-       shift it computed was real but tiny, because TOK_MID (a Grantha ratio) has no reason to resemble
-       the generic fallback face's own ratio. `markMidPx(m,f)` asks the MARK's own question in the MARK's
-       own (already-unmagnified) font; TOK_MID×wordPx asks the WORD's, at the word's magnified size. */
-    const markY=markMag?(y-TOK_MID*wordPx+markMidPx(m,f)):y;
+       about the wrong font. `markMidPx(f)` asks the MARK's own question in the MARK's own (already-
+       unmagnified) font; TOK_MID×wordPx asks the WORD's, at the word's magnified size. A font metric now
+       (capHeightPx), computed ONCE here rather than per mark-slot below — see scriptMidEm's own note for
+       why ink (which WOULD have varied per mark character) was replaced. */
+    markY=y-TOK_MID*wordPx+markMidPx(f);
+  }
+  [[seamPost(tk),1,halfEnd,"",seamPostToks(tk)],[seamPre(tk),-1,halfStart!=null?halfStart:halfEnd,"",seamPreToks(tk)],[seamMid(tk),1,halfEnd," seam-mid",seamMidToks(tk)]].forEach(([m,side,half,extra,toks])=>{
+    if(!m) return;
     const w=meas(m,f), x=cx+(RTL?-side:side)*(half+w/2);
     const e=E("text",{class:"seam-mark"+extra,x:x,y:markY,"text-anchor":"middle"});   // anchored on its own CENTRE, never start/end: those two are relative to the inline base direction, so under RTL they'd flip and hang the mark back over the very text it sits beside
     e.style.font=f; e.textContent=m; e.dataset.seamRow=row||"form"; if(toks)e.dataset.seamToks=toks; parent.appendChild(e);   // the row is what the centring pass measures BY (mid marks) and what the stylesheet colours by (all of them), so every mark carries it; data-seam-toks names the two tokens the seam joins, which is what applySel gives the accent from
