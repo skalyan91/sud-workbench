@@ -407,14 +407,19 @@ function scriptFamilyPrefix(){ return (typeof fontStackName==="function"&&ORTHO_
    is actually on screen. belowGap()'s magnification term only ever compensates for the font being
    BIGGER, never for a subjoined consonant genuinely reaching DEEPER — the same gap .stext-stacked exists
    to close for the running line, here for the diagram's own below-token stack (POS/translit/gloss).
-   Scoped to STACKING_SCRIPTS (js/lang/translit.js, the same set .stext-stacked uses) — an everyday Indic
-   running hand has no such reach, and adding this to belowGap() for every script would just open air
-   nothing needs. Measured against the DEEPEST ink actually on screen, not one sample character — same
-   reasoning as scriptLiftEm()'s own ascent measurement: a subjoined cluster only reaches its full depth
-   once shaped as a whole word. Returns the EXTRA px beyond what descent(WORD_F) already gives, so
-   belowGap() can simply add it; 0 outside a stacking script or with nothing yet to measure. Cached into
-   STACK_DROP by refreshFontStacks(), like TOK_ASC/scriptLiftEm() beside it — belowGap() runs far too
-   often (every renderer's draw AND reserve) to re-scan the whole document on each call. */
+   Scoped to DIAGRAM_STACKING_SCRIPTS (js/lang/translit.js) rather than STACKING_SCRIPTS itself — an
+   everyday Indic running hand has no such reach, and adding this to belowGap() for every script would
+   just open air nothing needs. DIAGRAM_STACKING_SCRIPTS is STACKING_SCRIPTS minus Tibetan: see its own
+   comment for the live + hidden-window measurement showing Tibetan's real subjoined depth, under the
+   correctly-stacking Noto Serif Tibetan this app now bundles, needs no reserve beyond what belowGap()'s
+   own magnification term already gives every 1.5×-scaled script — Tibetan still belongs in
+   STACKING_SCRIPTS itself (.stext-stacked, the running-sentence view, still needs it). Measured against
+   the DEEPEST ink actually on screen, not one sample character — same reasoning as scriptLiftEm()'s own
+   ascent measurement: a subjoined cluster only reaches its full depth once shaped as a whole word.
+   Returns the EXTRA px beyond what descent(WORD_F) already gives, so belowGap() can simply add it; 0
+   outside a stacking script or with nothing yet to measure. Cached into STACK_DROP by
+   refreshFontStacks(), like TOK_ASC/scriptLiftEm() beside it — belowGap() runs far too often (every
+   renderer's draw AND reserve) to re-scan the whole document on each call. */
 /* ⚠ SVG-MEASURED, NOT CANVAS — this is exactly the ambiguous-family-name trap the _measDOM comment above
    describes for Grantha: fontCovers() finds LOCAL system coverage and skips the app's own download, and
    canvas's font matcher and the SVG text-layout engine painting the diagram can independently resolve
@@ -428,7 +433,7 @@ function scriptFamilyPrefix(){ return (typeof fontStackName==="function"&&ORTHO_
    directly, measured through the SAME element (and so the SAME font resolution) meas()/measGloss() paint
    with. No capability lost, unlike those three. */
 function stackDropExtra(){
-  if(!(typeof STACKING_SCRIPTS!=="undefined" && STACKING_SCRIPTS.has(ORTHO_SCHEME))) return 0;
+  if(!(typeof DIAGRAM_STACKING_SCRIPTS!=="undefined" && DIAGRAM_STACKING_SCRIPTS.has(ORTHO_SCHEME))) return 0;
   try{
     _mtxt.style.cssText="white-space:pre;font:100px "+scriptFamilyPrefix()+LIVE_TOKEN_STACK;
     let maxInk=-1;
