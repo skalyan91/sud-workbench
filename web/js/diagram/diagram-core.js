@@ -265,35 +265,32 @@ function domBaseline(s,f){ _measMountBase(); _mbase.style.font=f; _mbaseText.tex
      after the size token rather than simply prepended — prepending it was tried first and left canvas
      silently measuring against a stale font, which is why the very first cut of this floor measured no
      different for the shallow and deep strings either. */
-  let canvasFloor=0,fontDescent=0;
+  let canvasFloor=0;
   try{
     const prefix=(typeof scriptFamilyPrefix==="function")?scriptFamilyPrefix():"";
     const pf=prefix?f.replace(/(\d+(?:\.\d+)?px\s+)/,"$1"+prefix):f;
-    _cv.font=pf; const m=_cv.measureText(s||"");
-    canvasFloor=a+(m.actualBoundingBoxDescent||0);
-    fontDescent=m.fontBoundingBoxDescent||0;
+    _cv.font=pf; canvasFloor=a+(_cv.measureText(s||"").actualBoundingBoxDescent||0);
   }catch(_){}
   const h=Math.max(c.height,inkBottom,canvasFloor);
-  /* ⚠ SHORTENING `asc` MOVED THE WRONG THING, ON REPORT — "pushed the letters down even further" the
-     moment it shipped. `align-items:flex-start` plants the text at the box's own top, and that top is
-     `fo.y = origY - asc` — so shrinking `asc` moves the box's top DOWN, and because the text is seated
-     RELATIVE TO the box's own top (not to `origY` directly), the text — baseline included — moves down
-     WITH it. Verified live against a fixed target baseline: `asc` shortened by 12 moved the reader's own
-     reported conjunct's ink bottom from 7px above target to 19px above (i.e. 12 CLOSER to whatever sits
-     below), the opposite of the intended fix. `asc` LENGTHENED by the same 12 moves the same ink to 5px
-     BELOW target — comfortably further from the floor, confirmed by the same harness, which is why the
-     sign is flipped here rather than the lever abandoned: growing `asc` (not shrinking it) is what pulls
-     the glyph away from whatever sits below the row, exactly as intended, and still without touching
-     `height` — a `fo.y` that sits higher, over an unchanged-height box, is a bottom edge that ends up
-     lower relative to the (now higher) glyph, same arithmetic as before with the sign the other way
-     round. `fontDescent` is unchanged in meaning: how much of the font's own ascent-heavy line-height:
-     normal split is being borrowed, only now added rather than subtracted. Scoped to
-     DIAGRAM_STACKING_SCRIPTS, as before. */
-  let ascOut=a>0?a:px;
-  if(typeof DIAGRAM_STACKING_SCRIPTS!=="undefined" && typeof ORTHO_SCHEME!=="undefined" && DIAGRAM_STACKING_SCRIPTS.has(ORTHO_SCHEME)){
-    ascOut=ascOut+fontDescent;
-  }
-  return { asc: ascOut, height: h>0?h:px*2 }; }   // a<=0/h<=0 (measurement failed, or an empty string) falls back to the font's own nominal size, the same floor smpReshape's own defaults already used
+  /* ⚠ TOUCHING `asc` AT ALL WAS THE WRONG MOVE — TWO ROUNDS OF IT, IN BOTH DIRECTIONS, CONFIRM THE SAME
+     THING: `asc` is the ONLY quantity here that moves the REAL, PAINTED position of the glyph (verified:
+     shortening it pushed the ink down, on report; lengthening it pulled the ink up, but "too high" and a
+     NEW clipping report followed just as fast). `height`, by contrast, was verified live to change
+     NOTHING about where the ink paints — three foreignObjects built with the SAME asc (29, unmodified)
+     and heights of 45, 100 and 20 all painted the reader's own reported conjunct at the IDENTICAL
+     absolute position, because `foreignObject.tok-word,…{overflow:visible}` (app.css) means the box's
+     own declared bounds never constrain anything drawn inside it. That reframes every round of this
+     investigation: the "box too short" reports were never about real collision with whatever sits below
+     the row — the glyph's actual paint position never moved during any of the height-only fixes — they
+     were about whether THIS element's own declared bounding box, as DevTools shows it, visually encloses
+     its own content. `asc` was never the right lever for that question, because it's the one thing here
+     that DOES move the real glyph — anything asked of it necessarily also moves the glyph relative to
+     `origY`, and hence relative to whatever else in the row is anchored there without it, which is
+     exactly the "too high" / misalignment this asc-adjustment round produced. Reverted: `asc` is once
+     again exactly `a`, unadjusted, for every script alike; only `height` (still floored by canvasFloor
+     for a deep DIAGRAM_STACKING_SCRIPTS conjunct, unaffected by any of this) grows to make the box's own
+     declared bounds match its content, with zero effect on where anything actually paints. */
+  return { asc: a>0?a:px, height: h>0?h:px*2 }; }   // a<=0/h<=0 (measurement failed, or an empty string) falls back to the font's own nominal size, the same floor smpReshape's own defaults already used
 /* X-HEIGHT, THE CSS WAY — CSS's `ex` unit (ancient — CSS1 — unlike the L4 `cap` unit this replaced)
    resolves to "the font's own x-height" through the SAME font-matching DOM/SVG text painting already
    goes through, so unlike every canvas-measured metric above and below, this one CANNOT disagree with
