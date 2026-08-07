@@ -653,6 +653,36 @@ function scriptFamilyPrefix(){ return (typeof fontStackName==="function"&&ORTHO_
    function only ever needed actualBoundingBoxDescent — pure INK depth — which _mtxt.getBBox() gives
    directly, measured through the SAME element (and so the SAME font resolution) meas()/measGloss() paint
    with. No capability lost, unlike those three. */
+/* ⚠ CHROME IS THE COMPENSATION TARGET FOR GRANTHA, ON REQUEST — canvas fixed getBBox()'s content-blind
+   constant (stackDropExtra's own Kawi/Balinese/Javanese/Grantha branch below), but canvas's OWN
+   actualBoundingBoxDescent still disagrees between engines for a genuinely deep Grantha conjunct: measured
+   live against samples/brihat_jataka.conllu (a real Chrome-vs-shipping-WKWebView comparison, not a
+   synthetic probe), a real triconsonantal stack — Ca+virama+Ka+virama+Ta+vowel-sign+anusvāra — shapes to
+   166.100/100em in Chrome (Skia/HarfBuzz) and only 80.891/100em in WKWebView (CoreText) for the IDENTICAL
+   string through the SAME canvas API. That is not a measurement artefact (both read via the one API) — it
+   is the two engines' own shapers genuinely disagreeing about how deep to draw this conjunct in this
+   Google-vendored variable font, and it is what the reported "gap between tokens and arcs, worse in Safari"
+   traces to: every wrapped row's height folds in STACK_DROP (belowReserveH, diagram-wrap.js), and each
+   row's own start inherits the previous row's bottom, so a per-row shortfall compounds — measured, 22.5px
+   apart by the second wrapped row of this same document from a ~9-10px per-row STACK_DROP gap.
+   GRANTHA_CALIB_STR/GRANTHA_CALIB_CHROME pin that one conjunct's Chrome-measured depth as a portable
+   reference; every engine measures its OWN canvas descent for that fixed string, live, and — ONLY where
+   this engine's own reading falls genuinely short of Chrome's — floors the document's own measured max up
+   to the reference value (see stackDropExtra's own note beside the floor for why a floor, not a ratio: a
+   multiplicative correction was tried first and measured to OVERSHOOT, because the calibration conjunct's
+   own shaping shortfall doesn't transfer to whatever different cluster a given document's own scan finds
+   deepest). Self-calibrating rather than a hardcoded UA-sniffed constant: an engine that already matches
+   or exceeds Chrome on the calibration conjunct is left untouched entirely, and a future WebKit shaping
+   change that closes the gap on its own switches this off by itself rather than needing a version-gated
+   constant revisited by hand.
+   ⚠ NOT EXACT for every document — a floor guarantees at least as much reserve as this one real,
+   already-observed conjunct needs, not a precise reconstruction of what Chrome would measure for whatever
+   THIS document's own worst cluster happens to be; it is a compensation, not a live Chrome oracle (none
+   exists at runtime in the shipped app). Scoped to Grantha alone, by the same by-NAME reasoning every
+   other branch here uses — Kawi/Balinese/Javanese's own canvas routing was independently verified with no
+   remaining cross-engine gap of this kind, and calibrating them against a Grantha-specific conjunct would
+   be unjustified. */
+const GRANTHA_CALIB_STR="𑌪𑌙𑍍𑌕𑍍𑌤𑌿𑌂", GRANTHA_CALIB_CHROME=166.10000610351562;
 function stackDropExtra(){
   if(!(typeof DIAGRAM_STACKING_SCRIPTS!=="undefined" && DIAGRAM_STACKING_SCRIPTS.has(ORTHO_SCHEME))) return 0;
   try{
@@ -728,6 +758,24 @@ function stackDropExtra(){
         }
         if(d>maxInk) maxInk=d; } }
     if(maxInk<0) return 0;
+    /* ⚠ A FLOOR, NOT A RATIO — the multiplicative version tried first (chromeRef/liveCalib, applied to
+       maxInk) measured WORSE, not better: live against this same document, WKWebView's OWN worst cluster
+       (123.5/100, a DIFFERENT conjunct than the calibration string) scaled by the calibration ratio
+       (166.1/80.891≈2.053) landed at 253.5/100 — a document-level STACK_DROP of 51.67, overshooting
+       Chrome's own 31.97 by 62%, because the ratio measured on the calibration conjunct's own shaping
+       shortfall doesn't transfer to a DIFFERENT cluster's own (unknown, unmeasured) shortfall. A floor
+       sidesteps that: it doesn't try to infer how badly THIS document's own worst cluster is under-shaped,
+       it simply guarantees at least as much reserve as a real, already-observed Grantha conjunct needs in
+       Chrome. Verified live: this document's own Chrome-measured maxInk (166.100) already equals
+       GRANTHA_CALIB_CHROME (the calibration string IS this document's Chrome-side worst case), so flooring
+       WKWebView's 123.5 up to 166.1 reproduces Chrome's 31.97 exactly, not just closer to it. */
+    if(ORTHO_SCHEME==="Grantha"){   // see GRANTHA_CALIB_STR's own note above this function
+      const cm=_cv.measureText(GRANTHA_CALIB_STR).actualBoundingBoxDescent||0;
+      // only floor where THIS engine demonstrably under-shapes the calibration conjunct relative to Chrome
+      // (2% slack for float noise) — an engine already at or above Chrome's own number (Chrome itself, or
+      // any future WebKit that closes the gap) is left alone, never pulled DOWN toward the floor either.
+      if(cm>0 && cm<GRANTHA_CALIB_CHROME*0.98 && maxInk<GRANTHA_CALIB_CHROME) maxInk=GRANTHA_CALIB_CHROME;
+    }
     const px=parseFloat(WORD_F)||TOK_REF_SIZE*TOK_MAG;
     return Math.max(0,(maxInk/100)*px-descent(WORD_F));
   }catch(_){ return 0; } }
