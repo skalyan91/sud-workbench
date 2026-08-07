@@ -220,7 +220,25 @@ function _measMountBase(){ const h=document.documentElement||document.body; if(h
 function domBaseline(s,f){ _measMountBase(); _mbase.style.font=f; _mbaseText.textContent=s||"";
   const c=_mbase.getBoundingClientRect(), m=_mbaseMark.getBoundingClientRect();
   const px=parseFloat(f)||15, a=m.top-c.top;
-  return { asc: a>0?a:px, height: c.height>0?c.height:px*2 }; }   // a<=0/height<=0 (measurement failed, or an empty string) falls back to the font's own nominal size, the same floor smpReshape's own defaults already used
+  /* ⚠ `c.height` ALONE UNDER-MEASURES A DEEP CONJUNCT, ON REPORT — it is the CONTAINER's own box, sized
+     by `line-height:normal` (see _mbase's own style above), and line-height:normal is exactly the
+     quantity this file has already found disagreeing between engines for these faces (the align-items
+     saga two commits back was the same root cause, one layer up). A real subjoined-consonant stack's
+     ink can extend BELOW whatever a "normal" line box reserves — the glyph outline doesn't consult
+     line-height at all — and where an engine's own line-height:normal for this font is SHORTER (Safari,
+     per live report, against Chrome for the same string), `c.height` is short by exactly that much, so
+     the box smpReshape sizes from it (Math.ceil(h+2)) comes back too short too: correctly filled
+     (confirmed live — the previous two commits' fixes hold), but too short to contain the real ink,
+     which then visibly overflows below it — "the conjunct sticks out further than in Chrome", the box
+     itself never being the wrong SIZE for what smpReshape asked of it, only for what the glyph actually
+     needed. Measuring the REAL ink bottom (a Range over _mbaseText, immune to line-height the same way
+     the ascent marker already is) and taking whichever of it or the container's own height reaches
+     further is what makes this the actual floor a deep stack needs, in either engine, rather than
+     trusting either one's notion of "normal" to already be tall enough. */
+  const range=document.createRange(); range.selectNodeContents(_mbaseText);
+  const inkBottom=range.getBoundingClientRect().bottom-c.top;   // ink's own bottom edge, relative to the SAME origin `a` is measured from
+  const h=Math.max(c.height,inkBottom);
+  return { asc: a>0?a:px, height: h>0?h:px*2 }; }   // a<=0/h<=0 (measurement failed, or an empty string) falls back to the font's own nominal size, the same floor smpReshape's own defaults already used
 /* X-HEIGHT, THE CSS WAY — CSS's `ex` unit (ancient — CSS1 — unlike the L4 `cap` unit this replaced)
    resolves to "the font's own x-height" through the SAME font-matching DOM/SVG text painting already
    goes through, so unlike every canvas-measured metric above and below, this one CANNOT disagree with
