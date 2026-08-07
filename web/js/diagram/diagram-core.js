@@ -987,10 +987,28 @@ function smpReshape(root){
        untouched by any of this. */
     fo.setAttribute("width",Math.ceil(w+2)+""); fo.setAttribute("height",Math.ceil(h)+"");
     fo.style.overflow="visible";
+    /* ⚠ THE TEXT GOES IN AN INNER SPAN, NOT DIRECTLY IN THE FLEX DIV — on report ("baseline still at the
+       floor of the box"), and a mismatch this file should have caught sooner: domBaseline() ITSELF never
+       measures loose text against a bare line-height:normal DIV — it measures a <span> (_mbaseText)
+       NESTED inside one (_mbase), with a second, zero-size marker span (_mbaseMark) as its sibling, so the
+       browser's own inline layout can place that marker "on the baseline" the exact same way it would for
+       any other inline content on the line. Rendering the SAME text as a bare text node directly inside a
+       `display:flex` div (as this did until now) hands the engine a DIFFERENT box to resolve — an
+       anonymous flex item wrapping loose text, not an explicit inline box — and there is no guarantee two
+       engines agree on how that anonymous item's line box interacts with `align-items` for a font with
+       unusual ascent/descent metrics (exactly what every DIAGRAM_STACKING_SCRIPTS member has). Wrapping
+       the text in an explicit <span> makes the render side structurally identical to what domBaseline()
+       already measures — same nesting depth, same element types, same line-height:normal context — so an
+       engine cannot resolve the two differently by construction. The outer div keeps `line-height:normal`
+       and the font (inherited by the span), and gains nothing else: `.fo-form`'s own flex/align/colour
+       rules (app.css) reach the span exactly as they reached the bare text before, since align-items
+       cross-aligns whatever flex item is there, span or anonymous box alike. */
     const d=document.createElementNS("http://www.w3.org/1999/xhtml","div");
     d.setAttribute("class","fo-form "+(el.getAttribute("class")||""));
     d.style.cssText="font:"+f+";line-height:normal;white-space:pre";
-    d.textContent=s;
+    const inner=document.createElementNS("http://www.w3.org/1999/xhtml","span");
+    inner.textContent=s;
+    d.appendChild(inner);
     fo.appendChild(d);
     for(const ch of el.children) if(ch.tagName==="title") fo.appendChild(ch.cloneNode(true));   // the hover tooltip belongs to the token, not to the <text> we are discarding
     el.parentNode&&el.parentNode.replaceChild(fo,el); }
