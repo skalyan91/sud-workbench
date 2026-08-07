@@ -193,104 +193,41 @@ _mmount.setAttribute("aria-hidden","true");
 _mmount.style.cssText="position:absolute;left:-99999px;top:0;pointer-events:none;visibility:hidden";
 function _measMountRoot(){ const doc=document.getElementById("doc"), h=doc||document.documentElement||document.body;
   if(h&&_mmount.parentNode!==h) h.appendChild(_mmount); }
-/* THE HTML BASELINE, MEASURED THE ONLY WAY THAT CANNOT DISAGREE WITH WHAT smpReshape PAINTS: an actual
-   inline baseline-aligned marker, in an actual live DOM layout, read back with getBoundingClientRect().
-   ⚠ smpReshape used to ask CANVAS for this (measureText(s).actualBoundingBoxAscent) on the reasoning
-   that canvas is "the control" for these scripts — true for WIDTH (it composes the conjuncts SVG
-   cannot, verified against SVG's own unshaped width), which is a DIFFERENT claim from "canvas's
-   ascent/descent for this cluster matches what the HTML div will lay out", and nothing had verified
-   THAT one. Reported live: Grantha/Kawi tokens still jiggled after every token was moved onto the
-   foreignObject/HTML path (verifying the earlier detection fixes had worked) — so the remaining
-   inconsistency has to be in the ONE canvas-measured number smpReshape still uses to seat that div,
-   not in which tokens take the HTML path. The technique: a zero-size `<span>` with
-   `vertical-align:baseline` sits INLINE beside the real text, so the BROWSER's own line layout — not a
-   canvas guess about it — plants that span's own box exactly on the text's baseline; its top edge
-   relative to the container's is the ascent, for whatever this specific string/font pair actually laid
-   out to, shaping included. */
-const _mbase=document.createElement("div");
-_mbase.setAttribute("aria-hidden","true");
-_mbase.style.cssText="position:absolute;left:-99999px;top:0;white-space:pre;visibility:hidden;pointer-events:none;line-height:normal";
-const _mbaseText=document.createElement("span"), _mbaseMark=document.createElement("span");
-_mbaseMark.style.cssText="display:inline-block;width:0;height:0;vertical-align:baseline";
-_mbase.appendChild(_mbaseText); _mbase.appendChild(_mbaseMark);
-function _measMountBase(){ const h=document.documentElement||document.body; if(h&&!_mbase.isConnected) h.appendChild(_mbase); }
-// {asc, height}: the DOM's own answer to both numbers smpReshape used to ask canvas for — the ascent
-// (see the note above) AND the container's real laid-out height, so overflow:visible is the only thing
-// standing between a still-canvas-derived box and the ink, not just the vertical POSITION.
-function domBaseline(s,f){ _measMountBase(); _mbase.style.font=f; _mbaseText.textContent=s||"";
-  const c=_mbase.getBoundingClientRect(), m=_mbaseMark.getBoundingClientRect();
-  const px=parseFloat(f)||15, a=m.top-c.top;
-  /* ⚠ `c.height` ALONE UNDER-MEASURES A DEEP CONJUNCT, ON REPORT — it is the CONTAINER's own box, sized
-     by `line-height:normal` (see _mbase's own style above), and line-height:normal is exactly the
-     quantity this file has already found disagreeing between engines for these faces (the align-items
-     saga two commits back was the same root cause, one layer up). A real subjoined-consonant stack's
-     ink can extend BELOW whatever a "normal" line box reserves — the glyph outline doesn't consult
-     line-height at all — and where an engine's own line-height:normal for this font is SHORTER (Safari,
-     per live report, against Chrome for the same string), `c.height` is short by exactly that much, so
-     the box smpReshape sizes from it (Math.ceil(h+2)) comes back too short too: correctly filled
-     (confirmed live — the previous two commits' fixes hold), but too short to contain the real ink,
-     which then visibly overflows below it — "the conjunct sticks out further than in Chrome", the box
-     itself never being the wrong SIZE for what smpReshape asked of it, only for what the glyph actually
-     needed. Measuring the REAL ink bottom (a Range over _mbaseText, immune to line-height the same way
-     the ascent marker already is) and taking whichever of it or the container's own height reaches
-     further is what makes this the actual floor a deep stack needs, in either engine, rather than
-     trusting either one's notion of "normal" to already be tall enough. */
-  const range=document.createRange(); range.selectNodeContents(_mbaseText);
-  const inkBottom=range.getBoundingClientRect().bottom-c.top;   // ink's own bottom edge, relative to the SAME origin `a` is measured from
-  /* ⚠ A CANVAS FLOOR WAS TRIED, REVERTED, AND HAD TO BE RESTORED — round-trip confirmed live, so the
-     reasoning behind the revert is recorded here as the dead end it turned out to be, not as guidance.
-     `inkBottom` (this Range) DOES come back identical for a shallow probe and the deep conjunct (41
-     either way), while canvas's own actualBoundingBoxDescent is genuinely content-sensitive on the same
-     two strings (7.21875 vs 15.96875) — that part holds. The revert's argument was that this shouldn't
-     matter anyway, because `foreignObject.tok-word,…{overflow:visible}` (app.css) means nothing this
-     box's declared height ever clips what paints inside it — so a too-short box looked like it could only
-     be a cosmetic mismatch against Chrome's own (smaller) 41/43, never the cause of a real collision.
-     Reverting to `Math.max(c.height,inkBottom)` alone (dropping the canvas floor) restored EXACTLY that
-     41/43 box — and reopened the original bug: reported live, "the baseline has again collapsed to the
-     floor" the moment the box went back to matching Chrome's number. So `overflow:visible` was the wrong
-     reason to trust: it keeps the GLYPH from being clipped, but says nothing about where WITHIN the box
-     `align-items:flex-start` seats it, and Chrome's own `line-height:normal` for this font reserves real
-     descent room around the glyph independent of any div height at all — Safari's reserves far less
-     (the same asymmetry this whole investigation started from). A 41/43 box that is "enough" in Chrome is
-     therefore NOT the same 41/43 box in Safari, and matching Chrome's px NUMBER was never actually the
-     bar — visual correctness in each engine is, and the two numbers legitimately differing is what that
-     looks like here. The floor is canvas's descent again, `a` (ascent, independently verified reliable)
-     plus canvas's actualBoundingBoxDescent for this exact string, family-prefixed the same way every other
-     canvas measurement in this file already is. */
-  /* ⚠ SIZE THEN FAMILY, NOT THE OTHER WAY ROUND — a CSS font shorthand is invalid with the family first,
-     and an invalid assignment to canvas's own `.font` is SILENTLY REJECTED, leaving whatever font a
-     PREVIOUS caller last set successfully still in effect (this file's own capHeightPx()/xHeightPx() note
-     the identical trap for the identical reason). `f` arrives here as an opaque, already-built string
-     (`SIZEpx family-list`, optionally weight/style-prefixed), so the prefix has to be SPLICED IN right
-     after the size token rather than simply prepended — prepending it was tried first and left canvas
-     silently measuring against a stale font, which is why the very first cut of this floor measured no
-     different for the shallow and deep strings either. */
-  let canvasFloor=0;
+/* THE HTML BASELINE, REBUILT ON CANVAS FONT METRICS, ON REQUEST — the DOM marker-span technique this
+   function used to use (a zero-size `<span vertical-align:baseline>` sitting inline beside the real text,
+   read back with getBoundingClientRect()) measured smpReshape's own div correctly reproducing whatever
+   `line-height:normal` a given engine settles on for a font — and an entire saga of this file's own
+   history (the align-items regression, the canvas-floor add/revert/restore cycle, the "baseline at the
+   floor of the box" report this rewrite answers) turned out to be that exact thing going wrong: "normal"
+   is a UA-defined half-leading distribution around the font's own single-line reference, and it is the
+   ONE quantity this file has repeatedly found disagreeing between Chrome and Safari for these scripts'
+   faces. Canvas's fontBoundingBoxAscent/fontBoundingBoxDescent are a DIFFERENT thing — the font's own
+   declared em-box metrics (hhea/OS2 ascent and descent), not an engine's own layout DECISION about how to
+   lay out "normal" text — and they are the SAME metrics scriptAscentEm/scriptMidEm/scriptLiftEm already
+   rely on elsewhere in this file as the more cross-engine-consistent reading. Defining the box by
+   ascender and descender, directly, is what smpReshape() now does: the foreignObject is sized and seated
+   off THESE two numbers, and its inner div's own line-height is set to the same explicit px figure —
+   never "normal" — so neither engine's own ambiguous interpretation enters the render side either. */
+function domBaseline(s,f){
   try{
+    /* ⚠ SIZE THEN FAMILY, NOT THE OTHER WAY ROUND — a CSS font shorthand is invalid with the family
+       first, and an invalid assignment to canvas's own `.font` is SILENTLY REJECTED, leaving whatever
+       font a PREVIOUS caller last set successfully still in effect (this file's own capHeightPx()/
+       xHeightPx() note the identical trap for the identical reason). `f` arrives here as an opaque,
+       already-built string (`SIZEpx family-list`, optionally weight/style-prefixed), so the prefix has
+       to be SPLICED IN right after the size token rather than simply prepended.
+       ⚠ AND THE FAMILY MUST LEAD, exactly as scriptAscentEm()'s own note documents: canvas
+       fontBoundingBoxAscent reports the metrics of the FIRST family in the font list whatever face
+       actually shapes the text, so without scriptFamilyPrefix() this would answer the ordinary Latin
+       fallback's ascent/descent for every script alike, not the script's own. */
     const prefix=(typeof scriptFamilyPrefix==="function")?scriptFamilyPrefix():"";
     const pf=prefix?f.replace(/(\d+(?:\.\d+)?px\s+)/,"$1"+prefix):f;
-    _cv.font=pf; canvasFloor=a+(_cv.measureText(s||"").actualBoundingBoxDescent||0);
-  }catch(_){}
-  const h=Math.max(c.height,inkBottom,canvasFloor);
-  /* ⚠ TOUCHING `asc` AT ALL WAS THE WRONG MOVE — TWO ROUNDS OF IT, IN BOTH DIRECTIONS, CONFIRM THE SAME
-     THING: `asc` is the ONLY quantity here that moves the REAL, PAINTED position of the glyph (verified:
-     shortening it pushed the ink down, on report; lengthening it pulled the ink up, but "too high" and a
-     NEW clipping report followed just as fast). `height`, by contrast, was verified live to change
-     NOTHING about where the ink paints — three foreignObjects built with the SAME asc (29, unmodified)
-     and heights of 45, 100 and 20 all painted the reader's own reported conjunct at the IDENTICAL
-     absolute position, because `foreignObject.tok-word,…{overflow:visible}` (app.css) means the box's
-     own declared bounds never constrain anything drawn inside it. That reframes every round of this
-     investigation: the "box too short" reports were never about real collision with whatever sits below
-     the row — the glyph's actual paint position never moved during any of the height-only fixes — they
-     were about whether THIS element's own declared bounding box, as DevTools shows it, visually encloses
-     its own content. `asc` was never the right lever for that question, because it's the one thing here
-     that DOES move the real glyph — anything asked of it necessarily also moves the glyph relative to
-     `origY`, and hence relative to whatever else in the row is anchored there without it, which is
-     exactly the "too high" / misalignment this asc-adjustment round produced. Reverted: `asc` is once
-     again exactly `a`, unadjusted, for every script alike; only `height` (still floored by canvasFloor
-     for a deep DIAGRAM_STACKING_SCRIPTS conjunct, unaffected by any of this) grows to make the box's own
-     declared bounds match its content, with zero effect on where anything actually paints. */
-  return { asc: a>0?a:px, height: h>0?h:px*2 }; }   // a<=0/h<=0 (measurement failed, or an empty string) falls back to the font's own nominal size, the same floor smpReshape's own defaults already used
+    _cv.font=pf;
+    const m=_cv.measureText(s||"");
+    const asc=m.fontBoundingBoxAscent||0, desc=m.fontBoundingBoxDescent||0;
+    if(!(asc>0)){ const px=parseFloat(f)||15; return {asc:px, height:px*2}; }   // measurement failed, or an empty string — the same nominal-size floor smpReshape's own defaults already used
+    return { asc, height: asc+desc };
+  }catch(_){ const px=parseFloat(f)||15; return {asc:px, height:px*2}; } }
 /* X-HEIGHT, THE CSS WAY — CSS's `ex` unit (ancient — CSS1 — unlike the L4 `cap` unit this replaced)
    resolves to "the font's own x-height" through the SAME font-matching DOM/SVG text painting already
    goes through, so unlike every canvas-measured metric above and below, this one CANNOT disagree with
@@ -333,7 +270,6 @@ function capHeightPx(font){ _measMountCH(); _mch.style.font=font; return parseFl
 const _cv=document.createElement("canvas").getContext("2d");
 _measMount(); if(!_msvg.isConnected) document.addEventListener("DOMContentLoaded",_measMount);
 _measMountHTML(); if(!_mdiv.isConnected) document.addEventListener("DOMContentLoaded",_measMountHTML);
-_measMountBase(); if(!_mbase.isConnected) document.addEventListener("DOMContentLoaded",_measMountBase);
 _measMountRoot(); if(!_mmount.isConnected) document.addEventListener("DOMContentLoaded",_measMountRoot);
 _measMountXH(); if(!_mxh.isConnected) document.addEventListener("DOMContentLoaded",_measMountXH);
 /* TOKEN_STACK / MONO_STACK — the BASE family lists (~150 Noto script faces + the CJK/system tail). They are
@@ -975,38 +911,33 @@ function smpReshape(root){
     const fo=document.createElementNS("http://www.w3.org/2000/svg","foreignObject");
     for(const a of el.attributes) if(a.name!=="x"&&a.name!=="y"&&a.name!=="text-anchor") fo.setAttribute(a.name,a.value);
     fo.setAttribute("x",(x-w/2)+""); fo.setAttribute("y",(y-asc)+"");
-    /* ⚠ HEIGHT DOESN'T GET WIDTH'S "+2" — on report. The two used to share one flat safety margin, but
-       it was never calibrated for height specifically: domBaseline()'s own Math.max already floors `h`
-       against three independent measurements (container, ink Range, canvas descent), the last of which
-       is a precise bound rather than an estimate that needs slop stacked on top of it. Chrome's own box
-       for the SAME token measures 2px SHORTER than domBaseline()'s bare `h` here (43 vs a real ceil(h) of
-       45 for the reader's own reported conjunct) — Safari genuinely needs more room than Chrome for this
-       glyph (the engine asymmetry this whole investigation started from), so even bare `h` already runs
-       a little ahead of Chrome's number, and adding +2 on top of that was pure excess, not a needed
-       cushion. Width keeps its own +2 — a different measurement (_measDOM), with its own justification,
-       untouched by any of this. */
+    /* ⚠ HEIGHT NEEDS NO PADDING NOW — domBaseline() no longer floors `h` against three separate DOM/
+       canvas measurements (a container box, an ink Range, a canvas-descent floor); it is one canvas
+       reading, fontBoundingBoxAscent+fontBoundingBoxDescent (see domBaseline's own note above), so there
+       is no estimate here for a safety margin to compensate. Width keeps its own +2 — a different
+       measurement (_measDOM), with its own justification, untouched by any of this. */
     fo.setAttribute("width",Math.ceil(w+2)+""); fo.setAttribute("height",Math.ceil(h)+"");
     fo.style.overflow="visible";
-    /* ⚠ THE TEXT GOES IN AN INNER SPAN, NOT DIRECTLY IN THE FLEX DIV — on report ("baseline still at the
-       floor of the box"), and a mismatch this file should have caught sooner: domBaseline() ITSELF never
-       measures loose text against a bare line-height:normal DIV — it measures a <span> (_mbaseText)
-       NESTED inside one (_mbase), with a second, zero-size marker span (_mbaseMark) as its sibling, so the
-       browser's own inline layout can place that marker "on the baseline" the exact same way it would for
-       any other inline content on the line. Rendering the SAME text as a bare text node directly inside a
-       `display:flex` div (as this did until now) hands the engine a DIFFERENT box to resolve — an
-       anonymous flex item wrapping loose text, not an explicit inline box — and there is no guarantee two
-       engines agree on how that anonymous item's line box interacts with `align-items` for a font with
-       unusual ascent/descent metrics (exactly what every DIAGRAM_STACKING_SCRIPTS member has). Wrapping
-       the text in an explicit <span> makes the render side structurally identical to what domBaseline()
-       already measures — same nesting depth, same element types, same line-height:normal context — so an
-       engine cannot resolve the two differently by construction. The outer div keeps `line-height:normal`
-       and the font (inherited by the span), and gains nothing else: `.fo-form`'s own flex/align/colour
-       rules (app.css) reach the span exactly as they reached the bare text before, since align-items
-       cross-aligns whatever flex item is there, span or anonymous box alike. */
+    /* ⚠ THE TEXT GOES IN AN INNER DIV WITH AN EXPLICIT PIXEL line-height, ON REQUEST — "get its bounding
+       box to be defined by the ascender and descender, rather than cap height and baseline". Both halves
+       of that ask are answered together: domBaseline() now measures the font's own em-box directly
+       (fontBoundingBoxAscent+Descent, its own note above) instead of asking a DOM line box what "normal"
+       means for this font — but that measurement is worthless if the RENDER side still poses the SAME
+       ambiguous question. Setting this div's own line-height to that SAME explicit px figure (asc+desc,
+       `h`) removes "normal" from the render side too: there is no longer a UA-defined half-leading
+       distribution for either engine to apply, because the line-height IS the font's own declared
+       ascent+descent, not a request that either engine go compute its own idea of what "one line" of
+       this font amounts to. A DIV, not the SPAN this used to be: line-height on an inline element still
+       resolves against whatever line box its containing block establishes, rather than owning one
+       outright the way a block-level element's own single-line box does, and the outer `.fo-form`'s own
+       content-box height (driving what `align-items:flex-start` has to work with) is itself only as
+       unambiguous as this element's own. The outer div carries the font (inherited down) and nothing
+       else — no line-height of its own, so nothing here contradicts the inner div's explicit one. */
     const d=document.createElementNS("http://www.w3.org/1999/xhtml","div");
     d.setAttribute("class","fo-form "+(el.getAttribute("class")||""));
-    d.style.cssText="font:"+f+";line-height:normal;white-space:pre";
-    const inner=document.createElementNS("http://www.w3.org/1999/xhtml","span");
+    d.style.cssText="font:"+f;
+    const inner=document.createElementNS("http://www.w3.org/1999/xhtml","div");
+    inner.style.cssText="line-height:"+h+"px;white-space:pre";
     inner.textContent=s;
     d.appendChild(inner);
     fo.appendChild(d);
