@@ -821,8 +821,24 @@ function smpReshape(root){
      word. Reading only the direct text nodes is the fix; the <title> is carried over below so the
      tooltip itself survives the swap rather than being traded for the bug. */
   const ownText=e=>{ let o=""; for(const n of e.childNodes) if(n.nodeType===3) o+=n.nodeValue; return o; };
+  /* ⚠ A PUNCTUATION SATELLITE SHARES THE ROW WITH THE WORD BESIDE IT, AND SO MUST SHARE ITS RENDERING
+     TECHNOLOGY — even where the mark's own glyph is plain BMP and so never trips smpUnshaped() on its
+     own account. The daṇḍa is the case that showed this up: most scripts have no entry in SCRIPT_DANDA
+     and fall through to the shared Devanagari ।/॥ (BMP), so an SMP word swapped to `foreignObject` above
+     still sat beside a daṇḍa left in plain SVG `<text>` — the very SVG/HTML mixture this whole mechanism
+     exists to get rid of, just moved from "within one glyph" to "within one row". `hangForm()`
+     (dandaGlyph()||p.form) is drawn ONLY by drawHangsSVG/drawLeadsSVG, and ONLY into a `<text>` wrapped in
+     a `g.punct-sat` — that class is written NOWHERE else in this codebase (grep-verified) — so matching on
+     the parent's class reaches exactly those marks and nothing in the POS/gloss/translit/relation-label
+     layers, which never nest inside one. Gated on THIS render call having produced at least one genuine
+     (SMP) reshape of its own — never on ORTHO_SCHEME/language in the abstract — so a script with no SMP
+     content anywhere in the row (plain Devanagari, Tibetan, Khmer, Burmese, an English document, …) sees
+     its daṇḍa exactly as before: plain SVG `<text>`, untouched. */
+  const isPunctSat=el=>{ const p=el.parentNode; return !!(p&&p.classList&&p.classList.contains("punct-sat")); };
+  let hadSMP=false;
+  for(const el of texts){ if(smpUnshaped(ownText(el))){ hadSMP=true; break; } }
   for(const el of texts){ const s=ownText(el);
-    if(!smpUnshaped(s)) continue;
+    if(!smpUnshaped(s) && !(hadSMP && isPunctSat(el))) continue;
     const cs=getComputedStyle(el), f=cs.font||((cs.fontWeight!=="400"?cs.fontWeight+" ":"")+cs.fontSize+" "+cs.fontFamily);
     const w=_measDOM(s,f); if(!(w>0)) continue;
     const x=parseFloat(el.getAttribute("x"))||0, y=parseFloat(el.getAttribute("y"))||0;

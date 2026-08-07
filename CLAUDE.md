@@ -525,6 +525,28 @@ than 20 px of slack around correctly-placed glyphs, so it stays as the structura
 hint, and the first cut painted the tooltip into the diagram beside the word. The `<title>` is carried onto the
 `foreignObject` so the tooltip survives the swap rather than being traded for the bug.
 
+⚠️ **A PUNCTUATION SATELLITE (the daṇḍa) SHARES THE ROW WITH THE WORD BESIDE IT, AND MUST SHARE ITS
+RENDERING TECHNOLOGY TOO — round six, after five rounds that measured the SVG/`foreignObject` baseline
+alignment to be geometrically exact (sub-thousandth-pixel) in every case tried and never found the report's
+actual cause.** Rather than keep chasing a discrepancy geometry cannot see, the mixture itself was removed:
+most scripts have no entry in `SCRIPT_DANDA` and fall through to the shared Devanagari `।`/`॥`, which is
+plain BMP and so never trips `smpUnshaped()` on its own account — an SMP word (Grantha, Kawi, …) swapped to
+`foreignObject` therefore still sat beside a daṇḍa left in plain SVG `<text>`, two rendering engines in one
+row where `smpReshape` was meant to leave exactly one. `hangForm()` (`dandaGlyph()||p.form`) is drawn ONLY
+by `drawHangsSVG`/`drawLeadsSVG`, and ONLY into a `<text>` wrapped in a `g.punct-sat` — that class is written
+NOWHERE else in this file — so `smpReshape` now also swaps any `punct-sat` `<text>` it finds, but ONLY when
+THIS render call already produced at least one genuine (SMP) reshape of its own (`hadSMP`, a first pass over
+the same `texts` list). Gated on the row's own content, never on `ORTHO_SCHEME`/language in the abstract, so
+a script with no SMP content anywhere in the sentence (plain Devanagari, Tibetan, Khmer, Burmese, Balinese/
+Javanese — BMP scripts per `stackDropExtra`'s own note above — an English document, …) sees its daṇḍa exactly
+as before: plain SVG `<text>`, untouched. Verified live (`samples/brihat_jataka.conllu`, wrapped arcs):
+Grantha (SMP) — every daṇḍa now a `foreignObject`/`.fo-form`; the SAME sentence under Tibetan (BMP) or
+Original (no script) — every daṇḍa still plain SVG `<text>`; POS/gloss/translit rows untouched in all three
+(`.punct-sat` reaches nothing else); no `NaN` geometry; seam-mark placement is untouched by construction —
+`svgFormSeamMark`'s offset comes from `tailW()`/`hangW()`, which measure the daṇḍa's ADVANCE WIDTH via the
+ordinary (non-`smpUnshaped`) `meas()` path regardless of which technology paints it, so only the daṇḍa's own
+paint changed, never any layout math a neighbour depends on.
+
 ⚠ **THE MAGNIFICATION CARRIES THE WEIGHT AND TRACKING CURVES WITH IT, AND NOT DOING SO WAS A REAL LAYOUT BUG.**
 `refreshFontStacks` now derives three terms from `--script-mag` and publishes them back on #doc, so the CSS and the
 canvas/SVG measurement strings cannot disagree about any of them: `--script-wght` (`magWeight`, the weight curve
