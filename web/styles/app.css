@@ -1675,7 +1675,20 @@
        text-align:center couldn't be trusted to reach a shrink-wrapped box the same way in both engines
        either) — display:flex + justify-content:center + width:100% supplies that without touching height,
        so the vertical axis is left exactly where fo.y already puts it. */
-  foreignObject.tok-word,foreignObject.node-lbl,foreignObject.baseword,foreignObject.mwt-form{overflow:visible}
+  foreignObject.tok-word,foreignObject.node-lbl,foreignObject.baseword,foreignObject.mwt-form{overflow:visible; display:flex}   /* ⚠ ON REPORT: .fo-form's own height:100% (previous commit) still wasn't holding in Safari — percentage-height
+       resolution against a foreignObject's own box is exactly the kind of CSS/SVG interop corner engines have
+       already disagreed on elsewhere in this exact investigation (line-height:normal, canvas-vs-DOM metrics, …),
+       so trusting it a second time risked the same failure mode again. Making the foreignObject ITSELF the flex
+       container sidesteps percentage resolution entirely: `.fo-form`'s cross-axis size now comes from flexbox's
+       own stretch algorithm (align-items' default value, `stretch` — a flex ITEM with no explicit cross-size
+       fills the container by definition, computed directly by the flex layout algorithm rather than by resolving
+       a percentage against a foreignObject's own, possibly-engine-inconsistent notion of its content box). This
+       is the smpReshape()-emitted foreignObject specifically — its class is COPIED verbatim from the original
+       `&lt;text&gt;` element it replaces (smpReshape's own attribute-copy loop), which is exactly why this
+       selector (already scoped to precisely these four token-form classes, for the pre-existing overflow:visible
+       rule) reaches it with no new selector to get wrong. `.fo-form`'s own width/height:100% stay as they were —
+       harmless once this is the authority, and a second, cheap line of defence if a future engine's stretch
+       default itself turns out to need help. */
   .fo-form.tok-ital{font-style:italic}
   .fo-form.tok-typo{text-decoration-line:line-through}
   #doc .sel>.fo-form,#doc .node.sel .fo-form,#doc .tok-group.sel .fo-form{color:var(--accent)}
