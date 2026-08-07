@@ -617,7 +617,28 @@ function stackDropExtra(){
            is what keeps that untouched — exactly the same reasoning scriptLiftEm()'s own Tibetan-only
            branch gives for not applying an unaudited correction to every script the general form would
            technically also reach. */
-        if(ORTHO_SCHEME==="Kawi" && SMP_RE.test(o)){
+        /* ⚠ BALINESE AND JAVANESE, SCOPED BY NAME — a THIRD signature behind the SAME "constant regardless
+           of content" symptom Tibetan and Kawi had, and neither of those two's root cause: both scripts are
+           BMP (Balinese U+1B00–, Javanese U+A980–), so this is not Kawi's "WebKit can't shape SMP in SVG
+           <text>" bug, and it survives dropping scriptFamilyPrefix() (Tibetan's own fix), so it isn't a
+           font-name-ordering artefact either. Measured live in the shipping WKWebView, real document forms
+           of every length from 1 to 10 characters (including forms with genuinely zero descent by canvas's
+           own account, e.g. a bare Devanagari daṇḍa "।" reused as these schemes' sentence-final mark):
+           getBBox() WITH the script-family prefix returns ONE constant per script regardless of content —
+           83.8125/100px-em for every Balinese form tried, 91.609375/100 for every Javanese one, including
+           the zero-descent daṇḍa — and WITHOUT the prefix it collapses to a SECOND, shared constant
+           (29.3125/100, identical across Balinese/Javanese/Grantha/Zanabazar Square alike, again including
+           the zero-descent daṇḍa), i.e. dropping the prefix does not restore real ink here the way it did
+           for Tibetan — it just trades one font-metric constant for a different, generic one. Both faces are
+           variable (fvar 100–900, fonts.css), like Kawi's and Tibetan's own; canvas measureText's
+           actualBoundingBoxDescent is the one of this app's three text paths that answered correctly for
+           BOTH — content-sensitive and matching what a genuinely deep stacked cluster needs (0 for the
+           daṇḍa and for a bare unstacked consonant, up to ~83/100 for a real multi-mark stack) — so it is
+           the fix here too, by the SAME reasoning and the SAME by-NAME scoping Kawi's branch above uses:
+           Grantha and Zanabazar Square are NOT added, since routing them was measured (Kawi's own note
+           above) to move their numbers with no live evidence either way that canvas is the better answer
+           for them specifically. */
+        if((ORTHO_SCHEME==="Kawi" && SMP_RE.test(o)) || ORTHO_SCHEME==="Balinese" || ORTHO_SCHEME==="Javanese"){
           const m=_cv.measureText(o); d=m.actualBoundingBoxDescent||0;
         } else {
           _mtxt.textContent=o;
