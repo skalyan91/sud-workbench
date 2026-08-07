@@ -918,26 +918,32 @@ function smpReshape(root){
        measurement (_measDOM), with its own justification, untouched by any of this. */
     fo.setAttribute("width",Math.ceil(w+2)+""); fo.setAttribute("height",Math.ceil(h)+"");
     fo.style.overflow="visible";
-    /* ⚠ THE TEXT GOES IN AN INNER DIV WITH AN EXPLICIT PIXEL line-height, ON REQUEST — "get its bounding
-       box to be defined by the ascender and descender, rather than cap height and baseline". Both halves
-       of that ask are answered together: domBaseline() now measures the font's own em-box directly
-       (fontBoundingBoxAscent+Descent, its own note above) instead of asking a DOM line box what "normal"
-       means for this font — but that measurement is worthless if the RENDER side still poses the SAME
-       ambiguous question. Setting this div's own line-height to that SAME explicit px figure (asc+desc,
-       `h`) removes "normal" from the render side too: there is no longer a UA-defined half-leading
-       distribution for either engine to apply, because the line-height IS the font's own declared
-       ascent+descent, not a request that either engine go compute its own idea of what "one line" of
-       this font amounts to. A DIV, not the SPAN this used to be: line-height on an inline element still
-       resolves against whatever line box its containing block establishes, rather than owning one
-       outright the way a block-level element's own single-line box does, and the outer `.fo-form`'s own
-       content-box height (driving what `align-items:flex-start` has to work with) is itself only as
-       unambiguous as this element's own. The outer div carries the font (inherited down) and nothing
-       else — no line-height of its own, so nothing here contradicts the inner div's explicit one. */
+    /* ⚠ THE TEXT GOES IN AN INNER DIV, NOT DIRECTLY IN THE FLEX DIV — "get its bounding box to be defined
+       by the ascender and descender, rather than cap height and baseline". domBaseline() now measures
+       the font's own em-box directly (fontBoundingBoxAscent+Descent, its own note above) instead of
+       asking a DOM line box what "normal" means for this font — but that measurement is worthless if the
+       RENDER side still poses the SAME ambiguous question. A DIV, not the SPAN this used to be:
+       line-height on an inline element still resolves against whatever line box its containing block
+       establishes, rather than owning one outright the way a block-level element's own single-line box
+       does, and the outer `.fo-form`'s own content-box height (driving what `align-items:flex-start` has
+       to work with) is itself only as unambiguous as this element's own.
+       ⚠ line-height:1em, NOT a computed px figure — on FURTHER request, after the px version (asc+desc,
+       matching domBaseline()'s own `h`) was verified live to already converge Chrome and WKWebView to the
+       pixel for one token. `1em` is a length no engine can compute differently — it resolves to exactly
+       this div's own font-size, the one number both the CSS cascade and canvas already agree on without
+       any measurement step in between — where a canvas-derived px figure is consistent BECAUSE it was
+       independently verified so, `1em` is consistent BY CONSTRUCTION. The div's own box does not need to
+       equal the glyph's full ascent+descent to avoid clipping: `foreignObject{overflow:visible}` already
+       lets any ink beyond a line box paint uncropped (CSS never clips a line box's own content by
+       default), so the room the FOREIGNOBJECT itself reserves — domBaseline()'s `h`, unchanged — is what
+       actually has to be generous, not this div's own generated auto-height for its single line. The
+       outer div carries the font (inherited down) and nothing else — no line-height of its own, so
+       nothing here contradicts the inner div's explicit one. */
     const d=document.createElementNS("http://www.w3.org/1999/xhtml","div");
     d.setAttribute("class","fo-form "+(el.getAttribute("class")||""));
     d.style.cssText="font:"+f;
     const inner=document.createElementNS("http://www.w3.org/1999/xhtml","div");
-    inner.style.cssText="line-height:"+h+"px;white-space:pre";
+    inner.style.cssText="line-height:1em;white-space:pre";
     inner.textContent=s;
     d.appendChild(inner);
     fo.appendChild(d);
