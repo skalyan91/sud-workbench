@@ -237,7 +237,34 @@ function domBaseline(s,f){ _measMountBase(); _mbase.style.font=f; _mbaseText.tex
      trusting either one's notion of "normal" to already be tall enough. */
   const range=document.createRange(); range.selectNodeContents(_mbaseText);
   const inkBottom=range.getBoundingClientRect().bottom-c.top;   // ink's own bottom edge, relative to the SAME origin `a` is measured from
-  const h=Math.max(c.height,inkBottom);
+  /* ⚠ AND THE DOM ink RANGE ITSELF CAN UNDER-MEASURE TOO, ON REPORT — not just the container. Measured
+     directly against a real subjoined-conjunct cluster next to a shallow, unstacked probe of the same
+     script/size: `inkBottom` (this Range) came back IDENTICAL for both, while canvas's own
+     actualBoundingBoxDescent for the SAME two strings answered 7.21875 and 15.96875 — genuinely
+     content-sensitive, and the deeper number matches what a real subjoined "n" needs. Whatever the exact
+     cause (this element's font resolves the same string differently than the one smpReshape actually
+     paints; a WebKit HTML-text shaping limit for a cluster this deep; something else not yet isolated),
+     the Range measurement cannot be trusted alone here any more than the container height could. Canvas
+     is this file's own established control for exactly this question — the one of its three text paths
+     (SVG `&lt;text&gt;`, DOM, canvas) documented elsewhere (stackDropExtra's own notes) as reliably shaping these
+     conjuncts and answering content-sensitively — so it becomes a THIRD floor: `a` (already verified
+     correct, independently, many times over) plus canvas's own descent for this exact string, in the
+     SAME family-prefixed font canvas measurements elsewhere in this file use to avoid ambiguous
+     resolution. Math.max, again a pure floor — never shrinks anything the other two already got right. */
+  /* ⚠ SIZE THEN FAMILY, NOT THE OTHER WAY ROUND — a CSS font shorthand is invalid with the family
+     first, and an invalid assignment to canvas's own `.font` is SILENTLY REJECTED, leaving whatever
+     font a PREVIOUS caller last set successfully still in effect (this file's own capHeightPx()/
+     xHeightPx() note the identical trap for the identical reason). `f` arrives here as an opaque,
+     already-built string (`SIZEpx family-list`, optionally weight/style-prefixed) rather than
+     size/family passed separately, so the prefix has to be SPLICED IN right after the size token
+     rather than simply prepended. */
+  let canvasFloor=0;
+  try{
+    const prefix=(typeof scriptFamilyPrefix==="function")?scriptFamilyPrefix():"";
+    const pf=prefix?f.replace(/(\d+(?:\.\d+)?px\s+)/,"$1"+prefix):f;
+    _cv.font=pf; canvasFloor=a+(_cv.measureText(s||"").actualBoundingBoxDescent||0);
+  }catch(_){}
+  const h=Math.max(c.height,inkBottom,canvasFloor);
   return { asc: a>0?a:px, height: h>0?h:px*2 }; }   // a<=0/h<=0 (measurement failed, or an empty string) falls back to the font's own nominal size, the same floor smpReshape's own defaults already used
 /* X-HEIGHT, THE CSS WAY — CSS's `ex` unit (ancient — CSS1 — unlike the L4 `cap` unit this replaced)
    resolves to "the font's own x-height" through the SAME font-matching DOM/SVG text painting already
@@ -656,7 +683,18 @@ function stackDropExtra(){
            Grantha and Zanabazar Square are NOT added, since routing them was measured (Kawi's own note
            above) to move their numbers with no live evidence either way that canvas is the better answer
            for them specifically. */
-        if((ORTHO_SCHEME==="Kawi" && SMP_RE.test(o)) || ORTHO_SCHEME==="Balinese" || ORTHO_SCHEME==="Javanese"){
+        /* ⚠ GRANTHA JOINS THE CANVAS PATH TOO, on report — the "no live evidence either way" caveat the
+           note above records for excluding it no longer holds: measured directly against the reader's
+           own reported string (a genuine subjoined-conjunct cluster, U+1131C…U+1132E, "janmanām"), THIS
+           font's getBBox() ink is the identical 53.40625 constant for that string as for a bare, unstacked
+           three-consonant probe — the same signature, same font, same prefixed measurement this whole
+           block already treats as proof for Kawi/Balinese/Javanese. Canvas, on the SAME two strings,
+           answers 7.21875 and 15.96875 — genuinely content-sensitive, and the deeper of the two is
+           exactly the shape a real subjoined "n" (repha/virama stack) needs. Zanabazar Square is
+           deliberately NOT added alongside it — this measurement was taken for Grantha specifically, and
+           generalising to a script nothing here has tested is exactly the mistake this note's own history
+           warns against making twice. */
+        if((ORTHO_SCHEME==="Kawi" && SMP_RE.test(o)) || ORTHO_SCHEME==="Balinese" || ORTHO_SCHEME==="Javanese" || ORTHO_SCHEME==="Grantha"){
           const m=_cv.measureText(o); d=m.actualBoundingBoxDescent||0;
         } else {
           _mtxt.textContent=o;
