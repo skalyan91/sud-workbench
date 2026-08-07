@@ -1646,7 +1646,22 @@
      transform — the centring is the foreignObject's own x. */
   .fo-form{color:var(--text); text-shadow:0 0 2px var(--casing),0 0 2px var(--casing),0 0 3px var(--casing); opacity:var(--script-op,1);   /* the SMP-reshaped HTML stand-in for .tok-word/.node-lbl/.baseword/.mwt-form (smpReshape, js/diagram/diagram-core.js) — same opacity offset as its SVG counterpart; the font itself arrives via an INLINE style the swap sets directly, which this class-level rule doesn't touch */
     unicode-bidi:isolate; pointer-events:none;
-    display:flex; align-items:center; justify-content:center; width:100%; height:100%; box-sizing:border-box}   /* ⚠ SAFARI-ONLY: a plain block div (the old rule here — text-align:center, no vertical rule at all) shrink-wraps to its own content and, in WKWebView specifically, that shrunk box paints BOTTOM-LEFT within the taller foreignObject box smpReshape() sizes it into (+2px padding over the text's own height — see smpReshape's own note) — invisible in Chrome, where the same markup paints top-left, which happened to be close enough to right that six rounds of Chrome/CDP-only verification never caught it. flex + width/height:100% makes NO assumption about either engine's shrink-wrap/alignment default: the box is forced to fill the foreignObject exactly, and align-items/justify-content centre the single (white-space:pre, so never-wrapping) line of text within it explicitly, on both axes, in either engine. Replaces the old text-align:center outright rather than keeping it alongside — once the container is a flex row, text-align has no effect on where its one anonymous flex-item line sits (that's justify-content's job now), so leaving it in would have been dead weight, not a fallback. */
+    display:flex; align-items:flex-start; justify-content:center; width:100%; box-sizing:border-box}   /* ⚠ HORIZONTAL ONLY — a follow-up correction, on report. `align-items:center` (this rule's first cut)
+       measured, live: it moves the ACTUAL rendered baseline 7.5px away from where fo.y's own seating already
+       puts it (domBaseline()'s measured `asc` — the same quantity six rounds of this investigation already
+       verified correct, repeatedly, to sub-thousandth-pixel precision). `align-items:center` doesn't consult
+       that measurement at all — it centres the flex item using the BROWSER'S OWN line-box metrics for
+       `line-height:normal`, and per live report those disagree between engines for this font: Chrome's line
+       box puts the glyph's DESCENDER near the box's bottom edge, Safari's puts the BASELINE there instead —
+       two different, mutually-inconsistent notions of "the line's height", neither of which is the number
+       fo.y was computed against. Trusting either would have reopened exactly the seating bug six rounds of
+       measurement already closed once. `align-items:flex-start` restores TOP-alignment — the box's own top
+       edge is where fo.y's asc-based math already puts the text correctly, in both engines alike, so nothing
+       about vertical positioning needed fixing at all. Horizontal is the one axis this rule's own history
+       genuinely needed centring for (see this rule's original note, still true: a plain block's own
+       text-align:center couldn't be trusted to reach a shrink-wrapped box the same way in both engines
+       either) — display:flex + justify-content:center + width:100% supplies that without touching height,
+       so the vertical axis is left exactly where fo.y already puts it. */
   foreignObject.tok-word,foreignObject.node-lbl,foreignObject.baseword,foreignObject.mwt-form{overflow:visible}
   .fo-form.tok-ital{font-style:italic}
   .fo-form.tok-typo{text-decoration-line:line-through}
