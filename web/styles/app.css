@@ -1646,7 +1646,20 @@
      transform — the centring is the foreignObject's own x. */
   .fo-form{color:var(--text); text-shadow:0 0 2px var(--casing),0 0 2px var(--casing),0 0 3px var(--casing); opacity:var(--script-op,1);   /* the SMP-reshaped HTML stand-in for .tok-word/.node-lbl/.baseword/.mwt-form (smpReshape, js/diagram/diagram-core.js) — same opacity offset as its SVG counterpart; the font itself arrives via an INLINE style the swap sets directly, which this class-level rule doesn't touch */
     unicode-bidi:isolate; pointer-events:none;
-    display:flex; align-items:flex-start; justify-content:center; width:100%; box-sizing:border-box}   /* ⚠ HORIZONTAL ONLY — a follow-up correction, on report. `align-items:center` (this rule's first cut)
+    display:flex; align-items:flex-start; justify-content:center; width:100%; height:100%; box-sizing:border-box}   /* ⚠ height:100% RESTORED — dropping it (this rule's SECOND cut) fixed the baseline-shift bug but
+       reopened the ORIGINAL one: without it, .fo-form's own box shrink-wraps to `line-height:normal`'s
+       ENGINE-COMPUTED height — the exact quantity that disagrees between engines for this font (per live
+       report: Chrome's normal line-height reserves real descent room, Safari's doesn't) — so the DIV's own
+       bottom edge, not just the foreignObject's, ended up sitting at different places in each engine even
+       though the foreignObject itself (sized from domBaseline()'s measured height, not from any browser
+       line-height default) was always correct. height:100% makes .fo-form fill that already-correctly-sized
+       box instead of trusting its own shrink-wrap computation for anything — so "the div" the reader
+       inspects is the SAME size in both engines regardless of what either one's line-height:normal computes
+       internally; any glyph ink that overflows a short internal line box simply paints into the space this
+       reserves, in either engine, rather than the box itself ending wherever that computation happens to
+       stop. align-items:flex-start is unchanged and unaffected by this — it was never wrong; it is what
+       keeps the (still per-engine-nondeterministic) TOP of the text's own line box, and so the offset from
+       ROOM the box now correctly reserves, always fixed and identical either way. */   /* ⚠ HORIZONTAL ONLY — a follow-up correction, on report. `align-items:center` (this rule's first cut)
        measured, live: it moves the ACTUAL rendered baseline 7.5px away from where fo.y's own seating already
        puts it (domBaseline()'s measured `asc` — the same quantity six rounds of this investigation already
        verified correct, repeatedly, to sub-thousandth-pixel precision). `align-items:center` doesn't consult
