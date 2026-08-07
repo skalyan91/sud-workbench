@@ -274,26 +274,24 @@ function domBaseline(s,f){ _measMountBase(); _mbase.style.font=f; _mbaseText.tex
     fontDescent=m.fontBoundingBoxDescent||0;
   }catch(_){}
   const h=Math.max(c.height,inkBottom,canvasFloor);
-  /* ⚠ GROWING THE BOX WAS THE WRONG LEVER — REPOSITIONING IT IS THE RIGHT ONE, on report, after growing
-     it (mirroring the font's own ascent onto the descent side, doubling the box to 58px) was tried and
-     rejected: "shorten the TOP by 12px" instead. `asc` is what smpReshape subtracts from the target
-     baseline to seat the box's own top (`fo.y = origY - asc`) — `align-items:flex-start` then plants the
-     text at THAT top, so the box's declared height is what stands between the glyph's baseline and the
-     box's own bottom edge (clearance = height - asc). Growing height widens that gap by extending the
-     BOTTOM downward; shrinking `asc` widens the SAME gap by moving the TOP down instead, without touching
-     height at all — verified live (a synthetic foreignObject built with each variant, held against a
-     fixed target baseline): height 41, asc 29 gives 12px of clearance; the SAME height 41 with asc
-     shortened by 12 (asc 17) gives 24px — DOUBLE, matching the mirrored-ascent fix's own gain, but on a
-     box that stays close to Chrome's own reported size instead of ballooning past it. `fontDescent`
-     (canvas's declared OS/2 descent, already measured above and rejected as a HEIGHT floor — too small,
-     12px, to contain a real subjoined stack's ink) is exactly right used this way instead: it isn't being
-     asked to CONTAIN the ink any more, only to say how much of the font's own ascent-heavy reservation
-     above baseline is excess that can be handed to the descent side. Scoped to DIAGRAM_STACKING_SCRIPTS
-     (stackDropExtra's own scoping) — a non-stacking script's `line-height:normal` split was never the
-     asymmetric one this exists to correct. */
+  /* ⚠ SHORTENING `asc` MOVED THE WRONG THING, ON REPORT — "pushed the letters down even further" the
+     moment it shipped. `align-items:flex-start` plants the text at the box's own top, and that top is
+     `fo.y = origY - asc` — so shrinking `asc` moves the box's top DOWN, and because the text is seated
+     RELATIVE TO the box's own top (not to `origY` directly), the text — baseline included — moves down
+     WITH it. Verified live against a fixed target baseline: `asc` shortened by 12 moved the reader's own
+     reported conjunct's ink bottom from 7px above target to 19px above (i.e. 12 CLOSER to whatever sits
+     below), the opposite of the intended fix. `asc` LENGTHENED by the same 12 moves the same ink to 5px
+     BELOW target — comfortably further from the floor, confirmed by the same harness, which is why the
+     sign is flipped here rather than the lever abandoned: growing `asc` (not shrinking it) is what pulls
+     the glyph away from whatever sits below the row, exactly as intended, and still without touching
+     `height` — a `fo.y` that sits higher, over an unchanged-height box, is a bottom edge that ends up
+     lower relative to the (now higher) glyph, same arithmetic as before with the sign the other way
+     round. `fontDescent` is unchanged in meaning: how much of the font's own ascent-heavy line-height:
+     normal split is being borrowed, only now added rather than subtracted. Scoped to
+     DIAGRAM_STACKING_SCRIPTS, as before. */
   let ascOut=a>0?a:px;
   if(typeof DIAGRAM_STACKING_SCRIPTS!=="undefined" && typeof ORTHO_SCHEME!=="undefined" && DIAGRAM_STACKING_SCRIPTS.has(ORTHO_SCHEME)){
-    ascOut=Math.max(0,ascOut-fontDescent);
+    ascOut=ascOut+fontDescent;
   }
   return { asc: ascOut, height: h>0?h:px*2 }; }   // a<=0/h<=0 (measurement failed, or an empty string) falls back to the font's own nominal size, the same floor smpReshape's own defaults already used
 /* X-HEIGHT, THE CSS WAY — CSS's `ex` unit (ancient — CSS1 — unlike the L4 `cap` unit this replaced)
