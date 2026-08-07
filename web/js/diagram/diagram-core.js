@@ -909,7 +909,17 @@ function smpReshape(root){
     const fo=document.createElementNS("http://www.w3.org/2000/svg","foreignObject");
     for(const a of el.attributes) if(a.name!=="x"&&a.name!=="y"&&a.name!=="text-anchor") fo.setAttribute(a.name,a.value);
     fo.setAttribute("x",(x-w/2)+""); fo.setAttribute("y",(y-asc)+"");
-    fo.setAttribute("width",Math.ceil(w+2)+""); fo.setAttribute("height",Math.ceil(h+2)+"");
+    /* ⚠ HEIGHT DOESN'T GET WIDTH'S "+2" — on report. The two used to share one flat safety margin, but
+       it was never calibrated for height specifically: domBaseline()'s own Math.max already floors `h`
+       against three independent measurements (container, ink Range, canvas descent), the last of which
+       is a precise bound rather than an estimate that needs slop stacked on top of it. Chrome's own box
+       for the SAME token measures 2px SHORTER than domBaseline()'s bare `h` here (43 vs a real ceil(h) of
+       45 for the reader's own reported conjunct) — Safari genuinely needs more room than Chrome for this
+       glyph (the engine asymmetry this whole investigation started from), so even bare `h` already runs
+       a little ahead of Chrome's number, and adding +2 on top of that was pure excess, not a needed
+       cushion. Width keeps its own +2 — a different measurement (_measDOM), with its own justification,
+       untouched by any of this. */
+    fo.setAttribute("width",Math.ceil(w+2)+""); fo.setAttribute("height",Math.ceil(h)+"");
     fo.style.overflow="visible";
     const d=document.createElementNS("http://www.w3.org/1999/xhtml","div");
     d.setAttribute("class","fo-form "+(el.getAttribute("class")||""));
