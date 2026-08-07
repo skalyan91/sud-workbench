@@ -265,36 +265,37 @@ function domBaseline(s,f){ _measMountBase(); _mbase.style.font=f; _mbaseText.tex
      after the size token rather than simply prepended — prepending it was tried first and left canvas
      silently measuring against a stale font, which is why the very first cut of this floor measured no
      different for the shallow and deep strings either. */
-  let canvasFloor=0,stackFloor=0;
+  let canvasFloor=0,fontDescent=0;
   try{
     const prefix=(typeof scriptFamilyPrefix==="function")?scriptFamilyPrefix():"";
     const pf=prefix?f.replace(/(\d+(?:\.\d+)?px\s+)/,"$1"+prefix):f;
     _cv.font=pf; const m=_cv.measureText(s||"");
     canvasFloor=a+(m.actualBoundingBoxDescent||0);
-    /* ⚠ EVEN CANVAS'S OWN INK CAME UP SHORT, ON REPORT — for the reader's own actually-rendered token,
-       not the synthetic probe string canvasFloor was verified against. Every floor tried so far (SVG
-       getBBox, DOM ink Range, canvas actualBoundingBoxDescent) is a MEASUREMENT of one specific string's
-       glyphs, and each has independently proven to undershoot SOME real cluster this investigation didn't
-       happen to test against — three different techniques, three different blind spots, the same shape of
-       failure each time. Chasing a fourth, tighter measurement is the wrong kind of fix for that pattern;
-       a content-INDEPENDENT reserve is. `m.fontBoundingBoxDescent` (the font's own declared descent) was
-       tried first and is WORSE, not better — measured 12px against this exact font/size, smaller than
-       canvasFloor's own already-insufficient 15.97 for the deep conjunct, because a font's declared OS/2
-       descent describes a single glyph's reach, not what HarfBuzz can stack when it assembles a
-       multi-mark conjunct at shaping time — the very thing this reserve exists for. What IS
-       content-independent and genuinely generous: the font's own ASCENT, mirrored onto the descent side —
-       "give it as much room below baseline as the font itself reserves above it". No script in
-       DIAGRAM_STACKING_SCRIPTS piles subjoined material anywhere near a full ascent deep, so this is
-       deliberately over-provisioned rather than tightly measured, and that is the point: it stops
-       depending on any one string being the worst case this file has happened to test. Scoped to
-       DIAGRAM_STACKING_SCRIPTS specifically (stackDropExtra's own scoping) — a script with no stacking
-       has no business inheriting a whole extra ascent of empty space below every token. */
-    if(typeof DIAGRAM_STACKING_SCRIPTS!=="undefined" && typeof ORTHO_SCHEME!=="undefined" && DIAGRAM_STACKING_SCRIPTS.has(ORTHO_SCHEME)){
-      stackFloor=a+(m.fontBoundingBoxAscent||0);
-    }
+    fontDescent=m.fontBoundingBoxDescent||0;
   }catch(_){}
-  const h=Math.max(c.height,inkBottom,canvasFloor,stackFloor);
-  return { asc: a>0?a:px, height: h>0?h:px*2 }; }   // a<=0/h<=0 (measurement failed, or an empty string) falls back to the font's own nominal size, the same floor smpReshape's own defaults already used
+  const h=Math.max(c.height,inkBottom,canvasFloor);
+  /* ⚠ GROWING THE BOX WAS THE WRONG LEVER — REPOSITIONING IT IS THE RIGHT ONE, on report, after growing
+     it (mirroring the font's own ascent onto the descent side, doubling the box to 58px) was tried and
+     rejected: "shorten the TOP by 12px" instead. `asc` is what smpReshape subtracts from the target
+     baseline to seat the box's own top (`fo.y = origY - asc`) — `align-items:flex-start` then plants the
+     text at THAT top, so the box's declared height is what stands between the glyph's baseline and the
+     box's own bottom edge (clearance = height - asc). Growing height widens that gap by extending the
+     BOTTOM downward; shrinking `asc` widens the SAME gap by moving the TOP down instead, without touching
+     height at all — verified live (a synthetic foreignObject built with each variant, held against a
+     fixed target baseline): height 41, asc 29 gives 12px of clearance; the SAME height 41 with asc
+     shortened by 12 (asc 17) gives 24px — DOUBLE, matching the mirrored-ascent fix's own gain, but on a
+     box that stays close to Chrome's own reported size instead of ballooning past it. `fontDescent`
+     (canvas's declared OS/2 descent, already measured above and rejected as a HEIGHT floor — too small,
+     12px, to contain a real subjoined stack's ink) is exactly right used this way instead: it isn't being
+     asked to CONTAIN the ink any more, only to say how much of the font's own ascent-heavy reservation
+     above baseline is excess that can be handed to the descent side. Scoped to DIAGRAM_STACKING_SCRIPTS
+     (stackDropExtra's own scoping) — a non-stacking script's `line-height:normal` split was never the
+     asymmetric one this exists to correct. */
+  let ascOut=a>0?a:px;
+  if(typeof DIAGRAM_STACKING_SCRIPTS!=="undefined" && typeof ORTHO_SCHEME!=="undefined" && DIAGRAM_STACKING_SCRIPTS.has(ORTHO_SCHEME)){
+    ascOut=Math.max(0,ascOut-fontDescent);
+  }
+  return { asc: ascOut, height: h>0?h:px*2 }; }   // a<=0/h<=0 (measurement failed, or an empty string) falls back to the font's own nominal size, the same floor smpReshape's own defaults already used
 /* X-HEIGHT, THE CSS WAY — CSS's `ex` unit (ancient — CSS1 — unlike the L4 `cap` unit this replaced)
    resolves to "the font's own x-height" through the SAME font-matching DOM/SVG text painting already
    goes through, so unlike every canvas-measured metric above and below, this one CANNOT disagree with
