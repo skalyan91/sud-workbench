@@ -237,26 +237,41 @@ function domBaseline(s,f){ _measMountBase(); _mbase.style.font=f; _mbaseText.tex
      trusting either one's notion of "normal" to already be tall enough. */
   const range=document.createRange(); range.selectNodeContents(_mbaseText);
   const inkBottom=range.getBoundingClientRect().bottom-c.top;   // ink's own bottom edge, relative to the SAME origin `a` is measured from
-  /* ⚠ A CANVAS FLOOR WAS TRIED HERE AND REVERTED — measured, on the reader's own reported cluster, to be
-     the wrong fix for a bug this function was never the cause of. `inkBottom` (this Range) DOES come back
-     identical for a shallow probe and the deep conjunct (41 either way, in the live WKWebView) — so it
-     looked exactly like the "constant regardless of content" signature already fixed elsewhere in this
-     file for getBBox(), and canvas's own actualBoundingBoxDescent — genuinely content-sensitive on the
-     same two strings (7.21875 vs 15.96875) — looked like the established control to borrow, the same
-     reasoning stackDropExtra()'s own Grantha branch used. It measured clean in isolation (asc 29 + canvas
-     descent 15.97 = 44.97, growing only for the deep string) but the box it produced (47px, after the
-     +2 padding below) OVERSHOT what a genuinely UNCONSTRAINED div with the SAME class/font/text lays out
-     to — 41px, identical for shallow AND deep, and identical to Chrome's own reported 41px for the same
-     token. So `line-height:normal`'s box (not canvas) is the one that's actually right here — it just
-     ALSO doesn't grow with a deep conjunct's ink, in EITHER engine, and that's fine: `foreignObject.tok-
-     word,…{overflow:visible}` (app.css) means nothing this box declares as its height ever clips what
-     paints inside it, in either engine. A too-short foreignObject can't be why a conjunct visually
-     collides with the row below it — the ROW'S OWN reserve below the token can, and that is exactly the
-     separate quantity stackDropExtra() computes (and was separately, correctly fixed for Grantha,
-     unaffected by this revert). Conflating "the ink extends below this box's nominal height" (true, and
-     harmless) with "the document doesn't reserve enough room for it" (the real bug, and a different
-     function's job) is the mistake this comment exists to keep from being made twice. */
-  const h=Math.max(c.height,inkBottom);
+  /* ⚠ A CANVAS FLOOR WAS TRIED, REVERTED, AND HAD TO BE RESTORED — round-trip confirmed live, so the
+     reasoning behind the revert is recorded here as the dead end it turned out to be, not as guidance.
+     `inkBottom` (this Range) DOES come back identical for a shallow probe and the deep conjunct (41
+     either way), while canvas's own actualBoundingBoxDescent is genuinely content-sensitive on the same
+     two strings (7.21875 vs 15.96875) — that part holds. The revert's argument was that this shouldn't
+     matter anyway, because `foreignObject.tok-word,…{overflow:visible}` (app.css) means nothing this
+     box's declared height ever clips what paints inside it — so a too-short box looked like it could only
+     be a cosmetic mismatch against Chrome's own (smaller) 41/43, never the cause of a real collision.
+     Reverting to `Math.max(c.height,inkBottom)` alone (dropping the canvas floor) restored EXACTLY that
+     41/43 box — and reopened the original bug: reported live, "the baseline has again collapsed to the
+     floor" the moment the box went back to matching Chrome's number. So `overflow:visible` was the wrong
+     reason to trust: it keeps the GLYPH from being clipped, but says nothing about where WITHIN the box
+     `align-items:flex-start` seats it, and Chrome's own `line-height:normal` for this font reserves real
+     descent room around the glyph independent of any div height at all — Safari's reserves far less
+     (the same asymmetry this whole investigation started from). A 41/43 box that is "enough" in Chrome is
+     therefore NOT the same 41/43 box in Safari, and matching Chrome's px NUMBER was never actually the
+     bar — visual correctness in each engine is, and the two numbers legitimately differing is what that
+     looks like here. The floor is canvas's descent again, `a` (ascent, independently verified reliable)
+     plus canvas's actualBoundingBoxDescent for this exact string, family-prefixed the same way every other
+     canvas measurement in this file already is. */
+  /* ⚠ SIZE THEN FAMILY, NOT THE OTHER WAY ROUND — a CSS font shorthand is invalid with the family first,
+     and an invalid assignment to canvas's own `.font` is SILENTLY REJECTED, leaving whatever font a
+     PREVIOUS caller last set successfully still in effect (this file's own capHeightPx()/xHeightPx() note
+     the identical trap for the identical reason). `f` arrives here as an opaque, already-built string
+     (`SIZEpx family-list`, optionally weight/style-prefixed), so the prefix has to be SPLICED IN right
+     after the size token rather than simply prepended — prepending it was tried first and left canvas
+     silently measuring against a stale font, which is why the very first cut of this floor measured no
+     different for the shallow and deep strings either. */
+  let canvasFloor=0;
+  try{
+    const prefix=(typeof scriptFamilyPrefix==="function")?scriptFamilyPrefix():"";
+    const pf=prefix?f.replace(/(\d+(?:\.\d+)?px\s+)/,"$1"+prefix):f;
+    _cv.font=pf; canvasFloor=a+(_cv.measureText(s||"").actualBoundingBoxDescent||0);
+  }catch(_){}
+  const h=Math.max(c.height,inkBottom,canvasFloor);
   return { asc: a>0?a:px, height: h>0?h:px*2 }; }   // a<=0/h<=0 (measurement failed, or an empty string) falls back to the font's own nominal size, the same floor smpReshape's own defaults already used
 /* X-HEIGHT, THE CSS WAY — CSS's `ex` unit (ancient — CSS1 — unlike the L4 `cap` unit this replaced)
    resolves to "the font's own x-height" through the SAME font-matching DOM/SVG text painting already
