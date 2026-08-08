@@ -1684,7 +1684,7 @@ const MSEG_DIGRAPHS={la:["ae","oe"]};
 function msegDigraphs(){ return MSEG_DIGRAPHS[((DOCLANG||"").toLowerCase().split(/[-_]/)[0])]||null; }
 function msegSegment(formStr,lemmaStr){
   const F=Array.from(formStr||""), L=Array.from(lemmaStr||"");   // CODE POINTS, not UTF-16 units — a hyphen must never land inside a surrogate pair
-  const out={seg:formStr||"",pre:false,post:false};
+  const out={seg:formStr||"",pre:false,post:false,kind:null};   // `kind` ("pre"/"post"/"in"/null=unsegmented) is which CANDIDATE won — composeMGlossPrefill below needs to tell the infix shape apart from a plain prefix/suffix match, and pre&&post alone can't: both are true ONLY for "in" (see the tie-break block above), but a caller has no way to know that without re-deriving it, so it rides along on the result instead
   if(!F.length||!L.length) return out;   // no lemma at all (a "_" lemma, or no transliteration of it to compare like-for-like) → the prefill stays exactly what it was before this feature
   const eq=(a,b)=>a===b||a.toLowerCase()===b.toLowerCase();   // per-CHARACTER case folding, never toLowerCase() over the whole string: a handful of mappings change length ("İ" → "i̇") and would slide every index after them, cutting the form in the wrong place
   let p=0; while(p<F.length&&p<L.length&&eq(F[p],L[p])) p++;
@@ -1712,13 +1712,13 @@ function msegSegment(formStr,lemmaStr){
   const match=best.kind==="pre"?pieces[0]:pieces[1];   // the piece SHARED with the lemma: leading for a prefix match, second for a suffix or infix match
   if(!match.some(ch=>/\p{L}/u.test(ch))||!match.some(msegIsVowel)) return out;
   out.seg=pieces.map(a=>a.join("")).join("-");   // sliced out of F itself, so the FORM's own casing survives the folded comparison ("Unhappy"/"happy" → "Un-happy")
-  out.pre=best.kind!=="post"; out.post=best.kind!=="pre";
+  out.pre=best.kind!=="post"; out.post=best.kind!=="pre"; out.kind=best.kind;
   return out; }
 // The two strings the segmentation compares, taken LIKE-FOR-LIKE: whatever the MSeg prefill would have written
 // for the form, and the lemma's counterpart in the same alphabet. So a transliterated MSeg is compared against
 // MISC LTranslit / t.translitLemma, never against the native-script lemma — and where a non-Latin token has no
 // transliteration yet (the prefill then falls back to the raw form), the lemma falls back with it.
-function msegPrefillParts(t){ if(!t) return {seg:"",pre:false,post:false};
+function msegPrefillParts(t){ if(!t) return {seg:"",pre:false,post:false,kind:null};   // same shape msegSegment itself returns — see its own note on `kind`
   const ftr=translitNeeded(DOCLANG)?(miscTranslit(t.misc)||t.translit||""):"";   // "" ⇒ this document's MSeg is in the native script (Latin-script language, or no romanisation available for this token)
   const lraw=(t.lemma&&t.lemma!=="_")?t.lemma:"";
   const parts=msegSegment(ftr||(t.form||""), ftr?(miscKV(t.misc,"LTranslit")||t.translitLemma||""):lraw);
@@ -1727,6 +1727,35 @@ function msegPrefillParts(t){ if(!t) return {seg:"",pre:false,post:false};
 // FEATS compose to nothing writes no MGloss at all (the `if(mg)` at every call site), and a bare "-" would be
 // that nothing dressed up as a gloss.
 function mglossMarks(mg,seg){ return mg?((seg.pre?"-":"")+mg+(seg.post?"-":"")):mg; }
+/* composeMGloss + mglossMarks, together, for every PREFILL/REFILL site (mglossRefill, morphPrefillSent, the
+   post-reparse regen below all used to write this exact pair inline — one INFIX bug, three copies to have missed
+   it in). For a prefix or suffix match (seg.kind "pre"/"post") — or no match at all (kind null) — nothing here
+   changes: composeMGloss's single lex+gram run gets mglossMarks' attachment hyphen on whichever edge msegSegment
+   named, exactly as before.
+   THE INFIX CASE (seg.kind==="in" — the only shape where seg.pre AND seg.post are both true; see msegSegment's
+   own tie-break comment) is NOT a smaller version of the same rule and must not reuse composeMGloss at all.
+   msegSegment cut the form into three pieces there — flanking material, the MATCH (the substring shared with the
+   lemma), flanking material again — e.g. `dadātu` against lemma `dā` cuts to "da-dā-tu". The MATCH piece is the
+   stem — it's what equals the lemma — so a lexical gloss for the word (Wiktionary's "give", say) describes THAT
+   piece, the middle one, and nothing else. FEATS says nothing about which piece of the form realises which
+   category, so its abbreviations (dadātu's imperative/3rd/singular) don't belong to the match; they describe the
+   reduplication-plus-ending working together, and with no second bundle to split them into, this app's
+   convention puts the whole of `gram` on the FIRST (reduplicating) piece rather than inventing a division FEATS
+   never stated. Gluing lex and gram into one string and bracketing the OUTSIDE — composeMGloss+mglossMarks' usual
+   move — puts BOTH on the MIDDLE slot instead ("-give.IMP.3SG-" splits to ["","give.IMP.3SG",""]), which is
+   exactly backwards: the match/lemma piece would carry the grammatical categories that belong to its flanking
+   material, and the flanking material would carry nothing at all.
+   So for "in", the three MSeg slots are answered directly rather than through composeMGloss: `gram` on the
+   first (as CONTENT, not as an attachment mark on an empty slot — so no leading "-" the way the pre/post branch
+   would add one), `lex` alone on the second (the match), the third left empty — unglossed, same as every other
+   slot this file leaves for the annotator to fill in by hand. Two hyphens either way keep it 3-slot-aligned with
+   MSeg's own three pieces ("gram-lex-".split("-") is exactly ["gram","lex",""]), and an entirely empty result
+   (no FEATS abbreviations AND no lexical gloss) collapses back to "" rather than the two bare hyphens the
+   template would otherwise leave behind — "" is how every call site here already spells "nothing to write". */
+function composeMGlossPrefill(lex,featsStr,upos,seg){
+  if(seg&&seg.kind==="in"){ const gram=featsToGloss(featsStr,upos);
+    return (gram||lex)?(gram+"-"+lex+"-"):""; }
+  return mglossMarks(composeMGloss(lex,featsStr,upos),seg); }
 /* Item 3 — RE-DERIVE ONE TOKEN'S SEGMENTATION. MSeg is a function of the form AND the lemma, so it goes stale
    whenever EITHER moves: a hand-edited lemma, a lemma the background re-parse revised after a form edit, or the
    form itself. Every one of those paths funnels through here rather than re-deriving the value itself, so they
@@ -1773,7 +1802,7 @@ function mglossRefill(t,force){ if(!MORPH_ON||!t) return false;
   if(!force && cur && cur!==(t._mglossPre||"")) return false;   // hand-written → the annotator's, not ours
   const seg=msegPrefillParts(t);
   const lex=(GLOSS_ON&&!UPOS_LEIPZIG_ABBR[t.upos])?miscKV(t.misc,"Gloss").replace(/-/g,"_"):"";   // the same cross-tier prefill morphPrefillSent applies
-  const pv=glossEnc(mglossMarks(composeMGloss(lex,t.feats,t.upos),seg));
+  const pv=glossEnc(composeMGlossPrefill(lex,t.feats,t.upos,seg));
   if(!pv||pv===cur) return false;
   t.misc=setMiscKV(t.misc,"MGloss",pv); t._mglossPre=pv; return true; }
 /* A SEAM TYPED INTO A FORM IS A SEAM IN ITS SEGMENTATION TOO. `=` marks where a token should divide, and
@@ -1829,7 +1858,7 @@ function morphPrefillSent(s){ if(!s||!s.tokens) return;
   s.tokens.forEach(t=>{ const seg=msegPrefillParts(t);   // ONE segmentation per token, shared by both rows, so MSeg's boundaries and MGloss's attachment hyphens can never disagree about where the affixes are
     if(!miscKV(t.misc,"MSeg")){ const pv=glossEnc(seg.seg); if(pv){ t.misc=setMiscKV(t.misc,"MSeg",pv); t._msegPre=pv; } }
     if(!miscKV(t.misc,"MGloss")){ const lex=(GLOSS_ON&&!UPOS_LEIPZIG_ABBR[t.upos])?miscKV(t.misc,"Gloss").replace(/-/g,"_"):"";
-      const mg=glossEnc(mglossMarks(composeMGloss(lex,t.feats,t.upos),seg)); if(mg){ t.misc=setMiscKV(t.misc,"MGloss",mg); t._mglossPre=mg; } } }); }
+      const mg=glossEnc(composeMGlossPrefill(lex,t.feats,t.upos,seg)); if(mg){ t.misc=setMiscKV(t.misc,"MGloss",mg); t._mglossPre=mg; } } }); }
 // item: a re-parse replaced this sentence's tokens outright, so both morphemic tiers came back empty — re-seed them
 // from the FEATS the parse just produced. No-op unless the morphemic tier is on. The caller owns the undo snapshot
 // (a re-parse pushes one before it starts), so this rides along inside that single undoable step.
@@ -2111,7 +2140,7 @@ async function reparseTokenFields(si,tokIds,opts){
         if(opts.regloss) mg=mglossReglossLexical(t,mg);   // …and only a RETAG can move the token across the open/closed-class line that decides whether it carries a stem gloss at all — set by the two UPOS-edit call sites, since a form edit's background re-parse never changes the word class
         if(mg!==keep.MGloss) t.misc=setMiscKV(t.misc,"MGloss",mg); }
       else if(MORPH_ON){ const lex=(GLOSS_ON&&!UPOS_LEIPZIG_ABBR[t.upos])?miscKV(t.misc,"Gloss").replace(/-/g,"_"):"";   // nothing to preserve → compose one fresh, exactly as before (a token that had NO MGloss yet gets one, the same way morphPrefillSent would)
-        const mg=glossEnc(mglossMarks(composeMGloss(lex,t.feats,t.upos),seg));
+        const mg=glossEnc(composeMGlossPrefill(lex,t.feats,t.upos,seg));
         if(mg) t.misc=setMiscKV(t.misc,"MGloss",mg); } }
     msegRefill(t); });   // …and the segmentation tier alongside it, so the two morphemic rows never come back half-filled. Item 3: a REFILL, not a fill-if-empty — this is the path a form edit's background re-parse takes to revise the token's LEMMA, and the segmentation is computed from that lemma, so an MSeg still holding its previous auto-prefill has to follow it. msegRefill is what refuses to touch one the user has since typed over
   await annotateTranslitMisc(si); if(show.translit)fillTranslit();   // item 5: a secondary pass (re)writes MISC Translit/LTranslit + refills the display row

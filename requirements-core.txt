@@ -31,6 +31,30 @@ PyGObject; sys_platform == "linux"
 pycairo; sys_platform == "linux"
 conllu>=6.0
 
+# ── numpy (pinned here, not just in app/extras.py's Stanza tier — see why below) ────────────
+# `app/extras.py`'s `_stanza_platform_pins()` already adds `numpy<2` to the Stanza tier's pip
+# install on Intel Mac, to keep PyTorch's final macOS-x86_64 build (2.2.2, pre-numpy-2.0 ABI)
+# working — see that function's docstring for the ABI story. THAT ALONE DOES NOT WORK, because
+# the pin only affects what lands inside `EXTRAS_DIR`, and `EXTRAS_DIR` is *appended* to
+# `sys.path` by `extras.activate()`'s `site.addsitedir` call — after this venv's own
+# site-packages, which is already on `sys.path` from interpreter start. Python resolves
+# `import numpy` once per process and caches the module in `sys.modules`; with CORE's
+# site-packages earlier on `sys.path`, CORE's numpy is the one every `import numpy` anywhere in
+# the process resolves to — including inside Stanza's own torch — REGARDLESS of what the extras
+# tier separately pinned or when it was installed. And CORE's `numpy` (pulled in transitively by
+# spaCy, `fasttext-wheel`, …) has no ceiling anywhere else in this file, so on Intel it resolves
+# to a current 2.x release the moment anything imports it — which `app/langid.py`'s
+# `detect_language` does on every document open, via `import fasttext` inside `_load()`, well
+# before a reader could ever reach Manage Models to install the Stanza tier. So the ABI mismatch
+# is not a race that sometimes goes the right way — CORE's numpy wins every time, on every
+# realistic launch, and the extras-tier pin is dead code on this platform. Pinning it HERE too,
+# under the same marker, is what actually fixes it: it constrains the FIRST numpy import in the
+# process, which is the only one that matters. (`platform_machine` is a standard PEP 508 marker;
+# no `sys_platform`-only test can express "Intel Mac", since Windows and Linux both use
+# `x86_64`/`AMD64` too.) A no-op on Apple Silicon/Linux/Windows, matching the extras-tier pin's
+# own scoping — those platforms keep getting current, numpy-2-safe torch releases.
+numpy<2; sys_platform == "darwin" and platform_machine == "x86_64"
+
 # ── parsing (SUD spaCy only — thinc/CNN, no torch) ──────────────────────────
 spacy==3.8.14         # was 3.8.7 — the en_sud_ewt wheel below requires >=3.8.14,<3.9, and pip refuses to resolve the two together
 click>=8.0

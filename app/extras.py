@@ -73,6 +73,21 @@ def _stanza_platform_pins() -> list[str]:
     resolve to instead). Apple Silicon and Linux/Windows keep getting current torch releases, which
     are numpy-2.x-safe, so this constraint would be a no-op there — scope it to the one platform
     that's actually stuck on old torch.
+
+    ⚠ THIS PIN ALONE DOES NOT FIX THE BUG — it only constrains what lands inside EXTRAS_DIR, and
+    `activate()` below appends EXTRAS_DIR to `sys.path` with `site.addsitedir`, i.e. AFTER this
+    process's own (CORE) site-packages, which is already on `sys.path` at interpreter start.
+    `import numpy` resolves once per process against `sys.path` in order and the result is cached
+    in `sys.modules`, so CORE's numpy — unpinned anywhere else, and pulled in transitively by spaCy
+    and fasttext-wheel regardless of whether Stanza is ever touched — is what every later
+    `import numpy` gets, including one made from inside Stanza's own torch. And CORE's numpy is
+    loaded early and unconditionally: `app/langid.py`'s `detect_language` (run on every document
+    open) does `import fasttext`, which imports numpy, well before a reader could reach Manage
+    Models to install this tier. The pin that actually matters is the identically-scoped one in
+    `requirements-core.txt`/`requirements.txt` — see the comment there. This one is kept as a
+    defensive backstop (e.g. a `--target` install run against a CORE venv from before that pin
+    existed still gets a locally-consistent EXTRAS_DIR, even though it can't win the sys.path race
+    against a CORE that's already wrong) rather than because it independently fixes anything.
     """
     if platform.system() == "Darwin" and platform.machine() == "x86_64":
         return ["numpy<2"]

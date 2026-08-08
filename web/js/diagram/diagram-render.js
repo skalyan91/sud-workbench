@@ -91,6 +91,20 @@ function stemma(si,{proj,catNodes}){
   const ghostPairs=ghostPairsFor(t);   // [originIdx,targetIdx], 0-based — computed once, before ANY Y-position is derived from depth
   applyGhostDepth(depth,head,ghostPairs,n);   // item 4: a ghost's TARGET is pulled above its shallowest ghost dependent, cascading to its own real subtree — replaces the earlier per-edge "swap which end draws where" hack (which never touched real node positions)
   const LV=48,TOP=18,A=16,B=7,realMaxD=Math.max(0,...depth),ny=d=>TOP+d*LV;   // shorter edges; A above clears ascenders; TOP is small so the root (no incoming edge) gets no extra headroom
+  /* THE ROOT NODE'S OWN CROP RESERVE MUST GROW WITH IT, on request ("lzh diagram tokens need more space on
+     top, to account for their increased size"). TOP itself deliberately stays a small constant (see the note
+     above) because the ACTUAL top margin comes from fitTight(svg,boxes) cropping to the union of `boxes` — and
+     every node's box (below, `boxes.push({…hy:9})`) reserved a flat 9px tuned for NODE_F at TOK_MAG 1. A
+     magnified node — any INDIC_SCRIPTS/ORNAMENTAL_SCRIPTS script, or lzh (scriptMag(), js/lang/translit.js) —
+     draws its glyph at up to 2× that size, and the ROOT sits at depth 0, i.e. literally the topmost thing this
+     function draws: the flat 9px under-reserved the magnified glyph's real ink, cropping the root's own
+     ascenders off the top of the SVG (a big enough word or a stacked-mark script's letters read as clipped/
+     crowded against the very top of the block). Same closed-form term WORD_OFF/belowGap() already use for "how much
+     MORE ascent a magnified face reaches than an unmagnified one would" — ascent(NODE_F) is already the
+     MAGNIFIED font's own ascent (NODE_F=magFont(14)), so subtracting the unmagnified ascent it implies
+     (÷TOK_MAG) isolates just the extra. Exactly 0 at TOK_MAG 1, so an unmagnified document's crop is
+     byte-identical to before. */
+  const NODE_ASC_EXTRA=TOK_MAG>1?ascent(NODE_F)*(1-1/TOK_MAG):0;
   // Subject=Generic: the ∅ sits one level BELOW its predicate (ny(depth[i]+1), like any dependent) — if the predicate
   // is already at the deepest REAL level, that lands exactly where baseY/the bottom margin was sized for, with no
   // room of its own. Raise the whole figure's reserved depth by one extra level so the ∅ gets genuine space.
@@ -197,7 +211,7 @@ function stemma(si,{proj,catNodes}){
     g.appendChild(E("path",{class:"edge edge-ghost",d:`M ${ge.emptyX} ${ge.y1} L ${c[i]} ${ge.y2}`,stroke:ink}));
     const glbl=E("text",{class:"node-lbl",x:ge.emptyX,y:ge.gy}); glbl.textContent="∅"; g.appendChild(glbl);
     if(show.labels){ const L=ghostLabAt.get(ge); drawLabel(g,L.mx,L.my,"subj",col); const lb=g.lastElementChild; if(lb)lb.classList.add("lbl-ghost"); boxes.push({x:L.mx,y:L.my,hx:meas("subj",POS_F)/2+2,hy:7}); }
-    boxes.push({x:ge.emptyX,y:ge.gy,hx:8,hy:9});
+    boxes.push({x:ge.emptyX,y:ge.gy,hx:8,hy:9+NODE_ASC_EXTRA});   // "∅" is drawn .node-lbl too, so it magnifies with every other node glyph — see NODE_ASC_EXTRA's own note
     svg.appendChild(g); });
   for(let i=0;i<n;i++){const g=E("g",{class:"node"+(sel.s===si&&sel.t===OID(i)?" sel":""),"data-s":si,"data-tok":OID(i)});
     const txt=catNodes?(posDisp(t[i])||"X"):bform(t[i]), tw=catNodes?meas(txt,POS_F):fmeas(t[i],NODE_F);   // item 11: stemma word-node label uses bform → the SCRIPT glyph-swap applies to stemma nodes too
@@ -207,7 +221,7 @@ function stemma(si,{proj,catNodes}){
     if(gwOf(t[i]).length){ g.setAttribute("data-gw",[OID(i)].concat(gwOf(t[i]).map(p=>p.oid)).join(" "));
       if(!proj&&!catNodes) gwSlurSVG(svg,c[i]-tw/2,c[i]+tw/2,ny(depth[i])+descent(NODE_F)+tieLead(),si,[OID(i)].concat(gwOf(t[i]).map(p=>p.oid)),boxes); }   // …and, with NO baseline row (proj off), the slur belongs to the node — seated by the SAME tieLead() rule the tie layer uses, just measured from the node's own descender line instead of a below-stack bottom. With proj ON the baseline row's tie layer draws it (mwtTie below), so exactly one slur is drawn per word either way
     if(!catNodes){ drawHangsSVG(svg,t[i],c[i],ny(depth[i]),NODE_F,"node-lbl",si,boxes,OID(i)); drawLeadsSVG(svg,t[i],c[i],ny(depth[i]),NODE_F,"node-lbl",si,boxes,OID(i)); }   // folded-punctuation satellites beside the word node (POS-as-node has no word to host them)
-    boxes.push({x:c[i],y:ny(depth[i])-5,hx:tw/2+2,hy:9});}
+    boxes.push({x:c[i],y:ny(depth[i])-5,hx:tw/2+2,hy:9+(catNodes?0:NODE_ASC_EXTRA)});}   // catNodes draws POS_F (unmagnified) here, not the word glyph — see NODE_ASC_EXTRA's own note; gating on it keeps a POS-as-node stemma byte-identical
   fitTight(svg,boxes);   // crop tight so proj/non-proj get the same (minimal) top padding
   return wrapDiagram(svg,si);
 }

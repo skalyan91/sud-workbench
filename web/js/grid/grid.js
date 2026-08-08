@@ -141,10 +141,16 @@ function pillColW(k,H,from,to){ let m=Math.max(MISC_MIN, meas(H,HEAD_F)+16);   /
   const eat=raw=>{ if(!raw||raw==="_")return; String(raw).split("|").forEach(s=>{ s=s.trim(); if(s) m=Math.max(m, meas(s,GRID_F)+PILL_PAD); }); };
   DOC.slice(from,to).forEach(s=>{ s.tokens.forEach(t=>eat(t[k])); if(k==="misc")(s.mwt||[]).forEach(mm=>eat(mm.misc)); });   // include MWT-row MISC chips
   return Math.round(m); }
+// the ID column's OWN total inline padding — --grid-row-pad on the inline-start (tied to the row band's own left
+// inset, table.grid td.col-id in styles/app.css) + the flat 6px kept on the inline-end. ONE function so idWRaw
+// below and marginNumWidth (js/core/document.js) can't drift apart on what "the ID cell's own padding" means —
+// both used to spell it as a bare literal 12 (6+6), which went stale the instant the inline-start padding was
+// tied to --grid-row-pad instead. css() (diagram-core.js) caches the read, so calling this per scan costs nothing.
+function idPadTotal(){ return (parseFloat(css("--grid-row-pad"))||10)+6; }
 // re-measures ONLY DOC.slice(from,to), merging into colWRaw/idWRaw via Math.max — see the cache note above
 function scanColW(from,to){
   let maxTok=0; DOC.slice(from,to).forEach(s=>maxTok=Math.max(maxTok,s.tokens.length));
-  idWRaw=Math.max(idWRaw, Math.ceil(meas(String(Math.max(maxTok,1)),GRID_F))+12);   // …and the LEFT MARGIN shares this width: the sentence number and the §/¶ marks are drawn in the same box at their own sizes, and a number too wide for the token ids must widen the column rather than overflow it (js/core/document.js)   // content-fit like the columns below: the widest displayed id string (String(maxTok) is the largest index → longest id) + the cell's 6+6px padding. NOT floored to the "ID" header, which used to oversize the column whenever ids are short (single-digit). MWT range rows render no id text (see renderGrid), so they don't widen it
+  idWRaw=Math.max(idWRaw, Math.ceil(meas(String(Math.max(maxTok,1)),GRID_F))+idPadTotal());   // …and the LEFT MARGIN shares this width: the sentence number and the §/¶ marks are drawn in the same box at their own sizes, and a number too wide for the token ids must widen the column rather than overflow it (js/core/document.js)   // content-fit like the columns below: the widest displayed id string (String(maxTok) is the largest index → longest id) + the cell's own padding (idPadTotal, above). NOT floored to the "ID" header, which used to oversize the column whenever ids are short (single-digit). MWT range rows render no id text (see renderGrid), so they don't widen it
   // EVERY column the document admits, not just the VISIBLE ones (ALLCOLS, not AC). That is what makes the width
   // rule below monotonic: a hidden column still has a live natural width in colWRaw, so widening the page can find
   // it again. Measuring only the visible ones froze a column's width at whatever it was when it went away — and a

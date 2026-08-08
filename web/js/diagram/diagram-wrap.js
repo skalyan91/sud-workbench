@@ -1011,6 +1011,14 @@ function wpRevealSel(){ if(sel.s<0||sel.t<=0) return;
 function tree(si){
   const D=displaySent(DOC[si]), t=D.tokens, n=t.length, OID=k=>D.map[k]+1, sent={tokens:t}; RTL=D.rtl;
   const {children,root,head}=structure(sent),belowReserve=belowReserveH(trLayer(),belowTierN(),false),LV=48+belowReserve,TOP=18,A=16,B=7;         // item 2: the level height = a CONSTANT 48 (the stemma's LV) + the below-stack reserve, and the outgoing edge attaches just below that reserve (parentEndY) — so an edge is always LV−belowReserve−A−B = 48−16−7 = 25 tall, EXACTLY the stemma's, no matter how many annotation tiers are shown. belowReserve uses the SAME belowGap() per-row step the tiers are drawn at, so it cancels cleanly (Item 8: each tier row folds in descent(POS_F))
+  // THE ROOT's OWN CROP RESERVE, matching stemma()'s identical fix (diagram-render.js) for the identical reason:
+  // the root sits at depth 0 — literally the topmost thing this notation draws — and fitTight(svg,boxes) crops
+  // to the union of `boxes`, whose node box below reserved a flat 9px tuned for NODE_F at TOK_MAG 1. A magnified
+  // node (any INDIC_SCRIPTS/ORNAMENTAL_SCRIPTS script, or lzh — scriptMag(), js/lang/translit.js) needs the same
+  // "how much MORE ascent a magnified face reaches than an unmagnified one would" term WORD_OFF/belowGap() already
+  // use elsewhere: ascent(NODE_F) is already the MAGNIFIED font's own ascent, so subtracting the unmagnified
+  // ascent it implies (÷TOK_MAG) isolates just the extra. Exactly 0 at TOK_MAG 1 — byte-identical crop then.
+  const NODE_ASC_EXTRA=TOK_MAG>1?ascent(NODE_F)*(1-1/TOK_MAG):0;
   const SPW=meas(" ",WORD_F), NGAP=SPW+4;                              // node gap matches the stemma column gap
   // tidy layout: leaves packed with the stemma's node gap; a parent is centred over its children. Adjacent
   // siblings are then pushed apart (whole subtree shifted) only as far as their nodes AND their incoming
@@ -1089,7 +1097,7 @@ function tree(si){
     g.appendChild(E("path",{class:"edge edge-ghost",d:`M ${ge.gx} ${ge.y1} L ${x[i]} ${ge.y2}`,stroke:ink}));
     const glbl=E("text",{class:"node-lbl",x:ge.gx,y:ge.gy}); glbl.textContent="∅"; g.appendChild(glbl);
     if(show.labels){ const L=ghostLabAt.get(ge); drawLabel(g,L.mx,L.my,"subj",col); const lb=g.lastElementChild; if(lb)lb.classList.add("lbl-ghost"); boxes.push({x:L.mx,y:L.my,hx:meas("subj",POS_F)/2+2,hy:7}); }
-    boxes.push({x:ge.gx,y:ge.gy,hx:8,hy:9});
+    boxes.push({x:ge.gx,y:ge.gy,hx:8,hy:9+NODE_ASC_EXTRA});   // "∅" is drawn .node-lbl too, so it magnifies with every other node glyph — see NODE_ASC_EXTRA's own note
     svg.appendChild(g); });
   for(let i=0;i<n;i++){const g=E("g",{class:"node"+(sel.s===si&&sel.t===OID(i)?" sel":""),"data-s":si,"data-tok":OID(i)});
     const lbl=E("text",{class:"node-lbl"+italDeco(t[i]),x:x[i],y:ny(depth[i])}); lbl.textContent=bform(t[i]); const tw=fmeas(t[i],NODE_F);   // host form only
@@ -1107,7 +1115,7 @@ function tree(si){
     svgMarks(g,x[i],ny(depth[i]),t[i],NODE_F); svgFormSeamMark(g,t[i],x[i],ny(depth[i]),NODE_F,boxes);   // Item 11: node form appended LAST → paints on TOP of the translit/gloss stack; item 4: marks in front of it, then the seam mark off its inline end
     g.style.cursor="pointer"; g.addEventListener("click",()=>pick(si,OID(i))); svg.appendChild(g);
     drawHangsSVG(svg,t[i],x[i],ny(depth[i]),NODE_F,"node-lbl",si,boxes,OID(i)); drawLeadsSVG(svg,t[i],x[i],ny(depth[i]),NODE_F,"node-lbl",si,boxes,OID(i));   // folded punctuation as separate selectable satellites beside the node
-    boxes.push({x:x[i],y:ny(depth[i])-5,hx:tw/2+2,hy:9});}
+    boxes.push({x:x[i],y:ny(depth[i])-5,hx:tw/2+2,hy:9+NODE_ASC_EXTRA});}   // tree() has no catNodes/POS-as-node mode — every node here is bform(), always at NODE_F — see NODE_ASC_EXTRA's own note
   fitTight(svg,boxes);   // crop tight top, matching the stemma
   return wrapDiagram(svg,si);
 }

@@ -16,6 +16,21 @@ pycairo; sys_platform == "linux"     #   introspection bridge. Both are pip-inst
                       #   be present; see packaging/ for the apt/dnf/pacman lines once that phase lands.
 conllu>=6.0           # available for reference; I/O here is hand-rolled for byte-stable round-trips
 
+# ── numpy ────────────────────────────────────────────────────────────────────
+numpy<2; sys_platform == "darwin" and platform_machine == "x86_64"
+                      # PyTorch's final macOS-x86_64 build (2.2.2 — Apple dropped Intel wheels after
+                      # that) predates the numpy 2.0 C-ABI, so an unconstrained resolve on Intel Mac
+                      # gives you a current (2.x) numpy alongside that old torch and every torch op
+                      # raises "RuntimeError: Numpy is not available!" at runtime — not a missing
+                      # dependency, an incompatible pair. This one line is what actually fixes it in
+                      # THIS file: unlike the shipping bundles (requirements-core.txt + the Stanza
+                      # tier's own numpy<2 pin in app/extras.py's `_stanza_platform_pins()`, installed
+                      # into a separate EXTRAS_DIR appended to sys.path *after* this venv's own
+                      # site-packages), everything here shares one flat site-packages, so whichever
+                      # numpy pip resolves for THE WHOLE ENVIRONMENT is the one every `import numpy`
+                      # gets — including inside stanza's torch. `platform_machine` (not `sys_platform`
+                      # alone) is required: Windows and Linux both report "x86_64"/"AMD64" too, and
+                      # this must stay a no-op there, where torch keeps shipping numpy-2-safe builds.
 # ── parsing (SUD spaCy + Stanza UD) ─────────────────────────────────────────
 spacy==3.8.14         # loads the sud_<lang>_<treebank> parser packages. Was 3.8.7; the bundled en_sud_ewt
                       #   wheel below requires >=3.8.14,<3.9 and pip won't resolve it against the older pin
