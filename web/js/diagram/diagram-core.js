@@ -1995,11 +1995,18 @@ function tidyLayout(size,root,childrenOf,{lw,hgw,ldw,elw,SPW,NGAP}){
     })(root);
   return x;
 }
-function stemmaLayout(sent,catNodes,posBelow){const pad=2, SP=meas(" ",WORD_F)+8;   // gap matches arc view; slot also fits the baseline POS tag so they don't crowd
+/* The stemma's own nominal left margin — the x this layout seats the FIRST thing it draws at. Named rather
+   than written twice because spreadForLabels' closing re-seat (see its own note) has to restore exactly this
+   invariant after moving nodes around, and a second literal there could drift from this one. */
+const STEMMA_PAD=2;
+function stemmaLayout(sent,catNodes,posBelow){const pad=STEMMA_PAD, SP=meas(" ",WORD_F)+8;   // gap matches arc view; slot also fits the baseline POS tag so they don't crowd
   const lw=sent.tokens.map(t=>Math.max(fmeas(t,WORD_F),catNodes?meas(posDisp(t)||"X",POS_F):fmeas(t,NODE_F), posBelow?meas(posDisp(t)||"X",POS_F):0, trLayer()?meas(trTxt(t),trFont(t)):0, glossSlotW(t)));   // item 13: include the gloss-tier width so glosses stay spaced
-  const c=[]; let x=pad; sent.tokens.forEach((t,i)=>{ x+=genericSubjGapW(sent.tokens,i,catNodes?POS_F:NODE_F)+leadW(t,NODE_F); c.push(x+lw[i]/2); x+=lw[i]+tailW(t,NODE_F)+SP; });   // reserve inline-START room for right-merging leads (item 2) + inline-end room for trailing satellites; node centre stays on the host (arc endpoints unchanged). Subject=Generic: a virtual ∅-token band inserted just before, same idea as linear()
+  const c=[], ldw=[]; let x=pad; sent.tokens.forEach((t,i)=>{ const lead=genericSubjGapW(sent.tokens,i,catNodes?POS_F:NODE_F)+leadW(t,NODE_F); ldw.push(lead); x+=lead; c.push(x+lw[i]/2); x+=lw[i]+tailW(t,NODE_F)+SP; });   // reserve inline-START room for right-merging leads (item 2) + inline-end room for trailing satellites; node centre stays on the host (arc endpoints unchanged). Subject=Generic: a virtual ∅-token band inserted just before, same idea as linear()
   const total=x-SP+pad;
-  return {c,total,lw};   // caller mirrors after any label-spacing pass
+  /* `ldw` is that inline-START reserve, kept PER NODE rather than being consumed into `x` and forgotten: it is
+     the second half (with lw[i]/2) of "how far left of its own centre does node i actually draw", which is what
+     spreadForLabels needs to re-seat the figure honestly after it has shifted subtrees about. See its note. */
+  return {c,total,lw,ldw};   // caller mirrors after any label-spacing pass
 }
 function mirror(c,total){ if(RTL) for(let i=0;i<c.length;i++) c[i]=total-c[i]; }   // in-place RTL flip of x-centres
 /* transliteration + POS stacked below a word baseline; returns the bottom y (pushes hit-boxes) */
@@ -2281,7 +2288,7 @@ function fitTight(svg,boxes){ if(!boxes.length) return;
 // nearest child on each side (rightmost of the left group, leftmost of the right group) stays fixed, and the
 // outer children spread away from the head (their whole subtrees shift outward) by the minimum needed. Heads
 // and inner children never move → converges. A horizontal label may cross the projection lines.
-function spreadForLabels(x,edges){ const live=edges.filter(e=>e.w); if(!live.length) return;
+function spreadForLabels(x,edges,lw,ldw){ const live=edges.filter(e=>e.w); if(!live.length) return;
   const SPW=meas(" ",WORD_F), n=x.length;
   const kids=Array.from({length:n},()=>[]), hasIn=new Array(n).fill(false);   // reconstruct the tree for subtree spans
   edges.forEach(e=>{ if(e.h>=0&&e.h<n){ kids[e.h].push(e.d); hasIn[e.d]=true; } });
@@ -2320,7 +2327,31 @@ function spreadForLabels(x,edges){ const live=edges.filter(e=>e.w); if(!live.len
           else { shiftSet(a.d,-push); shiftSet(b.d,push); }             // straddling the head → split the push outward
           moved=true; } } });
     if(!moved) break; }
-  const mn=Math.min(...x); if(mn<2) for(let k=0;k<n;k++) x[k]+=(2-mn); }   // keep the leftmost node non-negative
+  /* ⚠ RE-SEAT ON THE LEFTMOST NODE'S OWN SLOT EDGE, NOT ON ITS CENTRE — this line used to read
+     `const mn=Math.min(...x); if(mn<2) … x[k]+=(2-mn)`, "keep the leftmost node non-negative", and a node's
+     CENTRE being non-negative is not what that phrase means. Everything stemmaLayout put to the LEFT of that
+     centre — the half-slot `lw[i]/2` (which is the widest of the node glyph, the baseline word, the POS tag,
+     the transliteration and the gloss tiers, so it is routinely much wider than the glyph) and the leading
+     reserve `ldw[i]` (right-merging punctuation satellites, the Subject=Generic ∅ band) — was simply dropped,
+     so pulling the leftmost CENTRE back to 2 pushed that node's own content to roughly −lw/2.
+     ⚠ AND NEGATIVE x IS WHERE THE FIGURE IS CLIPPED, not merely where it is cramped: fitTight (below) will
+     not grow the viewBox leftward past 0 (`aFit=Math.max(0,a)` — deliberately, see its own note), so the
+     content lands outside the SVG's own viewport and an unwrapped `.diagram` — no `overflow:visible`, that is
+     the wrapped variant only — cuts it off flat. This is exactly the reported "diagrams are getting clipped on
+     the left … just stemmas": the stemma is the ONE notation that re-seats its nodes this way (the hierarchy
+     packs subtrees through tidyLayout, which carries a real per-node `lext`; the flat notations never move a
+     token off linear()'s own pad). Measured before this fix, both at TOK_MAG 1: brihat_jataka s1's leftmost
+     node "mūrtitve" drawn 20.44px left of the viewBox — the screenshot reads "ırtitve" — and a Literary
+     Chinese stemma's first POS tag 6.92px in, "VERB" reading "ERB".
+     ⚠ NOT A MAGNIFICATION BUG, though magnification is what surfaced it and what makes it worse: every term of
+     `lw` grows with TOK_MAG (fmeas at the magnified WORD_F/NODE_F), so the overhang this discards grows with
+     the glyphs. There is deliberately NO TOK_MAG term here — the fix is that the re-seat now measures what it
+     always should have, and it must apply at TOK_MAG 1 too, which is where both measurements above were taken.
+     `lw`/`ldw` are optional so a caller with no width table degrades to the old centre-only behaviour rather
+     than shifting by NaN; both stemma() and stemmaGeomW() pass stemmaLayout's own arrays. */
+  const leftEdge=i=>x[i]-(lw?lw[i]/2:0)-(ldw?ldw[i]:0);
+  let mn=Infinity; for(let i=0;i<n;i++) mn=Math.min(mn,leftEdge(i));
+  if(mn<STEMMA_PAD) for(let k=0;k<n;k++) x[k]+=(STEMMA_PAD-mn); }   // …putting the leftmost node's own slot back exactly where stemmaLayout seated the first token, which is the invariant fitTight's left clamp documents as making it a no-op
 // spreadForLabels only clears EDGE-LABEL width (`e.w`) between siblings sharing a head — a subtree shift made purely
 // for that can still leave two SURFACE-ADJACENT nodes closer together than their own below-stack content (word/POS/
 // translit/gloss rows, sized by stemmaLayout's `lw`) needs, since a label like "mod" is usually far narrower than a

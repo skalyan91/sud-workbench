@@ -87,7 +87,7 @@ function _renderSentence(si){
 
 function stemma(si,{proj,catNodes}){
   const D=displaySent(DOC[si]), t=D.tokens, n=t.length, OID=k=>D.map[k]+1, sent={tokens:t}; RTL=D.rtl;
-  const {c,lw}=stemmaLayout(sent,catNodes,proj&&show.pos),{head,depth}=structure(sent);
+  const {c,lw,ldw}=stemmaLayout(sent,catNodes,proj&&show.pos),{head,depth}=structure(sent);   // ldw: the per-node inline-START reserve (leads / Subject=Generic band) — spreadForLabels needs it, with lw, to re-seat the figure on its leftmost node's real slot edge rather than on that node's centre (see its own note)
   const ghostPairs=ghostPairsFor(t);   // [originIdx,targetIdx], 0-based — computed once, before ANY Y-position is derived from depth
   applyGhostDepth(depth,head,ghostPairs,n);   // item 4: a ghost's TARGET is pulled above its shallowest ghost dependent, cascading to its own real subtree — replaces the earlier per-edge "swap which end draws where" hack (which never touched real node positions)
   const LV=48,TOP=18,A=16,B=7,realMaxD=Math.max(0,...depth),ny=d=>TOP+d*LV;   // shorter edges; A above clears ascenders; TOP is small so the root (no incoming edge) gets no extra headroom
@@ -114,7 +114,7 @@ function stemma(si,{proj,catNodes}){
   for(let i=0;i<n;i++){const h=head[i]; if(h<1||h>n||h===i+1) continue;
     const y1=ny(depth[i])-A, y2=ny(depth[h-1])+B, midY=(y1+y2)/2;
     edges.push({d:i,h:h-1,rel:t[i].deprel,y1,y2,midY,band:Math.round(midY/12),w:show.labels?meas(t[i].deprel,POS_F)+SPW:0});}
-  if(show.labels){ spreadForLabels(c,edges); }   // widen node gaps until labels fit (in natural order)
+  if(show.labels){ spreadForLabels(c,edges,lw,ldw); }   // widen node gaps until labels fit (in natural order). lw/ldw are for its CLOSING re-seat only (it never widens by them — that is ensureNodeGaps' job below): without them it pulls the leftmost node's CENTRE to x=2 and leaves that node's own slot at negative x, where fitTight's left clamp refuses to grow the viewBox and the SVG clips it — see spreadForLabels' own note
   ensureNodeGaps(c,lw);   // …then re-guarantee each node's OWN below-stack width — spreading for edge labels alone can leave that narrower than stemmaLayout reserved (see ensureNodeGaps' own note)
   edges.sort((p,q)=>catRank(p.rel)-catRank(q.rel));         // subj in front, then comp, mod, other
   // Shared=Yes: a coordination-shared dependent draws its REAL edge normally (straight to whichever conjunct

@@ -774,12 +774,12 @@ function arcsWrapped(si){
 // stemma geometry, label-less: node positions + edges, sized (with label spreading only when labels are kept)
 function stemmaGeomW(t,n,withLabels){
   const {head,depth}=structure({tokens:t});
-  const {c,lw}=stemmaLayout({tokens:t},false,false);
+  const {c,lw,ldw}=stemmaLayout({tokens:t},false,false);   // ldw: the per-node inline-START reserve — see the same destructure in stemma() (js/diagram/diagram-render.js) and spreadForLabels' own note
   const LV=48,TOP=18,B=7,SPW=meas(" ",WORD_F);
   const edges=[];
   for(let i=0;i<n;i++){const h=head[i]; if(h<1||h>n||h===i+1) continue;
     edges.push({d:i,h:h-1,rel:t[i].deprel,w:withLabels?meas(t[i].deprel,POS_F)+SPW:0});}
-  if(withLabels) spreadForLabels(c,edges);
+  if(withLabels) spreadForLabels(c,edges,lw,ldw);   // lw/ldw drive its closing re-seat, so the wrapped stemma's own natW starts from the same honest left edge the flat one does — see spreadForLabels' note in diagram-core.js
   ensureNodeGaps(c,lw);   // re-guarantee each node's own below-stack width after label-spreading — see its own note in diagram-core.js
   const maxD=Math.max(0,...depth), ny=d=>TOP+d*LV, natW=Math.max(2,...c.map((cx,i)=>cx+lw[i]/2))+2;
   mirror(c,natW);
