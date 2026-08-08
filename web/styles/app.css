@@ -257,7 +257,24 @@
     align-self:var(--script-align,baseline); position:relative;
     top:calc(-1 * var(--script-lift,0) * var(--stext-fs) * var(--script-mag,1));
     margin-bottom:calc(-1 * var(--script-lift,0) * var(--stext-fs) * var(--script-mag,1))}   /* …and the running line is the SCRIPT too, so it takes the ornamental magnification with the diagram glyphs (--script-mag, syncSchemeAttr in js/lang/translit.js). Nothing measures this row — it is ordinary flowing HTML — so unlike the diagram faces it needs no counterpart in refreshFontStacks. */   /* SUPERSEDED BUT KEPT AS THE PRE-MEASUREMENT DEFAULT: renderDoc's text-row alignment pass now measures every one of these rows against the Form field's own text x and writes the correction as an inline margin, so the script line and the transliteration below it land on one column by measurement rather than by the arithmetic below — which was right about the 1px but could only ever be right at one window width (see formTextTarget on the ID column's share of the table's slack). The original derivation, still the reason this starts at 0 rather than at .stext's −1px:  */   /* item 20: LEFT-ALIGN the script top line's text with the transliteration/original input (.strans-orig, marginInlineStart:idW+8, padding:1px 3px) below it. In the .shead flex row .stext text-left = num idW + shead gap 8 + stext margin-left −1 + stext pad-left 3 = idW+10; the translit line's text-left = its marginInlineStart (idW+8) + pad-left 3 = idW+11 — so the script line sat 1px to the left. Removing the base −1px inline-start margin (from margin:-1px -1px) for the script line only puts .stext text-left at idW+8+0+3 = idW+11, exactly matching the translit. Scoped to the SCRIPT top line (.stext-script); the normal editable .stext keeps its −1px margin, so its layout and the diagram alignment are untouched. */
-  .stext.stext-stacked{line-height:2; margin-top:calc(-0.3em - 1px)}   /* item 9 (rev): KEEP line-height:2 so Grantha's stacked conjuncts/vowel marks have room, but pull the tall line box UP with a negative top margin so its extra top-leading overflows into the gap ABOVE the block instead of inflating the .shead row (which shifted the baseline-aligned number/ID + block controls). -0.3em ≈ half the extra leading (2 − 1.4 = 0.6em), plus the base -1px .stext top margin. Renamed from .stext-grantha: Javanese and Balinese share the same stacked-diacritic problem (their vowel signs/panjingan-style conjuncts stack above and below the base consonant the same way Grantha's do) and now get the identical treatment. Kawi joined the three in document.js's class-on-render check when it was reinstated into _AKSHARA_SCRIPTS: without line-height:2 a subjoined Kawi conjunct on one line of a multi-line verse visibly overlapped the line below it. Zanabazar Square joined afterward on user report from the real app (a synthetic CDP test during its own reinstatement read as clean, but WebKit disagreed). NOTE: verify in the app's WebKit that the controls re-align and the conjuncts aren't clipped by the block above. */
+  .stext.stext-stacked{line-height:2;
+    /* ⚠ TOP MARGIN IS A CSS-NATIVE FORMULA NOW, NOT A TUNED CONSTANT — on request: "set the top margin of
+       an enlarged Sanskrit script running sentence to -(0.5em - 0.5ex), at least for scripts without a
+       shirorekha". STACKING_SCRIPTS (Grantha, Javanese, Balinese, ZanabazarSquare, Tibetan — js/lang/
+       translit.js) is exactly that "at least" subset: none of them carries a Devanagari-style continuous
+       shirorekha, which is the ONE case scriptLiftEm()'s own --script-lift measurement (.stext-script,
+       above) exists to get right for those scripts THAT do have one — untouched here, since this rule
+       layers ON TOP of that one rather than replacing it for every script. `0.5em - 0.5ex` needs no JS
+       measurement at all: `ex` is a native CSS length (the font's own x-height, exactly what xHeightPx()
+       elsewhere in this codebase asks getComputedStyle for anyway), so half the gap between the em-square
+       and the x-height band is a length the CASCADE resolves, not a constant this file has to keep
+       re-tuning by hand the way -0.3em (the number this replaces) was. Superseded, not silently dropped:
+       -0.3em was itself already an approximation ("≈ half the extra leading"), not a measurement either. */
+    margin-top:calc(-1 * (0.5em - 0.5ex));
+    /* ⚠ BOTTOM MARGIN, ON REQUEST — "set the bottom margin to 0.5em for stacked scripts". A flat, positive
+       0.5em below the tall (line-height:2) box, giving the row below (transliteration/original) clearance
+       from a stacked script's own subjoined depth without asking anything to measure it. */
+    margin-bottom:0.5em}   /* item 9 (rev): KEEP line-height:2 so Grantha's stacked conjuncts/vowel marks have room, pulling the tall line box UP with a negative top margin so its extra top-leading overflows into the gap ABOVE the block instead of inflating the .shead row (which shifted the baseline-aligned number/ID + block controls). Renamed from .stext-grantha: Javanese and Balinese share the same stacked-diacritic problem (their vowel signs/panjingan-style conjuncts stack above and below the base consonant the same way Grantha's do) and now get the identical treatment. Kawi is OUT (js/lang/translit.js's own note on STACKING_SCRIPTS) — it no longer carries this class at all. Zanabazar Square joined afterward on user report from the real app (a synthetic CDP test during its own reinstatement read as clean, but WebKit disagreed). NOTE: verify in the app's WebKit that the controls re-align and the conjuncts aren't clipped by the block above. */
   .stext,.strans,.tg-lname,.tg-text{text-shadow:0 0 2px var(--casing),0 0 2px var(--casing),0 0 3px var(--casing)}   /* item 19: give the block-initial text rows (sentence text, transliteration/original, per-language translations) the SAME legibility casing halo the diagram uses — the HTML equivalent (mirroring .bwform / .oline's text-shadow:0 0 2px,0 0 2px,0 0 3px var(--casing)) of the SVG paint-order stroke:var(--casing) on .tok-pos/.translit/.lbl. A subtle content-background-coloured halo, not a visible outline; .strans covers both .strans and .strans-orig. Grid cells and the POS/deprel spans are excluded — they carry their own casing. */
   .stext mark.findhit,.strans mark.findhit,.tg-text mark.findhit{text-shadow:none}   /* …but NOT through a find hit. The halo is three background-coloured shadows behind every glyph; over the amber <mark> (macos-kit/mac-chrome.css) they read as a pale fur around each letter of the match, which is exactly the run you most need to read cleanly. The <mark> supplies its own contrast, so it needs no casing — and dropping it HERE, on the mark alone, leaves the surrounding sentence's halo untouched. .strans covers .strans-orig; markInEl only ever wraps text nodes, so this cannot reach anything else. */
   .stext[contenteditable]:hover{background:var(--field-bg)}
@@ -1516,7 +1533,7 @@
   .insfields{--ins-label:66px; --ins-gap:8px}
   .insrow{display:grid; grid-template-columns:var(--ins-label) minmax(0,1fr); align-items:center; column-gap:var(--ins-gap)}
   .insrow .inslab{text-align:end; font-size:12px; color:var(--muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
-  :root[data-platform="win"] .insrow .inslab{text-align:start}   /* an OS-look branch: Fluent leading-aligns a form label where macOS trailing-aligns it. Layout, spacing and the control axis are identical, so nothing else here forks on it — .fo-form's own data-platform="win" rule, further down, is a DIFFERENT kind of branch (engine, not look — see its own note) */
+  :root[data-platform="win"] .insrow .inslab{text-align:start}   /* the ONLY data-platform branch in the sheet: Fluent leading-aligns a form label where macOS trailing-aligns it. Layout, spacing and the control axis are identical, so nothing else here forks on it — .fo-form's own align-items rule, further down, forks on data-engine instead (a genuinely different question — see its own note) */
   .insctl{display:flex; align-items:center; gap:8px; min-width:0}   /* the control axis itself — a row's controls start here, never at the sheet's edge */
   .insctl .ins-rm{margin-inline-start:auto}   /* …and the row's Right Accessory still goes to the trailing edge (see .gm-rm/.ins-rm above) */
   .sheet .insblock textarea,.insblock .insnote{margin-inline-start:calc(var(--ins-label) + var(--ins-gap)); width:auto}   /* the text view and its footnote are controls too: on the axis, or the form has two of them. width:auto is NOT decoration — both kits give .sheet textarea width:100%, and 100% OF THE BLOCK plus the indent put the field's whole trailing edge outside the sheet; auto lets the column flex container stretch it to what is left after the margin */
@@ -1675,21 +1692,18 @@
        text-align:center couldn't be trusted to reach a shrink-wrapped box the same way in both engines
        either) — display:flex + justify-content:center + width:100% supplies that without touching height,
        so the vertical axis is left exactly where fo.y already puts it. */
-  /* ⚠ THE SECOND PLATFORM BRANCH IN THIS SHEET (app.css's own note at :root[data-platform="win"]
-     .insrow .inslab, styles/app.css, calls itself "the ONLY" one — no longer true, and this is why).
-     On report: Chrome wants align-items:center here, WKWebView wants flex-start, for the SAME markup
-     and the SAME CSS otherwise — the ink's own vertical position within the inner div's now-explicit
-     `line-height:1em` box is an engine-level layout decision this rule cannot make disappear the way
-     switching line-height:normal→1em (a previous commit) removed the FONT-METRIC half of this same
-     class of disagreement. This app only ever SHIPS two engines — WKWebView on macOS (and, via
-     WebKitGTK, Linux) and WebView2 on Windows, which is Chromium — so `data-platform="win"` is not a
-     proxy for "which OS" here, it is this app's own existing signal for "which engine", already
-     computed and published before first paint for the kit-selection decision (index.html's inline
-     <head> script) and read back by every module through it (js/core/platform.js). Piggy-backing on
-     it needs no new detection machinery, and is exactly as reliable as the kit choice itself already
-     has to be. Chrome (a real browser, not a shipped runtime) is Chromium too, which is why testing
-     against it during development shows the SAME symptom `data-platform="win"` targets here. */
-  html[data-platform="win"] .fo-form{align-items:center}
+  /* ⚠ THIS IS AN ENGINE BRANCH, NOT A PLATFORM ONE — corrected on report ("don't apply … align-items:
+     flex-start in Chrome, even on a Mac"). On report: Chrome wants align-items:center here, WKWebView
+     wants flex-start, for the SAME markup and the SAME CSS otherwise — the ink's own vertical position
+     within the inner div's `line-height:1em` box is an engine-level layout decision this rule cannot
+     make disappear. `data-platform="win"` was tried first, on the reasoning that this app only ships
+     WKWebView (macOS/Linux) and WebView2-which-is-Chromium (Windows) — but that reasoning breaks the
+     moment this page loads in a REAL Chrome browser for design-mode testing: data-platform stays "mac"
+     there (nothing overrides the UA sniff for OS purposes), while the engine genuinely is Chromium, so
+     the rule fired against the wrong half of the split. `data-engine` (js/core/platform.js, IS_CHROMIUM)
+     asks the actual question — a `window.chrome` presence check, true in every Chromium-family browser
+     including a real Chrome window regardless of what OS it's hosted on, false in every WebKit one. */
+  html[data-engine="chromium"] .fo-form{align-items:center}
   foreignObject.tok-word,foreignObject.node-lbl,foreignObject.baseword,foreignObject.mwt-form{overflow:visible; display:flex}   /* ⚠ ON REPORT: .fo-form's own height:100% (previous commit) still wasn't holding in Safari — percentage-height
        resolution against a foreignObject's own box is exactly the kind of CSS/SVG interop corner engines have
        already disagreed on elsewhere in this exact investigation (line-height:normal, canvas-vs-DOM metrics, …),

@@ -486,9 +486,11 @@ const ORNAMENTAL_SCRIPTS=new Set(["Ranjana","Soyombo","Bhaiksuki","Siddham"]);
    INDIC_SCRIPTS member gets — mirrors document.js's own .stext-stacked condition (which used to restate
    this list as a bare ORTHO_SCHEME OR-chain; centralised here so the diagram's own below-token spacing
    — belowGap(), js/diagram/diagram-core.js — can consult the SAME set rather than drift from it by hand).
-   Grantha/Javanese/Balinese/Kawi/ZanabazarSquare joined on measured or live-reported overlap; Tibetan
-   rejoined the same way (see document.js's own note on each). */
-const STACKING_SCRIPTS=new Set(["Grantha","Javanese","Balinese","Kawi","ZanabazarSquare","Tibetan"]);
+   Grantha/Javanese/Balinese/ZanabazarSquare joined on measured or live-reported overlap; Tibetan rejoined
+   the same way (see document.js's own note on each). ⚠ Kawi is OUT, on request — it no longer gets
+   STACKED_GAP's extra em (diagram-core.js) or .stext-stacked's line-height:2 in the running-sentence
+   view; it stays at the ordinary INDIC_SCRIPTS magnification alone, the same as any non-stacking script. */
+const STACKING_SCRIPTS=new Set(["Grantha","Javanese","Balinese","ZanabazarSquare","Tibetan"]);
 /* ⚠ DIAGRAM_STACKING_SCRIPTS — the narrower, Tibetan-excluded subset this app used to derive from the set
    above, feeding the diagram's own below-token reserve (stackDropExtra(), js/diagram/diagram-core.js) — is
    REMOVED, along with that function and STACK_DROP entirely, on request ("I think STACK_DROP was a bad

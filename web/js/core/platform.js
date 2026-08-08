@@ -12,6 +12,22 @@ const PLATFORM = document.documentElement.dataset.platform === "win" ? "win"
                 : document.documentElement.dataset.platform === "linux" ? "linux" : "mac";
 const IS_WIN = PLATFORM === "win";
 const IS_LINUX = PLATFORM === "linux";
+/* ⚠ THE RENDERING ENGINE IS A DIFFERENT QUESTION FROM PLATFORM, AND data-platform ANSWERS THE WRONG
+   ONE FOR IT — on report ("don't apply [WebKit-specific fixes] in Chrome, even on a Mac"). PLATFORM/
+   IS_WIN is a KIT decision (which chrome/theme to draw), fixed at load from ?platform= or a UA string,
+   and it is exactly right for that job — but the KIT and the ENGINE only correlate in the two
+   configurations this app actually SHIPS (macOS/Linux → WKWebView/WebKitGTK, both WebKit; Windows →
+   WebView2, Chromium). Loading this SAME page in a real Chrome browser for design-mode testing still
+   reports data-platform="mac" (nothing overrides the UA sniff), while the engine underneath is
+   genuinely Chromium — so anything gated on IS_WIN alone (a handful of narrow WebKit-only layout
+   workarounds in js/diagram/diagram-core.js, none of them look/theme decisions) fires against the wrong
+   engine there. `window.chrome` is a well-established, low-ceremony presence check — truthy in every
+   Chromium-family browser (real Chrome, WebView2), absent in WebKit (Safari, WKWebView, WebKitGTK) —
+   and unlike data-platform it answers the question these workarounds actually need asked. Published as
+   <html data-engine> for the one consumer that needs it in CSS (app.css's .fo-form align-items rule);
+   every JS consumer reads IS_CHROMIUM directly. */
+const IS_CHROMIUM = !!window.chrome;
+document.documentElement.dataset.engine = IS_CHROMIUM ? "chromium" : "webkit";
 /* Linux keyboards have no Cmd key, and GTK/GNOME apps use the same Ctrl-based convention Windows
    does — so everywhere below that asks "is this the non-mac chord", Linux reads as Windows-like
    rather than as a third case. Kept as one flag rather than threading IS_WIN||IS_LINUX through

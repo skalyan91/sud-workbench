@@ -788,10 +788,12 @@ function smpReshape(root){
        getComputedStyle(fo).height at "0px" — a foreignObject's own cross-axis length simply does not
        resolve `em` against its own font-size in WebKit's SVG implementation, full stop. The identical code
        answers "22.5px" in Chrome/Chromium, which WebView2 (this app's OTHER real runtime, on Windows)
-       shares — so `calc(1em)` is kept for that engine, where it demonstrably works, and IS_WIN (js/core/
-       platform.js — the SAME mac/WebKit-vs-win/Chromium split `.fo-form`'s own align-items rule above
-       uses, and for the identical reason: this app never ships a THIRD engine) decides which strategy
-       runs. WebKit (mac, and Linux via WebKitGTK) falls back to the XML attribute with a plain number —
+       shares — so `calc(1em)` is kept for that engine, where it demonstrably works, and IS_CHROMIUM
+       (js/core/platform.js — a genuine `window.chrome` presence check, not the data-platform kit
+       decision `.fo-form`'s own align-items rule used at first and had to correct: data-platform stays
+       "mac" for a real Chrome browser testing this page on a Mac, where the engine genuinely is
+       Chromium) decides which strategy runs. WebKit (mac, and Linux via WebKitGTK) falls back to the
+       XML attribute with a plain number —
        not a canvas measurement, just parseFloat(f) reading the SAME "1em" figure directly off the font
        string already being used to build the div below, so nothing here asks any engine to compute
        anything a second time. Confirmed harmless as a fallback rather than merely "not broken yet":
@@ -815,7 +817,7 @@ function smpReshape(root){
        em; the text inside it does not (inner div's own note, below, is hardcoded 1em unconditionally). */
     const lineEm=(typeof STACKING_SCRIPTS!=="undefined" && STACKING_SCRIPTS.has(ORTHO_SCHEME))?2:1;
     fo.style.font=f;
-    if(typeof IS_WIN!=="undefined" && IS_WIN) fo.style.height="calc("+lineEm+"em)";
+    if(typeof IS_CHROMIUM!=="undefined" && IS_CHROMIUM) fo.style.height="calc("+lineEm+"em)";
     else fo.setAttribute("height",((parseFloat(f)||TOK_REF_SIZE)*lineEm)+"");
     fo.style.overflow="visible";
     /* ⚠ THE TEXT GOES IN AN INNER DIV, NOT DIRECTLY IN THE FLEX DIV — "get its bounding box to be defined
@@ -847,10 +849,12 @@ function smpReshape(root){
     /* ⚠ margin-right:-0.5em, WEBKIT ONLY, ON REPORT — for every script reaching this function (Grantha,
        Kawi, and any other SMP-content token; smpUnshaped() is what gates arrival here, not a script
        name, so this reaches all of them alike without a per-script list to maintain). Scoped the SAME
-       way as the height-fallback and align-items branches above and in app.css — !IS_WIN, i.e. WebKit
-       (macOS, and Linux via WebKitGTK) — since the report was specifically against Safari, and Chromium
-       is not implicated. */
-    inner.style.cssText="line-height:1em;white-space:pre"+((typeof IS_WIN!=="undefined"&&!IS_WIN)?";margin-right:-0.5em":"");
+       way as the height-fallback and align-items branches above and in app.css — !IS_CHROMIUM, i.e.
+       WebKit (macOS, and Linux via WebKitGTK) — since the report was specifically against Safari, and
+       Chromium is not implicated. NOT !IS_WIN: the report was specifically that this must not fire
+       against a real Chrome browser even when data-platform is "mac" (design-mode testing), which
+       !IS_WIN alone gets wrong the same way the align-items rule did before its own correction. */
+    inner.style.cssText="line-height:1em;white-space:pre"+((typeof IS_CHROMIUM!=="undefined"&&!IS_CHROMIUM)?";margin-right:-0.5em":"");
     inner.textContent=s;
     d.appendChild(inner);
     fo.appendChild(d);
@@ -1015,10 +1019,17 @@ function svgSeamMark(parent,tk,cx,y,halfEnd,font,boxes,halfStart,row){ if(!paren
        LIVE_TOKEN_STACK falls through to for "-"/"꞊" (almost never the script family a Grantha/Javanese/…
        word renders in), so applying the WORD's centring ratio to the MARK's own size answered a question
        about the wrong font. `markMidPx(f)` asks the MARK's own question in the MARK's own (already-
-       unmagnified) font; TOK_MID×wordPx asks the WORD's, at the word's magnified size. A font metric now
+       unmagnified) font; TOK_MID×wordPx asks the WORD's, at the word's magnified size — now ×lineEm too
+       (below), on request ("seam markers should have the same absolute line-height as tokens"): the
+       token's own box (smpReshape's foreignObject, `tok-word`) is 2em tall for STACKING_SCRIPTS, not 1em,
+       so centring against a bare 1em-tall reference left the mark seated too high against the taller box
+       a stacking script's token now actually is. The MARK's own rendered SIZE is untouched — it stays
+       unmagnified, small, exactly as the note above already argues for; only the reference this centres
+       AGAINST grows, matching what the token itself grew to. A font metric now
        (xHeightPx), computed ONCE here rather than per mark-slot below — see scriptMidEm's own note for
        why neither ink nor cap-height was the right one to replace it with. */
-    markY=y-TOK_MID*wordPx+markMidPx(f);
+    const lineEm=(typeof STACKING_SCRIPTS!=="undefined" && STACKING_SCRIPTS.has(ORTHO_SCHEME))?2:1;   // matches smpReshape's own tok-word decision — see this function's own note, above
+    markY=y-TOK_MID*wordPx*lineEm+markMidPx(f);
   }
   [[seamPost(tk),1,halfEnd,"",seamPostToks(tk)],[seamPre(tk),-1,halfStart!=null?halfStart:halfEnd,"",seamPreToks(tk)],[seamMid(tk),1,halfEnd," seam-mid",seamMidToks(tk)]].forEach(([m,side,half,extra,toks])=>{
     if(!m) return;
