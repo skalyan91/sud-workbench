@@ -201,13 +201,12 @@ function _measMountRoot(){ const doc=document.getElementById("doc"), h=doc||docu
    floor of the box" report this rewrite answers) turned out to be that exact thing going wrong: "normal"
    is a UA-defined half-leading distribution around the font's own single-line reference, and it is the
    ONE quantity this file has repeatedly found disagreeing between Chrome and Safari for these scripts'
-   faces. Canvas's fontBoundingBoxAscent/fontBoundingBoxDescent are a DIFFERENT thing — the font's own
-   declared em-box metrics (hhea/OS2 ascent and descent), not an engine's own layout DECISION about how to
-   lay out "normal" text — and they are the SAME metrics scriptAscentEm/scriptMidEm/scriptLiftEm already
-   rely on elsewhere in this file as the more cross-engine-consistent reading. Defining the box by
-   ascender and descender, directly, is what smpReshape() now does: the foreignObject is sized and seated
-   off THESE two numbers, and its inner div's own line-height is set to the same explicit px figure —
-   never "normal" — so neither engine's own ambiguous interpretation enters the render side either. */
+   faces. Canvas's fontBoundingBoxAscent is a DIFFERENT thing — the font's own declared em-box ascent
+   (hhea/OS2), not an engine's own layout DECISION about how to lay out "normal" text — and it is the SAME
+   metric scriptAscentEm/scriptMidEm/scriptLiftEm already rely on elsewhere in this file as the more
+   cross-engine-consistent reading. Only the ASCENT is returned now — smpReshape() no longer asks this
+   function for a height at all; the foreignObject's own height is a CSS calc(1em) (its own note there),
+   tied to the font-size directly rather than to a second canvas reading of this same string. */
 function domBaseline(s,f){
   try{
     /* ⚠ SIZE THEN FAMILY, NOT THE OTHER WAY ROUND — a CSS font shorthand is invalid with the family
@@ -219,15 +218,13 @@ function domBaseline(s,f){
        ⚠ AND THE FAMILY MUST LEAD, exactly as scriptAscentEm()'s own note documents: canvas
        fontBoundingBoxAscent reports the metrics of the FIRST family in the font list whatever face
        actually shapes the text, so without scriptFamilyPrefix() this would answer the ordinary Latin
-       fallback's ascent/descent for every script alike, not the script's own. */
+       fallback's ascent for every script alike, not the script's own. */
     const prefix=(typeof scriptFamilyPrefix==="function")?scriptFamilyPrefix():"";
     const pf=prefix?f.replace(/(\d+(?:\.\d+)?px\s+)/,"$1"+prefix):f;
     _cv.font=pf;
-    const m=_cv.measureText(s||"");
-    const asc=m.fontBoundingBoxAscent||0, desc=m.fontBoundingBoxDescent||0;
-    if(!(asc>0)){ const px=parseFloat(f)||15; return {asc:px, height:px*2}; }   // measurement failed, or an empty string — the same nominal-size floor smpReshape's own defaults already used
-    return { asc, height: asc+desc };
-  }catch(_){ const px=parseFloat(f)||15; return {asc:px, height:px*2}; } }
+    const asc=_cv.measureText(s||"").fontBoundingBoxAscent||0;
+    return asc>0?asc:(parseFloat(f)||15);   // measurement failed, or an empty string — the same nominal-size floor smpReshape's own defaults already used
+  }catch(_){ return parseFloat(f)||15; } }
 /* X-HEIGHT, THE CSS WAY — CSS's `ex` unit (ancient — CSS1 — unlike the L4 `cap` unit this replaced)
    resolves to "the font's own x-height" through the SAME font-matching DOM/SVG text painting already
    goes through, so unlike every canvas-measured metric above and below, this one CANNOT disagree with
@@ -907,38 +904,66 @@ function smpReshape(root){
     const cs=getComputedStyle(el), f=cs.font||((cs.fontWeight!=="400"?cs.fontWeight+" ":"")+cs.fontSize+" "+cs.fontFamily);
     const w=_measDOM(s,f); if(!(w>0)) continue;
     const x=parseFloat(el.getAttribute("x"))||0, y=parseFloat(el.getAttribute("y"))||0;
-    const {asc,height:h}=domBaseline(s,f);
+    const asc=domBaseline(s,f);
     const fo=document.createElementNS("http://www.w3.org/2000/svg","foreignObject");
     for(const a of el.attributes) if(a.name!=="x"&&a.name!=="y"&&a.name!=="text-anchor") fo.setAttribute(a.name,a.value);
     fo.setAttribute("x",(x-w/2)+""); fo.setAttribute("y",(y-asc)+"");
-    /* ⚠ HEIGHT NEEDS NO PADDING NOW — domBaseline() no longer floors `h` against three separate DOM/
-       canvas measurements (a container box, an ink Range, a canvas-descent floor); it is one canvas
-       reading, fontBoundingBoxAscent+fontBoundingBoxDescent (see domBaseline's own note above), so there
-       is no estimate here for a safety margin to compensate. Width keeps its own +2 — a different
-       measurement (_measDOM), with its own justification, untouched by any of this. */
-    fo.setAttribute("width",Math.ceil(w+2)+""); fo.setAttribute("height",Math.ceil(h)+"");
+    fo.setAttribute("width",Math.ceil(w+2)+"");
+    /* ⚠ HEIGHT IS A CSS calc(), NOT A JS-COMPUTED PIXEL NUMBER, ON REQUEST — "try computing the heights
+       using a calc with em units instead of trying to compute everything in pixels". The previous version
+       asked domBaseline() for a px height (fontBoundingBoxAscent+Descent) and wrote that number onto the
+       `height` XML ATTRIBUTE, which cannot hold a calc()/em expression at all — only a plain number
+       (user units) or a percentage — so a CSS length was never an option there. Height goes through
+       `.style` instead (a foreignObject's geometry properties are ordinary CSS properties too, exactly
+       like the `overflow`/`display` this element already takes through `.style`/the stylesheet), and
+       `calc(1em)` ties it to `fo.style.font` — set here for that reason alone, so `em` on THIS element
+       resolves against the SAME font-size the content below uses, rather than whatever this SVG subtree
+       would otherwise inherit. `1em` exactly, matching the inner div's own line-height (below) — not a
+       generous over-estimate — because `overflow:visible` already lets any real ink deeper than one em
+       (a subjoined stack) paint past the box uncropped, so a TIGHT height is what actually closes "too
+       much space below the token": a box taller than its own content's line-height is exactly the gap
+       `align-items:flex-start` was reported leaving underneath, however that extra height had been
+       computed. Width keeps `_measDOM`'s own +2 and stays a plain XML attribute — the mismatch was in the
+       BLOCK axis, not this one.
+       ⚠ AND IT DOES NOT RESOLVE AT ALL IN WEBKIT — a genuine engine limitation, not a workaround-able
+       measurement disagreement this file's usual canvas/DOM techniques could route around. Verified FOUR
+       ways in the shipping WKWebView: the `font` shorthand above, the `font-size` longhand alone, a plain
+       `1em` with no calc() wrapper, and the SVG `font-size` XML attribute all leave
+       getComputedStyle(fo).height at "0px" — a foreignObject's own cross-axis length simply does not
+       resolve `em` against its own font-size in WebKit's SVG implementation, full stop. The identical code
+       answers "22.5px" in Chrome/Chromium, which WebView2 (this app's OTHER real runtime, on Windows)
+       shares — so `calc(1em)` is kept for that engine, where it demonstrably works, and IS_WIN (js/core/
+       platform.js — the SAME mac/WebKit-vs-win/Chromium split `.fo-form`'s own align-items rule above
+       uses, and for the identical reason: this app never ships a THIRD engine) decides which strategy
+       runs. WebKit (mac, and Linux via WebKitGTK) falls back to the XML attribute with a plain number —
+       not a canvas measurement, just parseFloat(f) reading the SAME "1em" figure directly off the font
+       string already being used to build the div below, so nothing here asks any engine to compute
+       anything a second time. Confirmed harmless as a fallback rather than merely "not broken yet":
+       `align-items:flex-start` (WebKit's own branch) positions a flex item at its container's cross-start
+       edge regardless of how tall that container is, so even the UNCORRECTED 0px case seated the inner
+       div's top exactly on fo.y, verified live — this fallback exists for the box's own geometric honesty
+       (a future reader, or a future consumer of this foreignObject's getBBox(), should not find a 0px box
+       that happens to work by coincidence) rather than because anything currently breaks without it. */
+    fo.style.font=f;
+    if(typeof IS_WIN!=="undefined" && IS_WIN) fo.style.height="calc(1em)";
+    else fo.setAttribute("height",(parseFloat(f)||TOK_REF_SIZE)+"");
     fo.style.overflow="visible";
     /* ⚠ THE TEXT GOES IN AN INNER DIV, NOT DIRECTLY IN THE FLEX DIV — "get its bounding box to be defined
        by the ascender and descender, rather than cap height and baseline". domBaseline() now measures
-       the font's own em-box directly (fontBoundingBoxAscent+Descent, its own note above) instead of
-       asking a DOM line box what "normal" means for this font — but that measurement is worthless if the
-       RENDER side still poses the SAME ambiguous question. A DIV, not the SPAN this used to be:
-       line-height on an inline element still resolves against whatever line box its containing block
-       establishes, rather than owning one outright the way a block-level element's own single-line box
-       does, and the outer `.fo-form`'s own content-box height (driving what `align-items:flex-start` has
-       to work with) is itself only as unambiguous as this element's own.
-       ⚠ line-height:1em, NOT a computed px figure — on FURTHER request, after the px version (asc+desc,
-       matching domBaseline()'s own `h`) was verified live to already converge Chrome and WKWebView to the
-       pixel for one token. `1em` is a length no engine can compute differently — it resolves to exactly
-       this div's own font-size, the one number both the CSS cascade and canvas already agree on without
-       any measurement step in between — where a canvas-derived px figure is consistent BECAUSE it was
-       independently verified so, `1em` is consistent BY CONSTRUCTION. The div's own box does not need to
-       equal the glyph's full ascent+descent to avoid clipping: `foreignObject{overflow:visible}` already
-       lets any ink beyond a line box paint uncropped (CSS never clips a line box's own content by
-       default), so the room the FOREIGNOBJECT itself reserves — domBaseline()'s `h`, unchanged — is what
-       actually has to be generous, not this div's own generated auto-height for its single line. The
-       outer div carries the font (inherited down) and nothing else — no line-height of its own, so
-       nothing here contradicts the inner div's explicit one. */
+       the font's own em-box ascent directly (fontBoundingBoxAscent, its own note above) instead of asking
+       a DOM line box what "normal" means for this font — but that measurement is worthless if the RENDER
+       side still poses the SAME ambiguous question. A DIV, not a SPAN: line-height on an inline element
+       still resolves against whatever line box its containing block establishes, rather than owning one
+       outright the way a block-level element's own single-line box does, and the outer `.fo-form`'s own
+       content-box height (driving what `align-items` has to work with) is itself only as unambiguous as
+       this element's own.
+       ⚠ line-height:1em, NOT a computed px figure — after a px version (asc+desc) was verified live to
+       already converge Chrome and WKWebView to the pixel for one token, `1em` was asked for anyway: it is
+       a length no engine can compute differently — it resolves to exactly this div's own font-size, the
+       one number both the CSS cascade and canvas already agree on with no measurement step in between —
+       where a canvas-derived px figure is consistent BECAUSE it was independently verified so, `1em` is
+       consistent BY CONSTRUCTION. The outer div carries the font (inherited down) and nothing else — no
+       line-height of its own, so nothing here contradicts the inner div's explicit one. */
     const d=document.createElementNS("http://www.w3.org/1999/xhtml","div");
     d.setAttribute("class","fo-form "+(el.getAttribute("class")||""));
     d.style.cssText="font:"+f;

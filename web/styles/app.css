@@ -1516,7 +1516,7 @@
   .insfields{--ins-label:66px; --ins-gap:8px}
   .insrow{display:grid; grid-template-columns:var(--ins-label) minmax(0,1fr); align-items:center; column-gap:var(--ins-gap)}
   .insrow .inslab{text-align:end; font-size:12px; color:var(--muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
-  :root[data-platform="win"] .insrow .inslab{text-align:start}   /* the ONLY platform branch in the sheet: Fluent leading-aligns a form label where macOS trailing-aligns it. Layout, spacing and the control axis are identical, so nothing else forks */
+  :root[data-platform="win"] .insrow .inslab{text-align:start}   /* an OS-look branch: Fluent leading-aligns a form label where macOS trailing-aligns it. Layout, spacing and the control axis are identical, so nothing else here forks on it — .fo-form's own data-platform="win" rule, further down, is a DIFFERENT kind of branch (engine, not look — see its own note) */
   .insctl{display:flex; align-items:center; gap:8px; min-width:0}   /* the control axis itself — a row's controls start here, never at the sheet's edge */
   .insctl .ins-rm{margin-inline-start:auto}   /* …and the row's Right Accessory still goes to the trailing edge (see .gm-rm/.ins-rm above) */
   .sheet .insblock textarea,.insblock .insnote{margin-inline-start:calc(var(--ins-label) + var(--ins-gap)); width:auto}   /* the text view and its footnote are controls too: on the axis, or the form has two of them. width:auto is NOT decoration — both kits give .sheet textarea width:100%, and 100% OF THE BLOCK plus the indent put the field's whole trailing edge outside the sheet; auto lets the column flex container stretch it to what is left after the margin */
@@ -1675,6 +1675,21 @@
        text-align:center couldn't be trusted to reach a shrink-wrapped box the same way in both engines
        either) — display:flex + justify-content:center + width:100% supplies that without touching height,
        so the vertical axis is left exactly where fo.y already puts it. */
+  /* ⚠ THE SECOND PLATFORM BRANCH IN THIS SHEET (app.css's own note at :root[data-platform="win"]
+     .insrow .inslab, styles/app.css, calls itself "the ONLY" one — no longer true, and this is why).
+     On report: Chrome wants align-items:center here, WKWebView wants flex-start, for the SAME markup
+     and the SAME CSS otherwise — the ink's own vertical position within the inner div's now-explicit
+     `line-height:1em` box is an engine-level layout decision this rule cannot make disappear the way
+     switching line-height:normal→1em (a previous commit) removed the FONT-METRIC half of this same
+     class of disagreement. This app only ever SHIPS two engines — WKWebView on macOS (and, via
+     WebKitGTK, Linux) and WebView2 on Windows, which is Chromium — so `data-platform="win"` is not a
+     proxy for "which OS" here, it is this app's own existing signal for "which engine", already
+     computed and published before first paint for the kit-selection decision (index.html's inline
+     <head> script) and read back by every module through it (js/core/platform.js). Piggy-backing on
+     it needs no new detection machinery, and is exactly as reliable as the kit choice itself already
+     has to be. Chrome (a real browser, not a shipped runtime) is Chromium too, which is why testing
+     against it during development shows the SAME symptom `data-platform="win"` targets here. */
+  html[data-platform="win"] .fo-form{align-items:center}
   foreignObject.tok-word,foreignObject.node-lbl,foreignObject.baseword,foreignObject.mwt-form{overflow:visible; display:flex}   /* ⚠ ON REPORT: .fo-form's own height:100% (previous commit) still wasn't holding in Safari — percentage-height
        resolution against a foreignObject's own box is exactly the kind of CSS/SVG interop corner engines have
        already disagreed on elsewhere in this exact investigation (line-height:normal, canvas-vs-DOM metrics, …),
