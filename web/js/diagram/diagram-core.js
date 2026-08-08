@@ -866,15 +866,20 @@ function smpReshape(root){
     d.setAttribute("class","fo-form "+(el.getAttribute("class")||""));
     d.style.cssText="font:"+f;
     const inner=document.createElementNS("http://www.w3.org/1999/xhtml","div");
-    /* ⚠ margin-right:-0.5em, WEBKIT ONLY, ON REPORT — for every script reaching this function (Grantha,
-       Kawi, and any other SMP-content token; smpUnshaped() is what gates arrival here, not a script
-       name, so this reaches all of them alike without a per-script list to maintain). Scoped the SAME
-       way as the height-fallback and align-items branches above and in app.css — !IS_CHROMIUM, i.e.
-       WebKit (macOS, and Linux via WebKitGTK) — since the report was specifically against Safari, and
-       Chromium is not implicated. NOT !IS_WIN: the report was specifically that this must not fire
-       against a real Chrome browser even when data-platform is "mac" (design-mode testing), which
-       !IS_WIN alone gets wrong the same way the align-items rule did before its own correction. */
-    inner.style.cssText="line-height:1em;white-space:pre"+((typeof IS_CHROMIUM!=="undefined"&&!IS_CHROMIUM)?";margin-right:-0.5em":"");
+    /* ⚠ margin-right, WEBKIT ONLY, ON REPORT — for every script reaching this function (Grantha, Kawi,
+       and any other SMP-content token; smpUnshaped() is what gates arrival here, not a script name, so
+       this reaches all of them alike without a per-script list to maintain, except where one script's
+       own value has since been corrected — see below). Scoped the SAME way as the height-fallback and
+       align-items branches above and in app.css — !IS_CHROMIUM, i.e. WebKit (macOS, and Linux via
+       WebKitGTK) — since the report was specifically against Safari, and Chromium is not implicated.
+       NOT !IS_WIN: the report was specifically that this must not fire against a real Chrome browser
+       even when data-platform is "mac" (design-mode testing), which !IS_WIN alone gets wrong the same
+       way the align-items rule did before its own correction.
+       ⚠ -0.33em FOR SOYOMBO SPECIFICALLY, ON REPORT — every other script keeps the original -0.5em; this
+       is the one place in smpReshape() that has to ask which script it actually is, because the report
+       named Soyombo's own value as wrong without saying every script's was. */
+    const margR=(ORTHO_SCHEME==="Soyombo")?"-0.33em":"-0.5em";
+    inner.style.cssText="line-height:1em;white-space:pre"+((typeof IS_CHROMIUM!=="undefined"&&!IS_CHROMIUM)?(";margin-right:"+margR):"");
     inner.textContent=s;
     d.appendChild(inner);
     fo.appendChild(d);

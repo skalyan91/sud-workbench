@@ -1704,6 +1704,13 @@
      asks the actual question — a `window.chrome` presence check, true in every Chromium-family browser
      including a real Chrome window regardless of what OS it's hosted on, false in every WebKit one. */
   html[data-engine="chromium"] .fo-form{align-items:center}
+  /* ⚠ ZANABAZAR SQUARE ALWAYS GETS align-items:center, ON REQUEST — regardless of engine (a no-op on
+     Chromium, which already has it from the rule above; the meaningful change is WebKit, whose base
+     .fo-form rule is align-items:flex-start). #doc[data-scheme] is syncSchemeAttr's own per-document
+     ORTHO_SCHEME publish (js/lang/translit.js) — the SAME script-name signal .fo-form's own class list
+     copies from the original <text> element has no equivalent of, so this is the one place a script
+     name has to be asked via the DOCUMENT's own attribute rather than the element's. */
+  #doc[data-scheme="ZanabazarSquare"] .fo-form{align-items:center}
   foreignObject.tok-word,foreignObject.node-lbl,foreignObject.baseword,foreignObject.mwt-form{overflow:visible; display:flex}   /* ⚠ ON REPORT: .fo-form's own height:100% (previous commit) still wasn't holding in Safari — percentage-height
        resolution against a foreignObject's own box is exactly the kind of CSS/SVG interop corner engines have
        already disagreed on elsewhere in this exact investigation (line-height:normal, canvas-vs-DOM metrics, …),
