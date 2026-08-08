@@ -1019,17 +1019,18 @@ function svgSeamMark(parent,tk,cx,y,halfEnd,font,boxes,halfStart,row){ if(!paren
        LIVE_TOKEN_STACK falls through to for "-"/"꞊" (almost never the script family a Grantha/Javanese/…
        word renders in), so applying the WORD's centring ratio to the MARK's own size answered a question
        about the wrong font. `markMidPx(f)` asks the MARK's own question in the MARK's own (already-
-       unmagnified) font; TOK_MID×wordPx asks the WORD's, at the word's magnified size — now ×lineEm too
-       (below), on request ("seam markers should have the same absolute line-height as tokens"): the
-       token's own box (smpReshape's foreignObject, `tok-word`) is 2em tall for STACKING_SCRIPTS, not 1em,
-       so centring against a bare 1em-tall reference left the mark seated too high against the taller box
-       a stacking script's token now actually is. The MARK's own rendered SIZE is untouched — it stays
-       unmagnified, small, exactly as the note above already argues for; only the reference this centres
-       AGAINST grows, matching what the token itself grew to. A font metric now
+       unmagnified) font; TOK_MID×wordPx asks the WORD's, at the word's magnified size. A font metric now
        (xHeightPx), computed ONCE here rather than per mark-slot below — see scriptMidEm's own note for
-       why neither ink nor cap-height was the right one to replace it with. */
-    const lineEm=(typeof STACKING_SCRIPTS!=="undefined" && STACKING_SCRIPTS.has(ORTHO_SCHEME))?2:1;   // matches smpReshape's own tok-word decision — see this function's own note, above
-    markY=y-TOK_MID*wordPx*lineEm+markMidPx(f);
+       why neither ink nor cap-height was the right one to replace it with.
+       ⚠ NOT ×lineEm — tried, on report ("seam markers should have the same absolute line-height as
+       tokens"), and reverted one message later ("I don't want the seam marker's font size to change!
+       Only its height, so that it lines up with the middle of the tokens' x-height"). TOK_MID×wordPx IS
+       already exactly that — half the WORD's own x-height, at its actual painted size, is the offset from
+       baseline to the middle of the x-height band. Multiplying it by lineEm was answering a question
+       nobody asked: STACKING_SCRIPTS's extra em is room reserved BELOW a token for a subjoined mark to
+       reach into (smpReshape's tok-word box, belowGap's STACKED_GAP), not a change to the WORD's own
+       x-height, which is a font-metric property that doesn't move just because the box around it grew. */
+    markY=y-TOK_MID*wordPx+markMidPx(f);
   }
   [[seamPost(tk),1,halfEnd,"",seamPostToks(tk)],[seamPre(tk),-1,halfStart!=null?halfStart:halfEnd,"",seamPreToks(tk)],[seamMid(tk),1,halfEnd," seam-mid",seamMidToks(tk)]].forEach(([m,side,half,extra,toks])=>{
     if(!m) return;
