@@ -312,7 +312,7 @@ _lazyFont("LIVE_TOKEN_STACK",()=>TOKEN_STACK); _lazyFont("LIVE_MONO_STACK",()=>M
    why a canvas font string cannot read the property itself). 1 everywhere except the ornamental Sanskrit
    scripts. It multiplies the TOKEN-FORM faces only — WORD_F/NODE_F/MWT_F and the goeswith tie — never the
    POS, transliteration or gloss rows, which are Latin annotation drawn at the app's own body size. */
-let TOK_MAG=1, TOK_WGHT=400, TOK_TRACK=0, TOK_ASC=1, TOK_MID=0, TOK_LIFT=0, TOK_OP=1, TOK_OP_RUN=1;
+let TOK_MAG=1, TOK_WGHT=400, TOK_TRACK=0, TOK_ASC=1, TOK_MID=0, TOK_LIFT=0, TOK_OP=1, TOK_OP_RUN=1, STACKED_GAP=0;
 // TOK_WGHT stays 400 for magnified faces now (see magTrack's own note on why the weight curve was dropped for
 // them), so this omits a weight token and lets the face render at its own resting weight.
 function magFont(px){ const w=TOK_WGHT;
@@ -555,17 +555,19 @@ function snumCapHeightLiftEm(){
     return (capHeightTopY-numRect.top)/fontPx;   // positive → cap-height sits below .snum's top → lift by this many em to close it
   }catch(_){ return null; } }
 function scriptFamilyPrefix(){ return (typeof fontStackName==="function"&&ORTHO_SCHEME)?("'"+fontStackName(ORTHO_SCHEME)+"', "):""; }
-/* ⚠ STACK_DROP AND stackDropExtra() ARE REMOVED ENTIRELY, ON REQUEST ("I think STACK_DROP was a bad
-   move to begin with; remove it") — after its Grantha-specific Chrome-compensation floor was already
-   pulled for causing cross-script inconsistency (previous commit), a further report ("Javanese and
-   Balinese are clipped — subjoined/stacked marks cut off below the token") turned up while that
-   removal was still under investigation, and the mechanism itself — not any one script's calibration
-   on top of it — was judged not worth keeping. Every DIAGRAM_STACKING_SCRIPTS-scoped reserve this
-   function fed (belowReserveH, belowStack, the MWT tie rows in this file, diagram-wrap.js's wrapped
-   tree, document.js's flat-notation MWT rows) now gets exactly what belowGap()'s own magnification
-   term already gives every 1.5×-scaled script — no separate per-script stacking-depth measurement on
-   top of it. DIAGRAM_STACKING_SCRIPTS itself (js/lang/translit.js) is removed too: stackDropExtra()
-   was its only reader. */
+/* ⚠ stackDropExtra() ITSELF IS REMOVED — after its Grantha-specific Chrome-compensation floor was
+   already pulled for causing cross-script inconsistency (previous commit), a further report ("Javanese
+   and Balinese are clipped — subjoined/stacked marks cut off below the token") turned up while that
+   removal was still under investigation, and the mechanism itself — a per-document canvas scan, not any
+   one script's calibration on top of it — was judged not worth keeping ("I think STACK_DROP was a bad
+   move to begin with; remove it"). What replaced it, on further request ("instead of using STACK_DROP,
+   set the line height of stacked-script tokens to 2em"), is STACKED_GAP (refreshFontStacks's own note) —
+   a flat one extra em for STACKING_SCRIPTS members, no per-document measurement at all. Every site this
+   function used to feed (belowReserveH, belowStack, the MWT tie rows in this file, diagram-wrap.js's
+   wrapped tree, document.js's flat-notation MWT rows) now reads STACKED_GAP instead. DIAGRAM_STACKING_
+   SCRIPTS (js/lang/translit.js, this function's own scoping set) is gone with it — STACKED_GAP asks
+   STACKING_SCRIPTS directly, the same broader set .stext-stacked already uses, since there is no longer
+   a Tibetan-specific measured exception to carve out of it. */
 function scriptAscentEm(){
   if(TOK_MAG===1) return 1;
   let ch="";
@@ -798,9 +800,20 @@ function smpReshape(root){
        div's top exactly on fo.y, verified live — this fallback exists for the box's own geometric honesty
        (a future reader, or a future consumer of this foreignObject's getBBox(), should not find a 0px box
        that happens to work by coincidence) rather than because anything currently breaks without it. */
+    /* ⚠ 2em FOR STACKING SCRIPTS, NOT STACK_DROP — on request, replacing the per-document canvas scan
+       STACK_DROP used to do (removed entirely, previous commit) with a flat, content-independent multiple
+       for exactly the scripts that need more than a bare single line: STACKING_SCRIPTS (js/lang/
+       translit.js) — Grantha, Javanese, Balinese, Kawi, ZanabazarSquare, Tibetan — the SAME set
+       .stext-stacked already gives `line-height:2` for in the running-sentence view, so this is not a new
+       number, just the diagram's own token box finally matching a convention this codebase already trusts
+       elsewhere. Every OTHER script reaching this function (Siddham, Ranjana, Soyombo, Bhaiksuki, or any
+       other SMP content that isn't itself a stacking script) stays at 1em — smpUnshaped() gates arrival
+       here on content alone, not on script identity, so this is the one place that still has to ask which
+       script it actually is. */
+    const lineEm=(typeof STACKING_SCRIPTS!=="undefined" && STACKING_SCRIPTS.has(ORTHO_SCHEME))?2:1;
     fo.style.font=f;
-    if(typeof IS_WIN!=="undefined" && IS_WIN) fo.style.height="calc(1em)";
-    else fo.setAttribute("height",(parseFloat(f)||TOK_REF_SIZE)+"");
+    if(typeof IS_WIN!=="undefined" && IS_WIN) fo.style.height="calc("+lineEm+"em)";
+    else fo.setAttribute("height",((parseFloat(f)||TOK_REF_SIZE)*lineEm)+"");
     fo.style.overflow="visible";
     /* ⚠ THE TEXT GOES IN AN INNER DIV, NOT DIRECTLY IN THE FLEX DIV — "get its bounding box to be defined
        by the ascender and descender, rather than cap height and baseline". domBaseline() now measures
@@ -811,13 +824,16 @@ function smpReshape(root){
        outright the way a block-level element's own single-line box does, and the outer `.fo-form`'s own
        content-box height (driving what `align-items` has to work with) is itself only as unambiguous as
        this element's own.
-       ⚠ line-height:1em, NOT a computed px figure — after a px version (asc+desc) was verified live to
+       ⚠ line-height:Nem, NOT a computed px figure — after a px version (asc+desc) was verified live to
        already converge Chrome and WKWebView to the pixel for one token, `1em` was asked for anyway: it is
        a length no engine can compute differently — it resolves to exactly this div's own font-size, the
        one number both the CSS cascade and canvas already agree on with no measurement step in between —
        where a canvas-derived px figure is consistent BECAUSE it was independently verified so, `1em` is
-       consistent BY CONSTRUCTION. The outer div carries the font (inherited down) and nothing else — no
-       line-height of its own, so nothing here contradicts the inner div's explicit one. */
+       consistent BY CONSTRUCTION. `N` is `lineEm` (fo.style.height's own note, above) — 2 for
+       STACKING_SCRIPTS, 1 otherwise, so the two stay in step by construction rather than by two separate
+       numbers someone has to remember to update together. The outer div carries the font (inherited down)
+       and nothing else — no line-height of its own, so nothing here contradicts the inner div's explicit
+       one. */
     const d=document.createElementNS("http://www.w3.org/1999/xhtml","div");
     d.setAttribute("class","fo-form "+(el.getAttribute("class")||""));
     d.style.cssText="font:"+f;
@@ -828,7 +844,7 @@ function smpReshape(root){
        way as the height-fallback and align-items branches above and in app.css — !IS_WIN, i.e. WebKit
        (macOS, and Linux via WebKitGTK) — since the report was specifically against Safari, and Chromium
        is not implicated. */
-    inner.style.cssText="line-height:1em;white-space:pre"+((typeof IS_WIN!=="undefined"&&!IS_WIN)?";margin-right:-0.5em":"");
+    inner.style.cssText="line-height:"+lineEm+"em;white-space:pre"+((typeof IS_WIN!=="undefined"&&!IS_WIN)?";margin-right:-0.5em":"");
     inner.textContent=s;
     d.appendChild(inner);
     fo.appendChild(d);
@@ -928,6 +944,21 @@ function refreshFontStacks(){
   // invalidates their output exactly as it invalidates colW's, for the same reason.
   if(fchg && typeof invalidateDiaCache==="function") invalidateDiaCache();
   WORD_F=magFont(15); NODE_F=magFont(14);
+  /* ⚠ 2em FOR STACKING SCRIPTS, NOT STACK_DROP — on request ("instead of using STACK_DROP, set the line
+     height of stacked-script tokens to 2em"), STACK_DROP's old role (extra below-token reserve for
+     STACKING_SCRIPTS — Grantha, Javanese, Balinese, Kawi, ZanabazarSquare, Tibetan) is filled by a flat,
+     content-independent ONE em, added ONCE at every site that used to add STACK_DROP once (belowStack's
+     seed, belowReserveH's tail, tieLayout's r.dtr/r.dpos, htmlTieBottom, diagram-wrap.js's wrapped-tree
+     dropY, document.js's flat-notation MWT rows) — the SAME injection pattern, a trivial computation
+     instead of stackDropExtra()'s removed per-document canvas scan. `2em` total, matching the SAME
+     `line-height:2` .stext-stacked already gives these scripts in the running-sentence view (one implicit
+     em from the ordinary row-to-row step, plus this one extra) — not a new number, just this codebase's
+     own existing convention applied here too. Scripts smpReshape() swaps to HTML but that are NOT
+     STACKING_SCRIPTS members (Siddham, Ranjana, Soyombo, Bhaiksuki, …) get 0 here, same as every
+     non-magnified script always did — smpReshape's own inner-div line-height (js/diagram/diagram-core.js,
+     further down) makes the identical 1-vs-2 decision independently, since it needs the ratio rather than
+     a px figure and the two can't share one variable. */
+  STACKED_GAP=(typeof STACKING_SCRIPTS!=="undefined" && STACKING_SCRIPTS.has(ORTHO_SCHEME))?(TOK_REF_SIZE*TOK_MAG):0;
   POS_F='15px '+LIVE_TOKEN_STACK; GRID_F='462 13px '+LIVE_MONO_STACK; HEAD_F='500 11px '+uiFont(); HEAD_F_REQ='700 11px '+uiFont();   // HEAD_F/HEAD_F_REQ ride along on this refresh only for uniformity — it is built off --ui-font, not off either LIVE_ stack (see its lazy definition above), so nothing this function reacts to can actually change it
   TRANS_F='italic 15px '+LIVE_TOKEN_STACK; TRANS_UP_F='15px '+LIVE_TOKEN_STACK; MWT_F=WORD_F;
   GRID_ITAL_F='italic 462 13px '+LIVE_MONO_STACK;
@@ -1556,20 +1587,24 @@ function ascent(f){_cv.font=f; const m=_cv.measureText("Ábgjyd漢"); return m.a
    expression every consumer shares, so the draws and the reserves grow together and neither clipping nor
    misalignment is possible. Exactly `belowGap()` whenever TOK_MAG is 1, which is every document
    but those.
-   ⚠ STACK_DROP IS GONE — removed entirely, on request, after its Grantha-specific compensation was
-   already pulled for causing cross-script inconsistency and a further report of Balinese/Javanese
-   clipping surfaced while that removal was still under investigation (stackDropExtra's own former site,
-   above scriptAscentEm, has the full history). This function, and every OTHER reserve/draw site that
-   used to add STACK_DROP on top of it once (belowReserveH below, belowStack, the MWT tie rows in this
-   file, diagram-wrap.js's wrapped tree, document.js's flat-notation MWT rows), now gives every
-   1.5×-scaled script exactly this — the magnification term alone — with nothing extra for any
-   particular script's own stacking depth. */
+   ⚠ STACK_DROP ITSELF IS GONE — removed entirely, after its Grantha-specific compensation was already
+   pulled for causing cross-script inconsistency and a further report of Balinese/Javanese clipping
+   surfaced while that removal was still under investigation (stackDropExtra's own former site, above
+   scriptAscentEm, has the full history). What replaced it, on request ("instead of using STACK_DROP, set
+   the line height of stacked-script tokens to 2em"), is STACKED_GAP (refreshFontStacks's own note) — a
+   FLAT, content-independent one extra em for STACKING_SCRIPTS members, added once by whichever site
+   reserves/draws the first row below the glyphs (belowReserveH below, belowStack, the MWT tie rows in
+   this file, diagram-wrap.js's wrapped tree, document.js's flat-notation MWT rows), the SAME injection
+   pattern STACK_DROP used but with no per-document measurement behind it — 2em total (matching what
+   .stext-stacked already gives these scripts in the running-sentence view), the same for every member
+   regardless of how deep its own content happens to stack. */
 function belowGap(){ return 18+descent(POS_F)+(TOK_MAG>1?descent(WORD_F)*(1-1/TOK_MAG):0); }
 // how many rows sit below the glyph line (translit + gloss/mgloss tiers + POS) — the ANNOTATION rows,
 // never the glyph row itself, which is why n can be 0 (a token with translit/glosses/POS all off).
 function belowRows(hasTr,tierCount,hasPos){ return (hasTr?1:0)+tierCount+(hasPos?1:0); }
-// total vertical reserve those rows need — n·belowGap() for the n row-to-row steps, nothing more.
-function belowReserveH(hasTr,tierCount,hasPos){ const n=belowRows(hasTr,tierCount,hasPos); return n*belowGap(); }
+// total vertical reserve those rows need: n·belowGap() for the n row-to-row steps, plus STACKED_GAP
+// exactly once (n>0) — see its own note at refreshFontStacks() for what it replaces and why once, not per row.
+function belowReserveH(hasTr,tierCount,hasPos){ const n=belowRows(hasTr,tierCount,hasPos); return n*belowGap()+(n>0?STACKED_GAP:0); }
 function xHeight(f){_cv.font=f; const m=_cv.measureText("x"); return m.actualBoundingBoxAscent||6;}   // the x-height of a (POS) glyph — subtracted from the inter-tier step to seat the MWT bracket (POS tags now render via c2sc small caps, whose visual height sits at x-height, not full cap height)
 // sizeSid() — the JS width-measurement this comment described — is GONE: .sid-in is a contenteditable
 // span now (js/core/document.js's buildBlock), not an <input>, and a span with no explicit width simply
@@ -1897,7 +1932,7 @@ function stemmaLayout(sent,catNodes,posBelow){const pad=2, SP=meas(" ",WORD_F)+8
 function mirror(c,total){ if(RTL) for(let i=0;i<c.length;i++) c[i]=total-c[i]; }   // in-place RTL flip of x-centres
 /* transliteration + POS stacked below a word baseline; returns the bottom y (pushes hit-boxes) */
 function hasTr(toks){ return trLayer() && toks.some(x=>trTxt(x)); }   // the transliteration row is active (romanisation, or originals under an orthography) → reserve it for every token (keeps POS aligned)
-function belowStack(g,x,y0,tk,boxes,trRow){ let y=y0;   // trRow: reserve the transliteration row even for a token that has none (so POS stays aligned across the sentence)
+function belowStack(g,x,y0,tk,boxes,trRow){ let y=y0+STACKED_GAP;   // trRow: reserve the transliteration row even for a token that has none (so POS stays aligned across the sentence). +STACKED_GAP seeds the ONE gap from the glyph baseline to whichever row is drawn FIRST below it; every later belowGap() step in this function is the plain, un-bumped one
   const showTr = trRow!=null ? trRow : (trLayer() && !!trTxt(tk));
   if(showTr){ y+=belowGap(); const rt=trTxt(tk); if(rt){ const e=E("text",{class:"translit"+frnUp(tk),x:x,y:y,"text-anchor":"middle"}); e.textContent=rt; if(trRowEdit())e.classList.add("tr-edit"); g.appendChild(e); boxes&&boxes.push({x,y:y-4,hx:meas(rt,trFont(tk))/2,hy:7}); svgSeamMark(g,tk,x,y,meas(rt,trFont(tk))/2,trFont(tk),boxes,null,"translit"); } }   // Item 8: the translit row gains the SAME descender-matched top gap the POS row carries (+descent(POS_F), the label-font descender) so the row above's descenders don't crowd it; .tr-edit → click-to-edit the romanisation, or the STORED transliteration behind it (see trRowEdit). The romanisation is a WORD-LIKE row, so it carries the seam mark too — a word broken across tokens reads as broken on every row that spells it out
   belowTiers().forEach(tier=>{ y+=belowGap(); const txt=tierText(tk,tier), dtxt=txt||"…"; const e=E("text",{class:"gloss gl-edit"+frnUp(tk),x:x,y:y,"text-anchor":"middle","data-tier":tier,tabindex:"0"}); setGlossText(e,tier,dtxt); if(!txt)e.classList.add("gl-empty"); g.appendChild(e);
@@ -1964,8 +1999,8 @@ function tieLayout(D){ const rows=tieRows(D); if(!rows.length) return {rows:[],d
     inTier.forEach(r=>{ r.dy=top;
       if(r.kind==="gw"){ r.dfy=0; r.dtr=0; r.dpos=0; bot=Math.max(bot,top+gwDepth()); return; }   // a tie carries NO label (the relation is marked by the mark alone), so its row is only as deep as the glyph's own ink
       r.dfy=top+PIN+mwtFormLead();                                                        // tie body PIN below the top; the label baseline a further mwtFormLead() below it
-      r.dtr=(r.kind==="mwt"&&trTxt(r.m))?r.dfy+STEP:0;                                      // an MWT's own transliteration row — the FIRST row below the tie's own surface-form glyphs
-      r.dpos=(r.kind==="mwt"&&r.pos)?(r.dtr?r.dtr+STEP:r.dfy+STEP):0;                       // …and, on a coinciding pair, the ExtPos annotation LAST — form → translit → POS, the same order a plain token's below-stack uses
+      r.dtr=(r.kind==="mwt"&&trTxt(r.m))?r.dfy+STEP+STACKED_GAP:0;                          // an MWT's own transliteration row — the FIRST row below the tie's own surface-form glyphs, so it's the one that gets STACKED_GAP (once)
+      r.dpos=(r.kind==="mwt"&&r.pos)?(r.dtr?r.dtr+STEP:r.dfy+STEP+STACKED_GAP):0;           // …and, on a coinciding pair, the ExtPos annotation LAST — form → translit → POS, the same order a plain token's below-stack uses. STACKED_GAP only if dtr didn't already spend it
       bot=Math.max(bot, r.dpos||r.dtr||r.dfy); });
     deepest=bot; top=bot+STEP; }                                                           // the next tier starts one inter-tier step below the deepest label of this one
   return {rows, depth:PIN+lead+deepest+1, lead}; }                                          // depth is measured from the below-stack bottom: +PIN for the y offset mwtTie is handed, +1 slack — for a lone plain MWT tie this reproduces the former fixed 39+descent−xHeight exactly
@@ -2109,7 +2144,7 @@ function htmlTieBottom(r){ const PIN=6, STEP=belowGap(), lead=5+tieLead();
   if(r.kind==="gw") return lead+r.dy+gwDepth();                            // the tie has no label under it — it reaches only as far as the glyph's own ink
   if(r.kind==="xpos") return lead+r.dy+PIN+20;                             // the ExtPos value IS the label
   const n=belowRows((trLayer()&&trTxt(r)),0,!!r.pos);
-  return lead+r.dy+PIN+20+n*STEP; }                                        // MWT surface form, then its transliteration row, then any ExtPos annotation
+  return lead+r.dy+PIN+20+n*STEP+(n>0?STACKED_GAP:0); }                    // MWT surface form, then its transliteration row, then any ExtPos annotation — STACKED_GAP once (belowReserveH's math), for the same reason belowStack seeds it once rather than per row
 function mwtDepth(D){ return tieLayout(D).depth; }   // extra vertical room the bracket stack needs below the below-stack bottom. Item 1 made this tier-aware — one entry per bracket TIER, each as deep as the deepest label that tier carries (an MWT surface form, plus its transliteration row and/or an ExtPos annotation) — so an ExtPos bracket that pushes an overlapping MWT tie down a tier also grows every reserve that folds in mwtDepth (arcsWrapped's per-row tieBot, projWrapped, belowH) in lockstep. With a single plain MWT tie and no ExtPos it returns exactly the former fixed 39+descent(POS_F)−xHeight(POS_F) (39 with no POS row), +belowGap() for a transliteration row — the seating those constants were tuned for is unchanged.
 
 /* labels are always horizontal and centred on their edge (x-height middle); collision avoidance is
