@@ -1740,21 +1740,24 @@ function mglossMarks(mg,seg){ return mg?((seg.pre?"-":"")+mg+(seg.post?"-":"")):
    piece, the middle one, and nothing else. FEATS says nothing about which piece of the form realises which
    category, so its abbreviations (dadātu's imperative/3rd/singular) don't belong to the match; they describe the
    reduplication-plus-ending working together, and with no second bundle to split them into, this app's
-   convention puts the whole of `gram` on the FIRST (reduplicating) piece rather than inventing a division FEATS
-   never stated. Gluing lex and gram into one string and bracketing the OUTSIDE — composeMGloss+mglossMarks' usual
-   move — puts BOTH on the MIDDLE slot instead ("-give.IMP.3SG-" splits to ["","give.IMP.3SG",""]), which is
-   exactly backwards: the match/lemma piece would carry the grammatical categories that belong to its flanking
-   material, and the flanking material would carry nothing at all.
-   So for "in", the three MSeg slots are answered directly rather than through composeMGloss: `gram` on the
-   first (as CONTENT, not as an attachment mark on an empty slot — so no leading "-" the way the pre/post branch
-   would add one), `lex` alone on the second (the match), the third left empty — unglossed, same as every other
-   slot this file leaves for the annotator to fill in by hand. Two hyphens either way keep it 3-slot-aligned with
-   MSeg's own three pieces ("gram-lex-".split("-") is exactly ["gram","lex",""]), and an entirely empty result
-   (no FEATS abbreviations AND no lexical gloss) collapses back to "" rather than the two bare hyphens the
-   template would otherwise leave behind — "" is how every call site here already spells "nothing to write". */
+   convention puts the whole of `gram` on the LAST (ending) piece rather than inventing a division FEATS never
+   stated — on correction: an earlier cut put it on the FIRST (reduplicating) piece instead, which read the
+   grammatical content onto the wrong flank. Gluing lex and gram into one string and bracketing the OUTSIDE —
+   composeMGloss+mglossMarks' usual move — puts BOTH on the MIDDLE slot instead ("-give.IMP.3SG-" splits to
+   ["","give.IMP.3SG",""]), which is exactly backwards either way: the match/lemma piece would carry the
+   grammatical categories that belong to its flanking material, and the flanking material would carry nothing
+   at all.
+   So for "in", the three MSeg slots are answered directly rather than through composeMGloss: the first (leading)
+   piece left empty — unglossed, same as every other slot this file leaves for the annotator to fill in by hand
+   — `lex` alone on the second (the match), `gram` on the third (as CONTENT, not as an attachment mark on an
+   empty slot — so no trailing "-" the way the pre/post branch would add one). Two hyphens either way keep it
+   3-slot-aligned with MSeg's own three pieces ("-lex-gram".split("-") is exactly ["","lex","gram"]), and an
+   entirely empty result (no FEATS abbreviations AND no lexical gloss) collapses back to "" rather than the two
+   bare hyphens the template would otherwise leave behind — "" is how every call site here already spells
+   "nothing to write". */
 function composeMGlossPrefill(lex,featsStr,upos,seg){
   if(seg&&seg.kind==="in"){ const gram=featsToGloss(featsStr,upos);
-    return (gram||lex)?(gram+"-"+lex+"-"):""; }
+    return (gram||lex)?("-"+lex+"-"+gram):""; }
   return mglossMarks(composeMGloss(lex,featsStr,upos),seg); }
 /* Item 3 — RE-DERIVE ONE TOKEN'S SEGMENTATION. MSeg is a function of the form AND the lemma, so it goes stale
    whenever EITHER moves: a hand-edited lemma, a lemma the background re-parse revised after a form edit, or the
