@@ -2242,36 +2242,57 @@ function fitViewBox(svg,boxes){const W0=+svg.getAttribute("width"),H0=+svg.getAt
   boxes.forEach(B=>{a=Math.min(a,B.x-B.hx);b=Math.max(b,B.x+B.hx);c=Math.min(c,B.y-B.hy);d=Math.max(d,B.y+B.hy);});
   const M=6; if(a<0||b>W0||c<0||d>H0){const x=Math.floor(a-M),y=Math.floor(c-M),w=Math.ceil(b-a+2*M),h=Math.ceil(d-c+2*M);
     svg.setAttribute("viewBox",`${x} ${y} ${w} ${h}`); svg.setAttribute("width",w); svg.setAttribute("height",h);}}
-/* ⚠ THE INK IS DRAWN `TOK_Y_LOWER` px LOWER THAN THE CROP `boxes` DESCRIBES, and that asymmetry IS the whole
-   feature — it is the ONLY way to open headroom above the topmost thing a notation draws. On request ("lower
-   the diagram tokens by 2.5"), after the obvious version was tried and reverted: raising the layout's own TOP
-   constant (stemma()/tree(), js/diagram/diagram-render.js + js/diagram/diagram-wrap.js) moves the drawn glyphs
-   AND the `boxes` entries that describe them by the same amount, and fitTight then re-crops tightly around the
-   new position with the identical margin — a perfect no-op, confirmed by pixel measurement in the shipping
-   WKWebView (the top-of-diagram-to-root-ink gap moved by under 1px, all of it attributable to an unrelated
-   NODE_F size change landing in the same commit).
-   What actually opens room is moving the INK without moving the CROP. Done here, by shifting the finished
-   viewBox UP by TOK_Y_LOWER rather than by translating any content: `boxes` is a plain array of JS numbers,
-   every renderer's own layout math (spreadForLabels, the label de-collision passes, repArcEnds, mwtTie's
-   seating) is computed in the same unshifted user space, and NOTHING is re-expressed — the crop window keeps
-   exactly the size and the content-relative position it had, and the whole figure simply lands TOK_Y_LOWER
-   lower inside it. Equivalent, to the pixel, to wrapping every drawn element in <g transform="translate(0,N)">,
-   but with no DOM structure to break: ghostsBehind() still walks svg.children, smpReshape() still sweeps the
-   finished element, and the ONE place that maps a screen coordinate back into user space (the flat brackets
-   row hit-target, js/diagram/diagram-wrap.js) reads vb.x for an x-only answer and is untouched either way.
-   ⚠ IT SPENDS THE BOTTOM MARGIN TO BUY THE TOP ONE — deliberately, and that is the trade that was asked for:
-   the bottom is measured comfortably the more generous of the two (stemma 8.4px inside the SVG against 5.0px
-   at the top; brackets 8.8 against 4.0), and M(6) − TOK_Y_LOWER still leaves every notation's lowest ink
-   inside its own viewBox, so nothing is clipped — only re-balanced.
-   ⚠ THE FOUR NOTATIONS THAT DO NOT REACH fitTight STATE IT THEMSELVES, in the one term each of them has:
-   outline() (js/diagram/diagram-wrap.js) is HTML rows in a padded box, so it moves the same 2.5 from its
-   paddingBottom to its paddingTop; bracketsWrapped's `.text-conv.bwrap` does the same in app.css, where its
-   own comment already ties its 10px/18px to flat brackets' internal gaps and so has to move with them. The
-   wrapped stemma/hierarchy (projWrapped) is the ONE deliberate exemption: its tree is scaled to FILL .wp-stem
-   (sy=bh/natH, so the deepest node sits flush on the box's bottom edge, which overflow:hidden then clips) and
-   its token glyphs live in a separate fixed-height strip whose top is not the figure's top — there is no tight
-   crop there to loosen, and shifting the stretched tree down would clip its own lowest nodes. */
+/* ⚠ A TOKEN'S OWN STACK IS DRAWN `TOK_Y_LOWER` px LOWER THAN THE `boxes` ENTRY THAT DESCRIBES IT, AND THE EDGES
+   DO NOT MOVE AT ALL. Two corrections are folded into that one sentence, and both were paid for:
+   ① The FIRST attempt raised the layout's own TOP constant (stemma()/tree(), js/diagram/diagram-render.js +
+   js/diagram/diagram-wrap.js). That moved the drawn glyph AND the `boxes` entry describing it by the same
+   amount, so fitTight simply re-cropped tightly around the new position with the identical margin — a perfect
+   no-op, confirmed by pixel measurement in the shipping WKWebView. The lesson kept from it: nothing is gained
+   without an ASYMMETRY between where the ink is drawn and where the crop is told the ink is.
+   ② The SECOND attempt introduced that asymmetry at the WHOLE-SVG level, by sliding the finished viewBox up.
+   Rejected on sight, and rightly: the viewBox maps the ONE coordinate space the edges live in too, so the arcs,
+   stemma edges, brackets and relation labels came down with the tokens and the figure was merely re-hung 2.5px
+   lower inside its own box. Nothing moved RELATIVE to anything else, which is the entire point of the request.
+   What ships is the same asymmetry at TOKEN granularity. Every renderer now computes two baselines for each
+   token — the LAYOUT one (`ny(depth)`, `wy`, `by`, …, unchanged, and the only one any `boxes` entry ever sees)
+   and the DRAW one, `+TOK_Y_LOWER` below it — and hands the draw baseline to the glyph and to everything
+   anchored to that one token: its below-stack (translit / gloss tiers / POS), its goeswith parts and slur, its
+   Typo/Foreign marks, its seam and NewPar marks, its folded-punctuation satellites, its MWT tie, its hit/wash
+   band, and — in brackets — the [ ] glyphs that share the word row with it. The EDGES keep the layout baseline
+   throughout: every arc path, stemma/hierarchy edge, projection line, interrupter bump, root stub, relation
+   label, ghost and their own `boxes` entries are computed from the untouched `ny(depth)`/`arcZone`/`base`/
+   `relY`, so the tokens move DOWN AND AWAY from them, which is what "I just want the nodes to shift" asks for.
+   ⚠ `loBoxes()` (just below) IS the asymmetry. The token-stack helpers (belowStack, gwFormSVG, svgFormSeamMark,
+   drawHangsSVG/drawLeadsSVG, gwSlurSVG, mwtTie) each DRAW and PUSH A BOX from the one `y` they are given, so
+   handing them the draw baseline would carry the crop along with the ink and re-create failure ① one level
+   down. They are handed the draw baseline and a `loBoxes(boxes)` sink instead, which subtracts TOK_Y_LOWER back
+   off every entry on its way into the real array. Every renderer's own inline `boxes.push` for the glyph is
+   simply left on the layout baseline, which is the same statement written by hand.
+   ⚠ WHAT IT BUYS, PER NOTATION, is not the same thing everywhere, and that is correct rather than uneven:
+   in stemma/hierarchy the ROOT GLYPH is the topmost thing drawn, so its crop no longer follows it down and
+   genuine headroom opens above it; in arcs and brackets the topmost thing is an arc crown or a relation label,
+   which does not move, so what opens there is the ARC-TO-GLYPH clearance the tokens were crowding (the gap
+   belowGap() already guards on the other side of the word). The bottom margin pays for it in every case, and
+   is measured the more generous of the two to begin with.
+   ⚠ THE ONE PLACE IT COSTS CLEARANCE is a stemma/hierarchy edge leaving the UNDERSIDE of its head node: that
+   endpoint sits at `ny(depth)+B`, a fixed 7px below the LAYOUT baseline, so a glyph now descending 2.5px
+   further leaves 1.0px between a descender's ink and the edge's start where there used to be 3.5px. Measured
+   on a real descender ("yesterday" as a head, fixture s2) and screenshotted: the two do not touch, and the
+   edge leaves diagonally from a point the descender's stem is never directly above. Left uncompensated ON
+   PURPOSE — moving that endpoint down with the glyph is moving an edge, which is exactly what this round was
+   told not to do. If it is ever judged too tight, B is the single term to grow, not this constant.
+   ⚠ THE TWO HTML NOTATIONS STATE IT IN THE ONE TERM THEY HAVE — a row IS the token there and no separate edge
+   layer exists to protect: outline() moves the same 2.5 from its paddingBottom to its paddingTop, and
+   bracketsWrapped's `.text-conv.bwrap` does the same in app.css. The wrapped stemma/hierarchy (projWrapped)
+   stays exempt: its tree is scaled to FILL .wp-stem (sy=bh/natH, deepest node flush on the bottom edge, which
+   overflow:hidden then clips) and its token glyphs sit in a separate fixed-height strip that draws no `boxes`
+   at all — there is no crop there to hold still, so the asymmetry has nothing to bite on. */
 const TOK_Y_LOWER=2.5;
+// The crop sink for a lowered token stack: pass the DRAW baseline to the helper and `loBoxes(boxes)` as its
+// `boxes`, and every box it pushes lands back on the LAYOUT baseline. Returns the argument untouched when there
+// is none (projWrapped and the wrapped-proj rows pass null), so a caller never has to branch. A plain `.push`
+// façade is enough — fitTight/fitViewBox are the only readers of a boxes array, and nothing else ever sees this.
+function loBoxes(boxes){ return boxes?{push(B){ boxes.push(Object.assign({},B,{y:B.y-TOK_Y_LOWER})); }}:boxes; }
 /* tight fit: crop AND expand the viewBox to the exact content extent (unlike fitViewBox, which only grows) */
 function fitTight(svg,boxes){ if(!boxes.length) return;
   let a=Infinity,b=-Infinity,c=Infinity,d=-Infinity;
@@ -2311,7 +2332,7 @@ function fitTight(svg,boxes){ if(!boxes.length) return;
      is still required: for content only slightly negative (−M < a < 0) `x` sits to ITS left already, needing
      no extra margin at all, and the naive `x-a` would otherwise go negative there. */
   const aFit=Math.max(0,a);
-  const x=Math.floor(aFit-M),y=Math.floor(c-M)-TOK_Y_LOWER,w=Math.ceil(b-aFit+2*M),h=Math.ceil(d-c+2*M);   // …then the crop alone slides UP by TOK_Y_LOWER (see its own note above): `h` is untouched, so the window keeps its size and the ink lands that much lower inside it. The floor() stays on the un-shifted value so the shift is exact rather than re-rounded away
+  const x=Math.floor(aFit-M),y=Math.floor(c-M),w=Math.ceil(b-aFit+2*M),h=Math.ceil(d-c+2*M);
   svg.setAttribute("viewBox",`${x} ${y} ${w} ${h}`); svg.setAttribute("width",w); svg.setAttribute("height",h);
   svg._leftOverflow=Math.max(0,x-a);}
 // De-collide edge labels by HORIZONTAL spreading, symmetric around each head: for a head's children, the

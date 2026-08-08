@@ -687,19 +687,20 @@ function arcsWrapped(si){
     // tokens + below stack (drawn last → on top of the cross-line edges)
     r.idx.forEach(i=>{ const tk=t[i], X=r.LX(i), lw=r.lw[i-r.s], g=E("g",{class:"tok-group"+(sel.s===si&&sel.t===OID(i)?" sel":""),"data-s":si,"data-tok":OID(i)});
       const wy=repBase(rep,r.wordY,i);   // item 11: reported-speech step UP off the line — the same shared repBase the arc endpoints above went through, so word and arc leave the line together
-      const hy=Math.min(r.arcZone-NR, wy-14);
-      g.appendChild(E("rect",{class:"tok-hit",x:X-lw/2-3,y:hy,width:lw+6,height:r.stackBot+6-hy}));
-      g.appendChild(E("rect",{class:"tok-wash",x:X-lw/2-3,y:wy-14,width:lw+6,height:r.stackBot+6-(wy-14)}));   // wash only the word+POS band, not the arcs above
-      const f=E("text",{class:"tok-word"+italDeco(tk),x:X,y:wy,"text-anchor":"middle"}); f.textContent=bform(tk);   // host form only
-      belowStack(g,X,wy,tk,boxes,hasTr(t));
-      g.appendChild(f); gwFormSVG(g,f,tk,X,wy,WORD_F,"tok-word",si,boxes);   // goeswith: continuation parts beside the head (see gwFormSVG); the slur comes from this row's own tie layer (mwtTie below)
+      const wyD=wy+TOK_Y_LOWER, loB=loBoxes(boxes);   // …and then the DRAW baseline, TOK_Y_LOWER below it (js/diagram/diagram-core.js). `r.wordY`/`r.arcZone`/`r.stackBot` stay the LAYOUT row geometry — the within-row bumps, the cross-line arcs' band bounds and every box here are all stated in it, so only the token's own ink moves
+      const hy=Math.min(r.arcZone-NR, wyD-14);
+      g.appendChild(E("rect",{class:"tok-hit",x:X-lw/2-3,y:hy,width:lw+6,height:r.stackBot+6+TOK_Y_LOWER-hy}));
+      g.appendChild(E("rect",{class:"tok-wash",x:X-lw/2-3,y:wyD-14,width:lw+6,height:r.stackBot+6+TOK_Y_LOWER-(wyD-14)}));   // wash only the word+POS band, not the arcs above   // both reaches grow by the same 2.5 the stack dropped, so the (lowered) POS row stays inside them
+      const f=E("text",{class:"tok-word"+italDeco(tk),x:X,y:wyD,"text-anchor":"middle"}); f.textContent=bform(tk);   // host form only
+      belowStack(g,X,wyD,tk,loB,hasTr(t));
+      g.appendChild(f); gwFormSVG(g,f,tk,X,wyD,WORD_F,"tok-word",si,loB);   // goeswith: continuation parts beside the head (see gwFormSVG); the slur comes from this row's own tie layer (mwtTie below)
       if(gwOf(tk).length) g.setAttribute("data-gw",[OID(i)].concat(gwOf(tk).map(p=>p.oid)).join(" "));
-      svgMarks(g,X,wy,tk,WORD_F); svgFormSeamMark(g,tk,X,wy,WORD_F,boxes);   // Item 11: form appended LAST → paints on TOP of the POS/translit stack; item 4: marks in front, then the seam mark off the form's inline end
+      svgMarks(g,X,wyD,tk,WORD_F); svgFormSeamMark(g,tk,X,wyD,WORD_F,loB);   // Item 11: form appended LAST → paints on TOP of the POS/translit stack; item 4: marks in front, then the seam mark off the form's inline end
       g.style.cursor="pointer"; g.addEventListener("click",()=>pick(si,OID(i)));
       g.addEventListener("mouseenter",()=>dim(si,OID(i))); g.addEventListener("mouseleave",()=>dim(si,null)); svg.appendChild(g);
       boxes.push({x:X,y:wy-8,hx:lw/2+((i===r.s||i===r.e)?Math.ceil(4*FS):0),hy:12});   // Item 10 / item 4: reserve casing/Noto fudge for the row's END slots (LTR rightmost = r.e, RTL rightmost = r.s), SCALED by the block zoom (×FS), so the widest row's last token — form, POS, relation label and casing halo — never clips at the fitTight viewBox edge even magnified by zoom:var(--fs)
-      drawHangsSVG(svg,tk,X,wy,WORD_F,"tok-word",si,boxes,OID(i)); drawLeadsSVG(svg,tk,X,wy,WORD_F,"tok-word",si,boxes,OID(i)); });   // folded punctuation (and item 6's correct form) beside the word
-    mwtTie(svg, r.c.map(x=>x+r.offX), r.wform, rowTies(D,r.s,r.e), r.stackBot+5, boxes, si);
+      drawHangsSVG(svg,tk,X,wyD,WORD_F,"tok-word",si,loB,OID(i)); drawLeadsSVG(svg,tk,X,wyD,WORD_F,"tok-word",si,loB,OID(i)); });   // folded punctuation (and item 6's correct form) beside the word
+    mwtTie(svg, r.c.map(x=>x+r.offX), r.wform, rowTies(D,r.s,r.e), r.stackBot+TOK_Y_LOWER+5, loBoxes(boxes), si);   // the tie hangs off the DRAWN stack bottom, so it keeps its distance under the lowered word
   });
   // Ghost edges (Shared=Yes AND Subject-raising): dashed, dimmed — decorative, not a diagram element of their own,
   // but still: (item 7) fan-shared with the real arcs at any token they land on (never the reverse), (item 2)
@@ -775,7 +776,7 @@ function arcsWrapped(si){
 function stemmaGeomW(t,n,withLabels){
   const {head,depth}=structure({tokens:t});
   const {c,lw,ldw}=stemmaLayout({tokens:t},false,false);   // ldw: the per-node inline-START reserve — see the same destructure in stemma() (js/diagram/diagram-render.js) and spreadForLabels' own note
-  const LV=48,TOP=18,B=7,SPW=meas(" ",WORD_F);   // TOP matches stemma()'s own (js/diagram/diagram-render.js) — raising it to "lower the tokens" was tried and reverted there, see its note; TOK_Y_LOWER is the fix that actually works
+  const LV=48,TOP=18,B=7,SPW=meas(" ",WORD_F);   // TOP matches stemma()'s own (js/diagram/diagram-render.js) — raising it to "lower the tokens" was tried and reverted there, see its note; TOK_Y_LOWER (applied per token, at the draw site, never to this geometry) is the fix that actually works
   const edges=[];
   for(let i=0;i<n;i++){const h=head[i]; if(h<1||h>n||h===i+1) continue;
     edges.push({d:i,h:h-1,rel:t[i].deprel,w:withLabels?meas(t[i].deprel,POS_F)+SPW:0});}
@@ -788,7 +789,7 @@ function stemmaGeomW(t,n,withLabels){
 // hierarchy geometry, label-less: the same tidy layout as tree(), returning node positions + parent→child edges
 function treeGeomW(t,n,withLabels){
   const {children,root}=structure({tokens:t});
-  const LV=48,TOP=18,B=7,SPW=meas(" ",WORD_F),NGAP=SPW+4, lw=i=>Math.max(fmeas(t[i],NODE_F),glossSlotW(t[i])), hgw=i=>tailW(t[i],NODE_F), ldw=i=>leadW(t[i],NODE_F), elw=i=>(withLabels&&i!==root)?meas(t[i].deprel,POS_F):0;   // item 13: node slot also fits the gloss tiers. TOP matches tree()'s own (below) — raising it to "lower the tokens" was tried and reverted there, see stemma()'s note (js/diagram/diagram-render.js); TOK_Y_LOWER is the fix that actually works
+  const LV=48,TOP=18,B=7,SPW=meas(" ",WORD_F),NGAP=SPW+4, lw=i=>Math.max(fmeas(t[i],NODE_F),glossSlotW(t[i])), hgw=i=>tailW(t[i],NODE_F), ldw=i=>leadW(t[i],NODE_F), elw=i=>(withLabels&&i!==root)?meas(t[i].deprel,POS_F):0;   // item 13: node slot also fits the gloss tiers. TOP matches tree()'s own (below) — raising it to "lower the tokens" was tried and reverted there, see stemma()'s note (js/diagram/diagram-render.js); TOK_Y_LOWER (applied per token, at the draw site, never to this geometry) is the fix that actually works
   const x=tidyLayout(n,root,i=>children[i],{lw,hgw,ldw,elw,SPW,NGAP});   // #5: shared with the unwrapped hierarchy tree() → one source of truth, so the wrapped hierarchy can't drift from the flat one
   const depth=new Array(n).fill(0); (function d(i,dd){depth[i]=dd; children[i].forEach(c=>d(c,dd+1));})(root,0);
   const maxD=Math.max(0,...depth), ny=d=>TOP+d*LV, natW=Math.max(2,...x.map((xx,i)=>xx+lw(i)/2+hgw(i)))+6;
@@ -1010,7 +1011,7 @@ function wpRevealSel(){ if(sel.s<0||sel.t<=0) return;
 
 function tree(si){
   const D=displaySent(DOC[si]), t=D.tokens, n=t.length, OID=k=>D.map[k]+1, sent={tokens:t}; RTL=D.rtl;
-  const {children,root,head}=structure(sent),belowReserve=belowReserveH(trLayer(),belowTierN(),false),LV=48+belowReserve,TOP=18,A=16,B=7;         // item 2: the level height = a CONSTANT 48 (the stemma's LV) + the below-stack reserve, and the outgoing edge attaches just below that reserve (parentEndY) — so an edge is always LV−belowReserve−A−B = 48−16−7 = 25 tall, EXACTLY the stemma's, no matter how many annotation tiers are shown. belowReserve uses the SAME belowGap() per-row step the tiers are drawn at, so it cancels cleanly (Item 8: each tier row folds in descent(POS_F)). TOP matches stemma()'s own (diagram-render.js) — raising it to "lower the tokens" was tried and reverted there, see its note; TOK_Y_LOWER is the fix that actually works
+  const {children,root,head}=structure(sent),belowReserve=belowReserveH(trLayer(),belowTierN(),false),LV=48+belowReserve,TOP=18,A=16,B=7;         // item 2: the level height = a CONSTANT 48 (the stemma's LV) + the below-stack reserve, and the outgoing edge attaches just below that reserve (parentEndY) — so an edge is always LV−belowReserve−A−B = 48−16−7 = 25 tall, EXACTLY the stemma's, no matter how many annotation tiers are shown. belowReserve uses the SAME belowGap() per-row step the tiers are drawn at, so it cancels cleanly (Item 8: each tier row folds in descent(POS_F)). TOP matches stemma()'s own (diagram-render.js) — raising it to "lower the tokens" was tried and reverted there, see its note; TOK_Y_LOWER (applied per token, at the draw site, never to this level math) is the fix that actually works
   // THE ROOT's OWN CROP RESERVE, matching stemma()'s identical fix (diagram-render.js) for the identical reason:
   // the root sits at depth 0 — literally the topmost thing this notation draws — and fitTight(svg,boxes) crops
   // to the union of `boxes`, whose node box below reserved a flat 9px tuned for NODE_F at TOK_MAG 1. A magnified
@@ -1044,7 +1045,16 @@ function tree(si){
   const ghostPairs=ghostPairsFor(t);   // [originIdx,targetIdx,rel], 0-based — computed once, before any Y-position is derived from depth
   applyGhostDepth(depth,head,ghostPairs,n);   // a ghost's TARGET is pulled above its shallowest ghost dependent, cascading to its own real subtree (see stemma()'s own comment)
   const ny=d=>TOP+d*LV;
-  const parentEndY=i=> ny(depth[i]) + belowReserve + B;   // item 7/2: the OUTGOING (parent) edge attaches just below the UNIFORMLY-reserved below-stack (the node's lowest annotation tier — a glossing tier, the transliteration, or, with neither, the form) — so an edge never crosses the annotations AND every edge is the same 25px tall as the stemma (belowReserve is the same for all nodes, so the edge height is tier-count-independent)
+  /* ⚠ …plus, where the GLYPH ITSELF is what sits directly above that endpoint, the magnification's own extra
+     descent — the exact mirror of NODE_ASC_EXTRA above and of stemma()'s BB (js/diagram/diagram-render.js,
+     where the full measurement lives): a magnified node descends past the flat 7px B, and TOK_Y_LOWER spends
+     2.5 more of it, which measured as a real overlap at TOK_MAG 1.5 and 2. Gated on `belowReserve` being 0,
+     because with any annotation tier shown the thing above the endpoint is that TIER's row — drawn in an
+     UNMAGNIFIED face, and already cleared by belowReserveH's own STACKED_GAP/belowGap() terms — so reserving
+     the glyph's magnified descent there would lengthen an edge that needs nothing. 0 at TOK_MAG 1 either way,
+     so no unmagnified document has an edge endpoint anywhere but where it has always been. */
+  const NODE_DESC_EXTRA=(TOK_MAG>1&&!belowReserve)?descent(NODE_F)*(1-1/TOK_MAG):0;
+  const parentEndY=i=> ny(depth[i]) + belowReserve + B + NODE_DESC_EXTRA;   // item 7/2: the OUTGOING (parent) edge attaches just below the UNIFORMLY-reserved below-stack (the node's lowest annotation tier — a glossing tier, the transliteration, or, with neither, the form) — so an edge never crosses the annotations AND every edge is the same 25px tall as the stemma (belowReserve is the same for all nodes, so the edge height is tier-count-independent)
   const edges=[]; for(let i=0;i<n;i++) children[i].forEach(ci=>{ const y1=ny(depth[ci])-A, y2=parentEndY(i), midY=(y1+y2)/2;
     edges.push({d:ci,h:i,rel:t[ci].deprel,y1,y2,midY,band:Math.round(midY/12),w:show.labels?meas(t[ci].deprel,POS_F)+SPW:0}); });
   edges.sort((p,q)=>catRank(p.rel)-catRank(q.rel));   // subj in front; no global spread (it would de-centre parents)
@@ -1095,27 +1105,28 @@ function tree(si){
   genericEntries.forEach(ge=>{ const i=ge.i, col=relColor("subj"), ink=arcInk(col);
     const g=E("g",{class:"ghost-g","data-s":si});   // NEVER highlighted via the predicate's own selection — see stemma()'s identical comment: the predicate is this relation's HEAD, not its dependent
     g.appendChild(E("path",{class:"edge edge-ghost",d:`M ${ge.gx} ${ge.y1} L ${x[i]} ${ge.y2}`,stroke:ink}));
-    const glbl=E("text",{class:"node-lbl",x:ge.gx,y:ge.gy}); glbl.textContent="∅"; g.appendChild(glbl);
+    const glbl=E("text",{class:"node-lbl",x:ge.gx,y:ge.gy+TOK_Y_LOWER}); glbl.textContent="∅"; g.appendChild(glbl);   // a virtual NODE, so it lowers with every real one; its edge above and its box below both stay on the layout level
     if(show.labels){ const L=ghostLabAt.get(ge); drawLabel(g,L.mx,L.my,"subj",col); const lb=g.lastElementChild; if(lb)lb.classList.add("lbl-ghost"); boxes.push({x:L.mx,y:L.my,hx:meas("subj",POS_F)/2+2,hy:7}); }
     boxes.push({x:ge.gx,y:ge.gy,hx:8,hy:9+NODE_ASC_EXTRA});   // "∅" is drawn .node-lbl too, so it magnifies with every other node glyph — see NODE_ASC_EXTRA's own note
     svg.appendChild(g); });
   for(let i=0;i<n;i++){const g=E("g",{class:"node"+(sel.s===si&&sel.t===OID(i)?" sel":""),"data-s":si,"data-tok":OID(i)});
-    const lbl=E("text",{class:"node-lbl"+italDeco(t[i]),x:x[i],y:ny(depth[i])}); lbl.textContent=bform(t[i]); const tw=fmeas(t[i],NODE_F);   // host form only
-    const hit=E("rect",{class:"tok-hit tok-wash",x:x[i]-Math.max(26,tw/2+4),y:ny(depth[i])-A,width:Math.max(52,tw+8),height:A+B});   // node box = its own wash region
+    const nyL=ny(depth[i]), nyD=nyL+TOK_Y_LOWER, loB=loBoxes(boxes);   // nyL = the LAYOUT level (every edge endpoint and every box in this block); nyD = where this node's glyph and its whole stack DRAW — see TOK_Y_LOWER (js/diagram/diagram-core.js). The edges above were laid out from nyL and are untouched
+    const lbl=E("text",{class:"node-lbl"+italDeco(t[i]),x:x[i],y:nyD}); lbl.textContent=bform(t[i]); const tw=fmeas(t[i],NODE_F);   // host form only
+    const hit=E("rect",{class:"tok-hit tok-wash",x:x[i]-Math.max(26,tw/2+4),y:nyD-A,width:Math.max(52,tw+8),height:A+B});   // node box = its own wash region   // on the DRAW level, so the wash stays centred on the glyph it backlights
     g.appendChild(hit);
-    const dropY=ny(depth[i])+STACKED_GAP;   // seeds the ONE gap from the glyph (node-lbl) row down to whichever row is drawn first below it — STACKED_GAP (diagram-core.js), the flat replacement for the removed STACK_DROP
-    { const rt=trTxt(t[i]); if(rt){ const ty=dropY+belowGap(); const e=E("text",{class:"translit"+frnUp(t[i]),x:x[i],y:ty,"text-anchor":"middle"}); e.textContent=rt; if(trRowEdit())e.classList.add("tr-edit"); g.appendChild(e); boxes.push({x:x[i],y:ny(depth[i])+14,hx:meas(rt,trFont(t[i]))/2,hy:7}); svgSeamMark(g,t[i],x[i],ty,meas(rt,trFont(t[i]))/2,trFont(t[i]),boxes,null,"translit"); } }   // Item 8: same descender-matched top gap (belowGap()) the other renderers give the translit row
-    belowTiers().forEach((tier,ti)=>{ const gy=dropY+(trTxt(t[i])?belowGap():0)+(ti+1)*(belowGap()), txt=tierText(t[i],tier), dtxt=txt||"…"; const e=E("text",{class:"gloss gl-edit"+(txt?"":" gl-empty")+frnUp(t[i]),x:x[i],y:gy,"text-anchor":"middle","data-tier":tier,tabindex:"0"}); setGlossText(e,tier,dtxt); g.appendChild(e); boxes.push({x:x[i],y:gy-4,hx:meas(dtxt,trFont(t[i]))/2,hy:7});
-      if(tier==="mseg"||tier==="mgloss") svgSeamMark(g,t[i],x[i],gy,(tier==="mgloss"?measGloss(dtxt,tierFont(tier,t[i])):meas(dtxt,tierFont(tier,t[i])))/2,tierFont(tier,t[i]),boxes,null,tier); });   // gloss / morphemic tiers under the node (hierarchy has no per-node POS row) — the segmentation AND morphemic-gloss rows carry the seam mark (both per-morpheme, drawn off the "…" placeholder's own width where this tier isn't annotated for this token — see the note beside diagram-core.js's belowStack); the lexical gloss row doesn't
-    g.appendChild(lbl); gwFormSVG(g,lbl,t[i],x[i],ny(depth[i]),NODE_F,"node-lbl",si,boxes);   // goeswith: the continuation parts join the head on the node row, so the ONE translit/gloss stack drawn above spans the whole word
+    const dropY=nyL+STACKED_GAP, dropYD=nyD+STACKED_GAP;   // seeds the ONE gap from the glyph (node-lbl) row down to whichever row is drawn first below it — STACKED_GAP (diagram-core.js), the flat replacement for the removed STACK_DROP   // dropY stays the LAYOUT seed (the boxes below are stated in it); dropYD is the drawn one, and the two differ by exactly TOK_Y_LOWER so every row keeps its spacing
+    { const rt=trTxt(t[i]); if(rt){ const ty=dropYD+belowGap(); const e=E("text",{class:"translit"+frnUp(t[i]),x:x[i],y:ty,"text-anchor":"middle"}); e.textContent=rt; if(trRowEdit())e.classList.add("tr-edit"); g.appendChild(e); boxes.push({x:x[i],y:nyL+14,hx:meas(rt,trFont(t[i]))/2,hy:7}); svgSeamMark(g,t[i],x[i],ty,meas(rt,trFont(t[i]))/2,trFont(t[i]),loB,null,"translit"); } }   // Item 8: same descender-matched top gap (belowGap()) the other renderers give the translit row
+    belowTiers().forEach((tier,ti)=>{ const step=(trTxt(t[i])?belowGap():0)+(ti+1)*(belowGap()), gy=dropY+step, gyD=dropYD+step, txt=tierText(t[i],tier), dtxt=txt||"…"; const e=E("text",{class:"gloss gl-edit"+(txt?"":" gl-empty")+frnUp(t[i]),x:x[i],y:gyD,"text-anchor":"middle","data-tier":tier,tabindex:"0"}); setGlossText(e,tier,dtxt); g.appendChild(e); boxes.push({x:x[i],y:gy-4,hx:meas(dtxt,trFont(t[i]))/2,hy:7});
+      if(tier==="mseg"||tier==="mgloss") svgSeamMark(g,t[i],x[i],gyD,(tier==="mgloss"?measGloss(dtxt,tierFont(tier,t[i])):meas(dtxt,tierFont(tier,t[i])))/2,tierFont(tier,t[i]),loB,null,tier); });   // gloss / morphemic tiers under the node (hierarchy has no per-node POS row) — the segmentation AND morphemic-gloss rows carry the seam mark (both per-morpheme, drawn off the "…" placeholder's own width where this tier isn't annotated for this token — see the note beside diagram-core.js's belowStack); the lexical gloss row doesn't
+    g.appendChild(lbl); gwFormSVG(g,lbl,t[i],x[i],nyD,NODE_F,"node-lbl",si,loB);   // goeswith: the continuation parts join the head on the node row, so the ONE translit/gloss stack drawn above spans the whole word
     if(gwOf(t[i]).length){ const ids=[OID(i)].concat(gwOf(t[i]).map(p=>p.oid));
       g.setAttribute("data-gw",ids.join(" "));
-      const STEP=belowGap(), nodeBot=dropY+(trTxt(t[i])?STEP:0)+belowTierN()*STEP;   // this node's OWN below-stack bottom — the hierarchy has no shared word row, so each node stacks its rows itself
-      gwSlurSVG(svg,x[i]-tw/2,x[i]+tw/2,nodeBot+5+tieLead(),si,ids,boxes); }   // the hierarchy draws no ties at all (an MWT has no place in a dependency tree), so the slur is seated here directly — by the SAME "+5, then tieLead()" rule mwtTie is handed in every other notation, just measured from this node's own stack bottom
-    svgMarks(g,x[i],ny(depth[i]),t[i],NODE_F); svgFormSeamMark(g,t[i],x[i],ny(depth[i]),NODE_F,boxes);   // Item 11: node form appended LAST → paints on TOP of the translit/gloss stack; item 4: marks in front of it, then the seam mark off its inline end
+      const STEP=belowGap(), nodeBot=dropYD+(trTxt(t[i])?STEP:0)+belowTierN()*STEP;   // this node's OWN below-stack bottom — the hierarchy has no shared word row, so each node stacks its rows itself   // measured off the DRAWN stack, so the slur hangs the same distance under the (lowered) rows
+      gwSlurSVG(svg,x[i]-tw/2,x[i]+tw/2,nodeBot+5+tieLead(),si,ids,loB); }   // the hierarchy draws no ties at all (an MWT has no place in a dependency tree), so the slur is seated here directly — by the SAME "+5, then tieLead()" rule mwtTie is handed in every other notation, just measured from this node's own stack bottom
+    svgMarks(g,x[i],nyD,t[i],NODE_F); svgFormSeamMark(g,t[i],x[i],nyD,NODE_F,loB);   // Item 11: node form appended LAST → paints on TOP of the translit/gloss stack; item 4: marks in front of it, then the seam mark off its inline end
     g.style.cursor="pointer"; g.addEventListener("click",()=>pick(si,OID(i))); svg.appendChild(g);
-    drawHangsSVG(svg,t[i],x[i],ny(depth[i]),NODE_F,"node-lbl",si,boxes,OID(i)); drawLeadsSVG(svg,t[i],x[i],ny(depth[i]),NODE_F,"node-lbl",si,boxes,OID(i));   // folded punctuation as separate selectable satellites beside the node
-    boxes.push({x:x[i],y:ny(depth[i])-5,hx:tw/2+2,hy:9+NODE_ASC_EXTRA});}   // tree() has no catNodes/POS-as-node mode — every node here is bform(), always at NODE_F — see NODE_ASC_EXTRA's own note
+    drawHangsSVG(svg,t[i],x[i],nyD,NODE_F,"node-lbl",si,loB,OID(i)); drawLeadsSVG(svg,t[i],x[i],nyD,NODE_F,"node-lbl",si,loB,OID(i));   // folded punctuation as separate selectable satellites beside the node
+    boxes.push({x:x[i],y:nyL-5,hx:tw/2+2,hy:9+NODE_ASC_EXTRA});}   // …on the LAYOUT level: holding the root's crop here while its glyph draws lower is what opens the headroom above it   // tree() has no catNodes/POS-as-node mode — every node here is bform(), always at NODE_F — see NODE_ASC_EXTRA's own note
   fitTight(svg,boxes);   // crop tight top, matching the stemma
   return wrapDiagram(svg,si);
 }
@@ -1216,7 +1227,7 @@ function brackets(si){
   // whole-row hit target: clicking anywhere selects the innermost constituent whose brackets enclose that x
   const spanX={}; seq.forEach(it=>{ if(it.owner!=null){ (spanX[it.owner]=spanX[it.owner]||{owner:it.owner}); if(it.t==="o")spanX[it.owner].x0=it.x; if(it.t==="c")spanX[it.owner].x1=it.x; } });
   const spans=Object.values(spanX).filter(s=>s.x0!=null&&s.x1!=null);
-  const hit=E("rect",{class:"span-hit",x:0,y:yWord-14,width:total,height:18,fill:"transparent"}); hit.style.cursor="pointer";
+  const hit=E("rect",{class:"span-hit",x:0,y:yWord+TOK_Y_LOWER-14,width:total,height:18,fill:"transparent"}); hit.style.cursor="pointer";   // the whole-row target follows the row it targets, which now draws TOK_Y_LOWER lower
   hit.addEventListener("click",ev=>{ ev.stopPropagation();
     const rect=svg.getBoundingClientRect(), vb=svg.viewBox.baseVal, sx=vb.x+(ev.clientX-rect.left)/rect.width*vb.width;   // map click → user x (zoom-safe)
     let best=null; spans.forEach(s=>{ if(sx>=s.x0&&sx<=s.x1 && (!best||(s.x1-s.x0)<(best.x1-best.x0))) best=s; });   // smaller span wins
@@ -1234,7 +1245,7 @@ function brackets(si){
       let cur=o.x-4; const segs=[];   // the whole span, minus each interrupting constituent (and its brackets)
       holes.forEach(([hL,hR])=>{ if(hL>cur) segs.push([cur,hL]); cur=Math.max(cur,hR); });
       if(c2.x+4>cur) segs.push([cur,c2.x+4]);
-      segs.forEach(([x0,x1])=> svg.appendChild(E("rect",{x:x0,y:wy-13,width:x1-x0,height:16,rx:5,fill:col,"fill-opacity":0.15,"pointer-events":"none"}))); } }
+      segs.forEach(([x0,x1])=> svg.appendChild(E("rect",{x:x0,y:wy+TOK_Y_LOWER-13,width:x1-x0,height:16,rx:5,fill:col,"fill-opacity":0.15,"pointer-events":"none"}))); } }   // the wash backlights the FORM/BRACKET row, both of which draw on the lowered baseline (see TOK_Y_LOWER, js/diagram/diagram-core.js), so it rides with them
   // fan the interrupter-arc endpoints with the shared routine (the SAME fan arc view uses): the arc into an
   // interrupter sits central, arcs out of a shared head fan out, shortest outermost, one step
   const npReal=np.filter(a=>a.h>=0&&a.h<n).map(a=>Object.assign(a,{hk:a.h,dk:a.d,xh:wx[a.h],xd:wx[a.d],len:Math.abs(a.d-a.h)}));
@@ -1281,30 +1292,46 @@ function brackets(si){
   let stackBot=yWord;
   seq.forEach(it=>{ if(it.t==="w"){
       const g=E("g",{class:"tok-group"+(sel.s===si&&sel.t===OID(it.i)?" sel":""),"data-s":si,"data-tok":OID(it.i)});
-      const wy=yWord-rep[it.i];
+      const wy=yWord-rep[it.i], wyD=wy+TOK_Y_LOWER, loB=loBoxes(boxes);   // wy = the LAYOUT baseline (every box here, and the interrupter arcs' own `base`, are stated in it); wyD = where the form and its stack DRAW — see TOK_Y_LOWER (js/diagram/diagram-core.js)
       const rly=relY-rep[it.i];   // item 6: the deprel label rides above the form → lifts with a reported token, same as the form
-      const r=relOf(it.i); if(r){ drawLabel(g,it.x,rly,r,relColor(t[it.i].deprel)); boxes.push({x:it.x,y:rly,hx:meas(r,POS_F)/2+2,hy:7}); }
-      const f=E("text",{class:"tok-word"+(selI>=0&&isAnc(selI,it.i)?" inspan":"")+italDeco(t[it.i]),x:it.x,y:wy,"text-anchor":"middle"}); f.textContent=bform(t[it.i]);   // host form only, under the wash; the deprel label + POS siblings in the group stay default
-      stackBot=Math.max(stackBot, belowStack(g,it.x,wy,t[it.i],boxes,hasTr(t)));   // transliteration + POS below the word
-      g.appendChild(f); gwFormSVG(g,f,t[it.i],it.x,wy,WORD_F,"tok-word",si,boxes);   // goeswith: continuation parts beside the head; the slur comes from the tie layer (mwtTie below)
+      /* ⚠ …AND LOWERS WITH IT TOO — the one relation label in this app that does, and the exception is
+         principled rather than convenient. Everywhere else a relation label annotates a drawn EDGE and is
+         placed by that edge's own geometry (the stemma/hierarchy midpoint, the arc crown and its de-collision
+         pass, the interrupter bump below), so it belongs to the edge layer TOK_Y_LOWER holds still. Flat
+         brackets draws no edge for an ordinary token at all: this label is printed in the token's own cell,
+         the above-stack twin of the POS row below it, and `relH`/`relY` exist precisely to hold its gap to the
+         form at 20+descent(WORD_F) — the value the comment on relY records as matching wrapped stemma and
+         wrapped brackets "to ~1px". Leaving it behind would have broken that three-way match by exactly 2.5px
+         in the one member of it whose tokens moved. Its BOX stays on the layout baseline like every other, so
+         it is also what opens this notation's crop headroom (the label is its topmost ink). */
+      const r=relOf(it.i); if(r){ drawLabel(g,it.x,rly+TOK_Y_LOWER,r,relColor(t[it.i].deprel)); boxes.push({x:it.x,y:rly,hx:meas(r,POS_F)/2+2,hy:7}); }
+      const f=E("text",{class:"tok-word"+(selI>=0&&isAnc(selI,it.i)?" inspan":"")+italDeco(t[it.i]),x:it.x,y:wyD,"text-anchor":"middle"}); f.textContent=bform(t[it.i]);   // host form only, under the wash; the deprel label + POS siblings in the group stay default
+      stackBot=Math.max(stackBot, belowStack(g,it.x,wyD,t[it.i],loB,hasTr(t)));   // transliteration + POS below the word
+      g.appendChild(f); gwFormSVG(g,f,t[it.i],it.x,wyD,WORD_F,"tok-word",si,loB);   // goeswith: continuation parts beside the head; the slur comes from the tie layer (mwtTie below)
       if(gwOf(t[it.i]).length) g.setAttribute("data-gw",[OID(it.i)].concat(gwOf(t[it.i]).map(p=>p.oid)).join(" "));
-      svgMarks(g,it.x,wy,t[it.i],WORD_F); svgFormSeamMark(g,t[it.i],it.x,wy,WORD_F,boxes);   // Item 11: form appended LAST → paints on TOP of the POS/translit stack; item 4: marks in front, then the seam mark off the form's inline end
+      svgMarks(g,it.x,wyD,t[it.i],WORD_F); svgFormSeamMark(g,t[it.i],it.x,wyD,WORD_F,loB);   // Item 11: form appended LAST → paints on TOP of the POS/translit stack; item 4: marks in front, then the seam mark off the form's inline end
       g.style.cursor="pointer"; g.addEventListener("click",()=>pick(si,OID(it.i))); svg.appendChild(g);
       boxes.push({x:it.x,y:wy-8,hx:it.w/2,hy:12});
-      drawHangsSVG(svg,t[it.i],it.x,wy,WORD_F,"tok-word",si,boxes,OID(it.i)); drawLeadsSVG(svg,t[it.i],it.x,wy,WORD_F,"tok-word",si,boxes,OID(it.i));   // folded punctuation (and item 6's correct form) beside the word, before the following close bracket
+      drawHangsSVG(svg,t[it.i],it.x,wyD,WORD_F,"tok-word",si,loB,OID(it.i)); drawLeadsSVG(svg,t[it.i],it.x,wyD,WORD_F,"tok-word",si,loB,OID(it.i));   // folded punctuation (and item 6's correct form) beside the word, before the following close bracket
     } else if(it.t==="g"){   // Subject=Generic: the ∅ — a real seq slot, drawn like any bracketed single-token dependent (its own label above, its own glyph on the word row), dimmed via .ghost-g. NEVER highlighted via the predicate's own selection — the predicate is this relation's HEAD, not its dependent, and the ∅ dependent has no real token of its own to select instead
       const i=it.i, col=relColor("subj"), g=E("g",{class:"ghost-g","data-s":si});
       const wy=yWord-rep[i], rly=relY-rep[i];
-      if(show.labels){ drawLabel(g,it.x,rly,"subj",col); const lb=g.lastElementChild; if(lb)lb.classList.add("lbl-ghost"); boxes.push({x:it.x,y:rly,hx:meas("subj",POS_F)/2+2,hy:7}); }
-      const glbl=E("text",{class:"tok-word",x:it.x,y:wy,"text-anchor":"middle"}); glbl.textContent="∅"; g.appendChild(glbl);
+      if(show.labels){ drawLabel(g,it.x,rly+TOK_Y_LOWER,"subj",col); const lb=g.lastElementChild; if(lb)lb.classList.add("lbl-ghost"); boxes.push({x:it.x,y:rly,hx:meas("subj",POS_F)/2+2,hy:7}); }   // the ∅'s own cell, label and all, moves exactly as a real token's does (see the `w` branch above)
+      const glbl=E("text",{class:"tok-word",x:it.x,y:wy+TOK_Y_LOWER,"text-anchor":"middle"}); glbl.textContent="∅"; g.appendChild(glbl);   // a virtual TOKEN on the word row → lowers with the real ones; both boxes stay on the layout baseline
       svg.appendChild(g); boxes.push({x:it.x,y:wy-8,hx:it.w/2,hy:12});
     } else { const selBr=it.owner!=null&&sel.s===si&&sel.t===OID(it.owner);
       const by=yWord-(it.owner!=null?rep[it.owner]:0);   // a bracket sits on the plane of the constituent it delimits (its owner is that constituent's head)
-      const battr={class:"brk"+(it.ghost?" brk-ghost":"")+(selBr?" sel":"")+(selI>=0&&it.owner!=null&&isAnc(selI,it.owner)?" inspan":""),x:it.x,y:by,fill:it.col}; if(it.owner!=null){ battr["data-s"]=si; battr["data-owner"]=OID(it.owner); }   // brackets of the subtree's constituents get .inspan too; the ∅'s own bracket (it.ghost) is dimmed, not owned/clickable
+      /* ⚠ A BRACKET SHARES THE FORMS' OWN TEXT ROW, so it takes the SAME lowering they do — the one piece of
+         non-token furniture in this file that must move. It is not an edge: flat brackets set "[", the word and
+         "]" on one baseline precisely so they read as one line of type (see .bwbr's own note in app.css, which
+         keeps the wrapped view's brackets on the form's baseline for the identical reason), and leaving them on
+         the layout baseline while every form dropped 2.5px would break that line apart. The interrupter ARCS
+         above them are the edge layer here, and they stay on `base`/`relY`, untouched. */
+      const battr={class:"brk"+(it.ghost?" brk-ghost":"")+(selBr?" sel":"")+(selI>=0&&it.owner!=null&&isAnc(selI,it.owner)?" inspan":""),x:it.x,y:by+TOK_Y_LOWER,fill:it.col}; if(it.owner!=null){ battr["data-s"]=si; battr["data-owner"]=OID(it.owner); }   // brackets of the subtree's constituents get .inspan too; the ∅'s own bracket (it.ghost) is dimmed, not owned/clickable
       const b=E("text",battr); b.textContent=it.glyph; svg.appendChild(b);   // original glyph at the mirrored position (so RTL reads correctly)
       if(it.owner!=null){ b.style.cursor="pointer"; b.addEventListener("click",()=>pick(si,OID(it.owner))); }   // clicking a bracket selects the span it delimits
       boxes.push({x:it.x,y:by-6,hx:it.w/2,hy:9}); } });
-  mwtTie(svg,wx,wform,D,stackBot+5,boxes,si);   // surface-form ties for multi-word tokens — hug the FORM's own ink width, not the (deprel-label-widened) slot
+  mwtTie(svg,wx,wform,D,stackBot+5,loBoxes(boxes),si);   // surface-form ties for multi-word tokens — hug the FORM's own ink width, not the (deprel-label-widened) slot   // stackBot already came back lowered, so the tie keeps its distance under the word
   fitTight(svg,boxes);
   return wrapDiagram(svg,si);}
 function outline(si){const D=displaySent(DOC[si]), t=D.tokens, n=t.length, OID=k=>D.map[k]+1, sent={tokens:t},{children,root}=structure(sent); RTL=D.rtl;
@@ -1320,7 +1347,7 @@ function outline(si){const D=displaySent(DOC[si]), t=D.tokens, n=t.length, OID=k
   const mwtOf={}; (D.mwt||[]).forEach(m=>mwtOf[m.from-1]=m);   // annotate the first word of each multi-word token
   const box=document.createElement("div"); box.className="text-conv outline"; box.dir=RTL?"rtl":"ltr";
   box.style.paddingBottom=(15-TOK_Y_LOWER+descent(NODE_F))+"px";   // bottom = the same 15px base the top uses + the outline form font's descender depth, so the last row's descenders clear the edge (CSS can't call descent()) — LESS TOK_Y_LOWER, which the top takes
-  box.style.paddingTop=(15+TOK_Y_LOWER)+"px";   // the outline's own statement of the lowering every SVG notation gets from fitTight's crop shift (see TOK_Y_LOWER, js/diagram/diagram-core.js): this box IS the crop, its rows ARE the ink, so the 2.5 simply moves from the bottom pad to the top one — total height unchanged, content 2.5px lower, exactly as the cropped notations
+  box.style.paddingTop=(15+TOK_Y_LOWER)+"px";   // the outline's own statement of the token lowering the SVG notations get per token (see TOK_Y_LOWER, js/diagram/diagram-core.js). It needs no draw-vs-crop asymmetry, because it has neither: a row IS the token here — the relation label, the form, the transliteration, the gloss tiers and the POS tag all run INLINE along it — and there is no separate edge layer to hold still. So the 2.5 simply moves from the bottom pad to the top one: total height unchanged, every row 2.5px lower
   // item 3 — shift each row's content DOWN by half the form's descender: less padding above, that much more below,
   // so the x-height band (not the full ascender-to-descender box) reads as vertically centred in the row.
   const _half=descent(NODE_F)/2; box.style.setProperty("--olpt",(5-_half)+"px"); box.style.setProperty("--olpb",(5+_half)+"px");

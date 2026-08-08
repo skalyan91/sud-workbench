@@ -90,7 +90,7 @@ function stemma(si,{proj,catNodes}){
   const {c,lw,ldw}=stemmaLayout(sent,catNodes,proj&&show.pos),{head,depth}=structure(sent);   // ldw: the per-node inline-START reserve (leads / Subject=Generic band) — spreadForLabels needs it, with lw, to re-seat the figure on its leftmost node's real slot edge rather than on that node's centre (see its own note)
   const ghostPairs=ghostPairsFor(t);   // [originIdx,targetIdx], 0-based — computed once, before ANY Y-position is derived from depth
   applyGhostDepth(depth,head,ghostPairs,n);   // item 4: a ghost's TARGET is pulled above its shallowest ghost dependent, cascading to its own real subtree — replaces the earlier per-edge "swap which end draws where" hack (which never touched real node positions)
-  const LV=48,TOP=18,A=16,B=7,realMaxD=Math.max(0,...depth),ny=d=>TOP+d*LV;   // shorter edges; A above clears ascenders; TOP is small so the root (no incoming edge) gets no extra headroom. ⚠ Raising TOP alone to "lower the diagram tokens" was tried and reverted — fitTight(svg,boxes) crops tight to whatever `boxes` says regardless of where TOP puts it, so the whole figure just gets re-cropped around its new position with the SAME margin: no visible headroom gained, confirmed by measurement. See TOK_Y_LOWER (js/diagram/diagram-core.js) for the fix that actually works — it moves the CROP, not the layout, so the ink keeps every coordinate this function computes and simply lands lower inside a window of unchanged size
+  const LV=48,TOP=18,A=16,B=7,realMaxD=Math.max(0,...depth),ny=d=>TOP+d*LV;   // shorter edges; A above clears ascenders; TOP is small so the root (no incoming edge) gets no extra headroom. ⚠ Raising TOP alone to "lower the diagram tokens" was tried and reverted — fitTight(svg,boxes) crops tight to whatever `boxes` says regardless of where TOP puts it, so the whole figure just gets re-cropped around its new position with the SAME margin: no visible headroom gained, confirmed by measurement. See TOK_Y_LOWER (js/diagram/diagram-core.js) for the fix that actually works — the asymmetry applied PER TOKEN (glyph drawn at ny+TOK_Y_LOWER, its crop box still recorded at ny) rather than to TOP, so the root gains real headroom while every edge laid out from this ny stays exactly where it is
   /* THE ROOT NODE'S OWN CROP RESERVE MUST GROW WITH IT, on request ("lzh diagram tokens need more space on
      top, to account for their increased size"). TOP itself deliberately stays a small constant (see the note
      above) because the ACTUAL top margin comes from fitTight(svg,boxes) cropping to the union of `boxes` — and
@@ -105,6 +105,19 @@ function stemma(si,{proj,catNodes}){
      (÷TOK_MAG) isolates just the extra. Exactly 0 at TOK_MAG 1, so an unmagnified document's crop is
      byte-identical to before. */
   const NODE_ASC_EXTRA=TOK_MAG>1?ascent(NODE_F)*(1-1/TOK_MAG):0;
+  /* ⚠ AND THE SAME TERM ON THE DESCENDER SIDE, FOR THE EDGE THAT LEAVES A NODE'S UNDERSIDE. B is a flat 7px
+     below the LAYOUT baseline, tuned when a node was an unmagnified 15px face; a magnified one (lzh, any
+     INDIC_SCRIPTS/ORNAMENTAL_SCRIPTS member) descends further and was ALREADY grazing that endpoint before
+     this file lowered anything — measured on a synthetic all-descender head ("gyppy") at TOK_MAG 1 / 1.5 / 2:
+     3.64px / 1.96px / 0.28px of real ink clearance, i.e. the flat 7 was degrading toward a touch on its own.
+     TOK_Y_LOWER then spends 2.5 of whatever is left (1.14 / −0.54 / −2.22 — an actual OVERLAP at both
+     magnifications), so the magnification's own extra descent is added back here. Restores ~1.1px at every
+     magnification, which is what TOK_MAG 1 has.
+     ⚠ EXACTLY 0 AT TOK_MAG 1, which is the point: "the edges do not move" (see TOK_Y_LOWER,
+     js/diagram/diagram-core.js) holds byte-for-byte in every unmagnified document — every document but the
+     magnified-script ones — and the one place an endpoint DOES move is the one place the alternative was a
+     glyph drawn through a line. Same closed form NODE_ASC_EXTRA above and belowGap() already use. */
+  const NODE_DESC_EXTRA=TOK_MAG>1?descent(NODE_F)*(1-1/TOK_MAG):0, BB=B+NODE_DESC_EXTRA;
   // Subject=Generic: the ∅ sits one level BELOW its predicate (ny(depth[i]+1), like any dependent) — if the predicate
   // is already at the deepest REAL level, that lands exactly where baseY/the bottom margin was sized for, with no
   // room of its own. Raise the whole figure's reserved depth by one extra level so the ∅ gets genuine space.
@@ -112,7 +125,7 @@ function stemma(si,{proj,catNodes}){
   const SPW=meas(" ",WORD_F);
   const edges=[];
   for(let i=0;i<n;i++){const h=head[i]; if(h<1||h>n||h===i+1) continue;
-    const y1=ny(depth[i])-A, y2=ny(depth[h-1])+B, midY=(y1+y2)/2;
+    const y1=ny(depth[i])-A, y2=ny(depth[h-1])+BB, midY=(y1+y2)/2;
     edges.push({d:i,h:h-1,rel:t[i].deprel,y1,y2,midY,band:Math.round(midY/12),w:show.labels?meas(t[i].deprel,POS_F)+SPW:0});}
   if(show.labels){ spreadForLabels(c,edges,lw,ldw); }   // widen node gaps until labels fit (in natural order). lw/ldw are for its CLOSING re-seat only (it never widens by them — that is ensureNodeGaps' job below): without them it pulls the leftmost node's CENTRE to x=2 and leaves that node's own slot at negative x, where fitTight's left clamp refuses to grow the viewBox and the SVG clips it — see spreadForLabels' own note
   ensureNodeGaps(c,lw);   // …then re-guarantee each node's OWN below-stack width — spreading for edge labels alone can leave that narrower than stemmaLayout reserved (see ensureNodeGaps' own note)
@@ -128,7 +141,7 @@ function stemma(si,{proj,catNodes}){
   // in applyGhostDepth couldn't fully resolve a pathological case.
   const orientGhost=(origin,target)=>depth[origin]<depth[target]?{d:target,h:origin}:{d:origin,h:target};
   const ghostEdges=ghostPairs.map(([o,tg,rel])=>{ const {d,h}=orientGhost(o,tg);
-    return {d,h,rel,origin:o,y1:ny(depth[d])-A,y2:ny(depth[h])+B}; });
+    return {d,h,rel,origin:o,y1:ny(depth[d])-A,y2:ny(depth[h])+BB}; });
   const total=Math.max(2,...c.map((cx,i)=>cx+lw[i]/2))+2;
   mirror(c,total);                                          // NOW flip for RTL, after label spacing is settled
   const belowH=proj?belowReserveH(trLayer(),belowTierN(),show.pos):0, tieH=proj?mwtDepth(D):0;   // Item 1/8: every below-row (translit, each gloss, POS) folds in descent(POS_F), matching belowStack's descender-matched per-row step
@@ -142,29 +155,29 @@ function stemma(si,{proj,catNodes}){
   // first use in the proj block → a temporal-dead-zone ReferenceError that blanked the whole diagram).
   const genericEntries=[]; for(let i=0;i<n;i++) if(hasGenericSubj(t,i)) genericEntries.push({i});
   genericEntries.forEach(ge=>{ const i=ge.i, gapAmt=genericSubjGapW(t,i,catNodes?POS_F:NODE_F);
-    ge.emptyX=c[i]-lw[i]/2-gapAmt/2; ge.gy=ny(depth[i]+1); ge.y1=ge.gy-A; ge.y2=ny(depth[i])+B; });
+    ge.emptyX=c[i]-lw[i]/2-gapAmt/2; ge.gy=ny(depth[i]+1); ge.y1=ge.gy-A; ge.y2=ny(depth[i])+BB; });
   if(proj){ const bformW=t.map(tk=>fmeas(tk,NODE_F));   // the baseline word's own ink-width alone — the tie hugs THIS, not `lw` (which is padded to fit the hierarchy NODE label/POS-below and shouldn't stretch a tie meant to visually group surface-form parts)
-    for(let i=0;i<n;i++){ const by=baseY-rep[i];
-    svg.appendChild(E("line",{class:"proj",x1:c[i],y1:by-16,x2:c[i],y2:ny(depth[i])+B}));   // the projection line follows its word down, so node and word stay tied together. Drawn baseline→node (bottom to top) so the dash pattern anchors at the baseline — a dot sits cleanly on the word end and any partial dash lands at the node, matching the icon
+    for(let i=0;i<n;i++){ const by=baseY-rep[i], byD=by+TOK_Y_LOWER, loB=loBoxes(boxes);   // by = the LAYOUT baseline (what every `boxes` entry below records, and what the projection line above ends its clearance from); byD = the DRAW baseline the word and its whole stack actually render on — see TOK_Y_LOWER (js/diagram/diagram-core.js)
+    svg.appendChild(E("line",{class:"proj",x1:c[i],y1:by-16,x2:c[i],y2:ny(depth[i])+BB}));   // the projection line follows its word down, so node and word stay tied together. Drawn baseline→node (bottom to top) so the dash pattern anchors at the baseline — a dot sits cleanly on the word end and any partial dash lands at the node, matching the icon   // an EDGE: both ends stay on the LAYOUT baselines, so the lowered word simply hangs 2.5px further below the line's foot
     const bg=E("g",{class:"tok-group"+(sel.s===si&&sel.t===OID(i)?" sel":""),"data-s":si,"data-tok":OID(i)});   // baseline words are clickable too
     const bwidth=Math.max(24,bformW[i]+8);
     const hitW=Math.max(bwidth, trTxt(t[i])?meas(trTxt(t[i]),trFont(t[i]))+10:0, show.pos&&t[i].upos?meas(posDisp(t[i]),POS_F)+10:0);   // widen to the transliteration/POS below (a short word can romanise to a wider string)
-    bg.appendChild(E("rect",{class:"tok-hit tok-wash",x:c[i]-hitW/2,y:by-14,width:hitW,height:24+belowH}));   // baseline hit already spans just the word+POS band → doubles as the drag-target wash
-    const bw=E("text",{class:"baseword"+italDeco(t[i]),x:c[i],y:by}); bw.textContent=bform(t[i]); boxes.push({x:c[i],y:by-6,hx:bwidth/2,hy:9});   // host form only, centred on c[i]
-    baseBot=Math.max(baseBot, belowStack(bg,c[i],by,t[i],boxes,hasTr(t)));
-    bg.appendChild(bw); gwFormSVG(bg,bw,t[i],c[i],by,NODE_F,"baseword",si,boxes); svgMarks(bg,c[i],by,t[i],NODE_F); svgFormSeamMark(bg,t[i],c[i],by,NODE_F,boxes);   // Item 11: baseline form appended LAST → paints on TOP of the POS/translit stack; item 4: marks in front of it. The seam mark rides beside the form, like the below-stack rows carry their own   // goeswith: the continuation parts join the head on this row (and re-seat it), so the ONE below-stack drawn above spans the whole word. The slur itself comes from the tie layer below (mwtTie)
+    bg.appendChild(E("rect",{class:"tok-hit tok-wash",x:c[i]-hitW/2,y:byD-14,width:hitW,height:24+belowH+TOK_Y_LOWER}));   // baseline hit already spans just the word+POS band → doubles as the drag-target wash   // seated on the DRAW baseline so the wash stays centred on the glyph it highlights, and grown by the same 2.5 so the (lowered) POS row is still inside it
+    const bw=E("text",{class:"baseword"+italDeco(t[i]),x:c[i],y:byD}); bw.textContent=bform(t[i]); boxes.push({x:c[i],y:by-6,hx:bwidth/2,hy:9});   // host form only, centred on c[i]
+    baseBot=Math.max(baseBot, belowStack(bg,c[i],byD,t[i],loB,hasTr(t)));
+    bg.appendChild(bw); gwFormSVG(bg,bw,t[i],c[i],byD,NODE_F,"baseword",si,loB); svgMarks(bg,c[i],byD,t[i],NODE_F); svgFormSeamMark(bg,t[i],c[i],byD,NODE_F,loB);   // Item 11: baseline form appended LAST → paints on TOP of the POS/translit stack; item 4: marks in front of it. The seam mark rides beside the form, like the below-stack rows carry their own   // goeswith: the continuation parts join the head on this row (and re-seat it), so the ONE below-stack drawn above spans the whole word. The slur itself comes from the tie layer below (mwtTie)
     if(gwOf(t[i]).length) bg.setAttribute("data-gw",[OID(i)].concat(gwOf(t[i]).map(p=>p.oid)).join(" "));   // selecting EITHER half lights the whole word — see gwHolds/applySel
     bg.style.cursor="pointer"; bg.addEventListener("click",()=>pick(si,OID(i))); svg.appendChild(bg);
-    drawHangsSVG(svg,t[i],c[i],by,NODE_F,"baseword",si,boxes,OID(i)); drawLeadsSVG(svg,t[i],c[i],by,NODE_F,"baseword",si,boxes,OID(i)); }   // folded punctuation (and item 6's correct form) beside the baseline word
+    drawHangsSVG(svg,t[i],c[i],byD,NODE_F,"baseword",si,loB,OID(i)); drawLeadsSVG(svg,t[i],c[i],byD,NODE_F,"baseword",si,loB,OID(i)); }   // folded punctuation (and item 6's correct form) beside the baseline word
     // Subject=Generic: give the ∅ the SAME node→baseline pairing every real token gets in proj mode — a projection
     // line down from its node height (ge.gy, already used by the diagonal ghost edge above) to a baseline glyph
     // of its own, rather than leaving it floating at node height with no baseline presence at all.
     genericEntries.forEach(ge=>{ const i=ge.i, by=baseY-rep[i];
-      svg.appendChild(E("line",{class:"proj proj-ghost",x1:ge.emptyX,y1:by-16,x2:ge.emptyX,y2:ge.gy+B}));
+      svg.appendChild(E("line",{class:"proj proj-ghost",x1:ge.emptyX,y1:by-16,x2:ge.emptyX,y2:ge.gy+BB}));
       const g=E("g",{class:"ghost-g","data-s":si});   // NEVER highlighted via the predicate's own selection — see the diagonal ghost edge below for why (same relation, same direction mistake to avoid)
-      const glbl=E("text",{class:"node-lbl",x:ge.emptyX,y:by}); glbl.textContent="∅"; g.appendChild(glbl);
+      const glbl=E("text",{class:"node-lbl",x:ge.emptyX,y:by+TOK_Y_LOWER}); glbl.textContent="∅"; g.appendChild(glbl);   // the ∅ is a virtual TOKEN, so it lowers with every real one; its box stays on the layout baseline like theirs
       svg.appendChild(g); boxes.push({x:ge.emptyX,y:by-6,hx:8,hy:9}); });
-    mwtTie(svg,c,bformW,D,baseBot+5,boxes,si); }
+    mwtTie(svg,c,bformW,D,baseBot+5,loBoxes(boxes),si); }   // baseBot already came back from the lowered belowStack, so the tie hangs the same distance under the (lowered) word — and loBoxes puts its crop back on the layout baseline
   // edges as ONE cased unit: pre-compute each stroke path + arrowhead, then draw ALL their casings first (a single
   // layer behind every edge → the edge-set occludes the tokens/proj-lines behind it cleanly, but edges DON'T case
   // against each OTHER), then the strokes + arrowheads on top (per-edge groups keep click/selection). Item 21.
@@ -208,20 +221,21 @@ function stemma(si,{proj,catNodes}){
   // editable/interactable/grid-visible, but positioned exactly like any other token would be.
   genericEntries.forEach(ge=>{ const i=ge.i, col=relColor("subj"), ink=arcInk(col);
     const g=E("g",{class:"ghost-g","data-s":si});   // NEVER highlighted via the predicate's own selection: the predicate is this relation's HEAD, not its dependent — a real edge highlights on the DEPENDENT's selection, and the ∅ dependent has no real token of its own to select, so this stays purely decorative (no data-dep, no .sel) instead of wrongly keying off the predicate
-    g.appendChild(E("path",{class:"edge edge-ghost",d:`M ${ge.emptyX} ${ge.y1} L ${c[i]} ${ge.y2}`,stroke:ink}));
-    const glbl=E("text",{class:"node-lbl",x:ge.emptyX,y:ge.gy}); glbl.textContent="∅"; g.appendChild(glbl);
+    g.appendChild(E("path",{class:"edge edge-ghost",d:`M ${ge.emptyX} ${ge.y1} L ${c[i]} ${ge.y2}`,stroke:ink}));   // an EDGE: untouched, both ends on the layout baselines
+    const glbl=E("text",{class:"node-lbl",x:ge.emptyX,y:ge.gy+TOK_Y_LOWER}); glbl.textContent="∅"; g.appendChild(glbl);   // …but the ∅ NODE lowers with every other node glyph (its box below stays on ge.gy)
     if(show.labels){ const L=ghostLabAt.get(ge); drawLabel(g,L.mx,L.my,"subj",col); const lb=g.lastElementChild; if(lb)lb.classList.add("lbl-ghost"); boxes.push({x:L.mx,y:L.my,hx:meas("subj",POS_F)/2+2,hy:7}); }
     boxes.push({x:ge.emptyX,y:ge.gy,hx:8,hy:9+NODE_ASC_EXTRA});   // "∅" is drawn .node-lbl too, so it magnifies with every other node glyph — see NODE_ASC_EXTRA's own note
     svg.appendChild(g); });
   for(let i=0;i<n;i++){const g=E("g",{class:"node"+(sel.s===si&&sel.t===OID(i)?" sel":""),"data-s":si,"data-tok":OID(i)});
     const txt=catNodes?(posDisp(t[i])||"X"):bform(t[i]), tw=catNodes?meas(txt,POS_F):fmeas(t[i],NODE_F);   // item 11: stemma word-node label uses bform → the SCRIPT glyph-swap applies to stemma nodes too
-    const lbl=E("text",{class:(catNodes?"node-cat":"node-lbl"+italDeco(t[i])),x:c[i],y:ny(depth[i])}); lbl.textContent=txt; if(catNodes) svgTip(lbl,posTitle(t[i].upos));   // stemma POS-as-node → POS hover tooltip (Item 2)
-    const hit=E("rect",{class:"tok-hit tok-wash",x:c[i]-Math.max(26,tw/2+4),y:ny(depth[i])-A,width:Math.max(52,tw+8),height:A+B});   // node box = its own wash region (no arcs above a node)
-    g.appendChild(hit); g.appendChild(lbl); if(!catNodes){ gwFormSVG(g,lbl,t[i],c[i],ny(depth[i]),NODE_F,"node-lbl",si,boxes); svgMarks(g,c[i],ny(depth[i]),t[i],NODE_F); svgFormSeamMark(g,t[i],c[i],ny(depth[i]),NODE_F,boxes); } g.style.cursor="pointer"; g.addEventListener("click",()=>pick(si,OID(i))); svg.appendChild(g);   // item 4: marks in front of the node label. A POS-as-node label is a TAG, not the word, so it takes no seam mark   // goeswith: a word node shows the whole word, so both parts are drawn here too (a POS-as-node label is not the word and takes none)
+    const nyL=ny(depth[i]), nyD=nyL+TOK_Y_LOWER, loB=loBoxes(boxes);   // nyL = the LAYOUT level (every edge endpoint and every box below is stated in it); nyD = where this node's own glyph and satellites actually draw — see TOK_Y_LOWER (js/diagram/diagram-core.js)
+    const lbl=E("text",{class:(catNodes?"node-cat":"node-lbl"+italDeco(t[i])),x:c[i],y:nyD}); lbl.textContent=txt; if(catNodes) svgTip(lbl,posTitle(t[i].upos));   // stemma POS-as-node → POS hover tooltip (Item 2)
+    const hit=E("rect",{class:"tok-hit tok-wash",x:c[i]-Math.max(26,tw/2+4),y:nyD-A,width:Math.max(52,tw+8),height:A+B});   // node box = its own wash region (no arcs above a node)   // seated on the DRAW level: the wash exists to backlight the GLYPH, so it tracks it rather than the edge endpoints, and A+B is far wider than the glyph either way
+    g.appendChild(hit); g.appendChild(lbl); if(!catNodes){ gwFormSVG(g,lbl,t[i],c[i],nyD,NODE_F,"node-lbl",si,loB); svgMarks(g,c[i],nyD,t[i],NODE_F); svgFormSeamMark(g,t[i],c[i],nyD,NODE_F,loB); } g.style.cursor="pointer"; g.addEventListener("click",()=>pick(si,OID(i))); svg.appendChild(g);   // item 4: marks in front of the node label. A POS-as-node label is a TAG, not the word, so it takes no seam mark   // goeswith: a word node shows the whole word, so both parts are drawn here too (a POS-as-node label is not the word and takes none)
     if(gwOf(t[i]).length){ g.setAttribute("data-gw",[OID(i)].concat(gwOf(t[i]).map(p=>p.oid)).join(" "));
-      if(!proj&&!catNodes) gwSlurSVG(svg,c[i]-tw/2,c[i]+tw/2,ny(depth[i])+descent(NODE_F)+tieLead(),si,[OID(i)].concat(gwOf(t[i]).map(p=>p.oid)),boxes); }   // …and, with NO baseline row (proj off), the slur belongs to the node — seated by the SAME tieLead() rule the tie layer uses, just measured from the node's own descender line instead of a below-stack bottom. With proj ON the baseline row's tie layer draws it (mwtTie below), so exactly one slur is drawn per word either way
-    if(!catNodes){ drawHangsSVG(svg,t[i],c[i],ny(depth[i]),NODE_F,"node-lbl",si,boxes,OID(i)); drawLeadsSVG(svg,t[i],c[i],ny(depth[i]),NODE_F,"node-lbl",si,boxes,OID(i)); }   // folded-punctuation satellites beside the word node (POS-as-node has no word to host them)
-    boxes.push({x:c[i],y:ny(depth[i])-5,hx:tw/2+2,hy:9+(catNodes?0:NODE_ASC_EXTRA)});}   // catNodes draws POS_F (unmagnified) here, not the word glyph — see NODE_ASC_EXTRA's own note; gating on it keeps a POS-as-node stemma byte-identical
+      if(!proj&&!catNodes) gwSlurSVG(svg,c[i]-tw/2,c[i]+tw/2,nyD+descent(NODE_F)+tieLead(),si,[OID(i)].concat(gwOf(t[i]).map(p=>p.oid)),loB); }   // …and, with NO baseline row (proj off), the slur belongs to the node — seated by the SAME tieLead() rule the tie layer uses, just measured from the node's own descender line instead of a below-stack bottom. With proj ON the baseline row's tie layer draws it (mwtTie below), so exactly one slur is drawn per word either way
+    if(!catNodes){ drawHangsSVG(svg,t[i],c[i],nyD,NODE_F,"node-lbl",si,loB,OID(i)); drawLeadsSVG(svg,t[i],c[i],nyD,NODE_F,"node-lbl",si,loB,OID(i)); }   // folded-punctuation satellites beside the word node (POS-as-node has no word to host them)
+    boxes.push({x:c[i],y:nyL-5,hx:tw/2+2,hy:9+(catNodes?0:NODE_ASC_EXTRA)});}   // …on the LAYOUT level, deliberately: the glyph is drawn TOK_Y_LOWER below this, and holding the crop here is what turns the drop into headroom above the root instead of a re-hung figure   // catNodes draws POS_F (unmagnified) here, not the word glyph — see NODE_ASC_EXTRA's own note; gating on it keeps a POS-as-node stemma byte-identical
   fitTight(svg,boxes);   // crop tight so proj/non-proj get the same (minimal) top padding
   return wrapDiagram(svg,si);
 }
@@ -348,7 +362,7 @@ function arcs(si){
     if(!a.isEmpty) g.setAttribute("data-dep",OID(a.to-1));
     g.appendChild(E("path",{class:"arc-path arc-ghost",d:dstr,stroke:ink}));
     g.appendChild(E("path",{class:"ah ah-ghost",d:arrowPath(P[2],P[3],AH),fill:ink}));   // NO outset argument, deliberately: a ghost draws no .arc-casing/.ah-casing at all (it is meant to read as a duplicate, not to occlude what it crosses), so there is no halo for the head to match — same for the stemma ghost head above
-    if(a.isEmpty){ const glbl=E("text",{class:"tok-word",x:a.X2,y:repBase(rep,wordY,a.from-1),"text-anchor":"middle"}); glbl.textContent="∅"; g.appendChild(glbl);   // Subject=Generic: the ∅ glyph itself sits on the WORD row, not the arc-attachment height a.y1 uses — and it's now at X2 (the arrowhead end), since the ∅ is the dependent. Its row is the PREDICATE's own (lifted) word baseline, via the shared repBase — a ∅ inside a report steps off the line with the predicate it hangs from
+    if(a.isEmpty){ const glbl=E("text",{class:"tok-word",x:a.X2,y:repBase(rep,wordY,a.from-1)+TOK_Y_LOWER,"text-anchor":"middle"}); glbl.textContent="∅"; g.appendChild(glbl);   // …and, being a virtual TOKEN on that row, it lowers with every real one (its box below is arc geometry and stays)   // Subject=Generic: the ∅ glyph itself sits on the WORD row, not the arc-attachment height a.y1 uses — and it's now at X2 (the arrowhead end), since the ∅ is the dependent. Its row is the PREDICATE's own (lifted) word baseline, via the shared repBase — a ∅ inside a report steps off the line with the predicate it hangs from
       boxes.push({x:a.X2,y:a.y1-8,hx:8,hy:12}); }
     boxes.push({x:a.mx,y:a.apexY,hx:2,hy:2});   // item 2/11: the ghost's own (possibly lifted) crown, from the shared repArcEnds above, counts toward fitTight's crop
     svg.appendChild(g); ghostG[gi]=g; });
@@ -397,25 +411,26 @@ function arcs(si){
   /* label TEXTS last → in front of all arcs, their opaque casing occluding crossing edges cleanly */
   labs.forEach(L=>{ const lg=E("g",{class:"arc","data-s":si,"data-dep":L.dep}); lg.style.cursor="pointer"; lg.addEventListener("click",()=>pick(si,L.dep));
     drawLabel(lg,L.mx,L.fy,L.text,L.col); svg.appendChild(lg); });
-  const stackH=wordY+belowReserveH(trLayer(),belowTierN(),show.pos)+8;   // hit-rect reach: cover the transliteration + gloss + POS rows below the word (Item 1/8: every below-row folds in descent(POS_F), matching belowStack's descender-matched step)
+  const stackH=wordY+TOK_Y_LOWER+belowReserveH(trLayer(),belowTierN(),show.pos)+8;   // hit-rect reach: cover the transliteration + gloss + POS rows below the word (Item 1/8: every below-row folds in descent(POS_F), matching belowStack's descender-matched step)   // +TOK_Y_LOWER because the whole stack now DRAWS that much lower (see TOK_Y_LOWER, js/diagram/diagram-core.js) — the reach has to follow the ink, not the layout
   let stackBot=wordY;
   t.forEach((tk,i)=>{const g=E("g",{class:"tok-group"+(sel.s===si&&sel.t===OID(i)?" sel":""),"data-s":si,"data-tok":OID(i)});
     const wy=repBase(rep,wordY,i);   // item 11: the word, its below-stack, its hit/wash band and its tail all lift by rep[i] — the SAME shared repBase the arc endpoint above went through — so the reported token and its arc float off the line together
-    const hy=Math.min(arcZone-NR, wy-14);   // hit/wash top follows the (lifted) content so a raised word isn't left above the band
-    const f=E("text",{class:"tok-word"+italDeco(tk),x:c[i],y:wy,"text-anchor":"middle"}); f.textContent=bform(tk);   // host form only; folded punctuation is drawn as separate satellites below
+    const wyD=wy+TOK_Y_LOWER, loB=loBoxes(boxes);   // wy = the LAYOUT baseline every `boxes` entry here records; wyD = where the word and its stack actually draw. The ARCS above keep arcZone/repArcEnds untouched, so what this opens is the arc-to-glyph clearance
+    const hy=Math.min(arcZone-NR, wyD-14);   // hit/wash top follows the (lifted) content so a raised word isn't left above the band
+    const f=E("text",{class:"tok-word"+italDeco(tk),x:c[i],y:wyD,"text-anchor":"middle"}); f.textContent=bform(tk);   // host form only; folded punctuation is drawn as separate satellites below
     const hit=E("rect",{class:"tok-hit",x:c[i]-w[i]/2-3,y:hy,width:w[i]+6,height:stackH-hy});
-    g.appendChild(hit); g.appendChild(E("rect",{class:"tok-wash",x:c[i]-w[i]/2-3,y:wy-14,width:w[i]+6,height:stackH-(wy-14)}));   // wash covers only the word+POS band, not the arcs the tall hit-rect spans
-    stackBot=Math.max(stackBot, belowStack(g,c[i],wy,tk,boxes,hasTr(t)));   // transliteration + POS below the word
+    g.appendChild(hit); g.appendChild(E("rect",{class:"tok-wash",x:c[i]-w[i]/2-3,y:wyD-14,width:w[i]+6,height:stackH-(wyD-14)}));   // wash covers only the word+POS band, not the arcs the tall hit-rect spans
+    stackBot=Math.max(stackBot, belowStack(g,c[i],wyD,tk,loB,hasTr(t)));   // transliteration + POS below the word
     g.appendChild(f);   // Item 11: form appended LAST → paints on TOP of the POS/translit stack
-    gwFormSVG(g,f,tk,c[i],wy,WORD_F,"tok-word",si,boxes);   // goeswith: the continuation parts join the head on the word row (and re-seat it); the one below-stack drawn above already spans the whole word, and the slur comes from the tie layer (mwtTie below)
+    gwFormSVG(g,f,tk,c[i],wyD,WORD_F,"tok-word",si,loB);   // goeswith: the continuation parts join the head on the word row (and re-seat it); the one below-stack drawn above already spans the whole word, and the slur comes from the tie layer (mwtTie below)
     if(gwOf(tk).length) g.setAttribute("data-gw",[OID(i)].concat(gwOf(tk).map(p=>p.oid)).join(" "));   // selecting EITHER half lights the whole word — see gwHolds/applySel
-    svgMarks(g,c[i],wy,tk,WORD_F); svgFormSeamMark(g,tk,c[i],wy,WORD_F,boxes);   // item 4: Typo strikethrough, IN FRONT of the glyphs; then the seam mark hung off the form's inline end
+    svgMarks(g,c[i],wyD,tk,WORD_F); svgFormSeamMark(g,tk,c[i],wyD,WORD_F,loB);   // item 4: Typo strikethrough, IN FRONT of the glyphs; then the seam mark hung off the form's inline end
     g.style.cursor="pointer";
     g.addEventListener("click",()=>pick(si,OID(i)));
     g.addEventListener("mouseenter",()=>dim(si,OID(i))); g.addEventListener("mouseleave",()=>dim(si,null)); svg.appendChild(g);
     boxes.push({x:c[i],y:wy-8,hx:w[i]/2,hy:12});
-    drawHangsSVG(svg,tk,c[i],wy,WORD_F,"tok-word",si,boxes,OID(i)); drawLeadsSVG(svg,tk,c[i],wy,WORD_F,"tok-word",si,boxes,OID(i));});   // folded punctuation (and item 6's correct form) as separate elements beside the word
-  mwtTie(svg,c,wform,D,stackBot+5,boxes,si);   // surface-form ties for multi-word tokens — hug the FORM's own ink width, not the (POS/deprel-widened) slot
+    drawHangsSVG(svg,tk,c[i],wyD,WORD_F,"tok-word",si,loB,OID(i)); drawLeadsSVG(svg,tk,c[i],wyD,WORD_F,"tok-word",si,loB,OID(i));});   // folded punctuation (and item 6's correct form) as separate elements beside the word
+  mwtTie(svg,c,wform,D,stackBot+5,loBoxes(boxes),si);   // surface-form ties for multi-word tokens — hug the FORM's own ink width, not the (POS/deprel-widened) slot
   fitTight(svg,boxes);
   return wrapDiagram(svg,si);
 }
