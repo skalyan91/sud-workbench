@@ -809,7 +809,10 @@ function smpReshape(root){
        elsewhere. Every OTHER script reaching this function (Siddham, Ranjana, Soyombo, Bhaiksuki, or any
        other SMP content that isn't itself a stacking script) stays at 1em — smpUnshaped() gates arrival
        here on content alone, not on script identity, so this is the one place that still has to ask which
-       script it actually is. */
+       script it actually is.
+       ⚠ THIS IS THE foreignObject's OWN BOX (`tok-word`), NOT THE TEXT'S LINE-HEIGHT — on correction,
+       after a first cut also drove the inner div's line-height off `lineEm`. The container gets the extra
+       em; the text inside it does not (inner div's own note, below, is hardcoded 1em unconditionally). */
     const lineEm=(typeof STACKING_SCRIPTS!=="undefined" && STACKING_SCRIPTS.has(ORTHO_SCHEME))?2:1;
     fo.style.font=f;
     if(typeof IS_WIN!=="undefined" && IS_WIN) fo.style.height="calc("+lineEm+"em)";
@@ -824,16 +827,19 @@ function smpReshape(root){
        outright the way a block-level element's own single-line box does, and the outer `.fo-form`'s own
        content-box height (driving what `align-items` has to work with) is itself only as unambiguous as
        this element's own.
-       ⚠ line-height:Nem, NOT a computed px figure — after a px version (asc+desc) was verified live to
-       already converge Chrome and WKWebView to the pixel for one token, `1em` was asked for anyway: it is
-       a length no engine can compute differently — it resolves to exactly this div's own font-size, the
-       one number both the CSS cascade and canvas already agree on with no measurement step in between —
-       where a canvas-derived px figure is consistent BECAUSE it was independently verified so, `1em` is
-       consistent BY CONSTRUCTION. `N` is `lineEm` (fo.style.height's own note, above) — 2 for
-       STACKING_SCRIPTS, 1 otherwise, so the two stay in step by construction rather than by two separate
-       numbers someone has to remember to update together. The outer div carries the font (inherited down)
-       and nothing else — no line-height of its own, so nothing here contradicts the inner div's explicit
-       one. */
+       ⚠ line-height:1em, ALWAYS — NOT lineEm, on correction ("I didn't mean 2em on the inner div — that
+       should still be 1em! I meant on the tok-word!!"). The 2-for-STACKING_SCRIPTS decision belongs to
+       the foreignObject's OWN height alone (fo.style.height's own note, above) — the CONTAINER gets extra
+       room for a subjoined mark to extend into, not the TEXT's own line box, which stays exactly the
+       single-line height it was before STACKED_GAP existed. `align-items:flex-start` (WebKit) seats this
+       1em-tall inner div flush at the container's top regardless of the container's own (possibly larger)
+       height, so the extra em a stacking script's foreignObject now reserves shows up entirely BELOW the
+       text, never inside its own line spacing. After a px version (asc+desc) was verified live to already
+       converge Chrome and WKWebView to the pixel for one token, `1em` was asked for anyway: it is a length
+       no engine can compute differently — it resolves to exactly this div's own font-size, the one number
+       both the CSS cascade and canvas already agree on with no measurement step in between. The outer div
+       carries the font (inherited down) and nothing else — no line-height of its own, so nothing here
+       contradicts the inner div's explicit one. */
     const d=document.createElementNS("http://www.w3.org/1999/xhtml","div");
     d.setAttribute("class","fo-form "+(el.getAttribute("class")||""));
     d.style.cssText="font:"+f;
@@ -844,7 +850,7 @@ function smpReshape(root){
        way as the height-fallback and align-items branches above and in app.css — !IS_WIN, i.e. WebKit
        (macOS, and Linux via WebKitGTK) — since the report was specifically against Safari, and Chromium
        is not implicated. */
-    inner.style.cssText="line-height:"+lineEm+"em;white-space:pre"+((typeof IS_WIN!=="undefined"&&!IS_WIN)?";margin-right:-0.5em":"");
+    inner.style.cssText="line-height:1em;white-space:pre"+((typeof IS_WIN!=="undefined"&&!IS_WIN)?";margin-right:-0.5em":"");
     inner.textContent=s;
     d.appendChild(inner);
     fo.appendChild(d);
