@@ -689,10 +689,10 @@ function arcsWrapped(si){
       const wy=repBase(rep,r.wordY,i);   // item 11: reported-speech step UP off the line — the same shared repBase the arc endpoints above went through, so word and arc leave the line together
       const wyD=wy+TOK_Y_LOWER, loB=loBoxes(boxes);   // …and then the DRAW baseline, TOK_Y_LOWER below it (js/diagram/diagram-core.js). `r.wordY`/`r.arcZone`/`r.stackBot` stay the LAYOUT row geometry — the within-row bumps, the cross-line arcs' band bounds and every box here are all stated in it, so only the token's own ink moves
       const hy=Math.min(r.arcZone-NR, wyD-14);
-      g.appendChild(E("rect",{class:"tok-hit",x:X-lw/2-3,y:hy,width:lw+6,height:r.stackBot+6+TOK_Y_LOWER-hy}));
-      g.appendChild(E("rect",{class:"tok-wash",x:X-lw/2-3,y:wyD-14,width:lw+6,height:r.stackBot+6+TOK_Y_LOWER-(wyD-14)}));   // wash only the word+POS band, not the arcs above   // both reaches grow by the same 2.5 the stack dropped, so the (lowered) POS row stays inside them
+      g.appendChild(E("rect",{class:"tok-hit",x:X-lw/2-3,y:hy,width:lw+6,height:r.stackBot+6+TOK_Y_LOWER+ARC_TR_GAP-hy}));
+      g.appendChild(E("rect",{class:"tok-wash",x:X-lw/2-3,y:wyD-14,width:lw+6,height:r.stackBot+6+TOK_Y_LOWER+ARC_TR_GAP-(wyD-14)}));   // wash only the word+POS band, not the arcs above   // both reaches grow by the same 2.5 the stack dropped, so the (lowered) POS row stays inside them
       const f=E("text",{class:"tok-word"+italDeco(tk),x:X,y:wyD,"text-anchor":"middle"}); f.textContent=bform(tk);   // host form only
-      belowStack(g,X,wyD,tk,loB,hasTr(t));
+      belowStack(g,X,wyD+ARC_TR_GAP,tk,loB,hasTr(t));   // the flat arc view's own +2.5 (ARC_TR_GAP, js/diagram/diagram-core.js) — the wrapped variant of a notation must not drift from the flat one, and the row-layout `r.stackBot` (which the cross-line arcs' band bounds are measured from) stays untouched so no edge moves
       g.appendChild(f); gwFormSVG(g,f,tk,X,wyD,WORD_F,"tok-word",si,loB);   // goeswith: continuation parts beside the head (see gwFormSVG); the slur comes from this row's own tie layer (mwtTie below)
       if(gwOf(tk).length) g.setAttribute("data-gw",[OID(i)].concat(gwOf(tk).map(p=>p.oid)).join(" "));
       svgMarks(g,X,wyD,tk,WORD_F); svgFormSeamMark(g,tk,X,wyD,WORD_F,loB);   // Item 11: form appended LAST → paints on TOP of the POS/translit stack; item 4: marks in front, then the seam mark off the form's inline end
@@ -700,7 +700,7 @@ function arcsWrapped(si){
       g.addEventListener("mouseenter",()=>dim(si,OID(i))); g.addEventListener("mouseleave",()=>dim(si,null)); svg.appendChild(g);
       boxes.push({x:X,y:wy-8,hx:lw/2+((i===r.s||i===r.e)?Math.ceil(4*FS):0),hy:12});   // Item 10 / item 4: reserve casing/Noto fudge for the row's END slots (LTR rightmost = r.e, RTL rightmost = r.s), SCALED by the block zoom (×FS), so the widest row's last token — form, POS, relation label and casing halo — never clips at the fitTight viewBox edge even magnified by zoom:var(--fs)
       drawHangsSVG(svg,tk,X,wyD,WORD_F,"tok-word",si,loB,OID(i)); drawLeadsSVG(svg,tk,X,wyD,WORD_F,"tok-word",si,loB,OID(i)); });   // folded punctuation (and item 6's correct form) beside the word
-    mwtTie(svg, r.c.map(x=>x+r.offX), r.wform, rowTies(D,r.s,r.e), r.stackBot+TOK_Y_LOWER+5, loBoxes(boxes), si);   // the tie hangs off the DRAWN stack bottom, so it keeps its distance under the lowered word
+    mwtTie(svg, r.c.map(x=>x+r.offX), r.wform, rowTies(D,r.s,r.e), r.stackBot+TOK_Y_LOWER+ARC_TR_GAP+5, loBoxes(boxes), si);   // the tie hangs off the DRAWN stack bottom, so it keeps its distance under the lowered word
   });
   // Ghost edges (Shared=Yes AND Subject-raising): dashed, dimmed — decorative, not a diagram element of their own,
   // but still: (item 7) fan-shared with the real arcs at any token they land on (never the reverse), (item 2)
@@ -1114,7 +1114,17 @@ function tree(si){
     const lbl=E("text",{class:"node-lbl"+italDeco(t[i]),x:x[i],y:nyD}); lbl.textContent=bform(t[i]); const tw=fmeas(t[i],NODE_F);   // host form only
     const hit=E("rect",{class:"tok-hit tok-wash",x:x[i]-Math.max(26,tw/2+4),y:nyD-A,width:Math.max(52,tw+8),height:A+B});   // node box = its own wash region   // on the DRAW level, so the wash stays centred on the glyph it backlights
     g.appendChild(hit);
-    const dropY=nyL+STACKED_GAP, dropYD=nyD+STACKED_GAP;   // seeds the ONE gap from the glyph (node-lbl) row down to whichever row is drawn first below it — STACKED_GAP (diagram-core.js), the flat replacement for the removed STACK_DROP   // dropY stays the LAYOUT seed (the boxes below are stated in it); dropYD is the drawn one, and the two differ by exactly TOK_Y_LOWER so every row keeps its spacing
+    const dropY=nyL+STACKED_GAP-TR_TIGHTEN, dropYD=nyD+STACKED_GAP-TR_TIGHTEN;   // seeds the ONE gap from the glyph (node-lbl) row down to whichever row is drawn first below it — STACKED_GAP (diagram-core.js), the flat replacement for the removed STACK_DROP   // dropY stays the LAYOUT seed (the boxes below are stated in it); dropYD is the drawn one, and the two differ by exactly TOK_Y_LOWER so every row keeps its spacing
+    /* ⚠ …LESS TR_TIGHTEN (js/diagram/diagram-core.js), the hierarchy's own `0.5em − 0.5ex` reduction of the
+       token→transliteration step, on request. Applied to the SEED and not inside belowGap(): that function
+       is shared with arcs, stemma and brackets, and arcs wants this gap moved the OTHER way (ARC_TR_GAP),
+       so the two adjustments have to be independently addressable. Applied to BOTH baselines, so the crop
+       follows rows that genuinely moved — unlike TOK_Y_LOWER, this is not a draw-vs-layout asymmetry but a
+       real change of position, and holding the boxes back would over-reserve the space just recovered.
+       Every row below inherits the shift, keeping their spacing to each other untouched, and the seed is
+       exactly where the comment above says the ONE glyph-to-first-row gap is expressed. `belowReserve` —
+       and so LV, and so parentEndY, and so every edge in this figure — is deliberately NOT reduced: the
+       recovered space simply becomes slack above the next level, and no edge moves. 0 at TOK_MAG 1. */
     { const rt=trTxt(t[i]); if(rt){ const ty=dropYD+belowGap(); const e=E("text",{class:"translit"+frnUp(t[i]),x:x[i],y:ty,"text-anchor":"middle"}); e.textContent=rt; if(trRowEdit())e.classList.add("tr-edit"); g.appendChild(e); boxes.push({x:x[i],y:nyL+14,hx:meas(rt,trFont(t[i]))/2,hy:7}); svgSeamMark(g,t[i],x[i],ty,meas(rt,trFont(t[i]))/2,trFont(t[i]),loB,null,"translit"); } }   // Item 8: same descender-matched top gap (belowGap()) the other renderers give the translit row
     belowTiers().forEach((tier,ti)=>{ const step=(trTxt(t[i])?belowGap():0)+(ti+1)*(belowGap()), gy=dropY+step, gyD=dropYD+step, txt=tierText(t[i],tier), dtxt=txt||"…"; const e=E("text",{class:"gloss gl-edit"+(txt?"":" gl-empty")+frnUp(t[i]),x:x[i],y:gyD,"text-anchor":"middle","data-tier":tier,tabindex:"0"}); setGlossText(e,tier,dtxt); g.appendChild(e); boxes.push({x:x[i],y:gy-4,hx:meas(dtxt,trFont(t[i]))/2,hy:7});
       if(tier==="mseg"||tier==="mgloss") svgSeamMark(g,t[i],x[i],gyD,(tier==="mgloss"?measGloss(dtxt,tierFont(tier,t[i])):meas(dtxt,tierFont(tier,t[i])))/2,tierFont(tier,t[i]),loB,null,tier); });   // gloss / morphemic tiers under the node (hierarchy has no per-node POS row) — the segmentation AND morphemic-gloss rows carry the seam mark (both per-morpheme, drawn off the "…" placeholder's own width where this tier isn't annotated for this token — see the note beside diagram-core.js's belowStack); the lexical gloss row doesn't
@@ -1189,7 +1199,7 @@ function brackets(si){
   addBr(0,n-1,relColor("root"),n,root);                                                                    // + the whole sentence
   opens.forEach(a=>a.sort((p,q)=>q.sz-p.sz)); closes.forEach(a=>a.sort((p,q)=>p.sz-q.sz));
   // linear glyph sequence: brackets and words in reading order (words never reordered)
-  const RF='600 15px '+LIVE_TOKEN_STACK, WBOLD='640 15px '+LIVE_TOKEN_STACK, gap=5;
+  const RF='600 15px '+LIVE_TOKEN_STACK, WBOLD='640 15px '+LIVE_TOKEN_STACK, gap=5, BRK_PAINT='600 16px '+LIVE_TOKEN_STACK;   // BRK_PAINT is .brk's PAINTED font (app.css), kept apart from RF (the 15px string this function measures bracket WIDTHS with, and which the layout below is calibrated against): only the vertical centring cares which of the two it is, and it cares by 0.4px
   const seq=[]; for(let p=0;p<n;p++){
     opens[p].forEach(o=>seq.push({t:"o",glyph:"[",col:o.col,owner:o.owner}));   // the predicate's OWN incoming brackets (from its real head) open first
     if(hasGenericSubj(t,p)){ const col=relColor("subj");   // Subject=Generic: its OWN small bracket pair, nested INSIDE the predicate's own brackets (opened after them, closed before its word) — a real seq entry (not an interrupter-style arc), so it gets uniform inter-item spacing on BOTH sides like any other bracketed unit
@@ -1327,10 +1337,24 @@ function brackets(si){
          keeps the wrapped view's brackets on the form's baseline for the identical reason), and leaving them on
          the layout baseline while every form dropped 2.5px would break that line apart. The interrupter ARCS
          above them are the edge layer here, and they stay on `base`/`relY`, untouched. */
-      const battr={class:"brk"+(it.ghost?" brk-ghost":"")+(selBr?" sel":"")+(selI>=0&&it.owner!=null&&isAnc(selI,it.owner)?" inspan":""),x:it.x,y:by+TOK_Y_LOWER,fill:it.col}; if(it.owner!=null){ battr["data-s"]=si; battr["data-owner"]=OID(it.owner); }   // brackets of the subtree's constituents get .inspan too; the ∅'s own bracket (it.ghost) is dimmed, not owned/clickable
+      /* ⚠ …AND, ONCE THE TOKEN IS MAGNIFIED, CENTRED ON IT RATHER THAN LEFT ON ITS BASELINE ("in brackets
+         and outlines, the Chinese tokens need to be centre-aligned with the brackets"). A shared baseline is
+         what makes "[", the word and "]" read as one line of type while all three are one size; at 1.5–2×
+         the token's x-height band climbs well above the 16px bracket's and the brackets read as having sunk
+         to the word's feet. `centreBracketLift` (js/diagram/diagram-core.js) — deliberately NOT the seam
+         mark's `centreOnTokenLift`, which centres two x-height BANDS and so has nothing to say about a
+         glyph that spans ascender to descender; its own note carries the measurement that settled it.
+         Measured at TOK_MAG 1.5: a 4.05px lift, landing the two ink centres 0.15px apart (they were 3.90px
+         apart before). The BRACKET moves, not the token: everything else in the cell (the deprel
+         label above, the below-stack, the MWT tie, the wash and hit bands, the interrupter-arc endpoints)
+         is seated off the token's baseline, so lifting the two glyphs that are not is the local change.
+         Its box moves with it — this is real ink, not a draw-vs-crop asymmetry. 0 at TOK_MAG 1, where
+         `.brk` renders exactly as it always has. */
+      const brkLift=centreBracketLift(BRK_PAINT,WORD_F);   // BRK_PAINT states .brk's PAINTED face (app.css: 16px/600), not RF — RF is 15px and exists to measure slot WIDTHS, and a 1px size error here is 0.4px of lift, which is a fifth of the whole correction. WORD_F is the token's own magnified face, the one .tok-word paints in
+      const battr={class:"brk"+(it.ghost?" brk-ghost":"")+(selBr?" sel":"")+(selI>=0&&it.owner!=null&&isAnc(selI,it.owner)?" inspan":""),x:it.x,y:by+TOK_Y_LOWER-brkLift,fill:it.col}; if(it.owner!=null){ battr["data-s"]=si; battr["data-owner"]=OID(it.owner); }   // brackets of the subtree's constituents get .inspan too; the ∅'s own bracket (it.ghost) is dimmed, not owned/clickable
       const b=E("text",battr); b.textContent=it.glyph; svg.appendChild(b);   // original glyph at the mirrored position (so RTL reads correctly)
       if(it.owner!=null){ b.style.cursor="pointer"; b.addEventListener("click",()=>pick(si,OID(it.owner))); }   // clicking a bracket selects the span it delimits
-      boxes.push({x:it.x,y:by-6,hx:it.w/2,hy:9}); } });
+      boxes.push({x:it.x,y:by-6-brkLift,hx:it.w/2,hy:9}); } });
   mwtTie(svg,wx,wform,D,stackBot+5,loBoxes(boxes),si);   // surface-form ties for multi-word tokens — hug the FORM's own ink width, not the (deprel-label-widened) slot   // stackBot already came back lowered, so the tie keeps its distance under the word
   fitTight(svg,boxes);
   return wrapDiagram(svg,si);}

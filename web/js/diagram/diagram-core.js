@@ -312,7 +312,7 @@ _lazyFont("LIVE_TOKEN_STACK",()=>TOKEN_STACK); _lazyFont("LIVE_MONO_STACK",()=>M
    why a canvas font string cannot read the property itself). 1 everywhere except the ornamental Sanskrit
    scripts. It multiplies the TOKEN-FORM faces only — WORD_F/NODE_F/MWT_F and the goeswith tie — never the
    POS, transliteration or gloss rows, which are Latin annotation drawn at the app's own body size. */
-let TOK_MAG=1, TOK_WGHT=400, TOK_TRACK=0, TOK_ASC=1, TOK_MID=0, TOK_LIFT=0, TOK_OP=1, TOK_OP_RUN=1, STACKED_GAP=0, TOK_Y_LOWER=0;
+let TOK_MAG=1, TOK_WGHT=400, TOK_TRACK=0, TOK_ASC=1, TOK_MID=0, TOK_LIFT=0, TOK_OP=1, TOK_OP_RUN=1, STACKED_GAP=0, TOK_Y_LOWER=0, TR_TIGHTEN=0, ARC_TR_GAP=0;
 // TOK_WGHT stays 400 for magnified faces now (see magTrack's own note on why the weight curve was dropped for
 // them), so this omits a weight token and lets the face render at its own resting weight.
 function magFont(px){ const w=TOK_WGHT;
@@ -1035,6 +1035,49 @@ function refreshFontStacks(){
      lzh's own 1.5×, not derived as a ratio, so any magnified script gets the same flat 2.5 a stemma root does
      at TOK_MAG 1.5, rather than inventing a proportional curve nobody asked for. */
   TOK_Y_LOWER=TOK_MAG>1?2.5:0;
+  /* ⚠ THE HIERARCHY'S TOKEN→TRANSLITERATION STEP IS `0.5em − 0.5ex` TIGHTER, on request ("in hierarchies,
+     the space between a token and its transliteration needs to be reduced by 0.5em - 0.5ex"). Written as
+     the user wrote it — an em/ex expression, not a px figure — and resolved against NODE_F, the face of the
+     row ABOVE the gap (the hierarchy's node glyph), because that is the "em" a CSS author writing this on
+     the token would have meant. `0.5em − 0.5ex` is the amount by which half the em box overshoots half the
+     x-height band: the reserve above the transliteration is stated against the em box (belowGap()'s flat 18
+     plus its descent terms), while what the eye measures the gap from is the letters. Measured: 5.23px at
+     TOK_MAG 1.5 (22.5px NODE_F, ex 12.05), which takes lzh's real ink gap from 10.72px to ~5.5px.
+     ⚠ GATED, like every other term in this block, and NOT because the formula needs it (an em/ex expression
+     already scales itself) — because the request came out of a magnified-script document and this whole
+     feature is that document's. `TOK_Y_LOWER` directly above is the cautionary case: it shipped ungated on
+     exactly this kind of reasoning-from-a-formula and had to be gated one report later ("Chinese stemmas now
+     look correct. But English now looks too low!"). ⚠️ The gate is NOT a no-op the way it is for some
+     siblings: a transliteration row is shown for plenty of UNMAGNIFIED languages too (Arabic, Hebrew,
+     Sanskrit in IAST, modern Chinese), and those keep today's 10.06px. If the intent turns out to be
+     typographic rather than magnification-specific, dropping `TOK_MAG>1?…:0` here is the whole change. */
+  TR_TIGHTEN=TOK_MAG>1?(0.5*fontPxOf(NODE_F)-0.5*xHeightPx(NODE_F)):0;
+  /* ⚠ AND THE ARC VIEW'S SAME STEP IS 2.5px WIDER, which is the opposite direction and deliberately so
+     ("in arcs, the space needs to be increased by 2.5px"). A literal flat px, exactly as asked — not the
+     em/ex form above — so it is stated as one. The two notations reach the same gap through the same
+     belowGap(), which is why neither number may be applied to that shared function: each is injected at its
+     own renderer's call site (tree()'s dropY, arcs()/arcsWrapped()'s belowStack seed), leaving stemma and
+     brackets on the untouched value. Gated for the same reason as TOK_Y_LOWER, which it matches in both
+     magnitude and shape. Measured: lzh arcs 10.60px → 13.10px. */
+  ARC_TR_GAP=TOK_MAG>1?2.5:0;
+  if(d){
+    /* ⚠ AND A MAGNIFIED TOKEN IS CENTRED ON ITS ROW-MATES RATHER THAN SHARING THEIR BASELINE, in the two
+       notations that set a token IN A ROW of small annotations rather than above/below them ("in brackets
+       and outlines, the Chinese tokens need to be centre-aligned with the brackets or other annotations").
+       Baseline-sharing is right while everything in the row is one size — which is why `.bwbr`'s own note
+       records `vertical-align:middle` being tried and reverted there — and stops being right the moment the
+       token alone is 1.5–2× the rest: its x-height band then sits far above theirs and the row reads as the
+       small glyphs having sunk. Both terms are therefore magnification-only by construction as well as by
+       policy: at TOK_MAG 1 `--script-cross` IS `baseline` (the value the rule had) and the lift is 0.
+       The two notations need different mechanisms because their rows are built differently: the OUTLINE row
+       is already a flex row with an explicit `align-items`, so it simply switches to `center` and every span
+       in it — relation label, transliteration, gloss tiers, POS — centres against the form at once; WRAPPED
+       BRACKETS is inline flow, where there is no cross-axis to set, so its bracket glyphs take a paint-only
+       `position:relative` lift instead (no reflow, so the greedy line-packing budget is untouched). Both
+       bracket lifts come from `centreBracketLift` below — NOT from the seam mark's `centreOnTokenLift`; see
+       that pair's own notes for why a "[" and a "-" want different answers to the same-sounding question. */
+    d.style.setProperty("--script-cross",TOK_MAG>1?"center":"baseline");
+    d.style.setProperty("--script-brk-lift",centreBracketLift('700 15px '+LIVE_TOKEN_STACK,magFont(15)).toFixed(2)+"px"); }   // '700 15px …' mirrors .bwbr's own font-weight/size (app.css); magFont(15) is .bwform's own calc(15px * var(--script-mag)) at the token weight
   POS_F='15px '+LIVE_TOKEN_STACK; GRID_F='462 13px '+LIVE_MONO_STACK; HEAD_F='500 11px '+uiFont(); HEAD_F_REQ='700 11px '+uiFont();   // HEAD_F/HEAD_F_REQ ride along on this refresh only for uniformity — it is built off --ui-font, not off either LIVE_ stack (see its lazy definition above), so nothing this function reacts to can actually change it
   TRANS_F='italic 15px '+LIVE_TOKEN_STACK; TRANS_UP_F='15px '+LIVE_TOKEN_STACK; MWT_F=WORD_F;
   GRID_ITAL_F='italic 462 13px '+LIVE_MONO_STACK;
@@ -1066,6 +1109,34 @@ function refreshFontStacks(){
 // glyph one (see scriptMidEm's own note on why x-height is what this measures) — so it needs no glyph
 // text at all, only its font.
 function markMidPx(font){ return xHeightPx(font)/2; }
+function fontPxOf(f){ const m=/(\d+(?:\.\d+)?)px/.exec(f||""); return m?parseFloat(m[1]):0; }   // the size out of a canvas/CSS font shorthand — the same read svgSeamMark did inline before two callers wanted it
+/* HOW FAR TO RAISE AN UNMAGNIFIED ROW-MATE so its x-height band sits on a magnified token's, in px.
+   The SEAM MARK's rule, and only its (the bracket rows want `centreBracketLift` just below instead — a
+   different question wearing the same words). Reasoning for x-height over ink or cap-height is written out
+   in full at svgSeamMark, below. `TOK_MID × tokenPx` is half the TOKEN's x-height at its painted
+   size — the offset from its baseline to the middle of its x-height band — and `markMidPx(satFont)` is the
+   same question asked of the SATELLITE in the satellite's own (unmagnified) face, which is a different
+   font and so a different ratio. 0 at TOK_MAG 1: TOK_MID is itself 0 there (scriptMidEm), and the explicit
+   guard keeps the expression from returning a bare −markMidPx() rather than nothing. */
+function centreOnTokenLift(satFont,tokenPx){ return TOK_MAG>1 ? (TOK_MID*tokenPx-markMidPx(satFont)) : 0; }
+/* …AND THE BRACKET'S OWN VERSION OF THE SAME QUESTION, WHICH IS NOT THE SEAM MARK'S. The rule above centres
+   two X-HEIGHT BANDS, which is exactly right for a seam mark ("-"/"꞊", a small mid-register glyph the user
+   explicitly asked to sit "in the middle of the tokens' x-height") and exactly wrong for "[": a bracket HAS
+   no x-height — it spans ascender to descender — so asking xHeightPx() about its face answers a question
+   about the letter "x" in a font that is not drawing one. Measured on the real lzh bracket row at TOK_MAG
+   1.5: the two ink centres are 3.90px apart, the x-height rule lifts 1.97 (visibly short — the brackets
+   still read as sunk in an 8× screenshot), and this one lifts 4.05.
+   Each end is measured by whichever metric is STABLE for it, which is the whole trick:
+   · the TOKEN by its FONT's em box, never by ink — a magnified token is a different glyph in every
+     sentence, and ink-sampling is precisely the noise that made three earlier cuts of the seam-mark
+     centring wrong in opposite directions (Grantha too high, Javanese too low; see scriptMidEm's note).
+     Verified to be a good proxy rather than merely a safe one: for 知 at 22.5px the em-box mid is 8.50 and
+     the real ink mid 8.35, 0.15px apart.
+   · the BRACKET by its own INK, which is safe here for the reason it is not safe there — the glyph is
+     FIXED. "[" is the only thing this ever measures, in one known face, so there is nothing to vary. */
+function emMidPx(font){ _cv.font=font; const m=_cv.measureText("x"); return (m.fontBoundingBoxAscent-m.fontBoundingBoxDescent)/2; }
+function inkMidPx(text,font){ _cv.font=font; const m=_cv.measureText(text); return (m.actualBoundingBoxAscent-m.actualBoundingBoxDescent)/2; }
+function centreBracketLift(brkFont,tokFont){ return TOK_MAG>1 ? (emMidPx(tokFont)-inkMidPx("[",brkFont)) : 0; }
 function svgSeamMark(parent,tk,cx,y,halfEnd,font,boxes,halfStart,row){ if(!parent) return;
   /* ⚠ A SEAM MARK IS NOT PART OF THE WORD, so the ornamental magnification does not reach it. It is
      punctuation ABOUT the word — "this is where the orthographic word breaks" — set in the app's own
@@ -1096,7 +1167,7 @@ function svgSeamMark(parent,tk,cx,y,halfEnd,font,boxes,halfStart,row){ if(!paren
        nobody asked: STACKING_SCRIPTS's extra em is room reserved BELOW a token for a subjoined mark to
        reach into (smpReshape's tok-word box, belowGap's STACKED_GAP), not a change to the WORD's own
        x-height, which is a font-metric property that doesn't move just because the box around it grew. */
-    markY=y-TOK_MID*wordPx+markMidPx(f);
+    markY=y-centreOnTokenLift(f,wordPx);   // the shared expression (above); identical to the `y − TOK_MID*wordPx + markMidPx(f)` written here before the bracket rows wanted the same answer
   }
   [[seamPost(tk),1,halfEnd,"",seamPostToks(tk)],[seamPre(tk),-1,halfStart!=null?halfStart:halfEnd,"",seamPreToks(tk)],[seamMid(tk),1,halfEnd," seam-mid",seamMidToks(tk)]].forEach(([m,side,half,extra,toks])=>{
     if(!m) return;

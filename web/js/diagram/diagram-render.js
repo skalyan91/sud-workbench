@@ -411,7 +411,7 @@ function arcs(si){
   /* label TEXTS last → in front of all arcs, their opaque casing occluding crossing edges cleanly */
   labs.forEach(L=>{ const lg=E("g",{class:"arc","data-s":si,"data-dep":L.dep}); lg.style.cursor="pointer"; lg.addEventListener("click",()=>pick(si,L.dep));
     drawLabel(lg,L.mx,L.fy,L.text,L.col); svg.appendChild(lg); });
-  const stackH=wordY+TOK_Y_LOWER+belowReserveH(trLayer(),belowTierN(),show.pos)+8;   // hit-rect reach: cover the transliteration + gloss + POS rows below the word (Item 1/8: every below-row folds in descent(POS_F), matching belowStack's descender-matched step)   // +TOK_Y_LOWER because the whole stack now DRAWS that much lower (see TOK_Y_LOWER, js/diagram/diagram-core.js) — the reach has to follow the ink, not the layout
+  const stackH=wordY+TOK_Y_LOWER+ARC_TR_GAP+belowReserveH(trLayer(),belowTierN(),show.pos)+8;   // hit-rect reach: cover the transliteration + gloss + POS rows below the word (Item 1/8: every below-row folds in descent(POS_F), matching belowStack's descender-matched step)   // +TOK_Y_LOWER because the whole stack now DRAWS that much lower (see TOK_Y_LOWER, js/diagram/diagram-core.js) — the reach has to follow the ink, not the layout
   let stackBot=wordY;
   t.forEach((tk,i)=>{const g=E("g",{class:"tok-group"+(sel.s===si&&sel.t===OID(i)?" sel":""),"data-s":si,"data-tok":OID(i)});
     const wy=repBase(rep,wordY,i);   // item 11: the word, its below-stack, its hit/wash band and its tail all lift by rep[i] — the SAME shared repBase the arc endpoint above went through — so the reported token and its arc float off the line together
@@ -420,7 +420,14 @@ function arcs(si){
     const f=E("text",{class:"tok-word"+italDeco(tk),x:c[i],y:wyD,"text-anchor":"middle"}); f.textContent=bform(tk);   // host form only; folded punctuation is drawn as separate satellites below
     const hit=E("rect",{class:"tok-hit",x:c[i]-w[i]/2-3,y:hy,width:w[i]+6,height:stackH-hy});
     g.appendChild(hit); g.appendChild(E("rect",{class:"tok-wash",x:c[i]-w[i]/2-3,y:wyD-14,width:w[i]+6,height:stackH-(wyD-14)}));   // wash covers only the word+POS band, not the arcs the tall hit-rect spans
-    stackBot=Math.max(stackBot, belowStack(g,c[i],wyD,tk,loB,hasTr(t)));   // transliteration + POS below the word
+    /* ⚠ THE BELOW-STACK IS SEEDED ARC_TR_GAP LOWER THAN THE WORD IT HANGS FROM, on request ("in arcs, the
+       space needs to be increased by 2.5px") — the ARC view only. The seed is the one place this gap is
+       expressible per notation: belowGap() is shared with stemma, brackets and the hierarchy, and the
+       hierarchy wants this same step TIGHTER (TR_TIGHTEN, js/diagram/diagram-core.js), so neither number
+       may live in the shared function. Only the ROWS move — the word's own <text> stays on wyD — and the
+       boxes move with them (loB subtracts only TOK_Y_LOWER), because unlike that lowering this is a real
+       change of position the crop must reserve. 0 at TOK_MAG 1. */
+    stackBot=Math.max(stackBot, belowStack(g,c[i],wyD+ARC_TR_GAP,tk,loB,hasTr(t)));   // transliteration + POS below the word
     g.appendChild(f);   // Item 11: form appended LAST → paints on TOP of the POS/translit stack
     gwFormSVG(g,f,tk,c[i],wyD,WORD_F,"tok-word",si,loB);   // goeswith: the continuation parts join the head on the word row (and re-seat it); the one below-stack drawn above already spans the whole word, and the slur comes from the tie layer (mwtTie below)
     if(gwOf(tk).length) g.setAttribute("data-gw",[OID(i)].concat(gwOf(tk).map(p=>p.oid)).join(" "));   // selecting EITHER half lights the whole word — see gwHolds/applySel
