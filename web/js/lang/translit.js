@@ -486,14 +486,14 @@ const ORNAMENTAL_SCRIPTS=new Set(["Ranjana","Soyombo","Bhaiksuki","Siddham"]);
    INDIC_SCRIPTS member gets — mirrors document.js's own .stext-stacked condition (which used to restate
    this list as a bare ORTHO_SCHEME OR-chain; centralised here so the diagram's own below-token spacing
    — belowGap(), js/diagram/diagram-core.js — can consult the SAME set rather than drift from it by hand).
-   Grantha/Javanese/Balinese/ZanabazarSquare joined on measured or live-reported overlap; Tibetan rejoined
-   the same way (see document.js's own note on each). ⚠ Kawi is BACK IN, on request — it was pulled for
-   a session, on report, while STACK_DROP's own removal/replacement was still under investigation; now
-   that the actual "Balinese/Javanese clipped" root cause (a WebKit opacity-compositing bug, fixed in
-   diagram-core.js) turned out to have nothing to do with STACK_DROP/STACKED_GAP at all, there is no
-   remaining reason to keep Kawi singled out — it gets STACKED_GAP's extra half-em (diagram-core.js) and
-   .stext-stacked's line-height:2 in the running-sentence view again, the same as its four siblings. */
-const STACKING_SCRIPTS=new Set(["Grantha","Javanese","Balinese","Kawi","ZanabazarSquare","Tibetan"]);
+   Grantha/Javanese/Balinese/ZanabazarSquare joined on measured or live-reported overlap. ⚠ Kawi is BACK
+   IN, on request — it was pulled for a session, on report, while STACK_DROP's own removal/replacement was
+   still under investigation; now that the actual "Balinese/Javanese clipped" root cause (a WebKit
+   opacity-compositing bug, fixed in diagram-core.js) turned out to have nothing to do with STACK_DROP/
+   STACKED_GAP at all, there is no remaining reason to keep Kawi singled out. ⚠ Burmese joined and Tibetan
+   left, on request — Burmese's own stacked medial consonants (subscript ya/ra/wa) need the same room this
+   set already gives Grantha/Javanese/Balinese; Tibetan's don't, now that it's out. */
+const STACKING_SCRIPTS=new Set(["Grantha","Javanese","Balinese","Kawi","Burmese","ZanabazarSquare"]);
 /* ⚠ DIAGRAM_STACKING_SCRIPTS — the narrower, Tibetan-excluded subset this app used to derive from the set
    above, feeding the diagram's own below-token reserve (stackDropExtra(), js/diagram/diagram-core.js) — is
    REMOVED, along with that function and STACK_DROP entirely, on request ("I think STACK_DROP was a bad
