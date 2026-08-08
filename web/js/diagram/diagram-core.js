@@ -312,7 +312,7 @@ _lazyFont("LIVE_TOKEN_STACK",()=>TOKEN_STACK); _lazyFont("LIVE_MONO_STACK",()=>M
    why a canvas font string cannot read the property itself). 1 everywhere except the ornamental Sanskrit
    scripts. It multiplies the TOKEN-FORM faces only — WORD_F/NODE_F/MWT_F and the goeswith tie — never the
    POS, transliteration or gloss rows, which are Latin annotation drawn at the app's own body size. */
-let TOK_MAG=1, TOK_WGHT=400, TOK_TRACK=0, TOK_ASC=1, TOK_MID=0, TOK_LIFT=0, TOK_OP=1, TOK_OP_RUN=1, STACKED_GAP=0;
+let TOK_MAG=1, TOK_WGHT=400, TOK_TRACK=0, TOK_ASC=1, TOK_MID=0, TOK_LIFT=0, TOK_OP=1, TOK_OP_RUN=1, STACKED_GAP=0, TOK_Y_LOWER=0;
 // TOK_WGHT stays 400 for magnified faces now (see magTrack's own note on why the weight curve was dropped for
 // them), so this omits a weight token and lets the face render at its own resting weight.
 function magFont(px){ const w=TOK_WGHT;
@@ -1023,6 +1023,18 @@ function refreshFontStacks(){
      decision independently, since it needs the ratio rather than a px figure and the two can't share one
      variable; this constant only feeds the flat px bonus, not that ratio. */
   STACKED_GAP=(typeof STACKING_SCRIPTS!=="undefined" && STACKING_SCRIPTS.has(ORTHO_SCHEME))?(TOK_REF_SIZE*TOK_MAG*0.5):0;
+  /* ⚠ GATED ON TOK_MAG>1, on correction ("Chinese stemmas now look correct. But English now looks too low!").
+     TOK_Y_LOWER (its own use sites, below in this file, and diagram-render.js/diagram-wrap.js) was shipped as
+     a flat, unconditional 2.5 — the one magnification-driven term in this whole file that DIDN'T carry the
+     "0 at TOK_MAG 1" guarantee every other one here does (NODE_ASC_EXTRA, NODE_DESC_EXTRA, --dia-pad-extra,
+     STACKED_GAP above). An unmagnified document has no crowding at the top to relieve — the report that started
+     this whole feature was specifically about a MAGNIFIED script's glyphs needing more room — so lowering an
+     ordinary Latin diagram's tokens by the same 2.5px moved them for no reason: that gap was already sized
+     right, and now every non-magnified document (English included) sits 2.5px further from its own arcs/edges
+     than its own layout says it should. Flat, not scaled by how far past 1 TOK_MAG is — 2.5 was asked for
+     lzh's own 1.5×, not derived as a ratio, so any magnified script gets the same flat 2.5 a stemma root does
+     at TOK_MAG 1.5, rather than inventing a proportional curve nobody asked for. */
+  TOK_Y_LOWER=TOK_MAG>1?2.5:0;
   POS_F='15px '+LIVE_TOKEN_STACK; GRID_F='462 13px '+LIVE_MONO_STACK; HEAD_F='500 11px '+uiFont(); HEAD_F_REQ='700 11px '+uiFont();   // HEAD_F/HEAD_F_REQ ride along on this refresh only for uniformity — it is built off --ui-font, not off either LIVE_ stack (see its lazy definition above), so nothing this function reacts to can actually change it
   TRANS_F='italic 15px '+LIVE_TOKEN_STACK; TRANS_UP_F='15px '+LIVE_TOKEN_STACK; MWT_F=WORD_F;
   GRID_ITAL_F='italic 462 13px '+LIVE_MONO_STACK;
@@ -2286,8 +2298,12 @@ function fitViewBox(svg,boxes){const W0=+svg.getAttribute("width"),H0=+svg.getAt
    bracketsWrapped's `.text-conv.bwrap` does the same in app.css. The wrapped stemma/hierarchy (projWrapped)
    stays exempt: its tree is scaled to FILL .wp-stem (sy=bh/natH, deepest node flush on the bottom edge, which
    overflow:hidden then clips) and its token glyphs sit in a separate fixed-height strip that draws no `boxes`
-   at all — there is no crop there to hold still, so the asymmetry has nothing to bite on. */
-const TOK_Y_LOWER=2.5;
+   at all — there is no crop there to hold still, so the asymmetry has nothing to bite on.
+   ⚠ AND THE CONSTANT ITSELF IS 0 AT TOK_MAG 1 — declared with `let TOK_MAG` above, recomputed in
+   refreshFontStacks() alongside STACKED_GAP, on correction ("Chinese stemmas now look correct. But English
+   now looks too low!"): a flat, unconditional 2.5 lowered every token whether its script was magnified or
+   not, and an unmagnified document had no crowding this whole feature exists to relieve. See
+   refreshFontStacks()'s own note for the full account. */
 // The crop sink for a lowered token stack: pass the DRAW baseline to the helper and `loBoxes(boxes)` as its
 // `boxes`, and every box it pushes lands back on the LAYOUT baseline. Returns the argument untouched when there
 // is none (projWrapped and the wrapped-proj rows pass null), so a caller never has to branch. A plain `.push`
