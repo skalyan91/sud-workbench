@@ -978,7 +978,7 @@ function refreshFontStacks(){
   // brackets/outline all measure through this same meas()/WORD_F/NODE_F/POS_F/… family, so a font-stack change
   // invalidates their output exactly as it invalidates colW's, for the same reason.
   if(fchg && typeof invalidateDiaCache==="function") invalidateDiaCache();
-  WORD_F=magFont(15); NODE_F=magFont(14);
+  WORD_F=magFont(15); NODE_F=magFont(15);   // on correction: the node glyph's base size is 15px, the SAME as WORD_F, not 14 — a 1px undersize that, at TOK_MAG 1.5, compounded into a 1.5px shortfall in every ascent/descent-derived reserve this file computes off NODE_F (NODE_ASC_EXTRA, --dia-pad-extra's own ascent+descent term)
   /* THE VISIBLE GAP ABOVE THE DIAGRAM, not just the SVG's own internal crop — on request ("lzh diagram
      tokens need more space on top, to account for their increased size"; the FIRST attempt at this only
      grew fitTight()'s own root-node box reserve in stemma()/tree(), which stops the root's ascenders being

@@ -229,15 +229,17 @@
        document.js's else branch. No margin-inline-start override — that one's specifically about lining
        the SCRIPT line's text up with the transliteration/original row below it (item 20, .stext-script's
        own note), which lzh has no equivalent of.
-       ⚠ THE TOP-ALIGN + LIFT IS SHARED WITH .stext-script, not reinvented — --script-align/--script-lift
-       (js/diagram/diagram-core.js) are driven off TOK_MAG alone, with no script-family special-casing, so
-       they already answer correctly for whatever font is actually in use, Han included: baseline-aligning
-       a magnified line against the unmagnified sentence number hangs the glyph's whole extra height above
-       the row exactly as it would for a Brahmic script, and scriptLiftEm()'s ink-vs-font-box measurement
-       is honest about however much (or little) of that a CJK face turns out to reserve. */
-    align-self:var(--script-align,baseline); position:relative;
-    top:calc(-1 * var(--script-lift,0) * var(--stext-fs) * var(--script-mag,1));
-    margin-bottom:calc(-1 * var(--script-lift,0) * var(--stext-fs) * var(--script-mag,1))}
+       ⚠ ON CORRECTION, NO LONGER SHARING --script-align/--script-lift WITH .stext-script. Those two are
+       tuned against scriptLiftEm()'s ink-vs-font-box measurement — honest for a Brahmic face's shirorekha
+       and stacked marks, but not a claim this selector needs: Han glyphs carry no such reserved-but-unused
+       ascent to lift past, and the shared `top`/margin-bottom pair was pulling the line by an amount tuned
+       for a different kind of face. `align-self` is now the literal `start` (not var(--script-align,…),
+       which resolves to `flex-start` past TOK_MAG 1 in any case — this drops the indirection now that this
+       selector doesn't share the variable's OTHER consumer). `margin-bottom` is now the same closed-form
+       em/ex idiom STACKED_GAP and the running-sentence's own item-5/item-11 fixes already use elsewhere in
+       this file (e.g. `calc(0.5em - 0.5ex)`) — here negative, since a magnified line sits TALLER than the
+       row expects and the row below has to be pulled up to close the gap that leaves, not pushed down. */
+    align-self:start; margin-bottom:calc(-0.5em + 0.5ex)}
   .stext.stext-script{margin-inline-start:0; font-size:calc(var(--stext-fs) * var(--script-mag,1)); opacity:var(--script-op-run,1);   /* offsets a magnified script's own un-lightened weight — the running sentence's OWN, gentler curve (--script-op-run, distinct from the diagram's --script-op) — see magOpacityRun's note, js/diagram/diagram-core.js */
     /* …AND IT IS TOP-ALIGNED IN THE ROW, THEN PULLED UP BY ITS OWN ASCENDER. `.shead` is baseline-aligned,
        which is right while every item is set at one size; a script at double size then hangs its whole
