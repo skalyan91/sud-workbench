@@ -775,7 +775,7 @@ function arcsWrapped(si){
 function stemmaGeomW(t,n,withLabels){
   const {head,depth}=structure({tokens:t});
   const {c,lw,ldw}=stemmaLayout({tokens:t},false,false);   // ldw: the per-node inline-START reserve — see the same destructure in stemma() (js/diagram/diagram-render.js) and spreadForLabels' own note
-  const LV=48,TOP=20.5,B=7,SPW=meas(" ",WORD_F);   // TOP matches stemma()'s own (js/diagram/diagram-render.js) — raised from 18 on correction, see its note
+  const LV=48,TOP=18,B=7,SPW=meas(" ",WORD_F);   // TOP matches stemma()'s own (js/diagram/diagram-render.js) — raising it to "lower the tokens" was tried and reverted there, see its note; TOK_Y_LOWER is the fix that actually works
   const edges=[];
   for(let i=0;i<n;i++){const h=head[i]; if(h<1||h>n||h===i+1) continue;
     edges.push({d:i,h:h-1,rel:t[i].deprel,w:withLabels?meas(t[i].deprel,POS_F)+SPW:0});}
@@ -788,7 +788,7 @@ function stemmaGeomW(t,n,withLabels){
 // hierarchy geometry, label-less: the same tidy layout as tree(), returning node positions + parent→child edges
 function treeGeomW(t,n,withLabels){
   const {children,root}=structure({tokens:t});
-  const LV=48,TOP=20.5,B=7,SPW=meas(" ",WORD_F),NGAP=SPW+4, lw=i=>Math.max(fmeas(t[i],NODE_F),glossSlotW(t[i])), hgw=i=>tailW(t[i],NODE_F), ldw=i=>leadW(t[i],NODE_F), elw=i=>(withLabels&&i!==root)?meas(t[i].deprel,POS_F):0;   // item 13: node slot also fits the gloss tiers. TOP matches tree()'s own (below) — raised from 18 on correction, see stemma()'s note (js/diagram/diagram-render.js)
+  const LV=48,TOP=18,B=7,SPW=meas(" ",WORD_F),NGAP=SPW+4, lw=i=>Math.max(fmeas(t[i],NODE_F),glossSlotW(t[i])), hgw=i=>tailW(t[i],NODE_F), ldw=i=>leadW(t[i],NODE_F), elw=i=>(withLabels&&i!==root)?meas(t[i].deprel,POS_F):0;   // item 13: node slot also fits the gloss tiers. TOP matches tree()'s own (below) — raising it to "lower the tokens" was tried and reverted there, see stemma()'s note (js/diagram/diagram-render.js); TOK_Y_LOWER is the fix that actually works
   const x=tidyLayout(n,root,i=>children[i],{lw,hgw,ldw,elw,SPW,NGAP});   // #5: shared with the unwrapped hierarchy tree() → one source of truth, so the wrapped hierarchy can't drift from the flat one
   const depth=new Array(n).fill(0); (function d(i,dd){depth[i]=dd; children[i].forEach(c=>d(c,dd+1));})(root,0);
   const maxD=Math.max(0,...depth), ny=d=>TOP+d*LV, natW=Math.max(2,...x.map((xx,i)=>xx+lw(i)/2+hgw(i)))+6;
@@ -1010,7 +1010,7 @@ function wpRevealSel(){ if(sel.s<0||sel.t<=0) return;
 
 function tree(si){
   const D=displaySent(DOC[si]), t=D.tokens, n=t.length, OID=k=>D.map[k]+1, sent={tokens:t}; RTL=D.rtl;
-  const {children,root,head}=structure(sent),belowReserve=belowReserveH(trLayer(),belowTierN(),false),LV=48+belowReserve,TOP=20.5,A=16,B=7;         // item 2: the level height = a CONSTANT 48 (the stemma's LV) + the below-stack reserve, and the outgoing edge attaches just below that reserve (parentEndY) — so an edge is always LV−belowReserve−A−B = 48−16−7 = 25 tall, EXACTLY the stemma's, no matter how many annotation tiers are shown. belowReserve uses the SAME belowGap() per-row step the tiers are drawn at, so it cancels cleanly (Item 8: each tier row folds in descent(POS_F)). TOP matches stemma()'s own (diagram-render.js) — raised from 18 on correction, see its note
+  const {children,root,head}=structure(sent),belowReserve=belowReserveH(trLayer(),belowTierN(),false),LV=48+belowReserve,TOP=18,A=16,B=7;         // item 2: the level height = a CONSTANT 48 (the stemma's LV) + the below-stack reserve, and the outgoing edge attaches just below that reserve (parentEndY) — so an edge is always LV−belowReserve−A−B = 48−16−7 = 25 tall, EXACTLY the stemma's, no matter how many annotation tiers are shown. belowReserve uses the SAME belowGap() per-row step the tiers are drawn at, so it cancels cleanly (Item 8: each tier row folds in descent(POS_F)). TOP matches stemma()'s own (diagram-render.js) — raising it to "lower the tokens" was tried and reverted there, see its note; TOK_Y_LOWER is the fix that actually works
   // THE ROOT's OWN CROP RESERVE, matching stemma()'s identical fix (diagram-render.js) for the identical reason:
   // the root sits at depth 0 — literally the topmost thing this notation draws — and fitTight(svg,boxes) crops
   // to the union of `boxes`, whose node box below reserved a flat 9px tuned for NODE_F at TOK_MAG 1. A magnified
@@ -1319,8 +1319,8 @@ function outline(si){const D=displaySent(DOC[si]), t=D.tokens, n=t.length, OID=k
   ghostPairsFor(t).forEach(([o,tg,rel])=>{ if(tg>=0&&tg<n&&o>=0&&o<n) ghostsAt[tg].push({gi:o,rel}); });
   const mwtOf={}; (D.mwt||[]).forEach(m=>mwtOf[m.from-1]=m);   // annotate the first word of each multi-word token
   const box=document.createElement("div"); box.className="text-conv outline"; box.dir=RTL?"rtl":"ltr";
-  box.style.paddingBottom=(15+descent(NODE_F))+"px";   // bottom = top pad (15px) + the outline form font's descender depth, so the last row's descenders clear the edge (CSS can't call descent())
-  box.style.paddingTop="15px";
+  box.style.paddingBottom=(15-TOK_Y_LOWER+descent(NODE_F))+"px";   // bottom = the same 15px base the top uses + the outline form font's descender depth, so the last row's descenders clear the edge (CSS can't call descent()) — LESS TOK_Y_LOWER, which the top takes
+  box.style.paddingTop=(15+TOK_Y_LOWER)+"px";   // the outline's own statement of the lowering every SVG notation gets from fitTight's crop shift (see TOK_Y_LOWER, js/diagram/diagram-core.js): this box IS the crop, its rows ARE the ink, so the 2.5 simply moves from the bottom pad to the top one — total height unchanged, content 2.5px lower, exactly as the cropped notations
   // item 3 — shift each row's content DOWN by half the form's descender: less padding above, that much more below,
   // so the x-height band (not the full ascender-to-descender box) reads as vertically centred in the row.
   const _half=descent(NODE_F)/2; box.style.setProperty("--olpt",(5-_half)+"px"); box.style.setProperty("--olpb",(5+_half)+"px");

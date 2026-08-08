@@ -2242,6 +2242,36 @@ function fitViewBox(svg,boxes){const W0=+svg.getAttribute("width"),H0=+svg.getAt
   boxes.forEach(B=>{a=Math.min(a,B.x-B.hx);b=Math.max(b,B.x+B.hx);c=Math.min(c,B.y-B.hy);d=Math.max(d,B.y+B.hy);});
   const M=6; if(a<0||b>W0||c<0||d>H0){const x=Math.floor(a-M),y=Math.floor(c-M),w=Math.ceil(b-a+2*M),h=Math.ceil(d-c+2*M);
     svg.setAttribute("viewBox",`${x} ${y} ${w} ${h}`); svg.setAttribute("width",w); svg.setAttribute("height",h);}}
+/* ⚠ THE INK IS DRAWN `TOK_Y_LOWER` px LOWER THAN THE CROP `boxes` DESCRIBES, and that asymmetry IS the whole
+   feature — it is the ONLY way to open headroom above the topmost thing a notation draws. On request ("lower
+   the diagram tokens by 2.5"), after the obvious version was tried and reverted: raising the layout's own TOP
+   constant (stemma()/tree(), js/diagram/diagram-render.js + js/diagram/diagram-wrap.js) moves the drawn glyphs
+   AND the `boxes` entries that describe them by the same amount, and fitTight then re-crops tightly around the
+   new position with the identical margin — a perfect no-op, confirmed by pixel measurement in the shipping
+   WKWebView (the top-of-diagram-to-root-ink gap moved by under 1px, all of it attributable to an unrelated
+   NODE_F size change landing in the same commit).
+   What actually opens room is moving the INK without moving the CROP. Done here, by shifting the finished
+   viewBox UP by TOK_Y_LOWER rather than by translating any content: `boxes` is a plain array of JS numbers,
+   every renderer's own layout math (spreadForLabels, the label de-collision passes, repArcEnds, mwtTie's
+   seating) is computed in the same unshifted user space, and NOTHING is re-expressed — the crop window keeps
+   exactly the size and the content-relative position it had, and the whole figure simply lands TOK_Y_LOWER
+   lower inside it. Equivalent, to the pixel, to wrapping every drawn element in <g transform="translate(0,N)">,
+   but with no DOM structure to break: ghostsBehind() still walks svg.children, smpReshape() still sweeps the
+   finished element, and the ONE place that maps a screen coordinate back into user space (the flat brackets
+   row hit-target, js/diagram/diagram-wrap.js) reads vb.x for an x-only answer and is untouched either way.
+   ⚠ IT SPENDS THE BOTTOM MARGIN TO BUY THE TOP ONE — deliberately, and that is the trade that was asked for:
+   the bottom is measured comfortably the more generous of the two (stemma 8.4px inside the SVG against 5.0px
+   at the top; brackets 8.8 against 4.0), and M(6) − TOK_Y_LOWER still leaves every notation's lowest ink
+   inside its own viewBox, so nothing is clipped — only re-balanced.
+   ⚠ THE FOUR NOTATIONS THAT DO NOT REACH fitTight STATE IT THEMSELVES, in the one term each of them has:
+   outline() (js/diagram/diagram-wrap.js) is HTML rows in a padded box, so it moves the same 2.5 from its
+   paddingBottom to its paddingTop; bracketsWrapped's `.text-conv.bwrap` does the same in app.css, where its
+   own comment already ties its 10px/18px to flat brackets' internal gaps and so has to move with them. The
+   wrapped stemma/hierarchy (projWrapped) is the ONE deliberate exemption: its tree is scaled to FILL .wp-stem
+   (sy=bh/natH, so the deepest node sits flush on the box's bottom edge, which overflow:hidden then clips) and
+   its token glyphs live in a separate fixed-height strip whose top is not the figure's top — there is no tight
+   crop there to loosen, and shifting the stretched tree down would clip its own lowest nodes. */
+const TOK_Y_LOWER=2.5;
 /* tight fit: crop AND expand the viewBox to the exact content extent (unlike fitViewBox, which only grows) */
 function fitTight(svg,boxes){ if(!boxes.length) return;
   let a=Infinity,b=-Infinity,c=Infinity,d=-Infinity;
@@ -2281,7 +2311,7 @@ function fitTight(svg,boxes){ if(!boxes.length) return;
      is still required: for content only slightly negative (−M < a < 0) `x` sits to ITS left already, needing
      no extra margin at all, and the naive `x-a` would otherwise go negative there. */
   const aFit=Math.max(0,a);
-  const x=Math.floor(aFit-M),y=Math.floor(c-M),w=Math.ceil(b-aFit+2*M),h=Math.ceil(d-c+2*M);
+  const x=Math.floor(aFit-M),y=Math.floor(c-M)-TOK_Y_LOWER,w=Math.ceil(b-aFit+2*M),h=Math.ceil(d-c+2*M);   // …then the crop alone slides UP by TOK_Y_LOWER (see its own note above): `h` is untouched, so the window keeps its size and the ink lands that much lower inside it. The floor() stays on the un-shifted value so the shift is exact rather than re-rounded away
   svg.setAttribute("viewBox",`${x} ${y} ${w} ${h}`); svg.setAttribute("width",w); svg.setAttribute("height",h);
   svg._leftOverflow=Math.max(0,x-a);}
 // De-collide edge labels by HORIZONTAL spreading, symmetric around each head: for a head's children, the
