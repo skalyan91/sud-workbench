@@ -979,6 +979,29 @@ function refreshFontStacks(){
   // invalidates their output exactly as it invalidates colW's, for the same reason.
   if(fchg && typeof invalidateDiaCache==="function") invalidateDiaCache();
   WORD_F=magFont(15); NODE_F=magFont(14);
+  /* THE VISIBLE GAP ABOVE THE DIAGRAM, not just the SVG's own internal crop — on request ("lzh diagram
+     tokens need more space on top, to account for their increased size"; the FIRST attempt at this only
+     grew fitTight()'s own root-node box reserve in stemma()/tree(), which stops the root's ascenders being
+     CLIPPED inside the SVG's tight-cropped viewBox but adds no actual breathing room outside it, since
+     fitTight crops to content plus a fixed small margin regardless of how big that content is — reported
+     back as "still not seeing extra space above"). The real gap the reader sees is `.diagram`'s own CSS
+     padding-top (app.css), a flat 13px sized for TOK_MAG 1 and never touched by that first attempt. Publish
+     the same "how much MORE reach a magnified face has than an unmagnified one would" term used throughout
+     this file (belowGap()/WORD_OFF/NODE_ASC_EXTRA) as a CSS custom property so app.css can grow that padding
+     by exactly the extra room a magnified token/node glyph needs — NODE_F rather than WORD_F because
+     stemma/tree (which sit closest to the block top, with no arc row above the glyphs to absorb the growth)
+     draw NODE_F, and it and WORD_F differ by only 1px unmagnified. Exactly 0 at TOK_MAG 1, so an unmagnified
+     document's gap is byte-identical to before.
+     ⚠ BOTH ascent AND descent, on correction ("the diagram tokens still look like they have more space below
+     than above — add the descender length to the top"): an ascent-only term matches how much further the
+     glyph's OWN ink reaches above its baseline, but the row this padding sits against is the block's running-
+     sentence header above it, not the glyph's own baseline — and the belowGap()/STACKED_GAP reserve on the
+     OTHER side of the same glyph already folds in the token's magnified DESCENT growth too (belowGap()'s own
+     `descent(WORD_F)*(1-1/TOK_MAG)` term), not just its ascent. Growing the top by ascent alone left it
+     under-sized relative to the bottom by exactly that descent term, reading as "more space below than
+     above" even once the ascent-only version was live. Adding both keeps the two sides' growth terms the
+     same shape. */
+  d && d.style.setProperty("--dia-pad-extra",(TOK_MAG>1?(ascent(NODE_F)+descent(NODE_F))*(1-1/TOK_MAG):0).toFixed(2)+"px");
   /* ⚠ HALF AN EM FOR STACKING SCRIPTS, NOT A FULL ONE — on request ("too much space below the tokens;
      do the same thing as for Grantha" i.e. reduce it, confirmed: "reduce STACKED_GAP itself — it's just
      too generous for everyone"). STACK_DROP's old role (extra below-token reserve for STACKING_SCRIPTS —
