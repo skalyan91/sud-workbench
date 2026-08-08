@@ -325,23 +325,43 @@ function magFont(px){ const w=TOK_WGHT;
    at the same weight does, exactly the imbalance the weight curve was trying (and, for these faces,
    failing) to correct. A small opacity reduction is the substitute — it works on every face alike,
    static or variable, unlike weight, and a few percent of transparency reads as "lighter", not as
-   "faded", at these sizes. Proportional to the SAME (mag−1) shape every other magnification term in
-   this file uses (magTrack, mwtFormLead, the .strans gap fix) — 0 at mag 1 for BOTH curves below
-   (byte-identical to a plain document), and each curve DIFFERS by (mag−1) too, not just between the
-   two contexts — 1.5× and 2× are never the same number as each other, on request.
+   "faded", at these sizes.
+   ⚠ THE SHAPE IS LOGARITHMIC, NOT LINEAR IN (mag−1), on request for a "physically-motivated" derivation
+   of how much transparency a given magnification needs. It cannot be a claim about the GLYPH'S own ink:
+   under pure uniform scaling, a stroke's own area and the glyph's total bounding area both scale with
+   the SQUARE of the linear magnification, so the ink-coverage FRACTION — stroke area over total area —
+   is invariant to mag. Nothing about the shape geometrically gets "heavier" at 2× that wasn't already
+   there at 1×. What genuinely changes is the ABSOLUTE stroke width the reader's eye receives, and the
+   relevant physical law for how PERCEIVED intensity of a stimulus scales with its physical magnitude is
+   the Weber–Fechner law — the same logarithmic relationship behind the decibel scale for loudness and
+   the magnitude scale for stellar brightness: perceived intensity ∝ log(physical stimulus). Treating
+   apparent "weight" as a perceived-intensity stimulus of the same kind makes log(mag) the correct
+   independent variable, not (mag−1) — a linear function of mag is what you get from FIRST-order Taylor
+   expanding log(mag) around mag=1 (log(mag) ≈ mag−1 for mag near 1), which is why the OLD linear curve
+   wasn't visibly wrong at 1.5× (close to 1, where the approximation is still good) but had no principled
+   reason to stay right further out. trackCurve() (above) already treats an analogous "compensate for
+   scale" problem the identical way, for the identical reason — this isn't a new kind of curve for this
+   file, just the same one applied to a second quantity.
+   ⚠ CALIBRATED, NOT INVENTED — the constant in front of log(mag) is chosen so each curve reproduces
+   EXACTLY its own previously-set, already-visually-accepted value at mag=1.5 (this app's own standard
+   INDIC_SCRIPTS tier): OPACITY_K_DIA·ln(1.5) = .06, OPACITY_K_RUN·ln(1.5) = .03, i.e. unchanged "~6%
+   lighter"/"~3% lighter" at 1.5× to the last decimal. Only the EXTRAPOLATION away from that one point
+   changes — at 2×, log(2)/log(1.5) ≈ 1.710 rather than (2−1)/(1.5−1) = 2, so the diagram curve now reads
+   1−.06·1.710 ≈ .897 (was .88) and the running curve 1−.03·1.710 ≈ .949 (was .94): both slightly LESS
+   transparent at 2× than the old linear guess, which is exactly the correction a sub-linear
+   (logarithmic) growth curve makes past its calibration point.
    ⚠ TWO CURVES, NOT ONE, ON REQUEST — running-sentence prose and an isolated diagram token are different
    visual contexts and don't obviously want the same offset. A magnified diagram token sits alone amid a
    lot of open space (arcs, POS/gloss rows, whitespace); a magnified running-sentence script sits inside a
    dense run of continuous text the reader is already processing a lot of ink from. The diagram token's
    isolation is what makes its extra weight stand out MORE by contrast, so it gets the stronger offset;
-   the running line's already-busy register can afford to keep slightly more of its own ink. Both are
-   judgement calls on the exact curve, not measured physical quantities like scriptLiftEm() beside them —
-   deliberately kept small ("a bit semitransparent", the report this answers) rather than tuned toward
-   some target contrast ratio, and the running/diagram SPLIT is equally a judgement call, not a measured
-   distinction — if the direction (diagram lighter than running) turns out backwards on report, that's a
-   one-line swap of which coefficient goes where, not a rederivation. */
-function magOpacityDia(mag){ return mag>0 ? 1-.12*(mag-1) : 1; }    // diagram: ~6% lighter at 1.5×, ~12% at 2×
-function magOpacityRun(mag){ return mag>0 ? 1-.06*(mag-1) : 1; }    // running sentence: half the diagram's offset — ~3% at 1.5×, ~6% at 2×
+   the running line's already-busy register can afford to keep slightly more of its own ink. The
+   running/diagram SPLIT itself is still a judgement call, not a measured distinction — if the direction
+   (diagram lighter than running) turns out backwards on report, that's a one-line swap of which
+   coefficient goes where, not a rederivation; the SHAPE each one follows, now, is not a judgement call. */
+const OPACITY_K_DIA=.06/Math.log(1.5), OPACITY_K_RUN=.03/Math.log(1.5);   // solved from "the curve equals its old value at mag=1.5" — see the note above, not tuned directly
+function magOpacityDia(mag){ return mag>0 ? 1-OPACITY_K_DIA*Math.log(mag) : 1; }    // diagram: 6.00% lighter at 1.5× (exact), ~10.3% at 2×
+function magOpacityRun(mag){ return mag>0 ? 1-OPACITY_K_RUN*Math.log(mag) : 1; }    // running sentence: half the diagram's offset — 3.00% lighter at 1.5× (exact), ~5.1% at 2×
 _lazyFont("WORD_F",()=>magFont(15)); _lazyFont("NODE_F",()=>magFont(14));
 _lazyFont("POS_F",()=>'15px '+LIVE_TOKEN_STACK); _lazyFont("GRID_F",()=>'462 13px '+LIVE_MONO_STACK); _lazyFont("HEAD_F",()=>'500 11px '+uiFont()); _lazyFont("HEAD_F_REQ",()=>'700 11px '+uiFont());   // TWO heading faces now, because the band is drawn in two weights: HEAD_F is the OPTIONAL columns' SF Pro Medium (500) and HEAD_F_REQ the obligatory ID/Form columns' Bold (700) — see `table.grid th` / `table.grid th.th-req` in styles/app.css. scanColW/pillColW pick per column; measuring every heading with one weight under-sized ID and Form by the Medium→Bold width difference   // HEAD_F is the GRID HEADING face, and its only consumers are scanColW/pillColW (js/grid/grid.js). It must match `table.grid th` in styles/app.css exactly, which is now title case in the UI font at 11px/590 — NOT --token-font, so it is the one string here built off uiFont() (js/core/platform.js, which resolves --ui-font to a plain family list; a canvas font string can't carry a var()) rather than off LIVE_TOKEN_STACK, and refreshFontStacks' token/mono-stack invalidation therefore doesn't apply to it. uiFont() caches its own DOM read, so calling it from a lazy getter costs nothing after the first   // POS tags: same size + weight (normal, i.e. no weight token here) as the transliteration (TRANS_F) — upright rather than italic; c2sc small-caps do the visual "tag" styling now, not a bumped weight/shrunk size. GRID_F: weight curve @12.65px (matches table.grid's own CSS weight — was unweighted/400, measuring narrower than the grid actually renders)
 _lazyFont("TRANS_F",()=>'italic 15px '+LIVE_TOKEN_STACK); _lazyFont("TRANS_UP_F",()=>'15px '+LIVE_TOKEN_STACK); _lazyFont("MWT_F",()=>WORD_F);   /* the MWT surface form measures/renders exactly like a normal token form (WORD_F, 15px). TRANS_UP_F: the same row set UPRIGHT — what a Foreign=Yes token's transliteration renders in (see trFont/.frn-up) */
@@ -954,21 +974,27 @@ function refreshFontStacks(){
   // invalidates their output exactly as it invalidates colW's, for the same reason.
   if(fchg && typeof invalidateDiaCache==="function") invalidateDiaCache();
   WORD_F=magFont(15); NODE_F=magFont(14);
-  /* ⚠ 2em FOR STACKING SCRIPTS, NOT STACK_DROP — on request ("instead of using STACK_DROP, set the line
-     height of stacked-script tokens to 2em"), STACK_DROP's old role (extra below-token reserve for
-     STACKING_SCRIPTS — Grantha, Javanese, Balinese, Kawi, ZanabazarSquare, Tibetan) is filled by a flat,
-     content-independent ONE em, added ONCE at every site that used to add STACK_DROP once (belowStack's
+  /* ⚠ HALF AN EM FOR STACKING SCRIPTS, NOT A FULL ONE — on request ("too much space below the tokens;
+     do the same thing as for Grantha" i.e. reduce it, confirmed: "reduce STACKED_GAP itself — it's just
+     too generous for everyone"). STACK_DROP's old role (extra below-token reserve for STACKING_SCRIPTS —
+     Grantha, Javanese, Balinese, Kawi, ZanabazarSquare, Tibetan) is still filled by a flat,
+     content-independent bonus, added ONCE at every site that used to add STACK_DROP once (belowStack's
      seed, belowReserveH's tail, tieLayout's r.dtr/r.dpos, htmlTieBottom, diagram-wrap.js's wrapped-tree
      dropY, document.js's flat-notation MWT rows) — the SAME injection pattern, a trivial computation
-     instead of stackDropExtra()'s removed per-document canvas scan. `2em` total, matching the SAME
-     `line-height:2` .stext-stacked already gives these scripts in the running-sentence view (one implicit
-     em from the ordinary row-to-row step, plus this one extra) — not a new number, just this codebase's
-     own existing convention applied here too. Scripts smpReshape() swaps to HTML but that are NOT
-     STACKING_SCRIPTS members (Siddham, Ranjana, Soyombo, Bhaiksuki, …) get 0 here, same as every
-     non-magnified script always did — smpReshape's own inner-div line-height (js/diagram/diagram-core.js,
-     further down) makes the identical 1-vs-2 decision independently, since it needs the ratio rather than
-     a px figure and the two can't share one variable. */
-  STACKED_GAP=(typeof STACKING_SCRIPTS!=="undefined" && STACKING_SCRIPTS.has(ORTHO_SCHEME))?(TOK_REF_SIZE*TOK_MAG):0;
+     instead of stackDropExtra()'s removed per-document canvas scan — just a smaller one: half an em, not
+     a full one, so 1.5em total below-token reserve rather than the 2em this started at. The verified case
+     for even the FULL em was generous rather than tight — measured live against a real Javanese subjoined
+     "m" conjunct in the shipping WKWebView (samples/brihat_jataka.conllu), the reserved wash box had over
+     100px to spare beyond even canvas's own (larger, more honest than getBBox()'s) ink measurement — so
+     halving it is not expected to reopen the clipping that motivated STACKED_GAP in the first place, which
+     in any case has since turned out to be a SEPARATE bug (opacity forcing a WebKit compositing layer
+     sized off getBBox(), fixed via fill-opacity/stroke-opacity above — not a reserve-space shortfall).
+     Scripts smpReshape() swaps to HTML but that are NOT STACKING_SCRIPTS members (Siddham, Ranjana,
+     Soyombo, Bhaiksuki, …) get 0 here, same as every non-magnified script always did — smpReshape's own
+     inner-div line-height (js/diagram/diagram-core.js, further down) still makes its own 1-vs-2 lineEm
+     decision independently, since it needs the ratio rather than a px figure and the two can't share one
+     variable; this constant only feeds the flat px bonus, not that ratio. */
+  STACKED_GAP=(typeof STACKING_SCRIPTS!=="undefined" && STACKING_SCRIPTS.has(ORTHO_SCHEME))?(TOK_REF_SIZE*TOK_MAG*0.5):0;
   POS_F='15px '+LIVE_TOKEN_STACK; GRID_F='462 13px '+LIVE_MONO_STACK; HEAD_F='500 11px '+uiFont(); HEAD_F_REQ='700 11px '+uiFont();   // HEAD_F/HEAD_F_REQ ride along on this refresh only for uniformity — it is built off --ui-font, not off either LIVE_ stack (see its lazy definition above), so nothing this function reacts to can actually change it
   TRANS_F='italic 15px '+LIVE_TOKEN_STACK; TRANS_UP_F='15px '+LIVE_TOKEN_STACK; MWT_F=WORD_F;
   GRID_ITAL_F='italic 462 13px '+LIVE_MONO_STACK;
