@@ -489,36 +489,13 @@ const ORNAMENTAL_SCRIPTS=new Set(["Ranjana","Soyombo","Bhaiksuki","Siddham"]);
    Grantha/Javanese/Balinese/Kawi/ZanabazarSquare joined on measured or live-reported overlap; Tibetan
    rejoined the same way (see document.js's own note on each). */
 const STACKING_SCRIPTS=new Set(["Grantha","Javanese","Balinese","Kawi","ZanabazarSquare","Tibetan"]);
-/* THE DIAGRAM'S OWN below-token reserve (stackDropExtra(), js/diagram/diagram-core.js) needed a SECOND,
-   narrower set once Tibetan switched from Noto Sans Tibetan to the correctly-stacking Noto Serif Tibetan
-   (see fonts.css/fontload.js's own notes on that swap) — .stext-stacked above is UNCHANGED and still
-   reads STACKING_SCRIPTS whole, per live confirmation that the running-sentence spacing is still right
-   for Tibetan under the new face.
-   ⚠ MEASURED, both live in the shipping WKWebView and via renderDoc() in a hidden pywebview window: FIVE
-   real, genuinely deep multi-consonant Tibetan clusters — བརྒྱད (2 stacked consonants under a superscript
-   ra), སྒྲོལ་མ, རྩྭ (a 3-consonant stack), སྤྱོད་པ, and བསྐྱོད (4 consonants: བ-ས-ཀ-ྱ, about as deep as
-   Tibetan orthography gets) — all painted the IDENTICAL ink depth below baseline: 6.596px at the real
-   22.5px (15×1.5 mag) painted size, i.e. 1.206px beyond descent(WORD_F)'s own plain Latin descender.
-   Depth does not grow with stack depth under this font, so there is nothing left for a per-script bonus
-   to reserve: 1.2px is smaller than the 1.80px belowGap() ALREADY adds for any 1.5×-magnified script's
-   bigger descender, stacking or not (descent(WORD_F)×(1−1/TOK_MAG)). Before this fix stackDropExtra()
-   reserved 24.96px for Tibetan regardless — a ~20× overshoot — because it measures via a `<text>` element
-   whose font string NAMES "Noto Serif Tibetan" FIRST (scriptFamilyPrefix(), needed by scriptAscentEm's
-   canvas metrics but copied onto this SVG getBBox() measurement too): with that font led, WebKit's
-   getBBox() answers a CONSTANT 281.5px-tall box (100px font-size) for a bare, unstacked "ཀ" — identical,
-   digit for digit, to the box it gives the full multi-cluster word — which is a font-metric constant,
-   not glyph ink, for this specific variable (`fvar`, 100–900) face. Measuring instead through the SAME
-   font resolution the real glyph actually paints with (LIVE_TOKEN_STACK alone, no prefix — Noto Serif
-   Tibetan is simply the first family in that huge stack that covers a Tibetan codepoint, so it still
-   wins per-character fallback) reproduces the real painted ink almost exactly (29.31 vs 29.3125 in
-   stackDropExtra()'s own /100px units). The SAME scriptFamilyPrefix() approach measured against Grantha
-   does NOT show this constant-regardless-of-content behaviour — it under- rather than over-shoots there —
-   so this is a Tibetan/Noto-Serif-Tibetan-specific WebKit quirk, not a defect in the shared formula, and
-   the fix is to keep that formula and every other STACKING_SCRIPTS member's own number untouched (touching
-   it would risk exactly the regression the Grantha comment above this one was written to prevent) and
-   simply not ask it of Tibetan. Derived from STACKING_SCRIPTS by subtraction rather than restated by hand,
-   so a future STACKING_SCRIPTS edit can't silently drift the two apart. */
-const DIAGRAM_STACKING_SCRIPTS=new Set([...STACKING_SCRIPTS].filter(s=>s!=="Tibetan"));
+/* ⚠ DIAGRAM_STACKING_SCRIPTS — the narrower, Tibetan-excluded subset this app used to derive from the set
+   above, feeding the diagram's own below-token reserve (stackDropExtra(), js/diagram/diagram-core.js) — is
+   REMOVED, along with that function and STACK_DROP entirely, on request ("I think STACK_DROP was a bad
+   move to begin with; remove it"), after a Grantha-specific compensation on top of it was already pulled
+   for causing cross-script inconsistency and a further report of Balinese/Javanese clipping surfaced while
+   that removal was still under investigation. STACKING_SCRIPTS itself is UNCHANGED and still used whole by
+   .stext-stacked above, for the running-sentence view, which this removal does not touch. */
 function isLzhLang(lang){ const b=((lang!=null?lang:DOCLANG)||"").toLowerCase().split(/[-_]/)[0]; return b==="lzh"; }
 /* Literary Chinese magnifies too, on request — its Han glyphs run to the same dense, fine-stroke
    complexity (rare/archaic characters, more strokes per square than the simplified everyday set) that
