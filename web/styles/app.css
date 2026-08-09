@@ -264,7 +264,25 @@
        none; top:-N with margin-bottom:+N → 23.4px, exactly double; top:-N with margin-bottom:-N → 0px,
        matching the unshifted layout). Every term is exactly 0 at mag 1, which is every document but the
        ornamental scripts. */
-    align-self:var(--script-align,baseline); position:relative}   /* ⚠ `top` IS REMOVED, on request — the measured --script-lift/scriptLiftEm() shirorekha-lift this rule used to apply is gone from THIS property, for every enlarged Sanskrit script (all of INDIC_SCRIPTS, not just STACKING_SCRIPTS). The margin-bottom half of the old top:-N/margin-bottom:-N flow-gap-closing pair moved to .stext-stacked below (a NARROWER, corrected scope — see its own note) rather than staying here, so this rule now sets no vertical offset at all. …and the running line is the SCRIPT too, so it takes the ornamental magnification with the diagram glyphs (--script-mag, syncSchemeAttr in js/lang/translit.js). Nothing measures this row — it is ordinary flowing HTML — so unlike the diagram faces it needs no counterpart in refreshFontStacks. */   /* item 20: LEFT-ALIGN the script top line's text with the transliteration/original input (.strans-orig, marginInlineStart:idW+8, padding:1px 3px) below it. In the .shead flex row .stext text-left = num idW + shead gap 8 + stext margin-left −1 + stext pad-left 3 = idW+10; the translit line's text-left = its marginInlineStart (idW+8) + pad-left 3 = idW+11 — so the script line sat 1px to the left. Removing the base −1px inline-start margin (from margin:-1px -1px) for the script line only puts .stext text-left at idW+8+0+3 = idW+11, exactly matching the translit. Scoped to the SCRIPT top line (.stext-script); the normal editable .stext keeps its −1px margin, so its layout and the diagram alignment are untouched. */
+    /* ⚠ …AND `top` IS BACK, BUT ONLY FOR A HANGING SCRIPT — a NARROWER rule than the one removed below,
+       not its reinstatement. What was removed was the lift applied to every enlarged Sanskrit script
+       alike, off `--script-lift`; what this applies is `--script-hang-lift` (refreshFontStacks,
+       js/diagram/diagram-core.js), which is that lift GATED on HANGING_SCRIPTS membership and published
+       as a literal 0 for everything else — so Grantha, Javanese, Balinese, Kawi, Burmese, Brahmi and the
+       rest keep the un-shifted running line the removal gave them, byte for byte, and only the scripts
+       with a head-line to align BY are moved. On request: "hanging status should also determine the
+       alignment of the running sentence".
+       ⚠ AND THE NUMBER IT SHIFTS BY IS MEASURED, NOT DERIVED — snumHeadlineLiftEm() lays out a real
+       `.shead` row and reads back how far the script's own head-line sits below the top of .snum's
+       digits, so this puts the two flush by construction rather than by an em-box approximation of where
+       a shirorekha ought to be. `1em` here is .stext-script's OWN font-size, i.e. --stext-fs × --script-mag,
+       which is the size the lift was measured against.
+       ⚠ `margin-bottom` CARRIES THE SAME SIGN AS `top`, for the reason the block above states at length:
+       `position:relative` moves the PAINT and not the box FLOW reserves, so `top:-N` alone leaves an
+       N-tall gap of dead space below the line; −N closes it and +N doubles it. Both terms are exactly 0
+       for a non-hanging script and at mag 1, i.e. this rule changes nothing for either. */
+    align-self:var(--script-align,baseline); position:relative;
+    top:calc(-1em * var(--script-hang-lift,0)); margin-bottom:calc(-1em * var(--script-hang-lift,0))}   /* ⚠ `top` WAS REMOVED, on request — the measured --script-lift/scriptLiftEm() shirorekha-lift this rule used to apply is gone from THIS property, for every enlarged Sanskrit script (all of INDIC_SCRIPTS, not just STACKING_SCRIPTS). The margin-bottom half of the old top:-N/margin-bottom:-N flow-gap-closing pair moved to .stext-stacked below (a NARROWER, corrected scope — see its own note) rather than staying here, so this rule now sets no vertical offset at all. …and the running line is the SCRIPT too, so it takes the ornamental magnification with the diagram glyphs (--script-mag, syncSchemeAttr in js/lang/translit.js). Nothing measures this row — it is ordinary flowing HTML — so unlike the diagram faces it needs no counterpart in refreshFontStacks. */   /* item 20: LEFT-ALIGN the script top line's text with the transliteration/original input (.strans-orig, marginInlineStart:idW+8, padding:1px 3px) below it. In the .shead flex row .stext text-left = num idW + shead gap 8 + stext margin-left −1 + stext pad-left 3 = idW+10; the translit line's text-left = its marginInlineStart (idW+8) + pad-left 3 = idW+11 — so the script line sat 1px to the left. Removing the base −1px inline-start margin (from margin:-1px -1px) for the script line only puts .stext text-left at idW+8+0+3 = idW+11, exactly matching the translit. Scoped to the SCRIPT top line (.stext-script); the normal editable .stext keeps its −1px margin, so its layout and the diagram alignment are untouched. */
   /* ⚠ margin-bottom:calc(0.5em − 0.5ex), CORRECTED HERE FROM .stext-script, ON REQUEST — the CSS-native
      em/ex clearance formula (ex is a native length, no JS measurement needed) belongs to STACKING_SCRIPTS
      specifically, not every enlarged Sanskrit script: it's clearance for a stacked/subjoined mark's own
@@ -274,7 +292,15 @@
      Balinese/Kawi/Burmese/Zanabazar Square's stacked conjuncts still have room, with nothing pulling the
      box back up into the row above it and, now, real clearance below it too. NOTE: verify in the app's
      WebKit that the controls re-align and the conjuncts aren't clipped by the block above. */
-  .stext.stext-stacked{line-height:2; margin-bottom:calc(0.5em - 0.5ex)}
+  /* ⚠ …AND THE HANG TERM HAS TO BE RESTATED HERE, because this selector OVERRIDES .stext-script's
+     margin-bottom outright (same 0,2,0 specificity, later in the file) and two of the STACKING_SCRIPTS
+     members — Tibetan and Zanabazar Square — are HANGING_SCRIPTS members too. Without it their running
+     line would take the `top` lift and lose the negative margin that closes the flow gap it leaves, i.e.
+     exactly the +N/−N sign error .stext-script's own note records being measured. The two terms are
+     independent and simply add: `0.5em − 0.5ex` is clearance BELOW for a subjoined mark's reach, and
+     `−1em × --script-hang-lift` is the paint shift's own compensation. 0 for every stacking script that
+     does not also hang (Grantha, Javanese, Balinese, Kawi, Burmese), which leaves this rule as it was. */
+  .stext.stext-stacked{line-height:2; margin-bottom:calc(0.5em - 0.5ex - 1em * var(--script-hang-lift,0))}
   .stext,.strans,.tg-lname,.tg-text{text-shadow:0 0 2px var(--casing),0 0 2px var(--casing),0 0 3px var(--casing)}   /* item 19: give the block-initial text rows (sentence text, transliteration/original, per-language translations) the SAME legibility casing halo the diagram uses — the HTML equivalent (mirroring .bwform / .oline's text-shadow:0 0 2px,0 0 2px,0 0 3px var(--casing)) of the SVG paint-order stroke:var(--casing) on .tok-pos/.translit/.lbl. A subtle content-background-coloured halo, not a visible outline; .strans covers both .strans and .strans-orig. Grid cells and the POS/deprel spans are excluded — they carry their own casing. */
   .stext mark.findhit,.strans mark.findhit,.tg-text mark.findhit{text-shadow:none}   /* …but NOT through a find hit. The halo is three background-coloured shadows behind every glyph; over the amber <mark> (macos-kit/mac-chrome.css) they read as a pale fur around each letter of the match, which is exactly the run you most need to read cleanly. The <mark> supplies its own contrast, so it needs no casing — and dropping it HERE, on the mark alone, leaves the surrounding sentence's halo untouched. .strans covers .strans-orig; markInEl only ever wraps text nodes, so this cannot reach anything else. */
   .stext[contenteditable]:hover{background:var(--field-bg)}

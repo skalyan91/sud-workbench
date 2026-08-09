@@ -312,7 +312,7 @@ _lazyFont("LIVE_TOKEN_STACK",()=>TOKEN_STACK); _lazyFont("LIVE_MONO_STACK",()=>M
    why a canvas font string cannot read the property itself). 1 everywhere except the ornamental Sanskrit
    scripts. It multiplies the TOKEN-FORM faces only — WORD_F/NODE_F/MWT_F and the goeswith tie — never the
    POS, transliteration or gloss rows, which are Latin annotation drawn at the app's own body size. */
-let TOK_MAG=1, TOK_WGHT=400, TOK_TRACK=0, TOK_ASC=1, TOK_MID=0, TOK_LIFT=0, TOK_OP=1, TOK_OP_RUN=1, STACKED_GAP=0, TOK_Y_LOWER=0, LZH_MAG=false, TR_TIGHTEN=0, TOK_TR_GAP=0, NODE_Y_EXTRA=0, MAG_DESC=0, TOK_DESC=0, TR_ROW_DESC=0, TR_ROW_EXTRA=0, TR_ABOVE_EXTRA=0, BRK_DEPREL_LESS=0, MAG_DEPREL_GAP=0;
+let TOK_MAG=1, TOK_WGHT=400, TOK_TRACK=0, TOK_ASC=1, TOK_MID=0, TOK_LIFT=0, TOK_HANG_LIFT=0, TOK_OP=1, TOK_OP_RUN=1, STACKED_GAP=0, TOK_Y_LOWER=0, LZH_MAG=false, TR_TIGHTEN=0, TOK_TR_GAP=0, NODE_Y_EXTRA=0, MAG_DESC=0, TOK_DESC=0, TR_ROW_DESC=0, TR_ROW_EXTRA=0, TR_ABOVE_EXTRA=0, BRK_DEPREL_LESS=0, MAG_DEPREL_GAP=0;
 // TOK_WGHT stays 400 for magnified faces now (see magTrack's own note on why the weight curve was dropped for
 // them), so this omits a weight token and lets the face render at its own resting weight.
 function magFont(px){ const w=TOK_WGHT;
@@ -450,6 +450,32 @@ function magTrack(mag){ return mag>0&&mag!==1 ? +(TRACK_K*-Math.log(mag)).toFixe
    Returned as an em FACTOR, not px, so the CSS can apply it against whatever size the line is set at. */
 function scriptLiftEm(){
   if(TOK_MAG===1) return 0;
+  /* ⚠ AND A HANGING SCRIPT DOES NOT TAKE THE em-BOX ARITHMETIC BELOW AT ALL, on request ("hanging
+     status should also determine the alignment of the running sentence"). Everything under this line
+     is an APPROXIMATION of where the head-line sits — the font's full ascent minus the deepest ink on
+     screen — and the function's own note beside `snumCapHeightLiftEm` already admits it is "a
+     plausible-sounding proxy, but not necessarily the same number as where THIS face's actual head-line
+     sits". For a script that HAS a head-line there is no need to approximate: `scriptHeadlinePx` (the
+     median ink ascent of the base letters, marks stripped) measures exactly that, and it is already
+     what `centreBracketLift` aligns the brackets by. Asking the running line the same question of the
+     same measurement is what makes "hanging" one property with one consequence, rather than a bracket
+     rule that the sentence above the brackets contradicts.
+     ⚠ IT REPLACES, IT DOES NOT BLEND — the same posture the Grantha branch below takes toward the same
+     arithmetic, and for the same reason: the two are answers to ONE question ("how far must this line
+     rise for its top reference line to meet the number"), so a measured answer supersedes a derived one
+     outright; averaging them would just move the honest number by half the error of the other.
+     ⚠ AND IT IS ASKED FIRST, ABOVE THE TIBETAN CORRECTION, WHICH TIBETAN IS STILL A MEMBER OF. That
+     correction exists because the em-box arithmetic cannot see line-height:2's half-leading; the
+     synthetic-row measurement can — it lays out a real `.stext-stacked` span in the real engine and
+     reads back where the baseline landed — so for Tibetan the whole correction is subsumed rather than
+     bypassed. It stays below as the FALLBACK path: `snumHeadlineLiftEm` returns null with no #doc, no
+     orthography filled yet, or a face whose head-line will not measure, and the em-box number (with its
+     Tibetan term) is then still the best available answer, exactly as before this branch existed.
+     Grantha is untouched either way — it is not a HANGING_SCRIPTS member (round tops), so its own
+     cap-height target below is what it goes on taking. */
+  if(typeof HANGING_SCRIPTS!=="undefined" && HANGING_SCRIPTS.has(ORTHO_SCHEME)){
+    const hang=snumHeadlineLiftEm();
+    if(hang!=null) return hang; }
   try{
     _cv.font="100px "+scriptFamilyPrefix()+LIVE_TOKEN_STACK;
     let h=0, dsc=0, maxInk=-1;
@@ -542,6 +568,15 @@ _msnum.style.cssText="position:absolute;left:-99999px;top:0;visibility:hidden;po
 _msnum.className="shead";
 const _msnumNum=document.createElement("span"), _msnumScript=document.createElement("span"), _msnumMark=document.createElement("span"), _msnumSid=document.createElement("span");
 _msnumNum.className="snum"; _msnumNum.textContent="1";
+/* …and the NUMBER gets a baseline marker of its own, for the head-line target below. `snumCapHeightLiftEm`
+   only ever needed the number's BOX top (numRect.top) and so needed no marker; a head-line target wants the
+   top of the DIGITS, which is the number's own baseline less its cap height, and a zero-size inline-block on
+   that baseline is the only thing that reads it back rather than reconstructing it from line-box arithmetic
+   (the same trick `_msnumMark` already plays for the script span, and for the same reason). Zero width AND
+   zero height, so it contributes neither ascent nor descent and cannot move the row it is measuring. */
+const _msnumNumMark=document.createElement("span");
+_msnumNumMark.style.cssText="display:inline-block;width:0;height:0;vertical-align:baseline";
+_msnumNum.appendChild(_msnumNumMark);
 _msnumScript.className="stext stext-script";
 _msnumScript.style.cssText="top:0;margin-bottom:0";   // beats .stext.stext-script's own top/margin-bottom unconditionally — plain inline style, no !important needed
 _msnumMark.style.cssText="display:inline-block;width:0;height:0;vertical-align:baseline";
@@ -573,6 +608,53 @@ function snumCapHeightLiftEm(){
     if(capPx<=0) return null;
     const capHeightTopY=markRect.top-capPx;   // baseline (markRect.top) minus the cap-height, i.e. the top of the cap-height band
     return (capHeightTopY-numRect.top)/fontPx;   // positive → cap-height sits below .snum's top → lift by this many em to close it
+  }catch(_){ return null; } }
+/* THE SAME MEASUREMENT, FOR A HANGING SCRIPT'S HEAD-LINE — how far the running sentence has to rise for
+   its head-line to meet the top of the sentence number's digits. Same synthetic `.shead` row, same
+   reason for building one (the browser is asked where the row's baselines land rather than being
+   modelled — see snumCapHeightLiftEm's own note), same sign convention: positive → the head-line
+   currently sits BELOW the target, so lift by that many em.
+   ⚠ TWO DIFFERENCES FROM THE CAP-HEIGHT VERSION, both deliberate.
+   (1) THE SCRIPT SIDE IS `scriptHeadlinePx`, NOT A CSS `cap`/`ex` UNIT. There is no CSS unit for "the
+   shirorekha", and the font declares no metric for one either; it has to be read off the letters, which
+   is exactly what that function does (the MEDIAN ink ascent of the distinct base letters with combining
+   marks stripped — see its own note on why the median and not the max). It is asked at `magFont
+   (TOK_REF_SIZE)`, the identical string `centreBracketLift` passes it, so the two callers share ONE
+   memo entry instead of evicting each other's every render; the answer is then rescaled to the running
+   line's own (smaller) size, which is sound because a head-line is a FONT metric and so scale-free.
+   That sharing is also the stronger claim: the bracket and the sentence number are aligned to the same
+   measured line, not to two independent readings of it.
+   (2) THE TARGET IS THE TOP OF THE DIGITS, NOT `.snum`'s BOX TOP. The box top is the top of the
+   number's LINE BOX — half-leading plus the font's full ascent above the baseline — and the digits do
+   not reach it: measured on the live row, .snum's box top sits ~4.6px above the cap of its own "1" at
+   13px. Aligning to the box would put the word's head-line visibly above the number it is meant to be
+   level with, which is the misalignment this exists to remove, so the digits' own cap top is what is
+   measured (`_msnumNumMark`'s baseline less `capHeightPx` in .snum's own face — lining tabular figures,
+   so cap height IS digit height). ⚠️ snumCapHeightLiftEm above still targets the box top; it is not
+   changed here because nothing currently consumes it (see `--script-lift`'s note in refreshFontStacks)
+   and re-aiming an inert Grantha-only number on the way past would be a second, unreported change. */
+function snumHeadlineLiftEm(){
+  try{
+    _measMountSnum();
+    if(!_msnum.isConnected) return null;   // no #doc to mount in — a detached row reads back all-zero rects and a default 16px font, i.e. a confident-looking wrong number. refreshFontStacks only calls this inside its own `if(d)`, so this is belt-and-braces for a harness that loads this file alone
+    if(typeof STACKING_SCRIPTS!=="undefined"&&STACKING_SCRIPTS.has(ORTHO_SCHEME)) _msnumScript.classList.add("stext-stacked");
+    else _msnumScript.classList.remove("stext-stacked");   // …so Tibetan/Zanabazar Square's line-height:2 (and the .shead:has(.stext-stacked) margins it triggers on .snum) are part of what gets measured, rather than a correction bolted on afterwards
+    const ref=magFont(TOK_REF_SIZE), refPx=fontPxOf(ref), headPx=scriptHeadlinePx(ref);
+    if(!(headPx>0&&refPx>0)) return null;   // no orthography rendered yet (fillOrtho is async), or the face will not measure — the em-box path is still the best answer
+    const headEm=headPx/refPx;
+    let ch="";
+    outer: for(const s of (typeof DOC!=="undefined"?DOC:[])){ for(const t of (s.tokens||[])){
+        const o=t.ortho||""; for(const c of o){ if(c>" "){ ch=c; break outer; } } } }
+    if(!ch) return null;
+    _msnumScript.textContent=""; _msnumScript.appendChild(_msnumMark); _msnumScript.appendChild(document.createTextNode(ch));   // one representative letter — the span only has to establish the row's line box; WHERE the head-line falls in it comes from headEm, not from this glyph
+    const fontPx=parseFloat(getComputedStyle(_msnumScript).fontSize)||0;
+    if(fontPx<=0) return null;
+    const numCs=getComputedStyle(_msnumNum);
+    const capPx=capHeightPx(numCs.fontWeight+" "+numCs.fontSize+" "+numCs.fontFamily);   // SIZE BEFORE FAMILY (weight may lead) — an invalid shorthand is silently rejected and leaves _mch at a previous caller's font; see capHeightPx's own note
+    if(capPx<=0) return null;
+    const headY=_msnumMark.getBoundingClientRect().top-headEm*fontPx;   // the script's baseline (the marker) less its head-line height, i.e. where the head-line paints with no lift applied
+    const digitTopY=_msnumNumMark.getBoundingClientRect().top-capPx;    // the number's baseline less its cap height, i.e. the top of the "1"
+    return (headY-digitTopY)/fontPx;
   }catch(_){ return null; } }
 function scriptFamilyPrefix(){ return (typeof fontStackName==="function"&&ORTHO_SCHEME)?("'"+fontStackName(ORTHO_SCHEME)+"', "):""; }
 /* ⚠ stackDropExtra() ITSELF IS REMOVED — after its Grantha-specific Chrome-compensation floor was
@@ -1002,7 +1084,19 @@ function refreshFontStacks(){
     TOK_OP_RUN=magOpacityRun(TOK_MAG); d.style.setProperty("--script-op-run",TOK_OP_RUN.toFixed(3));   // the running sentence's OWN, gentler curve — same reasoning, different context, see magOpacityRun's own note
     TOK_ASC=scriptAscentEm(); d.style.setProperty("--script-asc",TOK_ASC.toFixed(3));
     TOK_MID=scriptMidEm();   // svgSeamMark's own vertical re-centring against the magnified word beside it — JS-internal only, no CSS consumer
-    TOK_LIFT=scriptLiftEm(); d.style.setProperty("--script-lift",TOK_LIFT.toFixed(4)); }   // cached into a plain JS global (not re-read back off the CSS var, which is colour-cache-adjacent and cleared on a different trigger)   // (--script-align is published ABOVE, before this measurement rather than after it — see its own note)   // empty (no #doc, or the property somehow unset) → keep whatever was last live, which starts as the static base
+    TOK_LIFT=scriptLiftEm(); d.style.setProperty("--script-lift",TOK_LIFT.toFixed(4));
+    /* ⚠ AND THE ONE THE CSS ACTUALLY READS IS THE GATED COPY. `--script-lift` has had NO consumer since
+       `.stext-script`'s `top` was removed on request ("the measured shirorekha-lift is gone from this
+       property, for every enlarged Sanskrit script") — it is still published, and scriptLiftEm() is
+       still the honest answer to its own question, but nothing reads it. Reviving THAT property would
+       move every magnified script's running line at once, which is the change that was asked to be
+       undone; what has now been asked for instead is narrower — "hanging status should also determine
+       the alignment of the running sentence" — so the lift reaches the CSS only where the script has a
+       head-line to align BY, and every other script's running line is left exactly where the removal
+       left it. One measurement (scriptLiftEm() already returns the head-line number for a hanging
+       script — see its own branch), two publishes, and the whole gate stated in one place. */
+    TOK_HANG_LIFT=(TOK_MAG>1&&typeof HANGING_SCRIPTS!=="undefined"&&HANGING_SCRIPTS.has(ORTHO_SCHEME))?TOK_LIFT:0;
+    d.style.setProperty("--script-hang-lift",TOK_HANG_LIFT.toFixed(4)); }   // cached into a plain JS global (not re-read back off the CSS var, which is colour-cache-adjacent and cleared on a different trigger)   // (--script-align is published ABOVE, before this measurement rather than after it — see its own note)   // empty (no #doc, or the property somehow unset) → keep whatever was last live, which starts as the static base
   // a font-stack change is the ONE non-content thing that can change what meas() returns (js/grid/grid.js's
   // computeColW/pillColW measure against GRID_F/HEAD_F, both built from LIVE_MONO_STACK/LIVE_TOKEN_STACK below)
   // → the column-width cache's every cached measurement is now stale, so force a full rescan rather than trust

@@ -669,6 +669,40 @@ the same N pulls the flow's own "row ends here" back up by that same N, closing 
 (the bug this read as `+`, until measured) adds to it, doubling it instead of closing it. Measured in
 isolation: `top:-N` alone → an N-tall gap where flow expected none; `top:-N` with `margin-bottom:+N` →
 2N; `top:-N` with `margin-bottom:-N` → 0, matching the unshifted layout. Every term is 0 at mag 1.
+⚠ **THEN THE WHOLE `top` WAS REMOVED ON REQUEST — AND IS BACK FOR THE HANGING SCRIPTS ONLY.** The
+`.stext-script` lift above was dropped for every enlarged Sanskrit script (the number and the block
+controls were pushed DOWN by `calc(2em − 2ex)`/`calc(1.5em − 1.5ex)` instead, and then rescoped to
+`:has(.stext-stacked)`), which left `--script-lift` published and read by nothing at all — including the
+Grantha `snumCapHeightLiftEm` retarget, which has therefore never been on screen. It is back under a
+SECOND name and a narrower gate, on the report "hanging status should also determine the alignment of the
+running sentence": `--script-hang-lift` is `scriptLiftEm()`'s answer **published only for a
+`HANGING_SCRIPTS` member** and a literal 0 for everything else, so Grantha/Javanese/Balinese/Kawi/Burmese/
+Brahmi keep the un-shifted line the removal gave them (verified: their `.shead` screenshots are
+byte-identical before and after) and only a script with a head-line to align BY moves. `--script-lift`
+itself is still published and still consumed by nothing.
+⚠ **AND FOR THOSE SCRIPTS THE em-BOX APPROXIMATION IS GONE, REPLACED BY THE BRACKETS' OWN MEASUREMENT.**
+`scriptLiftEm()` now answers a `HANGING_SCRIPTS` member from `snumHeadlineLiftEm()` — the synthetic
+`.shead` row `snumCapHeightLiftEm` already builds, but reading back how far the face's real head-line
+(`scriptHeadlinePx`, the median ink ascent of the base letters) sits below the top of `.snum`'s DIGITS
+(its baseline less `capHeightPx`, **not** its box top, which is ~4.6px higher at 13px). `scriptHeadlinePx`
+is asked at `magFont(TOK_REF_SIZE)` — the identical string `centreBracketLift` passes — so the bracket and
+the sentence number align to ONE measured line and share one memo entry; the em ratio is scale-free, so it
+rescales to the running line's smaller size. Measured, head-line vs digit top, every hanging script:
+**0.00–0.01px** (Devanagari lift 0.1104em, Gujarati 0.1294, Nandinagari 0.1104, Tibetan 0.0544, Rañjanā
+0.1345, Siddhaṃ 0.1355, Soyombo 0.1045, Zanabazar Square **−0.1403** — negative, i.e. pushed DOWN, because
+its `.snum` is already displaced by the `:has(.stext-stacked)` margin). The gap from the line to the row
+below is unchanged to 0.01px in every case, and the block height to ≤0.5px. **The Tibetan line-height:2
+half-leading correction is subsumed, not bypassed** — the synthetic row is laid out with `.stext-stacked`
+on it, so the engine reports the half-leading rather than the arithmetic having to model it; the em-box
+path and its Tibetan term stay below as the fallback for when the measurement returns null (no #doc, no
+orthography yet, a face that will not measure). Grantha is not a member and is untouched.
+⚠ **Gujarati and Nandinagari joined `HANGING_SCRIPTS` in the same report, overruling the round that had
+excluded them** ("defined by dropping the shirorekha", "the head-strokes do NOT join"). Those readings are
+true and were the wrong test: the list is consulted for an ALIGNMENT, and a rule need not be continuous to
+be a line. Re-rendered against the app's own bundled faces at 64px, Noto Sans Nandinagari draws every base
+consonant's head-stroke at ONE height (a dashed shirorekha) and Noto Sans Gujarati tops every letter flat
+at one height. Both consumers move for them: the running line by the numbers above, and the brackets by
++1.01px (Gujarati) / +1.43px (Nandinagari), the same register as Devanagari's own documented +0.99px.
 
 ⚠ **A z-index cannot beat the native window-tab bar.** Every floating popup clamps its top to
 `menuTopBound()` (`js/core/scroll.js`) rather than to a bare `8`: the app's own titlebar is web content

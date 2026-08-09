@@ -516,32 +516,48 @@ const STACKING_SCRIPTS=new Set(["Grantha","Javanese","Balinese","Kawi","Burmese"
 /* ── THE HANGING SCRIPTS: the ones whose letters HANG FROM A HEAD-LINE rather than SIT ON a baseline ──
    A third judgement list beside ORNAMENTAL_SCRIPTS and STACKING_SCRIPTS, and it answers a third,
    independent question: not "is this ornament too fine to read at body size" (magnification) and not
-   "do its subjoined marks need room below" (reserve), but "does this script draw a continuous
-   horizontal line along the top of its words". Where it does, that line — the shirorekha/mātrā, or its
+   "do its subjoined marks need room below" (reserve), but "does this script give its words a single
+   horizontal reference line along the top". Where it does, that line — the shirorekha/mātrā, or its
    flat-topped equivalent — is the script's own visual reference line, and Latin furniture set beside a
-   word wants to meet it rather than to be centred on some band borrowed from Latin's own metrics. Its
-   one consumer is `centreBracketLift` (js/diagram/diagram-core.js), on request ("hanging scripts for
-   Sanskrit should be aligned to brackets by the hanging line in brackets view"); the head-line's actual
-   HEIGHT is measured per face (`scriptHeadlinePx`), never tabulated — this list decides only whether the
-   script HAS one.
+   word wants to meet it rather than to be centred on some band borrowed from Latin's own metrics. Two
+   consumers now: `centreBracketLift` (js/diagram/diagram-core.js), on request ("hanging scripts for
+   Sanskrit should be aligned to brackets by the hanging line in brackets view"), and — on the follow-up
+   request "hanging status should also determine the alignment of the running sentence" — the running
+   line's own lift against the sentence number (`snumHeadlineLiftEm`/`--script-hang-lift`, same file).
+   The head-line's actual HEIGHT is measured per face (`scriptHeadlinePx`), never tabulated — this list
+   decides only whether the script HAS one.
    ⚠ MEMBERSHIP WAS READ OFF THE APP'S OWN FACES, not off the literature: every candidate's 33 base
    consonants were rendered in the very font this app ships for it and inspected. In = a single unbroken
    (Devanagari, Bengali, Tirhuta, Sharada, Newa, Rañjanā) or flat-topped-and-level (Siddhaṃ, Soyombo,
-   Tibetan, Zanabazar Square) top line. Out, and each for a reason visible in that sheet: NANDINAGARI
-   (its whole distinction from Nagari is that the head-strokes do NOT join), BHAIKSUKI (per-letter
-   arrow-heads, not a line — which is also why the "arrow-head script" is named for them), BRAHMI (no
-   head-stroke at all), GRANTHA/Malayalam/Kannada/Telugu/Sinhala/Tamil (round tops), GUJARATI (defined by
-   dropping the shirorekha), ORIYA (umbrella tops, a curve rather than a rule), and the South-East Asian
-   set (Javanese, Balinese, Kawi, Burmese, Khmer, Thai, Cham, Tai Tham).
+   Tibetan, Zanabazar Square) top line. Out, and each for a reason visible in that sheet: BHAIKSUKI
+   (per-letter arrow-heads, not a line — which is also why the "arrow-head script" is named for them),
+   BRAHMI (no head-stroke at all), GRANTHA/Malayalam/Kannada/Telugu/Sinhala/Tamil (round tops), ORIYA
+   (umbrella tops, a curve rather than a rule), and the South-East Asian set (Javanese, Balinese, Kawi,
+   Burmese, Khmer, Thai, Cham, Tai Tham).
+   ⚠ GUJARATI AND NANDINAGARI ARE IN, OVERRULED ON LIVE REPORT ("Gujarati and Nandinagari are also
+   hanging scripts") — and the reasoning that had excluded them is kept here rather than deleted,
+   because what it got wrong is instructive. It read the question as "is a continuous rule DRAWN", and
+   on that reading both were out for real reasons: Nandinagari's whole distinction from Nagari is that
+   the head-strokes do NOT join, and Gujarati is defined by dropping the shirorekha altogether. But the
+   question this list is consulted for is an ALIGNMENT one — "is there one horizontal line along the top
+   of the letters for a bracket, or a sentence number, to meet" — and a rule does not have to be
+   continuous to be a line. Re-rendered against the app's own bundled faces at 64px (the same
+   contact-sheet method the original round used, .claude/scratch_y25/y27sheet.mjs): Noto Sans
+   Nandinagari draws every base consonant with its own flat head-stroke, all at ONE height, reading as a
+   dashed shirorekha; Noto Sans Gujarati draws no stroke but tops every letter flat at one height, the
+   shirorekha's ghost. Either answers "where is the top line" unambiguously, which is all the two
+   consumers ask. The literature-style criterion is the one that was too strict, not the report.
    ⚠ A "FLATNESS" PROBE WAS TRIED FIRST AND REJECTED — measuring whether a script's base consonants share
    one ink top, so the list could be derived rather than judged. It answers a DIFFERENT question and
    answered it unreliably here: Burmese and Cham came back perfectly level (uniform letter height is not
    a head-line), while Bengali and Tirhuta — which have one of the most unmistakable head-lines there is
    — came back with a third of an em of spread, off a font-resolution difference between the canvas
    probe and the painted face. A list that can be checked by eye against a contact sheet is the honest
-   form for this. */
+   form for this. (Note that the Gujarati correction above does NOT reopen it: "level tops" is necessary
+   for a head-line and not sufficient — Burmese has them and has no head-line — so the eye still has to
+   decide, which is exactly what this list records.) */
 const HANGING_SCRIPTS=new Set(["Devanagari","Bengali","Tirhuta","Sharada","Newa","Ranjana",
-  "Siddham","Soyombo","Tibetan","ZanabazarSquare"]);
+  "Siddham","Soyombo","Tibetan","ZanabazarSquare","Gujarati","Nandinagari"]);
 function isLzhLang(lang){ const b=((lang!=null?lang:DOCLANG)||"").toLowerCase().split(/[-_]/)[0]; return b==="lzh"; }
 /* Literary Chinese magnifies too, on request — its Han glyphs run to the same dense, fine-stroke
    complexity (rare/archaic characters, more strokes per square than the simplified everyday set) that
