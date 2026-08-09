@@ -312,7 +312,7 @@ _lazyFont("LIVE_TOKEN_STACK",()=>TOKEN_STACK); _lazyFont("LIVE_MONO_STACK",()=>M
    why a canvas font string cannot read the property itself). 1 everywhere except the ornamental Sanskrit
    scripts. It multiplies the TOKEN-FORM faces only — WORD_F/NODE_F/MWT_F and the goeswith tie — never the
    POS, transliteration or gloss rows, which are Latin annotation drawn at the app's own body size. */
-let TOK_MAG=1, TOK_WGHT=400, TOK_TRACK=0, TOK_ASC=1, TOK_MID=0, TOK_LIFT=0, TOK_OP=1, TOK_OP_RUN=1, STACKED_GAP=0, TOK_Y_LOWER=0, LZH_MAG=false, TR_TIGHTEN=0, TOK_TR_GAP=0, NODE_Y_EXTRA=0, TOK_DESC=0, MAG_DEPREL_GAP=0;
+let TOK_MAG=1, TOK_WGHT=400, TOK_TRACK=0, TOK_ASC=1, TOK_MID=0, TOK_LIFT=0, TOK_OP=1, TOK_OP_RUN=1, STACKED_GAP=0, TOK_Y_LOWER=0, LZH_MAG=false, TR_TIGHTEN=0, TOK_TR_GAP=0, NODE_Y_EXTRA=0, MAG_DESC=0, TOK_DESC=0, TR_ROW_DESC=0, MAG_DEPREL_GAP=0;
 // TOK_WGHT stays 400 for magnified faces now (see magTrack's own note on why the weight curve was dropped for
 // them), so this omits a weight token and lets the face render at its own resting weight.
 function magFont(px){ const w=TOK_WGHT;
@@ -1103,19 +1103,52 @@ function refreshFontStacks(){
      descent() has always meant everywhere else in this file (belowGap, NODE_DESC_EXTRA, RELDESC). Measured
      5.40px at TOK_MAG 1.5 against TR_TIGHTEN's 5.23 — close enough that only the wording distinguishes them,
      which is why each is stated in the form it was asked in rather than collapsed into one number.
-     Two callers: brackets' token→deprel gap (+TOK_DESC, on top of the +2.5 it already carries) and outline's
-     row padding (±TOK_DESC/2, top gaining what the bottom gives up). */
-  TOK_DESC=LZH_MAG?descent(NODE_F):0;
+     ⚠️ TWO GATES, ONE MEASUREMENT. The quantity is the magnified node face's own descent; who takes it is a
+     separate question that has now been answered differently for the two callers, so it is stated once
+     (MAG_DESC, every magnified script — exactly scriptMag()'s two branches, as MAG_DEPREL_GAP below) and
+     narrowed once (TOK_DESC, Literary Chinese only). Both callers used to read TOK_DESC:
+      · brackets' token→deprel gap stays lzh-only — "brackets are perfect" was said of Sanskrit brackets in
+        the round that introduced this, and nothing since has revisited it;
+      · outline's row padding is now asked for in magnified SANSKRIT too ("in Sanskrit outline view, the rows
+        need the same vertical padding adjustment we did for lzh"), so it reads MAG_DESC instead. Widening
+        TOK_DESC's own gate would have carried brackets along with it, which is the one thing that must not
+        happen — hence the split rather than a flipped condition. */
+  MAG_DESC=TOK_MAG>1?descent(NODE_F):0;
+  TOK_DESC=LZH_MAG?MAG_DESC:0;   // identical to the LZH_MAG?descent(NODE_F):0 it replaces — LZH_MAG implies TOK_MAG>1, so MAG_DESC is already the descent whenever this is nonzero
+  /* ⚠ AND THE TRANSLITERATION ROW'S OWN DESCENT, which is a THIRD quantity again and neither of the two above
+     ("in hierarchies (for lzh), both the space above a token and the space below a transliteration need to be
+     increased by transliteration descender length"). Not TOK_DESC — that is the NODE GLYPH's face (NODE_F,
+     magnified, 5.40px), and this gap is bounded below by the transliteration's own descenders, which are what
+     collide. Not TR_TIGHTEN's em/ex form either: same reasoning as TOK_DESC's own note, the bare phrase means
+     descent(). Measured 3.60px — TRANS_F is 15px and UNMAGNIFIED (only the form row ever magnifies), so unlike
+     every other term here this one does not grow with TOK_MAG; it is the row's real ink depth and that is the
+     point. TRANS_F rather than per-token trFont(): a level height is one number for the whole figure, and the
+     upright variant a Foreign=Yes token takes (TRANS_UP_F) measures the same 3.60 anyway.
+     Two applications, both in tree() (js/diagram/diagram-wrap.js) and both gated there on the transliteration
+     row actually being drawn — see its own note for why the pair has to move together.
+     ⚠️ TRANS_F/TRANS_UP_F are REASSIGNED HERE, hoisted up out of the block at the end of this function, because
+     this is the first term to MEASURE one of them: read where they used to be set, `descent(TRANS_F)` would
+     answer for the PREVIOUS font stack on every refresh that changes it (the lazy getter only covers the very
+     first call), i.e. a scheme switch would carry one refresh's worth of stale descent. Nothing between here
+     and their old position reads either. */
+  TRANS_F='italic 15px '+LIVE_TOKEN_STACK; TRANS_UP_F='15px '+LIVE_TOKEN_STACK;
+  TR_ROW_DESC=LZH_MAG?descent(TRANS_F):0;
   /* ⚠ AND THE WRAPPED STEMMA/HIERARCHY'S TOKEN→DEPREL GAP IS THE ONE GEOMETRY TERM THAT IS *NOT* lzh-only
      ("the parts of the lzh corrections that also apply to enlarged Sanskrit scripts are: increased gap
-     between token and deprel (in wrapped stemmas and hierarchies; brackets are perfect)"). Its total is
-     exactly what flat brackets carries for lzh — TOK_TR_GAP + the descent — so the two views agree at 33.3px
-     rather than each inventing a figure. projWrapped had NOTHING before this: it is exempt from TOK_Y_LOWER
+     between token and deprel (in wrapped stemmas and hierarchies; brackets are perfect)"). Its total was
+     taken from what flat brackets carried for lzh — TOK_TR_GAP + the descent — so the two views would state
+     one figure at 33.3px rather than each inventing its own.
+     ⚠️ THEY NO LONGER AGREE, and deliberately: brackets was asked for a FURTHER descent one round later ("in
+     brackets, the token-deprel gap needs to be increased (probably by descender length)") and is now
+     TOK_TR_GAP + 2·TOK_DESC = 38.7px for lzh, while nothing was said about the wrapped stemma/hierarchy, so
+     this stays where it was approved. The 33.3 above is therefore history rather than a live invariant — do
+     not "restore" it by chasing brackets without being asked to.
+     projWrapped had NOTHING before this: it is exempt from TOK_Y_LOWER
      (its tree fills its box, so there is no crop to loosen) and its token strip draws no `boxes`, so this is
      fresh geometry rather than a gate being widened. `TOK_MAG>1` IS the "magnified Sanskrit or lzh"
      condition asked for, exactly: scriptMag() (js/lang/translit.js) raises it from those two branches and
      nothing else. */
-  MAG_DEPREL_GAP=TOK_MAG>1?(2.5+descent(NODE_F)):0;
+  MAG_DEPREL_GAP=TOK_MAG>1?(2.5+MAG_DESC):0;   // MAG_DESC IS `TOK_MAG>1?descent(NODE_F):0` — the same expression this used to spell out, now stated once above and shared with outline's row padding
   if(d){
     /* ⚠ AND A MAGNIFIED TOKEN IS CENTRED ON ITS ROW-MATES RATHER THAN SHARING THEIR BASELINE, in the two
        notations that set a token IN A ROW of small annotations rather than above/below them ("in brackets
@@ -1151,7 +1184,7 @@ function refreshFontStacks(){
        With it, that same diff is empty. */
     d.style.setProperty("--script-brk-pos",TOK_MAG>1?"relative":"static"); }
   POS_F='15px '+LIVE_TOKEN_STACK; GRID_F='462 13px '+LIVE_MONO_STACK; HEAD_F='500 11px '+uiFont(); HEAD_F_REQ='700 11px '+uiFont();   // HEAD_F/HEAD_F_REQ ride along on this refresh only for uniformity — it is built off --ui-font, not off either LIVE_ stack (see its lazy definition above), so nothing this function reacts to can actually change it
-  TRANS_F='italic 15px '+LIVE_TOKEN_STACK; TRANS_UP_F='15px '+LIVE_TOKEN_STACK; MWT_F=WORD_F;
+  MWT_F=WORD_F;   // TRANS_F/TRANS_UP_F used to be set on this line; they are now set earlier, beside TR_ROW_DESC, which measures one of them — see its note
   GRID_ITAL_F='italic 462 13px '+LIVE_MONO_STACK;
   GLOSS_F=weightCurve(13.2)+' 13.2px '+LIVE_TOKEN_STACK; MSEG_F='italic 15px '+LIVE_TOKEN_STACK; MSEG_UP_F='15px '+LIVE_TOKEN_STACK; MGLOSS_F=weightCurve(13.2)+' 13.2px '+LIVE_TOKEN_STACK;
   GW_TIE_F=magFont(26);
