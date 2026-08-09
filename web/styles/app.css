@@ -1035,6 +1035,19 @@
   .punctsat{font-family:var(--token-font); font-size:14px; color:var(--text); letter-spacing:.0055em;   /* tracking curve @14px */ unicode-bidi:isolate; cursor:pointer}   /* a folded punctuation mark rendered as its OWN selectable, unannotated inline element beside its host (outline / wrapped brackets); real horizontal space, no arc/deprel/POS of its own */
   .punctsat.sel{color:var(--accent)}   /* accent only, no weight bump — see the "selected token text" note beside .node.sel .node-lbl */
   #doc.zone-grid .punctsat.sel{color:var(--accent-dim)}
+  /* ⚠ AND, IN WRAPPED BRACKETS ONLY, IT SCALES WITH THE MAGNIFIED SCRIPT — on report ("you made Sanskrit
+     punctuation small in brackets mode … I only wanted you to do it for seam markers"). The 14px base above
+     has never referenced --script-mag, so a daṇḍa satellite (।/॥) stayed flat 14px while its own host word
+     grew to 22.5px around it at TOK_MAG 1.5 — the SAME kind of un-magnified-annotation gap the wrapped
+     seam-mark fix closed for `.seam-mark`, just never closed here. Flat brackets and arcs draw the daṇḍa as
+     an ordinary SVG token (.tok-word), so they already scale correctly and needed no fix; this rule brings
+     the HTML .bwrap path to the same place. Scoped to .bwrap alone, matching the seam-mark fix's own
+     precedent and the explicit correction against widening it: `.oform`'s own punctuation (outline) is left
+     on the plain 14px above — outline has repeatedly been confirmed correct and nothing here should move it.
+     14px, not 15, to keep this class's own existing (pre-magnification) 1px-narrower-than-the-word
+     convention rather than silently adopting the form's own base. 0 at TOK_MAG 1, i.e. the flat 14px this
+     selector inherits. */
+  .bwrap .punctsat{font-size:calc(14px * var(--script-mag,1))}
   .otrans{font-style:italic; color:var(--dia-muted); font-size:14px; letter-spacing:.0255em;   /* tracking curve @14px (.0055em) + italic bump (ITALIC_TRACK, diagram-core.js — kept in sync with _measOneUncached's italicTrackOf() by hand) */ margin-inline-start:8px; unicode-bidi:isolate; font-family:var(--token-font)}   /* same size as the form beside it */
   /* item 7: under a script orthography the translit row shows the ORIGINAL (CJK) script — italics are for romanisation only */
   #doc.ortho-script .otrans,#doc.ortho-script .translit,#doc.ortho-script .strans{font-style:normal}
@@ -1085,10 +1098,13 @@
      the original, un-enlarged size, like in arcs". `1em` in a font-size resolves against the PARENT, so
      dividing by --script-mag lands exactly on the host's own unmagnified base (22.5→15) — the same
      quantity svgSeamMark computes as wordPx/TOK_MAG, and a no-op at mag 1.
-     ⚠️ SCOPED TO .bwrap, though `.outline` has the identical mismatch (21px against a 14px base) and the
-     identical one-line cure. Left alone deliberately: the outline has been called correct twice, and this
-     round asked for brackets. Widening is `.bwrap` → `.bwrap, .outline` here, nothing else. */
-  .bwrap span.seam-mark[data-seam-row="form"]{font-size:calc(1em / var(--script-mag,1)); top:calc((var(--script-mag,1) - 1) * 0.5em)}   /* …and re-centred, because `top:0` seats the span's LINE BOX at the host's top and the shrunk box no longer fills it: at 22.5px the mark landed mid-height by accident, at 15px it rode high. The shift is half the difference between the two boxes — in the mark's OWN em (which is host/mag), host − self = self·(mag − 1), so half of it is `(mag − 1) · 0.5em` — the HTML counterpart of the re-centring svgSeamMark does with TOK_MID. Exactly 0 at mag 1, i.e. the `top:0` this rule inherits. */
+     ⚠️ NOW WIDENED TO `.outline` TOO ("in Sanskrit outline view … seam markers need to be at the normal
+     token font size, just like in brackets view") — the identical mismatch (21px against a 14px base) this
+     note originally left alone "the outline has been called correct twice" is now the thing being asked
+     for. `1em`/`0.5em` are both expressed relative to the HOST's own computed font-size, so the same rule
+     applies correctly whether that host is `.bwform` (15px base) or `.oform` (14px base) — no second,
+     size-specific copy needed. */
+  .bwrap span.seam-mark[data-seam-row="form"],.outline span.seam-mark[data-seam-row="form"]{font-size:calc(1em / var(--script-mag,1)); top:calc((var(--script-mag,1) - 1) * 0.5em)}   /* …and re-centred, because `top:0` seats the span's LINE BOX at the host's top and the shrunk box no longer fills it: at 22.5px the mark landed mid-height by accident, at 15px it rode high. The shift is half the difference between the two boxes — in the mark's OWN em (which is host/mag), host − self = self·(mag − 1), so half of it is `(mag − 1) · 0.5em` — the HTML counterpart of the re-centring svgSeamMark does with TOK_MID. Exactly 0 at mag 1, i.e. the `top:0` this rule inherits. */
   span.seam-post{inset-inline-start:100%}   /* after the row: inset-inline-START:100% is its inline END, mirroring under RTL */
   span.seam-pre{inset-inline-end:100%}      /* before it, likewise mirrored */
   .has-seam{position:relative}   /* the containing block for the mark above — the row it belongs to */

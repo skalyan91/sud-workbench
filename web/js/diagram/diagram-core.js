@@ -312,7 +312,7 @@ _lazyFont("LIVE_TOKEN_STACK",()=>TOKEN_STACK); _lazyFont("LIVE_MONO_STACK",()=>M
    why a canvas font string cannot read the property itself). 1 everywhere except the ornamental Sanskrit
    scripts. It multiplies the TOKEN-FORM faces only — WORD_F/NODE_F/MWT_F and the goeswith tie — never the
    POS, transliteration or gloss rows, which are Latin annotation drawn at the app's own body size. */
-let TOK_MAG=1, TOK_WGHT=400, TOK_TRACK=0, TOK_ASC=1, TOK_MID=0, TOK_LIFT=0, TOK_OP=1, TOK_OP_RUN=1, STACKED_GAP=0, TOK_Y_LOWER=0, LZH_MAG=false, TR_TIGHTEN=0, TOK_TR_GAP=0, NODE_Y_EXTRA=0, MAG_DESC=0, TOK_DESC=0, TR_ROW_DESC=0, MAG_DEPREL_GAP=0;
+let TOK_MAG=1, TOK_WGHT=400, TOK_TRACK=0, TOK_ASC=1, TOK_MID=0, TOK_LIFT=0, TOK_OP=1, TOK_OP_RUN=1, STACKED_GAP=0, TOK_Y_LOWER=0, LZH_MAG=false, TR_TIGHTEN=0, TOK_TR_GAP=0, NODE_Y_EXTRA=0, MAG_DESC=0, TOK_DESC=0, TR_ROW_DESC=0, TR_ROW_EXTRA=0, BRK_DEPREL_LESS=0, MAG_DEPREL_GAP=0;
 // TOK_WGHT stays 400 for magnified faces now (see magTrack's own note on why the weight curve was dropped for
 // them), so this omits a weight token and lets the face render at its own resting weight.
 function magFont(px){ const w=TOK_WGHT;
@@ -1133,6 +1133,20 @@ function refreshFontStacks(){
      and their old position reads either. */
   TRANS_F='italic 15px '+LIVE_TOKEN_STACK; TRANS_UP_F='15px '+LIVE_TOKEN_STACK;
   TR_ROW_DESC=LZH_MAG?descent(TRANS_F):0;
+  /* ⚠ A FURTHER, FLAT 4px added to the hierarchy's below-transliteration reserve alone ("in hierarchies, the
+     transliteration needs another 4px of space below") — on top of, not instead of, TR_ROW_DESC's own
+     contribution there. Deliberately NOT added to the "space above a token" half of that same round: this
+     request names only "below", and folding it into trDrop (which feeds both halves via nyD) would move the
+     glyph itself again, which nothing here asked for. Lives in tree()'s own belowReserve expression, never in
+     nyD. lzh-only, matching every sibling term in this feature. */
+  TR_ROW_EXTRA=LZH_MAG?4:0;
+  /* ⚠ AND BRACKETS' TOKEN→DEPREL GAP GIVES BACK A FLAT 4px ("in brackets, deprels need 4px *less* of space
+     below") — a correction to the two-descent total the immediately preceding round shipped (TOK_TR_GAP +
+     2·TOK_DESC = 38.7px for lzh), not a reversion of it: the request is phrased as a further adjustment to
+     where the gap now sits, not "put it back". Subtracted from both RELEXTRA and relH in brackets() — the
+     two expressions that already carry TOK_DESC together, so they can't drift apart. lzh-only, matching
+     TOK_DESC's own scope (Sanskrit brackets stay excluded, "brackets are perfect"). */
+  BRK_DEPREL_LESS=LZH_MAG?4:0;
   /* ⚠ AND THE WRAPPED STEMMA/HIERARCHY'S TOKEN→DEPREL GAP IS THE ONE GEOMETRY TERM THAT IS *NOT* lzh-only
      ("the parts of the lzh corrections that also apply to enlarged Sanskrit scripts are: increased gap
      between token and deprel (in wrapped stemmas and hierarchies; brackets are perfect)"). Its total was
