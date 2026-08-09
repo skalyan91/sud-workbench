@@ -753,8 +753,8 @@ function _measOne(s,f,extraCss){
    Square) and for none of the BMP ones. Chrome shapes SMP in SVG, so NO headless test can see this —
    the same trap the Zanabazar Square note records, and the reason CLAUDE.md's claim that Kawi "comes
    out clean" was wrong: it was verified in a synthetic CDP harness.
-   NO LONGER DETECTED AT ALL — see smpUnshaped's own note for the two detection strategies tried and
-   abandoned, in order. */
+   NO LONGER DETECTED BY CONTENT — see smpUnshaped's own note for the two content-based detection
+   strategies tried and abandoned, in order, and for why ENGINE identity is the one signal that survived. */
 const SMP_RE=/[\uD800-\uDBFF][\uDC00-\uDFFF]/;
 /* ⚠ STOPPED TRYING TO DETECT THE FAILURE; JUST ASSUME IT, for any supplementary-plane text. Two
    detection strategies were built and both were reported wrong on real documents:
@@ -773,12 +773,28 @@ const SMP_RE=/[\uD800-\uDBFF][\uDC00-\uDFFF]/;
         horizontal "too far left" one the comparison was built to catch), and there is no cheap DOM
         signal available that answers the real question ("did this paint as one composed cluster or as
         loose codepoints") without literally rendering both ways and eyeballing them.
-     Given no available signal reliably answers "will this shape", the correct move is to stop asking:
-     supplementary-plane text (any script — the same failure is expected, on the same evidence, for
-     every SMP Brahmic script) is ALWAYS routed through the HTML fallback (smpReshape), which is the SAME
-     rendering path the running-sentence line already uses correctly. Simpler, and — unlike either
-     detection strategy — cannot be wrong about a case detection missed. */
-function smpUnshaped(s){ return SMP_RE.test(s||""); }
+     Given no available signal reliably answers "will this shape", the correct move is to stop asking
+     PER CONTENT: supplementary-plane text (any script — the same failure is expected, on the same
+     evidence, for every SMP Brahmic script) is routed through the HTML fallback (smpReshape), which is
+     the SAME rendering path the running-sentence line already uses correctly. Simpler, and — unlike
+     either abandoned detection strategy — cannot be wrong about a case content-based detection missed.
+     ⚠ BUT IT MUST STILL ASK PER ENGINE, ON REPORT — "all these Sanskrit script fixes were supposed to
+     be scoped to WKWebView, not Chromium". The two strategies above were abandoned because no per-STRING
+     or per-SCRIPT signal reliably predicts shaping success; ENGINE IDENTITY is neither of those — it is
+     not a guess about content, it is `!!window.chrome` (`IS_CHROMIUM`, js/core/platform.js), which the
+     shipping app already treats as ground truth elsewhere (the WebKit-only inner-div rule this feature
+     removed two rounds ago used the identical gate). Chrome shapes supplementary-plane Brahmic text in
+     SVG `<text>` correctly (this whole mechanism's own opening note says so — "WebKit does not shape…",
+     never "no engine does"), so swapping it there trades a correct rendering for the HTML fallback's own
+     seating/centring corrections, which exist to compensate for a failure Chrome never has. Every
+     consumer of `smpUnshaped()` exists ONLY to serve the swap or to measure for whichever path the swap
+     decision sends a string down (line ~1050's `meas()` branch), so gating it here — rather than at each
+     call site — makes every downstream correction (foBaselineDrop, the ornamental bracket-lift term,
+     the wrapped-strip clearance) WebKit-only for free, with nothing left to re-scope by hand. Defaults
+     to assuming the failure (proceeds as before) if `IS_CHROMIUM` is somehow unavailable — the same
+     "cannot be wrong about a case detection missed" posture the paragraph above already commits to. */
+function smpUnshaped(s){
+  return (typeof IS_CHROMIUM==="undefined"||!IS_CHROMIUM) && SMP_RE.test(s||""); }
 /* ── …AND THE FORMS THAT CANNOT SHAPE ARE DRAWN AS HTML INSTEAD ─────────────────────────────────────
    A <foreignObject> carrying an ordinary HTML element shapes through the engine's normal text path,
    which handles these scripts correctly — it is the same path the running sentence uses, and the
@@ -915,9 +931,19 @@ function smpReshape(root){
        since wrapping is an orthogonal display toggle and never changes `conv` itself. Nothing else about
        arcs moved: WORD_OFF, --dia-pad-extra and every arc/edge/crop term are exactly as the previous two
        rounds left them, so this undoes only smpReshape's own contribution to what arcs paints. */
-    const boxW=Math.ceil(w+2),
-      drop=(typeof conv!=="undefined"&&conv==="arcs")?asc:((typeof foBaselineDrop==="function")?foBaselineDrop(s,f,asc):asc);
-    fo.setAttribute("x",(x-boxW/2)+""); fo.setAttribute("y",(y-drop)+"");
+    /* ⚠ AND IN ARCS SPECIFICALLY THE SWAPPED GLYPH SHIFTS 0.5em RIGHT, ON REQUEST — measured centring
+       (both here and two rounds back, against real WKWebView pixels) says these five scripts paint on
+       the same slot centre every un-swapped script does; the reader's own eye, looking at the real app,
+       says arcs still reads as if they sit too far left, and the request is precise enough (a literal
+       em fraction, not "a bit more") to take as the intended correction rather than re-open the
+       measurement. `0.5 * fontPxOf(f)`, so the shift scales with whatever size this word is actually
+       painted at (the magnified token face, ORNAMENTAL_SCRIPTS' own 2× included) rather than a flat px
+       constant that would read as too little at 2× and too much unmagnified. Arcs only: brackets,
+       stemma, hierarchy and outline were never reported wrong here and stay on dead-centre. */
+    const boxW=Math.ceil(w+2), inArcs=(typeof conv!=="undefined"&&conv==="arcs"),
+      drop=inArcs?asc:((typeof foBaselineDrop==="function")?foBaselineDrop(s,f,asc):asc),
+      arcShift=inArcs?0.5*(fontPxOf(f)||0):0;
+    fo.setAttribute("x",(x-boxW/2+arcShift)+""); fo.setAttribute("y",(y-drop)+"");
     fo.setAttribute("width",boxW+"");
     /* ⚠ HEIGHT IS A CSS calc(), NOT A JS-COMPUTED PIXEL NUMBER, ON REQUEST — "try computing the heights
        using a calc with em units instead of trying to compute everything in pixels". The previous version
