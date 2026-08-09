@@ -484,8 +484,27 @@ function stxUnitEl(d,text){ const e=document.createElement("span");   // no `edi
    simply loses its decorations quietly — which is exactly the kind of silent divergence worth a mark.
    A SIBLING of the line, never a child: .stext is contenteditable and commitSentText reads el.textContent, so
    anything inside it would be committed into `# text` (the same constraint that ruled out <ruby> for the typo
-   mark, see below). Find-or-create, because paintStext runs on every repaint and must stay idempotent. */
-function setStextWarn(el,bad){ if(!el||!el.parentElement) return;
+   mark, see below). Find-or-create, because paintStext runs on every repaint and must stay idempotent.
+   ⚠ THE VERY FIRST PAINT RUNS BEFORE THE LINE HAS A PARENT, AND THAT USED TO LOSE THE BADGE SILENTLY.
+   wireStext's own paintStext call (buildBlock, above) fires while `el` is still a bare, unattached node — the
+   surrounding .shead/.sblock/.docsheet chain is only stitched together and appended to #doc by statements
+   AFTER it, later in the same function — so insertAdjacentElement had no sibling slot to land in and this
+   function's original one-line guard just gave up. Usually invisible: a bridge round-trip (a parse, a model
+   answer) triggers repaintStext once the block is live, which finds the badge missing and adds it. But a
+   genuine mismatch needs no bridge to be detected — stextAlign answers `bad` synchronously off text already in
+   hand — so a non-Sanskrit document with no model loaded got exactly one paint, on a detached node, and never
+   raised the badge at all: reachable, not hypothetical, once the daṇḍa false-positive above stopped being the
+   thing masking it in Sanskrit specifically. `_stxRetried` bounds the fix to ONE retry rather than an unbounded
+   requeue: a microtask fires only once the current synchronous task fully unwinds, which for this call site is
+   always after buildBlock has appended the block (proved by the append being a later statement in the very
+   function that is still on the stack when the microtask is queued) — so the retry always finds a parent on a
+   normal render. The flag exists only to stop a genuinely orphaned node (rendered, then discarded by another
+   render before this task drained) from rescheduling itself forever; it fails silently there, exactly as this
+   function always has for a detached element. */
+function setStextWarn(el,bad){ if(!el) return;
+  if(!el.parentElement){
+    if(bad && !el._stxRetried){ el._stxRetried=true; queueMicrotask(()=>setStextWarn(el,bad)); }
+    return; }
   let w=el.nextElementSibling; if(w&&!w.classList.contains("stx-warn")) w=null;
   if(!bad){ if(w) w.remove(); return; }
   if(w) return;
