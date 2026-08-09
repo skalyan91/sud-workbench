@@ -148,7 +148,14 @@ let PAGED=true;
 // OUTLINE, whose rows run those tiers inline rather than stacked, where it goes on the form alone — see that call
 // site.
 const MSEG_MARK="꞊", MORPH_MARK="-";   // U+A78A, U+002D
-function msegGlued(s,tokId){ return (s&&s.mwt||[]).some(m=>tokId>=m.from&&tokId<m.to); }   // token `tokId` (1-based) is a NON-FINAL member of some MWT range, i.e. its word continues into the next token
+// THE MWT RANGE A SEAM IS INSIDE — the range holding BOTH token `k` and token k+1, i.e. the orthographic word the
+// seam between them is internal to; null where the seam lies in no range at all. `k>=m.from && k<m.to` says exactly
+// that: k is a NON-FINAL member, so k+1 is a member too and the two are in ONE range (a marked MWT seam can
+// therefore never straddle two different ranges). msegGlued is the same test asked as a yes/no, and is written in
+// terms of this one so the two cannot drift — "is this token's word continued into the next" and "which word is it"
+// are one fact. Rule 2 of seamOwner is the other caller; see its note below.
+function seamMwt(s,k){ return ((s&&s.mwt)||[]).find(m=>k>=m.from&&k<m.to)||null; }
+function msegGlued(s,tokId){ return !!seamMwt(s,tokId); }   // token `tokId` (1-based) is a NON-FINAL member of some MWT range, i.e. its word continues into the next token
 // mSUD: a "/m" relation says its two ends are morphemes of ONE word, so a seam is word-internal exactly when some
 // "/m" edge SPANS it (the relation is what makes the word, so nothing here assumes a word's morpheme tokens are
 // contiguous — a spanning edge is the evidence either way). Returns the set of seam ids the sentence's "/m" edges
@@ -173,9 +180,9 @@ function morphSeams(s){ const seams=new Set();
 //     settles nothing, and the rules below take over.
 //     Deliberately FIRST: "always" means what it says, so a "/m" member takes its mark even where its group head
 //     is some ancestor the token on the other side of the seam has nothing to do with.
-//  2. AN ANCESTOR TIE: if one of the two is an IMMEDIATE head or dependent of an ANCESTOR of the other, it owns
-//     the seam — it is tied into the other's line of descent above the other, which makes it the member of the
-//     pair the boundary hangs from.
+//  2. AN ANCESTOR TIE INSIDE THE WORD: if one of the two is an IMMEDIATE head or dependent of an ANCESTOR of the
+//     other, AND THAT ANCESTOR IS ITSELF PART OF THE MWT THE SEAM SITS IN, it owns the seam — it is tied into the
+//     other's line of descent above the other, which makes it the member of the pair the boundary hangs from.
 //     IMMEDIATE qualifies the LINK, not the ancestor: the ancestor may sit at ANY depth on the other token's head
 //     chain — its head, its grandparent, higher still — but the tie to that ancestor has to be a DIRECT edge (the
 //     token is that ancestor's own head, or its own dependent). A tie mediated by some further token in between is
@@ -183,6 +190,28 @@ function morphSeams(s){ const seams=new Set();
 //     GRANDPARENT/GRANDCHILD (one is the head of the other's head), but a direct edge to an ancestor further up
 //     qualifies just the same. Where NEITHER side is tied that way, rule 2 says nothing and the seam falls through
 //     to rule 4 and is centred.
+//     ⚠ THE ANCESTOR MUST LIE INSIDE THE SEAM'S OWN MWT, and that restriction is the whole of rule 2's reach. The
+//     question rule 2 answers is which of two pieces of ONE WORD an internal boundary hangs from, so only the
+//     word's OWN internal structure can answer it: a tie to something OUTSIDE the word is a fact about how the
+//     whole word attaches to the rest of the sentence, and says nothing about where the boundary inside it
+//     belongs. Read without the restriction the rule fired on exactly that — French `du` = `de`+`le` (samples/
+//     french_mwt.conllu), where `le`'s head is `chat` and `chat`'s own head is `de`, so `de` is the direct HEAD of
+//     an ancestor of `le`… and `chat` is the word AFTER the MWT entirely: the seam was awarded to `de` ("de꞊le")
+//     on the strength of a token outside the pair's own word. With the restriction that
+//     tie is not a tie, and the seam falls through to rule 4 and is centred, which is the honest rendering when
+//     nothing INSIDE the word claims the boundary. In-word ties are untouched and still decide: a four-component
+//     Sanskrit compound whose members hang off its last component is settled by rule 2 exactly as before.
+//     "THE SEAM'S OWN MWT" (seamMwt) is the range containing BOTH tokens — the only reading that is well defined,
+//     and the only one the data can produce: msegFlagSent reaches seamOwner only for a seam that carries a mark,
+//     and an MWT mark's two tokens are always members of ONE range (see seamMwt). Where the seam is in no range at
+//     all — an mSUD "/m" morpheme seam in a document with no MWT ranges — there is no such word to test an
+//     ancestor against and rule 2 says nothing, the same answer it gives for a tie it cannot honour. That costs
+//     nothing in practice: rule 1 settles a "/m" seam before rule 2 is ever consulted (measured over every marked
+//     seam in every sample — samples/chinese_msud.conllu's two "/m" seams are both rule-1 decisions), and the two
+//     readings can only differ where rule 1 leaves the seam open: a "/m" edge SPANNING a seam neither of whose
+//     tokens is a "/m" member itself, or two different morph groups meeting at one seam, in a document that also
+//     has no MWT range there. The alternative — leave rule 2 unrestricted where the seam has no MWT — was rejected as an unstated
+//     exception to a rule that reads better without one; flipping to it is one clause in ancTieDepth.
 //     TWO readings had to be pinned down here, both of them load-bearing:
 //     · AGAINST RULE 3. Read literally, rule 2 would swallow every directly-linked pair and leave rule 3 dead:
 //       where k+1's head IS k, k is (in the ordinary case) also a dependent of ITS own head, which is an ancestor
@@ -191,7 +220,11 @@ function morphSeams(s){ const seams=new Set();
 //       itself, so it is skipped entirely for a directly-linked pair: `linked` below gates it, and rule 3 owns
 //       that case. The two rules' antecedents are therefore mutually exclusive, which is also why a rule-2 tie
 //       (below) can never fall through to rule 3.
-//     · WHEN BOTH SATISFY IT. Two tokens sharing one head are each a direct dependent of an ancestor of the other,
+//     · WHEN BOTH SATISFY IT — both of them under the in-word restriction above, since a tie that restriction
+//       rejects is not a tie at all and must not reach this tie-break either. One side rejected leaves the OTHER
+//       side's single tie to answer on its own; both rejected leaves rule 4. That falls out of applying the
+//       restriction INSIDE ancTieDepth, where each side's depth is computed, rather than filtering afterwards.
+//       Two tokens sharing one head are each a direct dependent of an ancestor of the other,
 //       and rule 2 as written would hand the seam to both. The tie-break is RULE 1'S OWN PRINCIPLE, applied to the
 //       shared head instead of to a morphological group head: THE TOKEN FURTHER FROM THAT HEAD OWNS THE SEAM —
 //       measured, exactly as rule 1 measures it, in SURFACE ORDER (rule 1 asks nothing but which SIDE the group
@@ -206,6 +239,11 @@ function morphSeams(s){ const seams=new Set();
 //       of the other" — making head(k) and head(k+1) both common ancestors, and each of them therefore equal to the
 //       nearest one. sharedHead is still computed rather than assumed, so a malformed tree degrades to rule 4
 //       instead of trusting an identity it may not satisfy.
+//       AND IT NEEDS NO in-word restriction OF ITS OWN, which is why sharedHead is left as it was: by that same
+//       derivation the shared head IS each side's tie ancestor, and both of those have already had to be inside
+//       the seam's MWT for the two sides to fire at all. Restricting it a second time would state the same
+//       constraint twice, and would differ from this only on a tree where the derivation fails — exactly the case
+//       the computed sharedHead already routes to rule 4.
 //       Since the shared head is neither of the two (if it were, the pair would be directly linked, which rule 2 is
 //       gated off), it lies strictly to one side of both, and the tie-break ALWAYS resolves: the token on the far
 //       side from it takes the mark. Two siblings under a head to their left → the LATER one; under a head to their
@@ -296,14 +334,26 @@ function morphGroupHead(s,x){ const own=s.tokens[x-1]; if(!own||!/\/m$/.test(own
   while(k>0 && guard++<500){ const t=s.tokens[k-1]; if(!t||!/\/m$/.test(t.deprel||"")) return k; k=parseInt(t.head,10)||0; }
   return 0; }   // ran off the top (or a cyclic HEAD column) → treat it as no group head rather than guessing one
 // Rule 2's measure: how far up `y`'s head chain the nearest STRICT ancestor of `y` lies that `x` is DIRECTLY
-// attached to — as that ancestor's head or as its dependent. 1 = y's own head (so x and y are siblings), 2 = y's
-// grandparent (x is y's grandparent, or a dependent of it), …; 0 = no such ancestor, i.e. rule 2 does not fire for
-// `x`. Every depth is walked, because "immediate" in rule 2 qualifies the LINK to the ancestor, not the ancestor's
-// distance from `y` (see the rule-2 note above) — the depth is returned only so a caller could rank two ties, not
-// to gate them. `x` itself is skipped (a token is neither its own head nor its own dependent), and headChain's own
-// cycle guard is what keeps a malformed HEAD column from hanging the walk.
-function ancTieDepth(s,x,y){ const chain=headChain(s,y), hx=parseInt((s.tokens[x-1]||{}).head,10)||0;
+// attached to — as that ancestor's head or as its dependent — AND THAT LIES INSIDE `rng`, the MWT range the seam
+// between the two sits in (seamMwt). 1 = y's own head (so x and y are siblings), 2 = y's grandparent (x is y's
+// grandparent, or a dependent of it), …; 0 = no such ancestor, i.e. rule 2 does not fire for `x`. Every depth is
+// walked, because "immediate" in rule 2 qualifies the LINK to the ancestor, not the ancestor's distance from `y`
+// (see the rule-2 note above) — the depth is returned only so a caller could rank two ties, not to gate them. `x`
+// itself is skipped (a token is neither its own head nor its own dependent), and headChain's own cycle guard is
+// what keeps a malformed HEAD column from hanging the walk.
+// ⚠ `rng` IS REQUIRED, AND A NULL ONE ANSWERS 0 FOR EVERY x. A tie to an ancestor outside the word says nothing
+// about a boundary inside it (the rule-2 note gives the case that forced this), and a seam that is in no MWT range
+// at all has no word to test an ancestor against — so both come back as "no tie", which is exactly the answer
+// seamOwner's own no-tie branches already handle. It is a parameter rather than something derived in here so the
+// two sides of one seam cannot be measured against two different ranges, and so an unrestricted call is not
+// something a caller can write by accident.
+// ⚠ `continue`, not `break`, on an out-of-range ancestor: the restriction is on each ancestor SEPARATELY, and a
+// head chain may leave the range and come back into it (a component headed by a token outside the MWT whose own
+// head is back inside it — non-projective, but nothing forbids it in the columns).
+function ancTieDepth(s,x,y,rng){ if(!rng) return 0;
+  const chain=headChain(s,y), hx=parseInt((s.tokens[x-1]||{}).head,10)||0;
   for(let j=1;j<chain.length;j++){ const c=chain[j]; if(c===x) continue;
+    if(c<rng.from||c>rng.to) continue;                                     // …outside the seam's own MWT: a tie to it is not the word's own structure and does not count
     if(hx===c) return j;                                                   // x is a direct DEPENDENT of that ancestor
     if((parseInt((s.tokens[c-1]||{}).head,10)||0)===x) return j; }         // …or its direct HEAD
   return 0; }
@@ -322,10 +372,13 @@ function seamOwner(s,k){ const ta=s.tokens[k-1], tb=s.tokens[k]; if(!ta||!tb) re
   if(fa!==fb) return fa?k:k+1;      // exactly one of them marks this seam → it takes it, whatever the rules below would have said
   const ha=parseInt(ta.head,10)||0, hb=parseInt(tb.head,10)||0;
   const linked=(ha===k+1)||(hb===k);   // the two are DIRECTLY linked — rule 3's case, and the one rule 2 is gated off (see its note above)
-  // 2. a direct tie to an ancestor of the other, at any depth; where BOTH sides are tied, the one FURTHER from the
-  //    shared head takes it — rule 1's own measure of "further from a head", i.e. which SIDE that head lies on in
-  //    surface order
-  if(!linked){ const da=ancTieDepth(s,k,k+1), db=ancTieDepth(s,k+1,k);
+  // 2. a direct tie to an ancestor of the other, at any depth, PROVIDED THAT ANCESTOR IS ITSELF INSIDE THE MWT THIS
+  //    SEAM SITS IN (an ancestor outside the word says nothing about a boundary inside it — see the rule-2 note
+  //    above; a seam in no MWT range answers no tie on either side and falls straight through); where BOTH sides
+  //    are tied, the one FURTHER from the shared head takes it — rule 1's own measure of "further from a head",
+  //    i.e. which SIDE that head lies on in surface order
+  if(!linked){ const rng=seamMwt(s,k);   // the pair's own orthographic word, or null; measured ONCE so both sides are judged against the same range
+    const da=ancTieDepth(s,k,k+1,rng), db=ancTieDepth(s,k+1,k,rng);
     if(da&&db){ const H=sharedHead(s,k,k+1);
       return (H>k+1)?k:((H>0&&H<k)?k+1:0); }   // head to the RIGHT of the pair → the earlier token is further from it; to the LEFT → the later one. H can only be one of the two, or 0, on a malformed tree → rule 4
     if(da) return k;
