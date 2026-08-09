@@ -90,8 +90,21 @@ function bracketsWrapped(si){
   const fw=Array(n).fill(-1), flatW=i=>{ if(fw[i]>=0)return fw[i]; let w=brW+wordW(i)+hangWpx(i); dchildren[i].forEach(c=>w+=G+flatW(c)); return fw[i]=w+G+brW; };
   const AV=Math.max(160, AVAILW/FS-22-Math.ceil(3*FS)-4);   // item 4: the per-line wrap budget. Reserve the fixed 22px inline-end margin PLUS a zoom-scaled pad (×FS) for the last token's text-shadow casing halo, so a line breaks early enough that the rightmost token's form/POS/relation glyphs never touch the port edge at higher zoom (zoom:var(--fs)). The trailing -4 is a SEPARATE margin against a different hazard: wordW's per-token widths are measured through meas()/fmeas() (an SVG <text> + getComputedTextLength(), see diagram-core.js), but a wrapped-bracket line renders as ordinary HTML <span>s under .bwline2{white-space:nowrap} — a different text-layout engine that can shape a few px wider than the SVG measurement said, and nowrap means the line cannot recover by breaking. A small constant slack here costs one word breaking slightly earlier than it strictly had to; not reserving it costs an occasional line rendering wider than AVAILW with nowrap forbidding any recovery. See the matching overflow-x:hidden on .text-conv.bwrap (app.css) for the case this slack doesn't catch.
   const box=document.createElement("div"); box.className="text-conv bwrap softcase"; box.dir=RTL?"rtl":"ltr";
-  box.style.setProperty("--relpad",(show.labels?(13.3+descent(WORD_F)):0)+"px");               // reserved space above the form for the relation row. Copies projWrapped's deprel→form offset EXACTLY (20px + the form's descender depth): the HTML box model seats the form baseline ~6.7px lower inside its line box than the label's centre, so the flat "20" nominal maps to ~13.3, and +descent(WORD_F) adds the projWrapped descender fold on top — landing the relation centre the same distance above the form baseline as the wrapped stemma
-  box.style.setProperty("--undpad",belowReserveH(hasTr(t),belowTierN(),show.pos)+"px");            // reserved space below for the transliteration + gloss + POS rows (Item 1/8: EVERY below-row folds in descent(POS_F) — matching belowStack's descender-matched per-row step — via the .otrans/.gloss/.bwpos margin-top set below; the reserve grows to match so the stack bottom stays at the same depth as the flat/arc views) — belowGap() per row, matching the flat renderer's baseline step. hasTr (actual translit presence), NOT show.translit, so an English sentence reserves no phantom translit row — keeping the token's stack bottom at the SAME depth as the arc/flat views, so a cross-line arc's upper endpoint (tokBot + clearance) lands where arcsWrapped puts it (stackBot + clearance)
+  /* ⚠ BOTH PADS TAKE +TOK_TR_GAP, the wrapped view's statement of the same two widenings flat brackets
+     makes ("the token-transliteration gap in stemmas and brackets should be sized to match" / "in
+     brackets, the token-deprel gap should also match"). The mechanism differs because the box model
+     does: flat brackets seats every row at a computed y, while here the form is the only IN-FLOW child
+     and the relation/below-stack are absolutely positioned into padding reserved above and below it —
+     so growing the PADDING is how a gap widens, and the label/rows stay put while the form moves.
+     --relpad only where there is a label row (show.labels already gates it); --und-extra rides along
+     with --undpad because .bwund is positioned from the form's own bottom edge (top:calc(100% + …),
+     app.css) rather than from the padding, so the reserve and the offset have to move together.
+     ⚠️ --relpad is also read by positionBracketAnnots (js/core/document.js) to seat the level-bracket
+     arcs at the deprel row; growing it therefore keeps those arcs ON that row while the form drops away
+     from them — the same outcome flat brackets gets by writing `base=relY`. 0 outside lzh. */
+  box.style.setProperty("--relpad",(show.labels?(13.3+descent(WORD_F)+TOK_TR_GAP):0)+"px");               // reserved space above the form for the relation row. Copies projWrapped's deprel→form offset EXACTLY (20px + the form's descender depth): the HTML box model seats the form baseline ~6.7px lower inside its line box than the label's centre, so the flat "20" nominal maps to ~13.3, and +descent(WORD_F) adds the projWrapped descender fold on top — landing the relation centre the same distance above the form baseline as the wrapped stemma
+  box.style.setProperty("--undpad",(belowReserveH(hasTr(t),belowTierN(),show.pos)+TOK_TR_GAP)+"px");            // reserved space below for the transliteration + gloss + POS rows (Item 1/8: EVERY below-row folds in descent(POS_F) — matching belowStack's descender-matched per-row step — via the .otrans/.gloss/.bwpos margin-top set below; the reserve grows to match so the stack bottom stays at the same depth as the flat/arc views) — belowGap() per row, matching the flat renderer's baseline step. hasTr (actual translit presence), NOT show.translit, so an English sentence reserves no phantom translit row — keeping the token's stack bottom at the SAME depth as the arc/flat views, so a cross-line arc's upper endpoint (tokBot + clearance) lands where arcsWrapped puts it (stackBot + clearance)
+  box.style.setProperty("--und-extra",TOK_TR_GAP+"px");   // …and the matching shift of .bwund's own top offset, which is measured from the FORM's bottom edge rather than from that padding (app.css)
   if(selTok>=0) box.style.setProperty("--washcol",selCol);
   let anyInt=false; for(let i=0;i<n;i++) if(isInt(i)){anyInt=true;break;}
   if(anyInt) box.classList.add("hasint");            // headroom above the first line for interrupter arcs
@@ -689,10 +702,10 @@ function arcsWrapped(si){
       const wy=repBase(rep,r.wordY,i);   // item 11: reported-speech step UP off the line — the same shared repBase the arc endpoints above went through, so word and arc leave the line together
       const wyD=wy+TOK_Y_LOWER, loB=loBoxes(boxes);   // …and then the DRAW baseline, TOK_Y_LOWER below it (js/diagram/diagram-core.js). `r.wordY`/`r.arcZone`/`r.stackBot` stay the LAYOUT row geometry — the within-row bumps, the cross-line arcs' band bounds and every box here are all stated in it, so only the token's own ink moves
       const hy=Math.min(r.arcZone-NR, wyD-14);
-      g.appendChild(E("rect",{class:"tok-hit",x:X-lw/2-3,y:hy,width:lw+6,height:r.stackBot+6+TOK_Y_LOWER+ARC_TR_GAP-hy}));
-      g.appendChild(E("rect",{class:"tok-wash",x:X-lw/2-3,y:wyD-14,width:lw+6,height:r.stackBot+6+TOK_Y_LOWER+ARC_TR_GAP-(wyD-14)}));   // wash only the word+POS band, not the arcs above   // both reaches grow by the same 2.5 the stack dropped, so the (lowered) POS row stays inside them
+      g.appendChild(E("rect",{class:"tok-hit",x:X-lw/2-3,y:hy,width:lw+6,height:r.stackBot+6+TOK_Y_LOWER+TOK_TR_GAP-hy}));
+      g.appendChild(E("rect",{class:"tok-wash",x:X-lw/2-3,y:wyD-14,width:lw+6,height:r.stackBot+6+TOK_Y_LOWER+TOK_TR_GAP-(wyD-14)}));   // wash only the word+POS band, not the arcs above   // both reaches grow by the same 2.5 the stack dropped, so the (lowered) POS row stays inside them
       const f=E("text",{class:"tok-word"+italDeco(tk),x:X,y:wyD,"text-anchor":"middle"}); f.textContent=bform(tk);   // host form only
-      belowStack(g,X,wyD+ARC_TR_GAP,tk,loB,hasTr(t));   // the flat arc view's own +2.5 (ARC_TR_GAP, js/diagram/diagram-core.js) — the wrapped variant of a notation must not drift from the flat one, and the row-layout `r.stackBot` (which the cross-line arcs' band bounds are measured from) stays untouched so no edge moves
+      belowStack(g,X,wyD+TOK_TR_GAP,tk,loB,hasTr(t));   // the flat arc view's own +2.5 (TOK_TR_GAP, js/diagram/diagram-core.js) — the wrapped variant of a notation must not drift from the flat one, and the row-layout `r.stackBot` (which the cross-line arcs' band bounds are measured from) stays untouched so no edge moves
       g.appendChild(f); gwFormSVG(g,f,tk,X,wyD,WORD_F,"tok-word",si,loB);   // goeswith: continuation parts beside the head (see gwFormSVG); the slur comes from this row's own tie layer (mwtTie below)
       if(gwOf(tk).length) g.setAttribute("data-gw",[OID(i)].concat(gwOf(tk).map(p=>p.oid)).join(" "));
       svgMarks(g,X,wyD,tk,WORD_F); svgFormSeamMark(g,tk,X,wyD,WORD_F,loB);   // Item 11: form appended LAST → paints on TOP of the POS/translit stack; item 4: marks in front, then the seam mark off the form's inline end
@@ -700,7 +713,7 @@ function arcsWrapped(si){
       g.addEventListener("mouseenter",()=>dim(si,OID(i))); g.addEventListener("mouseleave",()=>dim(si,null)); svg.appendChild(g);
       boxes.push({x:X,y:wy-8,hx:lw/2+((i===r.s||i===r.e)?Math.ceil(4*FS):0),hy:12});   // Item 10 / item 4: reserve casing/Noto fudge for the row's END slots (LTR rightmost = r.e, RTL rightmost = r.s), SCALED by the block zoom (×FS), so the widest row's last token — form, POS, relation label and casing halo — never clips at the fitTight viewBox edge even magnified by zoom:var(--fs)
       drawHangsSVG(svg,tk,X,wyD,WORD_F,"tok-word",si,loB,OID(i)); drawLeadsSVG(svg,tk,X,wyD,WORD_F,"tok-word",si,loB,OID(i)); });   // folded punctuation (and item 6's correct form) beside the word
-    mwtTie(svg, r.c.map(x=>x+r.offX), r.wform, rowTies(D,r.s,r.e), r.stackBot+TOK_Y_LOWER+ARC_TR_GAP+5, loBoxes(boxes), si);   // the tie hangs off the DRAWN stack bottom, so it keeps its distance under the lowered word
+    mwtTie(svg, r.c.map(x=>x+r.offX), r.wform, rowTies(D,r.s,r.e), r.stackBot+TOK_Y_LOWER+TOK_TR_GAP+5, loBoxes(boxes), si);   // the tie hangs off the DRAWN stack bottom, so it keeps its distance under the lowered word
   });
   // Ghost edges (Shared=Yes AND Subject-raising): dashed, dimmed — decorative, not a diagram element of their own,
   // but still: (item 7) fan-shared with the real arcs at any token they land on (never the reverse), (item 2)
@@ -1117,14 +1130,14 @@ function tree(si){
     const dropY=nyL+STACKED_GAP-TR_TIGHTEN, dropYD=nyD+STACKED_GAP-TR_TIGHTEN;   // seeds the ONE gap from the glyph (node-lbl) row down to whichever row is drawn first below it — STACKED_GAP (diagram-core.js), the flat replacement for the removed STACK_DROP   // dropY stays the LAYOUT seed (the boxes below are stated in it); dropYD is the drawn one, and the two differ by exactly TOK_Y_LOWER so every row keeps its spacing
     /* ⚠ …LESS TR_TIGHTEN (js/diagram/diagram-core.js), the hierarchy's own `0.5em − 0.5ex` reduction of the
        token→transliteration step, on request. Applied to the SEED and not inside belowGap(): that function
-       is shared with arcs, stemma and brackets, and arcs wants this gap moved the OTHER way (ARC_TR_GAP),
+       is shared with arcs, stemma and brackets, and arcs wants this gap moved the OTHER way (TOK_TR_GAP),
        so the two adjustments have to be independently addressable. Applied to BOTH baselines, so the crop
        follows rows that genuinely moved — unlike TOK_Y_LOWER, this is not a draw-vs-layout asymmetry but a
        real change of position, and holding the boxes back would over-reserve the space just recovered.
        Every row below inherits the shift, keeping their spacing to each other untouched, and the seed is
        exactly where the comment above says the ONE glyph-to-first-row gap is expressed. `belowReserve` —
        and so LV, and so parentEndY, and so every edge in this figure — is deliberately NOT reduced: the
-       recovered space simply becomes slack above the next level, and no edge moves. 0 at TOK_MAG 1. */
+       recovered space simply becomes slack above the next level, and no edge moves. 0 outside lzh. */
     { const rt=trTxt(t[i]); if(rt){ const ty=dropYD+belowGap(); const e=E("text",{class:"translit"+frnUp(t[i]),x:x[i],y:ty,"text-anchor":"middle"}); e.textContent=rt; if(trRowEdit())e.classList.add("tr-edit"); g.appendChild(e); boxes.push({x:x[i],y:nyL+14,hx:meas(rt,trFont(t[i]))/2,hy:7}); svgSeamMark(g,t[i],x[i],ty,meas(rt,trFont(t[i]))/2,trFont(t[i]),loB,null,"translit"); } }   // Item 8: same descender-matched top gap (belowGap()) the other renderers give the translit row
     belowTiers().forEach((tier,ti)=>{ const step=(trTxt(t[i])?belowGap():0)+(ti+1)*(belowGap()), gy=dropY+step, gyD=dropYD+step, txt=tierText(t[i],tier), dtxt=txt||"…"; const e=E("text",{class:"gloss gl-edit"+(txt?"":" gl-empty")+frnUp(t[i]),x:x[i],y:gyD,"text-anchor":"middle","data-tier":tier,tabindex:"0"}); setGlossText(e,tier,dtxt); g.appendChild(e); boxes.push({x:x[i],y:gy-4,hx:meas(dtxt,trFont(t[i]))/2,hy:7});
       if(tier==="mseg"||tier==="mgloss") svgSeamMark(g,t[i],x[i],gyD,(tier==="mgloss"?measGloss(dtxt,tierFont(tier,t[i])):meas(dtxt,tierFont(tier,t[i])))/2,tierFont(tier,t[i]),loB,null,tier); });   // gloss / morphemic tiers under the node (hierarchy has no per-node POS row) — the segmentation AND morphemic-gloss rows carry the seam mark (both per-morpheme, drawn off the "…" placeholder's own width where this tier isn't annotated for this token — see the note beside diagram-core.js's belowStack); the lexical gloss row doesn't
@@ -1229,11 +1242,23 @@ function brackets(si){
   // construction above), not as an interrupter-style ghost arc — a real dependent's own bracket, not a decorative bump.
   const maxAH=Math.max(12,...np.map(a=>a.hgt),...ghostArcs.map(a=>a.hgt));
   const RELDESC=descent(WORD_F);   // deprel→form gap copies the wrapped stemma (projWrapped) EXACTLY: 20px + the form's descender depth (projWrapped is now the authoritative reference, not the old flat-tuned "20")
-  const relH=show.labels?(20+RELDESC):0, ARCH=np.length?(ARC_APEX*maxAH+8):0, posH=show.pos?16:0;   // reserve to the tallest interrupter arc's visible PEAK (0.75·h), not its handle height
-  const yWord=ARCH+relH+16, yPos=yWord+posH, H=yWord+posH+8, relY=yWord-(20+RELDESC);   // deprel centre sits 20px + descent(WORD_F) above the form baseline — the SAME offset projWrapped uses (wordY-(20+RELDESC)), so wrapped stemma, flat brackets and wrapped brackets all match to ~1px
+  /* ⚠ THE DEPREL→FORM STEP TAKES THE SAME +TOK_TR_GAP AS THE FORM→TRANSLITERATION ONE BELOW IT ("in
+     brackets, the token-deprel gap should also match"). Only where there IS a label row: with show.labels
+     off `relH` is 0 and RELEXTRA must be too, or the figure would reserve a gap above a row it never draws.
+     The arithmetic keeps the LABEL still and moves the FORM down, which is what widening a gap stated as
+     "label sits N above the form" means here: relH grows by the extra, yWord (=ARCH+relH+16) grows with
+     it, and relY (=yWord−the same total) therefore lands back on ARCH+16, exactly where it was.
+     ⚠️ `base` FOLLOWS relY, not yWord — it is written as relY below precisely so the invariant its old
+     comment records ("a no-head-label arc attaches exactly at the deprel-row level … keeping arc endpoints
+     and deprel baselines aligned across modes") survives a change that moves one and not the other. So the
+     interrupter arcs stay where they are and the token drops away from them, matching how every other
+     notation in this round treats its edge layer. */
+  const RELEXTRA=show.labels?TOK_TR_GAP:0;
+  const relH=show.labels?(20+RELDESC+TOK_TR_GAP):0, ARCH=np.length?(ARC_APEX*maxAH+8):0, posH=show.pos?16:0;   // reserve to the tallest interrupter arc's visible PEAK (0.75·h), not its handle height
+  const yWord=ARCH+relH+16, yPos=yWord+posH, H=yWord+posH+8+TOK_TR_GAP, relY=yWord-(20+RELDESC+RELEXTRA);   // deprel centre sits 20px + descent(WORD_F) above the form baseline — the SAME offset projWrapped uses (wordY-(20+RELDESC)), so wrapped stemma, flat brackets and wrapped brackets all match to ~1px
   const svg=E("svg",{class:"tree softcase",width:total,height:H,viewBox:`0 0 ${total} ${H}`}); const boxes=[];
-  const NR=parseFloat(css("--arc-node-r")), POSGAP=20;
-  const base=yWord-(POSGAP+descent(WORD_F));   // Item 15: the interrupter-arc endpoints clear the token by POSGAP(=20)+descent(WORD_F) = yWord-(20+RELDESC) = relY, the deprel-label baseline. So a no-head-label arc now attaches exactly at the deprel-row level (as in arc view and the wrapped bracket level arcs), keeping arc endpoints and deprel baselines aligned across modes (was 16)
+  const NR=parseFloat(css("--arc-node-r"));   // POSGAP (=20) is gone with the line below: it existed only to re-derive `base`, and that is now stated as relY directly — see its note. The 20 itself survives where it belongs, inside relH/relY's own literal
+  const base=relY;   // Item 15: the interrupter-arc endpoints clear the token by 20+descent(WORD_F) — which IS relY, the deprel-label baseline.   // …written AS relY now rather than re-derived from yWord: the two were equal by construction until the deprel gap gained RELEXTRA above, and stating the invariant beats restating the arithmetic that used to imply it So a no-head-label arc now attaches exactly at the deprel-row level (as in arc view and the wrapped bracket level arcs), keeping arc endpoints and deprel baselines aligned across modes (was 16)
   // whole-row hit target: clicking anywhere selects the innermost constituent whose brackets enclose that x
   const spanX={}; seq.forEach(it=>{ if(it.owner!=null){ (spanX[it.owner]=spanX[it.owner]||{owner:it.owner}); if(it.t==="o")spanX[it.owner].x0=it.x; if(it.t==="c")spanX[it.owner].x1=it.x; } });
   const spans=Object.values(spanX).filter(s=>s.x0!=null&&s.x1!=null);
@@ -1316,7 +1341,7 @@ function brackets(si){
          it is also what opens this notation's crop headroom (the label is its topmost ink). */
       const r=relOf(it.i); if(r){ drawLabel(g,it.x,rly+TOK_Y_LOWER,r,relColor(t[it.i].deprel)); boxes.push({x:it.x,y:rly,hx:meas(r,POS_F)/2+2,hy:7}); }
       const f=E("text",{class:"tok-word"+(selI>=0&&isAnc(selI,it.i)?" inspan":"")+italDeco(t[it.i]),x:it.x,y:wyD,"text-anchor":"middle"}); f.textContent=bform(t[it.i]);   // host form only, under the wash; the deprel label + POS siblings in the group stay default
-      stackBot=Math.max(stackBot, belowStack(g,it.x,wyD,t[it.i],loB,hasTr(t)));   // transliteration + POS below the word
+      stackBot=Math.max(stackBot, belowStack(g,it.x,wyD+TOK_TR_GAP,t[it.i],loB,hasTr(t)));   // transliteration + POS below the word   // +TOK_TR_GAP: the same 2.5px arcs takes, on request that stemma and brackets be "sized to match" it (js/diagram/diagram-core.js). Only the rows move; the form stays on wyD
       g.appendChild(f); gwFormSVG(g,f,t[it.i],it.x,wyD,WORD_F,"tok-word",si,loB);   // goeswith: continuation parts beside the head; the slur comes from the tie layer (mwtTie below)
       if(gwOf(t[it.i]).length) g.setAttribute("data-gw",[OID(it.i)].concat(gwOf(t[it.i]).map(p=>p.oid)).join(" "));
       svgMarks(g,it.x,wyD,t[it.i],WORD_F); svgFormSeamMark(g,t[it.i],it.x,wyD,WORD_F,loB);   // Item 11: form appended LAST → paints on TOP of the POS/translit stack; item 4: marks in front, then the seam mark off the form's inline end

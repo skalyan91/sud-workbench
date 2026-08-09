@@ -312,7 +312,7 @@ _lazyFont("LIVE_TOKEN_STACK",()=>TOKEN_STACK); _lazyFont("LIVE_MONO_STACK",()=>M
    why a canvas font string cannot read the property itself). 1 everywhere except the ornamental Sanskrit
    scripts. It multiplies the TOKEN-FORM faces only — WORD_F/NODE_F/MWT_F and the goeswith tie — never the
    POS, transliteration or gloss rows, which are Latin annotation drawn at the app's own body size. */
-let TOK_MAG=1, TOK_WGHT=400, TOK_TRACK=0, TOK_ASC=1, TOK_MID=0, TOK_LIFT=0, TOK_OP=1, TOK_OP_RUN=1, STACKED_GAP=0, TOK_Y_LOWER=0, TR_TIGHTEN=0, ARC_TR_GAP=0;
+let TOK_MAG=1, TOK_WGHT=400, TOK_TRACK=0, TOK_ASC=1, TOK_MID=0, TOK_LIFT=0, TOK_OP=1, TOK_OP_RUN=1, STACKED_GAP=0, TOK_Y_LOWER=0, LZH_MAG=false, TR_TIGHTEN=0, TOK_TR_GAP=0;
 // TOK_WGHT stays 400 for magnified faces now (see magTrack's own note on why the weight curve was dropped for
 // them), so this omits a weight token and lets the face render at its own resting weight.
 function magFont(px){ const w=TOK_WGHT;
@@ -1035,6 +1035,23 @@ function refreshFontStacks(){
      lzh's own 1.5×, not derived as a ratio, so any magnified script gets the same flat 2.5 a stemma root does
      at TOK_MAG 1.5, rather than inventing a proportional curve nobody asked for. */
   TOK_Y_LOWER=TOK_MAG>1?2.5:0;
+  /* ⚠ LITERARY CHINESE ONLY — NOT "ANY MAGNIFIED SCRIPT", which is what the four terms below shipped as and
+     what had to be corrected ("those changes were supposed to be scoped to magnified Chinese, not anything
+     else"). scriptMag() (js/lang/translit.js) raises TOK_MAG from TWO independent branches — the
+     INDIC_SCRIPTS/ORNAMENTAL_SCRIPTS one (Sanskrit in Devanagari, Grantha, Ranjana, …) and the isLzhLang()
+     one — and `TOK_MAG>1` cannot tell them apart, so a Sanskrit document was getting a tighter hierarchy
+     transliteration step, a wider one elsewhere and centred bracket/outline rows it was never asked about.
+     The distinction is real rather than bureaucratic: these four terms answer to Han glyphs, which fill a
+     square em with almost no descender and leave the em-box reserves this file computes off a Latin
+     "gjpqy" sample looking generous, while a Devanagari or Grantha akshara genuinely uses that room.
+     ⚠️ SCOPED HERE, IN ONE PLACE, rather than at the four use sites: the alternative is four copies of a
+     compound condition that must not drift. Everything ABOVE this line keeps its plain `TOK_MAG>1` gate on
+     purpose — TOK_Y_LOWER, STACKED_GAP, --dia-pad-extra and (in the renderers) NODE_ASC_EXTRA/
+     NODE_DESC_EXTRA are about how much room a BIG glyph needs, which is a question about size and not about
+     script, and they are settled. `isLzhLang()` is js/lang/translit.js's own, loaded earlier in
+     index.html and called exactly the way scriptMag() calls it; the typeof guard is for the measurement
+     harnesses that load this file alone. */
+  LZH_MAG=TOK_MAG>1 && typeof isLzhLang==="function" && isLzhLang();
   /* ⚠ THE HIERARCHY'S TOKEN→TRANSLITERATION STEP IS `0.5em − 0.5ex` TIGHTER, on request ("in hierarchies,
      the space between a token and its transliteration needs to be reduced by 0.5em - 0.5ex"). Written as
      the user wrote it — an em/ex expression, not a px figure — and resolved against NODE_F, the face of the
@@ -1043,23 +1060,29 @@ function refreshFontStacks(){
      x-height band: the reserve above the transliteration is stated against the em box (belowGap()'s flat 18
      plus its descent terms), while what the eye measures the gap from is the letters. Measured: 5.23px at
      TOK_MAG 1.5 (22.5px NODE_F, ex 12.05), which takes lzh's real ink gap from 10.72px to ~5.5px.
-     ⚠ GATED, like every other term in this block, and NOT because the formula needs it (an em/ex expression
-     already scales itself) — because the request came out of a magnified-script document and this whole
-     feature is that document's. `TOK_Y_LOWER` directly above is the cautionary case: it shipped ungated on
-     exactly this kind of reasoning-from-a-formula and had to be gated one report later ("Chinese stemmas now
-     look correct. But English now looks too low!"). ⚠️ The gate is NOT a no-op the way it is for some
-     siblings: a transliteration row is shown for plenty of UNMAGNIFIED languages too (Arabic, Hebrew,
-     Sanskrit in IAST, modern Chinese), and those keep today's 10.06px. If the intent turns out to be
-     typographic rather than magnification-specific, dropping `TOK_MAG>1?…:0` here is the whole change. */
-  TR_TIGHTEN=TOK_MAG>1?(0.5*fontPxOf(NODE_F)-0.5*xHeightPx(NODE_F)):0;
-  /* ⚠ AND THE ARC VIEW'S SAME STEP IS 2.5px WIDER, which is the opposite direction and deliberately so
-     ("in arcs, the space needs to be increased by 2.5px"). A literal flat px, exactly as asked — not the
-     em/ex form above — so it is stated as one. The two notations reach the same gap through the same
-     belowGap(), which is why neither number may be applied to that shared function: each is injected at its
-     own renderer's call site (tree()'s dropY, arcs()/arcsWrapped()'s belowStack seed), leaving stemma and
-     brackets on the untouched value. Gated for the same reason as TOK_Y_LOWER, which it matches in both
-     magnitude and shape. Measured: lzh arcs 10.60px → 13.10px. */
-  ARC_TR_GAP=TOK_MAG>1?2.5:0;
+     ⚠ GATED ON LZH_MAG, and NOT because the formula needs it (an em/ex expression already scales itself) —
+     because the request came out of a Literary Chinese document and, twice now, has turned out to mean only
+     that document. `TOK_Y_LOWER` above is the first cautionary case (shipped ungated, gated one report later
+     — "Chinese stemmas now look correct. But English now looks too low!"); this term is the second (shipped
+     on `TOK_MAG>1`, narrowed to lzh one report after that). ⚠️ The gate is NOT a no-op: a transliteration
+     row is shown for plenty of languages that do not take it — every unmagnified one (Arabic, Hebrew,
+     Sanskrit in IAST, modern Chinese) and now every magnified NON-lzh one (Sanskrit in Devanagari, Grantha)
+     — and all of them keep the untouched 10.06px. */
+  TR_TIGHTEN=LZH_MAG?(0.5*fontPxOf(NODE_F)-0.5*xHeightPx(NODE_F)):0;
+  /* ⚠ AND THE FLAT NOTATIONS' SAME STEP IS 2.5px WIDER, which is the opposite direction and deliberately
+     so ("in arcs, the space needs to be increased by 2.5px" — then, once that landed, "arcs view is
+     perfect; the token-transliteration gap in stemmas and brackets should be sized to match"). A literal
+     flat px, exactly as asked — not the em/ex form above — so it is stated as one.
+     ⚠️ NAMED FOR THE GAP, NOT FOR ARCS. It shipped as ARC_TR_GAP while arcs was its only caller and is now
+     read by four renderers (arcs, arcsWrapped, stemma's proj baseline row, brackets flat + wrapped); a name
+     saying "arc" while driving a stemma would mislead the next reader more than a rename costs. The ONE
+     notation deliberately outside it is the hierarchy, which goes the other way (TR_TIGHTEN above) because
+     that is what was asked for it specifically.
+     ⚠️ Injected at each renderer's own belowStack() seed, never into belowGap(): that function is shared
+     with the hierarchy, which wants this same step TIGHTER, so the two adjustments must stay independently
+     addressable. Measured (lzh, real ink): arcs 10.60px → 13.10px, and stemma/brackets 10.72/10.61 → the
+     same 13.1-13.2 band, which is what "sized to match" asks for. */
+  TOK_TR_GAP=LZH_MAG?2.5:0;
   if(d){
     /* ⚠ AND A MAGNIFIED TOKEN IS CENTRED ON ITS ROW-MATES RATHER THAN SHARING THEIR BASELINE, in the two
        notations that set a token IN A ROW of small annotations rather than above/below them ("in brackets
@@ -1068,7 +1091,7 @@ function refreshFontStacks(){
        records `vertical-align:middle` being tried and reverted there — and stops being right the moment the
        token alone is 1.5–2× the rest: its x-height band then sits far above theirs and the row reads as the
        small glyphs having sunk. Both terms are therefore magnification-only by construction as well as by
-       policy: at TOK_MAG 1 `--script-cross` IS `baseline` (the value the rule had) and the lift is 0.
+       policy: outside lzh `--script-cross` IS `baseline` (the value the rule had) and the lift is 0.
        The two notations need different mechanisms because their rows are built differently: the OUTLINE row
        is already a flex row with an explicit `align-items`, so it simply switches to `center` and every span
        in it — relation label, transliteration, gloss tiers, POS — centres against the form at once; WRAPPED
@@ -1076,8 +1099,17 @@ function refreshFontStacks(){
        `position:relative` lift instead (no reflow, so the greedy line-packing budget is untouched). Both
        bracket lifts come from `centreBracketLift` below — NOT from the seam mark's `centreOnTokenLift`; see
        that pair's own notes for why a "[" and a "-" want different answers to the same-sounding question. */
-    d.style.setProperty("--script-cross",TOK_MAG>1?"center":"baseline");
-    d.style.setProperty("--script-brk-lift",centreBracketLift('700 15px '+LIVE_TOKEN_STACK,magFont(15)).toFixed(2)+"px"); }   // '700 15px …' mirrors .bwbr's own font-weight/size (app.css); magFont(15) is .bwform's own calc(15px * var(--script-mag)) at the token weight
+    d.style.setProperty("--script-cross",LZH_MAG?"center":"baseline");
+    d.style.setProperty("--script-brk-lift",centreBracketLift('700 15px '+LIVE_TOKEN_STACK,magFont(15)).toFixed(2)+"px");   // '700 15px …' mirrors .bwbr's own font-weight/size (app.css); magFont(15) is .bwform's own calc(15px * var(--script-mag)) at the token weight
+    /* ⚠ AND THE `position` ITSELF IS PUBLISHED, not left permanently `relative` with a 0px offset. Measured:
+       a statically-positioned inline span and a relatively-positioned one at top:0 do NOT round to the same
+       subpixel in Chrome — pixel-diffing a Sanskrit wrapped-bracket line before and after showed 350 pixels
+       differing by up to 200 levels, all of them on the top and bottom SERIFS of the [ ] glyphs, i.e. the
+       bracket sitting a fraction of a pixel off where flow had put it. Tiny, and still a change to a
+       document this round exists to leave alone ("those changes were supposed to be scoped to magnified
+       Chinese, not anything else"), so the rule reverts to `static` outright rather than to a null offset.
+       With it, that same diff is empty. */
+    d.style.setProperty("--script-brk-pos",LZH_MAG?"relative":"static"); }
   POS_F='15px '+LIVE_TOKEN_STACK; GRID_F='462 13px '+LIVE_MONO_STACK; HEAD_F='500 11px '+uiFont(); HEAD_F_REQ='700 11px '+uiFont();   // HEAD_F/HEAD_F_REQ ride along on this refresh only for uniformity — it is built off --ui-font, not off either LIVE_ stack (see its lazy definition above), so nothing this function reacts to can actually change it
   TRANS_F='italic 15px '+LIVE_TOKEN_STACK; TRANS_UP_F='15px '+LIVE_TOKEN_STACK; MWT_F=WORD_F;
   GRID_ITAL_F='italic 462 13px '+LIVE_MONO_STACK;
@@ -1136,7 +1168,7 @@ function centreOnTokenLift(satFont,tokenPx){ return TOK_MAG>1 ? (TOK_MID*tokenPx
      FIXED. "[" is the only thing this ever measures, in one known face, so there is nothing to vary. */
 function emMidPx(font){ _cv.font=font; const m=_cv.measureText("x"); return (m.fontBoundingBoxAscent-m.fontBoundingBoxDescent)/2; }
 function inkMidPx(text,font){ _cv.font=font; const m=_cv.measureText(text); return (m.actualBoundingBoxAscent-m.actualBoundingBoxDescent)/2; }
-function centreBracketLift(brkFont,tokFont){ return TOK_MAG>1 ? (emMidPx(tokFont)-inkMidPx("[",brkFont)) : 0; }
+function centreBracketLift(brkFont,tokFont){ return LZH_MAG ? (emMidPx(tokFont)-inkMidPx("[",brkFont)) : 0; }   // LZH_MAG, not TOK_MAG>1 — see its own note: a Devanagari/Grantha document magnifies too and was never asked for this
 function svgSeamMark(parent,tk,cx,y,halfEnd,font,boxes,halfStart,row){ if(!parent) return;
   /* ⚠ A SEAM MARK IS NOT PART OF THE WORD, so the ornamental magnification does not reach it. It is
      punctuation ABOUT the word — "this is where the orthographic word breaks" — set in the app's own
