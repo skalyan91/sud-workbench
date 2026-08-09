@@ -909,45 +909,37 @@ function projWrapped(si,kind){
      at PADV+8 and the WORD drops away from it — the same direction flat brackets moves, and it keeps the
      row's own top clearance untouched. `stackBot`/`oneRowH` follow wordY, so the strip grows by exactly
      the extra and nothing below the word is crowded. 0 at TOK_MAG 1, where this file is unchanged. */
-  /* ⚠ …AND THE WHOLE TOKEN CELL IS SEATED BY foSeatRise, WHICH IS WHAT THE SUPPLEMENTARY-PLANE SCRIPTS
-     NEEDED HERE AND DID NOT GET. Where the engine cannot shape the script in SVG, smpReshape()
-     (js/diagram/diagram-core.js) replaces the `<text>` with a foreignObject seated at `y − domBaseline`,
-     and the HTML line box inside it does NOT put the glyph back on the baseline the `<text>` was drawn on:
-     foSeatRise() probes the real offset, and it is large, signed differently per face, and — this is why it
-     is PROBED rather than derived — different in the two engines: in the shipping WKWebView Soyombo +11.00,
-     Kawi +6.00, Zanabazar Square +5.50 and Siddhaṃ +4.00 all paint ABOVE their seat and Grantha +10.00 too,
-     while headless Chrome answers Soyombo +11.00, Zanabazar +5.75, Siddhaṃ +4.00 but Grantha −1.25 and Kawi
-     −5.25, i.e. BELOW it. Every other notation inherits that error too and every other notation has
-     somewhere to absorb it — the arc view has a whole arc zone above the word — which is exactly why the row
-     geometry this strip borrowed from arcs (wordY off a nominal baseline, a deprel 20px + RELDESC above it)
-     is the one place it shows: here the relation label sits directly on top of the glyph. Reported as
-     "Grantha, Kawi, Soyombo and Zanabazar are displaying wrongly in wrapped stemmas and hierarchies, due to
-     the unthinking application of adjustments designed for (wrapped) arcs view".
-     Measured in the shipping WKWebView, first row, deprel-label bottom to the glyph's real ink top:
-     Soyombo −6.91 and Kawi −1.81 — collisions, the letters running INTO the relation label — Zanabazar
-     Square +0.34 and Siddhaṃ +4.56, against Devanagari's +6.92 and Rañjanā's +8.44, the two hanging scripts
-     that are NOT swapped and so were right all along. With the seat: 4.09 / 4.19 / 5.84 / 8.56, i.e. the
-     band the un-swapped scripts already occupied, and Devanagari and Rañjanā unmoved to the hundredth of a
-     pixel. (Chrome, same measurement: −6.66 / 9.67 / 1.13 / 4.81 → 4.34 / 4.42 / 6.88 / 8.81.)
-     ⚠️ ASKED OF THE SENTENCE, ONCE, exactly as flat brackets asks it (see BRK_LIFT's own note): a bracket
-     and a whole token strip are alike in having no ONE glyph whose swap they could follow, and the answer
-     is a property of the document's script, which is uniform in every real case. It returns a literal 0 for
-     every document with no supplementary-plane form in it, so nothing about a Latin, Devanagari or Rañjanā
-     document moves by so much as a subpixel.
-     ⚠️ THE PROBE'S MEMO IS (font, scheme, SAMPLE), so a virtualization window whose sentences begin with
-     different words really can pay it more than once — measured at 5.5ms cold and ~0.002ms warm, against a
-     16-block Grantha wrapped render that costs 1.2–2.4s of layout on its own, i.e. inside the noise: the
-     same 200-sentence document measured 1711→1232ms (wrapped stemma) and 3279→2446ms (wrapped hierarchy)
-     across this change. Not worth a document-wide scan to collapse into one key.
-     ⚠️ THE CELL MOVES, THE LABEL DOES NOT. `wordY` carries the rise so the glyph, its below-stack, its
-     hit/wash band and the MWT tie all ride with it (they are all derived from wordY, and their spacing
-     RELATIVE to the glyph — the part earlier rounds measured and approved against arcs — is untouched);
-     `yDep` subtracts it straight back out so the relation label stays at PADV+8 where its own round put it.
-     `stackBot`/`oneRowH` follow wordY, so the strip grows or shrinks by exactly the seat and nothing is
-     crowded at either end. */
-  const FO_RISE = (typeof foSeatRise==="function")
-    ? foSeatRise((t.map(tk=>bform(tk)).find(f=>typeof smpUnshaped==="function"&&smpUnshaped(f)))||"", WORD_F) : 0;   // the first form that would actually be swapped, which is what the probe has to be asked about — a document with none gets 0
-  const wordY = (deprelsAbove ? (PADV+8+20+RELDESC+MAG_DEPREL_GAP) : ASC) + FO_RISE, yDep = wordY-(20+RELDESC+MAG_DEPREL_GAP+FO_RISE), stackBot = wordY+belowH;   // deprel 20px + descent(WORD_F) above the word: the extra descender depth is clearance BELOW the label (deprel y stays at PADV+8, word drops by the descent); top clearance unchanged   // …+FO_RISE on the word and −FO_RISE back out of the label — see the note above
+  /* ⚠ AND foSeatRise IS **NOT** ADDED HERE — a `wordY += FO_RISE` seat was tried (one commit, reverted on
+     report: "now Grantha/Kawi/Siddhaṃ etc. are too far up … in wrapped stemma/hierarchy; they were better
+     before"), and the reason it failed is worth keeping, because the arithmetic looked unimpeachable and the
+     measurement says it bought nothing at all.
+     The idea was: smpReshape() (js/diagram/diagram-core.js) swaps the `<text>` for a foreignObject seated at
+     `y − domBaseline`, and the HTML line box inside does not land on that baseline — foSeatRise() PROBES the
+     real offset (shipping WKWebView: Soyombo +11.00, Grantha +10.00, Kawi +6.00, Zanabazar Square +5.50,
+     Siddhaṃ +4.00, all painting ABOVE their seat; headless Chrome disagrees in SIGN for two of them, Grantha
+     −1.25 and Kawi −5.25) — so seat the whole cell lower by that rise and the deprel label stops colliding
+     with the glyph.
+     ⚠️ IT DOES NOT MOVE THE GLYPH, BECAUSE capBlock RESERVES THE TOKEN ROW FIRST. `capBlock`
+     (js/core/document.js) caps a wrapproj diagram at `d = min(diaNat, avail−g)` and then splits it
+     `treeRoom = max(24, content − oneRowH)` — the ONE token row is taken off the top of the budget and
+     `.wp-stem` gets whatever is left. In any block whose diagram is already at the cap (which is every one
+     that matters here — a wrapped stemma is asked for precisely because the sentence is long) `d` cannot
+     grow, so growing `oneRowH` by the rise does not push the strip down: it pulls the TREE ABOVE IT UP by
+     exactly the same amount. Measured in
+     the shipping WKWebView (samples/brihat_jataka.conllu, wrapped stemma, Grantha, FO_RISE 10.00): the strip
+     top moved 101.98 → 91.98 while the glyph's own baseline within it moved 39.28 → 49.28 — i.e. the glyph
+     stayed at 141.26 in the diagram's own coordinates, to the hundredth of a pixel, in both states. What
+     actually moved was `.wp-stem` (80.11 → 70.11 tall), every tree node and edge in it, the projection lines'
+     lower ends (90.20 → 80.20) and the deprel label. The reported "too far up" IS that: the tree and its
+     projection lines lifted away from tokens that never moved, leaving a rise-wide dead band between the two.
+     Same shape for Kawi (6.00), Soyombo (11.00), Zanabazar Square (5.50) and Siddhaṃ (4.00).
+     ⚠️ SO THE LABEL/GLYPH GAP IT "FIXED" WAS BOUGHT BY SHRINKING THE TREE, not by re-seating anything — and
+     that is a trade this view cannot afford, since the tree is the whole point of a wrapped stemma. The
+     seating error is left where every other notation leaves it, which is also what foSeatRise's own note asks
+     for: "THE SEATING ITSELF IS DELIBERATELY NOT CHANGED … the rise is ALREADY part of the arc/stemma/
+     hierarchy spacing this feature's earlier rounds measured and approved". Only the one piece of furniture
+     that has to line up with a glyph's own middle (flat brackets' "[" — see BRK_LIFT) consults the probe. */
+  const wordY = deprelsAbove ? (PADV+8+20+RELDESC+MAG_DEPREL_GAP) : ASC, yDep = wordY-(20+RELDESC+MAG_DEPREL_GAP), stackBot = wordY+belowH;   // deprel 20px + descent(WORD_F) above the word: the extra descender depth is clearance BELOW the label (deprel y stays at PADV+8, word drops by the descent); top clearance unchanged
   const oneRowH=Math.ceil(stackBot+descent(WORD_F)+(anyMwt?mwtDepth(D)+18:0)+(deprelsAbove?PADV:10));
   // — token rows, one <svg> per row (each a scroll-snap target) so exactly one line is visible at a time —
   const toks=document.createElement("div"); toks.className="wp-toks"; toks.style.height=oneRowH+"px"; toks.style.width=svgW+"px";

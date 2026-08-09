@@ -262,6 +262,23 @@ function arcs(si){
      accounts for on the other side of the token. Measured on a real lzh sentence: the arc-to-glyph gap
      fell from 8.4px unmagnified to 4.2px at 1.5× — visibly tight, though not yet touching. Exactly the
      old flat 16 whenever TOK_MAG is 1, which is every document but the newly-magnified ones. */
+  /* ⚠ AND THE ASCENT HERE IS **NOT** `scriptHeadlinePx`, THOUGH --dia-pad-extra's IS — asked, measured and
+     rejected. The two terms look alike (both are "how much more ascent a magnified face reaches") and answer
+     different questions: --dia-pad-extra reserves BLANK SPACE between the block's running-sentence header
+     and the diagram, where letting a repha or a vowel sign use the sky above the head-line costs nothing;
+     WORD_OFF is a CLEARANCE BETWEEN TWO DRAWN THINGS — the arc endpoints above and the glyph's real ink
+     below — and the marks that overshoot the head-line are precisely what has to clear them. Measured in the
+     shipping WKWebView (samples/brihat_jataka.conllu, flat arcs, arc-path bottom to glyph ink top, min over
+     the first six tokens): Rañjanā's tokens' own `actualBoundingBoxAscent` is 24.41px against a measured
+     head-line of 19.61, Siddhaṃ's 23.33 against 20.48 — so substituting the head-line would spend 2.4/1.4px
+     of a clearance that measures 6.25/3.33 today, taking Siddhaṃ to −0.58, i.e. an overlap. The reported
+     "Rañjanā and Siddhaṃ are still too low in arcs" is answered where the dead space actually is, which is
+     --dia-pad-extra in this notation (js/diagram/diagram-core.js, refreshFontStacks) — 13.4px of it, against
+     the ~2.4px an honest ink-ascent correction could win here at the cost of the clearance.
+     ⚠️ NOR IS foSeatRise FOLDED IN, for the same reason projWrapped no longer seats by it (see that note):
+     it would push the swapped scripts DOWN by their own rise (Soyombo +11, Grantha +10, Kawi +6, Zanabazar
+     Square +5.5, Siddhaṃ +4), which is the opposite of what was asked for, and arcs' spacing is the spacing
+     earlier rounds explicitly measured and approved WITH the seat error present (foSeatRise's own note). */
   const TOP=8, WORD_OFF=16+(TOK_MAG>1?ascent(WORD_F)*(1-1/TOK_MAG):0);
   const list=t.map((tk,i)=>({from:parseInt(tk.head,10),to:i+1,dep:tk.deprel}))
     .filter(a=>a.from!==a.to && a.from>=1 && a.from<=n)   // include punctuation edges

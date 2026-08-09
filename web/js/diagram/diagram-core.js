@@ -865,8 +865,17 @@ function smpReshape(root){
     const asc=domBaseline(s,f);
     const fo=document.createElementNS("http://www.w3.org/2000/svg","foreignObject");
     for(const a of el.attributes) if(a.name!=="x"&&a.name!=="y"&&a.name!=="text-anchor") fo.setAttribute(a.name,a.value);
-    fo.setAttribute("x",(x-w/2)+""); fo.setAttribute("y",(y-asc)+"");
-    fo.setAttribute("width",Math.ceil(w+2)+"");
+    /* ⚠ THE BOX IS CENTRED ON THE WIDTH IT IS ACTUALLY GIVEN, NOT ON `w`. The width below is `ceil(w+2)`
+       (the +2 is _measDOM's own slack, kept so a sub-pixel overhang cannot clip), while `.fo-form` centres
+       the text INSIDE that box — so seating the box at `x − w/2` put the glyph's own centre at
+       `x + (ceil(w+2) − w)/2`, i.e. 1.0–1.5px to the RIGHT of the anchor a `text-anchor:middle` <text>
+       would have used. Measured in both engines, first token of samples/brihat_jataka.conllu: Grantha
+       +1.04, Kawi +1.09, Soyombo +1.39, Zanabazar Square +1.14, Siddhaṃ +1.31 — against exactly 0.00 for
+       Devanagari and Rañjanā, which are not swapped. Half the box's own padding is the whole of it, so
+       halving THAT is the fix and the glyph lands on 0.00 like every un-swapped script. */
+    const boxW=Math.ceil(w+2);
+    fo.setAttribute("x",(x-boxW/2)+""); fo.setAttribute("y",(y-asc)+"");
+    fo.setAttribute("width",boxW+"");
     /* ⚠ HEIGHT IS A CSS calc(), NOT A JS-COMPUTED PIXEL NUMBER, ON REQUEST — "try computing the heights
        using a calc with em units instead of trying to compute everything in pixels". The previous version
        asked domBaseline() for a px height (fontBoundingBoxAscent+Descent) and wrote that number onto the
@@ -948,20 +957,25 @@ function smpReshape(root){
     d.setAttribute("class","fo-form "+(el.getAttribute("class")||""));
     d.style.cssText="font:"+f;
     const inner=document.createElementNS("http://www.w3.org/1999/xhtml","div");
-    /* ⚠ margin-right, WEBKIT ONLY, ON REPORT — for every script reaching this function (Grantha, Kawi,
-       and any other SMP-content token; smpUnshaped() is what gates arrival here, not a script name, so
-       this reaches all of them alike without a per-script list to maintain, except where one script's
-       own value has since been corrected — see below). Scoped the SAME way as the height-fallback and
-       align-items branches above and in app.css — !IS_CHROMIUM, i.e. WebKit (macOS, and Linux via
-       WebKitGTK) — since the report was specifically against Safari, and Chromium is not implicated.
-       NOT !IS_WIN: the report was specifically that this must not fire against a real Chrome browser
-       even when data-platform is "mac" (design-mode testing), which !IS_WIN alone gets wrong the same
-       way the align-items rule did before its own correction.
-       ⚠ -0.33em FOR SOYOMBO SPECIFICALLY, ON REPORT — every other script keeps the original -0.5em; this
-       is the one place in smpReshape() that has to ask which script it actually is, because the report
-       named Soyombo's own value as wrong without saying every script's was. */
-    const margR=(ORTHO_SCHEME==="Soyombo")?"-0.33em":"-0.5em";
-    inner.style.cssText="line-height:1em;white-space:pre"+((typeof IS_CHROMIUM!=="undefined"&&!IS_CHROMIUM)?(";margin-right:"+margR):"");
+    /* ⚠ NO margin-right. A WebKit-only `-0.5em` (`-0.33em` for Soyombo) lived here for several rounds; it is
+       REMOVED, on report ("Grantha/Kawi/Siddhaṃ … are too far … to the right"), and the measurement says it
+       never had a compensating job to do. `.fo-form` is `display:flex; justify-content:center` (app.css), so
+       a negative margin on this inner flex ITEM cannot narrow, clip or unpad anything — it only shrinks the
+       item's OUTER width, which centring then answers by sliding the text right by HALF the margin. Probed in
+       the shipping WKWebView across Grantha/Kawi/Soyombo/Zanabazar Square/Siddhaṃ, four tokens each: the
+       painted advance is IDENTICAL with the margin and without it (to 0.00px), and equals canvas
+       `measureText().width` and `_measDOM()` to 0.01px in every single case — i.e. there is no trailing
+       advance, no engine-added side bearing, nothing for it to cancel. What it did was displace the glyph
+       from its slot centre by +5.13…+7.50px (margin/2), on top of the +1.0…+1.5px the box padding contributed
+       (fixed separately, at fo.x above): measured slot-centre offsets 6.67 (Grantha), 6.71 (Kawi), 6.34
+       (Soyombo), 6.76 (Zanabazar Square), 8.81 (Siddhaṃ) — against 0.00 for Devanagari and Rañjanā, which are
+       not swapped. In the wrapped stemma/hierarchy that offset is not subtle: the projection line drops onto
+       the slot CENTRE and the letters sit most of a character to its right, which is what the report is.
+       With both terms gone every script, swapped or not, centres by the one rule `text-anchor:middle` states.
+       ⚠️ If a future report genuinely needs a per-script horizontal nudge, it belongs on the BOX (fo.x), not
+       on a flex item's margin — the margin route makes the shift a side effect of centring free space, which
+       is why it took a probe to see that it was a shift at all rather than a fix. */
+    inner.style.cssText="line-height:1em;white-space:pre";
     inner.textContent=s;
     d.appendChild(inner);
     fo.appendChild(d);
@@ -1159,7 +1173,30 @@ function refreshFontStacks(){
                  && typeof HANGING_SCRIPTS!=="undefined" && HANGING_SCRIPTS.has(ORTHO_SCHEME))
     ? (scriptHeadlinePx(NODE_F)||ascent(NODE_F))   // the script's own measured head-line; 0 (no orthography yet, an unmeasurable face) falls back to the ascent this always used
     : ascent(NODE_F);
-  d && d.style.setProperty("--dia-pad-extra",(TOK_MAG>1?(_padAsc+descent(NODE_F))*(1-1/TOK_MAG):0).toFixed(2)+"px");
+  /* ⚠ AND IT IS 0 IN THE ARC VIEW, WHICH IS THE REST OF "Rañjanā AND Siddhaṃ ARE STILL TOO LOW IN ARCS".
+     Reducing this reserve from the Latin ascent to the measured head-line (the note above) moved them
+     17.76px → 13.40/13.84 and was reported back as an improvement that had not gone far enough. It had not:
+     the whole term is dead space in this ONE notation, and the rule's own note in app.css already says why
+     without drawing the conclusion — "stemma/tree … sit closest to the block top, with NO ARC ROW ABOVE THE
+     GLYPHS to absorb the growth". Arcs has exactly that arc row. Nothing magnified is ever the topmost ink
+     in an arc diagram: fitTight() crops to the union of `boxes`, whose highest members are an arc crown and
+     a deprel label set in POS_F, which is unmagnified and does not grow by so much as a pixel with TOK_MAG.
+     So the padding reserves room above the crown for an ascent that is nowhere near it, and the reader sees
+     it as the tokens (and everything else) sitting that much lower down the block.
+     ⚠️ SCOPED BY NOTATION, NOT BY SCRIPT — the argument is about what is drawn at the top of the diagram, and
+     that is a fact about the view. Rañjanā/Siddhaṃ are what was reported, but the same 8.88px of nothing sits
+     above a Devanagari or Literary Chinese arc diagram, and there is no reading on which one of them needs it
+     and another does not. Every notation whose topmost ink IS a magnified glyph keeps the reserve untouched:
+     stemma and hierarchy (the root node), brackets (the token line itself, with the brackets around it).
+     Measured live in the shipping WKWebView, samples/brihat_jataka.conllu, arcs: the padding above the SVG
+     falls 26.40px → 13.00 for Rañjanā and 26.84 → 13.00 for Siddhaṃ — i.e. back to exactly what an
+     unmagnified document has always had — while their stemma/hierarchy/brackets diagrams are byte-identical.
+     ⚠️ AND NOTHING INSIDE ANY SVG MOVES, which is what makes this safe to state so bluntly: no arc clearance,
+     no endpoint, no `boxes` entry, no hit rectangle. WORD_OFF (js/diagram/diagram-render.js, and its twin in
+     arcsWrapped) is the term that governs the arc-to-glyph gap and it is deliberately NOT touched — see its
+     own note for why the head-line is the wrong statistic THERE even though it is the right one here. */
+  const _padArcs=(typeof conv!=="undefined" && conv==="arcs");   // flat and wrapped alike — both are `conv==="arcs"`, and renderDoc() calls this function once per render, so a notation switch republishes it
+  d && d.style.setProperty("--dia-pad-extra",(TOK_MAG>1&&!_padArcs?(_padAsc+descent(NODE_F))*(1-1/TOK_MAG):0).toFixed(2)+"px");
   /* ⚠ HALF AN EM FOR STACKING SCRIPTS, NOT A FULL ONE — on request ("too much space below the tokens;
      do the same thing as for Grantha" i.e. reduce it, confirmed: "reduce STACKED_GAP itself — it's just
      too generous for everyone"). STACK_DROP's old role (extra below-token reserve for STACKING_SCRIPTS —
