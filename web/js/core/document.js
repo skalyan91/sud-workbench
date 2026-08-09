@@ -124,15 +124,31 @@ function _stxSkipB(text,j){ while(j>0){ if(_STX_WS.test(text[j-1])) j--;
    matches the raw line and NOT the resting one, so the whole sentence failed stage 1, the bridge was asked,
    and its "no" raised the tokenisation-mismatch badge — on a file that agrees with itself perfectly, and
    which no amount of re-parsing could fix, since the tokeniser reproduces the same two characters.
-   Both spellings are admissible surfaces for the same mark, so try the collapsed one when the literal form
-   does not match. Strictly a WIDENING — a unit that matched before still matches first, and by its own
-   spelling — and the span is measured in whichever string was matched, so the offsets stay offsets into the
-   line the caller handed us. dandaDisp is a no-op outside Sanskrit (dandaScan returns null), so no other
+   ⚠ AND IT RUNS BOTH WAYS, WHICH THE FIRST CUT OF THIS DID NOT. Widening the form only as far as
+   dandaDisp(form) covers a form spelt `||` against a resting line, because the display is what the form
+   collapses TO — but not a form spelt `‖` against the line being EDITED, because there the form is already
+   the collapsed glyph and the LINE holds the two characters. samples/brihat_jataka.conllu carries both
+   spellings (its first two verses write `‖` in the form column, its last two `||`), so half its sentences
+   raised the badge the moment the caret entered the running-sentence field and the other half never did —
+   measured, and exactly the reported "entering the input field gives a divergence warning". So a form is
+   tried against EVERY surface the app admits for the mark it spells (dandaSurfaces, beside dandaSpell:
+   one statement of which spellings are the same daṇḍa, shared with the write-back that re-spells one).
+   Strictly a WIDENING — a unit that matched before still matches first, and by its own spelling — and the
+   span is measured in whichever string was matched, so the offsets stay offsets into the line the caller
+   handed us. Sanskrit-only (dandaSurfaces answers null elsewhere, dandaDisp is a no-op there), so no other
    language pays for this or can be affected by it. */
+function stxFormSurfaces(form){                                           // every admissible spelling of `form`, its OWN first
+  const out=[form];
+  const d=(typeof dandaDisp==="function")?dandaDisp(form):form;           // kept: dandaDisp also collapses a `/` INSIDE a longer form, which is not a whole-form daṇḍa and so is not in the set below
+  if(d!==form) out.push(d);
+  const alt=(typeof dandaSurfaces==="function")?dandaSurfaces(form):null;
+  if(alt) for(const a of alt) if(out.indexOf(a)<0) out.push(a);
+  return out; }
 function _stxMatchAt(text,form,j){                                        // → the matched length at j, or 0
   if(text.lastIndexOf(form,j)===j) return form.length;                    // lastIndexOf(…,j)===j is startsWith-at-j without allocating
-  const d=(typeof dandaDisp==="function")?dandaDisp(form):form;
-  return (d!==form && text.lastIndexOf(d,j)===j) ? d.length : 0; }
+  const alts=stxFormSurfaces(form);
+  for(let i=1;i<alts.length;i++) if(text.lastIndexOf(alts[i],j)===j) return alts[i].length;
+  return 0; }
 function alignUnitsToText(text,units){ if(!text||!units.length) return null;
   const skip=j=>_stxSkipF(text,j);
   let pos=0; const spans=[];
@@ -166,7 +182,7 @@ function alignUnitsAround(text,units,k){ if(!text||!units.length||k<0||k>=units.
     /* the BACKWARD walk has to know the length before it knows the start, so it tries each admissible
        spelling's own length rather than assuming the form's — the same widening, read right to left. */
     let st=-1,w=0;
-    for(const f of [u.form,(typeof dandaDisp==="function")?dandaDisp(u.form):u.form]){
+    for(const f of stxFormSurfaces(u.form)){
       const c=j-f.length; if(c>=pos&&text.lastIndexOf(f,c)===c){ st=c; w=f.length; break; } }
     if(st<0) return null;
     spans[i]=[st,st+w]; end=st; }
@@ -618,13 +634,23 @@ function dandaSpellIn(text){ const t=String(text||"");
   return ""; }
 function learnDanda(s){ if(!s||s.danda||!isSanskritLang()||typeof s.text!=="string") return;   // Sanskrit-only: a `|` in an English `# text` is a pipe, not a daṇḍa
   const c=dandaSpellIn(s.text); if(c) s.danda=c; }
+/* WHICH SPELLINGS ARE THE SAME MARK — the one place that fact is stated, and both consumers read it here.
+   The app already conflates these notations everywhere else (dandaScan renders `//` and `||` alike as `‖`,
+   and `/` as `|`), so the set is not a new judgement; it is the existing one, named. Deliberately blind to
+   the Devanagari daṇḍa `।`/`॥`: those are what a Devanagari document actually writes, in the text AND in
+   the form column, so there is nothing to reconcile there (samples/brihat_jataka_devanagari.conllu agrees
+   with itself in both) and admitting them would let a `।` line match a `|` form, which is a real difference. */
+const _DANDA2=/^(?:\|\||\/\/|‖)$/, _DANDA1=/^(?:\||\/)$/;   // the two ASCII/CSL notations plus the collapsed display glyph
+function dandaSurfaces(form){ if(!isSanskritLang()) return null;   // outside Sanskrit a `|` is a pipe and a `/` a slash — see learnDanda
+  if(_DANDA2.test(form)) return ["||","//","‖"];
+  if(_DANDA1.test(form)) return ["|","/"];
+  return null; }                                                   // not a daṇḍa at all ⇒ it has exactly one spelling
 /* …and a daṇḍa token written the way THIS sentence writes them. Inert until the spelling has actually been
    read off the line (no `s.danda` ⇒ the form goes back in exactly as it stands), and deliberately blind to
-   the Devanagari daṇḍa `।`: this converts between the two ASCII/CSL notations the app already conflates, and
-   a document whose text really holds `।` means it. */
+   the Devanagari daṇḍa `।` for the reason just above. */
 function dandaSpell(form,s){ const d=s&&s.danda; if(!d) return form;
-  if(/^(?:\|\||\/\/|‖)$/.test(form)) return d+d;
-  if(/^(?:\||\/)$/.test(form)) return d;
+  if(_DANDA2.test(form)) return d+d;
+  if(_DANDA1.test(form)) return d;
   return form; }
 
 /* ═══ ⌘I OVER A SELECTION IN THE RUNNING SENTENCE ═════════════════════════════════════════════════
