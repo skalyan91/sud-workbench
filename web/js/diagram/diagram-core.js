@@ -1138,15 +1138,20 @@ function refreshFontStacks(){
      contribution there. Deliberately NOT added to the "space above a token" half of that same round: this
      request names only "below", and folding it into trDrop (which feeds both halves via nyD) would move the
      glyph itself again, which nothing here asked for. Lives in tree()'s own belowReserve expression, never in
-     nyD. lzh-only, matching every sibling term in this feature. */
-  TR_ROW_EXTRA=LZH_MAG?4:0;
+     nyD. lzh-only, matching every sibling term in this feature.
+     ⚠️ TUNED DOWN TO 2 one round later ("reduce the below-transliteration space in the hierarchy by 2px") —
+     a further adjustment to where this now sits (4→2), not a fresh, independent quantity. */
+  TR_ROW_EXTRA=LZH_MAG?2:0;
   /* ⚠ AND BRACKETS' TOKEN→DEPREL GAP GIVES BACK A FLAT 4px ("in brackets, deprels need 4px *less* of space
      below") — a correction to the two-descent total the immediately preceding round shipped (TOK_TR_GAP +
      2·TOK_DESC = 38.7px for lzh), not a reversion of it: the request is phrased as a further adjustment to
      where the gap now sits, not "put it back". Subtracted from both RELEXTRA and relH in brackets() — the
      two expressions that already carry TOK_DESC together, so they can't drift apart. lzh-only, matching
-     TOK_DESC's own scope (Sanskrit brackets stay excluded, "brackets are perfect"). */
-  BRK_DEPREL_LESS=LZH_MAG?4:0;
+     TOK_DESC's own scope (Sanskrit brackets stay excluded, "brackets are perfect").
+     ⚠️ TUNED BACK TO 2 one round later ("increase the below-deprel space in brackets by 2px") — the SAME
+     correction TR_ROW_EXTRA above just took, read in the opposite direction here because this term is
+     itself a subtraction: "increase the gap by 2" means "subtract 2 less", 4→2. */
+  BRK_DEPREL_LESS=LZH_MAG?2:0;
   /* ⚠ AND THE WRAPPED STEMMA/HIERARCHY'S TOKEN→DEPREL GAP IS THE ONE GEOMETRY TERM THAT IS *NOT* lzh-only
      ("the parts of the lzh corrections that also apply to enlarged Sanskrit scripts are: increased gap
      between token and deprel (in wrapped stemmas and hierarchies; brackets are perfect)"). Its total was
@@ -1238,24 +1243,21 @@ function fontPxOf(f){ const m=/(\d+(?:\.\d+)?)px/.exec(f||""); return m?parseFlo
    font and so a different ratio. 0 at TOK_MAG 1: TOK_MID is itself 0 there (scriptMidEm), and the explicit
    guard keeps the expression from returning a bare −markMidPx() rather than nothing. */
 function centreOnTokenLift(satFont,tokenPx){ return TOK_MAG>1 ? (TOK_MID*tokenPx-markMidPx(satFont)) : 0; }
-/* …AND THE BRACKET'S OWN VERSION OF THE SAME QUESTION, WHICH IS NOT THE SEAM MARK'S. The rule above centres
-   two X-HEIGHT BANDS, which is exactly right for a seam mark ("-"/"꞊", a small mid-register glyph the user
-   explicitly asked to sit "in the middle of the tokens' x-height") and exactly wrong for "[": a bracket HAS
-   no x-height — it spans ascender to descender — so asking xHeightPx() about its face answers a question
-   about the letter "x" in a font that is not drawing one. Measured on the real lzh bracket row at TOK_MAG
-   1.5: the two ink centres are 3.90px apart, the x-height rule lifts 1.97 (visibly short — the brackets
-   still read as sunk in an 8× screenshot), and this one lifts 4.05.
-   Each end is measured by whichever metric is STABLE for it, which is the whole trick:
-   · the TOKEN by its FONT's em box, never by ink — a magnified token is a different glyph in every
-     sentence, and ink-sampling is precisely the noise that made three earlier cuts of the seam-mark
-     centring wrong in opposite directions (Grantha too high, Javanese too low; see scriptMidEm's note).
-     Verified to be a good proxy rather than merely a safe one: for 知 at 22.5px the em-box mid is 8.50 and
-     the real ink mid 8.35, 0.15px apart.
-   · the BRACKET by its own INK, which is safe here for the reason it is not safe there — the glyph is
-     FIXED. "[" is the only thing this ever measures, in one known face, so there is nothing to vary. */
-function emMidPx(font){ _cv.font=font; const m=_cv.measureText("x"); return (m.fontBoundingBoxAscent-m.fontBoundingBoxDescent)/2; }
+/* …AND THE BRACKET'S OWN VERSION OF THE SAME QUESTION, WHICH USED TO ANSWER IT DIFFERENTLY FROM THE SEAM
+   MARK'S. The em-box version below (emMidPx) was tried first — the token measured by its font's full em box,
+   the bracket by its own ink — on the reasoning that a magnified token is a different glyph in every
+   sentence and ink-sampling was precisely the noise that made three earlier cuts of the seam-mark centring
+   wrong in opposite directions. Measured then: the two ink centres 3.90px apart, the em-box rule lifting
+   4.05, an x-height rule lifting only 1.97 and reading "visibly short" in an 8× screenshot.
+   ⚠️ THAT VERDICT IS OVERRULED, on direct instruction ("it is the x-height of tokens, not the full height,
+   that should be centred with the brackets") — not a magnitude tweak, a different quantity outright. The
+   token side now reads markMidPx(tokFont) (xHeightPx/2, the SAME x-height-band-centre question the seam
+   mark's own centreOnTokenLift already asks, just of the token's face rather than the mark's), sharing one
+   function rather than keeping a second, near-duplicate emMidPx around for a case nothing calls any more.
+   The bracket side is UNCHANGED — inkMidPx("[",…) — the "[" glyph is fixed in one known face, so measuring
+   it by its own ink was never the part in question. */
 function inkMidPx(text,font){ _cv.font=font; const m=_cv.measureText(text); return (m.actualBoundingBoxAscent-m.actualBoundingBoxDescent)/2; }
-function centreBracketLift(brkFont,tokFont){ return TOK_MAG>1 ? (emMidPx(tokFont)-inkMidPx("[",brkFont)) : 0; }   // every magnified script, lzh and Sanskrit alike — see the --script-cross note in refreshFontStacks for why this one term widened back out while the gap terms beside it did not
+function centreBracketLift(brkFont,tokFont){ return TOK_MAG>1 ? (markMidPx(tokFont)-inkMidPx("[",brkFont)) : 0; }   // every magnified script, lzh and Sanskrit alike — see the --script-cross note in refreshFontStacks for why this one term widened back out while the gap terms beside it did not
 function svgSeamMark(parent,tk,cx,y,halfEnd,font,boxes,halfStart,row){ if(!parent) return;
   /* ⚠ A SEAM MARK IS NOT PART OF THE WORD, so the ornamental magnification does not reach it. It is
      punctuation ABOUT the word — "this is where the orthographic word breaks" — set in the app's own

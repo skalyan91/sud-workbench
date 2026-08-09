@@ -1497,15 +1497,15 @@ function outline(si){const D=displaySent(DOC[si]), t=D.tokens, n=t.length, OID=k
       if(show.colour) rel.style.color=relColor(t[i].deprel); row.appendChild(rel); }
     appendLeadHTML(row,t[i],si,"punctsat opunct",OID(i));   // item 2: right-merging leads sit before the form (after the relation label)
     const form=document.createElement("span"); form.className="oform"+formDeco(t[i])+italDeco(t[i]); form.textContent=bform(t[i]); htmlSeamMark(form,t[i],"form");
-    /* ⚠ AND THE FORM ITSELF DROPS BY TR_TIGHTEN ("in outlines, tokens need to be lowered by 0.5em - 0.5ex")
-       — the SAME em/ex quantity the hierarchy's own token→transliteration tightening already computes
-       (js/diagram/diagram-core.js), reused rather than re-derived: `.oform`'s magnified font-size is the
-       same `calc(Npx * var(--script-mag,1))` shape NODE_F's own em/ex is measured against. A plain
-       margin-top on the flex ITEM (`.oline{display:flex; align-items:var(--script-cross,baseline)}`) nudges
-       the form down within the row's cross axis without touching its row-mates (deprel/translit/gloss/POS),
-       which is exactly what "tokens need to be lowered" — naming the token alone — asks for. lzh-only,
-       matching TR_TIGHTEN's own scope; 0 outside lzh. */
-    if(LZH_MAG) form.style.marginTop=TR_TIGHTEN.toFixed(2)+"px";
+    /* ⚠ AND THE FORM ITSELF DROPS — REVERTED FROM TR_TIGHTEN TO A FLAT 2px ("revert the latest lowering of
+       outline tokens, and instead lower by 2px"). The previous round read "tokens need to be lowered by
+       0.5em - 0.5ex" as reusing the hierarchy's own em/ex quantity (5.23px); this correction says that
+       reading was wrong outright — not merely too big — and replaces it with a literal, un-derived 2px, the
+       same flat-px idiom TOK_Y_LOWER/NODE_Y_EXTRA/TR_ROW_EXTRA already use elsewhere in this feature. Still
+       a margin-top on the flex ITEM alone (`.oline{display:flex; align-items:var(--script-cross,baseline)}`),
+       so the token nudges down without moving its row-mates (deprel/translit/gloss/POS) — that part of the
+       previous reasoning stands, only the MAGNITUDE and its DERIVATION were wrong. lzh-only; 0 outside lzh. */
+    if(LZH_MAG) form.style.marginTop="2px";
     if(gwOf(t[i]).length){ const ids=[OID(i)].concat(gwOf(t[i]).map(p=>p.oid));
       form.classList.add("gwunit"); gwFormHTML(form,form,t[i],si,"opart"); gwSlurHTML(form,ids,si); row.dataset.gw=ids.join(" "); }   // goeswith: the outline is the one view whose tiers run INLINE along the row, so there is no stack to share — the sharing is simply that the continuation gets NO row of its own (the fold saw to that) and no tiers of its own. The slur hangs out of flow under the pair, the same zero-width trick the seam marks use
     row.appendChild(form);   // host form only. The outline is the ONE view whose tiers run INLINE along a single row rather than stacked under the token, so the seam mark goes on the form alone: repeated after the transliteration and the segmentation too it would read as a separator BETWEEN the fields ("de=de=of") rather than as the word continuing
