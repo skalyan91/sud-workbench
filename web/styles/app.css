@@ -1076,6 +1076,19 @@
   .seam-mark.sel{fill:var(--accent); color:var(--accent)}
   #doc.zone-grid .seam-mark.sel{fill:var(--accent-dim); color:var(--accent-dim)}
   span.seam-mark{position:absolute; top:0; pointer-events:none}   /* HTML (wrapped brackets / outline): out of flow, so the row it hangs off keeps its own width and stays centred on its own text */
+  /* ⚠ AND, ON THE FORM ROW, IT UN-MAGNIFIES ITSELF — the HTML half of "A SEAM MARK IS NOT PART OF THE WORD,
+     so the ornamental magnification does not reach it" (svgSeamMark, js/diagram/diagram-core.js). The SVG
+     notations enforce that by writing an explicit unmagnified `style.font` onto the mark; the HTML ones
+     never did, and an absolutely-positioned span INHERITS its host's font-size — so a mark beside a
+     magnified .bwform came out at the host's own size. Measured on a magnified Sanskrit sentence: 15px in
+     arcs and flat brackets, 22.5px in wrapped brackets, which is the reported "seam markers should be at
+     the original, un-enlarged size, like in arcs". `1em` in a font-size resolves against the PARENT, so
+     dividing by --script-mag lands exactly on the host's own unmagnified base (22.5→15) — the same
+     quantity svgSeamMark computes as wordPx/TOK_MAG, and a no-op at mag 1.
+     ⚠️ SCOPED TO .bwrap, though `.outline` has the identical mismatch (21px against a 14px base) and the
+     identical one-line cure. Left alone deliberately: the outline has been called correct twice, and this
+     round asked for brackets. Widening is `.bwrap` → `.bwrap, .outline` here, nothing else. */
+  .bwrap span.seam-mark[data-seam-row="form"]{font-size:calc(1em / var(--script-mag,1)); top:calc((var(--script-mag,1) - 1) * 0.5em)}   /* …and re-centred, because `top:0` seats the span's LINE BOX at the host's top and the shrunk box no longer fills it: at 22.5px the mark landed mid-height by accident, at 15px it rode high. The shift is half the difference between the two boxes — in the mark's OWN em (which is host/mag), host − self = self·(mag − 1), so half of it is `(mag − 1) · 0.5em` — the HTML counterpart of the re-centring svgSeamMark does with TOK_MID. Exactly 0 at mag 1, i.e. the `top:0` this rule inherits. */
   span.seam-post{inset-inline-start:100%}   /* after the row: inset-inline-START:100% is its inline END, mirroring under RTL */
   span.seam-pre{inset-inline-end:100%}      /* before it, likewise mirrored */
   .has-seam{position:relative}   /* the containing block for the mark above — the row it belongs to */

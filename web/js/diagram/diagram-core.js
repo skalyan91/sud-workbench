@@ -312,7 +312,7 @@ _lazyFont("LIVE_TOKEN_STACK",()=>TOKEN_STACK); _lazyFont("LIVE_MONO_STACK",()=>M
    why a canvas font string cannot read the property itself). 1 everywhere except the ornamental Sanskrit
    scripts. It multiplies the TOKEN-FORM faces only — WORD_F/NODE_F/MWT_F and the goeswith tie — never the
    POS, transliteration or gloss rows, which are Latin annotation drawn at the app's own body size. */
-let TOK_MAG=1, TOK_WGHT=400, TOK_TRACK=0, TOK_ASC=1, TOK_MID=0, TOK_LIFT=0, TOK_OP=1, TOK_OP_RUN=1, STACKED_GAP=0, TOK_Y_LOWER=0, LZH_MAG=false, TR_TIGHTEN=0, TOK_TR_GAP=0;
+let TOK_MAG=1, TOK_WGHT=400, TOK_TRACK=0, TOK_ASC=1, TOK_MID=0, TOK_LIFT=0, TOK_OP=1, TOK_OP_RUN=1, STACKED_GAP=0, TOK_Y_LOWER=0, LZH_MAG=false, TR_TIGHTEN=0, TOK_TR_GAP=0, NODE_Y_EXTRA=0, TOK_DESC=0, MAG_DEPREL_GAP=0;
 // TOK_WGHT stays 400 for magnified faces now (see magTrack's own note on why the weight curve was dropped for
 // them), so this omits a weight token and lets the face render at its own resting weight.
 function magFont(px){ const w=TOK_WGHT;
@@ -1083,6 +1083,39 @@ function refreshFontStacks(){
      addressable. Measured (lzh, real ink): arcs 10.60px → 13.10px, and stemma/brackets 10.72/10.61 → the
      same 13.1-13.2 band, which is what "sized to match" asks for. */
   TOK_TR_GAP=LZH_MAG?2.5:0;
+  /* ⚠ A FURTHER 1.5px ON TOP OF TOK_Y_LOWER for the two notations that draw a token AS A NODE ("stemma nodes
+     need to be lowered an extra 1.5px" / "in hierarchies, we need the same extra 1.5px drop"). Kept as its
+     own term rather than folded into TOK_Y_LOWER=4: that constant is read by arcs, brackets and outline too,
+     and none of them was asked to move. Same crop asymmetry as TOK_Y_LOWER — the `boxes` entries stay on the
+     layout baseline, which is what turns the drop into headroom above the root rather than a taller block.
+     ⚠️ AND THE TOKEN'S OWN BELOW-STACK COMES WITH IT, which is what "make sure to keep the transliteration
+     gap as is" asks for. A GAP is a difference, not a position: the caveat is there because the obvious
+     implementation — lower the glyph, leave the rows — SHRINKS that gap by 1.5, and it would shrink the very
+     gap the previous round widened to 13.2px on request ("the token-transliteration gap in stemmas and
+     brackets should be sized to match [arcs]"). Undoing an approved result one round later is the reading to
+     reject, so the stack rides with the glyph and the gap stays exactly 13.22px. (The alternative reading —
+     pin the transliteration's ABSOLUTE y — is one line away: subtract NODE_Y_EXTRA from the belowStack seed
+     in stemma() and from dropYD in tree().) */
+  NODE_Y_EXTRA=LZH_MAG?1.5:0;
+  /* ⚠ THE FONT'S LITERAL DESCENT, not the `0.5em − 0.5ex` of TR_TIGHTEN above — the two requests are worded
+     differently on purpose. TR_TIGHTEN's came glossed ("reduced by the length of the descender (0.5em -
+     0.5ex)"); these came bare ("increased by the length of the descender"), and the bare phrase is what
+     descent() has always meant everywhere else in this file (belowGap, NODE_DESC_EXTRA, RELDESC). Measured
+     5.40px at TOK_MAG 1.5 against TR_TIGHTEN's 5.23 — close enough that only the wording distinguishes them,
+     which is why each is stated in the form it was asked in rather than collapsed into one number.
+     Two callers: brackets' token→deprel gap (+TOK_DESC, on top of the +2.5 it already carries) and outline's
+     row padding (±TOK_DESC/2, top gaining what the bottom gives up). */
+  TOK_DESC=LZH_MAG?descent(NODE_F):0;
+  /* ⚠ AND THE WRAPPED STEMMA/HIERARCHY'S TOKEN→DEPREL GAP IS THE ONE GEOMETRY TERM THAT IS *NOT* lzh-only
+     ("the parts of the lzh corrections that also apply to enlarged Sanskrit scripts are: increased gap
+     between token and deprel (in wrapped stemmas and hierarchies; brackets are perfect)"). Its total is
+     exactly what flat brackets carries for lzh — TOK_TR_GAP + the descent — so the two views agree at 33.3px
+     rather than each inventing a figure. projWrapped had NOTHING before this: it is exempt from TOK_Y_LOWER
+     (its tree fills its box, so there is no crop to loosen) and its token strip draws no `boxes`, so this is
+     fresh geometry rather than a gate being widened. `TOK_MAG>1` IS the "magnified Sanskrit or lzh"
+     condition asked for, exactly: scriptMag() (js/lang/translit.js) raises it from those two branches and
+     nothing else. */
+  MAG_DEPREL_GAP=TOK_MAG>1?(2.5+descent(NODE_F)):0;
   if(d){
     /* ⚠ AND A MAGNIFIED TOKEN IS CENTRED ON ITS ROW-MATES RATHER THAN SHARING THEIR BASELINE, in the two
        notations that set a token IN A ROW of small annotations rather than above/below them ("in brackets
@@ -1090,8 +1123,8 @@ function refreshFontStacks(){
        Baseline-sharing is right while everything in the row is one size — which is why `.bwbr`'s own note
        records `vertical-align:middle` being tried and reverted there — and stops being right the moment the
        token alone is 1.5–2× the rest: its x-height band then sits far above theirs and the row reads as the
-       small glyphs having sunk. Both terms are therefore magnification-only by construction as well as by
-       policy: outside lzh `--script-cross` IS `baseline` (the value the rule had) and the lift is 0.
+       small glyphs having sunk. Both terms are magnification-only by construction as well as by policy: at
+       TOK_MAG 1 `--script-cross` IS `baseline` (the value the rule had) and the lift is 0.
        The two notations need different mechanisms because their rows are built differently: the OUTLINE row
        is already a flex row with an explicit `align-items`, so it simply switches to `center` and every span
        in it — relation label, transliteration, gloss tiers, POS — centres against the form at once; WRAPPED
@@ -1099,7 +1132,14 @@ function refreshFontStacks(){
        `position:relative` lift instead (no reflow, so the greedy line-packing budget is untouched). Both
        bracket lifts come from `centreBracketLift` below — NOT from the seam mark's `centreOnTokenLift`; see
        that pair's own notes for why a "[" and a "-" want different answers to the same-sounding question. */
-    d.style.setProperty("--script-cross",LZH_MAG?"center":"baseline");
+    /* ⚠ THE CENTRING TERMS ARE THE ONE PART OF THE lzh SET THAT WIDENS BACK OUT, on request ("the parts of
+       the lzh corrections that also apply to enlarged Sanskrit scripts are: … centering in brackets and
+       outlines"). `TOK_MAG>1` is exactly that set and nothing more — scriptMag() raises it only from its
+       INDIC_SCRIPTS/ORNAMENTAL_SCRIPTS branch and its isLzhLang() branch — and it is also the honest
+       condition on its own terms: the mismatch these fix exists whenever the token alone is 1.5-2× its
+       row-mates, which is a fact about SIZE, not about which script produced it. The transliteration-gap
+       terms above stay LZH_MAG, because those were asked for as Han-specific and re-confirmed as such. */
+    d.style.setProperty("--script-cross",TOK_MAG>1?"center":"baseline");
     d.style.setProperty("--script-brk-lift",centreBracketLift('700 15px '+LIVE_TOKEN_STACK,magFont(15)).toFixed(2)+"px");   // '700 15px …' mirrors .bwbr's own font-weight/size (app.css); magFont(15) is .bwform's own calc(15px * var(--script-mag)) at the token weight
     /* ⚠ AND THE `position` ITSELF IS PUBLISHED, not left permanently `relative` with a 0px offset. Measured:
        a statically-positioned inline span and a relatively-positioned one at top:0 do NOT round to the same
@@ -1109,7 +1149,7 @@ function refreshFontStacks(){
        document this round exists to leave alone ("those changes were supposed to be scoped to magnified
        Chinese, not anything else"), so the rule reverts to `static` outright rather than to a null offset.
        With it, that same diff is empty. */
-    d.style.setProperty("--script-brk-pos",LZH_MAG?"relative":"static"); }
+    d.style.setProperty("--script-brk-pos",TOK_MAG>1?"relative":"static"); }
   POS_F='15px '+LIVE_TOKEN_STACK; GRID_F='462 13px '+LIVE_MONO_STACK; HEAD_F='500 11px '+uiFont(); HEAD_F_REQ='700 11px '+uiFont();   // HEAD_F/HEAD_F_REQ ride along on this refresh only for uniformity — it is built off --ui-font, not off either LIVE_ stack (see its lazy definition above), so nothing this function reacts to can actually change it
   TRANS_F='italic 15px '+LIVE_TOKEN_STACK; TRANS_UP_F='15px '+LIVE_TOKEN_STACK; MWT_F=WORD_F;
   GRID_ITAL_F='italic 462 13px '+LIVE_MONO_STACK;
@@ -1168,7 +1208,7 @@ function centreOnTokenLift(satFont,tokenPx){ return TOK_MAG>1 ? (TOK_MID*tokenPx
      FIXED. "[" is the only thing this ever measures, in one known face, so there is nothing to vary. */
 function emMidPx(font){ _cv.font=font; const m=_cv.measureText("x"); return (m.fontBoundingBoxAscent-m.fontBoundingBoxDescent)/2; }
 function inkMidPx(text,font){ _cv.font=font; const m=_cv.measureText(text); return (m.actualBoundingBoxAscent-m.actualBoundingBoxDescent)/2; }
-function centreBracketLift(brkFont,tokFont){ return LZH_MAG ? (emMidPx(tokFont)-inkMidPx("[",brkFont)) : 0; }   // LZH_MAG, not TOK_MAG>1 — see its own note: a Devanagari/Grantha document magnifies too and was never asked for this
+function centreBracketLift(brkFont,tokFont){ return TOK_MAG>1 ? (emMidPx(tokFont)-inkMidPx("[",brkFont)) : 0; }   // every magnified script, lzh and Sanskrit alike — see the --script-cross note in refreshFontStacks for why this one term widened back out while the gap terms beside it did not
 function svgSeamMark(parent,tk,cx,y,halfEnd,font,boxes,halfStart,row){ if(!parent) return;
   /* ⚠ A SEAM MARK IS NOT PART OF THE WORD, so the ornamental magnification does not reach it. It is
      punctuation ABOUT the word — "this is where the orthographic word breaks" — set in the app's own
