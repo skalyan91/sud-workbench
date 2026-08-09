@@ -48,7 +48,15 @@ BUNDLED_SUD = {"en_sud_ewt"}
 # deleted from the release, because an asset that exists and is unlisted is a decision we can revisit
 # — and because a user who has it INSTALLED still sees it (`list_installed` is a separate scan), so
 # it can be removed rather than silently orphaned.
-DEPRECATED_SUD = {"sa_sud_vedic_ufal_csl"}
+# `zh_sud_gsd_simp_trad` is the same case for the same reason, added at the v0.2.0 release: `zh_sud_gsd`
+# is its RENAMED successor, not an unrelated new package, so `by_pkg`'s per-package version comparison
+# in :func:`list_available` never sees the two as the same entry and both were listed side by side — the
+# old name with no README row left to answer `sud_scores()` (the results table dropped it), the new one
+# fully scored. `zh_sud_gsd` still takes either script as input (simplified is converted to traditional
+# at the pipeline boundary and back on output — see the SUD README's ⚑ footnote), so it is a strict
+# functional superset, not a narrower traditional-only replacement; leaving the old name selectable
+# would only ever offer a worse, unscored duplicate of the model beside it.
+DEPRECATED_SUD = {"sa_sud_vedic_ufal_csl", "zh_sud_gsd_simp_trad"}
 # Per-model UAS/LAS accuracy: SUD scores live in the repo README's scores table; Stanza (UD) scores
 # come from the official performance page.  Both are fetched + cached (TTL) and re-fetched on refresh.
 SUD_README_URL = f"https://raw.githubusercontent.com/{SUD_REPO}/main/README.md"
@@ -234,19 +242,39 @@ def _fetch_text(url: str, cache_name: str, refresh: bool | str, ttl: float | Non
 
 
 def sud_scores(refresh: bool | str = False) -> dict[str, dict]:
-    """``package → {"uas":float,"las":float}`` parsed from the SUD README scores table
-    (``| `pkg` | Lang | UAS | LAS | … |``).  Empty on failure."""
+    """``package → {"uas":float,"las":float}`` parsed from the SUD README's "Results" table.
+
+    Column-index-driven off the table's OWN header row, not a fixed ``cells[2]``/``cells[3]`` — the
+    v0.2.0 release added a ``Version`` column between Language and UAS (seven of eleven models moved
+    to 0.2.0, five stayed at 0.1.0, and the table now says so per row), which a hardcoded offset would
+    have silently read as UAS itself: ``_NUM_RE`` rejects a two-dot string like ``"0.2.0"``, so every
+    row of the new table would have failed the numeric check and the whole function would have
+    returned ``{}`` — no scores anywhere, not just the seven that moved. Scanning for a header row
+    naming ``UAS``/``LAS`` (reset between tables, so the unrelated "Released models"/"Available
+    models" tables earlier in the README, which have neither, are never mistaken for it) survives
+    that reorder and any future one. Empty on failure."""
     out: dict[str, dict] = {}
+    uas_i = las_i = None
     for line in _fetch_text(SUD_README_URL, "sud_readme.md", refresh).splitlines():
         if "|" not in line:
+            uas_i = las_i = None          # a table ended; the next one gets its own header search
             continue
         cells = [c.strip() for c in line.strip().strip("|").split("|")]
         if len(cells) < 4:
             continue
+        if uas_i is None or las_i is None:
+            lc = [c.strip("` ").upper() for c in cells]
+            if "UAS" in lc and "LAS" in lc:
+                uas_i, las_i = lc.index("UAS"), lc.index("LAS")
+            continue
+        if set(cells[0]) <= set("-: "):    # the |---|---:|…| separator row under the header
+            continue
+        if uas_i >= len(cells) or las_i >= len(cells):
+            continue
         pkg = cells[0].strip("` ").strip()
         if "_sud_" not in pkg:
             continue
-        uas, las = cells[2], cells[3]
+        uas, las = cells[uas_i], cells[las_i]
         if _NUM_RE.match(uas) and _NUM_RE.match(las):
             out[pkg] = {"uas": float(uas), "las": float(las)}
     return out
