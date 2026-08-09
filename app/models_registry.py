@@ -37,26 +37,45 @@ GITHUB_API = f"https://api.github.com/repos/{SUD_REPO}/releases"
 # Wiktionary → MGloss lookup for every language, and nothing in that feature's UI would connect the
 # two, so it reads as the definition lookup having quietly broken.
 BUNDLED_SUD = {"en_sud_ewt"}
-# Models the release still carries but this app no longer supports, hidden from the Model Manager.
-# `sa_sud_vedic_ufal_csl` reads and writes Clay-Sanskrit-Library notation — a `# text` whose sandhi
-# is MARKED rather than undone, so no token form is a substring of the running sentence. Supporting
-# it meant a whole reversal engine (`app/sa_csl.py` + its vendored transform) to recover the spans
-# that notation destroys. `sa_sud_vedic_ufal_dcs` supersedes it: it takes ordinary IAST or
-# Devanagari, keeps CSL strictly internal, and publishes real source offsets, so the app aligns
-# Sanskrit by literal match like every other language. Both were listed for a while; leaving the old
-# one selectable would offer a model whose output this app can no longer read. Filtered rather than
-# deleted from the release, because an asset that exists and is unlisted is a decision we can revisit
-# — and because a user who has it INSTALLED still sees it (`list_installed` is a separate scan), so
-# it can be removed rather than silently orphaned.
-# `zh_sud_gsd_simp_trad` is the same case for the same reason, added at the v0.2.0 release: `zh_sud_gsd`
-# is its RENAMED successor, not an unrelated new package, so `by_pkg`'s per-package version comparison
-# in :func:`list_available` never sees the two as the same entry and both were listed side by side — the
-# old name with no README row left to answer `sud_scores()` (the results table dropped it), the new one
-# fully scored. `zh_sud_gsd` still takes either script as input (simplified is converted to traditional
-# at the pipeline boundary and back on output — see the SUD README's ⚑ footnote), so it is a strict
-# functional superset, not a narrower traditional-only replacement; leaving the old name selectable
-# would only ever offer a worse, unscored duplicate of the model beside it.
-DEPRECATED_SUD = {"sa_sud_vedic_ufal_csl", "zh_sud_gsd_simp_trad"}
+# Models the release still carries but this app no longer supports, hidden from list_available() —
+# yet still shown by list_installed()/merge_installed() if a machine genuinely has one on disk. That
+# asymmetry is the point: `sa_sud_vedic_ufal_csl` reads and writes Clay-Sanskrit-Library notation — a
+# `# text` whose sandhi is MARKED rather than undone, so no token form is a substring of the running
+# sentence. Supporting it meant a whole reversal engine (`app/sa_csl.py` + its vendored transform) to
+# recover the spans that notation destroys. `sa_sud_vedic_ufal_dcs` supersedes it: it takes ordinary
+# IAST or Devanagari, keeps CSL strictly internal, and publishes real source offsets, so the app
+# aligns Sanskrit by literal match like every other language. Both were listed for a while; offering
+# the old one to a NEW installer would hand them a model whose output this app can no longer read —
+# but a user who already HAS it installed still needs to see the row, because it is their only path to
+# REMOVE it rather than have it silently orphaned (`Api.remove_model` reads this same list). Filtered
+# from the release listing rather than deleted from the release itself, because an asset that exists
+# and is merely unlisted is a decision this table can still revisit.
+DEPRECATED_SUD = {"sa_sud_vedic_ufal_csl"}
+# Models superseded by a RENAME of the same training line — same corpus, same output format the app
+# already reads correctly, just a newer package name for what is honestly the same model going
+# forward. Unlike DEPRECATED_SUD above, there is no compatibility hazard an old install needs
+# protecting from, so these are hidden from the MODEL MANAGER wherever it lists rows —
+# list_available() AND list_installed() — rather than merely off the network listing: "only show the
+# latest version of each model" is meant literally, and a straight rename is not a reason to make an
+# exception, however it happened to score against a benchmark it no longer targets the same way.
+# Deliberately NOT filtered out of `_installed_sud_packages()` itself, which several non-listing
+# callers share (`resolve_default_package`, the actual parser-loading path): a machine that somehow
+# still has only the old wheel and never the new one should keep parsing with what it has rather than
+# have language auto-selection go blind to a working model on disk. This is a display rule, not a
+# capability withdrawal.
+# `zh_sud_gsd_simp_trad` → `zh_sud_gsd`, added at the v0.2.0 release: a plain package rename, not an
+# unrelated new package, so `by_pkg`'s per-package version comparison in :func:`list_available` never
+# saw the two as one entry and both listed side by side — the old name with no README row left to
+# answer `sud_scores()` (the v0.2.0 results table dropped it), the new one fully scored. `zh_sud_gsd`
+# still takes either script as input (simplified is converted to traditional at the pipeline boundary
+# and back on output — see the SUD README's ⚑ footnote), so it is a strict functional superset, not a
+# narrower traditional-only replacement. `la_sud_ittb_proiel_perseus` needs no entry here: 0.1.0 and
+# 0.2.0 (the latter trained with runtime orthographic augmentation across the SAME treebanks — see the
+# README's own "bill, not benefit" note) ship under the identical package name, so `by_pkg`'s version
+# comparison and pip's own upgrade-in-place already collapse it to one row with no help from this set —
+# even though the augmented arm's headline LAS is a few points BELOW the arm it replaced on this same
+# benchmark, comparable training data is comparable training data and the newer one is still what ships.
+SUPERSEDED_SUD = {"zh_sud_gsd_simp_trad"}
 # Per-model UAS/LAS accuracy: SUD scores live in the repo README's scores table; Stanza (UD) scores
 # come from the official performance page.  Both are fetched + cached (TTL) and re-fetched on refresh.
 SUD_README_URL = f"https://raw.githubusercontent.com/{SUD_REPO}/main/README.md"
@@ -474,7 +493,7 @@ def list_available(refresh: bool | str = False) -> list[dict]:
     for rel in _fetch_releases(refresh):
         for asset in rel.get("assets", []):
             entry = parse_asset(asset.get("name", ""))
-            if not entry or entry["package"] in DEPRECATED_SUD:
+            if not entry or entry["package"] in DEPRECATED_SUD or entry["package"] in SUPERSEDED_SUD:
                 continue
             entry["asset_url"] = asset.get("browser_download_url")
             entry["size"] = asset.get("size")
@@ -583,6 +602,12 @@ def _installed_stanza_models() -> set[tuple[str, str]]:
 def list_installed() -> list[dict]:
     out = []
     for pkg in sorted(_installed_sud_packages()):
+        # SUPERSEDED_SUD is filtered HERE — this function's own listing — not out of
+        # _installed_sud_packages() itself, which resolve_default_package() and the real parsing path
+        # also read: the row is what "only show the latest version" is about, not whether a machine
+        # that genuinely still has the old wheel keeps using it to parse. See that set's own comment.
+        if pkg in SUPERSEDED_SUD:
+            continue
         entry = parse_asset(pkg + "-0-py3-none-any.whl") or {"id": f"sud:{pkg}", "package": pkg}
         try:
             from importlib.metadata import version
