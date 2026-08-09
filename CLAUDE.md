@@ -998,6 +998,13 @@ portable bundle ships only the torch-free CORE set, and the heavy tiers (`stanza
 startup. Every heavy import therefore sits behind a lazy `try: import` in `translit`/`parse` — a
 missing tier must surface as an offer to install, never an exception.
 
+⚠ **NOT EVERY TIER IS A PIP INSTALL**, and `la_macron` (≈4 MB) is the one that is not: it fetches a
+DATA file the Latin model cannot ship for licensing reasons and that is on PyPI in no form. A tier
+therefore declares EITHER `pip` + `probe` OR `module` — the name of a module supplying its own
+`available()`/`install(progress)`/`status()` — and `install()` dispatches on which. That `module`
+shape sat unused for a while and is the extension point for exactly this; use it rather than bolting a
+second install/progress/UI path beside the first. See `app/macron.py` under Language services.
+
 ### Language services
 
 - `app/translit.py` — Latin transliteration routed per language: wiktra by default, dedicated
@@ -1038,6 +1045,57 @@ missing tier must surface as an offer to install, never an exception.
   the opposite of `afterFormEdit`, which drops it: a hand-picked reading is a statement about the FORM,
   and a retag does not change the form. `regenTok` cannot stand in for any of this — it is a no-op with
   no parser model, and romanisation runs without one.
+- `app/macron.py` — **LATIN VOWEL LENGTH IS A SCRIPT SCHEME, AND THIS FILE CALLS THE MODEL RATHER THAN
+  BEING ONE.** `_SCRIPT_SCHEMES["la"] = [("macron", "With macrons")]` (app/translit.py) puts `divisa` →
+  `dīvīsa` on the Script pill beside Sanskrit's Brahmic scripts: display only, so the running sentence
+  and the diagram glyphs re-render while the FORM column, the grid, the editors and the file keep the
+  bare spelling. Nothing is ever written to MISC. The frontend names the off-row "Without macrons" and
+  suppresses "None" (`orthoOffLabel`/`isLatinLang`, js/lang/translit.js), because Latin's one entry is
+  not a writing system but a second SPELLING of the one it has — a two-state choice, and "Original"
+  names it after the absence of a script it never had.
+  ⚠ **The whole engine is the model's**, `la_macronise`, which `la_sud_ittb_proiel_perseus` 0.2.0 ships
+  IN ITS DEFAULT PIPELINE (`token._.macron`/`doc._.macron`; SUD-spaCy `scripts/la_macronise.py`). This
+  module is the one-module façade — availability, the fetch, and `resolve(form, upos, feats, lemma)`.
+  ⚠️ **An earlier `app/macron.py` reimplemented all of it** — 912 lines, plus `_la_macron_vendor.py`
+  (215) and the macOS-only `appledict.py` (599) — and 2cd6b14 deleted all three, correctly. Do not bring
+  any of it back. The component is measured at 97.63 % whole-token against Alatius (98.23 % in
+  vocabulary / 90.42 % out of it, cascading a harvested table into Morpheus), separates `malus` from
+  `mālus` on UPOS alone through its `MP` rungs, honours a typed breve as a veto (`intĕllectam` →
+  `intĕllēctam`) and keeps the caller's orthography (`jussit` stays `j`, `cælum` stays ligated). A
+  lookup rung, a paradigm rule or a per-word correction written HERE is a duplicate of one already
+  there.
+  ⚠ **ALL FOUR ARGUMENTS, or the answer is wrong rather than absent.** `Gallia` Nom and `Galliā` Abl are
+  one spelling separated only by FEATS, and the lemma supplies the declension where FEATS carries no
+  `InflClass` — which is why `Api.orthography`/`orthography(_many)`/`_render_one` carry `feats`/`lemmas`
+  beside `upos` and why all three are in `translit._CACHE`'s key. It is also why `orthoKeyOf`
+  (js/lang/translit-load.js) appends them under `orthoNeedsMorph()`: the batch de-duplicates on that key,
+  so keyed on (surface, UPOS) alone one `Gallia` in a document would decide the macrons of all of them.
+  Verified live in both skins — 33 distinct keys in ONE bridge call, the two `Gallia` PROPN tokens
+  answered `Gallia` and `Galliā`.
+  ⚠️ **A MULTI-WORD TOKEN IS COMPOSED FROM ITS COMPONENTS** (`laMwtCompose`), because Morpheus lists
+  WORDS and never host+clitic: the fused surface simply misses, and `multosque` came back bare in the
+  middle of an otherwise macronised line. `multōs` + `que` → `multōsque`, accepted only where stripping
+  the quantities off the join reproduces the stored form (French `du` = `de`+`le` is why that check is
+  there). And the refresh hangs off `markDirty` (`scheduleOrthoMorph`), the one funnel every edit passes
+  through, so ANY attribute moving re-renders the token rather than a list of write sites someone
+  remembered — verified: a hand FEATS edit Abl→Nom takes `Galliā` back to `Gallia` and touches nothing else.
+  ⚠ **THE DATA IS FETCHED, NOT SHIPPED, AND IT LIVES IN THE COMPONENT'S OWN CACHE.** Morpheus is
+  CC BY-SA 3.0 and the Latin wheel CC BY-NC-SA, so the wheel ships the pipe with no table (`--no-lut`);
+  `install()` runs the component's own `fetch_morpheus()` (~4 MB → ~2.2 MB in `~/.cache/sud-spacy/`, or
+  `$LA_MORPHEUS_TABLE`) as the `la_macron` extras tier — the `module` shape in `app/extras.py`, which
+  until now had no user. **Its cache, not ours**: the deleted version fetched a table of its own into
+  `paths.APP_DATA` and pointed the component at it through the environment (`parse._share_macron_table`),
+  so one download served two places that could get out of step. One file, one owner, and the in-pipeline
+  component macronises from the same data this display path does.
+  ⚠️ **THE ENGINE AND THE DATA ARE TWO ABSENCES AND `available()` REPORTS ONE ANSWER.** There is no second
+  copy of `la_macronise` in this app, so with no Latin model there is nothing to macronise with and
+  nothing to fetch with either (`fetch_morpheus` is that component's function) — `install()` says which
+  is missing rather than the UI reconciling two questions. Neither miss is memoised: the model can arrive
+  through the Model Manager, and the table through another window or the SUD-spaCy CLI, mid-session.
+  ⚠️ **NOT `_ext_misc`, and that is a decision, not an omission.** `Subject`/`Reported`/`Idiom` go to MISC
+  because they are ANNOTATION the model predicts; a macron is a spelling the reader is shown. Writing
+  `Macron=` would change the bytes of every Latin file this app parses AND would leave the Script menu
+  dead on a file loaded from disk, which has no such key — the display path answers for both.
 - `app/data/baxter_sagart.tsv` — Middle Chinese (Baxter) + Old Chinese (Baxter–Sagart), rebuilt by
   **`tools/build_baxter_index.py`** from the wikitext of Wiktionary's "Appendix:Baxter-Sagart Old Chinese
   reconstruction" (**CC BY-SA 4.0**, attribution in the file's own header). Six columns —

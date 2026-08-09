@@ -1055,13 +1055,20 @@ class Api:
         return {"schemes": translit.orthography_schemes(lang), "lang": lang}
 
     def orthography(self, forms: list[str], lang: str, scheme: str = "",
-                    upos: list[str] | None = None) -> dict:
+                    upos: list[str] | None = None, feats: list[str] | None = None,
+                    lemmas: list[str] | None = None) -> dict:
         """Same optional POS hint as ``transliterate`` above, parallel to ``forms``: a script rendering can
         be reading-dependent too (a Traditional/Simplified variant pair, a kana spell-out), so the layer
         that picks a reading is given the same evidence.  An MWT range sends nothing — its span covers
-        several tokens and so has no one part of speech to report."""
+        several tokens and so has no one part of speech to report.
+
+        ``feats``/``lemmas`` are parallel too, and exist for Latin macronisation, which needs the whole
+        morphological analysis rather than just the class: the lookup is keyed on (form, upos, feats),
+        and the lemma's ending supplies the declension wherever FEATS carries no ``InflClass``.  Sending
+        the form alone reaches only the morphology-blind level of the table, which is how nominative
+        ``Gallia`` acquires an ablative macron.  Every other language ignores both."""
         from . import translit
-        return {"ortho": translit.orthography_many(forms, lang, scheme, upos),
+        return {"ortho": translit.orthography_many(forms, lang, scheme, upos, feats, lemmas),
                 "lang": lang, "scheme": scheme}
 
     def sanskrit_mwt(self, groups: list[list[str]], lang: str, scheme: str = "",

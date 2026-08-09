@@ -125,7 +125,14 @@ function setTitle(name){ if(name)DOCNAME=name;
 // stored-transliteration rewrite, a session restored from disk — which stay dirty regardless of the history.
 function markDirty(v=true){ if(!v) DIRTY_BASE=false;
   DIRTY=!!v&&(DIRTY_BASE||UNDO.length>0);
-  if(hasBridge())try{window.pywebview.api.set_dirty(DIRTY);}catch(e){} setTitle(); }
+  if(hasBridge())try{window.pywebview.api.set_dirty(DIRTY);}catch(e){} setTitle();
+  /* …and the SCRIPT renderings that are keyed on more than the form follow the edit that invalidated
+     them. Only Latin macronisation is (the model's `la_macronise` reads UPOS + FEATS + lemma — see
+     app/macron.py), and this is the one funnel every document edit passes through — so hanging the
+     refresh here is what makes it true of ANY attribute of any token rather than of the handful of edit
+     sites someone thought to instrument. Debounced and self-gating; a no-op in every other language.
+     Guarded because js/lang/translit-load.js loads AFTER this module. */
+  if(v && typeof scheduleOrthoMorph==="function") scheduleOrthoMorph(); }
 function markDirtyBase(){ DIRTY_BASE=true; markDirty(); }   // an unsaved change with no undo entry to show for it
 // Stamp the one scheme a DOCUMENT owns onto its first sentence: the transliteration its MISC Translit/LTranslit
 // is written in. The script and the displayed romanisation are the READER's, kept per-language in PREFS, and

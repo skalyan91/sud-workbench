@@ -107,6 +107,33 @@ and is copied verbatim.
 and never reaches a file, so nothing in this app has to REVERSE it — the third file above generates
 it FORWARD, for display only.)
 
+## Latin vowel lengths — FETCHED AT RUNTIME, never shipped
+
+Nothing about Latin macronisation is vendored here any more. The lookup *code* is the
+`la_macronise` component inside the `la_sud_ittb_proiel_perseus` model wheel (Sunflower AI's own),
+and `app/macron.py` is a façade that calls it. The vowel lengths themselves come from **Morpheus**
+(Perseus Project, **CC BY-SA 3.0 US**) by way of the copy Johan Winge commits in **latin-macronizer**
+(**GPL-3.0**) as `latin_macronizer/macrons.txt`. That component downloads the file on demand into its
+own cache (`~/.cache/sud-spacy/`, or `$LA_MORPHEUS_TABLE`) and compiles it there — it is not in this
+repository, not in the model wheel, not in any build, and must not be added to any of them.
+
+That distinction is doing real work, not being pedantic: **GPL-3.0 restricts distribution, not
+use.** A file the user's own machine fetches from the upstream host, which never enters a build of
+this app, is the same arrangement `app/convert.py` has with the grew backend and `app/extras.py`
+has with the PyTorch tiers. Bundling it would raise a licence question; fetching it does not.
+
+(SUD-spaCy's own `build_la_macron.sh` produces a DIFFERENT table, harvested by macronising three
+CC BY-**NC**-SA treebanks. That one mixes NonCommercial keys with share-alike data and cannot be
+redistributed by anyone — upstream says so itself, and ships the component with `--no-lut` for
+exactly that reason. The component still reads one if the user has built it into their own model,
+cascading it ahead of Morpheus for the words it covers, but it is never required.)
+
+| Data behind that feature | Origin | Licence |
+|---|---|---|
+| Morpheus vowel-length data | [PerseusDL/morpheus](https://github.com/PerseusDL/morpheus) | CC BY-SA 3.0 US |
+| latin-macronizer (the route to it) | [Alatius/latin-macronizer](https://github.com/Alatius/latin-macronizer) | GPL-3.0 |
+| SUD_Latin-ITTB / PROIEL / Perseus (the harvest keys, if built) | Universal Dependencies | CC BY-NC-SA |
+
 ## Not vendored, but worth naming
 
 - **grew** — the OCaml backend (`grewpy_backend`) is an optional external prerequisite, built by

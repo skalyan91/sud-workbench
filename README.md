@@ -190,7 +190,18 @@ are disabled (surfaced as a toast). The conversion grammars are vendored from
   context-dependent scripts (Arabic and Persian DIN 31635, Hebrew ISO 259, Pīnyīn,
   Jyutping, Japanese kana → Hepburn, Korean) and uroman as a fallback. Sanskrit can be
   read in either of the two scripts a file may be stored in — IAST or Devanagari — and
-  displayed in any of 33 Brahmic scripts or romanised, whichever it is stored in.
+  displayed in any of 33 Brahmic scripts or romanised, whichever it is stored in. Latin
+  adds a **macronised** Script option, which restores the vowel lengths classical
+  orthography leaves unwritten (`divisa` → `dīvīsa`) in the running sentence and the
+  diagrams while the grid, the editors and the file keep the bare spelling. It reads the
+  whole analysis, not just the word, so `Gallia` and `Galliā` come out right where only the
+  case tells them apart, as do `malus` "bad" and `mālus` "mast". Multi-word tokens are
+  macronised from their **components** (`multōs` + `que` → `multōsque`), since no lexicon
+  lists a host with its clitic attached, and a breve you type is honoured rather than
+  overruled (`intĕllectam` → `intĕllēctam`). The lengths come from the Latin model's own
+  macroniser plus Morpheus data downloaded on first use (~4 MB) rather than bundled; the
+  Script menu's own row takes you to Manage Models when it isn't there yet, and the option
+  becomes usable the moment the download finishes.
   The four **ornamental** Sanskrit scripts — Rañjanā, Soyombo, Siddhaṃ and Balinese — are drawn at
   1.5× size, since their decoration is not resolvable at the size an everyday script reads at, and
   the running line then meets the sentence number at the top of the letters rather than at the
@@ -257,8 +268,10 @@ app/  __main__.py       pywebview bootstrap, application menu, and the AppKit/Py
       parse.py          parser engines: SUD spaCy + Stanza UD→SUD (+ MWT), sentence split
       parse_sud.py      backwards-compat shim over app.parse
       models_registry.py  available/installed models, GitHub-release + Stanza download
-      extras.py         on-demand install of the heavy optional stacks (Stanza/JP/Arabic)
+      extras.py         on-demand install of the optional tiers (Stanza/JP/Arabic/Latin macrons)
       translit.py       Latin transliteration, routed to a backend per language
+      macron.py         Latin vowel lengths (display only) — a façade over the Latin model's own
+                        la_macronise component; fetches the Morpheus data on demand
       langid.py         offline language identification (vendored fastText lid.176)
       wiktionary.py     Wiktionary definition lookup (MediaWiki REST API)
       apte.py           Apte Sanskrit-English dictionary lookup (vendored index; C-SALT fallback)
@@ -332,6 +345,7 @@ almost anything is to delete the relevant subdirectory and relaunch. Quit the ap
 | the Stanza tier itself looks broken | `rm -rf ~/Library/Application\ Support/SUD\ Workbench/site-packages` → reinstall the tier from Manage Models |
 | **Stanza fails with `RuntimeError: Numpy is not available!` (or the model just does nothing), on an Intel Mac.** PyTorch's last macOS x86_64 build (2.2.2) predates the NumPy 2.0 ABI; a venv built before `requirements-core.txt` pinned `numpy<2` on Intel resolved a current, incompatible numpy instead — and reinstalling only the Stanza tier can't fix it, because that numpy is CORE's, loaded on every document open (`app/langid.py`'s language auto-detect), well before Stanza is ever touched. | `rm -rf ~/Library/Application\ Support/SUD\ Workbench/venv ~/Library/Application\ Support/SUD\ Workbench/site-packages` and relaunch, then reinstall the Stanza tier from Manage Models. (On Apple Silicon this pin is a no-op — current torch there is numpy-2-safe, so this specific failure shouldn't occur; a NumPy report on Apple Silicon has a different cause.) |
 | a Stanza model is corrupt | `rm -rf ~/Library/Application\ Support/SUD\ Workbench/stanza_resources` |
+| **the Latin “With macrons” row stays unavailable, or macronises nothing.** Two separate things have to be present: the Latin model (which *is* the macroniser) and the Morpheus vowel lengths it reads. The lengths live in the model's own cache, outside Application Support, so a clean slate there does not touch them. | Download `la_sud_ittb_proiel_perseus` in Manage Models, then install the **Latin macrons** tier in the same window. To force the data to be re-fetched: `rm -rf ~/.cache/sud-spacy` (or `$LA_MORPHEUS_TABLE`, if you set one). |
 | **the window's corners are not fully rounded** (and other native chrome looks a version behind). AppKit reads the `LC_BUILD_VERSION` of the binary the app runs *inside* — the interpreter — and holds an older-SDK app at the previous appearance. | Check what the venv was built from: `otool -l "$(readlink ~/Library/Application\ Support/SUD\ Workbench/venv/bin/python)" \| awk '/LC_BUILD_VERSION/{f=1} f&&$1=="sdk"{print "sdk",$2;exit}'`. If it is behind your macOS major version, `brew install python@3.12`, then force a rebuild (below). |
 | **forcing a different Python 3.12** | `rm -rf ~/Library/Application\ Support/SUD\ Workbench/venv` and relaunch. The first-launch setup runs again, and `find_py()` picks the newest-SDK interpreter it can find. To name one instead, run the bundle's own launcher from a terminal so the variable reaches it (`open -a` does not pass the environment): <br>`SUD_PYTHON=/opt/homebrew/bin/python3.12 "/Applications/SUD Workbench.app/Contents/MacOS/SUD Workbench"` |
 | a completely clean slate | `rm -rf ~/Library/Application\ Support/SUD\ Workbench` (this also forgets recent files and preferences) |

@@ -579,7 +579,15 @@ function orSchemeLabel(id){ const s=ORTHO_SCHEMES.find(x=>x.id===id); return s?s
    re-ask the bridge and re-render the pills and the document off the fresh one. */
 window.__extraInstalled=function(){ if(!DOCLANG) return;
   try{ loadOrthoSchemes(DOCLANG); loadTranslitSchemes(DOCLANG); }catch(e){} };
-function orthoOffLabel(){ return "Original"; }
+/* WHAT THE "no scheme" ROW IS CALLED, which is not the same question in every language. Everywhere else the
+   Script menu picks a WRITING SYSTEM, and declining to pick one is "Original" — the stored glyphs. Latin's
+   only entry is not a writing system at all but a second SPELLING of the one it has (vowel length, see
+   _SCRIPT_SCHEMES["la"] in app/translit.py), so the menu is a two-state choice about macrons and naming
+   its off-state after the absence of a script says nothing a reader of Latin would recognise.
+   `isLatinLang` and not a check for "does this language's only scheme happen to be `macron`": the naming is
+   a fact about Latin, and a second Latin scheme later must not silently rename the row back. */
+function isLatinLang(lang){ return ((lang!=null?lang:DOCLANG)||"").toLowerCase().split(/[-_]/)[0]==="la"; }
+function orthoOffLabel(){ return isLatinLang()?"Without macrons":"Original"; }
 function updateOrthoPill(){ const p=document.getElementById("orthoPill"); if(!p)return;
   if(!ORTHO_SCHEMES.length){ p.hidden=true; return; }
   p.hidden=false; p.classList.add("pickable");
@@ -598,7 +606,11 @@ function orRender(){ const m=orEl(); m.innerHTML="";
   // glyph", and Sanskrit's only displayed transliteration is IAST, which the schemes list already
   // offers by name as "Latin". Two rows doing one thing, one of them naming it after the
   // absence of a script when it IS one, is worse than one.
-  const off=isSanskritLang()?[{id:"",label:orthoOffLabel(),available:true}]
+  /* …and Latin gets no "None" row either, for the same reason Sanskrit doesn't: "None" means "promote the
+     displayed transliteration to the main glyph", and Latin has no displayed transliteration to promote —
+     the row would name a state it cannot reach. That leaves exactly the two-state choice the macron scheme
+     is: "Without macrons" (orthoOffLabel) and "With macrons". */
+  const off=(isSanskritLang()||isLatinLang())?[{id:"",label:orthoOffLabel(),available:true}]
                             :[{id:"",label:"Original",available:true},{id:"none",label:"None",available:true}];
   const rows=off.concat(ORTHO_SCHEMES);
   rows.forEach(s=>{
@@ -662,7 +674,8 @@ function _orPick(id){ orClose(); id=id||""; if(id===ORTHO_SCHEME) return;
   if(DOCLANG){ PREFS.ortho[DOCLANG]=ORTHO_SCHEME; savePrefs(); }   // store ALL THREE kinds of choice verbatim — a script id, "none", and "" (Original). Deleting the key on Original (what this did before) left a deliberate Original indistinguishable from "never chose", so it could not be restored for a language whose default is not Original — see prefOrtho.
   toast(ORTHO_SCHEME==="none"?"Script: None (transliteration as main)"
         :(ORTHO_SCHEME?("Script: "+orSchemeLabel(ORTHO_SCHEME))
-        :"Original script")); }
+        :(isLatinLang()?orthoOffLabel():"Original script")));   // …and the toast says what the row the user just picked said (see orthoOffLabel)
+}
 // The row for the currently-selected script — the ✓ each orRender row carries is the only marker,
 // since s.id isn't on the DOM node itself.
 /* ⚠ NOT scrollIntoView — it does not reliably honour `.trmenu`'s own padding. Browsers reserve BOTTOM
