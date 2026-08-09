@@ -909,7 +909,45 @@ function projWrapped(si,kind){
      at PADV+8 and the WORD drops away from it — the same direction flat brackets moves, and it keeps the
      row's own top clearance untouched. `stackBot`/`oneRowH` follow wordY, so the strip grows by exactly
      the extra and nothing below the word is crowded. 0 at TOK_MAG 1, where this file is unchanged. */
-  const wordY = deprelsAbove ? (PADV+8+20+RELDESC+MAG_DEPREL_GAP) : ASC, yDep = wordY-(20+RELDESC+MAG_DEPREL_GAP), stackBot = wordY+belowH;   // deprel 20px + descent(WORD_F) above the word: the extra descender depth is clearance BELOW the label (deprel y stays at PADV+8, word drops by the descent); top clearance unchanged
+  /* ⚠ …AND THE WHOLE TOKEN CELL IS SEATED BY foSeatRise, WHICH IS WHAT THE SUPPLEMENTARY-PLANE SCRIPTS
+     NEEDED HERE AND DID NOT GET. Where the engine cannot shape the script in SVG, smpReshape()
+     (js/diagram/diagram-core.js) replaces the `<text>` with a foreignObject seated at `y − domBaseline`,
+     and the HTML line box inside it does NOT put the glyph back on the baseline the `<text>` was drawn on:
+     foSeatRise() probes the real offset, and it is large, signed differently per face, and — this is why it
+     is PROBED rather than derived — different in the two engines: in the shipping WKWebView Soyombo +11.00,
+     Kawi +6.00, Zanabazar Square +5.50 and Siddhaṃ +4.00 all paint ABOVE their seat and Grantha +10.00 too,
+     while headless Chrome answers Soyombo +11.00, Zanabazar +5.75, Siddhaṃ +4.00 but Grantha −1.25 and Kawi
+     −5.25, i.e. BELOW it. Every other notation inherits that error too and every other notation has
+     somewhere to absorb it — the arc view has a whole arc zone above the word — which is exactly why the row
+     geometry this strip borrowed from arcs (wordY off a nominal baseline, a deprel 20px + RELDESC above it)
+     is the one place it shows: here the relation label sits directly on top of the glyph. Reported as
+     "Grantha, Kawi, Soyombo and Zanabazar are displaying wrongly in wrapped stemmas and hierarchies, due to
+     the unthinking application of adjustments designed for (wrapped) arcs view".
+     Measured in the shipping WKWebView, first row, deprel-label bottom to the glyph's real ink top:
+     Soyombo −6.91 and Kawi −1.81 — collisions, the letters running INTO the relation label — Zanabazar
+     Square +0.34 and Siddhaṃ +4.56, against Devanagari's +6.92 and Rañjanā's +8.44, the two hanging scripts
+     that are NOT swapped and so were right all along. With the seat: 4.09 / 4.19 / 5.84 / 8.56, i.e. the
+     band the un-swapped scripts already occupied, and Devanagari and Rañjanā unmoved to the hundredth of a
+     pixel. (Chrome, same measurement: −6.66 / 9.67 / 1.13 / 4.81 → 4.34 / 4.42 / 6.88 / 8.81.)
+     ⚠️ ASKED OF THE SENTENCE, ONCE, exactly as flat brackets asks it (see BRK_LIFT's own note): a bracket
+     and a whole token strip are alike in having no ONE glyph whose swap they could follow, and the answer
+     is a property of the document's script, which is uniform in every real case. It returns a literal 0 for
+     every document with no supplementary-plane form in it, so nothing about a Latin, Devanagari or Rañjanā
+     document moves by so much as a subpixel.
+     ⚠️ THE PROBE'S MEMO IS (font, scheme, SAMPLE), so a virtualization window whose sentences begin with
+     different words really can pay it more than once — measured at 5.5ms cold and ~0.002ms warm, against a
+     16-block Grantha wrapped render that costs 1.2–2.4s of layout on its own, i.e. inside the noise: the
+     same 200-sentence document measured 1711→1232ms (wrapped stemma) and 3279→2446ms (wrapped hierarchy)
+     across this change. Not worth a document-wide scan to collapse into one key.
+     ⚠️ THE CELL MOVES, THE LABEL DOES NOT. `wordY` carries the rise so the glyph, its below-stack, its
+     hit/wash band and the MWT tie all ride with it (they are all derived from wordY, and their spacing
+     RELATIVE to the glyph — the part earlier rounds measured and approved against arcs — is untouched);
+     `yDep` subtracts it straight back out so the relation label stays at PADV+8 where its own round put it.
+     `stackBot`/`oneRowH` follow wordY, so the strip grows or shrinks by exactly the seat and nothing is
+     crowded at either end. */
+  const FO_RISE = (typeof foSeatRise==="function")
+    ? foSeatRise((t.map(tk=>bform(tk)).find(f=>typeof smpUnshaped==="function"&&smpUnshaped(f)))||"", WORD_F) : 0;   // the first form that would actually be swapped, which is what the probe has to be asked about — a document with none gets 0
+  const wordY = (deprelsAbove ? (PADV+8+20+RELDESC+MAG_DEPREL_GAP) : ASC) + FO_RISE, yDep = wordY-(20+RELDESC+MAG_DEPREL_GAP+FO_RISE), stackBot = wordY+belowH;   // deprel 20px + descent(WORD_F) above the word: the extra descender depth is clearance BELOW the label (deprel y stays at PADV+8, word drops by the descent); top clearance unchanged   // …+FO_RISE on the word and −FO_RISE back out of the label — see the note above
   const oneRowH=Math.ceil(stackBot+descent(WORD_F)+(anyMwt?mwtDepth(D)+18:0)+(deprelsAbove?PADV:10));
   // — token rows, one <svg> per row (each a scroll-snap target) so exactly one line is visible at a time —
   const toks=document.createElement("div"); toks.className="wp-toks"; toks.style.height=oneRowH+"px"; toks.style.width=svgW+"px";
@@ -1208,7 +1246,7 @@ function tree(si){
     const lbl=E("text",{class:"node-lbl"+italDeco(t[i]),x:x[i],y:nyD}); lbl.textContent=bform(t[i]); const tw=fmeas(t[i],NODE_F);   // host form only
     const hit=E("rect",{class:"tok-hit tok-wash",x:x[i]-Math.max(26,tw/2+4),y:nyD-A,width:Math.max(52,tw+8),height:A+B});   // node box = its own wash region   // on the DRAW level, so the wash stays centred on the glyph it backlights
     g.appendChild(hit);
-    const dropY=nyL+STACKED_GAP-belowTighten, dropYD=nyD+STACKED_GAP-belowTighten;   // seeds the ONE gap from the glyph (node-lbl) row down to whichever row is drawn first below it — STACKED_GAP (diagram-core.js), the flat replacement for the removed STACK_DROP   // dropY stays the LAYOUT seed (the boxes below are stated in it); dropYD is the drawn one, and the two differ by exactly TOK_Y_LOWER so every row keeps its spacing
+    const dropYD=nyD+STACKED_GAP-belowTighten;   // seeds the ONE gap from the glyph (node-lbl) row down to whichever row is drawn first below it — STACKED_GAP (diagram-core.js), the flat replacement for the removed STACK_DROP   // ⚠ THE LAYOUT-LEVEL TWIN (`dropY=nyL+…`) IS GONE, and with it the "the boxes below are stated in it" rule this comment used to record: it is what clipped the lzh hierarchy's bottom row (see the note above the transliteration row below). There is now ONE seed, the drawn one, and the boxes are stated in it like every other renderer's
     /* ⚠ …LESS TR_TIGHTEN (js/diagram/diagram-core.js), the hierarchy's own `0.5em − 0.5ex` reduction of the
        token→transliteration step, on request. Applied to the SEED and not inside belowGap(): that function
        is shared with arcs, stemma and brackets, and arcs wants this gap moved the OTHER way (TOK_TR_GAP),
@@ -1225,8 +1263,25 @@ function tree(si){
        TR_TIGHTEN above the reserve computed for it, and — the reason this round noticed — TR_TIGHTEN above
        the stemma's own seed, in exactly the configuration that was just asked to match the stemma exactly.
        The two halves of one adjustment now carry one gate. Changes nothing when the row is shown. */
-    { const rt=trTxt(t[i]); if(rt){ const ty=dropYD+belowGap(); const e=E("text",{class:"translit"+frnUp(t[i]),x:x[i],y:ty,"text-anchor":"middle"}); e.textContent=rt; if(trRowEdit())e.classList.add("tr-edit"); g.appendChild(e); boxes.push({x:x[i],y:nyL+14,hx:meas(rt,trFont(t[i]))/2,hy:7}); svgSeamMark(g,t[i],x[i],ty,meas(rt,trFont(t[i]))/2,trFont(t[i]),loB,null,"translit"); } }   // Item 8: same descender-matched top gap (belowGap()) the other renderers give the translit row
-    belowTiers().forEach((tier,ti)=>{ const step=(trTxt(t[i])?belowGap():0)+(ti+1)*(belowGap()), gy=dropY+step, gyD=dropYD+step, txt=tierText(t[i],tier), dtxt=txt||"…"; const e=E("text",{class:"gloss gl-edit"+(txt?"":" gl-empty")+frnUp(t[i]),x:x[i],y:gyD,"text-anchor":"middle","data-tier":tier,tabindex:"0"}); setGlossText(e,tier,dtxt); g.appendChild(e); boxes.push({x:x[i],y:gy-4,hx:meas(dtxt,trFont(t[i]))/2,hy:7});
+    /* ⚠ THE BELOW-ROW CROP BOXES ARE STATED ON THE **DRAW** LEVEL (nyD/dropYD), NOT THE LAYOUT ONE
+       (nyL/dropY) — on report, "hierarchies in lzh are getting clipped at the bottom". This box and the
+       gloss-tier box on the next line used to be written against the layout level while the rows they
+       describe DRAW against the draw level. That asymmetry is deliberate for the NODE — see nyD's own note
+       above: keeping the node's box on the layout level turns the glyph's drop into headroom above the root
+       instead of a taller block — and it is simply wrong for the rows BELOW it, which have nothing under
+       them but the crop. fitTight() (js/diagram/diagram-core.js) takes the union of `boxes` plus a flat 6px
+       margin, so anything drawn more than 6px below its own box is cut off outright.
+       The two levels differ by exactly nyD−nyL = TOK_Y_LOWER+NODE_Y_EXTRA+trDrop+aboveExtra, which was 2.5
+       when the "the two differ by exactly TOK_Y_LOWER" note beside dropY was written and is 11.60px for lzh
+       today (2.5 + 1.5 + 3.60 + 4.00) — past the margin, so the clip appeared as those terms landed one
+       round at a time. Measured (lzh, transliteration on, headless Chrome): the drawn translit ink ended
+       6.89px BELOW the viewBox bottom, while stemma (−4.70), arcs (−6.00) and brackets (−6.50) all sat
+       comfortably inside their own crops. On the draw level the ink is inside the crop again.
+       ⚠️ EXACTLY 0 FOR AN UNMAGNIFIED DOCUMENT, which is what keeps this from being churn: at TOK_MAG 1 all
+       four terms are 0, nyD IS nyL and dropYD IS dropY, so every box lands byte-identically where it did.
+       Only a magnified hierarchy's crop grows, and only by the ink it was cutting off. */
+    { const rt=trTxt(t[i]); if(rt){ const ty=dropYD+belowGap(); const e=E("text",{class:"translit"+frnUp(t[i]),x:x[i],y:ty,"text-anchor":"middle"}); e.textContent=rt; if(trRowEdit())e.classList.add("tr-edit"); g.appendChild(e); boxes.push({x:x[i],y:nyD+14,hx:meas(rt,trFont(t[i]))/2,hy:7}); svgSeamMark(g,t[i],x[i],ty,meas(rt,trFont(t[i]))/2,trFont(t[i]),loB,null,"translit"); } }   // Item 8: same descender-matched top gap (belowGap()) the other renderers give the translit row   // …and nyD+14, never nyL+14 — see the note just above
+    belowTiers().forEach((tier,ti)=>{ const step=(trTxt(t[i])?belowGap():0)+(ti+1)*(belowGap()), gyD=dropYD+step, txt=tierText(t[i],tier), dtxt=txt||"…"; const e=E("text",{class:"gloss gl-edit"+(txt?"":" gl-empty")+frnUp(t[i]),x:x[i],y:gyD,"text-anchor":"middle","data-tier":tier,tabindex:"0"}); setGlossText(e,tier,dtxt); g.appendChild(e); boxes.push({x:x[i],y:gyD-4,hx:meas(dtxt,trFont(t[i]))/2,hy:7});   // gyD−4, not the old layout-level gy−4: the box states where this row is DRAWN, for the reason the note above the translit row gives
       if(tier==="mseg"||tier==="mgloss") svgSeamMark(g,t[i],x[i],gyD,(tier==="mgloss"?measGloss(dtxt,tierFont(tier,t[i])):meas(dtxt,tierFont(tier,t[i])))/2,tierFont(tier,t[i]),loB,null,tier); });   // gloss / morphemic tiers under the node (hierarchy has no per-node POS row) — the segmentation AND morphemic-gloss rows carry the seam mark (both per-morpheme, drawn off the "…" placeholder's own width where this tier isn't annotated for this token — see the note beside diagram-core.js's belowStack); the lexical gloss row doesn't
     g.appendChild(lbl); gwFormSVG(g,lbl,t[i],x[i],nyD,NODE_F,"node-lbl",si,loB);   // goeswith: the continuation parts join the head on the node row, so the ONE translit/gloss stack drawn above spans the whole word
     if(gwOf(t[i]).length){ const ids=[OID(i)].concat(gwOf(t[i]).map(p=>p.oid));

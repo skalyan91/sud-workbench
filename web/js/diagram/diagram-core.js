@@ -1131,7 +1131,35 @@ function refreshFontStacks(){
      under-sized relative to the bottom by exactly that descent term, reading as "more space below than
      above" even once the ascent-only version was live. Adding both keeps the two sides' growth terms the
      same shape. */
-  d && d.style.setProperty("--dia-pad-extra",(TOK_MAG>1?(ascent(NODE_F)+descent(NODE_F))*(1-1/TOK_MAG):0).toFixed(2)+"px");
+  /* ⚠ AND FOR AN ORNAMENTAL HANGING SCRIPT THE "EXTRA REACH" IS ITS HEAD-LINE, NOT A LATIN 'Á'. `ascent()`
+     is `actualBoundingBoxAscent` of the sample "Ábgjyd漢" — the LATIN (or Han) ink top, since the token
+     stack's first family is what canvas answers for whatever the string, exactly as --script-asc's own note
+     records — and it comes out at 0.944em for every scheme alike. A head-line script's letters do not reach
+     0.944em: they stop at the shirorekha (or its flat-topped equivalent), which `scriptHeadlinePx` MEASURES
+     per face and which is 0.654em for Nithya Ranjana, 0.683 for Siddhaṃ and 0.714 for Soyombo. So the term
+     reserves a quarter of an em of top padding that those letters never use, and the ORNAMENTAL tier is
+     where it hurts: `(1−1/TOK_MAG)` is 1/2 at 2× against 1/3 at 1.5×, so the over-reservation is itself
+     doubled. Reported as "ornamental hanging scripts (Rañjanā and Siddhaṃ) are now too low in arc diagrams.
+     Undo the vertical adjustments for these" — this padding is the whole of what puts a diagram lower in
+     its block, and the arc view is where it reads worst, since the arc crown above the tokens is already
+     empty sky. Measured (and the two engines agree to 0.01px, since every term here is a canvas metric):
+     Rañjanā 17.76px → 13.40, Siddhaṃ 17.76 → 13.84, Soyombo 17.76 → 14.30, while every other scheme's
+     --dia-pad-extra is byte-identical (8.88px at 1.5×, 0 unmagnified).
+     ⚠️ ORNAMENTAL **AND** HANGING, which is the report's own phrase and the narrowest set that answers it —
+     `{Rañjanā, Siddhaṃ, Soyombo}`, the intersection of the 2× tier with the head-line list. Deliberately NOT
+     widened to every HANGING_SCRIPTS member: Devanagari, Gujarati, Nandinagari, Bengali, Tibetan and
+     Zanabazar Square sit at 1.5×, where the same error is 2.0–2.4px rather than 3.4–4.3, and none of them
+     has been reported. Deliberately NOT widened to every ORNAMENTAL member either — a script with no
+     head-line has no measured ink top to substitute, which is why `scriptHeadlinePx` answers 0 for one and
+     the `>0` test below is a precondition rather than a nicety (it also answers 0 before fillOrtho has
+     landed, and falling through to the ascent then is the old behaviour, which is the right thing to keep).
+     ⚠️ IT IS ONLY THE PADDING, i.e. nothing INSIDE any SVG moves: no arc clearance, no edge endpoint, no
+     `boxes` entry, no hit rectangle. The whole diagram simply sits where an honest reserve puts it. */
+  const _padAsc=(TOK_MAG>1 && typeof ORNAMENTAL_SCRIPTS!=="undefined" && ORNAMENTAL_SCRIPTS.has(ORTHO_SCHEME)
+                 && typeof HANGING_SCRIPTS!=="undefined" && HANGING_SCRIPTS.has(ORTHO_SCHEME))
+    ? (scriptHeadlinePx(NODE_F)||ascent(NODE_F))   // the script's own measured head-line; 0 (no orthography yet, an unmeasurable face) falls back to the ascent this always used
+    : ascent(NODE_F);
+  d && d.style.setProperty("--dia-pad-extra",(TOK_MAG>1?(_padAsc+descent(NODE_F))*(1-1/TOK_MAG):0).toFixed(2)+"px");
   /* ⚠ HALF AN EM FOR STACKING SCRIPTS, NOT A FULL ONE — on request ("too much space below the tokens;
      do the same thing as for Grantha" i.e. reduce it, confirmed: "reduce STACKED_GAP itself — it's just
      too generous for everyone"). STACK_DROP's old role (extra below-token reserve for STACKING_SCRIPTS —
