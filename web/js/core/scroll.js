@@ -359,7 +359,13 @@ function alignBlockTop(idx){
   const docEl=document.getElementById("doc"); if(!docEl||idx==null||idx<0) return null;
   const blk=(typeof scrollToSentence==="function")?scrollToSentence(idx):docEl.querySelector(`.sblock[data-i="${idx}"]`);
   if(!blk) return null;
-  docEl.scrollTop+=blk.getBoundingClientRect().top-docEl.getBoundingClientRect().top-docTopInset()-(typeof stickyHeadH==="function"?stickyHeadH(blk):0);
+  // item 10, on report: this used to land a sheet's FIRST block flush against the toolbar, gap and all
+  // scrolled off above it — the one thing blockSnap (above) exists to prevent, since it's what makes a new
+  // sheet read as a fresh page rather than one clipped at the top. Same charge, same guard (0 for every
+  // other block, and in unpaged view, so this is the old expression everywhere else): a saved-position
+  // restore or a multi-sentence insert landing on a sheet's first block now leaves the gap visible instead
+  // of requiring a follow-up wheel nudge to reveal it via blockSnap's own re-park.
+  docEl.scrollTop+=blk.getBoundingClientRect().top-docEl.getBoundingClientRect().top-docTopInset()-(typeof stickyHeadH==="function"?stickyHeadH(blk):0)-(typeof sheetGapAbove==="function"?sheetGapAbove(blk):0);
   return blk; }
 function restoreScrollPos(idx){ if(idx==null||idx<0) return;   // no saved anchor → leave at the top
   const apply=()=>{ alignBlockTop(idx); };   // item 1: align the saved block's top with just BELOW both overlaid bars, not under them — same technique as blockSnap, sticky boundary headings included (a restored position that puts the block under its own heading hides the very line the reader left off at)
