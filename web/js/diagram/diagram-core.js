@@ -905,8 +905,18 @@ function smpReshape(root){
        quantities was tuned against, which is what an un-swapped <text> has always done. Verified rather than
        argued — .wp-stem, .wp-toks, svg.wp-tree, the diagram's own height and scrollHeight, its computed
        padding-top, --dia-pad-extra and the block height, over 7 scripts × {wrapped stemma, wrapped hierarchy,
-       flat arcs, flat brackets}: all 28 views byte-identical before and after. */
-    const boxW=Math.ceil(w+2), drop=(typeof foBaselineDrop==="function")?foBaselineDrop(s,f,asc):asc;
+       flat arcs, flat brackets}: all 28 views byte-identical before and after.
+       ⚠️ …EXCEPT ARCS, WHICH IS BACK ON THE OLD `y − asc` SEAT, ON REPORT — live, in the shipping app: "No!
+       Revert your changes to arc mode! But stemmas and hierarchies now look perfect." So the measured seat
+       stands wherever it was reported to have HELPED (stemma, hierarchy, brackets, outline — all left as
+       above) and is withdrawn from the one view it was reported to have HURT, whatever the geometry measured
+       in the earlier round said about it. `conv` (js/core/prefs.js) is read the same way refreshFontStacks's
+       own arcs-only gate (`--dia-pad-extra`, this file) already reads it — "arcs" covers wrapped arcs too,
+       since wrapping is an orthogonal display toggle and never changes `conv` itself. Nothing else about
+       arcs moved: WORD_OFF, --dia-pad-extra and every arc/edge/crop term are exactly as the previous two
+       rounds left them, so this undoes only smpReshape's own contribution to what arcs paints. */
+    const boxW=Math.ceil(w+2),
+      drop=(typeof conv!=="undefined"&&conv==="arcs")?asc:((typeof foBaselineDrop==="function")?foBaselineDrop(s,f,asc):asc);
     fo.setAttribute("x",(x-boxW/2)+""); fo.setAttribute("y",(y-drop)+"");
     fo.setAttribute("width",boxW+"");
     /* ⚠ HEIGHT IS A CSS calc(), NOT A JS-COMPUTED PIXEL NUMBER, ON REQUEST — "try computing the heights
