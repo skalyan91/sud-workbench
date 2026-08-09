@@ -189,17 +189,37 @@ async function fillTranslit(){ if(!hasBridge()||!DOCLANG) return;   // translite
 function orthoKeyOf(t){ return trKey(t.form,trUpos(t)); }
 function orthoStale(t,k){ return !t.ortho || t._orthoKey!==k; }
 // ── orthography (display-only glyph re-rendering; token.ortho, never written to MISC) ──────────
-async function fillOrtho(){ if(!hasBridge()||!DOCLANG) return;
+/* ⚠ RESOLVES TO WHETHER IT PAINTED. Every early return and every failed fetch answers false, the tail
+   answers `any`. _orPick (js/lang/translit.js) is the caller that needs it: a script pick blanks every
+   t.ortho and then hands the RENDER to this function, so a fill that fetches nothing — no bridge, a call
+   that throws, an answer with no usable renderings — must be distinguishable from one that painted, or the
+   document keeps the previous script's letters for good. Answering the question here rather than letting
+   the caller restate this function's own preconditions is what stops the two drifting apart. */
+async function fillOrtho(){ if(!hasBridge()||!DOCLANG) return false;
   const skt=isSanskritLang();   // Sanskrit MWT surface forms are RECONSTRUCTED from components with external sandhi (below), not converted from the stored m.form
   const scriptOn=!!ORTHO_SCHEME && ORTHO_SCHEME!=="none";   // a real script chosen (not Original / None)
-  if(!scriptOn && !skt) return;   // Original / None for a non-Sanskrit language → stored form, nothing to fetch
+  if(!scriptOn && !skt) return false;   // Original / None for a non-Sanskrit language → stored form, nothing to fetch
+  /* ⚠ AN ANSWER FOR THE SCRIPT THAT WAS ASKED ABOUT, NOT FOR WHICHEVER ONE IS CURRENT WHEN IT ARRIVES.
+     Every fetch below awaits the bridge, and the reader can pick another script (or another language)
+     while it is in flight — there is no in-flight guard, and two picks in quick succession really do run
+     two fills at once. `orthoKeyOf` cannot catch it: its key is (surface, UPOS) and says nothing about the
+     scheme, so the older answer passes the staleness test and writes the PREVIOUS script's letters over
+     the newer ones. Measured (Grantha then Siddhaṃ 30 ms later, 120 ms stub bridge): the document settled
+     with ORTHO_SCHEME "Siddham" and Siddhaṃ's 2× magnification over Grantha glyphs — the same glyph/size
+     disagreement the reordering in syncSchemeAttr and refreshFontStacks exists to close, arriving through
+     a different door. `_orLangLoaded` in loadOrthoSchemes (js/lang/translit.js) is the same guard for the
+     same reason; this is that pattern applied per fetch. A superseded fill answers false and paints
+     nothing, which is right: the fill that superseded it is still coming and will. */
+  const askedScheme=ORTHO_SCHEME, askedLang=DOCLANG;
+  const superseded=()=>ORTHO_SCHEME!==askedScheme||DOCLANG!==askedLang;
   let any=false;
   if(scriptOn){   // fetch the SCRIPT rendering for single tokens (and MWTs for non-Sanskrit)
     const need=new Map();   // orthoKeyOf: (surface, upos) as the transliteration passes use. A script rendering can be reading-dependent, so it must not be shared between two tokens spelt alike but tagged differently
     const want=(k,txt,u)=>{ if(!need.has(k)) need.set(k,[txt,u,k]); };
     DOC.forEach(s=>{ s.tokens.forEach(t=>{ const k=orthoKeyOf(t); if(t.form&&orthoStale(t,k))want(k,t.form,trUpos(t)); }); if(!skt)(s.mwt||[]).forEach(m=>{ if(m.form&&!m.ortho)want(trKey(m.form,""),m.form,""); }); });   // an MWT range has no one UPOS (see fillTranslit) → no opinion
     if(need.size){ const batch=[...need.values()]; let r;
-      try{ r=await window.pywebview.api.orthography(batch.map(x=>x[0]),DOCLANG,ORTHO_SCHEME,batch.map(x=>x[1])); }catch(e){ return; }
+      try{ r=await window.pywebview.api.orthography(batch.map(x=>x[0]),DOCLANG,ORTHO_SCHEME,batch.map(x=>x[1])); }catch(e){ return false; }
+      if(superseded()) return false;   // another script was picked while this was in flight — see the note above
       const map={}; batch.forEach((x,i)=>{ const v=(r&&r.ortho&&r.ortho[i])||""; if(v)map[x[2]]=v; });   // x[2] = the key the entry was queued under, so the answer comes back to exactly the tokens that asked
       DOC.forEach(s=>{ s.tokens.forEach(t=>{ const k=orthoKeyOf(t), v=(t.form&&orthoStale(t,k))?map[k]:""; if(v){ t.ortho=v; t._orthoKey=k; } }); if(!skt)(s.mwt||[]).forEach(m=>{ const v=m.form&&!m.ortho?map[trKey(m.form,"")]:""; if(v) m.ortho=v; }); });   // the stamp rides WITH the value: a rendering and the analysis it was computed for can never be separated
       any=true; } }
@@ -219,6 +239,7 @@ async function fillOrtho(){ if(!hasBridge()||!DOCLANG) return;
       prevs.push(cx.prev); nexts.push(cx.next); pauses.push(cx.pause); } } }));
     if(groups.length){ let r; let dirtyForm=false;
       try{ r=await window.pywebview.api.sanskrit_mwt(groups,DOCLANG,scheme,lgroups,"",prevs,nexts,pauses); }catch(e){ r=null; }
+      if(superseded()) return false;   // …and the fusion is scripted too (`scheme`), so a superseded answer is as wrong here as above; the fill that superseded this one re-collects every m.ortho, which clearOrthoCache has just blanked
       if(r&&r.ortho){ refs.forEach((m,i)=>{ if(r.ortho[i]){ m.ortho=r.ortho[i]; any=true; }
         if(r.form&&r.form[i]){ m.miast=r.form[i];
           // item 3: the STORED surface form (grid + file) should BE the sandhi-fused word, not the naive
@@ -240,8 +261,27 @@ async function fillOrtho(){ if(!hasBridge()||!DOCLANG) return;
       DOC.forEach(s=>{ if(!s.orthoLine && (s.text||"").trim()){ texts.push(s.text); srefs.push(s); } });   // s.text keeps its real \n hard breaks (multi-line verse)
       if(texts.length){ let r2;
         try{ r2=await window.pywebview.api.orthography(texts,DOCLANG,ORTHO_SCHEME); }catch(e){ r2=null; }
+        if(superseded()) return false;   // the running line, same rule — clearOrthoCache blanks s.orthoLine, so the newer fill re-asks for it
         if(r2&&r2.ortho){ srefs.forEach((s,i)=>{ if(r2.ortho[i]){ s.orthoLine=r2.ortho[i]; any=true; } }); } } } }
-  if(any){ if(typeof invalidateDiaCache==="function") invalidateDiaCache(); renderUnlessEditing(); syncDocFonts(); } }   // renderUnlessEditing for the same reason fillTranslit uses it: an async refill must not pull the keyboard out of an open inline field   // wholesale, same reasoning as fillTranslit's own invalidateDiaCache call above: t.ortho/m.ortho/s.orthoLine feed bform()'s glyph directly, and this pass runs over the whole DOC asynchronously with no si of its own — BUG FIX: switching the Script picker (orPick) or loading a language whose remembered Script preference is a real script (loadOrthoSchemes) populates t.ortho/m.ortho/s.orthoLine with a script this document never used before — but until now nothing then asked fontload.js to fetch that script's face. syncDocFonts() is normally only called from the document-load paths (bridge.js/formats.js/init.js), all of which run BEFORE a script is ever picked, so docScripts()'s scan (which reads t.ortho, among other fields) saw no non-Latin text yet and the newly-chosen script's Noto face was NEVER requested this session. The page just fell through the CSS font stack to whatever the browser could resolve for those codepoints — on a machine with no native coverage for the script (the common case for anything rarer than Devanagari), that is either a patchwork of per-glyph system substitutes or the missing-glyph box, and canvas measureText() (meas(), used for every diagram width) does NOT do the same per-glyph fallback substitution DOM/SVG text painting does, so the measured slot and the painted glyphs disagree → clipped token forms. Calling syncDocFonts() here (AFTER t.ortho/m.ortho/s.orthoLine are populated, so the scan actually sees the new script) fetches the face if needed; ensureScriptFont() already re-renders via preserveScroll(renderDoc) once the face lands (see fontload.js), so this self-corrects without a special-cased second render pass here.
+  if(any){
+    /* ⚠ THE FACE FIRST, THEN THE RENDER THAT MEASURES AGAINST IT. This line used to be
+       `renderUnlessEditing(); syncDocFonts();` — measure, and only afterwards go and see whether the
+       script's font is even present, which is the ordering the whole of fontload.js's backstop machinery
+       exists to clean up after. `schemeFaceReady` (js/lang/fontload.js) names the two families that can
+       actually paint the scheme just chosen and waits for them; it costs a microtask when the face is
+       already there or has no @font-face of its own, and it is the ONLY thing that waits at all for the
+       faces web/styles/fonts.css declares locally (Nithya Ranjana, Grantha, Javanese, Balinese, Kawi,
+       Zanabazar Square, Tibetan) — syncDocFonts skips those by design (FONT_CORE_SCRIPTS), so nothing
+       used to, and an @font-face does not begin loading until layout asks for a glyph from it. Every
+       measured term of the render below (scriptAscentEm's fontBoundingBoxAscent, scriptMidEm's ex,
+       scriptLiftEm's ink depth, and every meas() width) reads the face, so this is the difference between
+       measuring the script and measuring whatever the stack fell through to.
+       syncDocFonts stays AFTER, and is still not awaited: it is the DOWNLOAD path (a face this machine has
+       no copy of), which must not hold the glyphs back — it re-renders when it lands, as it always has. */
+    if(typeof invalidateDiaCache==="function") invalidateDiaCache();
+    if(typeof schemeFaceReady==="function") await schemeFaceReady();
+    renderUnlessEditing(); syncDocFonts(); }
+  return any; }   // renderUnlessEditing for the same reason fillTranslit uses it: an async refill must not pull the keyboard out of an open inline field   // wholesale, same reasoning as fillTranslit's own invalidateDiaCache call above: t.ortho/m.ortho/s.orthoLine feed bform()'s glyph directly, and this pass runs over the whole DOC asynchronously with no si of its own — BUG FIX: switching the Script picker (orPick) or loading a language whose remembered Script preference is a real script (loadOrthoSchemes) populates t.ortho/m.ortho/s.orthoLine with a script this document never used before — but until now nothing then asked fontload.js to fetch that script's face. syncDocFonts() is normally only called from the document-load paths (bridge.js/formats.js/init.js), all of which run BEFORE a script is ever picked, so docScripts()'s scan (which reads t.ortho, among other fields) saw no non-Latin text yet and the newly-chosen script's Noto face was NEVER requested this session. The page just fell through the CSS font stack to whatever the browser could resolve for those codepoints — on a machine with no native coverage for the script (the common case for anything rarer than Devanagari), that is either a patchwork of per-glyph system substitutes or the missing-glyph box, and canvas measureText() (meas(), used for every diagram width) does NOT do the same per-glyph fallback substitution DOM/SVG text painting does, so the measured slot and the painted glyphs disagree → clipped token forms. Calling syncDocFonts() here (AFTER t.ortho/m.ortho/s.orthoLine are populated, so the scan actually sees the new script) fetches the face if needed; ensureScriptFont() already re-renders via preserveScroll(renderDoc) once the face lands (see fontload.js), so this self-corrects without a special-cased second render pass here.
 
 // ── MISC Translit/LTranslit (romanisation), written ONLY on a parse / secondary-annotation pass ──
 // Set/replace/remove a Key=Value in a CoNLL-U MISC string, preserving the other pairs and their order.

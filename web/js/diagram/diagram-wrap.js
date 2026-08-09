@@ -108,7 +108,18 @@ function bracketsWrapped(si){
      the flat one — the two were deliberately brought to one figure when the first descent landed. */
   box.style.setProperty("--relpad",(show.labels?(13.3+descent(WORD_F)+TOK_TR_GAP+2*TOK_DESC):0)+"px");             // reserved space above the form for the relation row. Copies projWrapped's deprel→form offset EXACTLY (20px + the form's descender depth): the HTML box model seats the form baseline ~6.7px lower inside its line box than the label's centre, so the flat "20" nominal maps to ~13.3, and +descent(WORD_F) adds the projWrapped descender fold on top — landing the relation centre the same distance above the form baseline as the wrapped stemma
   box.style.setProperty("--undpad",(belowReserveH(hasTr(t),belowTierN(),show.pos)+TOK_TR_GAP)+"px");            // reserved space below for the transliteration + gloss + POS rows (Item 1/8: EVERY below-row folds in descent(POS_F) — matching belowStack's descender-matched per-row step — via the .otrans/.gloss/.bwpos margin-top set below; the reserve grows to match so the stack bottom stays at the same depth as the flat/arc views) — belowGap() per row, matching the flat renderer's baseline step. hasTr (actual translit presence), NOT show.translit, so an English sentence reserves no phantom translit row — keeping the token's stack bottom at the SAME depth as the arc/flat views, so a cross-line arc's upper endpoint (tokBot + clearance) lands where arcsWrapped puts it (stackBot + clearance)
-  box.style.setProperty("--und-extra",TOK_TR_GAP+"px");   // …and the matching shift of .bwund's own top offset, which is measured from the FORM's bottom edge rather than from that padding (app.css)
+  /* ⚠ …PLUS STACKED_GAP, WHICH THE RESERVE ABOVE ALREADY CARRIED AND THIS OFFSET DID NOT. `belowReserveH`
+     folds STACKED_GAP into `--undpad` for a STACKING_SCRIPTS document (Grantha, Javanese, Balinese, Kawi,
+     Burmese, ZanabazarSquare — js/lang/translit.js), exactly as it does for every SVG notation; but a wrapped
+     bracket's below-stack is not seated by that padding, it is seated by THIS offset off the form's own box
+     bottom, and the offset was never told. So the room was reserved and then not used: the whole stack sat
+     STACKED_GAP too high and the transliteration row ran straight through the glyph's subjoined marks —
+     measured, first Grantha token, translit ink top minus form ink bottom: −6.37px, i.e. a real overlap
+     (Javanese −7.86). Reported as "in Sanskrit brackets and outlines, stacked scripts should have the
+     appropriate amount of space below tokens (like in arcs)"; arcs takes exactly this quantity at its
+     belowStack() seed, which is what "like in arcs" names. With it: +4.88px, against arcs' own +2.80px for
+     the same token. 0 for every non-stacking script, magnified or not — nothing else moves. */
+  box.style.setProperty("--und-extra",(TOK_TR_GAP+STACKED_GAP)+"px");   // …and the matching shift of .bwund's own top offset, which is measured from the FORM's bottom edge rather than from that padding (app.css)
   if(selTok>=0) box.style.setProperty("--washcol",selCol);
   let anyInt=false; for(let i=0;i<n;i++) if(isInt(i)){anyInt=true;break;}
   if(anyInt) box.classList.add("hasint");            // headroom above the first line for interrupter arcs
@@ -1077,8 +1088,24 @@ function tree(si){
      4px of space below") — one round after the above. Added only to belowReserve, never to nyD/trDrop: this
      request names "space below" only, and folding it into the term that also drives the glyph's own draw
      position (nyD, below) would move the token again, which nothing here asks for. Same trLayer() gate as
-     its neighbours, for the identical reason. */
-  const {children,root,head}=structure(sent),belowTighten=trLayer()?TR_TIGHTEN:0,trDrop=trLayer()?TR_ROW_DESC:0,belowExtra=trLayer()?TR_ROW_EXTRA:0,belowReserve=belowReserveH(trLayer(),belowTierN(),false)-belowTighten+2*trDrop+belowExtra,LV=48+belowReserve,TOP=18,A=16,B=7;       // item 2: the level height = a CONSTANT 48 (the stemma's LV) + the below-stack reserve, and the outgoing edge attaches just below that reserve (parentEndY) — so an edge is always LV−belowReserve−A−B = 48−16−7 = 25 tall, EXACTLY the stemma's, no matter how many annotation tiers are shown. belowReserve uses the SAME belowGap() per-row step the tiers are drawn at, so it cancels cleanly (Item 8: each tier row folds in descent(POS_F)). TOP matches stemma()'s own (diagram-render.js) — raising it to "lower the tokens" was tried and reverted there, see its note; TOK_Y_LOWER (applied per token, at the draw site, never to this level math) is the fix that actually works
+     its neighbours, for the identical reason.
+     ⚠️ AND aboveExtra IS THE MIRROR OF IT, asked for in the same breath two rounds later ("add back the 2px
+     of space below the transliteration, but add an extra 4px of space above the token"). It goes to nyD —
+     the space above a token is opened by dropping the glyph, the incoming edge ending at ny(depth)−A
+     whatever the glyph does — and then ONCE to belowReserve, purely to CARRY that drop so the stack below
+     does not overrun its own reserve. Once, not twice: trDrop above is added twice because its own sentence
+     asked for the gap below to widen as well, and this one asks only about the space ABOVE.
+     ⚠️ THE trLayer() GATE ON IT IS LOAD-BEARING, not house style. The rest of the same request is "if there
+     is no transliteration, make the token spacing exactly the same as in stemmas", and with the gate every
+     term this notation adds beyond the stemma's own (belowTighten, trDrop, belowExtra, aboveExtra) is 0
+     there, so nyD reduces to nyL+TOK_Y_LOWER+NODE_Y_EXTRA — the stemma's expression exactly, LV back to a
+     bare 48, and the two notations measured identical (token baseline, level step, edge clearances) with the
+     transliteration row off. The third case that sentence names — "if there is only transliteration, use the
+     same spacing as for English" — needs nothing here and is satisfied at source: only-transliteration means
+     Script:None, which puts a Latin romanisation on the glyph row, and scriptMag() (js/lang/translit.js)
+     returns 1 for it, so TOK_MAG is 1, LZH_MAG false and every constant in this feature is already 0.
+     Verified: lzh under Script:None lands its node baselines on English's, to the pixel. */
+  const {children,root,head}=structure(sent),belowTighten=trLayer()?TR_TIGHTEN:0,trDrop=trLayer()?TR_ROW_DESC:0,belowExtra=trLayer()?TR_ROW_EXTRA:0,aboveExtra=trLayer()?TR_ABOVE_EXTRA:0,belowReserve=belowReserveH(trLayer(),belowTierN(),false)-belowTighten+2*trDrop+belowExtra+aboveExtra,LV=48+belowReserve,TOP=18,A=16,B=7;       // item 2: the level height = a CONSTANT 48 (the stemma's LV) + the below-stack reserve, and the outgoing edge attaches just below that reserve (parentEndY) — so an edge is always LV−belowReserve−A−B = 48−16−7 = 25 tall, EXACTLY the stemma's, no matter how many annotation tiers are shown. belowReserve uses the SAME belowGap() per-row step the tiers are drawn at, so it cancels cleanly (Item 8: each tier row folds in descent(POS_F)). TOP matches stemma()'s own (diagram-render.js) — raising it to "lower the tokens" was tried and reverted there, see its note; TOK_Y_LOWER (applied per token, at the draw site, never to this level math) is the fix that actually works
   // THE ROOT's OWN CROP RESERVE, matching stemma()'s identical fix (diagram-render.js) for the identical reason:
   // the root sits at depth 0 — literally the topmost thing this notation draws — and fitTight(svg,boxes) crops
   // to the union of `boxes`, whose node box below reserved a flat 9px tuned for NODE_F at TOK_MAG 1. A magnified
@@ -1172,16 +1199,16 @@ function tree(si){
   genericEntries.forEach(ge=>{ const i=ge.i, col=relColor("subj"), ink=arcInk(col);
     const g=E("g",{class:"ghost-g","data-s":si});   // NEVER highlighted via the predicate's own selection — see stemma()'s identical comment: the predicate is this relation's HEAD, not its dependent
     g.appendChild(E("path",{class:"edge edge-ghost",d:`M ${ge.gx} ${ge.y1} L ${x[i]} ${ge.y2}`,stroke:ink}));
-    const glbl=E("text",{class:"node-lbl",x:ge.gx,y:ge.gy+TOK_Y_LOWER+NODE_Y_EXTRA+trDrop}); glbl.textContent="∅"; g.appendChild(glbl);   // a virtual NODE, so it lowers with every real one — trDrop included (see belowReserve's own note above); its edge above and its box below both stay on the layout level
+    const glbl=E("text",{class:"node-lbl",x:ge.gx,y:ge.gy+TOK_Y_LOWER+NODE_Y_EXTRA+trDrop+aboveExtra}); glbl.textContent="∅"; g.appendChild(glbl);   // a virtual NODE, so it lowers with every real one — trDrop and aboveExtra included (see belowReserve's own note above); its edge above and its box below both stay on the layout level
     if(show.labels){ const L=ghostLabAt.get(ge); drawLabel(g,L.mx,L.my,"subj",col); const lb=g.lastElementChild; if(lb)lb.classList.add("lbl-ghost"); boxes.push({x:L.mx,y:L.my,hx:meas("subj",POS_F)/2+2,hy:7}); }
     boxes.push({x:ge.gx,y:ge.gy,hx:8,hy:9+NODE_ASC_EXTRA});   // "∅" is drawn .node-lbl too, so it magnifies with every other node glyph — see NODE_ASC_EXTRA's own note
     svg.appendChild(g); });
   for(let i=0;i<n;i++){const g=E("g",{class:"node"+(sel.s===si&&sel.t===OID(i)?" sel":""),"data-s":si,"data-tok":OID(i)});
-    const nyL=ny(depth[i]), nyD=nyL+TOK_Y_LOWER+NODE_Y_EXTRA+trDrop, loB=loBoxes(boxes);   // …+trDrop, THIS round's "the space above a token needs to be increased by transliteration descender length" — a further drop of the glyph, the space above it being what the incoming edge (laid out from nyL, untouched) no longer fills. belowReserve above carries it back so the stack below does not overrun its own reserve; see its note   // …+NODE_Y_EXTRA: "in hierarchies, we need the same extra 1.5px drop". dropYD below is built from nyD, so the whole stack rides with the glyph and the token→transliteration gap is unchanged, exactly as the stemma's own caveat asks   // nyL = the LAYOUT level (every edge endpoint and every box in this block); nyD = where this node's glyph and its whole stack DRAW — see TOK_Y_LOWER (js/diagram/diagram-core.js). The edges above were laid out from nyL and are untouched
+    const nyL=ny(depth[i]), nyD=nyL+TOK_Y_LOWER+NODE_Y_EXTRA+trDrop+aboveExtra, loB=loBoxes(boxes);   // …+aboveExtra, the flat 4px "extra space above the token" (TR_ABOVE_EXTRA, js/diagram/diagram-core.js) — same mechanism as trDrop beside it, and carried once in belowReserve so the stack below keeps its own spacing   // …+trDrop, an earlier round's "the space above a token needs to be increased by transliteration descender length" — a further drop of the glyph, the space above it being what the incoming edge (laid out from nyL, untouched) no longer fills. belowReserve above carries it back so the stack below does not overrun its own reserve; see its note   // …+NODE_Y_EXTRA: "in hierarchies, we need the same extra 1.5px drop". dropYD below is built from nyD, so the whole stack rides with the glyph and the token→transliteration gap is unchanged, exactly as the stemma's own caveat asks   // nyL = the LAYOUT level (every edge endpoint and every box in this block); nyD = where this node's glyph and its whole stack DRAW — see TOK_Y_LOWER (js/diagram/diagram-core.js). The edges above were laid out from nyL and are untouched
     const lbl=E("text",{class:"node-lbl"+italDeco(t[i]),x:x[i],y:nyD}); lbl.textContent=bform(t[i]); const tw=fmeas(t[i],NODE_F);   // host form only
     const hit=E("rect",{class:"tok-hit tok-wash",x:x[i]-Math.max(26,tw/2+4),y:nyD-A,width:Math.max(52,tw+8),height:A+B});   // node box = its own wash region   // on the DRAW level, so the wash stays centred on the glyph it backlights
     g.appendChild(hit);
-    const dropY=nyL+STACKED_GAP-TR_TIGHTEN, dropYD=nyD+STACKED_GAP-TR_TIGHTEN;   // seeds the ONE gap from the glyph (node-lbl) row down to whichever row is drawn first below it — STACKED_GAP (diagram-core.js), the flat replacement for the removed STACK_DROP   // dropY stays the LAYOUT seed (the boxes below are stated in it); dropYD is the drawn one, and the two differ by exactly TOK_Y_LOWER so every row keeps its spacing
+    const dropY=nyL+STACKED_GAP-belowTighten, dropYD=nyD+STACKED_GAP-belowTighten;   // seeds the ONE gap from the glyph (node-lbl) row down to whichever row is drawn first below it — STACKED_GAP (diagram-core.js), the flat replacement for the removed STACK_DROP   // dropY stays the LAYOUT seed (the boxes below are stated in it); dropYD is the drawn one, and the two differ by exactly TOK_Y_LOWER so every row keeps its spacing
     /* ⚠ …LESS TR_TIGHTEN (js/diagram/diagram-core.js), the hierarchy's own `0.5em − 0.5ex` reduction of the
        token→transliteration step, on request. Applied to the SEED and not inside belowGap(): that function
        is shared with arcs, stemma and brackets, and arcs wants this gap moved the OTHER way (TOK_TR_GAP),
@@ -1191,7 +1218,13 @@ function tree(si){
        Every row below inherits the shift, keeping their spacing to each other untouched, and the seed is
        exactly where the comment above says the ONE glyph-to-first-row gap is expressed. `belowReserve` —
        and so LV, and so parentEndY, and so every edge in this figure — is deliberately NOT reduced: the
-       recovered space simply becomes slack above the next level, and no edge moves. 0 outside lzh. */
+       recovered space simply becomes slack above the next level, and no edge moves. 0 outside lzh.
+       ⚠️ `belowTighten`, NOT `TR_TIGHTEN` ITSELF — the trLayer()-gated copy of it that `belowReserve` above
+       already uses. Written bare here, this reduction fired even with the transliteration row OFF, where
+       there is no token→transliteration step to tighten at all: the drawn stack (a gloss tier, say) then sat
+       TR_TIGHTEN above the reserve computed for it, and — the reason this round noticed — TR_TIGHTEN above
+       the stemma's own seed, in exactly the configuration that was just asked to match the stemma exactly.
+       The two halves of one adjustment now carry one gate. Changes nothing when the row is shown. */
     { const rt=trTxt(t[i]); if(rt){ const ty=dropYD+belowGap(); const e=E("text",{class:"translit"+frnUp(t[i]),x:x[i],y:ty,"text-anchor":"middle"}); e.textContent=rt; if(trRowEdit())e.classList.add("tr-edit"); g.appendChild(e); boxes.push({x:x[i],y:nyL+14,hx:meas(rt,trFont(t[i]))/2,hy:7}); svgSeamMark(g,t[i],x[i],ty,meas(rt,trFont(t[i]))/2,trFont(t[i]),loB,null,"translit"); } }   // Item 8: same descender-matched top gap (belowGap()) the other renderers give the translit row
     belowTiers().forEach((tier,ti)=>{ const step=(trTxt(t[i])?belowGap():0)+(ti+1)*(belowGap()), gy=dropY+step, gyD=dropYD+step, txt=tierText(t[i],tier), dtxt=txt||"…"; const e=E("text",{class:"gloss gl-edit"+(txt?"":" gl-empty")+frnUp(t[i]),x:x[i],y:gyD,"text-anchor":"middle","data-tier":tier,tabindex:"0"}); setGlossText(e,tier,dtxt); g.appendChild(e); boxes.push({x:x[i],y:gy-4,hx:meas(dtxt,trFont(t[i]))/2,hy:7});
       if(tier==="mseg"||tier==="mgloss") svgSeamMark(g,t[i],x[i],gyD,(tier==="mgloss"?measGloss(dtxt,tierFont(tier,t[i])):meas(dtxt,tierFont(tier,t[i])))/2,tierFont(tier,t[i]),loB,null,tier); });   // gloss / morphemic tiers under the node (hierarchy has no per-node POS row) — the segmentation AND morphemic-gloss rows carry the seam mark (both per-morpheme, drawn off the "…" placeholder's own width where this tier isn't annotated for this token — see the note beside diagram-core.js's belowStack); the lexical gloss row doesn't
@@ -1390,6 +1423,22 @@ function brackets(si){
       drawLabel(g,mx,y,a.rel,col); const lb=g.lastElementChild; if(lb)lb.classList.add("lbl-ghost"); boxes.push({x:mx,y,hx:half,hy:hh}); }
     boxes.push({x:mx,y:apex,hx:2,hy:2});   // item 2: still counts toward fitTight's crop and later ghosts' decollision
     svg.appendChild(g); });
+  /* ⚠ THE BRACKET LIFT IS ONE FIGURE FOR THE WHOLE FIGURE, and it now has a second term. The first is
+     `centreBracketLift` (js/diagram/diagram-core.js) — half the token's own body height, less half the "["'s
+     ink — and its own note carries which body height each script family takes and why. The second is for the
+     scripts this engine cannot shape in SVG: smpReshape() replaces their `<text>` with a foreignObject whose
+     text does NOT land on the baseline it was seated for (foSeatRise's own note has the measurement — 11.29px
+     of rise for Soyombo), and a bracket centred on where the glyph was SUPPOSED to be misses it by exactly
+     that. Reported as "ornamental scripts need to be centre-aligned with the brackets, just like other
+     scripts": three of the four ORNAMENTAL_SCRIPTS are supplementary-plane and take the swap, Rañjanā is not
+     and takes only the first term.
+     ⚠️ ASKED OF THE SENTENCE, ONCE, not per bracket. A bracket sits BETWEEN tokens and belongs to a
+     constituent rather than to a glyph, so there is no single token whose swap it could follow; and the
+     answer is a property of the document's script, which is uniform in every real case (a document is
+     written in one script). The first form that would be swapped is what the probe is asked about, and a
+     document with none at all gets 0 — the un-corrected lift every non-SMP script has always had. */
+  const BRK_LIFT=centreBracketLift(BRK_PAINT,WORD_F)   // BRK_PAINT states .brk's PAINTED face (app.css: 16px/600), not RF — RF is 15px and exists to measure slot WIDTHS, and a 1px size error here is 0.4px of lift, which is a fifth of the whole correction. WORD_F is the token's own magnified face, the one .tok-word paints in
+    +foSeatRise((t.map(tk=>bform(tk)).find(f=>typeof smpUnshaped==="function"&&smpUnshaped(f)))||"",WORD_F);
   let stackBot=yWord;
   seq.forEach(it=>{ if(it.t==="w"){
       const g=E("g",{class:"tok-group"+(sel.s===si&&sel.t===OID(it.i)?" sel":""),"data-s":si,"data-tok":OID(it.i)});
@@ -1441,7 +1490,7 @@ function brackets(si){
          is seated off the token's baseline, so lifting the two glyphs that are not is the local change.
          Its box moves with it — this is real ink, not a draw-vs-crop asymmetry. 0 at TOK_MAG 1, where
          `.brk` renders exactly as it always has. */
-      const brkLift=centreBracketLift(BRK_PAINT,WORD_F);   // BRK_PAINT states .brk's PAINTED face (app.css: 16px/600), not RF — RF is 15px and exists to measure slot WIDTHS, and a 1px size error here is 0.4px of lift, which is a fifth of the whole correction. WORD_F is the token's own magnified face, the one .tok-word paints in
+      const brkLift=BRK_LIFT;   // hoisted out of the per-bracket loop — see its own note above the seq walk
       const battr={class:"brk"+(it.ghost?" brk-ghost":"")+(selBr?" sel":"")+(selI>=0&&it.owner!=null&&isAnc(selI,it.owner)?" inspan":""),x:it.x,y:by+TOK_Y_LOWER-brkLift,fill:it.col}; if(it.owner!=null){ battr["data-s"]=si; battr["data-owner"]=OID(it.owner); }   // brackets of the subtree's constituents get .inspan too; the ∅'s own bracket (it.ghost) is dimmed, not owned/clickable
       const b=E("text",battr); b.textContent=it.glyph; svg.appendChild(b);   // original glyph at the mirrored position (so RTL reads correctly)
       if(it.owner!=null){ b.style.cursor="pointer"; b.addEventListener("click",()=>pick(si,OID(it.owner))); }   // clicking a bracket selects the span it delimits
@@ -1476,7 +1525,16 @@ function outline(si){const D=displaySent(DOC[si]), t=D.tokens, n=t.length, OID=k
      lzh"). The two constants measure the same descent and differ only in gate; the split exists precisely so
      that widening this one leaves the OTHER reader of that measurement — brackets' token→deprel gap, which
      Sanskrit was explicitly excluded from — lzh-only. See MAG_DESC's note (js/diagram/diagram-core.js). */
-  const _half=descent(NODE_F)/2, _magHalf=MAG_DESC/2; box.style.setProperty("--olpt",(5-_half+_magHalf)+"px"); box.style.setProperty("--olpb",(5+_half-_magHalf)+"px");
+  /* ⚠ …AND A STACKING SCRIPT'S ROW GETS STACKED_GAP OF REAL ROOM UNDER IT, the same quantity every SVG
+     notation's belowStack() seeds and wrapped brackets' own `--und-extra` now carries ("in Sanskrit brackets
+     and outlines, stacked scripts should have the appropriate amount of space below tokens (like in arcs)").
+     The outline is the ONE view with no below-stack at all — its tiers run inline along the row — so "space
+     below the token" here is literally the row's bottom padding, and `.oline{line-height:1}` sizes the row
+     off the font-size while a Grantha or Javanese akshara's subjoined consonants reach far past it. Measured,
+     first row of the Grantha sample: the form's ink ended 8.02px BELOW the row box and left 2.09px to the next
+     row's ink (English 17.20, lzh 14.04, Devanagari 6.89). With it: 3.23px inside the box, 13.34px to the next
+     row. 0 for every non-stacking script — STACKED_GAP is 0 there — so no other document's rows move. */
+  const _half=descent(NODE_F)/2, _magHalf=MAG_DESC/2; box.style.setProperty("--olpt",(5-_half+_magHalf)+"px"); box.style.setProperty("--olpb",(5+_half-_magHalf+STACKED_GAP)+"px");
   const sb=document.createElement("div"); sb.className="osubbox"; box.appendChild(sb);   // subtree box (bottom)
   const hv=document.createElement("div"); hv.className="ohovbox"; box.appendChild(hv);   // hover band (middle) — same span as a row's selection
   const sr=document.createElement("div"); sr.className="oselrow"; box.appendChild(sr);   // selected-row band (top), same width as the box

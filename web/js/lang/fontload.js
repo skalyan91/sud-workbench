@@ -173,6 +173,41 @@ async function ensureScriptFont(script,sample){
   preserveScroll(renderDoc);   // the metrics change under it — re-measure with the face actually present
   if(!r.cached) toast("Downloaded "+family+" ("+Math.round(r.bytes/1024)+" KB)"); }
 
+/* ── THE CHOSEN SCRIPT'S OWN FACE, MADE ACTIVE BEFORE ANYTHING MEASURES AGAINST IT ────────────────
+   syncDocFonts below answers "does this machine need a face DOWNLOADED", which is a different question
+   and a slower one. This answers "is the face that will paint the scheme now in force actually usable
+   yet", and it exists because of the one gap that question left: a face this app declares ITSELF, in
+   web/styles/fonts.css — Nithya Ranjana and the six FONT_CORE_SCRIPTS members — is never fetched and so
+   never awaited by syncDocFonts (it skips them by name), while an @font-face does not begin loading when
+   it is DECLARED but the first time layout asks for a glyph from it. On a switch into such a script the
+   first thing to ask is `refreshFontStacks`'s own canvas/DOM measurements, which do not trigger a load and
+   do not wait for one — they simply report whatever the stack fell through to. That is the ordering
+   `fillOrtho` now closes by awaiting this before it renders.
+   TWO FAMILIES, never the whole stack: `document.fonts.load` on a family LIST would kick off every
+   @font-face the page declares, which is exactly the on-demand design this file exists to protect.
+     · fontStackName(ORTHO_SCHEME) — the same mapping scriptFamilyPrefix() (js/diagram/diagram-core.js)
+       already uses to name the script's family ahead of the measurement stack. A scheme that is not a
+       Unicode script name (simplified/traditional/iast/jyutping/…) yields a family nothing declares, and
+       `fonts.load` then resolves immediately with no matches — harmless, and the same fall-through
+       scriptFamilyPrefix takes.
+     · the FIRST family of the live --token-font, which is where syncSchemeAttr's one scheme-scoped
+       override lands ("Nithya Ranjana"), and which fontStackName cannot answer for since Rañjanā's face
+       is not named after its script. Ordinarily this is just "Noto Sans", already loaded, i.e. free.
+   The sample is a real character of what is about to be drawn, so the request names glyphs the face
+   really has (the same reason ensureScriptFont passes one). Failures are swallowed: a face that will not
+   load is precisely the case the font stacks' own fall-through is for. */
+async function schemeFaceReady(){
+  if(typeof document==="undefined"||!document.fonts||!document.fonts.load) return;
+  let sample="";
+  outer: for(const s of (typeof DOC!=="undefined"?DOC:[])){ for(const t of (s.tokens||[])){
+      for(const c of (t.ortho||"")){ if(c>" "){ sample=c; break outer; } } } }
+  const fams=[];
+  if(typeof ORTHO_SCHEME==="string"&&ORTHO_SCHEME&&ORTHO_SCHEME!=="none"&&typeof fontStackName==="function") fams.push(fontStackName(ORTHO_SCHEME));
+  const d=document.getElementById("doc");
+  if(d){ const first=(getComputedStyle(d).getPropertyValue("--token-font")||"").split(",")[0].trim().replace(/^["']|["']$/g,"");
+    if(first&&fams.indexOf(first)<0) fams.push(first); }
+  for(const f of fams){ try{ await document.fonts.load('15px "'+f.replace(/"/g,"")+'"',sample||"A"); }catch(_){ } }
+  try{ await document.fonts.ready; }catch(_){ } }   // …and anything else the same layout set going — the identical tail ensureScriptFont carries, and for the identical reason
 // Called after anything that can change what the document is written in — an open, an append, a
 // conversion, a language change. Serial, not parallel: a document mixing scripts should not fire five
 // downloads at once, and each one re-renders when it lands.

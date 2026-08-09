@@ -470,12 +470,57 @@ resolvable at a 15px body size, while every other script in the list is a runnin
 ⚠️ **Zanabazar Square is NOT one of them** — it was corrected out of the list on report: it is a practical
 script for Mongolian, Tibetan and Sanskrit, and its square construction is a letterform rather than ornament.
 Siddhaṃ and Balinese are in, surviving as bīja/mantra calligraphy and as ornamented palm-leaf lettering.
-`syncSchemeAttr` publishes `--script-mag` on #doc; `refreshFontStacks` reads it back into `TOK_MAG` in the same
+`refreshFontStacks` publishes `--script-mag` on #doc and reads it straight back into `TOK_MAG` in the same
 breath as the font stacks, because **a canvas `font` string cannot carry a `var()`** and every slot width in
 every notation comes from `meas()` against those strings — scaling the paint alone would lay out 15px boxes and
 draw 30px letters in them. ONLY the glyph faces scale (`WORD_F`/`NODE_F`/`MWT_F`/`GW_TIE_F` and their CSS
 twins, plus `.stext-script`); the POS, transliteration and gloss rows are Latin annotation, and doubling those
-would be a zoom, which ⌘+ already is. ⚠ **`belowGap()` is why the rows still clear.** The step below a token was
+would be a zoom, which ⌘+ already is.
+
+⚠ **A SCRIPT SWITCH IS FONT, THEN SIZE, THEN SPACING — AND IT USED TO BE SIZE FIRST, ALONE.** `syncSchemeAttr`
+published `--script-mag` the instant the reader picked a script, while everything DERIVED from it
+(`--script-asc`/`--script-lift`/`--script-align`/`--script-op(-run)`/`--script-cross`/`--script-brk-lift`/
+`--dia-pad-extra`, `TOK_MAG` and every canvas font string built on it) is published by `refreshFontStacks`, i.e.
+only on the next render — and a script pick does not render, it fires `fillOrtho` and waits for the bridge.
+Measured (headless Chrome, 150 ms stub bridge, Devanagari→Siddhaṃ): the size moved at t=957 ms and its own
+derived terms did not follow until t=1270 — **313 ms** of new magnification against old spacing, of which the
+first **178 ms** also had the PREVIOUS script's letters on screen (`clearOrthoCache` has blanked every
+`t.ortho`, the new renderings have not landed). Not merely stale but wrong: `.stext-script`'s
+`calc(--stext-fs * --script-mag)` and the px terms are MULTIPLIED, so a 2× size met a lift and a padding
+calibrated for 1.5×. The publish now lives at the top of `refreshFontStacks`, so size, everything derived from
+it, and the render that draws the new glyphs are one atomic step; between the pick and that render the previous
+script simply stays at its own size. Setting the FONT early (`data-scheme`, the Rañjanā `--token-font`
+override) is kept and is the point — that statement is what starts a webfont's load (Nithya Ranjana measurably
+goes `unloaded`→`loading` on it). ⚠️ **So `fillOrtho` now OWNS the render for a script pick**: it resolves to
+whether it painted, and `_orPick` renders itself if it did not (no bridge, a throwing bridge, an answer with no
+renderings — all of which used to leave the previous script's letters on screen for good) and replays a
+`captureTopAnchor` afterwards, since the height change `withTopChrome` used to wrap has moved into the
+deferred render.
+⚠️ **AND `--script-align` IS PUBLISHED BEFORE THE MEASUREMENTS, NOT AFTER THEM.** It was the last line of that
+block, three statements below `TOK_LIFT=scriptLiftEm()` — and `snumCapHeightLiftEm` measures a synthetic
+`.shead` holding a real `.stext.stext-script`, whose `align-self` IS `var(--script-align,baseline)`. Measured
+on a real switch into Grantha: the same call answers **0.0040 em** with the alignment still `baseline` from the
+previous scheme and **0.0657 em** once `flex-start` is published — published as `--script-lift` and corrected
+only because a second render happened to follow. (`--script-lift` currently has no CSS consumer, so the value
+error is inert today; the ordering is not.)
+⚠️ **AND THE FACE IS AWAITED BEFORE THE RENDER MEASURES IT** (`schemeFaceReady`, js/lang/fontload.js).
+`fillOrtho` ended `renderUnlessEditing(); syncDocFonts();` — measure, then go and see whether the script's font
+is even present. `syncDocFonts` answers the DOWNLOAD question and deliberately skips the faces `fonts.css`
+declares locally (Nithya Ranjana + the six `FONT_CORE_SCRIPTS`), so **nothing awaited those at all**, and an
+`@font-face` does not begin loading until layout asks for a glyph from it. `schemeFaceReady` names just two
+families — `fontStackName(ORTHO_SCHEME)` and the first family of the live `--token-font` (never the whole
+stack, which would fetch every declared face and defeat the on-demand design) — and waits. Measured: a
+declared-but-never-painted face goes `unloaded`→`loaded` in **21 ms**; two warm calls cost **0.2 ms**.
+`syncDocFonts` stays after the render and stays un-awaited — it is the download path and must not hold the
+glyphs back.
+⚠️ **AND A FILL ANSWERS FOR THE SCRIPT IT ASKED ABOUT.** There is no in-flight guard, and two picks in quick
+succession run two fills; `orthoKeyOf` is (surface, UPOS) and says nothing about the scheme, so the older
+answer passed the staleness test and overwrote the newer letters. Measured (Grantha, then Siddhaṃ 30 ms later):
+the document settled on `ORTHO_SCHEME="Siddham"` at 2× over **Grantha** glyphs. `fillOrtho` captures
+`ORTHO_SCHEME`/`DOCLANG` up front and bails after each await if either moved — `loadOrthoSchemes`'s own
+`_orLangLoaded` guard, applied per fetch.
+
+⚠ **`belowGap()` is why the rows still clear.** The step below a token was
 the literal `18+descent(POS_F)` in **fifteen** places — every renderer's draw AND every renderer's reserve
 (`stackH`/`belowH`/`stackBot`/`--undpad`/`tieLead`/`mwtDepth`) — and that 18 is calibrated against a 15px form
 with about **1.6px** of slack (measured: ink bottom 166.0, POS row top 167.6). A doubled form eats it. The one

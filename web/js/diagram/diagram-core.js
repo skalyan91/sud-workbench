@@ -312,7 +312,7 @@ _lazyFont("LIVE_TOKEN_STACK",()=>TOKEN_STACK); _lazyFont("LIVE_MONO_STACK",()=>M
    why a canvas font string cannot read the property itself). 1 everywhere except the ornamental Sanskrit
    scripts. It multiplies the TOKEN-FORM faces only — WORD_F/NODE_F/MWT_F and the goeswith tie — never the
    POS, transliteration or gloss rows, which are Latin annotation drawn at the app's own body size. */
-let TOK_MAG=1, TOK_WGHT=400, TOK_TRACK=0, TOK_ASC=1, TOK_MID=0, TOK_LIFT=0, TOK_OP=1, TOK_OP_RUN=1, STACKED_GAP=0, TOK_Y_LOWER=0, LZH_MAG=false, TR_TIGHTEN=0, TOK_TR_GAP=0, NODE_Y_EXTRA=0, MAG_DESC=0, TOK_DESC=0, TR_ROW_DESC=0, TR_ROW_EXTRA=0, BRK_DEPREL_LESS=0, MAG_DEPREL_GAP=0;
+let TOK_MAG=1, TOK_WGHT=400, TOK_TRACK=0, TOK_ASC=1, TOK_MID=0, TOK_LIFT=0, TOK_OP=1, TOK_OP_RUN=1, STACKED_GAP=0, TOK_Y_LOWER=0, LZH_MAG=false, TR_TIGHTEN=0, TOK_TR_GAP=0, NODE_Y_EXTRA=0, MAG_DESC=0, TOK_DESC=0, TR_ROW_DESC=0, TR_ROW_EXTRA=0, TR_ABOVE_EXTRA=0, BRK_DEPREL_LESS=0, MAG_DEPREL_GAP=0;
 // TOK_WGHT stays 400 for magnified faces now (see magTrack's own note on why the weight curve was dropped for
 // them), so this omits a weight token and lets the face render at its own resting weight.
 function magFont(px){ const w=TOK_WGHT;
@@ -937,17 +937,60 @@ function measGloss(s,f){ const segs=glossAbbrSegments(s);
 // LIVE_TOKEN_STACK/LIVE_MONO_STACK, not a fresh DOM read.
 function refreshFontStacks(){
   const d=document.getElementById("doc"), prevT=LIVE_TOKEN_STACK, prevM=LIVE_MONO_STACK, prevG=TOK_MAG;
-  if(d){ const cs=getComputedStyle(d);
+  if(d){
+    /* ⚠ THE MAGNIFICATION IS PUBLISHED HERE, NOT WHERE THE SCRIPT IS PICKED — the SIZE and the SPACING
+       have to move in ONE synchronous block, and for a long time they did not. `syncSchemeAttr`
+       (js/lang/translit.js) used to write `--script-mag` the instant the reader chose a script, while
+       every term derived from it — `--script-asc`/`--script-lift`/`--script-align`/`--script-op(-run)`/
+       `--script-cross`/`--script-brk-lift`/`--script-brk-pos`/`--dia-pad-extra`, TOK_MAG itself and every
+       canvas font string built off it — is written HERE, i.e. only on the next render. A script pick does
+       not render: it fires fillOrtho() and waits for the bridge. So the document sat with the NEW
+       magnification against the OLD spacing for a whole round trip. Measured (headless Chrome, a 150 ms
+       stub bridge, Devanagari→Siddhaṃ): --script-mag went 1.5→2 at t=957 ms and the derived terms did not
+       follow until t=1270 — 313 ms in which --script-lift was Devanagari's 0.0040 (Siddhaṃ's is 0.2130),
+       --script-asc 0.900 (1.000), --script-brk-lift 1.85px (3.87px), --dia-pad-extra 8.88px (17.76px) and
+       TOK_MAG still 1.5 while the CSS painted at 2. Worse than merely stale: `.stext-script`'s own
+       `font-size:calc(--stext-fs * --script-mag)` and the px terms above are MULTIPLIED together, so the
+       new size met a lift and a padding calibrated for the old one. And for the first 178 ms of that
+       window the glyphs were still the PREVIOUS script's (clearOrthoCache had blanked t.ortho and the new
+       renderings had not landed), i.e. one script's letters drawn at another script's size.
+       Publishing it here instead means the size, everything derived from it, and the render that draws the
+       new glyphs are one atomic step — "update the font, THEN the font size and spacing". Between the pick
+       and that render the previous script simply stays on screen at its own size, which is the honest
+       picture rather than a torn one. scriptMag() is js/lang/translit.js's, loaded earlier in index.html;
+       the typeof guard is for the measurement harnesses that load this file alone (they keep whatever
+       --script-mag the page already carries, exactly as before). */
+    if(typeof scriptMag==="function") d.style.setProperty("--script-mag",String(scriptMag()));
+    const cs=getComputedStyle(d);
     const t=cs.getPropertyValue("--token-font").trim(), m=cs.getPropertyValue("--mono-font").trim();
     if(t) LIVE_TOKEN_STACK=t; if(m) LIVE_MONO_STACK=m;
     /* …AND HOW BIG THE GLYPHS ARE. `--script-mag` is the Indic-script magnification (1.5 for every
        script in INDIC_SCRIPTS, js/lang/translit.js — every _AKSHARA_SCRIPTS scheme, app/translit.py), published on #doc
-       by syncSchemeAttr. Read back HERE, off the same element and in the same breath as the font stacks,
+       one line above. Read back HERE, off the same element and in the same breath as the font stacks,
        because a canvas `font` string cannot carry a var(): every slot width in every notation comes from
        meas() against these strings, so a paint that scaled without the measurement following it would lay
-       out 15px boxes and draw 30px letters in them. Read, never assumed — the CSS is the authority and
-       this is its mirror. */
+       out 15px boxes and draw 30px letters in them. Read rather than reused from scriptMag()'s own return
+       value — the CSS is the authority and this is its mirror, which is what keeps a harness that sets the
+       property by hand (and defines no scriptMag) working exactly as it did. */
     const g=parseFloat(cs.getPropertyValue("--script-mag")); if(g>0) TOK_MAG=g;
+    /* ⚠ AND THE ALIGNMENT IS PUBLISHED BEFORE THE MEASUREMENTS, NOT AFTER THEM — it used to be the LAST
+       line of this block, three statements below scriptLiftEm(), and scriptLiftEm() is one of the things
+       it decides the answer for. `snumCapHeightLiftEm()` measures a synthetic `.shead` row holding a real
+       `.stext.stext-script` span, and that span's `align-self` IS `var(--script-align,baseline)`
+       (styles/app.css) — a flex item's cross-axis placement, so baseline-aligned and top-aligned put its
+       baseline marker in two quite different places. Measured on the real switch into Grantha: the same
+       call answered 0.0040 em with the alignment still `baseline` (its value from the previous,
+       unmagnified scheme) and 0.0657 em once `flex-start` had been published — a 16× error, published as
+       `--script-lift`, and corrected only because a second render happened to follow. Same class of
+       mistake as the one the block above records, one function down: derive a measurement, then change
+       the thing it was measured against.
+       ⚠️ ON THE ALIGNMENT ITSELF, AND WHY IT IS ONLY THE ORNAMENTAL ONE. `.stext-script` carried
+       `align-self:flex-start` unconditionally, which is a no-op ONLY if the lift beside it is
+       non-zero: at mag 1 the lift is 0, so an unmagnified script line was top-aligned against a
+       baseline-aligned sentence number with nothing to bring it back — and the taller the face's
+       ascent, the further its letters sat below the number (Kawi's is 1.10 em, which is why it showed
+       there). Baseline is the resting alignment and this restores it for every non-ornamental script. */
+    d.style.setProperty("--script-align",TOK_MAG>1?"flex-start":"baseline");
     /* …AND WHAT FOLLOWS FROM IT, derived HERE and published back so the CSS and the measurement strings
        cannot disagree about any of them. Each is stated in the units its consumer needs, and each is
        exactly its no-op value at mag 1. TOK_WGHT is NOT one of them any more — see magTrack's own note
@@ -959,14 +1002,7 @@ function refreshFontStacks(){
     TOK_OP_RUN=magOpacityRun(TOK_MAG); d.style.setProperty("--script-op-run",TOK_OP_RUN.toFixed(3));   // the running sentence's OWN, gentler curve — same reasoning, different context, see magOpacityRun's own note
     TOK_ASC=scriptAscentEm(); d.style.setProperty("--script-asc",TOK_ASC.toFixed(3));
     TOK_MID=scriptMidEm();   // svgSeamMark's own vertical re-centring against the magnified word beside it — JS-internal only, no CSS consumer
-    TOK_LIFT=scriptLiftEm(); d.style.setProperty("--script-lift",TOK_LIFT.toFixed(4));   // cached into a plain JS global (not re-read back off the CSS var, which is colour-cache-adjacent and cleared on a different trigger)
-    /* ⚠ AND THE ALIGNMENT ITSELF IS ONLY THE ORNAMENTAL ONE. `.stext-script` carried
-       `align-self:flex-start` unconditionally, which is a no-op ONLY if the lift beside it is
-       non-zero: at mag 1 the lift is 0, so an unmagnified script line was top-aligned against a
-       baseline-aligned sentence number with nothing to bring it back — and the taller the face's
-       ascent, the further its letters sat below the number (Kawi's is 1.10 em, which is why it showed
-       there). Baseline is the resting alignment and this restores it for every non-ornamental script. */
-    d.style.setProperty("--script-align",TOK_MAG>1?"flex-start":"baseline"); }   // empty (no #doc, or the property somehow unset) → keep whatever was last live, which starts as the static base
+    TOK_LIFT=scriptLiftEm(); d.style.setProperty("--script-lift",TOK_LIFT.toFixed(4)); }   // cached into a plain JS global (not re-read back off the CSS var, which is colour-cache-adjacent and cleared on a different trigger)   // (--script-align is published ABOVE, before this measurement rather than after it — see its own note)   // empty (no #doc, or the property somehow unset) → keep whatever was last live, which starts as the static base
   // a font-stack change is the ONE non-content thing that can change what meas() returns (js/grid/grid.js's
   // computeColW/pillColW measure against GRID_F/HEAD_F, both built from LIVE_MONO_STACK/LIVE_TOKEN_STACK below)
   // → the column-width cache's every cached measurement is now stale, so force a full rescan rather than trust
@@ -1140,8 +1176,20 @@ function refreshFontStacks(){
      glyph itself again, which nothing here asked for. Lives in tree()'s own belowReserve expression, never in
      nyD. lzh-only, matching every sibling term in this feature.
      ⚠️ TUNED DOWN TO 2 one round later ("reduce the below-transliteration space in the hierarchy by 2px") —
-     a further adjustment to where this now sits (4→2), not a fresh, independent quantity. */
-  TR_ROW_EXTRA=LZH_MAG?2:0;
+     a further adjustment to where this now sits (4→2), and then BACK TO 4 the round after ("add back the 2px
+     of space below the transliteration"), which is that same adjustment reversed in so many words. */
+  TR_ROW_EXTRA=LZH_MAG?4:0;
+  /* ⚠ AND A FLAT 4px ON THE "ABOVE" SIDE, THIS TIME ("but add an extra 4px of space above the token") — the
+     other half of the same sentence, and deliberately a SEPARATE constant from TR_ROW_EXTRA rather than a
+     second use of it: the two are equal today by coincidence of two requests landing on the same round
+     figure, and the previous round already moved one of them without the other.
+     ⚠️ HIERARCHY ONLY, and gated at its use site on trLayer() — see tree()'s own note. The rest of that
+     sentence is what forces the gate: "if there is no transliteration, make the token spacing exactly the
+     same as in stemmas", and the stemma has no such term. Every other term in this feature that opens space
+     above a hierarchy token (trDrop/TR_ROW_DESC) is trLayer()-gated for the identical reason, so with the
+     transliteration row off the hierarchy's node position reduces to nyL+TOK_Y_LOWER+NODE_Y_EXTRA — which is
+     the stemma's own expression, character for character. lzh-only, matching every sibling here. */
+  TR_ABOVE_EXTRA=LZH_MAG?4:0;
   /* ⚠ AND BRACKETS' TOKEN→DEPREL GAP GIVES BACK A FLAT 4px ("in brackets, deprels need 4px *less* of space
      below") — a correction to the two-descent total the immediately preceding round shipped (TOK_TR_GAP +
      2·TOK_DESC = 38.7px for lzh), not a reversion of it: the request is phrased as a further adjustment to
@@ -1249,15 +1297,91 @@ function centreOnTokenLift(satFont,tokenPx){ return TOK_MAG>1 ? (TOK_MID*tokenPx
    sentence and ink-sampling was precisely the noise that made three earlier cuts of the seam-mark centring
    wrong in opposite directions. Measured then: the two ink centres 3.90px apart, the em-box rule lifting
    4.05, an x-height rule lifting only 1.97 and reading "visibly short" in an 8× screenshot.
-   ⚠️ THAT VERDICT IS OVERRULED, on direct instruction ("it is the x-height of tokens, not the full height,
-   that should be centred with the brackets") — not a magnitude tweak, a different quantity outright. The
-   token side now reads markMidPx(tokFont) (xHeightPx/2, the SAME x-height-band-centre question the seam
-   mark's own centreOnTokenLift already asks, just of the token's face rather than the mark's), sharing one
-   function rather than keeping a second, near-duplicate emMidPx around for a case nothing calls any more.
-   The bracket side is UNCHANGED — inkMidPx("[",…) — the "[" glyph is fixed in one known face, so measuring
-   it by its own ink was never the part in question. */
+   ⚠️ THAT VERDICT WAS OVERRULED, on direct instruction ("it is the x-height of tokens, not the full height,
+   that should be centred with the brackets") — not a magnitude tweak, a different quantity outright — and
+   then RE-SCOPED one round later, because the instruction had been given of Sanskrit brackets and this one
+   function answers for lzh's too. Both quantities are therefore live; which a script takes, and the
+   measurements behind the split, are at centreBracketLift itself below.
+   The bracket side is UNCHANGED throughout — inkMidPx("[",…) — the "[" glyph is fixed in one known face, so
+   measuring it by its own ink was never the part in question. */
 function inkMidPx(text,font){ _cv.font=font; const m=_cv.measureText(text); return (m.actualBoundingBoxAscent-m.actualBoundingBoxDescent)/2; }
-function centreBracketLift(brkFont,tokFont){ return TOK_MAG>1 ? (markMidPx(tokFont)-inkMidPx("[",brkFont)) : 0; }   // every magnified script, lzh and Sanskrit alike — see the --script-cross note in refreshFontStacks for why this one term widened back out while the gap terms beside it did not
+/* HALF THE FONT'S OWN EM BOX, ascent minus descent — the token side's OTHER answer, and the one two
+   script families want. Sampled on "x" only because fontBoundingBox* is a FONT metric, not a glyph one:
+   any character returns the same numbers, so the sample says nothing about which script is being asked. */
+function emMidPx(font){ _cv.font=font; const m=_cv.measureText("x"); return (m.fontBoundingBoxAscent-m.fontBoundingBoxDescent)/2; }
+/* ⚠ LITERARY CHINESE TAKES THE EM BOX AND EVERY OTHER MAGNIFIED SCRIPT TAKES THE X-HEIGHT, which is a
+   SCOPE correction rather than a reopening of the question. The x-height rule arrived on direct instruction
+   ("it is the x-height of tokens, not the full height, that should be centred with the brackets") — but
+   that instruction was given of SANSKRIT brackets, while this one function is read by lzh's brackets too,
+   and applying it there silently undid a lzh centring that had already been measured right and approved
+   one round earlier. Reported back as "in brackets, bring the tokens down so they are once again
+   center-aligned with the brackets" — a bigger lift raises the BRACKET, which is what "the token comes
+   down" against it means. Measured, flat brackets, bracket ink centre minus token ink centre (0 = centred):
+   lzh 知 reads −0.15 on the em box and +2.33 on the x-height. The em box is 2.20px further up than the
+   x-height at 1.5×, so every Brahmic scheme would move by that much if it were widened back out — away from
+   its own settled reading in each case (Devanagari +0.98, Grantha −4.85, Javanese −5.22). Each family keeps
+   whichever its own request settled on, and the split is honest on its own terms: a Han glyph has no
+   x-height band at all — the em box IS the letter — while a Brahmic akshara genuinely sits in one.
+   ⚠️ AND THE X-HEIGHT IS ASKED OF THE BASE TOKEN STACK, NOT OF A SCHEME'S FONT OVERRIDE. `xHeightPx`
+   resolves CSS's `ex`, i.e. the FIRST AVAILABLE font's own declared x-height; every Noto Brahmic scheme
+   therefore answers from the stack's Latin head, and exactly one scheme does not — Rañjanā, whose
+   `--token-font` override (syncSchemeAttr, js/lang/translit.js) puts Nithya Ranjana first. That face
+   declares an `ex` of 0.33em against ink whose real centre sits at 0.37em, a display hand's letterform
+   filling the em rather than sitting in a lowercase band, and reading it left Rañjanā's brackets +6.10px
+   off — the worst miss of any script, and half of the reported "ornamental scripts need to be
+   centre-aligned with the brackets, just like other scripts". Asked of TOKEN_STACK (the static base list,
+   this file's own) it lands at +3.02, inside the band Grantha/Javanese already sit in and unremarked on.
+   One reference for every script, so a per-script FONT override cannot quietly redefine the rule.
+   The BRACKET side is unchanged in both branches — inkMidPx("[",…), one known face, never in question. */
+function centreBracketLift(brkFont,tokFont){ if(!(TOK_MAG>1)) return 0;
+  const base=(typeof TOKEN_STACK==="string")?(fontPxOf(tokFont)||TOK_REF_SIZE*TOK_MAG)+"px "+TOKEN_STACK:tokFont;
+  return (LZH_MAG?emMidPx(tokFont):markMidPx(base))-inkMidPx("[",brkFont); }
+/* …AND WHERE THE GLYPH ACTUALLY LANDS, WHEN IT IS THE foreignObject FALLBACK THAT PAINTS IT. smpReshape()
+   seats its stand-in at `fo.y = y − domBaseline(s,f)`, i.e. the box's TOP one font-ascent above the baseline
+   the <text> it replaced was drawn on — but what then sits at that top is a `line-height:1em` inner div, and
+   a line box compresses (or, for a 2em STACKING_SCRIPTS container under `align-items:center`, re-centres)
+   the text inside it by an amount neither this file nor smpReshape can state in closed form: it is the
+   engine's own line-box arithmetic over the winning face's ascent/descent, and Chrome and WebKit genuinely
+   disagree about it (flex-start vs center — see `.fo-form`'s own note in app.css). Measured: a Soyombo token
+   paints 11.29px ABOVE the baseline `brackets()` seated its "[" against, which is the whole of the reported
+   "ornamental scripts are not centre-aligned with the brackets".
+   ⚠ THE SEATING ITSELF IS DELIBERATELY NOT CHANGED. Every notation's below-stack hangs off that same
+   nominal baseline, so the rise is ALREADY part of the arc/stemma/hierarchy spacing this feature's earlier
+   rounds measured and approved ("stacked scripts should have the appropriate amount of space below tokens
+   (like in arcs)" reads arcs as CORRECT). Re-seating the glyph would move all of that; what needs to know
+   about the rise is the one piece of furniture that has to line up with the glyph's own middle.
+   ⚠ PROBED, NOT DERIVED — the same choice svgShapesSMP()/cssLenScale() made for the same reason: the
+   quantity is an engine layout decision, so it is measured by building the very structure smpReshape builds
+   and reading back where its text sits. Mounted in `_mmount` (inside #doc) so `.fo-form`'s class rules, the
+   `data-engine` branch and the per-scheme `#doc[data-scheme]` override all match exactly as they will on the
+   real swap. Memoised on (font, scheme, sample) — one probe per render at most, and 0 for every document
+   whose forms are not SMP (there is no swap to correct for). */
+let _FORISE=0,_FORISE_KEY=" ";
+function foSeatRise(sample,font){
+  if(!sample||!font||typeof smpUnshaped!=="function"||!smpUnshaped(sample)) return 0;
+  const key=font+" "+ORTHO_SCHEME+" "+sample;
+  if(_FORISE_KEY===key) return _FORISE;
+  _FORISE_KEY=key; _FORISE=0;
+  try{
+    _measMountRoot();
+    const NS="http://www.w3.org/2000/svg", XH="http://www.w3.org/1999/xhtml";
+    const svg=document.createElementNS(NS,"svg"); svg.setAttribute("width","10"); svg.setAttribute("height","10");
+    const fo=document.createElementNS(NS,"foreignObject");
+    fo.setAttribute("class","tok-word"); fo.setAttribute("x","0"); fo.setAttribute("y","0"); fo.setAttribute("width","400");
+    const lineEm=(typeof STACKING_SCRIPTS!=="undefined" && STACKING_SCRIPTS.has(ORTHO_SCHEME))?2:1;   // smpReshape's own decision, restated here because the probe has to reproduce the box it produces
+    fo.style.font=font;
+    if(typeof IS_CHROMIUM!=="undefined" && IS_CHROMIUM) fo.style.height="calc("+lineEm+"em)";
+    else fo.setAttribute("height",((parseFloat(font)||TOK_REF_SIZE)*lineEm)+"");
+    fo.style.overflow="visible";
+    const d=document.createElementNS(XH,"div"); d.setAttribute("class","fo-form tok-word"); d.style.cssText="font:"+font;
+    const inner=document.createElementNS(XH,"div"); inner.style.cssText="line-height:1em;white-space:pre"; inner.textContent=sample;
+    const mark=document.createElementNS(XH,"span"); mark.style.cssText="display:inline-block;width:0;height:0;vertical-align:baseline";   // a zero-size inline-block's bottom margin edge IS the line's baseline — the one thing that reads back where the text really sat, rather than where a metric says it should have
+    inner.appendChild(mark); d.appendChild(inner); fo.appendChild(d); svg.appendChild(fo); _mmount.appendChild(svg);
+    const foTop=fo.getBoundingClientRect().top, base=mark.getBoundingClientRect().bottom;
+    _mmount.removeChild(svg);
+    if(base>0||foTop>0) _FORISE=domBaseline(sample,font)-(base-foTop);   // + = the glyph paints ABOVE the baseline it was seated for
+  }catch(_){ _FORISE=0; }
+  return _FORISE; }
 function svgSeamMark(parent,tk,cx,y,halfEnd,font,boxes,halfStart,row){ if(!parent) return;
   /* ⚠ A SEAM MARK IS NOT PART OF THE WORD, so the ornamental magnification does not reach it. It is
      punctuation ABOUT the word — "this is where the orthographic word breaks" — set in the app's own

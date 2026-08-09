@@ -441,7 +441,19 @@ function syncSchemeAttr(){ const d=document.getElementById("doc"); if(!d) return
   const root=document.documentElement;
   if(ORTHO_SCHEME==="Ranjana" && typeof TOKEN_STACK==="string") root.style.setProperty("--token-font",'"Nithya Ranjana", '+TOKEN_STACK);
   else root.style.removeProperty("--token-font");
-  d.style.setProperty("--script-mag",String(scriptMag()));   // …and how big the GLYPHS are drawn (see INDIC_SCRIPTS). On #doc, which is where refreshFontStacks reads it back to keep canvas measurement in step with the paint
+  /* ⚠ THE SIZE IS NOT SET HERE — ONLY THE FONT IS. `--script-mag` used to be published on the line below
+     this one, and that made the app do the two halves of a script switch in the wrong order: the FONT
+     (this function's `data-scheme` + `--token-font`) at pick time, the SIZE at pick time too — but
+     everything DERIVED from the size (`--script-asc`, `--script-lift`, `--script-align`, `--script-op`,
+     `--script-brk-lift`, `--dia-pad-extra`, the JS TOK_MAG every canvas measurement is built on) only on
+     the next render, which for a script pick is a whole bridge round trip later. So the document painted
+     at the new magnification against the old spacing, and for the first part of that window against the
+     PREVIOUS script's glyphs as well, since clearOrthoCache has just blanked every t.ortho and the new
+     renderings have not arrived. `refreshFontStacks` (js/diagram/diagram-core.js) publishes it now, at the
+     top of its own block, so the size and every term derived from it land together with the render that
+     draws the new letters — see its note there for the measured numbers. Setting the FONT here and early
+     is deliberate and unchanged: it is what starts a webfont's own load (Nithya Ranjana measurably goes
+     `unloaded`→`loading` on this very statement), so the face is on its way before anything measures it. */
 }
 /* ── EVERY INDIC SCRIPT IS DRAWN AT 1.5× SIZE ──────────────────────────────────────────────────────
    Superseded once already: this used to be a curated subset ("the ornamental scripts" — Rañjanā,
@@ -576,8 +588,31 @@ function _orPick(id){ orClose(); id=id||""; if(id===ORTHO_SCHEME) return;
   ORTHO_SCHEME=id; syncSchemeAttr();
   if(isSanskritLang()) show.translit=saTransRow();   // item 27(c): the IAST transliteration row/pill follows the GLYPH (non-Latin ⇒ show IAST beneath; Latin/an IAST-stored Original ⇒ hide)
   updateTranslitPill(); updateOrthoPill(); clearOrthoCache();
-  if((ORTHO_SCHEME && ORTHO_SCHEME!=="none")||isSanskritLang()) fillOrtho();   // a script fetches its rendering; Sanskrit also fuses MWT sandhi under None (item 18)
-  if((!ORTHO_SCHEME||ORTHO_SCHEME==="none") && DOC.length) preserveScroll(renderDoc);   // None/Original: re-render NOW to revert the glyphs (the cache was just cleared). fillOrtho only re-renders when it FETCHED something, so a script→None switch on a sentence with no MWTs would otherwise leave the stale script glyphs on screen.
+  const bare=(!ORTHO_SCHEME||ORTHO_SCHEME==="none");   // Original / None — the one case that has its own eager render below, and so needs no fallback when fillOrtho (Sanskrit's MWT-sandhi pass, which runs here too) paints nothing
+  if((ORTHO_SCHEME && ORTHO_SCHEME!=="none")||isSanskritLang()){
+    /* A script fetches its rendering; Sanskrit also fuses MWT sandhi under None (item 18). THE RENDER IS
+       fillOrtho's, not one of ours, and that is the whole point of the reordering recorded in
+       syncSchemeAttr: it is the first moment at which the new glyphs, the new magnification and the
+       spacing derived from it are all true at once.
+       ⚠ SO A FILL THAT PAINTS NOTHING HAS TO BE CAUGHT. fillOrtho renders only when it actually FETCHED
+       something, and it has three ways of fetching nothing — no bridge (browser design mode), a bridge
+       call that throws, and an answer with no usable renderings — while `clearOrthoCache()` two statements
+       up has already blanked every t.ortho. Left alone, the document would keep the PREVIOUS script's
+       letters (and, now, the previous script's size) with nothing ever coming to replace them. It returns
+       whether it painted, so the fallback below is a real render rather than a second copy of its own
+       preconditions, which would have to be kept in step with it by hand.
+       ⚠ AND THE READING POSITION IS RESTORED ACROSS THE WAIT. `withTopChrome` wraps this whole function
+       (see its note above) and restores synchronously, which used to be enough because the magnification —
+       the height change worth anchoring — happened inside it. It happens in the deferred render now, so
+       the anchor has to be replayed after that render, exactly as syncChrome's own rAF'd restore replays
+       one over withTopChrome's (js/core/scroll.js). captureTopAnchor records the block's INDEX as well as
+       its node, so it survives the re-render that discards the node. */
+    const anchor=bare?null:((typeof captureTopAnchor==="function")?captureTopAnchor():null);   // Original/None renders eagerly below, inside withTopChrome's own capture — nothing deferred to re-anchor
+    Promise.resolve(fillOrtho()).then(painted=>{
+      if(!painted && !bare && DOC.length) preserveScroll(renderDoc);
+      if(anchor && typeof restoreTopAnchor==="function") restoreTopAnchor(anchor); }).catch(()=>{});
+  }
+  if(bare && DOC.length) preserveScroll(renderDoc);   // None/Original: re-render NOW to revert the glyphs (the cache was just cleared). fillOrtho only re-renders when it FETCHED something, so a script→None switch on a sentence with no MWTs would otherwise leave the stale script glyphs on screen.
   if(isSanskritLang()&&show.translit) fillTranslit();   // fill the IAST row now that a script is active
   if(DOCLANG){ PREFS.ortho[DOCLANG]=ORTHO_SCHEME; savePrefs(); }   // store ALL THREE kinds of choice verbatim — a script id, "none", and "" (Original). Deleting the key on Original (what this did before) left a deliberate Original indistinguishable from "never chose", so it could not be restored for a language whose default is not Original — see prefOrtho.
   toast(ORTHO_SCHEME==="none"?"Script: None (transliteration as main)"
