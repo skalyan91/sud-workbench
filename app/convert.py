@@ -28,6 +28,7 @@ import os
 import shutil
 from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
+from typing import Any
 
 from . import io_conllu
 
@@ -255,10 +256,333 @@ def sud_to_msud(sentences: list[dict]) -> list[dict]:
     raise ConversionUnavailable("SUD → mSUD is not an automatic conversion")
 
 
+# ── UD enhanced dependencies (DEPS) → SUD's own Shared / Subject ─────────────
+# DEPS is not part of SUD, and this app does not support it as a column an annotator works in:
+# the save-time auto-fill that used to WRITE it back out ("Task E", js/io/bridge.js) is gone, and
+# the import path below CLEARS it.  Clearing is not the same as discarding, though — two of UD's
+# enhanced-syntax constructs (universaldependencies.org/u/overview/enhanced-syntax.html) state
+# exactly what two SUD annotations this app already models and already draws (as the dashed
+# "ghost" edges), so they are read off DEPS on the way in and re-expressed in SUD's own terms:
+#   · §2/§3 CONJUNCT PROPAGATION → FEATS ``Shared=Yes``.  UD gives a dependent shared across a
+#     coordination one extra enhanced arc per conjunct; SUD marks the dependent itself and lets
+#     conjunctsOf (js/diagram/diagram-render.js) enumerate the coordination.
+#   · §4 the ``:xsubj`` extension → MISC ``Subject=SubjRaising|ObjRaising|OblRaising``.  UD gives
+#     the raised argument an extra arc back to the controlled predicate; SUD marks the PREDICATE
+#     and lets subjRaiseTarget (js/diagram/diagram-edit.js) re-derive which argument is raised.
+# Everything else in DEPS goes with the column, which is what "wherever possible" costs — and the
+# three big ones are refused for exactly the reasons the deleted encoder refused to WRITE them:
+# gapping/empty-node references (this app never INFERS a gap, it only preserves one already in the
+# file — see the note on ``empties`` in _deps_to_shared_subject); case-marking-in-deprel
+# (``nmod:on``, ``obl:auf:dat``) assumes UD's shape, where the adposition is a DEPENDENT of the
+# nominal whose lemma is folded into the label, while SUD has the adposition HEAD the nominal, so
+# there is no case dependent to read a lemma off; and relative-clause ``ref``/coreference, which
+# SUD marks on the CLAUSE (``mod@relcl``) rather than on the pronoun.
+#
+# The two ports below are deliberately line-for-line with their JS originals rather than
+# "improved": the crawl and the coordination enumeration are what the RENDERER will use to draw
+# the ghost edge these annotations imply, so a derivation that disagreed with them by even one
+# tie-break would write an annotation the diagram then draws pointing somewhere else.
+def _fam_of(rel: str) -> str:
+    """base FAMILY of a relation — comp:obj / subj@expl / comp:obj/m → comp / subj / comp.
+    famOf (js/core/prefs.js)."""
+    rel = rel or ""
+    for i, ch in enumerate(rel):
+        if ch in ":@/":
+            return rel[:i]
+    return rel
+
+
+def _dep_base(rel: str) -> str:
+    """a relation without its ``@deep`` tail — comp:obj@agent → comp:obj.  depBase
+    (js/diagram/diagram-core.js).  NOT _fam_of: the crawl matches whole relations
+    (``comp:obj``), and folding those to ``comp`` would make an object and an oblique the
+    same target type."""
+    rel = rel or ""
+    i = rel.find("@")
+    return rel if i < 0 else rel[:i]
+
+
+def _int(v: Any) -> int:
+    try:
+        return int(str(v))
+    except (TypeError, ValueError):
+        return 0
+
+
+def _kv_get(col: str | None, key: str):
+    """the value of ``key`` in a ``|``-joined ``Key=Val`` column (FEATS *or* MISC — they share the
+    syntax, which is why getFeat, js/core/prefs.js, is used for both), or None if absent.  None and
+    "" are different answers here: ``Shared=`` is a statement, an absent Shared is not."""
+    if not col or col == "_":
+        return None
+    for kv in col.split("|"):
+        k, sep, val = kv.partition("=")
+        if sep and k == key:
+            return val
+    return None
+
+
+def _feats_set(col: str | None, name: str, val: str) -> str:
+    """add/replace one ``Feat=Val`` in FEATS, keeping it ALPHABETICAL by feature name — the
+    CoNLL-U spec's own requirement, and what setFeat (js/io/bridge.js) does on the other side of
+    the bridge.  Case-insensitive on the key, as the spec's ordering is."""
+    cur = [p for p in (col or "").split("|") if p and p != "_"]
+    for i, p in enumerate(cur):
+        if p.partition("=")[0] == name:
+            cur[i] = f"{name}={val}"
+            break
+    else:
+        cur.append(f"{name}={val}")
+    cur.sort(key=lambda s: s.partition("=")[0].lower())
+    return "|".join(cur) or "_"
+
+
+def _misc_set(col: str | None, key: str, val: str) -> str:
+    """add/replace one ``Key=Val`` in MISC, IN PLACE if the key is already there and appended
+    otherwise — setMiscKV (js/lang/translit-load.js).  Deliberately unsorted, unlike FEATS: MISC
+    has no ordering requirement, and re-sorting an imported token's MISC would rewrite lines this
+    pass has nothing to say about."""
+    cur = [p for p in (col or "").split("|") if p and p != "_"]
+    for i, p in enumerate(cur):
+        if p.partition("=")[0] == key:
+            cur[i] = f"{key}={val}"
+            break
+    else:
+        cur.append(f"{key}={val}")
+    return "|".join(cur) or "_"
+
+
+def _deps_pairs(raw: str | None, n: int) -> list[tuple[int, str]]:
+    """a DEPS cell (``3:conj|5:nsubj:xsubj``) as (head id, relation) pairs.
+
+    Anything whose head is not a plain token id in ``[1, n]`` is dropped, which is the one place
+    empty nodes are excluded: a gapping reference reads ``5.1:nsubj`` and ``"5.1".isdigit()`` is
+    False.  ``0:root`` goes the same way — the enhanced graph's root pointer is not an arc between
+    two tokens and neither construct here has anything to say about it."""
+    out: list[tuple[int, str]] = []
+    if not raw or raw == "_":
+        return out
+    for entry in raw.split("|"):
+        head, sep, rel = entry.partition(":")
+        if not sep or not head.isdigit():
+            continue
+        hid = int(head)
+        if 1 <= hid <= n:
+            out.append((hid, rel))
+    return out
+
+
+def _conjuncts_of(tokens: list[dict], x: int) -> list[int]:
+    """every conjunct (1-based id) in the SAME coordination as ``x``, x included.  conjunctsOf
+    (js/diagram/diagram-render.js), ported verbatim — it is what the renderer will enumerate when
+    it draws the ghost edges a ``Shared=Yes`` written here implies."""
+    if not (1 <= x <= len(tokens)):
+        return [x]
+    tk = tokens[x - 1]
+    h = _int(tk.get("head")) if _fam_of(tk.get("deprel") or "") == "conj" else x
+    if not (1 <= h <= len(tokens)):
+        return [x]
+    found = {h, x}
+    for i, tt in enumerate(tokens):
+        if _fam_of(tt.get("deprel") or "") == "conj" and _int(tt.get("head")) == h:
+            found.add(i + 1)
+    return sorted(found)
+
+
+def _subj_raise_target(tokens: list[dict], tok_id: int, target_type: str):
+    """the raised argument of the predicate ``tok_id``, for one raising type.  subjRaiseTarget
+    (js/diagram/diagram-edit.js), ported verbatim including its crossing budget: climb tok_id's own
+    head chain, stop at the first VERB/AUX ancestor and look among THAT ancestor's dependents for
+    one whose base relation is ``target_type``; at most one further VERB/AUX may be crossed without
+    a match, and crossing an AUX ends the crawl outright.  1-based id, or None."""
+    n = len(tokens)
+    cur, crossed, guard = tok_id, 0, 0
+    while guard <= n:
+        guard += 1
+        if not (1 <= cur <= n):
+            return None
+        hid = _int(tokens[cur - 1].get("head"))
+        if not (1 <= hid <= n):
+            return None
+        anc = tokens[hid - 1]
+        is_aux = anc.get("upos") == "AUX"
+        if is_aux or anc.get("upos") == "VERB":
+            for i, d in enumerate(tokens):
+                if i + 1 != tok_id and _int(d.get("head")) == hid \
+                        and _dep_base(d.get("deprel") or "") == target_type:
+                    return i + 1
+            if crossed >= 1:
+                return None      # the one permitted crossing without a match is already spent
+            if is_aux:
+                return None      # crossing an AUX at all ends the crawl, even on the first one
+            crossed += 1
+        cur = hid
+    return None
+
+
+_SUBJ_VALUE_OF = {"subj": "SubjRaising", "comp:obj": "ObjRaising", "comp:obl": "OblRaising"}
+
+
+def _still_stated(src_col: str | None, dst_col: str | None, key: str) -> bool:
+    """Does the converted token still carry the value the SOURCE FILE stated for ``key``?
+
+    This is the whole no-clobber rule, and it is deliberately not the simpler "is anything there".
+    What must never be overwritten is an ANNOTATOR's statement; what may be is a value the
+    conversion grammar minted in this same call from the basic tree alone.  The two are told apart
+    by comparing the columns, and the third case is why the comparison has to be a comparison:
+    ``UD_to_SUD.grs``'s ``del_feat_subject2`` assigns ``V.Subject`` unconditionally, so a file that
+    already said ``Subject=Instantiated`` on a controlled predicate comes out of grew saying
+    ``SubjRaising``.  Treating "the file said something" as a veto there would protect grew's
+    replacement rather than the annotator's value — which is already gone — and would keep a
+    better-evidenced answer out.  Verified on exactly that input."""
+    stated = _kv_get(src_col, key)
+    return stated is not None and _kv_get(dst_col, key) == stated
+
+
+def _is_descendant(tokens: list[dict], u: int, x: int) -> bool:
+    """is ``u`` inside ``x``'s subtree (x itself counts as its own ancestor's side: u == x → True)?"""
+    cur, guard = u, 0
+    while 1 <= cur <= len(tokens) and guard <= len(tokens):
+        if cur == x:
+            return True
+        cur = _int(tokens[cur - 1].get("head"))
+        guard += 1
+    return False
+
+
+def _ud_counterparts(s_toks: list[dict], d_toks: list[dict], x: int) -> list[int]:
+    """``x`` plus every UD token whose attachment the SUD edge ABOVE x now carries.
+
+    UD→SUD PROMOTES a function word over its host — UD writes ``1835 -case-> in``, SUD writes
+    ``in -comp:obj-> 1835`` — so for a shared PP the enhanced arcs that state the sharing are filed
+    on the HOST in UD (``in 1835 they arrived and enslaved …`` puts ``2:obl|4:obl`` on *1835*) while
+    the shared dependent in SUD is the PROMOTED word (*in*).  Reading only x's own DEPS would miss
+    every one of those, which is not a rare shape.
+
+    The promotion is recognised structurally rather than by a list of function-word relations: walk
+    x's own UD head links for as long as they stay INSIDE x's SUD subtree.  A head that is still
+    below x in SUD is one x was promoted over; the first head that is *not* is x's own genuine head,
+    and the walk stops there.  This also follows a CHAIN (``has been eating``: has → eating in one
+    step, since eating is under has in SUD)."""
+    out, cur, n = [x], x, len(d_toks)
+    for _ in range(n):
+        u = _int(s_toks[cur - 1].get("head"))
+        if not (1 <= u <= n) or u in out or not _is_descendant(d_toks, u, x):
+            break
+        out.append(u)
+        cur = u
+    return out
+
+
+def _derive_one(src: dict, dst: dict) -> None:
+    """Read one sentence's UD DEPS into the converted sentence's FEATS/MISC.  Mutates ``dst``."""
+    s_toks, d_toks = src.get("tokens") or [], dst.get("tokens") or []
+    n = len(d_toks)
+    # A grew rewrite reattaches and relabels but never inserts or deletes a token, so token i of the
+    # converted sentence IS token i of the source and a DEPS id means the same thing on both sides
+    # (verified form-by-form on a real conversion).  It is still CHECKED rather than assumed: a
+    # grammar that did move tokens would silently make every id below point at the wrong word, and
+    # an annotation on the wrong word is worse than no annotation.  DEPS is cleared either way.
+    if n != len(s_toks) or any((a.get("form") or "") != (b.get("form") or "")
+                               for a, b in zip(s_toks, d_toks)):
+        return
+
+    # ── §2/§3 conjunct propagation → FEATS Shared=Yes ─────────────────────────
+    for i, x in enumerate(d_toks):
+        h = _int(x.get("head"))
+        if not (1 <= h <= n):
+            continue
+        partners = set(_conjuncts_of(d_toks, h)) - {h}
+        if not partners:
+            continue          # x's head is in no coordination → nothing could be propagated to it
+        # An extra arc to a conjunct-partner of x's own head IS the propagation.  The enhanced
+        # relation's LABEL is not required to match the basic one: UD subtypes the propagated arc
+        # freely (``obl:in`` beside ``obl``) and SUD has relabelled the basic edge anyway, so a
+        # label test would reject the very entries this is looking for.
+        if not any(hid in partners
+                   for u in _ud_counterparts(s_toks, d_toks, i + 1)
+                   for hid, _rel in _deps_pairs(s_toks[u - 1].get("deps"), n)):
+            continue
+        if _still_stated(s_toks[i].get("feats"), x.get("feats"), "Shared"):
+            continue          # the FILE states a value (either way) and it survived → authoritative
+        if _kv_get(x.get("feats"), "Shared") == "Yes":
+            continue
+        # Anything else here was minted by the grammar seconds ago, from the basic tree alone —
+        # UD_to_SUD.grs's `shared_left_conj-dep` package guesses Shared from word order and word
+        # class (its `gen` rule marks an ADP/SCONJ mod and skips every other one), and its
+        # `unshared_left_conj-dep` package writes Shared=No.  The enhanced graph is the treebank's
+        # own statement about the same question, so it wins over a guess made in this same call.
+        x["feats"] = _feats_set(x.get("feats"), "Shared", "Yes")
+
+    # ── §4 the `:xsubj` extension → MISC Subject ──────────────────────────────
+    decided: set[int] = set()   # a predicate is answered once: two arcs naming it would otherwise fight
+    for i, _a in enumerate(d_toks):
+        for p, rel in _deps_pairs(s_toks[i].get("deps"), n):
+            if not rel.endswith(":xsubj") or p == i + 1 or p in decided:
+                continue
+            # The base relation is spelled in UD's vocabulary (`nsubj:xsubj`), which says nothing
+            # about which SUD slot the controller fills, so the TYPE is not read off the label —
+            # it is whichever of the three crawls actually reaches this argument in the SUD tree.
+            pred = d_toks[p - 1]
+            if pred.get("upos") not in ("VERB", "AUX"):
+                continue      # Subject only ever lives on a VERB/AUX (clearSubjIfNotVA, js/io/bridge.js) — writing it elsewhere writes a value the app's own next UPOS edit deletes
+            hits = [ty for ty in ("subj", "comp:obj", "comp:obl")
+                    if _subj_raise_target(d_toks, p, ty) == i + 1]
+            if not hits:
+                continue      # the crawl cannot reach this argument → not a structure SUD can state; leave it un-derived rather than invent one
+            # More than one type reaching the SAME argument shouldn't happen in a well-formed tree
+            # (subjRaiseTargetFor's own comment says so), and when it does the evidence does not
+            # single out a slot — so record the raising WITHOUT claiming one.  `Instantiated` is the
+            # value that exists for exactly this (UNTYPED_RAISING, js/diagram/diagram-edit.js), and
+            # the ghost edge still lands on this argument: subjRaiseTargetFor tries the three types
+            # in the same order and takes the first that resolves, which is hits[0].
+            value = _SUBJ_VALUE_OF[hits[0]] if len(hits) == 1 else "Instantiated"
+            decided.add(p)
+            if _still_stated(s_toks[p - 1].get("misc"), pred.get("misc"), "Subject"):
+                continue      # the FILE states one and it survived the rewrite → authoritative
+            cur = _kv_get(pred.get("misc"), "Subject")
+            if cur == value or (cur is not None and value == "Instantiated"):
+                continue      # never trade a typed value for the untyped one — Instantiated says strictly less
+            # Same rule as Shared: a value the grammar minted in this call is a guess from the basic
+            # tree and the enhanced graph outranks it.  This is not a hypothetical — UD_to_SUD.grs's
+            # `comp-obl_xcomp` fires on any marked xcomp and writes SubjRaising unconditionally (the
+            # ObjRaising rule beside it is guarded `without{D -[mark]-> *}`), so *She persuaded him
+            # to leave* comes out of the grammar as SubjRaising, i.e. controlled by *She*.  The
+            # `3:obj|5:nsubj:xsubj` on *him* says otherwise, and says it as the treebank.
+            pred["misc"] = _misc_set(pred.get("misc"), "Subject", value)
+
+
+def _deps_to_shared_subject(source: list[dict], converted: list[dict]) -> list[dict]:
+    """Re-express what UD's DEPS says in SUD's own terms, then clear the column.  Mutates and
+    returns ``converted``.
+
+    Takes BOTH documents because neither alone can answer: the enhanced arcs are in the source's
+    DEPS (grew drops the column outright — measured, every converted token comes back ``_``), while
+    the heads and relations the two constructs are read against are the CONVERTED, SUD ones.
+
+    Clearing is unconditional and separate from the derivation: DEPS is gone from the app's working
+    model after a UD import, not "gone only where something could be translated".  ``mwt`` ranges
+    and ``empties`` are left exactly as they came in — an MWT line's DEPS is ``_`` by the format's
+    own rule, and an empty node exists ONLY in the enhanced graph, so blanking its DEPS would leave
+    a line stating nothing at all.  An imported gap is preserved verbatim, as it always has been."""
+    if len(source) == len(converted):     # _restore_meta's guarantee — one graph in, one graph out
+        for src, dst in zip(source, converted):
+            _derive_one(src, dst)
+    for sent in converted:
+        for tok in sent.get("tokens") or []:
+            tok["deps"] = "_"
+    return converted
+
+
 def to_sud(sentences: list[dict], src_format: str, lang: str | None = None) -> list[dict]:
     """Bring an imported document into the app's native SUD, from its detected format."""
     if src_format == "UD":
-        return ud_to_sud(sentences, lang)
+        # The DEPS column is read for the two things SUD can state itself and then cleared — see
+        # _deps_to_shared_subject.  This lives at the IMPORT entry point rather than inside
+        # ud_to_sud because it is about a FILE's enhanced graph: every other ud_to_sud caller is a
+        # parse path (parse.py's Stanza routes), and those build their tokens with parse._tok,
+        # whose ``deps`` is hard-coded ``"_"`` — nothing there to read, and nothing to clear.
+        return _deps_to_shared_subject(sentences, ud_to_sud(sentences, lang))
     if src_format == "mSUD":
         return msud_to_sud(sentences, lang)
     return sentences  # already SUD
