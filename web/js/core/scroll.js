@@ -73,13 +73,38 @@ function scrollableUnder(target){ if(!target||!target.closest) return null;
      CAN be": either the block fits inside the port, or the port fits inside the block — and in that second case there
      is nothing left to bring into view, so the page-scroll intent doesn't apply and the inner scroller is the right
      owner. vis() (top of this file) already computes exactly that overlap. The 1px tolerance is the same fractional-
-     layout slack the atTop/atBot tests take: a block that IS flush must not be disqualified by device-pixel rounding. */
+     layout slack the atTop/atBot tests take: a block that IS flush must not be disqualified by device-pixel rounding.
+   ⚠ • AND THE PAGE-GROUND GAP ABOVE A SHEET IS PART OF THAT SHEET'S FIRST BLOCK, so the block is not asked to
+     cover the strip of port its own gap is standing in. This is the same charge item 10 already makes in two
+     other places (capBlock's height cap and blockSnap's target, js/core/document.js + below) arriving at the
+     third consumer, and without it the two of them CONTRADICT each other: blockSnap deliberately parks the first
+     block of a sheet with the gap flush under the toolbar — the sheet has to arrive looking like a new page —
+     so `gap` px of the port are page ground by construction, and a block TALLER than the port can then never
+     reach `min(height, portH)` of overlap at the very position the snap put it in. Measured on the fixture at a
+     420px window (paged, sheet 2's first block, 289px against a 249px port): overlap 227 vs. a required 248, so
+     `false`, and both panes — genuinely scrollable, scrollHeight over clientHeight — sat dead under the wheel
+     until the reader chained the page far enough to bury the gap. Charged as a REDUCTION OF WHAT THE BLOCK MUST
+     COVER and not by moving port.top, because the gap is an in-flow band and not an occluder like the toolbar:
+     port.top is what the reader can see, and only the block's own share of it has moved.
+     Only the part of the gap band actually INSIDE the port counts (vis of [r.top-gap, r.top]) — scrolled past,
+     the gap costs the block nothing and this is the old expression exactly, which is what keeps a first block
+     that the reader HAS scrolled flush to the toolbar (gap off screen above) still fully in view. 0 for every
+     block that is not the first of a sheet, and unpaged, so everywhere else this is the old expression too.
+     ⚠️ This runs on EVERY wheel event (the re-check below, not only the first-event decision), which is the
+     budget docTopInset() below reads --tabH off an inline style to protect. sheetGapAbove settles the two
+     cheap DOM questions — is the parent a .docsheet, is this its first .sblock — BEFORE it reads any computed
+     style, so a block that is not the first of a sheet never reaches one, and the block that does asks after
+     getBoundingClientRect has already flushed layout, so it forces no second reflow. Benchmarked in this very
+     Chrome, 2000 iterations: 0.20 µs for an ordinary block and 1.05 µs for a sheet's first, taking
+     blockFullyInView itself from 2.5 µs to 4.0 µs on that one block — against a 16,600 µs frame. */
 function blockFullyInView(sc){ const blk=sc.closest?sc.closest(".sblock"):null; if(!blk) return true;   // not inside a block (nothing the page could bring into view) → don't gate
   const docEl=document.getElementById("doc"); if(!docEl) return true;
   const vp=docEl.getBoundingClientRect();
   const port={top:vp.top+docTopInset()+(typeof stickyHeadH==="function"?stickyHeadH(blk):0), bottom:vp.bottom};
   const r=blk.getBoundingClientRect();
-  return vis(r,port)>=Math.min(r.height,port.bottom-port.top)-1; }
+  const gap=(typeof sheetGapAbove==="function")?sheetGapAbove(blk):0;   // real px, like the rects — sheetGapAbove measures the sheet's own margin, which is OUTSIDE .sblock{zoom:FS}
+  const gapOn=gap?vis({top:r.top-gap,bottom:r.top},port):0;             // …and only what of it the reader is actually looking at
+  return vis(r,port)>=Math.min(r.height,(port.bottom-port.top)-gapOn)-1; }
 let wheelIdle=null, wheelMode=null, wheelSc=null;   // per-gesture decision: null=undecided, "chain"=drive the page, "native"=leave to the browser; wheelSc = the inner scroller it was decided for
 /* ── IS THE PAGE ITSELF MOVING RIGHT NOW? ──────────────────────────────────────────────────────────
    Stamped by #doc's own scroll listener below, so it covers every way the page moves: a chained wheel,
