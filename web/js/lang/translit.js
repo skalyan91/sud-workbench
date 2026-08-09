@@ -513,6 +513,35 @@ const STACKING_SCRIPTS=new Set(["Grantha","Javanese","Balinese","Kawi","Burmese"
    for causing cross-script inconsistency and a further report of Balinese/Javanese clipping surfaced while
    that removal was still under investigation. STACKING_SCRIPTS itself is UNCHANGED and still used whole by
    .stext-stacked above, for the running-sentence view, which this removal does not touch. */
+/* ── THE HANGING SCRIPTS: the ones whose letters HANG FROM A HEAD-LINE rather than SIT ON a baseline ──
+   A third judgement list beside ORNAMENTAL_SCRIPTS and STACKING_SCRIPTS, and it answers a third,
+   independent question: not "is this ornament too fine to read at body size" (magnification) and not
+   "do its subjoined marks need room below" (reserve), but "does this script draw a continuous
+   horizontal line along the top of its words". Where it does, that line — the shirorekha/mātrā, or its
+   flat-topped equivalent — is the script's own visual reference line, and Latin furniture set beside a
+   word wants to meet it rather than to be centred on some band borrowed from Latin's own metrics. Its
+   one consumer is `centreBracketLift` (js/diagram/diagram-core.js), on request ("hanging scripts for
+   Sanskrit should be aligned to brackets by the hanging line in brackets view"); the head-line's actual
+   HEIGHT is measured per face (`scriptHeadlinePx`), never tabulated — this list decides only whether the
+   script HAS one.
+   ⚠ MEMBERSHIP WAS READ OFF THE APP'S OWN FACES, not off the literature: every candidate's 33 base
+   consonants were rendered in the very font this app ships for it and inspected. In = a single unbroken
+   (Devanagari, Bengali, Tirhuta, Sharada, Newa, Rañjanā) or flat-topped-and-level (Siddhaṃ, Soyombo,
+   Tibetan, Zanabazar Square) top line. Out, and each for a reason visible in that sheet: NANDINAGARI
+   (its whole distinction from Nagari is that the head-strokes do NOT join), BHAIKSUKI (per-letter
+   arrow-heads, not a line — which is also why the "arrow-head script" is named for them), BRAHMI (no
+   head-stroke at all), GRANTHA/Malayalam/Kannada/Telugu/Sinhala/Tamil (round tops), GUJARATI (defined by
+   dropping the shirorekha), ORIYA (umbrella tops, a curve rather than a rule), and the South-East Asian
+   set (Javanese, Balinese, Kawi, Burmese, Khmer, Thai, Cham, Tai Tham).
+   ⚠ A "FLATNESS" PROBE WAS TRIED FIRST AND REJECTED — measuring whether a script's base consonants share
+   one ink top, so the list could be derived rather than judged. It answers a DIFFERENT question and
+   answered it unreliably here: Burmese and Cham came back perfectly level (uniform letter height is not
+   a head-line), while Bengali and Tirhuta — which have one of the most unmistakable head-lines there is
+   — came back with a third of an em of spread, off a font-resolution difference between the canvas
+   probe and the painted face. A list that can be checked by eye against a contact sheet is the honest
+   form for this. */
+const HANGING_SCRIPTS=new Set(["Devanagari","Bengali","Tirhuta","Sharada","Newa","Ranjana",
+  "Siddham","Soyombo","Tibetan","ZanabazarSquare"]);
 function isLzhLang(lang){ const b=((lang!=null?lang:DOCLANG)||"").toLowerCase().split(/[-_]/)[0]; return b==="lzh"; }
 /* Literary Chinese magnifies too, on request — its Han glyphs run to the same dense, fine-stroke
    complexity (rare/archaic characters, more strokes per square than the simplified everyday set) that

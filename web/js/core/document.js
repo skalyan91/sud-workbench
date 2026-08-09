@@ -2559,6 +2559,47 @@ function positionReportBoxes(){ document.querySelectorAll("#doc .outline").forEa
     const padX=3, bx=document.createElement("div"); bx.className="oreportbox";   // item 6: horizontal padding only — the box hugs the rows' top/bottom with ZERO y padding
     bx.style.left=(l-padX)+"px"; bx.style.top=top+"px"; bx.style.width=(r-l+2*padX)+"px"; bx.style.height=(bot-top)+"px";
     box.insertBefore(bx,firstRow); }); }); }   // before the first row → behind every row (z-index:0 < the rows' z-index:1)
+/* ⚠ HOW FAR AN OUTLINE ROW'S OWN TOKEN GLYPH PAINTS OUTSIDE THE ROW'S BOX, in the row's own (unzoomed)
+   px — and the reason the SELECTION BAND has to know. `.oline{line-height:1}` sizes a row off the font
+   SIZE while a Brahmic akshara's ink runs to 1.8–2.2em (Grantha 1.824, Javanese 2.036, Balinese 2.201),
+   so a deep subjoined stack reaches past the row box even after `--olpb` has taken STACKED_GAP. That
+   overhang is harmless everywhere except on the SELECTED row, which is the one place the ink is inverted
+   to #fff over an opaque band: the part below the band's edge is then white on the page, invisible, and
+   reads as the glyph being CLIPPED. Measured over both sample sentences (Chrome and the shipping
+   WKWebView agree to 0.01px): Siddhaṃ overhangs the band by 8.37px, Grantha 4.68, Bhaiksuki 2.27,
+   Soyombo 1.31 — and Javanese/Devanagari/Rañjanā not at all, which is why the report named the stacked
+   scripts specifically.
+   ⚠ IT IS NOT THE `opacity` THE REPORT GUESSED AT, and that was worth ruling out rather than assuming,
+   since the identical-sounding SVG bug two rounds ago WAS one (`opacity<1` forcing a WebKit compositing
+   layer sized off getBBox() — see .tok-word's own note in app.css, fixed with fill-opacity). `.oform`
+   carries `opacity:var(--script-op)` too, so the same mechanism was the obvious suspect. Probed in the
+   shipping engine, offscreen WKWebView, same row and same glyph, lowest painted pixel of the descending
+   tail: opacity 1 → 385.25px, opacity 0.999 (a transparency layer, no visible alpha) → 385.25, opacity
+   0.5 → 385.25, and the row-level `.oline{opacity}` variant → 385.25. HTML sizes its transparency layer
+   off visual overflow, not off a glyph-bounds estimate, so nothing is clipped by it at all. The band's
+   own edge is the whole of it.
+   ⚠ BOTH DIRECTIONS, though only the bottom has ever overflowed: measured across all seven schemes the
+   worst ink TOP still sits 4.61px INSIDE the band (Grantha; Siddhaṃ 6.94, Bhaiksuki 7.61), so the `up`
+   term is 0 today in every document this app can produce. It is written because it is the same
+   measurement read the other way and costs nothing, not because anything asked for it. */
+function olineInkSpill(row){
+  const f=row&&row.querySelector(".oform"); if(!f) return {up:0,down:0};
+  let txt=""; for(const n of f.childNodes) if(n.nodeType===3) txt+=n.nodeValue;   // the FORM's own text nodes — a seam mark and the goeswith slur are CHILD ELEMENTS, out of flow, and are not the word
+  if(!txt.trim()) return {up:0,down:0};
+  try{
+    const cs=getComputedStyle(f);
+    _cv.font=(cs.fontStyle&&cs.fontStyle!=="normal"?cs.fontStyle+" ":"")+(cs.fontWeight&&cs.fontWeight!=="400"?cs.fontWeight+" ":"")+cs.fontSize+" "+cs.fontFamily;
+    const m=_cv.measureText(txt);
+    /* the baseline, read back rather than reconstructed: a zero-size inline-block's bottom margin edge IS
+       the line's baseline (the same trick foSeatRise uses), which needs no half-leading arithmetic over a
+       face whose natural height overflows its own `line-height:1` box. */
+    const probe=document.createElement("span");
+    probe.style.cssText="display:inline-block;width:0;height:0;vertical-align:baseline";
+    f.appendChild(probe); const base=probe.getBoundingClientRect().bottom; f.removeChild(probe);
+    const rr=row.getBoundingClientRect(), z=cssZoomOf(row)||1;   // rects are VIEWPORT px (zoom applied); canvas ink metrics and offsetTop/offsetHeight are the element's OWN px — see cssZoomOf's note
+    return {up:Math.max(0,(rr.top-base)/z+m.actualBoundingBoxAscent),
+            down:Math.max(0,(base-rr.bottom)/z+m.actualBoundingBoxDescent)};
+  }catch(_){ return {up:0,down:0}; } }
 function positionOutlineBoxes(){ positionReportBoxes();
   document.querySelectorAll("#doc .outline").forEach(box=>{
   const sb=box.querySelector(".osubbox"), srb=box.querySelector(".oselrow"); if(!sb)return;
@@ -2568,7 +2609,8 @@ function positionOutlineBoxes(){ positionReportBoxes();
   sub.forEach(r=>{ top=Math.min(top,r.offsetTop); bottom=Math.max(bottom,r.offsetTop+r.offsetHeight); });
   const {L,W}=bandLW(box,selRow);
   sb.style.display="block"; sb.style.left=L+"px"; sb.style.top=(top-2)+"px"; sb.style.width=W+"px"; sb.style.height=(bottom-top+4)+"px";
-  srb.style.display="block"; srb.style.left=L+"px"; srb.style.top=(selRow.offsetTop-2)+"px"; srb.style.width=W+"px"; srb.style.height=(selRow.offsetHeight+4)+"px"; }); }
+  const sp=olineInkSpill(selRow);   // …and the band covers whatever the row's own glyph paints outside its box — see olineInkSpill's note. 0/0 for every unmagnified document, so an ordinary row's band is byte-identical to before
+  srb.style.display="block"; srb.style.left=L+"px"; srb.style.top=(selRow.offsetTop-2-sp.up)+"px"; srb.style.width=W+"px"; srb.style.height=(selRow.offsetHeight+4+sp.up+sp.down)+"px"; }); }
 function positionHoverBox(row){ const box=row.closest(".outline"), hb=box&&box.querySelector(".ohovbox"); if(!hb)return;   // hover band spans to the whole tree's far edge
   const {L,W}=bandLW(box,row);
   hb.style.display="block"; hb.style.left=L+"px"; hb.style.top=(row.offsetTop-2)+"px"; hb.style.width=W+"px"; hb.style.height=(row.offsetHeight+4)+"px"; }

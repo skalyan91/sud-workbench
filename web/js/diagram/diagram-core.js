@@ -1305,6 +1305,44 @@ function centreOnTokenLift(satFont,tokenPx){ return TOK_MAG>1 ? (TOK_MID*tokenPx
    The bracket side is UNCHANGED throughout — inkMidPx("[",…) — the "[" glyph is fixed in one known face, so
    measuring it by its own ink was never the part in question. */
 function inkMidPx(text,font){ _cv.font=font; const m=_cv.measureText(text); return (m.actualBoundingBoxAscent-m.actualBoundingBoxDescent)/2; }
+function inkAscPx(text,font){ _cv.font=font; return _cv.measureText(text).actualBoundingBoxAscent||0; }   // the ink TOP above the baseline — inkMidPx's other half, wanted whole by the head-line branch of centreBracketLift
+/* ⚠ WHERE A HANGING SCRIPT'S HEAD-LINE SITS, in px above the baseline at the face it is painted in — the
+   shirorekha/mātrā of Devanagari, Bengali, Rañjanā …, or the level flat tops of Siddhaṃ/Soyombo/Tibetan/
+   Zanabazar Square. HANGING_SCRIPTS (js/lang/translit.js) decides WHETHER a script has one; this measures
+   WHERE, because it is a property of the face and the faces differ (measured at a 22.5px token: Devanagari
+   0.622em, Nithya Ranjana 0.872em — a quarter of an em apart).
+   ⚠ THE MEDIAN OF THE BASE LETTERS, NOT THE MAXIMUM, and not one sample character either. The maximum is
+   what `scriptLiftEm` takes and is right for ITS question ("how much empty ascent is there above the
+   tallest thing on screen"), but it is the wrong statistic here: the letters that overshoot the head-line
+   are exactly the ones this has to ignore. Combining marks are stripped first (`\p{M}` — a vowel sign,
+   anusvāra or repha rides ABOVE the line and is not it), which leaves base consonants and independent
+   vowels, and of those a handful still poke through in their own right — Devanagari ई/ऐ/ओ/औ carry their
+   strokes above the head-line as part of the letter, so no amount of mark-stripping removes them. In a
+   head-line script the great majority of base letters sit EXACTLY on the line, so the median is the line
+   and the overshooting minority cannot move it; a max would be dragged up by whichever of them the
+   document happens to contain, i.e. the answer would depend on the text rather than on the script.
+   Distinct CHARACTERS, not tokens: a token's ink ascent is the max over its own letters and would
+   reintroduce the same bias one level up. Memoised on (face, scheme) — the head-line is a fact about the
+   font, so a document change cannot move it — and a run with no orthography yet (fillOrtho is async)
+   returns 0 WITHOUT memoising, so the first real render still measures. */
+let _HDLINE=0,_HDLINE_KEY=" ";
+function scriptHeadlinePx(tokFont){
+  if(typeof HANGING_SCRIPTS==="undefined" || !HANGING_SCRIPTS.has(ORTHO_SCHEME)) return 0;
+  const key=tokFont+" "+ORTHO_SCHEME;
+  if(_HDLINE_KEY===key) return _HDLINE;
+  const asc=[];
+  try{
+    _cv.font=tokFont;
+    const seen=new Set();
+    for(const s of (typeof DOC!=="undefined"?DOC:[])) for(const t of (s.tokens||[])){
+      for(const c of (t.ortho||"").replace(/\p{M}/gu,"")){
+        if(c<=" "||seen.has(c)) continue; seen.add(c);
+        const a=_cv.measureText(c).actualBoundingBoxAscent; if(a>0) asc.push(a); } }
+  }catch(_){ return 0; }
+  if(!asc.length) return 0;   // nothing rendered yet — do NOT memoise a zero
+  asc.sort((a,b)=>a-b);
+  _HDLINE_KEY=key; _HDLINE=asc[asc.length>>1];
+  return _HDLINE; }
 /* HALF THE FONT'S OWN EM BOX, ascent minus descent — the token side's OTHER answer, and the one two
    script families want. Sampled on "x" only because fontBoundingBox* is a FONT metric, not a glyph one:
    any character returns the same numbers, so the sample says nothing about which script is being asked. */
@@ -1332,8 +1370,27 @@ function emMidPx(font){ _cv.font=font; const m=_cv.measureText("x"); return (m.f
    centre-aligned with the brackets, just like other scripts". Asked of TOKEN_STACK (the static base list,
    this file's own) it lands at +3.02, inside the band Grantha/Javanese already sit in and unremarked on.
    One reference for every script, so a per-script FONT override cannot quietly redefine the rule.
-   The BRACKET side is unchanged in both branches — inkMidPx("[",…), one known face, never in question. */
+   The BRACKET side is unchanged in both branches — inkMidPx("[",…), one known face, never in question.
+   ⚠️ AND A THIRD BRANCH, WHICH IS NOT A CENTRING AT ALL. For a HANGING script (HANGING_SCRIPTS,
+   js/lang/translit.js) the bracket's own TOP is put ON the head-line, on request ("hanging scripts for
+   Sanskrit should be aligned to brackets by the hanging line in brackets view"). The other two branches
+   centre one band on another because neither glyph offers a line to align to; a shirorekha script does —
+   it draws a horizontal rule along the top of every word — and a "[" answers it with a horizontal rule of
+   its own, its top arm. So the two are set flush and read as one stroke continuing through the bracket,
+   which is what "aligned BY the hanging line" asks for and is a stronger claim than either centring makes.
+   ⚠️ TOP, NOT CENTRE — the obvious alternative (the bracket's ink MIDDLE on the head-line) was built and
+   looked at: at 2× it lifts Rañjanā's brackets 11.6px, which floats them clear above the letters and into
+   the deprel labels, reading as detached rather than aligned. The top-arm rule lifts the same brackets
+   4.3px, from 4.3px below the head-line to exactly on it. Devanagari, whose x-height reading happened to
+   land within 1px of its own head-line already, moves 0.99px — so this is a correction Rañjanā/Siddhaṃ/
+   Soyombo needed and Devanagari barely did, which is itself the evidence that the x-height band was a
+   coincidence for one script rather than the rule for the family.
+   ⚠️ IT REPLACES the x-height term for these scripts rather than adding to it, and reaches no others:
+   lzh keeps its em box (a Han glyph has no head-line and is not in the set), and Grantha/Javanese and every
+   other round- or arrow-topped Brahmic keep the x-height reading their own rounds settled. */
 function centreBracketLift(brkFont,tokFont){ if(!(TOK_MAG>1)) return 0;
+  const head=scriptHeadlinePx(tokFont);
+  if(head>0) return head-inkAscPx("[",brkFont);   // the bracket's top arm ON the head-line — see the note above
   const base=(typeof TOKEN_STACK==="string")?(fontPxOf(tokFont)||TOK_REF_SIZE*TOK_MAG)+"px "+TOKEN_STACK:tokFont;
   return (LZH_MAG?emMidPx(tokFont):markMidPx(base))-inkMidPx("[",brkFont); }
 /* …AND WHERE THE GLYPH ACTUALLY LANDS, WHEN IT IS THE foreignObject FALLBACK THAT PAINTS IT. smpReshape()
