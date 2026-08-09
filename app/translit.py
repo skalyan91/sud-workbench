@@ -1907,18 +1907,18 @@ def _arabic_din(text: str) -> str:
 # Latin-script languages get an empty list (⇒ no menu).  See app/data/ for the vendored CJK datasets.
 _TRANSLIT_SCHEMES: dict[str, list[tuple[str, str]]] = {
     "ja": [("kunrei", "Kunrei"), ("hepburn", "Modified Hepburn")],
-    "zh": [("pinyin", "Pinyin")],
+    "zh": [("pinyin", "Hanyu Pinyin")],
     "yue": [("jyutping", "Jyutping")],
-    "lzh": [("pinyin", "Pinyin"), ("mc", "Baxter Middle Chinese"), ("oc", "Baxter–Sagart Old Chinese")],
+    "lzh": [("pinyin", "Hanyu Pinyin"), ("mc", "Baxter Middle Chinese"), ("oc", "Baxter–Sagart OC")],
     "sa": [("iast", "IAST")],
 }
 # Simplified/Traditional head every Han-script orthography list: they are SAME-SCRIPT-FAMILY glyph
 # conversions (via OpenCC), so the frontend must NOT push the original into the transliteration row for them.
 _HANZI_CONV = [("simplified", "Simplified"), ("traditional", "Traditional")]
 _ORTHO_SCHEMES: dict[str, list[tuple[str, str]]] = {
-    "zh": _HANZI_CONV + [("zhuyin", "Zhuyin"), ("gr", "Gwoyeu Romatzyh"), ("generalchinese", "General Chinese")],
+    "zh": _HANZI_CONV + [("zhuyin", "Zhuyin Fuhao"), ("gr", "Gwoyeu Romatzyh"), ("generalchinese", "General Chinese")],
     "yue": _HANZI_CONV + [("jyutping", "Jyutping"), ("generalchinese", "General Chinese")],
-    "lzh": _HANZI_CONV + [("zhuyin", "Zhuyin"), ("gr", "Gwoyeu Romatzyh"), ("generalchinese", "General Chinese"),
+    "lzh": _HANZI_CONV + [("zhuyin", "Zhuyin Fuhao"), ("gr", "Gwoyeu Romatzyh"), ("generalchinese", "General Chinese"),
                           ("jyutping", "Cantonese Jyutping")],
     "sa": list(_AKSHARA_SCRIPTS),   # the Indic scripts (Devanagari, Grantha, Siddham, …) via aksharamukha
 }
@@ -2054,13 +2054,13 @@ _SCRIPT_SCHEMES: dict[str, list[tuple[str, str]]] = {
     **{c: list(_SERBIAN_CONV) for c in _SERB},
     **{c: [("mn-traditional", "Mongolian (traditional)")] for c in _MONG},
 }
-_MANDARIN_DISPLAY = [("pinyin", "Pinyin", True), ("zhuyin", "Zhuyin", False),
+_MANDARIN_DISPLAY = [("pinyin", "Hanyu Pinyin", True), ("zhuyin", "Zhuyin Fuhao", False),
                      ("gr", "Gwoyeu Romatzyh", False), ("generalchinese", "General Chinese", False)]
 _DISPLAY_SCHEMES: dict[str, list[tuple[str, str, bool]]] = {
     "zh": _MANDARIN_DISPLAY,
     "yue": [("jyutping", "Jyutping", True), ("generalchinese", "General Chinese", False)],
     "lzh": _MANDARIN_DISPLAY + [("jyutping", "Cantonese Jyutping", False),
-                                ("mc", "Baxter Middle Chinese", True), ("oc", "Baxter–Sagart Old Chinese", True)],
+                                ("mc", "Baxter Middle Chinese", True), ("oc", "Baxter–Sagart OC", True)],
     # CSL is DISPLAY-ONLY and deliberately not `stored`: it is not a romanisation of a token but a
     # spelling of the JUNCTION it stands in, so the same word reads differently beside a different
     # neighbour and MISC Translit — which is per token and context-free — could not hold it honestly.
