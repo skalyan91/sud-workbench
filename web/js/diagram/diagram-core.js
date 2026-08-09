@@ -873,8 +873,41 @@ function smpReshape(root){
        +1.04, Kawi +1.09, Soyombo +1.39, Zanabazar Square +1.14, Siddhaṃ +1.31 — against exactly 0.00 for
        Devanagari and Rañjanā, which are not swapped. Half the box's own padding is the whole of it, so
        halving THAT is the fix and the glyph lands on 0.00 like every un-swapped script. */
-    const boxW=Math.ceil(w+2);
-    fo.setAttribute("x",(x-boxW/2)+""); fo.setAttribute("y",(y-asc)+"");
+    /* ⚠ AND THE BOX IS SEATED WHERE THE TEXT ACTUALLY PAINTS, NOT WHERE ONE FONT ASCENT SAYS IT SHOULD.
+       `y − asc` puts the box top one fontBoundingBoxAscent above the baseline the <text> was drawn on, on
+       the assumption that the inner div's own first baseline then lands back on `y`. It does not: what sits
+       at that top is a `line-height:1em` line box, and the engine's half-leading arithmetic over the winning
+       face's ascent/descent (plus, for a 2em STACKING_SCRIPTS container, whatever `align-items` does with the
+       spare em) moves the text inside it by an amount no closed form here can state. foBaselineDrop() PROBES
+       exactly that — it builds this same structure and reads back how far BELOW the box's own top edge the
+       text's baseline came out — and the seat is that measurement, used directly: put the top one measured
+       drop above the baseline the <text> was drawn on and the stand-in lands on it. Its own note carries the
+       measurement and the reason this is corrected here rather than absorbed by five notations' spacing.
+       Against the old `y − asc`, the shipping WKWebView painted Soyombo 11.00px, Grantha 10.00, Kawi 6.00,
+       Zanabazar Square 5.50 and Siddhaṃ 4.00 ABOVE the baseline they were seated for; headless Chrome, which
+       seats these boxes with `align-items:center` and resolves the height as a calc(), was out by different
+       amounts and in two cases with the opposite sign (Grantha −1.25, Kawi −5.25). Probed per engine and per
+       face for exactly that reason: no one number could have served both.
+       ⚠️ AND `asc` CANCELS OUT, WHICH IS WHY THIS IS A REPLACEMENT FOR `y − asc` AND NOT A CORRECTION TO IT.
+       Written as a correction the arithmetic reads `y − asc + (asc − drop)`, with the canvas-measured `asc`
+       appearing twice and cancelling — so a moment when canvas and layout disagree about which face is in
+       play cancels a WRONG number against a right one and leaves the seat off by the difference. Measured,
+       not hypothetical: canvas answered fontBoundingBoxAscent 32 for Soyombo throughout the renders that
+       follow a script switch and 37 once its face had settled, while this DOM measurement held at 26.00 in
+       both states — so the correction form seated every Soyombo token 5px high and cached it, and this form
+       is right either way. `asc` survives only as the FALLBACK for a probe that cannot measure at all, which
+       is exactly the seat this line had before.
+       ⚠️ THIS MOVES THE GLYPH AND NOTHING ELSE — which is the whole difference between it and the `wordY +=
+       FO_RISE` seat that projWrapped tried and reverted (see that function's note). Every layout quantity
+       (the row's own height, the below-stack's rows, the crop `boxes`, the hit and wash bands) is stated on
+       the nominal baseline `y` and is left exactly where it was, so capBlock's height budget does not move
+       and cannot answer by pulling the tree up: the stand-in simply lands on the baseline every one of those
+       quantities was tuned against, which is what an un-swapped <text> has always done. Verified rather than
+       argued — .wp-stem, .wp-toks, svg.wp-tree, the diagram's own height and scrollHeight, its computed
+       padding-top, --dia-pad-extra and the block height, over 7 scripts × {wrapped stemma, wrapped hierarchy,
+       flat arcs, flat brackets}: all 28 views byte-identical before and after. */
+    const boxW=Math.ceil(w+2), drop=(typeof foBaselineDrop==="function")?foBaselineDrop(s,f,asc):asc;
+    fo.setAttribute("x",(x-boxW/2)+""); fo.setAttribute("y",(y-drop)+"");
     fo.setAttribute("width",boxW+"");
     /* ⚠ HEIGHT IS A CSS calc(), NOT A JS-COMPUTED PIXEL NUMBER, ON REQUEST — "try computing the heights
        using a calc with em units instead of trying to compute everything in pixels". The previous version
@@ -1116,7 +1149,7 @@ function refreshFontStacks(){
   // → the column-width cache's every cached measurement is now stale, so force a full rescan rather than trust
   // the (now wrong) cached widths forward.
   const fchg=(LIVE_TOKEN_STACK!==prevT||LIVE_MONO_STACK!==prevM||TOK_MAG!==prevG);   // a size change invalidates exactly what a family change does, and for the identical reason
-  if(fchg){ clearMeasCache(); }   // smpUnshaped is a plain regex test now, nothing of its own to invalidate — clearMeasCache() alone is enough   // …and every cached text width, for the same reason: they were measured in the OLD families
+  if(fchg){ clearMeasCache(); _FODROP.clear(); }   // smpUnshaped is a plain regex test now, nothing of its own to invalidate   // …and every cached text width, for the same reason: they were measured in the OLD families   // …and every probed foreignObject baseline drop (foBaselineDrop): its key names the font STRING and the scheme, both of which usually move with a stack change — but a stack swapped underneath an unchanged size/scheme string would keep a drop measured against the OLD face, and a wrong seat is a visibly misplaced glyph rather than a slightly wrong width
   if(fchg && typeof invalidateColW==="function") invalidateColW();
   // …and every renderer's own cached diagram (js/core/document.js's notation-switch cache): stemma/arcs/tree/
   // brackets/outline all measure through this same meas()/WORD_F/NODE_F/POS_F/… family, so a font-stack change
@@ -1552,32 +1585,60 @@ function centreBracketLift(brkFont,tokFont){ if(!(TOK_MAG>1)) return 0;
   if(head>0) return head-inkAscPx("[",brkFont);   // the bracket's top arm ON the head-line — see the note above
   const base=(typeof TOKEN_STACK==="string")?(fontPxOf(tokFont)||TOK_REF_SIZE*TOK_MAG)+"px "+TOKEN_STACK:tokFont;
   return (LZH_MAG?emMidPx(tokFont):markMidPx(base))-inkMidPx("[",brkFont); }
-/* …AND WHERE THE GLYPH ACTUALLY LANDS, WHEN IT IS THE foreignObject FALLBACK THAT PAINTS IT. smpReshape()
-   seats its stand-in at `fo.y = y − domBaseline(s,f)`, i.e. the box's TOP one font-ascent above the baseline
-   the <text> it replaced was drawn on — but what then sits at that top is a `line-height:1em` inner div, and
-   a line box compresses (or, for a 2em STACKING_SCRIPTS container under `align-items:center`, re-centres)
-   the text inside it by an amount neither this file nor smpReshape can state in closed form: it is the
-   engine's own line-box arithmetic over the winning face's ascent/descent, and Chrome and WebKit genuinely
-   disagree about it (flex-start vs center — see `.fo-form`'s own note in app.css). Measured: a Soyombo token
-   paints 11.29px ABOVE the baseline `brackets()` seated its "[" against, which is the whole of the reported
-   "ornamental scripts are not centre-aligned with the brackets".
-   ⚠ THE SEATING ITSELF IS DELIBERATELY NOT CHANGED. Every notation's below-stack hangs off that same
-   nominal baseline, so the rise is ALREADY part of the arc/stemma/hierarchy spacing this feature's earlier
-   rounds measured and approved ("stacked scripts should have the appropriate amount of space below tokens
-   (like in arcs)" reads arcs as CORRECT). Re-seating the glyph would move all of that; what needs to know
-   about the rise is the one piece of furniture that has to line up with the glyph's own middle.
-   ⚠ PROBED, NOT DERIVED — the same choice svgShapesSMP()/cssLenScale() made for the same reason: the
-   quantity is an engine layout decision, so it is measured by building the very structure smpReshape builds
-   and reading back where its text sits. Mounted in `_mmount` (inside #doc) so `.fo-form`'s class rules, the
-   `data-engine` branch and the per-scheme `#doc[data-scheme]` override all match exactly as they will on the
-   real swap. Memoised on (font, scheme, sample) — one probe per render at most, and 0 for every document
-   whose forms are not SMP (there is no swap to correct for). */
-let _FORISE=0,_FORISE_KEY=" ";
-function foSeatRise(sample,font){
-  if(!sample||!font||typeof smpUnshaped!=="function"||!smpUnshaped(sample)) return 0;
-  const key=font+" "+ORTHO_SCHEME+" "+sample;
-  if(_FORISE_KEY===key) return _FORISE;
-  _FORISE_KEY=key; _FORISE=0;
+/* …AND WHERE THE GLYPH ACTUALLY LANDS, WHEN IT IS THE foreignObject FALLBACK THAT PAINTS IT — which is
+   what smpReshape() seats its stand-in BY. What sits at the box's top edge is a `line-height:1em` inner
+   div, and the line box places the text inside it by an amount neither this file nor smpReshape can state
+   in closed form: it is the engine's own line-box arithmetic over the winning face's ascent and descent,
+   and Chrome and WebKit genuinely disagree about it (flex-start vs center — see `.fo-form`'s own note in
+   app.css), as do a 1em box and a 2em STACKING_SCRIPTS one. So it is MEASURED: this builds the very
+   structure smpReshape builds and reads back how far below the box's own top edge the baseline came out.
+   Seat the top that far above the baseline the <text> would have used, and the stand-in lands on it.
+   ⚠ PROBED, NOT DERIVED — the same choice cssLenScale() made for the same reason: the quantity is an
+   engine layout decision. Mounted in `_mmount` (inside #doc) so `.fo-form`'s class rules, the `data-engine`
+   branch and the per-scheme `#doc[data-scheme]` override all match exactly as they will on the real swap.
+   ⚠ AND IT REPLACED A `y − fontBoundingBoxAscent` SEAT THAT WAS OUT BY 4–11px, which is what the reports
+   this round answered were made of. Measured in the shipping WKWebView against samples/brihat_jataka.conllu:
+   with that seat, the clearance from the lowest arc ink down to the glyph's own ink top in FLAT ARCS (min
+   over the first six tokens) ran Grantha −8.27, Soyombo −6.92, Kawi −5.31, Zanabazar Square −3.16 and
+   Siddhaṃ +3.33, against +3.42 for Devanagari and +6.25 for Rañjanā — the two magnified scripts that are
+   NOT swapped and so the controls for all of this. Negative is an overlap: the arcs were being drawn
+   through four of the five swapped scripts. The wrapped token strip said the same of its deprel label
+   (Grantha −4.77, Soyombo −6.91, Kawi −1.81 against +6.92/+8.44), which is the reported "too far up in
+   wrapped stemmas and hierarchies", and the room turned up UNDERNEATH, where the transliteration row sat
+   8–13px further below the glyph than the controls put it (Grantha 18.53, Kawi 17.02, Soyombo 16.70 against
+   5.98 and 9.81). One error, one sign, every notation.
+   ⚠ THE OLD SEAT'S OWN ASCENT TERM CANCELS, WHICH IS WHY THIS RETURNS THE DROP RATHER THAN A CORRECTION TO
+   IT. `y − asc + (asc − drop)` is `y − drop`, and writing it the first way puts a canvas-measured
+   fontBoundingBoxAscent on both sides of the cancellation — fine while canvas and layout agree about which
+   face is in play, wrong by the difference when they do not. Measured, not hypothetical: canvas answered
+   fontBoundingBoxAscent 32 for Soyombo throughout the renders that follow a script switch and 37 once the
+   face had settled, while this DOM measurement held at 26.00 in both. The correction form therefore seated
+   every Soyombo token 5px high and cached it; this form is right in either state. The ascent survives only
+   as the caller's FALLBACK for a probe that cannot measure at all, which is the seat this had before.
+   ⚠ MEMOISED PER FACE, NOT PER STRING — a Map keyed on (font, scheme, FIRST CODEPOINT of the sample). The
+   drop is a property of whichever face will shape the string (a line box's ascent is a font metric, not a
+   measurement of these particular letters), so one probe serves every token of a script, while a daṇḍa
+   dragged into the swap by `punct-sat` — BMP, and so very often a different face — still gets its own
+   answer instead of inheriting the word's. Verified: all six tokens of the sample's first sentence measure
+   the same drop, in every one of the five swapped scripts. A single-entry cache keyed on the whole sample,
+   which is what this had while its only caller asked once per sentence, would thrash once per token.
+   ⚠ AND NO smpUnshaped() GUARD — what decides whether a drop applies is whether the element is BEING
+   SWAPPED, which is smpReshape's decision and not a property of the string: a daṇḍa swapped for company
+   needs the seat exactly as much as the word beside it, and it is BMP. */
+const _FODROP=new Map();
+/* ⚠ AND A FACE LANDING MID-SESSION INVALIDATES EVERY DROP ALREADY PROBED. An `@font-face` does not begin
+   loading until layout asks it for a glyph, so a probe taken on the first render after a script switch can
+   measure the line box of whatever the stack falls through to; cached, it would seat every later render by
+   a face that is no longer the one painting. js/lang/fontload.js's `loadingdone` handler — which already
+   drops the measurement cache and re-renders for the identical reason — calls this, and it reports how many
+   entries went so that handler can force its re-render even when no cached WIDTH happened to be affected: a
+   drop is a fact about the line box, not about any string that was measured. */
+function clearFoDropCache(){ const n=_FODROP.size; _FODROP.clear(); return n; }
+function foBaselineDrop(sample,font,fallback){
+  if(!sample||!font) return fallback||0;
+  const key=font+" "+ORTHO_SCHEME+" "+String.fromCodePoint(sample.codePointAt(0));
+  if(_FODROP.has(key)) return _FODROP.get(key)||fallback||0;
+  let _drop=0;
   try{
     _measMountRoot();
     const NS="http://www.w3.org/2000/svg", XH="http://www.w3.org/1999/xhtml";
@@ -1595,9 +1656,9 @@ function foSeatRise(sample,font){
     inner.appendChild(mark); d.appendChild(inner); fo.appendChild(d); svg.appendChild(fo); _mmount.appendChild(svg);
     const foTop=fo.getBoundingClientRect().top, base=mark.getBoundingClientRect().bottom;
     _mmount.removeChild(svg);
-    if(base>0||foTop>0) _FORISE=domBaseline(sample,font)-(base-foTop);   // + = the glyph paints ABOVE the baseline it was seated for
-  }catch(_){ _FORISE=0; }
-  return _FORISE; }
+    if(base>foTop) _drop=base-foTop;   // how far BELOW the box's own top edge the stand-in's baseline actually lands
+  }catch(_){ _drop=0; }
+  _FODROP.set(key,_drop); return _drop||fallback||0; }
 function svgSeamMark(parent,tk,cx,y,halfEnd,font,boxes,halfStart,row){ if(!parent) return;
   /* ⚠ A SEAM MARK IS NOT PART OF THE WORD, so the ornamental magnification does not reach it. It is
      punctuation ABOUT the word — "this is where the orthographic word breaks" — set in the app's own

@@ -2636,7 +2636,7 @@ function olineInkSpill(row){
     _cv.font=(cs.fontStyle&&cs.fontStyle!=="normal"?cs.fontStyle+" ":"")+(cs.fontWeight&&cs.fontWeight!=="400"?cs.fontWeight+" ":"")+cs.fontSize+" "+cs.fontFamily;
     const m=_cv.measureText(txt);
     /* the baseline, read back rather than reconstructed: a zero-size inline-block's bottom margin edge IS
-       the line's baseline (the same trick foSeatRise uses), which needs no half-leading arithmetic over a
+       the line's baseline (the same trick foBaselineDrop uses), which needs no half-leading arithmetic over a
        face whose natural height overflows its own `line-height:1` box. */
     const probe=document.createElement("span");
     probe.style.cssText="display:inline-block;width:0;height:0;vertical-align:baseline";

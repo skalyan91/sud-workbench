@@ -275,10 +275,16 @@ function arcs(si){
      "Rañjanā and Siddhaṃ are still too low in arcs" is answered where the dead space actually is, which is
      --dia-pad-extra in this notation (js/diagram/diagram-core.js, refreshFontStacks) — 13.4px of it, against
      the ~2.4px an honest ink-ascent correction could win here at the cost of the clearance.
-     ⚠️ NOR IS foSeatRise FOLDED IN, for the same reason projWrapped no longer seats by it (see that note):
-     it would push the swapped scripts DOWN by their own rise (Soyombo +11, Grantha +10, Kawi +6, Zanabazar
-     Square +5.5, Siddhaṃ +4), which is the opposite of what was asked for, and arcs' spacing is the spacing
-     earlier rounds explicitly measured and approved WITH the seat error present (foSeatRise's own note). */
+     ⚠️ NOR IS THE foreignObject SEAT FOLDED IN HERE — but not because the rise is harmless: it is corrected at its own
+     source instead (smpReshape's `fo.y`, js/diagram/diagram-core.js). This clause used to read that arcs'
+     spacing was "the spacing earlier rounds explicitly measured and approved WITH the seat error present",
+     and the measurement retired that: WITH the error, the clearance from the lowest arc ink down to the
+     glyph's ink top ran Grantha −8.27, Soyombo −6.92, Kawi −5.31, Zanabazar Square −3.16 (Siddhaṃ +3.33)
+     against +3.42 for Devanagari and +6.25 for Rañjanā — i.e. this view was drawing its arcs THROUGH four
+     of the five swapped scripts, which no round approved. With the seat corrected they read +1.73, +4.08,
+     +0.69, +2.34 and +7.33 — all clear, all inside the band the two controls define — and WORD_OFF itself
+     is untouched: the glyph came down to the gap this term already reserves rather than the gap being
+     widened to chase it. */
   const TOP=8, WORD_OFF=16+(TOK_MAG>1?ascent(WORD_F)*(1-1/TOK_MAG):0);
   const list=t.map((tk,i)=>({from:parseInt(tk.head,10),to:i+1,dep:tk.deprel}))
     .filter(a=>a.from!==a.to && a.from>=1 && a.from<=n)   // include punctuation edges

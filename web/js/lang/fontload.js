@@ -57,10 +57,11 @@ if(typeof document!=="undefined"&&document.fonts&&document.fonts.addEventListene
     const core=!fams.length||fams.some(f=>/^Noto Sans( Mono)?$/i.test(f));   // no family list (an engine that doesn't populate it) ⇒ assume the worst and clear everything
     _fontPending=_fontPending||core;
     _fontSettle=setTimeout(()=>{ const wide=_fontPending; _fontPending=false;
+      const rises=(typeof clearFoDropCache==="function")?clearFoDropCache():0;   // every probed foreignObject baseline drop (foBaselineDrop, js/diagram/diagram-core.js): a face that only landed just now is one the probe may have measured without, and that measurement SEATS the glyph rather than merely sizing it — see that cache's own note
       const dropped=(typeof clearMeasCacheWhere==="function")
         ? clearMeasCacheWhere(wide?null:(t=>_NON_CORE.test(t)))
         : (typeof clearMeasCache==="function"?clearMeasCache():0);
-      if(!dropped) return;   // the face changed nothing that has been measured — leave the rendered diagrams alone
+      if(!dropped && !rises) return;   // the face changed nothing that has been measured — leave the rendered diagrams alone. `rises` counts too: a stale SEAT is a visibly misplaced glyph, and it can go stale with no cached width mentioning the face at all
       if(typeof invalidateDiaCache==="function") invalidateDiaCache();   // …the RENDERED diagrams too: the notation-switch cache (js/core/document.js) hands back an SVG laid out with the metrics of whatever face was in force when it was built, so a re-render alone would redraw nothing. Measured: token WIDTHS were identical across a font change while every token's x moved 4-5px, which is exactly a stale cropped diagram being reused
       if(typeof DOC!=="undefined"&&DOC.length&&typeof preserveScroll==="function"&&typeof renderDoc==="function") preserveScroll(renderDoc); },80); }); }   // 80ms: several faces of one document land in a burst (one per script), and each fires its own event — coalesce them into a single re-layout   // 80ms: several faces of one document land in a burst (one per script), and each fires its own event — coalesce them into a single re-layout
 // Scripts the CORE faces already cover, plus the ones with no Noto Sans family of their own.

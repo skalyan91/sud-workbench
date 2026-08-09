@@ -909,12 +909,13 @@ function projWrapped(si,kind){
      at PADV+8 and the WORD drops away from it — the same direction flat brackets moves, and it keeps the
      row's own top clearance untouched. `stackBot`/`oneRowH` follow wordY, so the strip grows by exactly
      the extra and nothing below the word is crowded. 0 at TOK_MAG 1, where this file is unchanged. */
-  /* ⚠ AND foSeatRise IS **NOT** ADDED HERE — a `wordY += FO_RISE` seat was tried (one commit, reverted on
-     report: "now Grantha/Kawi/Siddhaṃ etc. are too far up … in wrapped stemma/hierarchy; they were better
-     before"), and the reason it failed is worth keeping, because the arithmetic looked unimpeachable and the
-     measurement says it bought nothing at all.
+  /* ⚠ AND THE foreignObject SEAT IS **NOT** ADDED HERE — nor in any other notation. The stand-in's seating
+     error is corrected in smpReshape() itself now (js/diagram/diagram-core.js, at its `fo.y`), which moves
+     the GLYPH and leaves every layout quantity alone. The record below is why it has to be done there and
+     cannot be done here: the arithmetic for doing it here looked unimpeachable, and the measurement says it
+     bought nothing at all.
      The idea was: smpReshape() (js/diagram/diagram-core.js) swaps the `<text>` for a foreignObject seated at
-     `y − domBaseline`, and the HTML line box inside does not land on that baseline — foSeatRise() PROBES the
+     `y − domBaseline`, and the HTML line box inside did not land on that baseline — foBaselineDrop() PROBES the
      real offset (shipping WKWebView: Soyombo +11.00, Grantha +10.00, Kawi +6.00, Zanabazar Square +5.50,
      Siddhaṃ +4.00, all painting ABOVE their seat; headless Chrome disagrees in SIGN for two of them, Grantha
      −1.25 and Kawi −5.25) — so seat the whole cell lower by that rise and the deprel label stops colliding
@@ -926,7 +927,7 @@ function projWrapped(si,kind){
      that matters here — a wrapped stemma is asked for precisely because the sentence is long) `d` cannot
      grow, so growing `oneRowH` by the rise does not push the strip down: it pulls the TREE ABOVE IT UP by
      exactly the same amount. Measured in
-     the shipping WKWebView (samples/brihat_jataka.conllu, wrapped stemma, Grantha, FO_RISE 10.00): the strip
+     the shipping WKWebView (samples/brihat_jataka.conllu, wrapped stemma, Grantha, a 10.00px rise): the strip
      top moved 101.98 → 91.98 while the glyph's own baseline within it moved 39.28 → 49.28 — i.e. the glyph
      stayed at 141.26 in the diagram's own coordinates, to the hundredth of a pixel, in both states. What
      actually moved was `.wp-stem` (80.11 → 70.11 tall), every tree node and edge in it, the projection lines'
@@ -934,11 +935,14 @@ function projWrapped(si,kind){
      projection lines lifted away from tokens that never moved, leaving a rise-wide dead band between the two.
      Same shape for Kawi (6.00), Soyombo (11.00), Zanabazar Square (5.50) and Siddhaṃ (4.00).
      ⚠️ SO THE LABEL/GLYPH GAP IT "FIXED" WAS BOUGHT BY SHRINKING THE TREE, not by re-seating anything — and
-     that is a trade this view cannot afford, since the tree is the whole point of a wrapped stemma. The
-     seating error is left where every other notation leaves it, which is also what foSeatRise's own note asks
-     for: "THE SEATING ITSELF IS DELIBERATELY NOT CHANGED … the rise is ALREADY part of the arc/stemma/
-     hierarchy spacing this feature's earlier rounds measured and approved". Only the one piece of furniture
-     that has to line up with a glyph's own middle (flat brackets' "[" — see BRK_LIFT) consults the probe. */
+     that is a trade this view cannot afford, since the tree is the whole point of a wrapped stemma. Which is
+     the whole argument for correcting the SEAT instead: `fo.y` moves the painted glyph and touches no reserve
+     at all, so `oneRowH` is unchanged, capBlock's budget is unchanged, and the tree above the strip does not
+     move by so much as a pixel — the glyph comes down to meet it. Measured after that change, this view's
+     deprel-label-to-glyph clearance goes Grantha −4.77 → +5.23, Soyombo −6.91 → +4.09, Kawi −1.81 → +4.19,
+     Zanabazar Square +0.34 → +5.84 and Siddhaṃ +3.34 → +7.34, against +6.92 (Devanagari) and +8.44
+     (Rañjanā) for the two magnified scripts that are never swapped — and `.wp-stem` keeps every pixel it
+     had, which is what the reverted seat could not do. */
   const wordY = deprelsAbove ? (PADV+8+20+RELDESC+MAG_DEPREL_GAP) : ASC, yDep = wordY-(20+RELDESC+MAG_DEPREL_GAP), stackBot = wordY+belowH;   // deprel 20px + descent(WORD_F) above the word: the extra descender depth is clearance BELOW the label (deprel y stays at PADV+8, word drops by the descent); top clearance unchanged
   const oneRowH=Math.ceil(stackBot+descent(WORD_F)+(anyMwt?mwtDepth(D)+18:0)+(deprelsAbove?PADV:10));
   // — token rows, one <svg> per row (each a scroll-snap target) so exactly one line is visible at a time —
@@ -1470,22 +1474,22 @@ function brackets(si){
       drawLabel(g,mx,y,a.rel,col); const lb=g.lastElementChild; if(lb)lb.classList.add("lbl-ghost"); boxes.push({x:mx,y,hx:half,hy:hh}); }
     boxes.push({x:mx,y:apex,hx:2,hy:2});   // item 2: still counts toward fitTight's crop and later ghosts' decollision
     svg.appendChild(g); });
-  /* ⚠ THE BRACKET LIFT IS ONE FIGURE FOR THE WHOLE FIGURE, and it now has a second term. The first is
-     `centreBracketLift` (js/diagram/diagram-core.js) — half the token's own body height, less half the "["'s
-     ink — and its own note carries which body height each script family takes and why. The second is for the
-     scripts this engine cannot shape in SVG: smpReshape() replaces their `<text>` with a foreignObject whose
-     text does NOT land on the baseline it was seated for (foSeatRise's own note has the measurement — 11.29px
-     of rise for Soyombo), and a bracket centred on where the glyph was SUPPOSED to be misses it by exactly
-     that. Reported as "ornamental scripts need to be centre-aligned with the brackets, just like other
-     scripts": three of the four ORNAMENTAL_SCRIPTS are supplementary-plane and take the swap, Rañjanā is not
-     and takes only the first term.
-     ⚠️ ASKED OF THE SENTENCE, ONCE, not per bracket. A bracket sits BETWEEN tokens and belongs to a
-     constituent rather than to a glyph, so there is no single token whose swap it could follow; and the
-     answer is a property of the document's script, which is uniform in every real case (a document is
-     written in one script). The first form that would be swapped is what the probe is asked about, and a
-     document with none at all gets 0 — the un-corrected lift every non-SMP script has always had. */
-  const BRK_LIFT=centreBracketLift(BRK_PAINT,WORD_F)   // BRK_PAINT states .brk's PAINTED face (app.css: 16px/600), not RF — RF is 15px and exists to measure slot WIDTHS, and a 1px size error here is 0.4px of lift, which is a fifth of the whole correction. WORD_F is the token's own magnified face, the one .tok-word paints in
-    +foSeatRise((t.map(tk=>bform(tk)).find(f=>typeof smpUnshaped==="function"&&smpUnshaped(f)))||"",WORD_F);
+  /* ⚠ THE BRACKET LIFT IS ONE FIGURE FOR THE WHOLE FIGURE: `centreBracketLift` (js/diagram/diagram-core.js)
+     — half the token's own body height, less half the "["'s ink — whose own note carries which body height
+     each script family takes and why.
+     ⚠️ AND IT USED TO CARRY A SECOND TERM, foSeatRise, WHICH IS GONE BECAUSE ITS SUBJECT IS. smpReshape()
+     replaced these scripts' `<text>` with a foreignObject whose text did not land on the baseline it was
+     seated for (11.29px of rise for Soyombo), so a bracket centred on where the glyph was SUPPOSED to be
+     missed it by exactly that, and this lift was the one place in the app that corrected for it. The swap
+     now seats itself by that same probe (foBaselineDrop, js/diagram/diagram-core.js), so the glyph lands on
+     the baseline this lift is already computed against, and keeping the term would move the bracket by the
+     rise a SECOND time — in the direction the glyph no longer needs. The report it answered ("ornamental
+     scripts need to be centre-aligned with the brackets, just like other scripts") is answered by the seat
+     instead, and for every notation at once rather than for this one bracket. Verified: the "["'s own ink
+     centre against the glyph's, shipping WKWebView, flat brackets — Devanagari −1.77, Rañjanā −3.05,
+     Grantha −4.37, Soyombo −6.95, Siddhaṃ −9.01, every one of them identical to the hundredth of a pixel
+     before and after, i.e. the two changes cancel exactly as they are meant to. */
+  const BRK_LIFT=centreBracketLift(BRK_PAINT,WORD_F);   // BRK_PAINT states .brk's PAINTED face (app.css: 16px/600), not RF — RF is 15px and exists to measure slot WIDTHS, and a 1px size error here is 0.4px of lift, which is a fifth of the whole correction. WORD_F is the token's own magnified face, the one .tok-word paints in
   let stackBot=yWord;
   seq.forEach(it=>{ if(it.t==="w"){
       const g=E("g",{class:"tok-group"+(sel.s===si&&sel.t===OID(it.i)?" sel":""),"data-s":si,"data-tok":OID(it.i)});
