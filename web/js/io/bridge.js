@@ -130,66 +130,19 @@ function markDirtyBase(){ DIRTY_BASE=true; markDirty(); }   // an unsaved change
 // Stamp the one scheme a DOCUMENT owns onto its first sentence: the transliteration its MISC Translit/LTranslit
 // is written in. The script and the displayed romanisation are the READER's, kept per-language in PREFS, and
 // contribute no document metadata at all — see adoptDocSchemes.
-/* ── Task E: enhanced dependencies (DEPS), auto-filled ONLY from what a SUD tree can HONESTLY state ──
-   Computed LAZILY here, at the moment the document is turned into the JSON the Python serializer writes —
-   never stored on a live token, so no edit path (head/deprel/Shared/Subj, undo, a re-parse) ever has to keep
-   a cached DEPS in step with the tree the way a stored derived field would; it is simply re-derived, cheaply,
-   from whatever the tree says right now. And NEVER overwriting a value already in `t.deps` (an import, or a
-   file hand-authored before this app hid the column) — depsAutofill only ever fills an "_"/empty cell.
-   Deliberately narrow: universaldependencies.org/u/overview/enhanced-syntax.html is written for UD trees, and
-   this app speaks SUD by default (function words head their complements, not content words), so most of its
-   constructs would have to be FABRICATED rather than derived from a SUD tree and are left alone —
-     · gapping (empty nodes for an elided predicate) — this app never INFERS a gap, only preserves one already
-       in an imported file (as raw `_cols` on `empties[]`, untouched by this pass);
-     · case-marking-in-deprel (nmod:on / obl:auf:dat) — assumes UD's shape, where an adposition/case-marker is
-       a DEPENDENT of the nominal whose lemma gets folded into the label; SUD has the adposition HEAD the
-       nominal instead, so there is no "case dependent" to read a lemma off in the first place;
-     · relative-clause `ref` + coreference — would need to identify the relative pronoun and its grammatical
-       role inside the embedded clause, which SUD's `mod@relcl` marks the CLAUSE with, not the pronoun itself.
-   Two constructs DO transfer honestly, because this app already models them as first-class SUD annotations
-   with their own deterministic derivation (used to draw the very same facts as dashed "ghost" edges):
-     · conjunct propagation (enhanced-syntax §2/§3) — FEATS Shared=Yes plus conjunctsOf (js/diagram/
-       diagram-render.js) already say exactly which OTHER conjuncts a shared dependent belongs to;
-     · control/raising subjects (§4, UD's own `:xsubj` extension) — MISC Subject plus subjRaiseTarget/
-       SUBJ_TYPE_OF (js/diagram/diagram-edit.js) already say exactly which token is the raised argument and
-       which predicate it is raised to. Subject=Generic has no real token to attach to (a synthetic ∅ node, not a
-       word) and is correctly skipped — the type lookup below simply never resolves a target for it. */
-// like subjRaiseTargetFor (js/diagram/diagram-edit.js), but ALSO reports which raising TYPE resolved — needed to
-// label the DEPS :xsubj pair, which subjRaiseTargetFor's own return value (just the target id) doesn't carry for
-// Instantiated (it collapses all four types into one MISC value; see that function's own comment).
-function subjRaiseTypeAndTarget(tokens,tokId,subjVal){
-  const type=SUBJ_TYPE_OF[subjVal];
-  if(type){ const r=subjRaiseTarget(tokens,tokId,type); return r?{id:r,type}:null; }
-  if(!UNTYPED_RAISING[subjVal]) return null;   // Instantiated and the @x-migration artefact Raising — see UNTYPED_RAISING (js/diagram/diagram-edit.js)
-  for(const ty of ["subj","comp:obj","comp:obl"]){ const r=subjRaiseTarget(tokens,tokId,ty); if(r) return {id:r,type:ty}; }
-  return null; }
-// every EXTRA (head,relation) pair beyond a token's own basic edge, keyed by 1-based token id — see the block
-// comment above for what these two sources are and why they're the only ones honestly derivable here
-function depsForSent(s){ const toks=s.tokens, n=toks.length, extra={};
-  const add=(id,headId,rel)=>{ (extra[id]||(extra[id]=[])).push([headId,rel]); };
-  toks.forEach((t,i)=>{ const id=i+1;
-    if(hasFeat(t.feats,"Shared","Yes")){ const hid=parseInt(t.head,10);   // conjunct propagation: the basic edge already names ONE conjunct — add the SAME relation to every OTHER one
-      if(hid>=1&&hid<=n) conjunctsOf(toks,hid).forEach(c=>{ if(c!==hid) add(id,c,t.deprel); }); }
-    const subjVal=raiseGet(t,"Subject");
-    if(subjVal){ const r=subjRaiseTypeAndTarget(toks,id,subjVal);   // control/raising: the ARGUMENT gets the extra pair, pointing back at this predicate — never the predicate itself
-      if(r) add(r.id,id,r.type+":xsubj"); }
-    /* MISC Object contributes NO DEPS pair, deliberately. `:xsubj` is UD's own documented extension for exactly
-       this construction (enhanced-syntax §4) and is what the raised-SUBJECT case above emits; UD publishes no
-       `:xobj` counterpart, and depsAutofill's whole contract is that it only ever states what a SUD tree can
-       HONESTLY assert in UD's vocabulary (see the header comment on this section). Inventing a relation name to
-       round the feature out would be exactly the fabrication that comment rules out — so the object-raising
-       annotation lives in MISC and in the ghost edge, and stops there. */ });
-  return extra; }
-// one sentence's tokens, DEPS filled in wherever the file left it unspecified — a plain array of token objects
-// (shallow-copied only where actually touched), never mutating the live model
-function depsAutofill(sent){ const extra=depsForSent(sent);
-  return sent.tokens.map((t,i)=>{ const id=i+1;
-    if(t.deps && t.deps!=="_") return t;                 // already stated (import or hand-typed) → authoritative, never overwritten
-    const add=extra[id]; if(!add||!add.length) return t;  // nothing enhanced to say → UD's own guidance is to leave DEPS unspecified rather than merely restate the basic edge
-    const pairs=[[parseInt(t.head,10)||0, t.deprel||"_"], ...add];
-    const seen=new Set(), uniq=pairs.filter(([h,r])=>{ const k=h+":"+r; if(seen.has(k))return false; seen.add(k); return true; });
-    uniq.sort((a,b)=>a[0]-b[0]);
-    return {...t, deps:uniq.map(([h,r])=>h+":"+r).join("|")}; }); }
+/* ── DEPS (enhanced dependencies) is NOT auto-filled ──
+   This app once derived DEPS entries at save time from what a SUD tree already states honestly —
+   FEATS Shared=Yes for conjunct propagation, MISC Subject for control/raising subjects (UD's
+   enhanced-syntax §2/§3/§4) — the same facts already drawn as dashed "ghost" edges in the diagram.
+   That auto-fill ("Task E") is gone: DEPS is not part of SUD, and this app does not support it as a
+   column an annotator works in. The two facts it used to re-derive from are still fully expressed
+   where they always were — FEATS Shared, MISC Subject, the ghost edges — DEPS just no longer
+   restates them in UD's own enhanced-graph notation.
+   DEPS remains an ordinary CoNLL-U column otherwise: a value already in a file (an import that
+   hasn't gone through the UD→SUD Shared/Subject conversion, or one hand-authored before this
+   column existed) round-trips byte-for-byte, is shown in the grid, and is kept internally
+   consistent by shiftDeps/remapDeps (js/editing/edit-ops.js) under structural edits — none of that
+   read/write/re-index machinery is what this removes. Only the derive-and-write-on-save is gone. */
 function getDocJSON(){ if(DOC.length){ const s=DOC[0];
   if(TRANSLIT_SCHEMES.length){ s.translit_scheme=STORED_SCHEME||""; s.stored=""; } }   // `# stored` is the older spelling: emptied on save so a file written under it doesn't end up carrying BOTH keys and leaving the reader to guess which wins
   // item 13: persist a sentence's display line breaks as a LITERAL two-char \n in `# text` so a multi-line
@@ -199,11 +152,9 @@ function getDocJSON(){ if(DOC.length){ const s=DOC[0];
   // the real \n on load. Newline-free sentences (the existing samples) are returned untouched → byte-stable.
   return DOC.map(s=>{ if(!s) return s;
     const textNL=typeof s.text==="string" && s.text.indexOf("\n")>=0;
-    const needsDeps=s.tokens && s.tokens.some(t=>!t.deps||t.deps==="_");   // Task E: only a sentence that actually needs a fill costs the extra pass — most files (no Shared/Subj usage) leave every token's `_` exactly alone, so getDocJSON stays byte-stable end to end for them, JS layer included
-    if(!textNL && !needsDeps) return s;
+    if(!textNL) return s;
     const out={...s};
-    if(textNL) out.text=s.text.replace(/\n/g,"\\n");
-    if(needsDeps) out.tokens=depsAutofill(s);
+    out.text=s.text.replace(/\n/g,"\\n");
     return out; }); }
 function blankSent(){ return {sid:"s1",text:"",tokens:[tok("","","","","",0,"root")]}; }
 // bring backend sentences into the renderer's shape (heads as strings, display sid, no null cells)

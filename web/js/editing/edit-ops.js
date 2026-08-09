@@ -210,8 +210,10 @@ function focusNewToken(si,tokId){
   requestAnimationFrame(attempt); }
 /* ── RE-INDEXING WHAT THE HEAD COLUMN ISN'T ────────────────────────────────────────────────────────────────────
    Three things carry token ids besides `head`, and no structural edit used to touch any of them:
-     · a token's DEPS — the enhanced graph, "3:nsubj|5.1:comp:obj". Authoritative whenever it came from a file:
-       depsAutofill (js/io/bridge.js) only ever fills a "_", and never rewrites a real one.
+     · a token's DEPS — the enhanced graph, "3:nsubj|5.1:comp:obj". This app never writes one (it is not part
+       of SUD; a UD import converts what it can into Shared/Subject and clears the column instead — see
+       app/convert.py), but a file that already carries one — hand-authored, or imported before that
+       conversion existed — keeps it, and it has to stay correct under a structural edit like any other.
      · an EMPTY NODE's anchor — `after`, the id of the token it follows.
      · that same anchor spelled inside the empty node TWICE MORE — its own decimal id ("3.1") and column 0 of the
        raw line it was read from, which is what io_conllu re-emits verbatim.

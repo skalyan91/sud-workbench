@@ -1,11 +1,13 @@
 //@module js/grid.js
 /* column alignment: content + cell padding (+ chevron); narrow ID; Misc stretches */
-// Task E: DEPS (enhanced dependencies) IS a column now, but it is still the one nobody edits by hand — it is
-// auto-filled at save time (depsAutofill, js/io/bridge.js's getDocJSON) from what the SUD tree already says
-// (Shared=Yes/Subj), and it sits alongside FEATS/MISC's pill columns as more of the same derivable detail. That
-// is why it is the FIRST column the width rule drops (AUTOHIDE below) rather than being omitted outright, which
-// is what this comment used to record: it round-trips and serialises exactly as it always did, and now it is also
-// visible and editable whenever the page is wide enough to carry it.
+// DEPS (enhanced dependencies) IS a column, and it is one nobody edits by hand: it is not part of SUD, this
+// app derives nothing into it any more (getDocJSON, js/io/bridge.js, no longer auto-fills it from Shared=Yes/
+// Subject the way an earlier round did — those facts live in FEATS/MISC and the ghost edges, not restated
+// here in UD's enhanced-graph notation), and a UD import converts what it can OUT of DEPS into Shared/Subject
+// and clears it rather than carrying it forward. What is left is a plain pass-through column for a value a
+// file already had before that conversion existed: round-trips and serialises exactly as it always did. It is
+// the FIRST column the width rule drops (AUTOHIDE below) rather than being omitted outright, since a file that
+// does carry one should still show it whenever the page is wide enough to.
 const COLS=[["form","w-form","text","Form"],["lemma","","text","Lemma"],["upos","w-upos","upos","UPOS"],["xpos","","text","XPOS"],
   ["feats","","text","Feats"],["head","w-head","head","Head"],["deprel","w-deprel","deprel","DepRel"],["deep","w-deep","deep","Deep"],["deps","","text","Deps"],["misc","","text","Misc"]];   // CoNLL-U column order, with DEPREL split into its two halves (DepRel = depBase, Deep = the "@" tail) — so DEPS lands where the format puts it, between them and MISC
 function sentHasTranslit(s){ return s.tokens.some(t=>t.translit&&t.translit.length) || (s.mwt||[]).some(m=>m.translit); }
