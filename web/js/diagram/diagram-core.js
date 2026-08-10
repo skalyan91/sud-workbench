@@ -1051,7 +1051,9 @@ function smpReshape(root){
     /* ⚠ ROUND EIGHT — "Move Kawi back... Move Siddham back. Zanabazar is perfect." Both "back"s undo
        exactly the vertical change round seven made on that axis: Kawi 1 -> 2, Siddham 3.25 -> 2.25.
        Zanabazar Square (2.5) is the second script, after Grantha, confirmed settled and untouched. */
-    const ARC_SEAM_LIFT_PX={Siddham:2.25, ZanabazarSquare:2.5, Grantha:-2, Kawi:2};
+    /* ⚠ ROUND THIRTEEN — "Move Siddham 0.5px up." Its vertical lift, untouched since round eight's
+       revert, 2.25 -> 2.75. Zanabazar Square/Grantha/Kawi's own vertical lifts untouched. */
+    const ARC_SEAM_LIFT_PX={Siddham:2.75, ZanabazarSquare:2.5, Grantha:-2, Kawi:2};
     /* ⚠ HORIZONTAL, AND A DIFFERENT AXIS FROM THE ONE ABOVE — "Siddham is a few pixels too far to the
        right." `arcShift` (below) is 0.25em applied to EVERY SMP-reshaped script alike, calibrated live
        against Grantha/Kawi/Soyombo/Zanabazar in the original "quarter-em right" round and never checked
@@ -1092,7 +1094,10 @@ function smpReshape(root){
        Grantha and Zanabazar Square, confirmed settled and left untouched. Siddham's "back" undoes
        round ten's own +0.25 exactly: -0.75 -> -1. Siddham is now the only script in either table
        not yet confirmed settled. */
-    const ARC_SEAM_XSHIFT_PX={Siddham:-1, ZanabazarSquare:1, Kawi:0.25};
+    /* ⚠ ROUND TWELVE — "Move Siddham and Kawi .25px to the left." Kawi's round-eleven "perfect" was
+       a snapshot of that moment, not a permanent lock -- it's being revisited here, so that status
+       no longer holds. Siddham -1 -> -1.25, Kawi 0.25 -> 0. */
+    const ARC_SEAM_XSHIFT_PX={Siddham:-1.25, ZanabazarSquare:1, Kawi:0};
     const boxW=Math.ceil(w+2), inArcs=(typeof conv!=="undefined"&&conv==="arcs"),
       arcSeamLift=(inArcs && typeof ORTHO_SCHEME!=="undefined" && ARC_SEAM_LIFT_PX[ORTHO_SCHEME])||0,
       drop=(inArcs?asc:((typeof foBaselineDrop==="function")?foBaselineDrop(s,f,asc):asc))+arcSeamLift,
