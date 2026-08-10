@@ -135,6 +135,44 @@
      their shared edge) rather than a CSS mismatch — and the fix at that point is the architectural one floated
      alongside this item (merging `.titlebar`/`.viewbar` into one compositing pass so there is structurally only
      one region), not another round of recipe-matching. */
+  /* ⚠ AND THE BAND THE NATIVE TAB BAR SITS IN IS PAINTED BY NOTHING — WHICH IS THE ONE PLACE THE
+     DOCUMENT WAS SHOWING THROUGH THE CHROME RAW. The two rules above merge `.titlebar` and `.viewbar`
+     into one surface, and both stop where the page's own chrome stops (--tbH + --vbH). The native tab
+     bar lands BELOW that (`set_titlebar_reserve` puts our accessory above the system's, so the order is
+     toolbar, options bar, tabs, document) and --tabH is its bottom edge — so from --tbH+--vbH down to
+     --tabH there is a band, 48px on this machine, that the page draws in and previously left bare.
+     `.doc`'s top PADDING is --top-chrome, which only sets where the first block sits at scroll 0: scroll
+     the document and its content passes under ALL the chrome, exactly as the glass design intends. Under
+     the title bar and the options bar it is blurred and tinted; under this band it was neither.
+     MEASURED (two merged windows, options bar open, #doc scrolled 260px, window-server capture, both
+     themes): grid text — "convention / NOUN / NNS / Number=Plur" — legible SHARP behind and either side
+     of the native tab capsule, and the band sampling the raw document (light 247,247,247 · dark 41,41,41)
+     against the options bar's own 12px higher (252,252,252 / 33,33,33). That is the reported "the tab bar
+     should have the same blur and translucency as the options bar", and it is answered from this side
+     rather than the native one: the tab bar is TRANSPARENT — AppKit's own `NSTabBar` draws only a
+     Liquid-Glass `NSGlassEffectView` capsule, and (verified in the live app) that glass composites the
+     WKWebView's own pixels — so whatever the page paints in this band IS the tab bar's background, and
+     there is no public AppKit API that would let us set it any other way (see the note in
+     app/mac/shell.py's _tab_bar_height).
+     THE RECIPE IS `.viewbar`'s, RESTATED VERBATIM rather than shared through a class, on the same terms
+     as `.titlebar::after` two rules up: the three merged-state surfaces must stay byte-identical, so a
+     change to one is a change to all three. After: band light (254,254,254) vs options bar (255,255,255),
+     dark (31,31,31) vs (30,30,30) — i.e. the same 10% pass-through the options bar has, no longer a
+     window onto the document.
+     ON `.body`, NOT `.window`, and that is load-bearing: --tbH/--vbH are written by syncChrome
+     (js/ui/wiring.js) onto `.body`, and a custom property's var()s resolve where the property is
+     DECLARED — from `.window` both fall back (to this rule's own 44px/0px, `.viewbar`'s) and the band
+     then starts under the options bar instead of
+     below it, quietly double-compositing its tint. Same trap `--top-chrome` records in app.css.
+     `body:not(.fs-chrome-hidden)` because that class is exactly "the page's own chrome is collapsed", at
+     which point --tbH/--vbH are zeroed while --tabH is still whatever the last measurement said — the
+     band would then span the whole top of the document for the length of the full-screen transition.
+     z-index 19: directly under `.viewbar`'s 20, so it covers everything in `.doc` (nothing there goes
+     above `.nodeedit`'s 15) and nothing in the chrome. pointer-events:none — the band is over `.doc`'s
+     padding and the scroller must keep the wheel. */
+  html.tabbed body:not(.fs-chrome-hidden) .body::after{content:""; position:absolute; left:0; right:0; pointer-events:none; z-index:19;
+    top:calc(var(--tbH,44px) + var(--vbH,0px)); height:max(0px, calc(var(--tabH,0px) - var(--tbH,44px) - var(--vbH,0px)));
+    background:var(--tb-merged-tint,var(--toolbar-bg,rgba(246,246,248,.80))); -webkit-backdrop-filter:saturate(180%) blur(0.625px); backdrop-filter:saturate(180%) blur(0.625px)}
   html.mockup .titlebar{padding:6px 12px}
   .lights i{width:12px; height:12px; border-radius:50%; display:block; border:.5px solid rgba(0,0,0,.14)}
   .lights .r{background:#ff5f57} .lights .y{background:#febc2e} .lights .g{background:#28c840}

@@ -726,6 +726,34 @@ is clear of the tabs by construction (the reservation is what puts them below it
 already right and moving it would also have to move `--top-chrome`, `docTopInset()` and the reservation
 together.
 
+⚠ **THE TAB BAR IS TRANSPARENT, SO THE PAGE OWNS ITS BACKGROUND — AND THE PAGE WAS PAINTING NOTHING
+THERE.** `.titlebar` and `.viewbar` merge into one flat glass surface and both stop at `--tbH + --vbH`;
+the tabs land below that, at `--tabH`. Between the two is a band — **48px** — that no rule covered, and
+`.doc`'s top padding only decides where the first block sits at scroll 0, so a scrolled document passes
+under ALL the chrome exactly as the glass design intends. Under the two bars it is blurred and tinted;
+under this band it was neither. Measured (two merged windows, options bar open, `#doc` scrolled 260px,
+window-server capture): grid text — "convention / NOUN / NNS / Number=Plur" — legible **sharp** behind
+and either side of the tab capsule, the band sampling raw document (light 247,247,247 · dark 41,41,41)
+against the options bar 12px higher (252,252,252 / 33,33,33). That is the reported "the tab bar should
+have the same blur and translucency as the options bar". `html.tabbed body:not(.fs-chrome-hidden)
+.body::after` (macos-kit/mac-chrome.css) fills it with `.viewbar`'s recipe restated verbatim — the THIRD
+copy of the merged-state surface, so a change to one is a change to all three. After: 254,254,254 /
+31,31,31, i.e. the same 10% pass-through the options bar has. On `.body` and **not** `.window`, because
+`syncChrome` writes `--tbH`/`--vbH` onto `.body` and a custom property's `var()`s resolve where the
+property is DECLARED — from `.window` both fall back and the band starts UNDER the options bar and
+double-composites its tint (measured: the bar read 252→255).
+⚠️ **AND NOTHING NATIVE COULD HAVE DONE IT**, which was researched and measured before being written
+down (the long-form record is in `_tab_bar_height`'s docstring). `NSWindowTabGroup` publishes eight
+symbols and none is about appearance; the private `NSWindowStackController` the runtime really returns
+adds 144 more with no material/tint/blur/blend selector among them; `toolbarStyle` moves the bar's
+GEOMETRY only (tried across all five values — backing class, glass corner radius and the titlebar's own
+effect view came back byte-identical); a titlebar accessory exposes layout and visibility. What IS true
+is better than a knob: under `titlebarAppearsTransparent` + `NSFullSizeContentView` there is no
+`NSVisualEffectView` anywhere in the theme frame, macOS 26 draws the bar as a bare `NSTabBar` holding
+one Liquid-Glass `NSGlassEffectView` capsule, and that glass **composites the WKWebView's own pixels**
+(probed with a saturated page: the strip either side of the capsule read the document exactly). So the
+band is the tab bar's background, and CSS is the whole of the API.
+
 **Two chrome kits, one loaded.** `web/macos-kit/` (Liquid-Glass) and `web/win11-kit/` (Fluent) are
 self-contained, reusable, and **share 150 token names** — that identity is the whole
 design: `app.css` consumes tokens and needs no platform branching. Each has its own README. Keep

@@ -307,7 +307,35 @@ def _tab_bar_height(nswin) -> float:
     takes it ABOVE the toolbar band, which is why the page's own toolbar (--tabH on .titlebar's top)
     moves down by it as well as the document.
     0 when the baseline hasn't been seen yet: every window records it on its first tab-bar-less
-    measurement, and a window born INTO a tab group inherits the one another window recorded."""
+    measurement, and a window born INTO a tab group inherits the one another window recorded.
+
+    ⚠️ THIS MODULE MEASURES THE TAB BAR AND WILL NEVER STYLE IT, and that is a conclusion rather than an
+    omission — it was researched and measured before being written down, so it does not need doing again.
+    NO PUBLIC APPKIT API REACHES THE TAB BAR'S OWN RENDERING. ``NSWindowTabGroup`` publishes eight
+    symbols (identifier, isOverviewVisible, isTabBarVisible, windows, selectedWindow, addWindow:,
+    insertWindow:atIndex:, removeWindow:) and not one is about appearance; the private
+    ``NSWindowStackController`` the runtime actually returns adds 144 more with no material/tint/blur/
+    blend/appearance selector among them. ``toolbarStyle`` was tried across all five values and moves
+    the bar's GEOMETRY only — the backing class, the glass corner radius and the titlebar's own effect
+    view came back byte-identical each time. ``NSTitlebarAccessoryViewController`` exposes layout and
+    visibility; the tab bar IS one of those (``_setTabBarAccessoryViewController:``, private) but AppKit
+    owns the instance. Window ``appearance`` selects light/dark and nothing else. The only remaining
+    route is walking NSThemeFrame → NSTitlebarContainerView → NSTitlebarView → NSTabBar →
+    NSTabBarTrackView to reach a glass view's tintColor — undocumented, and this file has already been
+    burnt once by exactly that (the *TabBar*-class walk two paragraphs up, which never found one and
+    shipped an 8px-short fallback). Out of bounds.
+
+    ⚠️ AND IT DOES NOT NEED ONE, because the bar is TRANSPARENT and the page is what shows through it.
+    Measured in the live app (macOS 26.5.1, two merged windows, window-server capture with the document
+    painted a saturated colour): under ``titlebarAppearsTransparent`` + ``NSFullSizeContentView``,
+    ``NSTitlebarBackgroundView`` is hidden, there is no ``NSVisualEffectView`` anywhere in the theme
+    frame, and macOS 26 draws the bar as a bare ``NSTabBar`` holding one Liquid-Glass
+    ``NSGlassEffectView`` capsule. The strip either side of that capsule read the document's own pixels
+    exactly (234,51,195 against a 231,50,193 page) and the capsule read a lightened composite of them —
+    i.e. the glass samples the WKWebView, not the desktop. So the tab bar's background is whatever the
+    page paints in the band from --tbH+--vbH down to --tabH, and the fix for "the tab bar should have the
+    same blur and translucency as the options bar" is a CSS rule on `.body::after`
+    (`html.tabbed …`, web/macos-kit/mac-chrome.css) rather than anything here."""
     try:
         chrome = float(nswin.frame().size.height - nswin.contentLayoutRect().size.height)
         grp = nswin.tabGroup() if hasattr(nswin, "tabGroup") else None
