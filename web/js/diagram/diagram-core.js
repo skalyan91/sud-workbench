@@ -1084,7 +1084,11 @@ function smpReshape(root){
        round may need to move it again, and a present 0 records that it was deliberately zeroed, not
        simply never touched). Siddham -1.5 -> -1. Zanabazar Square's own share (confirmed settled,
        round eight) untouched. */
-    const ARC_SEAM_XSHIFT_PX={Siddham:-1, ZanabazarSquare:1, Kawi:0};
+    /* ⚠ ROUND TEN — "Move both .25px to the right." "Both" continues the pair the last several
+       rounds have both been about (Kawi/Siddham are the two scripts still being dialled in;
+       Grantha and Zanabazar Square are confirmed settled and left out of this "both"). Kawi
+       0 -> 0.25, Siddham -1 -> -0.75. */
+    const ARC_SEAM_XSHIFT_PX={Siddham:-0.75, ZanabazarSquare:1, Kawi:0.25};
     const boxW=Math.ceil(w+2), inArcs=(typeof conv!=="undefined"&&conv==="arcs"),
       arcSeamLift=(inArcs && typeof ORTHO_SCHEME!=="undefined" && ARC_SEAM_LIFT_PX[ORTHO_SCHEME])||0,
       drop=(inArcs?asc:((typeof foBaselineDrop==="function")?foBaselineDrop(s,f,asc):asc))+arcSeamLift,
