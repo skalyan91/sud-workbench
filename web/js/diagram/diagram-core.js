@@ -1037,7 +1037,11 @@ function smpReshape(root){
        a LARGER lift subtracts more from `y` in `fo.y=y−drop`, i.e. moves the glyph UP — see `drop`'s own
        assignment below), Kawi's +3 → +1 (−2, the opposite direction). Both stay inside the ROUND TWO
        table above; no new entries. */
-    const ARC_SEAM_LIFT_PX={Siddham:2.25, ZanabazarSquare:1.25, Grantha:-2, Kawi:1};
+    /* ⚠ ROUND FOUR — "Kawi: +1 up. Grantha: perfect. Siddham: -1 left. Zanabazar: +1 up." Grantha's
+       round-three number is confirmed correct and left untouched (the first script in this table to be
+       reported settled). Kawi +1 → +2 (up 1 more), Zanabazar Square's VERTICAL lift +1.25 → +2.25 (its
+       first vertical touch since round two — round three only adjusted its horizontal share). */
+    const ARC_SEAM_LIFT_PX={Siddham:2.25, ZanabazarSquare:2.25, Grantha:-2, Kawi:2};
     /* ⚠ HORIZONTAL, AND A DIFFERENT AXIS FROM THE ONE ABOVE — "Siddham is a few pixels too far to the
        right." `arcShift` (below) is 0.25em applied to EVERY SMP-reshaped script alike, calibrated live
        against Grantha/Kawi/Soyombo/Zanabazar in the original "quarter-em right" round and never checked
@@ -1055,7 +1059,10 @@ function smpReshape(root){
        Siddhaṃ's −3 → −1 (+2) and Zanabazar Square gains its first entry, +1 (0 → +1, i.e. its share of
        the uniform push is now 0.25em+1 rather than the plain shared value every other untouched script
        still gets). */
-    const ARC_SEAM_XSHIFT_PX={Siddham:-1, ZanabazarSquare:1};
+    /* ⚠ ROUND FOUR: "Siddham: -1 left" — its share cut a further 1px, -1 → -2. Zanabazar Square's
+       horizontal share (+1, round three) is confirmed correct and left untouched — this round's report
+       for it was vertical only. */
+    const ARC_SEAM_XSHIFT_PX={Siddham:-2, ZanabazarSquare:1};
     const boxW=Math.ceil(w+2), inArcs=(typeof conv!=="undefined"&&conv==="arcs"),
       arcSeamLift=(inArcs && typeof ORTHO_SCHEME!=="undefined" && ARC_SEAM_LIFT_PX[ORTHO_SCHEME])||0,
       drop=(inArcs?asc:((typeof foBaselineDrop==="function")?foBaselineDrop(s,f,asc):asc))+arcSeamLift,
