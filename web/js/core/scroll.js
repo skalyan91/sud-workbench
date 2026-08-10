@@ -96,7 +96,13 @@ function scrollableUnder(target){ if(!target||!target.closest) return null;
      style, so a block that is not the first of a sheet never reaches one, and the block that does asks after
      getBoundingClientRect has already flushed layout, so it forces no second reflow. Benchmarked in this very
      Chrome, 2000 iterations: 0.20 µs for an ordinary block and 1.05 µs for a sheet's first, taking
-     blockFullyInView itself from 2.5 µs to 4.0 µs on that one block — against a 16,600 µs frame. */
+     blockFullyInView itself from 2.5 µs to 4.0 µs on that one block — against a 16,600 µs frame.
+   ⚠ THIS BAR IS DIAGRAM-SPECIFIC, ON REPORT. A grid pane (.gwrap) now asks blockHalfInView instead (below) —
+     "must be fully in view" was too strict for a grid, which a reader wants scrollable as soon as roughly half
+     their block has arrived, not only once every last row of it has. blockFullyInView itself is unchanged and
+     stays the diagram (and .wp-toks/.text-conv) rule verbatim; paneVisibleEnough (below) is the one place that
+     decides which test a given inner scroller gets, so the two rules cannot drift apart per call site the way
+     the axis-test guard once did (see the re-check's own note further down). */
 function blockFullyInView(sc){ const blk=sc.closest?sc.closest(".sblock"):null; if(!blk) return true;   // not inside a block (nothing the page could bring into view) → don't gate
   const docEl=document.getElementById("doc"); if(!docEl) return true;
   const vp=docEl.getBoundingClientRect();
@@ -105,6 +111,28 @@ function blockFullyInView(sc){ const blk=sc.closest?sc.closest(".sblock"):null; 
   const gap=(typeof sheetGapAbove==="function")?sheetGapAbove(blk):0;   // real px, like the rects — sheetGapAbove measures the sheet's own margin, which is OUTSIDE .sblock{zoom:FS}
   const gapOn=gap?vis({top:r.top-gap,bottom:r.top},port):0;             // …and only what of it the reader is actually looking at
   return vis(r,port)>=Math.min(r.height,(port.bottom-port.top)-gapOn)-1; }
+/* GRIDS GET A LOOSER BAR THAN DIAGRAMS: a .gwrap may take the wheel once at least HALF its block's own height is
+   in view, not only once the whole block is. blockHalfInView is a SEPARATE test rather than a shared frac param
+   on blockFullyInView, on purpose — the two are asked different questions. blockFullyInView's min(r.height,
+   portHeight-gapOn) is there so a block TALLER than the port (both panes open) can still satisfy "as fully
+   visible as this block CAN be"; a straight 50%-of-r.height test does not need that rescue nearly as often (a
+   block has to be MORE than 2× the port's height before full port coverage alone can't reach half of it), and
+   CLAUDE.md is explicit that the tall-block special case is a past false start not to be copied to a second
+   call site — so this states the plain reading of "half the block is in view" (half of the BLOCK's own height,
+   not half of what the port can show of it) and leaves that rescue out. Both rects come from
+   getBoundingClientRect, like blockFullyInView's — the block's own zoom (`.sblock{zoom:var(--fs)}`) is baked
+   into both sides of the ratio the same way, so no separate cssZoomOf() conversion is needed here either. */
+function blockHalfInView(sc){ const blk=sc.closest?sc.closest(".sblock"):null; if(!blk) return true;
+  const docEl=document.getElementById("doc"); if(!docEl) return true;
+  const vp=docEl.getBoundingClientRect();
+  const port={top:vp.top+docTopInset()+(typeof stickyHeadH==="function"?stickyHeadH(blk):0), bottom:vp.bottom};
+  const r=blk.getBoundingClientRect(); if(!(r.height>0)) return true;
+  return vis(r,port)/r.height>=0.5-0.001; }   // -0.001 tolerance mirrors blockFullyInView's own -1px slack, scaled for a ratio test
+/* ONE DISPATCHER, consulted by BOTH the first-event decision and the per-event re-check below, so which rule a
+   pane type gets is stated ONCE — the re-check duplicating a decision the first-event branch already made is
+   exactly how the axis-test guard leaked (see the note on the re-check below); this is the same call site risk,
+   guarded against by sharing one function instead of inlining the classList test twice. */
+function paneVisibleEnough(sc){ return sc.classList.contains("gwrap")?blockHalfInView(sc):blockFullyInView(sc); }
 let wheelIdle=null, wheelMode=null, wheelSc=null;   // per-gesture decision: null=undecided, "chain"=drive the page, "native"=leave to the browser; wheelSc = the inner scroller it was decided for
 /* ── IS THE PAGE ITSELF MOVING RIGHT NOW? ──────────────────────────────────────────────────────────
    Stamped by #doc's own scroll listener below, so it covers every way the page moves: a chained wheel,
@@ -153,7 +181,7 @@ document.getElementById("doc").addEventListener("wheel",e=>{ const docEl=documen
     // diagram pannable sideways when the page is at rest, since a horizontal delta has nowhere to
     // chain to. Mid-glide that reasoning does not apply: two things scrolling at once is the fault
     // being fixed, and the block is on its way somewhere, so the pane is not the owner of anything.
-    else if((Math.abs(e.deltaY)>Math.abs(e.deltaX)||pageMoving()) && !blockFullyInView(sc)) wheelMode="chain";
+    else if((Math.abs(e.deltaY)>Math.abs(e.deltaX)||pageMoving()) && !paneVisibleEnough(sc)) wheelMode="chain";
     else { const atTop=sc.scrollTop<=0, atBot=sc.scrollTop+sc.clientHeight>=sc.scrollHeight-1;
       // item 5: chain to the page ONLY once the inner scroller is ALREADY at its bound in this direction — NO dependency on
       // where the block sits relative to the toolbar. The inner scroller (a wide diagram's horizontal scroll, or a wrapped
@@ -180,7 +208,7 @@ document.getElementById("doc").addEventListener("wheel",e=>{ const docEl=documen
      stayed `native` and unprevented, and ownership only moved when a vertical-dominant (3,0)
      arrived. That is exactly "they scroll in partially-visible blocks, but only while a page scroll
      is in progress" — the page scroll is what takes the block out of view mid-gesture. */
-  else if(wheelMode==="native" && wheelSc && (pageInFlight(docEl)||!blockFullyInView(wheelSc))) wheelMode="chain";
+  else if(wheelMode==="native" && wheelSc && (pageInFlight(docEl)||!paneVisibleEnough(wheelSc))) wheelMode="chain";
   if(wheelMode==="chain"){ e.preventDefault(); docEl.scrollTop+=e.deltaY; } }, {passive:false});   // "native" → the browser scrolls the element under the cursor; overscroll-behavior:none stops any leak, even if it hits its bound mid-gesture
 let scrollRaf=false, lastST=null;
 // JS-driven block snapping: once scrolling settles, if the nearest block top is within a small threshold of the

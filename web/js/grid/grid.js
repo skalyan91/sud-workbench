@@ -825,7 +825,16 @@ function buildFeatEditor(td,sent,t,si,i,key){
     if(key==="feats"&&next!==cur){ featsSyncGloss(t,cur);   // the OTHER half of the bidirectional MGloss↔FEATS sync — retarget an existing gloss abbreviation to match the FEATS value that just changed (a no-op when no morphemic tier is on)
       markDirty(); preserveScroll(renderDoc); }   // ANY feats change re-renders — not just ones that happened to touch the gloss sync — so Shared=Yes/Subj=… edits made here show up in the diagram (ghost edges, "shared" pill, …) immediately, not just on the next unrelated render
     else if(key==="misc"&&next!==cur){ markDirty(); preserveScroll(renderDoc); } };   // item 4: a MISC change (SpaceAfter → punctuation merge/spacing, CorrectForm, Reported, …) affects the diagram, so re-render at once
-  // — pill interaction (click=select · drag when selected=reorder · dbl-click=edit) —
+  // — pill interaction (click=edit immediately · drag=reorder · right-click a FEATS key/value=alternatives menu) —
+  // A plain click USED to only select the chip (outline + cursor:grab), requiring a second, undiscoverable
+  // dbl-click to actually open it for editing — editPill (below) was reachable from nowhere else. Selection
+  // bought nothing on its own: Backspace/Delete already act on the chip ADJACENT to the caret (see the box's own
+  // keydown handler, below), never on `.sel`, and dragging re-selects the pill itself the instant a real drag
+  // starts (onMove's own `selectPill(pill)`) — so `.sel` from a plain click was pure decoration nothing else in
+  // this file ever read. editPill is the same input-swap a dbl-click always opened; a click now takes that
+  // shortest path instead of a redundant "select, then a second gesture to actually edit" step. The dblclick
+  // listener stays (harmless — the pill is already gone, replaced by the .pilledit input, by the time a second
+  // click could register one).
   const arm=()=>{ if(!box._armed){ box._armed=true; pendingSnap=snapSent(si); } };   // pills aren't focusable → arm the undo snapshot ourselves before a mouse-driven mutation
   const clearSel=()=>box.querySelectorAll(".fpill.sel").forEach(p=>p.classList.remove("sel"));
   const selectPill=p=>{ clearSel(); p.classList.add("sel"); };
@@ -922,19 +931,55 @@ function buildFeatEditor(td,sent,t,si,i,key){
       if(k==="Enter"||k==="Tab"){ e.preventDefault(); commit(); box.focus(); }
       else if(k==="Escape"){ e.preventDefault(); ie._done=true; if(_acInput===ie)acClose(); restore(cur); box.focus(); } });
     ie.addEventListener("blur",commit); };
+  /* A FEATS CHIP'S OWN MENU — the same idea glossAbbrMenu (js/editing/context-menu.js) gives a morphemic gloss
+     abbreviation, brought to the grid's own FEATS pills: right-click the VALUE half for the feature's other
+     values (read off UD_FEATS/FEATS_VDESC via acValItems, in UD's own order — never alphabetised, never a
+     bespoke list), right-click the KEY half for other feature names to switch this pill to (acKeyItems,
+     grouped by FEATS_CATS/FEATS_CAT exactly as the free-typing autocomplete groups them). Both write through
+     the SAME chip machinery a hand edit uses — mkPill + box.insertBefore/remove + anchors() + serialize() —
+     not a parallel model write, so a menu pick round-trips (undo, touchColW, featsSyncGloss, markDirty,
+     re-render) exactly like retyping the chip would. box.focus() first (not arm() directly) so a pick ALSO
+     restores focus/caret the same way the × button's own click handler already does — its comment explains
+     why: focusin is what arms pendingSnap.
+     MISC-only, this is not: MISC's few keys with a value inventory at all (SpaceAfter, Reported, …) are
+     bookkeeping, not a paradigm, so there is nothing here worth offering "the other values of" — gated on
+     key==="feats" and a MISC pill's right-click falls through to the ordinary token menu untouched. */
+  const featPillMenu=(pill,e)=>{ if(key!=="feats") return false;
+    const val=pill.dataset.val, eq=val.indexOf("="); if(eq<0) return false;   // a bare (no "=") segment has no key/value halves to alternate
+    const onVal=e.target.closest&&e.target.closest(".pv"), onKey=e.target.closest&&e.target.closest(".pk");
+    if(!onVal&&!onKey) return false;   // "=", the × button, or the chip's own padding — no menu opinion there
+    const feat=val.slice(0,eq), curVal=val.slice(eq+1);
+    const applyVal=next=>{ if(next===val) return; box.focus(); const np=mkPill(next); if(np) box.insertBefore(np,pill); pill.remove(); anchors(); serialize(); };   // NOT named `pick` — that would shadow the global token-selection pick() this same closure's box.focus() goes on to trigger via focusin
+    if(onVal){ const vals=acValItems("feats",feat);
+      if(vals.length<2) return false;   // a one-value feature (Poss=Yes, Reflex=Yes, …) offers no alternative — same rule glossAbbrMenu uses
+      const desc=FEATS_VDESC[feat]||{};
+      showCtx(e.clientX,e.clientY,[{header:feat}].concat(vals.map(v=>({label:v, expand:desc[v]||"", check:v===curVal, opt:true,   // opt:true — see the checkmark-gutter note in CLAUDE.md/glossAbbrMenu
+        fn:()=>applyVal(feat+"="+v)}))), vals.length>12, sentRTL(sent));
+      return true; }
+    const used=new Set([...box.querySelectorAll(".fpill")].map(p=>{ const v2=p.dataset.val, e2=v2.indexOf("="); return e2>0?v2.slice(0,e2):null; }).filter(Boolean));
+    const items=acKeyItems("feats").filter(k=>k===feat||!used.has(k));   // exclude a feature already present elsewhere on this token (a second Case chip serialises fine but is never something the reader wants) — except this pill's OWN key, which must stay selectable so its row can carry the tick
+    if(items.length<2) return false;   // every other feature is already on this token — nothing to switch to
+    const groups=[], seen=new Set();
+    FEATS_CATS.forEach(cat=>{ const gi=items.filter(k=>FEATS_CAT[k]===cat); gi.forEach(k=>seen.add(k)); if(gi.length)groups.push([cat,gi]); });
+    const rest=items.filter(k=>!seen.has(k)); if(rest.length)groups.push(["Other (in document)",rest]);
+    const rows=[]; groups.forEach(([title,keys])=>{ rows.push({header:title});
+      keys.forEach(k=>rows.push({label:k, check:k===feat, opt:true, fn:()=>applyVal(k+"="+curVal)})); });
+    showCtx(e.clientX,e.clientY,rows, rows.length>18, sentRTL(sent));
+    return true; };
   const wirePill=pill=>{
     pill.addEventListener("dblclick",e=>{ e.preventDefault(); e.stopPropagation(); editPill(pill); });
+    pill.addEventListener("contextmenu",e=>{ if(featPillMenu(pill,e)){ e.preventDefault(); e.stopPropagation(); } });   // no menu opinion (MISC, a bare chip, a one-value feature, the × button) → falls through to the row's own contextmenu handler (tokenMenu)
     pill.addEventListener("pointerdown",e=>{ if(e.button!==0||e.target.closest(".px")) return;
       e.preventDefault();   // `box` is contenteditable, so a plain mousedown's DEFAULT action is to start/extend a native text selection — left unchecked, dragging a pill also drags a text selection across the field (the reported "triggers text selection"), and the resulting selection-drag fights our own geometry: mid-gesture the field can auto-scroll or reflow under a live selection, which was very plausibly why a drop always seemed to resolve to "the end" (placeMarker's rects were read against a shifting layout). preventDefault cancels that default action outright; box.focus() below replaces the (now-cancelled) default focusing behaviour explicitly, so a pill click still focuses an unfocused field.
       if(document.activeElement!==box) box.focus();
       try{pill.setPointerCapture(e.pointerId);}catch(_){}   // capture IMMEDIATELY, not after the 4px threshold trips inside onMove: a real (or Playwright-driven) drag gesture can easily jump straight from the pointerdown point to well past the neighbouring pill in its very first pointermove, landing that event's TARGET on a sibling pill (or the field) instead of this one — a plain (non-capturing) pointermove listener on `pill` would then just never fire, silently killing the drag before it starts. Capturing from pointerdown retargets every subsequent pointermove/pointerup for this pointer to `pill` regardless of where the cursor physically is, so onMove always sees them.
-      const sx=e.clientX, sy=e.clientY, wasSel=pill.classList.contains("sel"); let dragging=false;
+      const sx=e.clientX, sy=e.clientY; let dragging=false;   // wasSel (the pre-click .sel state) no longer read — a plain click opens the chip for editing rather than toggling selection, so there is nothing left to restore
       const onMove=ev=>{ if(!dragging){ if(Math.abs(ev.clientX-sx)+Math.abs(ev.clientY-sy)<4) return;   // 4px threshold → a plain click never starts a drag
           dragging=true; arm(); selectPill(pill); pill.classList.add("dragging"); box.classList.add("pdragging"); }   // .pdragging on the FIELD (not just the pill) drives the grabbing cursor for the whole gesture — the pill itself never visually follows the pointer (only the drop marker does), so relying on :hover/the pill's own cursor would show the wrong glyph the instant the pointer left the pill's original footprint
         placeMarker(ev.clientX,ev.clientY,pill); };
       const onUp=()=>{ pill.removeEventListener("pointermove",onMove); pill.removeEventListener("pointerup",onUp); pill.removeEventListener("pointercancel",onUp);
         if(dragging){ pill.classList.remove("dragging"); box.classList.remove("pdragging"); if(marker&&marker.parentNode){ box.insertBefore(pill,marker); marker.remove(); } anchors(); serialize(); box.focus(); }
-        else if(wasSel) pill.classList.remove("sel"); else selectPill(pill); };   // no drag → treat as a select toggle
+        else editPill(pill); };   // no drag → a plain click opens the chip for editing, immediately (see the block comment above wirePill)
       pill.addEventListener("pointermove",onMove); pill.addEventListener("pointerup",onUp); pill.addEventListener("pointercancel",onUp); });
   };
   const mkPill=raw=>{ const v=stripZW(raw).trim(); if(!v) return null;   // strip any caret-anchor ZW so it never enters a chip's serialised value
