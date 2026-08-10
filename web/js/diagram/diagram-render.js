@@ -285,7 +285,20 @@ function arcs(si){
      +0.69, +2.34 and +7.33 — all clear, all inside the band the two controls define — and WORD_OFF itself
      is untouched: the glyph came down to the gap this term already reserves rather than the gap being
      widened to chase it. */
-  const TOP=8, WORD_OFF=16+(TOK_MAG>1?ascent(WORD_F)*(1-1/TOK_MAG):0);
+  /* ⚠ AND THE ALLOWANCE IS MEASURED ON THE DOCUMENT'S OWN GLYPHS, NOT ON "Ábgjyd漢" — on report, "the
+     ornamental scripts have too much space on top in arc view". `ascent(WORD_F)` is the fixed Latin+Han
+     sample, and the sample is the HAN glyph every time: measured, it answers 0.944 em at both magnified
+     tiers (21.23px at 22.5, 28.31px at 30). A Sanskrit document contains no Han glyph, so the allowance
+     reserved clearance for ink that is never painted — and `(1 − 1/TOK_MAG)` charges 1/2 of it at the
+     ORNAMENTAL 2× tier against 1/3 at 1.5×, which is why the excess is visible there and only there.
+     TOK_INK_ASC (tokenInkAscentPx, js/diagram/diagram-core.js) is the same quantity this expression was
+     always trying to name — the tallest ink any token on screen actually reaches above its baseline, each
+     token measured as its own whole string so a repha still counts — published once per render rather
+     than rescanned per sentence. 0 (TOK_MAG 1, or a script picked whose orthographies have not landed yet)
+     falls through to `ascent(WORD_F)`, i.e. to exactly the behaviour this line had before.
+     ⚠️ Still NOT `scriptHeadlinePx` — see the note above; the marks that overshoot the head-line are
+     precisely what an arc endpoint has to clear, and the max is the statistic that keeps clearing them. */
+  const TOP=8, WORD_OFF=16+(TOK_MAG>1?(TOK_INK_ASC||ascent(WORD_F))*(1-1/TOK_MAG):0);
   const list=t.map((tk,i)=>({from:parseInt(tk.head,10),to:i+1,dep:tk.deprel}))
     .filter(a=>a.from!==a.to && a.from>=1 && a.from<=n)   // include punctuation edges
     .map(a=>({...a,lo:Math.min(a.from,a.to),hi:Math.max(a.from,a.to)}))

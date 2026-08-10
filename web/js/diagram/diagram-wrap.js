@@ -515,7 +515,28 @@ function arcsWrapped(si){
      unmagnified to 9.6px at 1.5× — smaller than flat arcs()'s pre-fix 50% collapse, but still shrinking.
      The same extra term belowGap() and flat arcs()'s WORD_OFF use closes it: exactly the old formula
      whenever TOK_MAG is 1. */
-  const POSGAP=16, WORD_OFF=POSGAP+descent(WORD_F)+(TOK_MAG>1?ascent(WORD_F)*(1-1/TOK_MAG):0), TOP=14, gap=8, SP=meas(" ",WORD_F), ROWGAP=16, ASC=11, DESC=descent(WORD_F);
+  /* ⚠ AND THE WHOLE OF THIS TERM'S MAGNIFICATION SENSITIVITY IS NOW THE ALLOWANCE, ON REPORT — "the
+     ornamental scripts have too much space on top in arc view". Measured in the shipping WKWebView on
+     samples/brihat_jataka.conllu, wrapped arcs (the DEFAULT view: show.wrap starts true), arc ink bottom
+     down to the first token's own glyph ink top, read off real pixels: the 1.5× scripts sit at 8.0–10.5px
+     (Grantha 8.0, Kawi 8.5, Devanagari 10.5) and the ORNAMENTAL 2× ones at 15.0–21.5 (Soyombo 10.0 only
+     because its foreignObject seat already lifts it 11px; Rañjanā 15.0, Bhaiksuki 21.0, Siddhaṃ 21.5).
+     WORD_OFF is the whole of the difference: 28.47px at 1.5× against 37.34 at 2×, +8.87 of which the
+     glyphs' own extra ink uses about half. Two independently wrong halves, both corrected here:
+     ⚠️ 1. THE ALLOWANCE MEASURED THE WRONG INK — `ascent(WORD_F)` is the fixed Latin+Han sample, i.e. the
+     Han glyph, 0.944 em at either tier; TOK_INK_ASC (tokenInkAscentPx, js/diagram/diagram-core.js) is the
+     tallest ink the document's own tokens really reach. See flat arcs()'s twin of this expression.
+     ⚠️ 2. `descent(WORD_F)` WAS A SECOND, UNINTENDED ALLOWANCE. It is a fixed clearance constant — the
+     item-15-era term that lined the arc endpoints up with the deprel-label baseline — and this function's
+     own note above already says descent "is the wrong half of the glyph" for a gap measured from ABOVE.
+     Being read off WORD_F it nonetheless GREW with TOK_MAG (3.59px unmagnified → 5.39 at 1.5× → 7.19 at
+     2×), so every magnified document was charged the explicit ascent allowance AND this one on top of it.
+     `/TOK_MAG` freezes it at its unmagnified value — descent is exactly linear in size (measured: 5.39/1.5
+     = 3.593, 7.19/2 = 3.595), so this is the identical number an unmagnified document has always had, and
+     the term is BYTE-IDENTICAL at TOK_MAG 1. Deliberately frozen rather than removed: dropping it outright
+     would move every unmagnified document, which nothing has reported.
+     ⚠️ Both corrections are exactly 0 at TOK_MAG 1, so English/French/unmagnified Sanskrit are untouched. */
+  const POSGAP=16, WORD_OFF=POSGAP+descent(WORD_F)/TOK_MAG+(TOK_MAG>1?(TOK_INK_ASC||ascent(WORD_F))*(1-1/TOK_MAG):0), TOP=14, gap=8, SP=meas(" ",WORD_F), ROWGAP=16, ASC=11, DESC=descent(WORD_F);
   const {w}=linear({tokens:t}), heads=t.map(x=>parseInt(x.head,10)), budget=Math.max(140,AVAILW/FS-16-24*TOK_MAG);   // unzoomed px (block is zoomed by FS); margin so a wide POS at a row end never overflows the port
   /* ⚠ AND A SECOND MARGIN, FOR WHAT THE ROW-PACKING CANNOT SEE. `budget` is fit against `w[]` — token/POS/
      translit SLOT widths only. `fitTight(svg,boxes)` (diagram-core.js, called once this function's arcs and

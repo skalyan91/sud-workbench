@@ -312,7 +312,7 @@ _lazyFont("LIVE_TOKEN_STACK",()=>TOKEN_STACK); _lazyFont("LIVE_MONO_STACK",()=>M
    why a canvas font string cannot read the property itself). 1 everywhere except the ornamental Sanskrit
    scripts. It multiplies the TOKEN-FORM faces only — WORD_F/NODE_F/MWT_F and the goeswith tie — never the
    POS, transliteration or gloss rows, which are Latin annotation drawn at the app's own body size. */
-let TOK_MAG=1, TOK_WGHT=400, TOK_TRACK=0, TOK_ASC=1, TOK_MID=0, TOK_LIFT=0, TOK_HANG_LIFT=0, TOK_OP=1, TOK_OP_RUN=1, STACKED_GAP=0, TOK_Y_LOWER=0, LZH_MAG=false, TR_TIGHTEN=0, TOK_TR_GAP=0, NODE_Y_EXTRA=0, MAG_DESC=0, TOK_DESC=0, TR_ROW_DESC=0, TR_ROW_EXTRA=0, TR_ABOVE_EXTRA=0, BRK_DEPREL_LESS=0, MAG_DEPREL_GAP=0;
+let TOK_MAG=1, TOK_WGHT=400, TOK_TRACK=0, TOK_ASC=1, TOK_INK_ASC=0, TOK_MID=0, TOK_LIFT=0, TOK_HANG_LIFT=0, TOK_OP=1, TOK_OP_RUN=1, STACKED_GAP=0, TOK_Y_LOWER=0, LZH_MAG=false, TR_TIGHTEN=0, TOK_TR_GAP=0, NODE_Y_EXTRA=0, MAG_DESC=0, TOK_DESC=0, TR_ROW_DESC=0, TR_ROW_EXTRA=0, TR_ABOVE_EXTRA=0, BRK_DEPREL_LESS=0, MAG_DEPREL_GAP=0;
 // TOK_WGHT stays 400 for magnified faces now (see magTrack's own note on why the weight curve was dropped for
 // them), so this omits a weight token and lets the face render at its own resting weight.
 function magFont(px){ const w=TOK_WGHT;
@@ -685,6 +685,37 @@ function scriptAscentEm(){
   const fam=(typeof fontStackName==="function"&&ORTHO_SCHEME)?("'"+fontStackName(ORTHO_SCHEME)+"', "):"";
   try{ _cv.font="100px "+fam+LIVE_TOKEN_STACK; const m=_cv.measureText(ch);
     const a=m.fontBoundingBoxAscent; return (a>0&&isFinite(a))?a/100:1; }catch(_){ return 1; } }
+/* ⚠ HOW FAR THE DOCUMENT'S OWN GLYPHS ACTUALLY REACH ABOVE THE BASELINE, in px at the magnified token
+   face — the statistic arcs' WORD_OFF magnification allowance is ABOUT, as opposed to the one it used to
+   ask for. That allowance (arcs(), js/diagram/diagram-render.js; arcsWrapped(), js/diagram/diagram-wrap.js)
+   states its own meaning exactly: "however much extra ascent the glyph gained" by being magnified, i.e.
+   inkAscent × (1 − 1/TOK_MAG) — and it read that inkAscent off `ascent(WORD_F)`, which measures the fixed
+   Latin+Han sample "Ábgjyd漢". That sample is the Han glyph, every time: measured, `ascent(WORD_F)` is
+   0.944 em at BOTH tiers (21.23px at 22.5, 28.31px at 30). A Sanskrit document has no Han glyph in it, so
+   the allowance reserved arc-to-glyph clearance for ink that is never painted — and at the ORNAMENTAL 2×
+   tier `(1 − 1/2)` charges TWICE what `(1 − 1/1.5)` charges at 1.5×, which is why the over-reserve showed
+   up there first and only there ("the ornamental scripts have too much space on top in arc view").
+   ⚠ THE MAXIMUM OVER THE TOKENS ON SCREEN, NOT A MEDIAN AND NOT ONE SAMPLE — the opposite statistic from
+   `scriptHeadlinePx`, deliberately, and for the reason that function's own note gives from the other side:
+   the letters that overshoot the head-line are exactly what an arc endpoint has to clear, so the head-line
+   is the wrong answer HERE even though it is the right one for `--dia-pad-extra` (blank sky) and for the
+   bracket alignment. WORD_OFF's own note already measured and rejected the head-line for this term.
+   ⚠ EACH TOKEN AS ITS OWN WHOLE STRING, shaping intact — `scriptLiftEm`'s own hard-won lesson: a repha only
+   forms once its cluster is shaped, and a per-character scan undercounts it by ~16 % of the em.
+   ⚠ `ortho` ONLY, AND 0 WHERE THERE IS NONE. Falling back to a token's Latin `form` would answer for the
+   IAST the script is about to replace and UNDER-reserve on the one render between a script pick and
+   fillOrtho landing; 0 tells the caller to keep using `ascent(WORD_F)`, which is exactly today's behaviour.
+   Computed once per render in refreshFontStacks (published as TOK_INK_ASC), never per sentence — arcs()
+   runs per sentence and a document scan there would be O(sentences × document). */
+function tokenInkAscentPx(){
+  if(TOK_MAG===1) return 0;   // the allowance itself is 0 at TOK_MAG 1, so there is nothing to measure for
+  let mx=0;
+  try{ _cv.font=WORD_F; const seen=new Set();
+    for(const s of (typeof DOC!=="undefined"?DOC:[])) for(const t of (s.tokens||[])){
+      const o=t.ortho||""; if(!o||seen.has(o)) continue; seen.add(o);
+      const a=_cv.measureText(o).actualBoundingBoxAscent; if(a>mx) mx=a; } }
+  catch(_){ return 0; }
+  return isFinite(mx)?mx:0; }
 /* HALF THE FONT'S OWN X-HEIGHT, above the baseline, as a ratio of size — via the CSS `ex` unit
    (xHeightPx, above), not ink and not cap-height.
    ⚠ THREE CUTS TO GET HERE. Two measured INK, and were wrong in OPPOSITE directions on report (Grantha
@@ -1198,6 +1229,7 @@ function refreshFontStacks(){
   // invalidates their output exactly as it invalidates colW's, for the same reason.
   if(fchg && typeof invalidateDiaCache==="function") invalidateDiaCache();
   WORD_F=magFont(15); NODE_F=magFont(15);   // on correction: the node glyph's base size is 15px, the SAME as WORD_F, not 14 — a 1px undersize that, at TOK_MAG 1.5, compounded into a 1.5px shortfall in every ascent/descent-derived reserve this file computes off NODE_F (NODE_ASC_EXTRA, --dia-pad-extra's own ascent+descent term)
+  TOK_INK_ASC=tokenInkAscentPx();   // the tallest ink the DOCUMENT'S OWN tokens reach above the baseline at WORD_F; 0 (no orthography yet, TOK_MAG 1) leaves arcs' WORD_OFF on ascent(WORD_F), which is what it always used — see tokenInkAscentPx's own note   // AFTER WORD_F is assigned, since it measures against it
   /* THE VISIBLE GAP ABOVE THE DIAGRAM, not just the SVG's own internal crop — on request ("lzh diagram
      tokens need more space on top, to account for their increased size"; the FIRST attempt at this only
      grew fitTight()'s own root-node box reserve in stemma()/tree(), which stops the root's ascenders being
