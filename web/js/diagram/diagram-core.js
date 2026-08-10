@@ -1079,7 +1079,12 @@ function smpReshape(root){
     /* ⚠ ROUND EIGHT — "...but then move it left by 1px" (Kawi, its own separate horizontal move,
        distinct from the vertical "back" above): 0.5 -> -0.5. Siddham's own horizontal share and
        Zanabazar's are both untouched -- neither reported this round. */
-    const ARC_SEAM_XSHIFT_PX={Siddham:-1.5, ZanabazarSquare:1, Kawi:-0.5};
+    /* ⚠ ROUND NINE — "Move Kawi and Siddham right by 0.5px." Kawi -0.5 -> 0 (its share now exactly
+       the plain uniform push, though kept as an explicit 0 entry rather than removed — a future
+       round may need to move it again, and a present 0 records that it was deliberately zeroed, not
+       simply never touched). Siddham -1.5 -> -1. Zanabazar Square's own share (confirmed settled,
+       round eight) untouched. */
+    const ARC_SEAM_XSHIFT_PX={Siddham:-1, ZanabazarSquare:1, Kawi:0};
     const boxW=Math.ceil(w+2), inArcs=(typeof conv!=="undefined"&&conv==="arcs"),
       arcSeamLift=(inArcs && typeof ORTHO_SCHEME!=="undefined" && ARC_SEAM_LIFT_PX[ORTHO_SCHEME])||0,
       drop=(inArcs?asc:((typeof foBaselineDrop==="function")?foBaselineDrop(s,f,asc):asc))+arcSeamLift,
