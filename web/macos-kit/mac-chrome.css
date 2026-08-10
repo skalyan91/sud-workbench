@@ -750,7 +750,20 @@
     padding:9px 15px; border-radius:9px; font-size:12.5px; box-shadow:0 10px 30px rgba(0,0,0,.35); opacity:0; pointer-events:none;
     transition:opacity .2s,transform .2s; z-index:70; -webkit-backdrop-filter:blur(10px); backdrop-filter:blur(10px); max-width:80%}
   .toast.show{opacity:1; transform:translateX(-50%) translateY(0)}
-  .scrim{position:absolute; inset:0; background:rgba(0,0,0,.12); display:none; align-items:center; justify-content:center; z-index:50}   /* modal scrim: a subtle, macOS-appropriate dim (not a heavy blackout) that INHIBITS the window behind — it captures pointer events (inset-0 layer above the content) so nothing behind is interactive while a dialog is open, and stays light enough to read as "modal" rather than a harsh curtain. Click-outside still dismisses. */
+  .scrim{position:absolute; top:var(--tabH,0px); right:0; bottom:0; left:0; background:rgba(0,0,0,.12); display:none; align-items:center; justify-content:center; z-index:50}   /* modal scrim: a subtle, macOS-appropriate dim (not a heavy blackout) that INHIBITS the window behind — it captures pointer events (a full-height layer above the content) so nothing behind is interactive while a dialog is open, and stays light enough to read as "modal" rather than a harsh curtain. Click-outside still dismisses. */
+  /* ⚠ top:var(--tabH) IN PLACE OF THE inset:0 THIS SHARED THE OLD TOP EDGE WITH, ON REPORT — "when the
+     native tab bar is active, sheets should appear at a lower position so as not to be hidden by the tab
+     bar". item 11's own note below is still the reason the scrim centres in the WINDOW rather than the
+     document pane — that stands, and is not what this touches; --tabH (js/core/scroll.js's menuTopBound,
+     app/mac/shell.py) is a DIFFERENT band, the native tab-bar accessory sitting ABOVE `.window` in the
+     window's own theme frame, not inside it. Centring against the full 0..100vh box therefore let a
+     dialog's TOP land in page-coordinate space the tab bar draws over — an AppKit view above the WKWebView
+     entirely, so that portion is invisible and unclickable exactly the way an unclamped drawer-pop was
+     (js/ui/wiring.js's clampDrawerPop, the same report's other half). Shrinking the scrim's own box to
+     start at --tabH — rather than leaving the scrim full-height and shifting only the SHEET — is what
+     keeps `align-items:center` doing the centring math over the region the reader can actually see, with
+     no second calculation to keep in step with it. 0 with no tab bar, i.e. byte-identical to the old
+     inset:0 for every window this app has actually shipped to until a tabbed one existed. */
   @media (prefers-color-scheme:dark){ .scrim{background:rgba(0,0,0,.28)} }   /* faint dark-mode equivalent */
   .scrim.show{display:flex}
   .confirmscrim{z-index:90}   /* a confirm/alert (askConfirm) stacks ABOVE an already-open sheet (e.g. "Remove model?" from within the Manage Models sheet) — its own scrim/host pair, never sharing #scrimHost so it can't blow away the sheet underneath */
@@ -794,7 +807,7 @@
   .sheet.aboutsm{width:min(300px,90vw)}   /* same small width as .sm, but NOT an alert — About is a separate-window content dialog, so it stays opaque with the rectangular button (unlike .sm's translucent/pill treatment) */   /* vw, not %: the centred #scrimHost is shrink-to-fit, so a %-width sheet collapses to its content and the px caps never engage — vw resolves the width against the window */
   .sheet{margin-top:0; width:min(460px,90vw); background:var(--panel-bg,#ffffff);
     border-radius:var(--r-dialog,26px); box-shadow:var(--lg-dialog-shadow, 0 0 0.5px rgba(0,0,0,.2), 0 17px 22.5px rgba(0,0,0,.5));
-    border:.5px solid var(--sheet-border); overflow:hidden; animation:drop .22s cubic-bezier(.2,.8,.2,1); max-height:calc(100vh - 32px); display:flex; flex-direction:column}   /* item 11: margin-top:0 + a vh cap, both required BY the centring — see the block above .scrim */
+    border:.5px solid var(--sheet-border); overflow:hidden; animation:drop .22s cubic-bezier(.2,.8,.2,1); max-height:calc(100vh - 32px - var(--tabH,0px)); display:flex; flex-direction:column}   /* item 11: margin-top:0 + a vh cap, both required BY the centring — see the block above .scrim. ⚠ − var(--tabH) added alongside .scrim's own top:var(--tabH) (that rule's note has the report): the 32px cap keeps a tall sheet inside a FULL 100vh scrim, but the scrim's own box is now (100vh − tabH) tall, and an uncapped sheet taller than THAT still overflows a centred flex box symmetrically — half above, half below — pushing its top back into the tab-bar band the scrim's own shrink was meant to clear. 0 with no tab bar, so this is a no-op everywhere the fix above is. */
   @keyframes drop{from{transform:translateY(-14px); opacity:0}to{transform:none; opacity:1}}
   .sheet header{padding:20px 16px 0} .sheet h3{margin:0; font-size:13px; line-height:16px; font-weight:700; color:var(--label-primary,rgba(0,0,0,.85))}   /* title: SF Pro Bold 13/16 */
   .sheet p{margin:6px 0 0; color:var(--label-primary,rgba(0,0,0,.85)); font-size:11px; line-height:14px; font-weight:400}   /* body: SF Pro Regular 11/14 */
