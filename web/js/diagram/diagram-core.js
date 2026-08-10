@@ -939,10 +939,16 @@ function smpReshape(root){
        measurement. `0.5 * fontPxOf(f)`, so the shift scales with whatever size this word is actually
        painted at (the magnified token face, ORNAMENTAL_SCRIPTS' own 2× included) rather than a flat px
        constant that would read as too little at 2× and too much unmagnified. Arcs only: brackets,
-       stemma, hierarchy and outline were never reported wrong here and stay on dead-centre. */
+       stemma, hierarchy and outline were never reported wrong here and stay on dead-centre.
+       ⚠ SIGN CORRECTED ON REPORT — a first cut moved the box RIGHT by this amount ("shift them 0.5em to
+       the right"), and the very next live look said the opposite: "No, shift them back to the left."
+       Same magnitude, same gate, sign flipped — the box now moves LEFT of dead-centre in arcs, which is
+       either the true correction or the read that hadn't yet been tried; if the app still looks wrong
+       here, the next report should give the actual direction observed rather than "still off", since
+       both signs have now been tried once each on the reporter's own word. */
     const boxW=Math.ceil(w+2), inArcs=(typeof conv!=="undefined"&&conv==="arcs"),
       drop=inArcs?asc:((typeof foBaselineDrop==="function")?foBaselineDrop(s,f,asc):asc),
-      arcShift=inArcs?0.5*(fontPxOf(f)||0):0;
+      arcShift=inArcs?-0.5*(fontPxOf(f)||0):0;
     fo.setAttribute("x",(x-boxW/2+arcShift)+""); fo.setAttribute("y",(y-drop)+"");
     fo.setAttribute("width",boxW+"");
     /* ⚠ HEIGHT IS A CSS calc(), NOT A JS-COMPUTED PIXEL NUMBER, ON REQUEST — "try computing the heights
