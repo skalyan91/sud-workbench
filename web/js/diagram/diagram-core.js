@@ -1048,7 +1048,10 @@ function smpReshape(root){
     /* ⚠ ROUND SEVEN — "Move Zanabazar up .25px; move Siddham up by 1px and Kawi down by 1px."
        Zanabazar Square 2.25 -> 2.5. Siddham's VERTICAL lift touched for the first time (only its
        horizontal share had moved before this): 2.25 -> 3.25. Kawi 2 -> 1. Grantha untouched again. */
-    const ARC_SEAM_LIFT_PX={Siddham:3.25, ZanabazarSquare:2.5, Grantha:-2, Kawi:1};
+    /* ⚠ ROUND EIGHT — "Move Kawi back... Move Siddham back. Zanabazar is perfect." Both "back"s undo
+       exactly the vertical change round seven made on that axis: Kawi 1 -> 2, Siddham 3.25 -> 2.25.
+       Zanabazar Square (2.5) is the second script, after Grantha, confirmed settled and untouched. */
+    const ARC_SEAM_LIFT_PX={Siddham:2.25, ZanabazarSquare:2.5, Grantha:-2, Kawi:2};
     /* ⚠ HORIZONTAL, AND A DIFFERENT AXIS FROM THE ONE ABOVE — "Siddham is a few pixels too far to the
        right." `arcShift` (below) is 0.25em applied to EVERY SMP-reshaped script alike, calibrated live
        against Grantha/Kawi/Soyombo/Zanabazar in the original "quarter-em right" round and never checked
@@ -1073,7 +1076,10 @@ function smpReshape(root){
        first horizontal entry, 0 → +1 (previously read correctly on the plain shared 0.25em). */
     /* ⚠ ROUND SIX — "Move Siddham and Kawi back left by 0.5px." Explicit magnitude this time (unlike
        Zanabazar above): Siddham -1 -> -1.5, Kawi +1 -> +0.5. */
-    const ARC_SEAM_XSHIFT_PX={Siddham:-1.5, ZanabazarSquare:1, Kawi:0.5};
+    /* ⚠ ROUND EIGHT — "...but then move it left by 1px" (Kawi, its own separate horizontal move,
+       distinct from the vertical "back" above): 0.5 -> -0.5. Siddham's own horizontal share and
+       Zanabazar's are both untouched -- neither reported this round. */
+    const ARC_SEAM_XSHIFT_PX={Siddham:-1.5, ZanabazarSquare:1, Kawi:-0.5};
     const boxW=Math.ceil(w+2), inArcs=(typeof conv!=="undefined"&&conv==="arcs"),
       arcSeamLift=(inArcs && typeof ORTHO_SCHEME!=="undefined" && ARC_SEAM_LIFT_PX[ORTHO_SCHEME])||0,
       drop=(inArcs?asc:((typeof foBaselineDrop==="function")?foBaselineDrop(s,f,asc):asc))+arcSeamLift,
