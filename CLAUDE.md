@@ -712,6 +712,19 @@ WKWebView entirely, so a menu positioned under it is unreachable rather than mer
 tab group (and on Windows), so this is the old constant everywhere else. The status-bar language menu
 opens *upward* and is the tallest thing in the app, so it is capped by `max-height` instead of moved —
 its list already scrolls.
+⚠️ **"Every" did not include the OPTIONS BAR's own dropdowns, and they are the ones most exposed to it.**
+`.drawer-pop` is placed by CSS alone (`position:absolute; top:calc(100% + 6px)`), so it never reached
+`menuTopBound` at all. And in a tabbed window the tab bar sits *below* the options bar, not above it —
+`set_titlebar_reserve` (`app/mac/shell.py`) puts an empty accessory of the bar's own height into the
+title-bar band and AppKit stacks the tabs under it (toolbar, options bar, tabs, document) — so a
+dropdown hangs DOWN from the bar straight THROUGH the tabs. Measured at a real tabbed geometry
+(`--tabH` 140, bar spanning 104..140): the options bar at 52..90, all four pops opening at top 90, each
+losing a 36px band of invisible unclickable rows. `clampDrawerPop` (`js/ui/wiring.js`) applies the same
+clamp as an inline `top`, re-derived on every OPEN rather than cleared on each of the three close paths.
+⚠️ **Moving `.viewbar` itself is the fix this does NOT need**, and that same measurement is why: the bar
+is clear of the tabs by construction (the reservation is what puts them below it), so its own `top` is
+already right and moving it would also have to move `--top-chrome`, `docTopInset()` and the reservation
+together.
 
 **Two chrome kits, one loaded.** `web/macos-kit/` (Liquid-Glass) and `web/win11-kit/` (Fluent) are
 self-contained, reusable, and **share 150 token names** — that identity is the whole

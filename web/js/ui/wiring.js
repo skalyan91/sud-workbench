@@ -286,12 +286,43 @@ document.getElementById("toggles").addEventListener("change",e=>{ const cb=e.tar
   show[k]=cb.checked; updateViewOptions(); preserveScroll(renderDoc); savePrefs(); });   // (transliteration is no longer a checkbox — it is driven by the status-bar transliteration menu)
 document.getElementById("gridsChk").addEventListener("change",e=>{ show.grids=e.target.checked; updateViewOptions(); preserveScroll(renderDoc); savePrefs(); });   // "Show grids" now lives outside #toggles (before the zoom controls)
 document.getElementById("autonumChk").addEventListener("change",e=>{ AUTONUM=e.target.checked; });
+/* ⚠ AN OPTIONS-BAR DROPDOWN IS A FLOATING POPUP TOO, AND IT WAS THE ONE THAT NEVER CLAMPED.
+   `.drawer-pop` is placed by CSS alone — `position:absolute; top:calc(100% + 6px)` in mac-chrome.css,
+   `+ 4px` in fluent-chrome.css — so it is the only popup in the app that never went through
+   menuTopBound (js/core/scroll.js), and the options bar is the worst possible anchor for that omission.
+   In a TABBED window the native tab bar sits BELOW the options bar, not above it: set_titlebar_reserve
+   (app/mac/shell.py) puts an empty accessory of the bar's own height into the title-bar band, and AppKit
+   stacks its own tab-bar accessory under ours — toolbar, options bar, tabs, document. So the bar itself
+   is clear of the tabs and only its dropdowns are not: they hang DOWN from it, straight through the bar,
+   and an AppKit view in the window's theme frame is above the WKWebView entirely, so the rows in that
+   band are not merely behind something — they are invisible and unclickable, which is what "options bar
+   dropdowns go behind the tab bar" reports. Measured before this (headless Chrome, a real tabbed
+   geometry of chrome 66 + a 38px reservation + a 36px bar → --tabH 140, the bar spanning 104..140): the
+   options bar at 52..90, and ALL FOUR pops opening at top 90, i.e. every one of them losing a 36px band
+   — Translations, 92px tall, more than a third of itself.
+   The remedy is the one every other popup already uses, and the reason NOT to move the options bar
+   itself (the other candidate) is that measurement: the bar does not overlap the tabs, so nothing about
+   the bar's own position is wrong. The clamp is written as an inline `top` in the pop's own absolutely-
+   positioned coordinate space, since that is where the kit put it; it is cleared and re-derived on every
+   OPEN rather than on each of the three close paths, because the answer depends on where the bar is now.
+   The pop's HEIGHT never enters into it, so a drawer whose rows syncGlossUI has just shown or hidden
+   needs no second pass. menuTopBound() is the old bare 8 in every case except the one this is for.
+   ⚠ The two measurement families (rect = viewport px, computed length = the element's own px) coincide
+   here and the mixture is safe: CSS `zoom` in this app is `.sblock{zoom:var(--fs)}`, and the options bar
+   is chrome — it lives outside #doc entirely, so there is no zoom in its ancestor chain to convert. */
+function clampDrawerPop(d){
+  const pop=d&&d.querySelector(".drawer-pop"); if(!pop)return;
+  pop.style.top="";   // …back to the kit's own calc(100% + Npx) before measuring where that actually lands
+  const bound=(typeof menuTopBound==="function")?menuTopBound():8;
+  const r=pop.getBoundingClientRect();
+  if(r.top>=bound) return;   // no tab bar up (bound is 8), or the pop already clears it — the common case, left byte-identical to the CSS
+  pop.style.top=((parseFloat(getComputedStyle(pop).top)||0)+(bound-r.top))+"px"; }
 document.getElementById("toggles").addEventListener("click",e=>{
   if(e.target.closest(".drawer-pop")&&!e.target.closest(".drawer-btn")) return;   // clicks inside an open pop (checkboxes, the translations list/search) don't toggle the drawer
   const btn=e.target.closest(".drawer-btn"); if(!btn)return;   // open/close a drawer
   const d=btn.parentElement, wasOpen=d.classList.contains("open");
   document.querySelectorAll("#toggles .drawer.open").forEach(x=>x.classList.remove("open"));
-  if(!wasOpen){ d.classList.add("open"); syncGlossUI();
+  if(!wasOpen){ d.classList.add("open"); syncGlossUI(); clampDrawerPop(d);   // …AFTER `.open` (a display:none pop measures 0×0 at 0,0) and after syncGlossUI, so the pop is the one the reader will see
     /* A DRAWER THAT OPENS WITH A SEARCH FIELD PUTS THE CARET IN IT, on request for Translations — which is the
        only drawer that has one today, but written generically because the reason is generic: a drawer whose
        first control is a search box is a drawer you opened in order to search, and the status-bar language menu
