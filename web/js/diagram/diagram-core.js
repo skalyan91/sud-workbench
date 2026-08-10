@@ -1053,7 +1053,9 @@ function smpReshape(root){
        Zanabazar Square (2.5) is the second script, after Grantha, confirmed settled and untouched. */
     /* ⚠ ROUND THIRTEEN — "Move Siddham 0.5px up." Its vertical lift, untouched since round eight's
        revert, 2.25 -> 2.75. Zanabazar Square/Grantha/Kawi's own vertical lifts untouched. */
-    const ARC_SEAM_LIFT_PX={Siddham:2.75, ZanabazarSquare:2.5, Grantha:-2, Kawi:2};
+    /* ⚠ ROUND FOURTEEN — "Now another 0.5px up." Continues round thirteen's own move on the same
+       script/axis: Siddham 2.75 -> 3.25. */
+    const ARC_SEAM_LIFT_PX={Siddham:3.25, ZanabazarSquare:2.5, Grantha:-2, Kawi:2};
     /* ⚠ HORIZONTAL, AND A DIFFERENT AXIS FROM THE ONE ABOVE — "Siddham is a few pixels too far to the
        right." `arcShift` (below) is 0.25em applied to EVERY SMP-reshaped script alike, calibrated live
        against Grantha/Kawi/Soyombo/Zanabazar in the original "quarter-em right" round and never checked
