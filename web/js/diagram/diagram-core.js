@@ -977,8 +977,39 @@ function smpReshape(root){
        to the right"), at half that magnitude. Taken as the settled answer rather than reopened: repeated,
        same-direction, live judgment of the painted app outranks a bounding-box measurement that was never
        in question — the measurement says the BOX is centred; the report is about where the INK reads. */
+    /* ⚠ A ROUND THAT TRIED "make the float DELIBERATE, one em-fraction for every SMP script" WAS BUILT,
+       MEASURED AGAINST REAL PIXELS, AND THROWN OUT — record why so it isn't retried. The theory: `asc −
+       foBaselineDrop` (the difference between the old `y−asc` seat and the newer probed one) is an
+       ACCIDENTAL per-face quantity riding inside `asc`, measured at Soyombo 11.00/Grantha 10.00/Kawi
+       6.00/Zanabazar 5.50/Siddhaṃ 4.00px, and Siddhaṃ+Zanabazar read "too low" only because they
+       happened to float LEAST of the five. Replacing the whole `asc` branch with `foBaselineDrop + a
+       fixed 0.40em` (the average of Grantha's and Soyombo's own OLD floats stated as a fraction of THEIR
+       OWN font size) was implemented, and DOM geometry confirmed it moved every box by exactly the
+       predicted amount (`fo.y` shifted 8.00px for Siddhaṃ, matching 0.40×30−4.00). But the mark-to-glyph
+       relationship a reader actually SEES is painted ink, not `fo.y`, and pixel-measured (mark ink centre
+       minus glyph ink centre, `.claude/scratch_seam/isolate.py`+`isomeas.py`, the shipping WKWebView) the
+       uniform rule overshot every 2×-magnified script catastrophically: Soyombo, already correct at
+       +3.00, went to −3.00; Siddhaṃ went from +5.75 clear past the target band to −2.25; Grantha, barely
+       touched by design, still drifted +3.50→+4.50 the wrong way. `asc − foBaselineDrop` and "how far the
+       PAINTED ink needs to move" are not the same quantity and do not scale together across faces — the
+       DOM number that looked like a clean explanation wasn't one. Reverted whole; the `asc` branch below
+       is exactly what shipped before this paragraph existed. */
+    /* ⚠ WHAT REPLACED IT: two explicit, PIXEL-MEASURED corrections, nothing derived. Same ink-centre
+       metric as above, HEAD vs the two scripts actually reported "too low" — Siddhaṃ +5.75, Zanabazar
+       Square +7.75 — against Grantha's own already-correct +3.50 as the target (not the whole approved
+       band's ~+3.0–3.5 mean; Grantha is the most-measured of the set and the number every other pass in
+       this file has cross-checked against). Deltas: Siddhaṃ needs +2.25px of additional lift, Zanabazar
+       Square +4.25 — an order of magnitude smaller than the em-fraction attempt's 8–9px, which is exactly
+       why that attempt overshot so badly. `ARC_SEAM_LIFT_PX` touches ONLY these two scripts' `drop` in
+       arcs; every other script's `asc`-based seat is untouched, including Grantha and Soyombo, which
+       were already right and stay exactly where they were. Re-verify with the same isolate.py/isomeas.py
+       pair before trusting this further — a hand-measured two-point correction is a first pass, not a
+       proof, and this file's whole history is proof that this class of number needs checking against
+       real pixels every time it changes, never reasoned through again. */
+    const ARC_SEAM_LIFT_PX={Siddham:2.25, ZanabazarSquare:4.25};
     const boxW=Math.ceil(w+2), inArcs=(typeof conv!=="undefined"&&conv==="arcs"),
-      drop=inArcs?asc:((typeof foBaselineDrop==="function")?foBaselineDrop(s,f,asc):asc),
+      arcSeamLift=(inArcs && typeof ORTHO_SCHEME!=="undefined" && ARC_SEAM_LIFT_PX[ORTHO_SCHEME])||0,
+      drop=(inArcs?asc:((typeof foBaselineDrop==="function")?foBaselineDrop(s,f,asc):asc))+arcSeamLift,
       arcShift=inArcs?0.25*(fontPxOf(f)||0):0;
     fo.setAttribute("x",(x-boxW/2+arcShift)+""); fo.setAttribute("y",(y-drop)+"");
     fo.setAttribute("width",boxW+"");
