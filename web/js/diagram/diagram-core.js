@@ -1006,11 +1006,50 @@ function smpReshape(root){
        pair before trusting this further — a hand-measured two-point correction is a first pass, not a
        proof, and this file's whole history is proof that this class of number needs checking against
        real pixels every time it changes, never reasoned through again. */
-    const ARC_SEAM_LIFT_PX={Siddham:2.25, ZanabazarSquare:4.25};
+    /* ⚠ ROUND TWO OF THE SAME TABLE, ON A FRESH LIVE LOOK — "almost there... Grantha and Zanabazar are
+       still a few pixels too high, and Kawi a few pixels too low." Grantha and Kawi had NEITHER been
+       touched by the round above (their `drop` was still the plain `asc` fallback); the earlier round
+       fixed only the two scripts that were reported that round (Siddhaṃ, Zanabazar), on the same
+       reasoning `ARC_SEAM_LIFT_PX`'s own note gives — a hand-measured correction answers the report it
+       was measured against, not every script that could in principle need one. Grantha's OWN un-touched
+       diff (+3.50, `.claude/scratch_seam/isomeas.py CHECK3`, mark-ink-centre minus glyph-ink-centre) was
+       never actually validated as a universal target — it was simply the most-approved number on hand
+       when Siddhaṃ/Zanabazar needed one, and with those two now close to it, the reader can compare all
+       three side by side and see that Grantha itself sits a little high. There is no single correct
+       diff shared by every script (Devanagari's own un-reshaped control reads +3.00, already a different
+       number from Grantha's — these are different glyph shapes at different em sizes, not one constant),
+       so this is read off each script's own report rather than re-derived from another script's number.
+       Confirmed against the isolated crops themselves (`.claude/scratch_seam/iso_CHECK3_*.png`) before
+       touching anything: Grantha's `=` sits visibly high against its own glyph's height; Kawi's floats
+       above the glyph's main body, well clear of its descender loop; Zanabazar's sits near the very top
+       of a glyph that reaches much further down than the mark's own position suggests. All three read
+       exactly as reported.
+       Adjustments: Grantha −3 (0 → −3, a new negative lift — the first script in this table that goes
+       BELOW its `asc` seat rather than above it), Zanabazar Square −3 (its existing +4.25 → +1.25, kept
+       partly since it was reported "still too low" only ONE round ago and "too high" only after this
+       round's own correction landed — the fix overcorrected, not the wrong direction), Kawi +3 (0 → +3,
+       untouched until now). "A few pixels" taken literally at 3px, the same order of magnitude as the
+       Siddhaṃ/Zanabazar deltas the previous round measured (2.25/4.25) — a first pass for a live check,
+       exactly as that round's own note says every number here should be. */
+    const ARC_SEAM_LIFT_PX={Siddham:2.25, ZanabazarSquare:1.25, Grantha:-3, Kawi:3};
+    /* ⚠ HORIZONTAL, AND A DIFFERENT AXIS FROM THE ONE ABOVE — "Siddham is a few pixels too far to the
+       right." `arcShift` (below) is 0.25em applied to EVERY SMP-reshaped script alike, calibrated live
+       against Grantha/Kawi/Soyombo/Zanabazar in the original "quarter-em right" round and never checked
+       against Siddhaṃ specifically since Siddhaṃ read correctly at the time. A UNIFORM shift assumes
+       every script's own ink sits the same distance off its box's geometric centre, which the ORIGINAL
+       centring fix already established is untrue in general (Grantha +1.04, Kawi +1.09, Soyombo +1.39,
+       Zanabazar Square +1.14, Siddhaṃ +1.31 — five DIFFERENT side-bearing asymmetries, at that time
+       small enough that one shared 0.25em covered all five well enough to pass a live look). Siddhaṃ's
+       own asymmetry (+1.31, the LARGEST of the five) is consistent with it needing the SMALLEST share of
+       a uniform push before it reads as shifted too far — exactly what's now reported. `ARC_SEAM_XSHIFT_PX`
+       overrides the per-script SHARE of the uniform push, not the mechanism: Siddhaṃ's own share is cut
+       by 3px (the same "a few pixels" scale as the vertical table), everyone else keeps the plain 0.25em. */
+    const ARC_SEAM_XSHIFT_PX={Siddham:-3};
     const boxW=Math.ceil(w+2), inArcs=(typeof conv!=="undefined"&&conv==="arcs"),
       arcSeamLift=(inArcs && typeof ORTHO_SCHEME!=="undefined" && ARC_SEAM_LIFT_PX[ORTHO_SCHEME])||0,
       drop=(inArcs?asc:((typeof foBaselineDrop==="function")?foBaselineDrop(s,f,asc):asc))+arcSeamLift,
-      arcShift=inArcs?0.25*(fontPxOf(f)||0):0;
+      arcSeamXShift=(inArcs && typeof ORTHO_SCHEME!=="undefined" && ARC_SEAM_XSHIFT_PX[ORTHO_SCHEME])||0,
+      arcShift=(inArcs?0.25*(fontPxOf(f)||0):0)+arcSeamXShift;
     fo.setAttribute("x",(x-boxW/2+arcShift)+""); fo.setAttribute("y",(y-drop)+"");
     fo.setAttribute("width",boxW+"");
     /* ⚠ HEIGHT IS A CSS calc(), NOT A JS-COMPUTED PIXEL NUMBER, ON REQUEST — "try computing the heights
