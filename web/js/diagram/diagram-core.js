@@ -931,25 +931,16 @@ function smpReshape(root){
        since wrapping is an orthogonal display toggle and never changes `conv` itself. Nothing else about
        arcs moved: WORD_OFF, --dia-pad-extra and every arc/edge/crop term are exactly as the previous two
        rounds left them, so this undoes only smpReshape's own contribution to what arcs paints. */
-    /* ⚠ AND IN ARCS SPECIFICALLY THE SWAPPED GLYPH SHIFTS 0.5em RIGHT, ON REQUEST — measured centring
-       (both here and two rounds back, against real WKWebView pixels) says these five scripts paint on
-       the same slot centre every un-swapped script does; the reader's own eye, looking at the real app,
-       says arcs still reads as if they sit too far left, and the request is precise enough (a literal
-       em fraction, not "a bit more") to take as the intended correction rather than re-open the
-       measurement. `0.5 * fontPxOf(f)`, so the shift scales with whatever size this word is actually
-       painted at (the magnified token face, ORNAMENTAL_SCRIPTS' own 2× included) rather than a flat px
-       constant that would read as too little at 2× and too much unmagnified. Arcs only: brackets,
-       stemma, hierarchy and outline were never reported wrong here and stay on dead-centre.
-       ⚠ SIGN CORRECTED ON REPORT — a first cut moved the box RIGHT by this amount ("shift them 0.5em to
-       the right"), and the very next live look said the opposite: "No, shift them back to the left."
-       Same magnitude, same gate, sign flipped — the box now moves LEFT of dead-centre in arcs, which is
-       either the true correction or the read that hadn't yet been tried; if the app still looks wrong
-       here, the next report should give the actual direction observed rather than "still off", since
-       both signs have now been tried once each on the reporter's own word. */
+    /* ⚠ NO HORIZONTAL SHIFT IN ARCS, SETTLED ON REPORT — two live tries (0.5em right, then 0.5em left)
+       both got corrected, and the third look said neither: "I want them to sit *on*-centre, not left or
+       right." That matches every measurement taken of this box across two separate rounds (this file's
+       own centring fix + a real WKWebView pixel probe with reference markers, both reporting these five
+       scripts on the slot centre to a few hundredths of a pixel) — the "too far left" the reader saw was
+       real, but it was never this term; see the seat note just above for where it actually was. Dead centre,
+       `x − boxW/2`, arcs included, exactly like every other notation. */
     const boxW=Math.ceil(w+2), inArcs=(typeof conv!=="undefined"&&conv==="arcs"),
-      drop=inArcs?asc:((typeof foBaselineDrop==="function")?foBaselineDrop(s,f,asc):asc),
-      arcShift=inArcs?-0.5*(fontPxOf(f)||0):0;
-    fo.setAttribute("x",(x-boxW/2+arcShift)+""); fo.setAttribute("y",(y-drop)+"");
+      drop=inArcs?asc:((typeof foBaselineDrop==="function")?foBaselineDrop(s,f,asc):asc);
+    fo.setAttribute("x",(x-boxW/2)+""); fo.setAttribute("y",(y-drop)+"");
     fo.setAttribute("width",boxW+"");
     /* ⚠ HEIGHT IS A CSS calc(), NOT A JS-COMPUTED PIXEL NUMBER, ON REQUEST — "try computing the heights
        using a calc with em units instead of trying to compute everything in pixels". The previous version
