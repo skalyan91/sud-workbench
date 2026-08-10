@@ -1088,7 +1088,11 @@ function smpReshape(root){
        rounds have both been about (Kawi/Siddham are the two scripts still being dialled in;
        Grantha and Zanabazar Square are confirmed settled and left out of this "both"). Kawi
        0 -> 0.25, Siddham -1 -> -0.75. */
-    const ARC_SEAM_XSHIFT_PX={Siddham:-0.75, ZanabazarSquare:1, Kawi:0.25};
+    /* ⚠ ROUND ELEVEN — "Kawi is perfect. Move Siddham back." Kawi (0.25) is the THIRD script, after
+       Grantha and Zanabazar Square, confirmed settled and left untouched. Siddham's "back" undoes
+       round ten's own +0.25 exactly: -0.75 -> -1. Siddham is now the only script in either table
+       not yet confirmed settled. */
+    const ARC_SEAM_XSHIFT_PX={Siddham:-1, ZanabazarSquare:1, Kawi:0.25};
     const boxW=Math.ceil(w+2), inArcs=(typeof conv!=="undefined"&&conv==="arcs"),
       arcSeamLift=(inArcs && typeof ORTHO_SCHEME!=="undefined" && ARC_SEAM_LIFT_PX[ORTHO_SCHEME])||0,
       drop=(inArcs?asc:((typeof foBaselineDrop==="function")?foBaselineDrop(s,f,asc):asc))+arcSeamLift,
