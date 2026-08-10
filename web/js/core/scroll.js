@@ -199,16 +199,22 @@ function docTopInset(){
   // the 0 padding-top the doc actually has, so nothing re-adds the titlebar height.
   if(document.body.classList.contains("fs-chrome-hidden")) return 0;   // …and a full-screen window shows no window-tab bar either, so --tabH cannot apply here
   const tb=document.querySelector(".titlebar"), vb=document.querySelector(".viewbar");
-  const bars=(tb?tb.offsetHeight:0) + (vb && !vb.classList.contains("hidden") ? vb.offsetHeight : 0);
-  /* …AND THE NATIVE WINDOW-TAB BAR, exactly as .doc's padding takes it (app.css): a FLOOR, max() and not
-     a sum, because --tabH is the bar's bottom EDGE in page coordinates and the web toolbar is drawn
-     inside the same band. Missing it here was worth 48px: the padding moved the document down but every
-     manual scroll target (blockSnap, restoreScrollPos, the find bar) and blockFullyInView kept aiming at
-     the untabbed inset, so opening a tab left the block the reader was on sliced by the bar.
+  const tbH=tb?tb.offsetHeight:0, vbH=(vb && !vb.classList.contains("hidden")) ? vb.offsetHeight : 0;
+  /* …AND THE NATIVE WINDOW-TAB BAR, exactly as .doc's padding takes it (app.css): a FLOOR against the
+     TITLE BAR, max() and not a sum, because --tabH is the bar's bottom EDGE in page coordinates and the
+     web toolbar is drawn inside the same band. Missing it here was worth 48px: the padding moved the
+     document down but every manual scroll target (blockSnap, restoreScrollPos, the find bar) and
+     blockFullyInView kept aiming at the untabbed inset, so opening a tab left the block the reader was
+     on sliced by the bar.
+     ⚠ THE OPTIONS BAR IS ADDED TO THAT FLOOR, NOT FLOORED WITH IT — max(tbH,tabH) + vbH, was
+     max(tbH+vbH, tabH) — since the bar now sits BELOW the tab bar (macos-kit/mac-chrome.css's `.viewbar`
+     top) and is therefore chrome of its own beneath it, never chrome the bar's own band could absorb.
+     This is `--top-chrome` restated in JS and the two must not drift: docPadTop() below prefers the
+     used value precisely because they can be read at a torn instant, not because they may disagree.
      Read off the INLINE style, which is where app/mac/shell.py's publish writes it — a getComputedStyle
      here would run on every wheel event through blockFullyInView. */
   const tabH=parseFloat(document.documentElement.style.getPropertyValue("--tabH"))||0;
-  return Math.max(bars, tabH); }
+  return Math.max(tbH, tabH) + vbH; }
 /* ── HOW FAR DOWN A FLOATING MENU MAY START ────────────────────────────────────────────────────────
    Every popup in this app clamps its top to a bare `8`, on the reasoning that the chrome above it is
    the app's OWN titlebar — web content, which a menu's z-index sits over perfectly well. The native

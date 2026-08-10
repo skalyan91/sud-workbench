@@ -462,8 +462,15 @@
   /* ── Options bar + its toggles ────────────────────────────────────────────────────────────────
      Flat, opaque, and separated by a 1px rule: no blur, because this bar sits over page content and
      an in-app Acrylic strip there would blur the document as it scrolls under — which is a macOS
-     scroll-edge idea, not a Fluent one. */
-  .viewbar{position:absolute; left:0; right:0; top:var(--tbH,32px); z-index:20; display:flex; align-items:center; gap:10px;
+     scroll-edge idea, not a Fluent one.
+     `max(--tbH,--tabH)` rather than a bare `--tbH` for ONE reason and it is not a Windows one: --tabH is
+     the bottom edge of a native macOS window-tab bar and is 0 on this platform always (Windows has no
+     window tabbing, and app/mac/shell.py is the only thing that ever publishes it), so this resolves to
+     `var(--tbH)` here — byte-identical, verified in the headless run. What it buys is that `--top-chrome`
+     in app.css, which is platform-neutral and now reads max(--tbH,--tabH) + --vbH, states the same
+     arithmetic as BOTH kits' options bar instead of only the macOS one. See macos-kit/mac-chrome.css's
+     own `.viewbar` block for why the bar sits below the tab bar there. */
+  .viewbar{position:absolute; left:0; right:0; top:max(var(--tbH,32px),var(--tabH,0px)); z-index:20; display:flex; align-items:center; gap:10px;
     padding:6px 16px; background:var(--toolbar-bg); border-bottom:1px solid var(--hairline); flex-wrap:wrap}
   /* 6px vertical, matching the macOS bar. Cut to 4px once (32px control + 4 + 4 + 1px border = a 41px
      bar rather than 45px) and put back: the taller bar is the wanted look. */

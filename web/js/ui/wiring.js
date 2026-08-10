@@ -286,43 +286,30 @@ document.getElementById("toggles").addEventListener("change",e=>{ const cb=e.tar
   show[k]=cb.checked; updateViewOptions(); preserveScroll(renderDoc); savePrefs(); });   // (transliteration is no longer a checkbox — it is driven by the status-bar transliteration menu)
 document.getElementById("gridsChk").addEventListener("change",e=>{ show.grids=e.target.checked; updateViewOptions(); preserveScroll(renderDoc); savePrefs(); });   // "Show grids" now lives outside #toggles (before the zoom controls)
 document.getElementById("autonumChk").addEventListener("change",e=>{ AUTONUM=e.target.checked; });
-/* ⚠ AN OPTIONS-BAR DROPDOWN IS A FLOATING POPUP TOO, AND IT WAS THE ONE THAT NEVER CLAMPED.
-   `.drawer-pop` is placed by CSS alone — `position:absolute; top:calc(100% + 6px)` in mac-chrome.css,
-   `+ 4px` in fluent-chrome.css — so it is the only popup in the app that never went through
-   menuTopBound (js/core/scroll.js), and the options bar is the worst possible anchor for that omission.
-   In a TABBED window the native tab bar sits BELOW the options bar, not above it: set_titlebar_reserve
-   (app/mac/shell.py) puts an empty accessory of the bar's own height into the title-bar band, and AppKit
-   stacks its own tab-bar accessory under ours — toolbar, options bar, tabs, document. So the bar itself
-   is clear of the tabs and only its dropdowns are not: they hang DOWN from it, straight through the bar,
-   and an AppKit view in the window's theme frame is above the WKWebView entirely, so the rows in that
-   band are not merely behind something — they are invisible and unclickable, which is what "options bar
-   dropdowns go behind the tab bar" reports. Measured before this (headless Chrome, a real tabbed
-   geometry of chrome 66 + a 38px reservation + a 36px bar → --tabH 140, the bar spanning 104..140): the
-   options bar at 52..90, and ALL FOUR pops opening at top 90, i.e. every one of them losing a 36px band
-   — Translations, 92px tall, more than a third of itself.
-   The remedy is the one every other popup already uses, and the reason NOT to move the options bar
-   itself (the other candidate) is that measurement: the bar does not overlap the tabs, so nothing about
-   the bar's own position is wrong. The clamp is written as an inline `top` in the pop's own absolutely-
-   positioned coordinate space, since that is where the kit put it; it is cleared and re-derived on every
-   OPEN rather than on each of the three close paths, because the answer depends on where the bar is now.
-   The pop's HEIGHT never enters into it, so a drawer whose rows syncGlossUI has just shown or hidden
-   needs no second pass. menuTopBound() is the old bare 8 in every case except the one this is for.
-   ⚠ The two measurement families (rect = viewport px, computed length = the element's own px) coincide
-   here and the mixture is safe: CSS `zoom` in this app is `.sblock{zoom:var(--fs)}`, and the options bar
-   is chrome — it lives outside #doc entirely, so there is no zoom in its ancestor chain to convert. */
-function clampDrawerPop(d){
-  const pop=d&&d.querySelector(".drawer-pop"); if(!pop)return;
-  pop.style.top="";   // …back to the kit's own calc(100% + Npx) before measuring where that actually lands
-  const bound=(typeof menuTopBound==="function")?menuTopBound():8;
-  const r=pop.getBoundingClientRect();
-  if(r.top>=bound) return;   // no tab bar up (bound is 8), or the pop already clears it — the common case, left byte-identical to the CSS
-  pop.style.top=((parseFloat(getComputedStyle(pop).top)||0)+(bound-r.top))+"px"; }
+/* ⚠ AN OPTIONS-BAR DROPDOWN NEEDS NO CLAMP OF ITS OWN, AND THE ONE IT BRIEFLY HAD IS THE REASON THE BAR
+   MOVED. `.drawer-pop` is placed by CSS alone — `position:absolute; top:calc(100% + 6px)` in
+   mac-chrome.css, `+ 4px` in fluent-chrome.css — so it is the one popup in the app that never went
+   through menuTopBound (js/core/scroll.js). While the options bar sat ABOVE the native tab bar (an empty
+   `set_titlebar_reserve` accessory of the bar's own height, with AppKit stacking its tab-bar accessory
+   under ours) every pop hung DOWN from the bar straight through the tabs — invisible and unclickable
+   rows, since an AppKit view in the theme frame is above the WKWebView entirely. `clampDrawerPop` pushed
+   each pop's top past --tabH and did close that, but the CURE was reported worse than the disease:
+   measured at a real tabbed geometry, all four pops then opened 57px below the button that opened them
+   (6px untabbed), which reads as a menu belonging to nothing — "dropdowns open on the opposite side of
+   the tab bar".
+   So the bar itself moved below the tabs instead (macos-kit/mac-chrome.css's `.viewbar` top, which
+   carries the full note), and with it there is nothing left to clamp: a pop opens from a bar that is
+   already past every native view, so its own `calc(100% + 6px)` clears --tabH by construction — the pop's
+   top is at least --tabH + the bar's height + 6, and menuTopBound() is exactly --tabH. Measured after:
+   6px under the button in all four states (untabbed/tabbed × bar shown/hidden), inline `top` never set.
+   The clamp is DELETED rather than left in as a guard, since a guard nothing can trigger is a claim about
+   the geometry that no test can keep honest. */
 document.getElementById("toggles").addEventListener("click",e=>{
   if(e.target.closest(".drawer-pop")&&!e.target.closest(".drawer-btn")) return;   // clicks inside an open pop (checkboxes, the translations list/search) don't toggle the drawer
   const btn=e.target.closest(".drawer-btn"); if(!btn)return;   // open/close a drawer
   const d=btn.parentElement, wasOpen=d.classList.contains("open");
   document.querySelectorAll("#toggles .drawer.open").forEach(x=>x.classList.remove("open"));
-  if(!wasOpen){ d.classList.add("open"); syncGlossUI(); clampDrawerPop(d);   // …AFTER `.open` (a display:none pop measures 0×0 at 0,0) and after syncGlossUI, so the pop is the one the reader will see
+  if(!wasOpen){ d.classList.add("open"); syncGlossUI();
     /* A DRAWER THAT OPENS WITH A SEARCH FIELD PUTS THE CARET IN IT, on request for Translations — which is the
        only drawer that has one today, but written generically because the reason is generic: a drawer whose
        first control is a search box is a drawer you opened in order to search, and the status-bar language menu
@@ -423,12 +410,20 @@ window.__setOptionsBar=function(on){ const vb=document.querySelector(".viewbar")
 // fix 3: keep the doc's top inset (--vbH/--tbH → .doc padding-top) and the options-bar's top edge synced to the
 // DYNAMIC titlebar + options-bar heights, so the document scrolls UNDER the translucent bars and their
 // backdrop-filter blurs the content through (previously the bars sat in flow over an opaque background → no blur).
-let TB_RESERVED=-1, CHROME_H={tb:-1,vb:-1};   // last reported bar heights, so a no-op sync neither crosses the bridge nor re-caps
-// The options bar's height, handed to the shell so it can hold that much space inside the native
-// title-bar band. Only on a CHANGE: syncChrome runs on every resize/reflow and this crosses the
-// bridge. -1 as the initial value so the first report (commonly 0, the bar closed) still goes.
-function reserveTitlebar(h){ if(h===TB_RESERVED||!hasBridge())return; TB_RESERVED=h;
-  try{ window.pywebview.api.titlebar_reserve(h); }catch(e){} }
+let CHROME_H={tb:-1,vb:-1};   // last reported bar heights, so a no-op sync neither crosses the bridge nor re-caps
+/* ⚠ AND NOTHING IS RESERVED IN THE NATIVE TITLE-BAR BAND ANY MORE. `reserveTitlebar(vbH)` used to sit at
+   the end of this function and hand the options bar's height to Api.titlebar_reserve →
+   set_titlebar_reserve, which put an empty accessory of that height into the band so AppKit would stack
+   the window-tab bar UNDER it — the old order, toolbar / options bar / tabs / document. The bar now sits
+   below the tabs (macos-kit/mac-chrome.css's `.viewbar` top), so the reservation had nothing left to buy
+   and would have cost the bar's height twice: once as an empty native band above the tabs and again as
+   the bar's real box below them. Deleted end to end — this call, the TB_RESERVED memo it was gated on,
+   Api.titlebar_reserve and app/mac/shell.py's set_titlebar_reserve/_reserve.
+   ⚠️ WHAT WENT WITH IT AND DID NOT NEED REPLACING: the reservation changed the native chrome's own
+   height, so set_titlebar_reserve re-published --tabH (and re-capped the blocks) a beat later on every
+   open and close. With no accessory the chrome does not move when the bar is toggled — --tabH is the same
+   number open or closed — and this function already captures the anchor, writes --vbH and re-caps for
+   exactly that toggle. One less bridge call per open, and one less 0.25s timer racing the reader. */
 function syncChrome(){
   const body=document.querySelector(".body"), tb=document.querySelector(".titlebar"), vb=document.querySelector(".viewbar");
   if(!body||!tb)return;
@@ -450,7 +445,6 @@ function syncChrome(){
   // to recompute the caps. rAF so the new padding is laid out before anything is measured.
   if(moved && typeof recapBlocks==="function") requestAnimationFrame(()=>{ recapBlocks();
     if(anchor && typeof restoreTopAnchor==="function") restoreTopAnchor(anchor); });   // …then put the reader back where they were, measured against the NEW inset
-  reserveTitlebar(vbH);   // …and let the native title bar reserve the options bar's space, so a window-tab bar lands BELOW it (macOS; see Api.titlebar_reserve)
   fsCaptureLights();   // item 5: keep a fresh snapshot of the WINDOWED traffic-light metrics for the full-screen titlebar-padding restore (no-op while in full screen)
 }
 /* ── item 10: full-screen auto-hide of the toolbar (.titlebar) + options bar (.viewbar) ──────────────

@@ -772,20 +772,14 @@ class Api:
         except Exception as exc:  # noqa: BLE001
             return {"error": str(exc)}
 
-    def titlebar_reserve(self, height: float = 0) -> dict:
-        """The options bar's measured height, so the shell can reserve it INSIDE the native title-bar
-        band (macOS) — which is what puts the bar ABOVE a window-tab bar rather than below it; see
-        app.mac.shell.set_titlebar_reserve. Reported by syncChrome (js/ui/wiring.js) whenever the
-        bar's height changes, 0 when it is closed or the chrome is collapsed in full screen.
-        A no-op off macOS: Windows has no titlebar accessories and no window tabbing."""
-        if sys.platform != "darwin" or self.window is None:
-            return {"ok": False}
-        try:
-            from .mac import shell as mac_shell
-            mac_shell.set_titlebar_reserve(self.window, float(height or 0))
-            return {"ok": True}
-        except Exception as exc:  # noqa: BLE001
-            return {"error": str(exc)}
+    # ⚠ `titlebar_reserve` USED TO LIVE HERE and is gone with the geometry it served. It handed the
+    # options bar's measured height to app.mac.shell.set_titlebar_reserve, which parked an empty
+    # accessory of that height in the native title-bar band so AppKit would stack the window-tab bar
+    # UNDER it (toolbar / options bar / tabs / document). The options bar now sits BELOW the tab bar
+    # instead — the reason is where its dropdowns open, and the whole account is in
+    # web/macos-kit/mac-chrome.css's `.viewbar` rule — so the reservation buys nothing and would cost
+    # the bar's height twice over. Removed on both sides at once (syncChrome no longer calls it); this
+    # note is here so a reader of the bridge surface finds out why rather than wondering.
 
     def new_tab(self) -> dict:
         """Another document window, opened as a TAB of the current one (macOS window tabbing).  Same

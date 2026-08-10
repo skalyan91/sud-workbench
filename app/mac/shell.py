@@ -74,7 +74,8 @@ _recent_target_tried = False
 # __main__ installs the provider (its _key_pair reads NSApp.keyWindow); with none installed — the
 # single-window case, and every unit-level import of this module — the _recent_ctx pair stands in.
 _key_provider: dict = {"fn": None}
-_reserve: dict = {}   # id(window) → the NSTitlebarAccessoryViewController holding the options bar's space
+# (_reserve — id(window) → the NSTitlebarAccessoryViewController that held the options bar's space —
+#  went with set_titlebar_reserve; see the block where that function used to be, below.)
 _last_tb_js: dict = {"js": None}   # the most recent titlebar metrics JS — every window's numbers are the same, so a new one can start from them (see apply() in _unify_titlebar_on_show)
 _titlebar_apply: dict = {}   # id(pywebview window) → (window, its own titlebar re-measure) — see remeasure below
 _new_tab_handler: dict = {"fn": None}   # set by __main__: what the tab bar's + button and ⌘T do
@@ -444,69 +445,28 @@ def _measurable(window) -> bool:
     return bool(ev is None or ev.is_set())
 
 
-def set_titlebar_reserve(window, height: float) -> None:
-    """Reserve ``height`` px INSIDE the window's title-bar band, for the options bar to draw in.
-
-    WHY THE BAND AND NOT THE PAGE: macOS implements the window-tab bar as a titlebar accessory pinned
-    to the BOTTOM of that band, so anything the page draws below the band is necessarily below the
-    tabs. Reserving the options bar's height as an accessory of our own puts it in the band too — and
-    ours lands ABOVE the system's (verified live: with both present the system's clip view sits at
-    y=0 and ours at y=36, bottom-up), which is the ordering asked for: toolbar, options bar, tabs,
-    document. The accessory is EMPTY and transparent; it exists only to make AppKit reserve the space,
-    while the bar itself stays what it always was — web content under a transparent title bar.
-    Added when the bar opens and removed when it closes (rather than kept at zero height), because an
-    accessory draws its own NSTitlebarSeparatorView and a 0-height one would leave that hairline
-    ruling the title bar for a bar that isn't there.
-    Height changes are cheap: the view is resized in place, so an options bar that re-wraps to two
-    rows just grows its reservation."""
-    def work():
-        try:
-            import AppKit
-            from Foundation import NSMakeRect
-            nswin = getattr(window, "native", None)
-            if nswin is None:
-                return
-            key = id(window)
-            vc = _reserve.get(key)
-            h = max(0.0, float(height or 0))
-            if h <= 0:
-                if vc is not None:
-                    try:
-                        for i, cur in enumerate(list(nswin.titlebarAccessoryViewControllers() or [])):
-                            if cur is vc:
-                                nswin.removeTitlebarAccessoryViewControllerAtIndex_(i)
-                                break
-                    except Exception as exc:  # noqa: BLE001
-                        _shell_log(f"[titlebar] reserve remove: {exc}")
-                    _reserve.pop(key, None)
-                threading.Timer(0.25, lambda: publish_tab_height(window)).start()   # …the chrome just SHRANK; the page is still holding the taller figure until this lands (the same re-publish the grow path does below — an early return here was why closing the options bar left the document indented as if it were open)
-                return
-            if vc is None:
-                vc = AppKit.NSTitlebarAccessoryViewController.alloc().init()
-                view = AppKit.NSView.alloc().initWithFrame_(NSMakeRect(0, 0, max(1.0, nswin.frame().size.width), h))
-                vc.setView_(view)
-                vc.setLayoutAttribute_(AppKit.NSLayoutAttributeBottom)   # …the bottom of the band, where AppKit stacks it above its own tab-bar accessory
-                if hasattr(vc, "setFullScreenMinHeight_"):
-                    vc.setFullScreenMinHeight_(0)   # full screen collapses the app's chrome itself (syncChrome zeroes --tbH/--vbH); no reservation is wanted there
-                nswin.addTitlebarAccessoryViewController_(vc)
-                _reserve[key] = vc
-            v = vc.view()
-            if v is not None:
-                f = v.frame()
-                if abs(f.size.height - h) > 0.5:
-                    v.setFrameSize_(AppKit.NSMakeSize(f.size.width or nswin.frame().size.width, h))
-            # THE RESERVATION IS PART OF THE CHROME the page has to clear, so its height is now
-            # stale in the page: --tabH is published as the whole native chrome, and this just moved
-            # it. Re-publish (a beat later, once AppKit has laid the band out) — which also re-caps
-            # the blocks, since the viewport they are measured against changed with it.
-            threading.Timer(0.25, lambda: publish_tab_height(window)).start()
-        except Exception as exc:  # noqa: BLE001 — a missing reservation is a layout loss, never a failure
-            _shell_log(f"[titlebar] reserve: {exc}")
-    try:
-        from PyObjCTools import AppHelper
-        AppHelper.callAfter(work)   # NSWindow chrome belongs on the Cocoa main thread
-    except Exception:  # noqa: BLE001
-        work()
+# ⚠ `set_titlebar_reserve` USED TO LIVE HERE, AND THE ORDERING IT BOUGHT IS THE ONE THE APP NO LONGER
+# WANTS. macOS implements the window-tab bar as a titlebar accessory pinned to the BOTTOM of the
+# title-bar band, so anything the page draws below that band is necessarily below the tabs. Reserving
+# the options bar's height as an empty transparent accessory of our own put it in the band too — and
+# ours landed ABOVE the system's (verified live: with both present the system's clip view sat at y=0
+# and ours at y=36, bottom-up) — which gave the order toolbar / options bar / tabs / document.
+# It worked, and it was the wrong thing to want: an options bar above the tabs has its DROPDOWNS
+# hanging down through them (invisible, unclickable rows — an AppKit view in the theme frame is above
+# the WKWebView entirely), and clamping each dropdown clear of the bar instead put it 57px below the
+# button that opened it, which is what "dropdowns open on the opposite side of the tab bar" reports.
+# The options bar now sits BELOW the tab bar as ordinary page content, i.e. exactly where a page draws
+# by default and with no accessory involved: `.viewbar{top:max(--tbH,--tabH)}`, whose rule in
+# web/macos-kit/mac-chrome.css carries the full account. So this function, the `_reserve` table it kept
+# its per-window accessory in, and Api.titlebar_reserve are all deleted rather than left unused.
+# WHAT WENT WITH IT: this was also the only caller that re-published --tabH on an options-bar toggle
+# (a 0.25s timer, because the reservation changed the native chrome's own height). With no accessory
+# the chrome does not move when the bar opens or closes, so there is nothing to re-publish — syncChrome
+# (js/ui/wiring.js) already owns --vbH, the top anchor and the block re-cap for that toggle.
+# One consequence worth naming, since it quietly fixes something: `_chrome_base["h"]` — the untabbed
+# chrome height, published as --tabTop — is recorded on any measurement taken with no tab bar visible,
+# so with the reservation in play it was 66 or 66+the options bar's height depending on which state the
+# window happened to be in when the last untabbed measurement ran. It is now always the bare 66.
 
 
 def set_new_tab_handler(fn) -> None:

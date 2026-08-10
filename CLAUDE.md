@@ -732,21 +732,56 @@ opens *upward* and is the tallest thing in the app, so it is capped by `max-heig
 its list already scrolls.
 ⚠️ **"Every" did not include the OPTIONS BAR's own dropdowns, and they are the ones most exposed to it.**
 `.drawer-pop` is placed by CSS alone (`position:absolute; top:calc(100% + 6px)`), so it never reached
-`menuTopBound` at all. And in a tabbed window the tab bar sits *below* the options bar, not above it —
-`set_titlebar_reserve` (`app/mac/shell.py`) puts an empty accessory of the bar's own height into the
-title-bar band and AppKit stacks the tabs under it (toolbar, options bar, tabs, document) — so a
-dropdown hangs DOWN from the bar straight THROUGH the tabs. Measured at a real tabbed geometry
+`menuTopBound` at all. And in a tabbed window the tab bar used to sit *below* the options bar, not above
+it — `set_titlebar_reserve` (`app/mac/shell.py`) put an empty accessory of the bar's own height into the
+title-bar band and AppKit stacked the tabs under it (toolbar, options bar, tabs, document) — so a
+dropdown hung DOWN from the bar straight THROUGH the tabs. Measured at a real tabbed geometry
 (`--tabH` 140, bar spanning 104..140): the options bar at 52..90, all four pops opening at top 90, each
-losing a 36px band of invisible unclickable rows. `clampDrawerPop` (`js/ui/wiring.js`) applies the same
-clamp as an inline `top`, re-derived on every OPEN rather than cleared on each of the three close paths.
-⚠️ **Moving `.viewbar` itself is the fix this does NOT need**, and that same measurement is why: the bar
-is clear of the tabs by construction (the reservation is what puts them below it), so its own `top` is
-already right and moving it would also have to move `--top-chrome`, `docTopInset()` and the reservation
-together.
+losing a 36px band of invisible unclickable rows.
+⚠️ **CLAMPING THE DROPDOWN CLOSED THAT AND WAS REJECTED ON SIGHT, SO THE OPTIONS BAR MOVED BELOW THE TABS
+INSTEAD** — the fix the round above recorded as "the one this does NOT need". That reasoning ("the bar is
+clear of the tabs by construction, so its own `top` is already right") is *true and answers a different
+question*: clear of the tabs is not the same as next to its own dropdowns. `clampDrawerPop` pushed each
+pop past `--tabH` and thereby opened all four **57px below the button that opened them** (6px untabbed,
+measured) — reported as "dropdowns open on the opposite side of the tab bar", which is what a menu
+detached from its own control reads as. `.viewbar{top:max(--tbH,--tabH)}` (`macos-kit/mac-chrome.css`,
+mirrored in the Fluent kit where `--tabH` is always 0) puts the bar under everything native, and the pops
+are back at their own 6px in every state with no clamp at all — `clampDrawerPop` is deleted, not kept as
+a guard, since a guard nothing can trigger is a claim no test keeps honest.
+⚠️ **THE RESERVATION WENT WITH IT — `set_titlebar_reserve`, `Api.titlebar_reserve` and `reserveTitlebar`
+are all gone**, because an accessory that pushes the tabs down is exactly wrong once the bar is below
+them: it would cost the bar's height twice, once as empty native band and once as the bar's real box.
+**The document does not move**: `--top-chrome` is now `max(--tbH,--tabH) + --vbH` — the floor is INSIDE
+the sum, was around it (`max(--tbH+--vbH, --tabH)`) — and `docTopInset()` states the same expression in
+JS, so tabbed with the bar open the first block still starts at **141px**, measured identical before and
+after. The reservation used to buy those 39px *inside* `--tabH`; the bar now spends them below it. The
+tabbed geometry this leaves (chrome 66 + a 36px bar = `--tabH` 102) is not new — it is exactly what a
+tabbed window with the options bar CLOSED has always had, i.e. the numbers `_tab_bar_height`'s own
+docstring records from the live app. Three things follow for free: `--tabH` no longer moves when the
+options bar is toggled (so the 0.25 s re-publish the reservation needed is gone, and the toggle's
+`withTopChrome` capture is one synchronous step instead of racing a bridge round-trip), `_chrome_base`
+is always the bare 66 rather than 66-or-66-plus-the-bar depending on when it was last read, and the
+bar's `border-bottom` comes back when tabbed — the seam below it is the DOCUMENT again.
+⚠️ **AND THE COLLAPSED FULL-SCREEN BAR IS PINNED TO `top:0`** (`app.css`), which is a NEW exposure this
+created rather than an old one tidied: `translateY(-102%)` hides the bar from wherever `top` put it, and
+102% of the BAR's own ~39px is all the slide there is. `--tbH` was zeroed by `syncChrome` in the same
+statement that adds `fs-chrome-hidden`, but `--tabH` is published from Python on a background thread, so
+a window that was tabbed when it entered full screen would hold ~102px for that round-trip and leave the
+bar on screen at ~62px. A full-screen window shows no tab bar, so 0 is right for the whole state.
+⚠️ **A NATIVE POPOVER WINDOW WAS THE OTHER CANDIDATE AND IS A REAL PROJECT, NOT A SHORTCUT.** pywebview
+6.2.1 has no popover, no panel and no child-window attachment: `create_window` offers `frameless`/
+`on_top`/`transparent`/`x`/`y`, and its `WindowHost` subclasses **`NSWindow`, not `NSPanel`**. A dropdown
+drawn that way therefore needs a non-activating `NSPanel` (or it steals key from the document window),
+`addChildWindow_ordered_` so it follows the parent's move/resize/space, page-px → screen-point
+positioning off the button, a global mouse monitor for dismiss-on-click-outside, and a bridge round-trip
+for every checkbox — none of which exists here, and all of it for popups that now need no help at all.
 
 ⚠ **THE TAB BAR IS TRANSPARENT, SO THE PAGE OWNS ITS BACKGROUND — AND THE PAGE WAS PAINTING NOTHING
-THERE.** `.titlebar` and `.viewbar` merge into one flat glass surface and both stop at `--tbH + --vbH`;
-the tabs land below that, at `--tabH`. Between the two is a band — **48px** — that no rule covered, and
+THERE.** `.titlebar` and `.viewbar` merge into one flat glass surface; the tabs land between them, from
+the title bar's own bottom edge (`--tbH`) down to `--tabH`, and the options bar starts where that band
+ends. (Written when the order was the other way round — both bars stopping at `--tbH + --vbH` with the
+tabs below — so the rule's `top`/`height` have since lost the `--vbH` they carried at each end; the band
+is the same **48px** on this machine and every word below stands.) That band is what no rule covered, and
 `.doc`'s top padding only decides where the first block sits at scroll 0, so a scrolled document passes
 under ALL the chrome exactly as the glass design intends. Under the two bars it is blurred and tinted;
 under this band it was neither. Measured (two merged windows, options bar open, `#doc` scrolled 260px,
@@ -757,9 +792,10 @@ have the same blur and translucency as the options bar". `html.tabbed body:not(.
 .body::after` (macos-kit/mac-chrome.css) fills it with `.viewbar`'s recipe restated verbatim — the THIRD
 copy of the merged-state surface, so a change to one is a change to all three. After: 254,254,254 /
 31,31,31, i.e. the same 10% pass-through the options bar has. On `.body` and **not** `.window`, because
-`syncChrome` writes `--tbH`/`--vbH` onto `.body` and a custom property's `var()`s resolve where the
-property is DECLARED — from `.window` both fall back and the band starts UNDER the options bar and
-double-composites its tint (measured: the bar read 252→255).
+`syncChrome` writes `--tbH` onto `.body` and a custom property's `var()`s resolve where the
+property is DECLARED — from `.window` it falls back to the rule's own 44px and the band starts in the
+title bar's last rows (measured against the old geometry, where the same trap started it under the
+options bar and double-composited its tint: the bar read 252→255).
 ⚠️ **AND NOTHING NATIVE COULD HAVE DONE IT**, which was researched and measured before being written
 down (the long-form record is in `_tab_bar_height`'s docstring). `NSWindowTabGroup` publishes eight
 symbols and none is about appearance; the private `NSWindowStackController` the runtime really returns
