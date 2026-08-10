@@ -931,16 +931,25 @@ function smpReshape(root){
        since wrapping is an orthogonal display toggle and never changes `conv` itself. Nothing else about
        arcs moved: WORD_OFF, --dia-pad-extra and every arc/edge/crop term are exactly as the previous two
        rounds left them, so this undoes only smpReshape's own contribution to what arcs paints. */
-    /* ⚠ NO HORIZONTAL SHIFT IN ARCS, SETTLED ON REPORT — two live tries (0.5em right, then 0.5em left)
-       both got corrected, and the third look said neither: "I want them to sit *on*-centre, not left or
-       right." That matches every measurement taken of this box across two separate rounds (this file's
-       own centring fix + a real WKWebView pixel probe with reference markers, both reporting these five
-       scripts on the slot centre to a few hundredths of a pixel) — the "too far left" the reader saw was
-       real, but it was never this term; see the seat note just above for where it actually was. Dead centre,
-       `x − boxW/2`, arcs included, exactly like every other notation. */
+    /* ⚠ A QUARTER-em RIGHT IN ARCS, SETTLED ON REPORT — the MEASURED box centre (this file's own fix,
+       and a real WKWebView pixel probe with reference markers, both agreeing on these five scripts to a
+       few hundredths of a pixel) and the box's own WIDTH are two different facts, and only one of them
+       is what a reader compares against a neighbouring token's OWN glyph. `boxW` is `_measDOM`'s ADVANCE
+       WIDTH — the same figure every other slot in the row is sized by — but a Brahmic conjunct's
+       INK does not fill its advance box symmetrically the way a Latin word's does: side-bearing and
+       stacked-mark reach are asymmetric per script, so a box centred by the numbers can still read as
+       eye-left of its neighbours, which is a genuine optical-centring gap no bounding-box measurement
+       states. Three live looks in a row: 0.5em right ("shift them 0.5em to the right"), then reverted to
+       0.5em left ("No, shift them back to the left"), then reverted again to none at all ("I want them
+       to sit *on*-centre, not left or right") — each corrected the one before it, and this round's own
+       report goes back to the SAME direction the first correction did ("Too far left. Move them 0.25em
+       to the right"), at half that magnitude. Taken as the settled answer rather than reopened: repeated,
+       same-direction, live judgment of the painted app outranks a bounding-box measurement that was never
+       in question — the measurement says the BOX is centred; the report is about where the INK reads. */
     const boxW=Math.ceil(w+2), inArcs=(typeof conv!=="undefined"&&conv==="arcs"),
-      drop=inArcs?asc:((typeof foBaselineDrop==="function")?foBaselineDrop(s,f,asc):asc);
-    fo.setAttribute("x",(x-boxW/2)+""); fo.setAttribute("y",(y-drop)+"");
+      drop=inArcs?asc:((typeof foBaselineDrop==="function")?foBaselineDrop(s,f,asc):asc),
+      arcShift=inArcs?0.25*(fontPxOf(f)||0):0;
+    fo.setAttribute("x",(x-boxW/2+arcShift)+""); fo.setAttribute("y",(y-drop)+"");
     fo.setAttribute("width",boxW+"");
     /* ⚠ HEIGHT IS A CSS calc(), NOT A JS-COMPUTED PIXEL NUMBER, ON REQUEST — "try computing the heights
        using a calc with em units instead of trying to compute everything in pixels". The previous version
