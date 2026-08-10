@@ -1031,7 +1031,13 @@ function smpReshape(root){
        untouched until now). "A few pixels" taken literally at 3px, the same order of magnitude as the
        Siddhaṃ/Zanabazar deltas the previous round measured (2.25/4.25) — a first pass for a live check,
        exactly as that round's own note says every number here should be. */
-    const ARC_SEAM_LIFT_PX={Siddham:2.25, ZanabazarSquare:1.25, Grantha:-3, Kawi:3};
+    /* ⚠ ROUND THREE, WITH EXACT PIXEL DELTAS INSTEAD OF "A FEW" — "Siddham: 2px to the right. zanabazar:
+       1px to the right. Grantha: 1px up. Kawi: 2px down." Applied as literal, signed adjustments to the
+       previous round's own numbers rather than re-measured from scratch: Grantha's lift −3 → −2 (+1, since
+       a LARGER lift subtracts more from `y` in `fo.y=y−drop`, i.e. moves the glyph UP — see `drop`'s own
+       assignment below), Kawi's +3 → +1 (−2, the opposite direction). Both stay inside the ROUND TWO
+       table above; no new entries. */
+    const ARC_SEAM_LIFT_PX={Siddham:2.25, ZanabazarSquare:1.25, Grantha:-2, Kawi:1};
     /* ⚠ HORIZONTAL, AND A DIFFERENT AXIS FROM THE ONE ABOVE — "Siddham is a few pixels too far to the
        right." `arcShift` (below) is 0.25em applied to EVERY SMP-reshaped script alike, calibrated live
        against Grantha/Kawi/Soyombo/Zanabazar in the original "quarter-em right" round and never checked
@@ -1043,8 +1049,13 @@ function smpReshape(root){
        own asymmetry (+1.31, the LARGEST of the five) is consistent with it needing the SMALLEST share of
        a uniform push before it reads as shifted too far — exactly what's now reported. `ARC_SEAM_XSHIFT_PX`
        overrides the per-script SHARE of the uniform push, not the mechanism: Siddhaṃ's own share is cut
-       by 3px (the same "a few pixels" scale as the vertical table), everyone else keeps the plain 0.25em. */
-    const ARC_SEAM_XSHIFT_PX={Siddham:-3};
+       by 3px (the same "a few pixels" scale as the vertical table), everyone else keeps the plain 0.25em.
+       ⚠ ROUND THREE: "Siddham: 2px to the right. zanabazar: 1px to the right" — exact deltas, applied
+       signed. Larger `arcShift` moves the box's `x` attribute right directly (`x−boxW/2+arcShift`), so
+       Siddhaṃ's −3 → −1 (+2) and Zanabazar Square gains its first entry, +1 (0 → +1, i.e. its share of
+       the uniform push is now 0.25em+1 rather than the plain shared value every other untouched script
+       still gets). */
+    const ARC_SEAM_XSHIFT_PX={Siddham:-1, ZanabazarSquare:1};
     const boxW=Math.ceil(w+2), inArcs=(typeof conv!=="undefined"&&conv==="arcs"),
       arcSeamLift=(inArcs && typeof ORTHO_SCHEME!=="undefined" && ARC_SEAM_LIFT_PX[ORTHO_SCHEME])||0,
       drop=(inArcs?asc:((typeof foBaselineDrop==="function")?foBaselineDrop(s,f,asc):asc))+arcSeamLift,
