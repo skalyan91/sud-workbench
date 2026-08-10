@@ -1120,6 +1120,33 @@ second install/progress/UI path beside the first. See `app/macron.py` under Lang
   there). And the refresh hangs off `markDirty` (`scheduleOrthoMorph`), the one funnel every edit passes
   through, so ANY attribute moving re-renders the token rather than a list of write sites someone
   remembered — verified: a hand FEATS edit Abl→Nom takes `Galliā` back to `Gallia` and touches nothing else.
+  ⚠️ **AND THE MSeg ROW SHOWS THE MACRONS TOO, AS AN OVERLAY ON `t.ortho` RATHER THAN A SECOND LOOKUP**
+  (`laMsegMacron`, js/lang/translit-load.js; reached through `tierDisp`, js/core/prefs.js). Every other
+  word-like row in the block already carried the lengths and the morphemic segmentation did not, which
+  read as the feature not covering that row. `msegSegment` still derives the boundary from the BARE form
+  against the BARE lemma and MISC `MSeg` still STORES it bare — same rule as FORM — so only the painted
+  text moves: `Troi-ae` on file, `Trōi-ae` on screen, `o-ris` → `ō-rīs`. **Nothing recomputes the cut**:
+  `la_macronise` returns `apply_mask(strip_macron(form))`, a per-CHARACTER substitution that inserts and
+  merges nothing, so the bare string's cut indices are the macronised string's. That is asserted rather
+  than assumed — every character is checked against its counterpart quantity-folded (`stripQuantity`, the
+  fold `laMwtCompose` already trusts its join on) and ANY disagreement returns the stored text: a
+  hand-rewritten MSeg that no longer spells its form (`zzz-qqq`, `Troi-a`, `Troi-aex`) shows exactly as
+  typed, and so does a token whose rendering has not landed yet. Verified live over `samples/la_virgil.conllu`
+  in all five notations with the model's own macronisations behind the bridge: MISC and FORM bare
+  throughout, "Without macrons" reverts the row, a hand re-cut / a `=` seam / two cuts all overlay at the
+  right positions. **⚠ Only the DRAWING sites read `tierDisp`** — the inline editor's proxy, `morphEdited`
+  and `msegRefill`'s `_msegPre` guard all still read `tierText`, so the field opens on the bare
+  segmentation (exactly as the form editor opens on the bare form under a script) and committing it
+  unedited writes nothing and pushes no undo entry.
+  ⚠️ **AND THE MSeg WRITE-BACK'S QUANTITY STRIP WAS DELETING THE MARKS IT EXISTS TO KEEP OUT.** An MSeg
+  edit de-hyphenates its text and writes the word back to FORM; the Latin guard beside it strips macron
+  and breve first so a hand-typed one cannot reach the file. But Latin treebanks DO spell some forms with
+  a length mark — `samples/la_virgil.conllu` writes Virgil's `căno` with its metrical breve — and the
+  stripped `cano` compared literally against the stored `căno` read as a changed word: measured, moving
+  the boundary to `că-no`, an edit that touches no letter, rewrote FORM to `cano` and respliced `# text`.
+  The comparison is quantity-folded where the strip ran (`moved()`, js/editing/context-menu.js), which is
+  what the guard's own comment already promised. Verified: a boundary-only edit leaves FORM and `# text`
+  byte-identical, a hand-typed `cā-no` still never reaches either, and a real letter change still writes.
   ⚠ **THE DATA IS FETCHED, NOT SHIPPED, AND IT LIVES IN THE COMPONENT'S OWN CACHE.** Morpheus is
   CC BY-SA 3.0 and the Latin wheel CC BY-NC-SA, so the wheel ships the pipe with no table (`--no-lut`);
   `install()` runs the component's own `fetch_morpheus()` (~4 MB → ~2.2 MB in `~/.cache/sud-spacy/`, or

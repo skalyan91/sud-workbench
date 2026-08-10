@@ -930,10 +930,11 @@ function syncGlossUI(){ const g=document.querySelector('#toggles [data-t2="gloss
   // analysis are different things, and an mSUD document has as much use for the first as any other. (This used to
   // grey the checkbox out under mSUD on the reasoning that the morphemic gloss superseded it — it doesn't.)
   if(g){ g.checked=GLOSS_ON; g.disabled=false; const lab=g.closest("label"); if(lab){ lab.classList.remove("chk-off"); lab.title=""; } }
-  // The morphemic tier is available in every language, Latin included. Its segmentation was always
-  // computed from the BARE form (msegSegment never read vowel length — the removed macron overlay
-  // only decorated an already-determined boundary for display), so dropping that decoration changes
-  // nothing about where the boundary falls; Latin just reads like every other language now.
+  // The morphemic tier is available in every language, Latin included. Its segmentation is computed
+  // from the BARE form and stored bare — msegSegment has never read vowel length, and where the
+  // boundary falls does not depend on one. Under Latin's `macron` Script scheme the row is DISPLAYED
+  // with the lengths (tierDisp, js/core/prefs.js → laMsegMacron, js/lang/translit-load.js), which is
+  // decoration over an already-determined boundary and touches neither this gate nor MISC.
   if(m){ m.checked=MORPH_ON; m.disabled=false; const lab=m.closest("label"); if(lab){ lab.classList.remove("chk-off"); lab.title=""; } }
   // item 3: the Show/Hide VISIBILITY checkboxes appear only when the tier is present, and reflect GLOSS_VIS / MORPH_VIS
   const gv=document.querySelector('#toggles [data-vis="gloss"]'), mv=document.querySelector('#toggles [data-vis="morph"]');

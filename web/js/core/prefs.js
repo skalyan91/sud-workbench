@@ -437,6 +437,21 @@ function msegStrip(txt,post,pre){ let v=(txt||"").replace(/[꞊=⹀]+$/,"");
 // other, and a normaliser that only recognised one of them would have covered only half of them.
 function tierDashFix(v,tier){ return /^gloss$/i.test(tier||"")?String(v||""):String(v||"").replace(/-{2,}/g,"-"); }
 function tierText(o,tier){ return o?tierDashFix(miscKV(o.misc,TIER_MISC[tier]).replace(INVISIBLE_RE,"").replace(GLOSS_WS_RE,""),tier):""; }   // strip invisible/stray-whitespace chars at the shared read accessor, not just at render/encode time — every direct miscKV(...,"MGloss"/"MSeg") read used to bypass glossEnc/glossAbbrSegments' stripping (e.g. retargetGlossAbbrev reading+rewriting raw MISC on a FEATS-driven sync), letting a stray invisible/CR-LF-tab char from old data persist across edits that never touch the field itself
+/* WHAT A TIER ROW PAINTS, as against what its MISC attribute stores. The two are the same string
+   everywhere except the MSeg tier under Latin's `macron` Script scheme, where the segmentation is
+   DERIVED from the bare form, STORED bare, and DISPLAYED with the vowel lengths every other row in the
+   block already shows — see laMsegMacron (js/lang/translit-load.js) for why that is an overlay on the
+   rendering the token already has rather than a lookup of its own.
+   ⚠ ONLY THE DRAWING SITES READ THIS. Every other reader is asking about the STORED value and must go
+   on asking tierText: the inline editors (editTier's proxy, js/editing/context-menu.js), the provenance
+   tests that decide whether a tier has been hand-edited (morphEdited, msegRefill's `_msegPre` guard)
+   and every write path. A field that OPENED on the macronised text would write a macron into MISC — and
+   from there, de-hyphenated, into FORM and `# text` — on its very first commit, which is exactly what
+   the form row's own editor declines to do under a script.
+   The typeof guard is the usual one for a cross-module call from a file that loads this early; it is
+   answered by the time anything renders. */
+function tierDisp(o,tier){ const v=tierText(o,tier);
+  return (tier==="mseg"&&typeof laMsegMacron==="function")?laMsegMacron(o,v):v; }
 // a Leipzig glossing abbreviation: a run of [A-Z0-9]+ bounded on BOTH sides by a punctuation mark or the edge of
 // the string (so "PST" in "run.PST", and "3SG" itself in "PST-3SG", both qualify; "St" or a bare word doesn't).
 // Small-capped via c2sc. The SAME pattern (as a whole-token test) also decides which already-split MGloss tokens

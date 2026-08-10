@@ -844,19 +844,36 @@ function editTier(si,tokId,tier,clickXY){ const s=DOC[si]; if(!s||tokId<1||tokId
        hand-edited MSeg (its `cur!==t._msegPre` guard), and this edit has just made it one.
        "=" is left alone: it is the CLITIC seam, a character the form legitimately carries (openConvertMWT
        reads it), so stripping it would rewrite the word rather than un-segment it. Only "-" goes. */
-    /* ⚠ DEFENSIVE: A HAND-TYPED VOWEL-LENGTH MARK COMES OFF BEFORE IT REACHES FORM. Nothing in this app
-       writes a macron/breve into the MSeg tier's text any more, but the FORM column must still never
-       carry one — the treebanks spell Latin bare and the file must round-trip byte-identically — so if
-       a reader types one in by hand while editing MSeg, de-hyphenating it and writing it back verbatim
-       would put that mark in the form, in `# text`, and in the saved file. Stripping it first leaves
-       exactly the bare word; an edit that only moved the boundary then compares equal and writes
-       nothing at all, as it should. */
+    /* ⚠ DEFENSIVE: A HAND-TYPED VOWEL-LENGTH MARK COMES OFF BEFORE IT REACHES FORM. The FORM column must
+       never carry one — the treebanks spell Latin bare and the file must round-trip byte-identically —
+       so if a reader types one in by hand while editing MSeg, de-hyphenating it and writing it back
+       verbatim would put that mark in the form, in `# text`, and in the saved file. Stripping it first
+       leaves exactly the bare word; an edit that only moved the boundary then compares equal and writes
+       nothing at all, as it should.
+       ⚠️ AND HAND-TYPED IS STILL THE ONLY WAY ONE GETS HERE, now that the MSeg row DISPLAYS the macrons
+       under Latin's `macron` Script scheme (tierDisp, js/core/prefs.js). That is an overlay drawn over
+       the row; this field opens on the proxy above, which reads tierText — the STORED, bare
+       segmentation — exactly as the form editor opens on the bare form under a script. So a reader who
+       clicks in sees the bare letters, and committing without typing writes the same string back and
+       changes nothing. This strip is what covers the case where they do type one. */
     if(tier==="mseg"){ let bare=tierText(tk,"mseg").replace(/-/g,"");
-      if(bare && (DOCLANG||"").toLowerCase().split(/[-_]/)[0]==="la") bare=bare.normalize("NFD").replace(/[̄̆]/g,"").normalize("NFC");   // combining macron + breve, taken off the DECOMPOSED string so precomposed ā and a+U+0304 are caught alike
+      const laQty=!!bare && (DOCLANG||"").toLowerCase().split(/[-_]/)[0]==="la";
+      if(laQty) bare=bare.normalize("NFD").replace(/[̄̆]/g,"").normalize("NFC");   // combining macron + breve, taken off the DECOMPOSED string so precomposed ā and a+U+0304 are caught alike
+      /* ⚠ AND WHERE THAT STRIP RAN, THE "DID ANYTHING MOVE?" TEST HAS TO BE QUANTITY-BLIND TOO — otherwise
+         the guard DELETES the very marks it exists to keep out. Latin treebanks do spell some forms with a
+         length mark (`samples/la_virgil.conllu` writes Virgil's `căno` with its metrical breve), so a
+         stripped `cano` compared literally against the stored `căno` reads as a changed word and rewrites
+         the FORM — and with it `# text` and the saved file. Measured on that very token before this line
+         existed: moving the boundary to `că-no`, an edit that touches no letter, turned the form into
+         `cano` and respliced the running line. Folding both sides restores what the paragraph above
+         promises ("an edit that only moved the boundary then compares equal and writes nothing at all"),
+         while a hand-typed mark still cannot reach FORM: it is stripped out of `bare` first, so the two
+         compare equal and nothing is written. A real letter change still writes, bare, exactly as before. */
+      const moved=v=>laQty?(stripQuantity(v||"")!==bare):((v||"")!==bare);   // stripQuantity: js/lang/translit-load.js, the same fold laMwtCompose trusts its join on. `bare` is already stripped, so only the stored side needs folding
       if(bare){
         if(typeof translitNeeded==="function" && translitNeeded(DOCLANG)){
-          if((tk.translit||"")!==bare){ tk.translit=bare; tk.misc=setMiscKV(tk.misc,"Translit",bare); tk._trMisc=true; markDirty(); }
-        } else if((tk.form||"")!==bare){ tk.form=bare; markDirty();
+          if(moved(tk.translit)){ tk.translit=bare; tk.misc=setMiscKV(tk.misc,"Translit",bare); tk._trMisc=true; markDirty(); }
+        } else if(moved(tk.form)){ tk.form=bare; markDirty();
           if(typeof afterFormEdit==="function") afterFormEdit(si,tokId,true); } } }
     markDirty(); preserveScroll(renderDoc); };
   if(tier!=="mseg") makeGlossEditableSC(el, proxy, "v", after, sentRTL(s), ()=>tierElOf(si,tokId,tier), d=>tierNav(si,tokId,tier,d), clickXY, tier==="mgloss"?tk:null);   // live c2sc small-caps on its Leipzig abbreviations as the user types — on BOTH gloss tiers, matching how both now render (setGlossText); MSeg is word text, not a gloss, so it keeps the plain <input> editor. Task C: the trailing token is the MGloss abbreviation-autocomplete's UPOS context (AMBIG_UPOS) — passed ONLY for "mgloss" (a lexical Gloss definition isn't built from Leipzig abbreviations, so it gets no dropdown)

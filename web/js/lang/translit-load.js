@@ -340,6 +340,47 @@ function laMwtCompose(){ let any=false;
     if(joined!==m.ortho){ m.ortho=joined; any=true; } }));
   return any; }
 
+/* ⚠ THE SEGMENTATION ROW SHOWS THE MACRONS TOO, AND IT IS AN OVERLAY ON `t.ortho` RATHER THAN A SECOND
+   LOOKUP. Under the Latin `macron` Script scheme every word-like row in the block already carries the
+   vowel lengths — the running sentence, the diagram glyph, the MWT surface — and the one row that
+   spells the word out morpheme by morpheme did not, which reads as the feature not covering it rather
+   than as a decision. It is a DISPLAY overlay in exactly the sense the rest of that feature is: MISC
+   MSeg stays the bare segmentation of the bare form, as FORM and `# text` do, because a macron is a
+   spelling and never annotation (see app/macron.py's own note on why nothing is written to MISC).
+   THERE IS ONE MACRONISATION IN THIS APP AND THIS IS NOT A SECOND ONE. `t.ortho` is the answer
+   `Api.orthography` has ALREADY given for this token's whole (form, upos, feats, lemma) — see the note
+   above fillOrtho — so the row rides that one lookup, its batch, its `_orthoKey` staleness stamp and
+   its Script toggle. Asking `macron.macronise` a second way here would be a second answer to one
+   question, and the two would drift the moment a FEATS edit moved one of them.
+   THE BOUNDARY IS NOT RE-COMPUTED EITHER, and does not need to be: `la_macronise` returns
+   `apply_mask(strip_macron(form))`, a per-CHARACTER substitution (`a`→`ā`, precomposed, `LONG` in
+   SUD-spaCy's scripts/la_macronise.py) that inserts no character and merges none, so the cut
+   msegSegment found in the bare string falls between the very same two letters here. Measured over the
+   Latin sample's own tokens: every macronisation is NFC and the same length as its input.
+   ⚠️ THAT IS ASSERTED, NOT ASSUMED. Each character is checked against its counterpart with the quantity
+   taken off — `stripQuantity`, the same test laMwtCompose trusts its join on — and ANY disagreement at
+   all returns the STORED text untouched: a hand-rewritten segmentation that no longer spells the form,
+   a token whose rendering has not landed yet, an engine that one day answers with different letters.
+   Bare is always a legitimate spelling of the word; a macron on the wrong vowel is not. */
+const MSEG_SEP_RE=/[-꞊=⹀]/;   // what MSeg's own text may carry between pieces: the morpheme boundary, and the three spellings this app has given the clitic seam (see _SEP_RE, js/io/bridge.js)
+// A base character plus whatever combining marks follow it, as ONE unit. `strip_macron` NFC-normalises
+// the component's answer while MSeg is sliced out of the FILE's own form, which nothing normalises, so
+// the two can legitimately arrive in different normalisations and a bare code-point walk would fall out
+// of step over the first decomposed mark. Latin does carry marked forms — `samples/la_virgil.conllu`
+// writes Virgil's `căno` with a breve (precomposed there, and a+U+0306 in a file written otherwise) —
+// so this is the one place the two spellings of one letter have to count as one.
+function laLetters(s){ const out=[]; for(const c of Array.from(s||"")){ if(out.length&&/\p{M}/u.test(c)) out[out.length-1]+=c; else out.push(c); } return out; }
+function laMsegMacron(t,txt){
+  if(!txt||!orthoNeedsMorph()) return txt;   // one language, one scheme: every other document pays a boolean, exactly as scheduleOrthoMorph does
+  const o=(t&&t.ortho)||""; if(!o) return txt;   // the fill is asynchronous — no rendering yet means the bare text, which is what was on screen a moment ago in any case
+  const O=laLetters(o), S=laLetters(txt);
+  let k=0, out="";
+  for(const g of S){
+    if(MSEG_SEP_RE.test(g)){ out+=g; continue; }   // a separator belongs to the SEGMENTATION, not to the word — it has no counterpart in the rendering and consumes nothing from it
+    if(k>=O.length||stripQuantity(O[k]).toLowerCase()!==stripQuantity(g).toLowerCase()) return txt;
+    out+=O[k++]; }
+  return k===O.length?out:txt; }   // …and MSeg must have spelt the WHOLE word, not a prefix of it
+
 // ── MISC Translit/LTranslit (romanisation), written ONLY on a parse / secondary-annotation pass ──
 // Set/replace/remove a Key=Value in a CoNLL-U MISC string, preserving the other pairs and their order.
 function setMiscKV(misc,key,val){ const empty=(!misc||misc==="_"); let parts=empty?[]:misc.split("|"); let done=false;
