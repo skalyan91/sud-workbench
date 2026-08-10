@@ -1041,7 +1041,9 @@ function smpReshape(root){
        round-three number is confirmed correct and left untouched (the first script in this table to be
        reported settled). Kawi +1 → +2 (up 1 more), Zanabazar Square's VERTICAL lift +1.25 → +2.25 (its
        first vertical touch since round two — round three only adjusted its horizontal share). */
-    const ARC_SEAM_LIFT_PX={Siddham:2.25, ZanabazarSquare:2.25, Grantha:-2, Kawi:2};
+    /* ⚠ ROUND FIVE — "Zanabazar: -0.5 down." First fractional delta in this table; applied literally
+       (2.25 → 1.75). Kawi/Grantha/Siddham's own vertical lifts untouched — none reported this round. */
+    const ARC_SEAM_LIFT_PX={Siddham:2.25, ZanabazarSquare:1.75, Grantha:-2, Kawi:2};
     /* ⚠ HORIZONTAL, AND A DIFFERENT AXIS FROM THE ONE ABOVE — "Siddham is a few pixels too far to the
        right." `arcShift` (below) is 0.25em applied to EVERY SMP-reshaped script alike, calibrated live
        against Grantha/Kawi/Soyombo/Zanabazar in the original "quarter-em right" round and never checked
@@ -1062,7 +1064,9 @@ function smpReshape(root){
     /* ⚠ ROUND FOUR: "Siddham: -1 left" — its share cut a further 1px, -1 → -2. Zanabazar Square's
        horizontal share (+1, round three) is confirmed correct and left untouched — this round's report
        for it was vertical only. */
-    const ARC_SEAM_XSHIFT_PX={Siddham:-2, ZanabazarSquare:1};
+    /* ⚠ ROUND FIVE — "Siddham: +1 right. Kawi: +1 right." Siddham's share −2 → −1. Kawi gains its
+       first horizontal entry, 0 → +1 (previously read correctly on the plain shared 0.25em). */
+    const ARC_SEAM_XSHIFT_PX={Siddham:-1, ZanabazarSquare:1, Kawi:1};
     const boxW=Math.ceil(w+2), inArcs=(typeof conv!=="undefined"&&conv==="arcs"),
       arcSeamLift=(inArcs && typeof ORTHO_SCHEME!=="undefined" && ARC_SEAM_LIFT_PX[ORTHO_SCHEME])||0,
       drop=(inArcs?asc:((typeof foBaselineDrop==="function")?foBaselineDrop(s,f,asc):asc))+arcSeamLift,
