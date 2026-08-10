@@ -444,11 +444,57 @@ _DEFS_SECTION_LANGS = {"zh": "Chinese", "lzh": "Chinese", "yue": "Chinese", "cmn
                        "hsn": "Chinese", "cdo": "Chinese", "zh-hans": "Chinese", "zh-hant": "Chinese"}
 
 
+# Vowel-length marks: the combining macron and the combining breve. The Python twin of the
+# frontend's `stripQuantity` (js/lang/translit-load.js) and of the same expression inlined in the
+# MSeg write-back guard (js/editing/context-menu.js) — taken off the DECOMPOSED string, so a
+# precomposed ā and an a + U+0304 go alike, and the two halves of the app agree on exactly which
+# two marks count as "a length mark". LATIN ONLY (see :func:`_search_form`): everywhere else a
+# diacritic is part of the spelling.
+_QUANTITY_RE = re.compile("[̄̆]")
+
+
+def _is_latin(lang: str) -> bool:
+    """The Python twin of the frontend's ``isLatinLang`` (web/js/lang/translit.js), written the way
+    :func:`app.apte.is_sanskrit` is — base subtag only, so "la", "lat", "la-x-classic" and "lat_IT"
+    all count. Wiktionary itself keys the section "la", so anything else could not resolve a section
+    anyway; the wider match costs nothing and states the intent."""
+    base = (lang or "").lower().split("-")[0].split("_")[0]
+    return base in ("la", "lat")
+
+
+def _strip_quantity(word: str) -> str:
+    """``word`` with its macrons and breves taken off — and BYTE-IDENTICAL when it carries none.
+    The early return is not an optimisation: NFC(NFD(x)) differs from x for any input already stored
+    decomposed, so recomposing unconditionally would quietly rewrite queries that have no length
+    mark in them at all. Only a string that actually holds one is normalised."""
+    d = unicodedata.normalize("NFD", word)
+    if not _QUANTITY_RE.search(d):
+        return word
+    return unicodedata.normalize("NFC", _QUANTITY_RE.sub("", d))
+
+
 def _search_form(word: str, lang: str) -> str:
     """The term to actually query Wiktionary with.  Sanskrit tokens in this app are STORED as
     IAST romanisation regardless of the sentence's own script (app.translit's "stored=iast"
     convention — see its Sanskrit orthography rendering), but Wiktionary indexes Sanskrit
     entries under their Devanagari headword, so an IAST lemma needs converting first.
+
+    **Latin is a third case of the same "query the spelling the wiki files it under" rule, and the
+    only one where the app STRIPS rather than converts.**  en.wiktionary titles a Latin entry with
+    the bare classical spelling and prints its vowel lengths in the headword LINE, so `cano` answers
+    and `căno`, `cānō` and `dīvīsa` all 404 (probed live).  A length mark can reach here from the
+    file itself — `samples/la_virgil.conllu` writes Virgil's `căno` with its metrical breve in FORM
+    *and* LEMMA, and the flyout looks a token up by `tok.lemma || tok.form` (js/editing/
+    context-menu.js), so that one token's dictionary was simply unreachable.  It is NOT the macron
+    DISPLAY layer leaking: `app/macron.py` is a Script scheme that never writes to FORM/LEMMA/MISC,
+    which is exactly why the query is otherwise already bare.  Both marks go, since a treebank may
+    write either (a breve is a metrical short, a macron a length) and Wiktionary's title carries
+    neither.
+
+    Scoped to Latin and to those two marks on purpose.  Every other language's diacritics are part of
+    the spelling the wiki files the word under — French `é`, German `ü`, and above all the IAST this
+    app stores Sanskrit in, where `ā` is a different phoneme from `a` and the macron is what the
+    Devanagari conversion two lines below reads.  Stripping there would break the lookups that work.
 
     Chinese is the same problem in a different script: **en.wiktionary keeps every Chinese sense on
     the TRADITIONAL spelling**, and gives a simplified one only a `{{zh-see}}` soft-redirect box
@@ -458,6 +504,8 @@ def _search_form(word: str, lang: str) -> str:
     converts phrase-first, so it picks the right one of a one-to-many pair from context
     (发 → 髮 in 头发, 發 in 发现). Where it still lands on a spelling the wiki doesn't file the word
     under, :func:`_zh_see_target` chases the page's own pointer instead."""
+    if _is_latin(lang):
+        return _strip_quantity(word)
     if lang == "sa":
         from . import translit
         deva = translit.orthography(word, "sa", "Devanagari")

@@ -1237,7 +1237,19 @@ second install/progress/UI path beside the first. See `app/macron.py` under Lang
   with nothing. A lookup that matched anything strictly is untouched by all of this.
   **A headword is queried in the spelling the wiki files it under, not the one the token carries**:
   Sanskrit in Devanagari (which a file may already be stored in, and may not — see the Sanskrit
-  section below), Chinese in **TRADITIONAL** characters. en.wiktionary
+  section below), Chinese in **TRADITIONAL** characters, and **Latin with its vowel-length marks
+  taken off** (`_is_latin`/`_strip_quantity`). The wiki titles a Latin entry with the bare classical
+  spelling and prints the lengths in the headword LINE, so `cano` answers while `căno`, `cānō` and
+  `dīvīsa` all 404 — probed live. This is NOT the macron DISPLAY layer leaking (`app/macron.py`
+  writes to no stored field, which is why the query is otherwise already bare): the mark comes from
+  the FILE, `samples/la_virgil.conllu` spelling Virgil's `căno` with its metrical breve in FORM *and*
+  LEMMA, and the flyout looking a token up by `tok.lemma || tok.form`. That one token's dictionary
+  was simply unreachable. Macron and breve both, off the NFD string — the same pair, expressed the
+  same way, as the frontend's `stripQuantity`. ⚠️ **Latin only**: everywhere else a diacritic is part
+  of the spelling the wiki files the word under, and in the IAST this app stores Sanskrit in the
+  macron is a different phoneme AND what the Devanagari conversion on the next line reads.
+  `_strip_quantity` returns its argument UNTOUCHED when it holds no length mark, so a word that has
+  none cannot be silently recomposed by the NFD/NFC round-trip. en.wiktionary
   keeps every Chinese sense on the traditional page and gives the simplified one only a `{{zh-see}}`
   soft redirect — no senses, no POS heading — so 编程 404s from the definition endpoint while 編程
   answers, and *every* character that simplification changed was silently unglossable. OpenCC
