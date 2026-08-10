@@ -304,6 +304,24 @@ taken; an `@deep` tail the reader set survives. Async, best-effort, no undo entr
 with no model. ⚠️ **That same-head gate is now the THIRD tier, not the rule** — see the ranking block
 below: the relation is asked of the ARC, so a head the parser would not have chosen gets an answer too.
 
+⚠️ **AND `setAsRoot` WAS THE ONE PATH IN THAT LIST THAT DID NOT ACTUALLY GO THROUGH THE FUNNEL** — the
+paragraph above named it, and it open-coded the two invariants it could see (`syncSharedFeat`, the old
+root's `root` → `udep` demotion) and none of the rest. A re-root moves **more edges than the one node
+the reader clicked**: the old root and every token that hung off it are re-parented onto the new root,
+each still labelled for the head it no longer has, the old root's placeholder `udep` most starkly. All
+of them now run `afterHeadEdit`, which asks the same three-tier question and applies the same
+error-level validation a hand-dragged arc gets. **Deferred, not fired per token**: `afterHeadEdit`
+takes an optional `defer` array that collects the ids instead of firing, and `headSyncDeprels`
+(js/io/bridge.js) runs them once the whole re-root has landed — a call fired from the first branch
+would be asking about a tree whose new root still has a head, and `headSyncDeprel`'s own staleness
+re-read would then throw away the answer it had just paid for. Sequential, so the first call warms
+`tokenScores`' cache for the rest, and **one render for the batch** rather than one per token. The
+**new root is not in the list**: head 0 is settled by rule, which is what `headSyncDeprel`'s `want>=1`
+guard already says. ⚠️ The changed set is NOT the classic root-to-node path reversal — this command
+leaves the intervening chain alone, so it is read off the mutation itself (`resync` is appended where
+each head is written) rather than re-derived by a diff that a later change to the re-rooting rule
+could desynchronise.
+
 ## The pipeline's runners-up (`analysis_scores`, `js/io/scores.js`)
 
 Every component scores a whole INVENTORY and the editor drew only the argmax: one head per token, one

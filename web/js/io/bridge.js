@@ -1997,7 +1997,10 @@ const PARSE_FIELDS=["lemma","xpos","feats","deps","misc"];
    against the pair actually in the document, after the awaits.
    Everything else is as before: the RELATION only (any `@deep` tail is the reader's and survives),
    fire-and-forget, no undo entry of its own, and a no-op with no model. */
-async function headSyncDeprel(si,tokId){ if(!(hasBridge()&&model)) return false;
+/* `quiet` suppresses only the trailing render — the write and markDirty still happen — so a caller
+   moving SEVERAL heads in one command can draw once at the end instead of once per token. See
+   headSyncDeprels just below; every other caller leaves it unset and behaves exactly as before. */
+async function headSyncDeprel(si,tokId,quiet){ if(!(hasBridge()&&model)) return false;
   const s=DOC[si], t=s&&s.tokens[tokId-1]; if(!t) return false;
   const want=parseInt(t.head,10); if(!(want>=1)) return false;   // a new ROOT is settled by afterHeadEdit's own invariant — there is nothing to ask
   const forms=s.tokens.map(x=>x.form||""); if(!forms.some(f=>f)) return false;
@@ -2021,8 +2024,30 @@ async function headSyncDeprel(si,tokId){ if(!(hasBridge()&&model)) return false;
   if(hd&&typeof depIsError==="function"&&await depIsError(hd.upos,now.upos,nd)) return false;
   const again=DOC[si]&&DOC[si].tokens[tokId-1];                  // depIsError is a bridge round-trip of its own — re-check before writing
   if(again!==now||parseInt(now.head,10)!==want) return false;
-  now.deprel=nd; markDirty(); renderUnlessEditing();             // …and not over an open inline field, as every other background refresh here
+  now.deprel=nd; markDirty(); if(!quiet) renderUnlessEditing();  // …and not over an open inline field, as every other background refresh here
   return true; }
+/* ── AND A RE-ROOT IS A BATCH OF RE-HEADINGS, NOT ONE ──────────────────────────────────────────────
+   Designating a new root moves more edges than the one the reader clicked on: `setAsRoot`
+   (js/editing/edit-ops.js) re-attaches the OLD root and every token that hung off it onto the new
+   one, so each of those tokens is now describing its edge with a label chosen for a head it no longer
+   has — the old root's own `root` is merely demoted to a placeholder `udep`, which is the starkest
+   case of it. Each of them deserves exactly the question headSyncDeprel already asks for a single
+   re-heading, so this loops that one implementation rather than restating its tiers, its validation
+   or its staleness re-reads; there is no second copy to drift.
+   ⚠ SEQUENTIAL, deliberately. The FIRST call is the one that crosses the bridge for `token_scores`;
+   `tokenScores` caches on the QUESTION (forms + word classes, js/io/scores.js), and a re-labelling
+   changes neither, so every later token in the batch reads the same warm entry. Firing them in
+   parallel would gain nothing — the Python side is one GIL — and would make the write order
+   non-deterministic for no benefit.
+   ⚠ The NEW ROOT is not in the list, and must not be: its relation is `root` by the head-0 ⟺ `root`
+   rule afterHeadEdit applies with certainty, which is the same thing headSyncDeprel's own `want>=1`
+   guard says. Asking the ranking about it would be re-opening a question already answered.
+   Best-effort and no-op with no model, exactly as the single-token path: the re-root itself has
+   already landed and been drawn before this is called. */
+async function headSyncDeprels(si,ids){ let hit=false;
+  for(const id of (ids||[])){ if(await headSyncDeprel(si,id,true)) hit=true; }
+  if(hit) renderUnlessEditing();
+  return hit; }
 const GESTURE_FEATS=["Shared"];   // FEATS keys settable only via a drag gesture or keyboard shortcut — a token re-parse must preserve them, same as Gloss/MSeg/MGloss. (Subject was here too until it moved to MISC; it is preserved by the `keep` list below instead — see raiseGet/raiseSet, js/core/prefs.js.)
 /* ⚠ SUD'S OWN MISC LAYER IS DERIVED FROM A TREE — AND THIS FUNCTION THROWS THE PARSER'S TREE AWAY.
    The released SUD parsers now predict Idiom/InIdiom/Subject/Reported (app/parse.py's _SUD_MISC_KEYS), and every

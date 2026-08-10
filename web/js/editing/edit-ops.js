@@ -388,9 +388,31 @@ function setAsRoot(si,tokId){ const s=DOC[si]; if(!s||tokId<1||tokId>s.tokens.le
   if(parseInt(xt.head,10)===0 && depBase(xt.deprel)==="root")return toast("Already the root");
   const oldRoot=toks.findIndex(t=>parseInt(t.head,10)===0)+1;   // 1-based (0 = none)
   pushUndo(si); if(typeof touchColW==="function") touchColW(si,si+1);
-  toks.forEach((t,i)=>{ const id=i+1; if(id===tokId)return; if(parseInt(t.head,10)===oldRoot){ t.head=String(tokId); syncSharedFeat(t,s); } });   // migrate the old root's dependents onto the new root
-  if(oldRoot && oldRoot!==tokId){ const or=toks[oldRoot-1]; or.head=String(tokId); syncSharedFeat(or,s); if(depBase(or.deprel)==="root")or.deprel=withDepBase(or.deprel,"udep"); }   // the old root now hangs off the new one
-  xt.head="0"; syncSharedFeat(xt,s); xt.deprel=withDepBase(xt.deprel,"root");
+  /* ⚠ EVERY EDGE THIS COMMAND MOVES GOES THROUGH afterHeadEdit, WHICH IT USED TO BYPASS ENTIRELY.
+     afterHeadEdit (js/editing/validation.js) documents itself as "the one funnel every head change
+     passes through … the diagram drag, the grid's Head cell, Find & Replace over Head,
+     setAsRoot/stepHead" — and setAsRoot was the one of those that did not, having open-coded the two
+     invariants it could see (syncSharedFeat, and the old root's `root` → `udep` demotion) and none of
+     the rest. What it therefore lost was the third thing that funnel does: RE-ASKING THE PARSER FOR
+     THE RELATION, because a relation describes an EDGE and every edge listed below has just acquired
+     a different head. The reader clicks ONE node, but the old root and each of its dependents are
+     re-attached with a label chosen for the head they no longer have — most visibly the old root
+     itself, whose `udep` is a placeholder rather than an analysis. Now each of them is asked the same
+     three-tier question a hand-dragged arc is (js/io/scores.js), validated the same way, and it costs
+     nothing here but the argument.
+     ⚠ WHICH TOKENS ARE THOSE is read off the mutation itself rather than re-derived: the two branches
+     below are already exactly "the tokens whose head this command changes", so `resync` is filled
+     where the head is written and cannot fall out of step with a later change to the re-rooting rule
+     the way a separately-computed old-head/new-head diff could. NB that set is NOT the classic
+     root-to-node path reversal — this command re-parents the old root and its dependents onto the new
+     root and leaves the intervening chain alone (a token deeper in it keeps the head it had, and so
+     keeps a relation that is still true of it).
+     ⚠ DEFERRED, not fired per token: see afterHeadEdit's own note on `defer` — a call fired from the
+     first branch would be asking about a tree whose new root still has a head. */
+  const resync=[];
+  toks.forEach((t,i)=>{ const id=i+1; if(id===tokId)return; if(parseInt(t.head,10)===oldRoot){ t.head=String(tokId); afterHeadEdit(t,s,resync); } });   // migrate the old root's dependents onto the new root
+  if(oldRoot && oldRoot!==tokId){ const or=toks[oldRoot-1]; or.head=String(tokId); afterHeadEdit(or,s,resync); }   // the old root now hangs off the new one — afterHeadEdit is what demotes its `root` to `udep`
+  xt.head="0"; afterHeadEdit(xt,s);   // …and what makes the new root's relation `root`. NOT deferred and not in `resync`: head 0 is the one case answered by a rule rather than by evidence, which is what headSyncDeprel's own `want>=1` guard says, so this call is a no-op past the invariant
   // Task B: no regenTok — re-rooting is purely structural and must never trigger a gloss/MGloss recompute (see
   // the matching note on setDiagramHead, js/diagram/diagram-edit.js).
   /* ⚠ RE-ROOTING DOES NOT SELECT. Selecting a node is a READER's gesture — a click, or a rectangle
@@ -400,7 +422,8 @@ function setAsRoot(si,tokId){ const s=DOC[si]; if(!s||tokId<1||tokId>s.tokens.le
      The command is structural and says nothing about what the reader is looking at. `sel` and pick()
      are therefore left exactly as they were; only the re-render remains, which is all the screen
      needs. */
-  markDirty(); preserveScroll(renderDoc); toast(`Token ${tokId} is now the root`); }
+  markDirty(); preserveScroll(renderDoc); toast(`Token ${tokId} is now the root`);
+  if(resync.length && typeof headSyncDeprels==="function") headSyncDeprels(si,resync); }   // …AFTER the re-root has landed and been drawn: async, best-effort, one render of its own only if something actually moved, and a plain no-op with no model (guarded because js/io/bridge.js loads after this module)
 // re-attach `tokId` to the previous/next valid head in token order (dir<0 = previous) — skips itself and its own subtree
 function stepHead(si,tokId,dir){ const s=DOC[si]; if(!s||tokId<1||tokId>s.tokens.length)return; const toks=s.tokens, dep=toks[tokId-1];
   if(depBase(dep.deprel)==="root")return toast("The root has no head");

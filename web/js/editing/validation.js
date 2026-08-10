@@ -1,7 +1,7 @@
 //@module js/validation.js
 /* validation */
 // keep the root invariant coupled: a token has head 0  ⟺  its deprel is "root"
-function afterHeadEdit(t,s){ if(parseInt(t.head,10)===0) t.deprel=withDepBase(t.deprel,"root"); else if(depBase(t.deprel)==="root") t.deprel=withDepBase(t.deprel,"udep");   // (keeps any @deep tail)
+function afterHeadEdit(t,s,defer){ if(parseInt(t.head,10)===0) t.deprel=withDepBase(t.deprel,"root"); else if(depBase(t.deprel)==="root") t.deprel=withDepBase(t.deprel,"udep");   // (keeps any @deep tail)
   if(s) syncSharedFeat(t,s);   // `s` = the token's sentence — pass it whenever the caller has it, so a rehead away from a conj head drops a stale Shared=Yes
   normGoesWith(t,s);   // …and a token that is ALREADY a goeswith continuation, dragged onto a new head, is a continuation of THAT word now
   /* …AND THE RELATION IS RE-ASKED OF THE PARSER, because a relation describes an EDGE and the edge has
@@ -12,9 +12,18 @@ function afterHeadEdit(t,s){ if(parseInt(t.head,10)===0) t.deprel=withDepBase(t.
      over Head, setAsRoot/stepHead), so a new path gets it for free and none can forget.
      headSyncDeprel (js/io/bridge.js) adopts the parser's relation ONLY where the parser independently
      chose the same head — see its own note. Async, best-effort, no undo entry of its own; guarded
-     because js/io/bridge.js loads after this module. */
+     because js/io/bridge.js loads after this module.
+
+     ⚠ AND A COMMAND THAT MOVES SEVERAL HEADS AT ONCE PASSES A `defer` ARRAY, which collects the token
+     ids instead of firing one call per token. Two reasons, and neither is mere batching. (1) ORDER: a
+     re-root (setAsRoot, js/editing/edit-ops.js) rewrites three or more heads in sequence, so a call
+     fired from the FIRST of them would ask about a tree that is still half-mutated — the new root's
+     own `head` has not been zeroed yet — and headSyncDeprel's own "has the document moved?" re-read
+     would then discard the answer it just paid for. (2) ONE RENDER: each call ends in
+     renderUnlessEditing(), and renderDoc is the expensive thing in this app. The caller runs the list
+     through `headSyncDeprels` once the whole structural edit has landed and been drawn. */
   if(s && typeof headSyncDeprel==="function"){ const si=DOC.indexOf(s), tokId=s.tokens.indexOf(t)+1;
-    if(si>=0&&tokId>0) headSyncDeprel(si,tokId); } }   // …and a token that is ALREADY a goeswith continuation, dragged onto a new head, is a continuation of THAT word now: its dependents follow it there (see normGoesWith). Not a no-op even though the relation didn't change — the head did, and every consequence below hangs off the head
+    if(si>=0&&tokId>0){ if(defer) defer.push(tokId); else headSyncDeprel(si,tokId); } } }   // …and a token that is ALREADY a goeswith continuation, dragged onto a new head, is a continuation of THAT word now: its dependents follow it there (see normGoesWith). Not a no-op even though the relation didn't change — the head did, and every consequence below hangs off the head
 function afterDeprelEdit(t,s){ if(depBase(t.deprel)==="root"){ t.head="0"; if(s)syncSharedFeat(t,s); } else if(parseInt(t.head,10)===0) t.deprel=withDepBase(t.deprel,"root");
   normGoesWith(t,s); }
 /* ── ASSIGNING `goeswith` NORMALISES THE DEPENDENT ─────────────────────────────────────────────────────────────
