@@ -1103,7 +1103,9 @@ function smpReshape(root){
        no longer holds. Siddham -1 -> -1.25, Kawi 0.25 -> 0. */
     /* ⚠ ROUND SIXTEEN — "Now left by 0.5px." Switches axis on the same script (Siddham's vertical was
        the last thing touched, rounds fourteen/fifteen; this is horizontal): -1.25 -> -1.75. */
-    const ARC_SEAM_XSHIFT_PX={Siddham:-1.75, ZanabazarSquare:1, Kawi:0};
+    /* ⚠ ROUND SEVENTEEN — "Now right by 0.25px." Continues on the same script/axis as round sixteen
+       (Siddham's horizontal): -1.75 -> -1.5. */
+    const ARC_SEAM_XSHIFT_PX={Siddham:-1.5, ZanabazarSquare:1, Kawi:0};
     const boxW=Math.ceil(w+2), inArcs=(typeof conv!=="undefined"&&conv==="arcs"),
       arcSeamLift=(inArcs && typeof ORTHO_SCHEME!=="undefined" && ARC_SEAM_LIFT_PX[ORTHO_SCHEME])||0,
       drop=(inArcs?asc:((typeof foBaselineDrop==="function")?foBaselineDrop(s,f,asc):asc))+arcSeamLift,
