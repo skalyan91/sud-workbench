@@ -1716,6 +1716,14 @@
   .tbtn .sfi{width:15px; height:15px}   /* labelled toolbar buttons */
   .tbtn.icon .sfi{height:24px; width:auto; aspect-ratio:1/1}   /* fix 1/2: 24px-TALL SF-Symbol glyph, width derived from the height (aspect-ratio, not a hardcoded square) so wider glyphs aren't forced square; strokes harmonised to a consistent 1.5 across every mask */
   #notationPill .tbtn.icon .sfi{width:20px; height:20px}   /* notation Lucide icons stay 20px (scoped exception) */
+  /* item 13: #notationPill's HTML `hidden` attribute (index.html) is NOT enough on its own — both kits'
+     `.tbpill{display:inline-flex}` (mac-chrome.css/fluent-chrome.css) is an AUTHOR-origin rule, and
+     author rules beat the browser's own user-agent-origin `[hidden]{display:none}` default regardless
+     of selector specificity (origin is the FIRST cascade tiebreak, before specificity is ever
+     compared) — so the class rule was silently winning and the five real buttons stayed on screen.
+     An ID selector is still author-origin, same as `.tbpill`, but OUTRANKS it on specificity within
+     that origin, which is what actually settles it. */
+  #notationPill{display:none}
   .sctrl .sfi{width:14px; height:14px}   /* single reference box: combined with each PNG's own transparent padding this lands every glyph's ink at ~11.5px tall, so the controls read at one optical size */
   .sctrl .sfi.lg{width:15px; height:15px}   /* move up/down are landscape arrows whose ink is shorter than it is wide; a hair-larger box brings their height up to match the rest */
   .sctrl .sfi.exp{position:relative; top:-1.5px}   /* export glyph's mass sits low; nudge it up to match the others */

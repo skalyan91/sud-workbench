@@ -77,7 +77,15 @@ let DIRTY=false, DIRTY_BASE=false, DOCNAME="untitled.conllu", DOCPATH="";   // D
 document.getElementById("btnParse").onclick=()=>addTextSheet();           // single "+" → add text (parsers split into sentences)
 document.getElementById("btnGuide").onclick=()=>openHelp();               // toolbar Help button → in-app Help dialog (no longer a deep-link to the guidelines site)
 // notation pill: five round buttons drive the hidden #convSel (reusing its onchange) and show the active one
-function updateNotationPill(){ document.querySelectorAll('#notationPill [data-notation]').forEach(b=>{ b.classList.toggle("active", b.dataset.notation===notation); b.setAttribute("aria-pressed", b.dataset.notation===notation?"true":"false"); }); }
+function updateNotationPill(){ let activeIcon=null;
+  document.querySelectorAll('#notationPill [data-notation]').forEach(b=>{ const on=b.dataset.notation===notation;
+    b.classList.toggle("active", on); b.setAttribute("aria-pressed", on?"true":"false");
+    if(on){ const s=b.querySelector(".sfi"); if(s) activeIcon=s.style.getPropertyValue("--m"); } });
+  // item 13: #notationBtn's own glyph tracks the current notation — read straight off whichever hidden
+  // button is active (same "one source of truth" the dropdown's items themselves already read from,
+  // _tbGroupItems) rather than a second Feat=>icon table kept in sync by hand.
+  const trigger=document.getElementById("notationBtn"); const ts=trigger&&trigger.querySelector(".sfi");
+  if(ts&&activeIcon) ts.style.setProperty("--m",activeIcon); }
 // item 12: single switch point for the five notations — drives the hidden #convSel (reusing its onchange, which
 // sets `notation`, re-renders, saves prefs). Used by the pill buttons, the ⌘1–⌘5 keys, and the native View menu.
 function setNotation(v){ if(!v||v===notation)return; const sel=document.getElementById("convSel"); if(sel){ sel.value=v; sel.dispatchEvent(new Event("change")); } }
