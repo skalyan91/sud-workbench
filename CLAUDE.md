@@ -1394,9 +1394,16 @@ five do — follow that when adding another.
 - **`packaging/windows/make_win_app.py`** — the Windows counterpart to `make_bootstrap_app.sh`, same
   architecture (ship source + launcher, per-user venv from the user's own Python 3.12 on first
   launch, CORE deps only, heavy tiers on demand). Written in **Python, not PowerShell**, so it can be
-  read and `--dry-run`'d from macOS — which is the only way it can be exercised at all here.
-  `find_py.ps1`/`find_git.ps1`/`setup_venv.ps1`/`bootstrap.ps1` are the first-launch scripts;
-  `sud-workbench.iss` is the Inno Setup installer (per-user, unsigned).
+  read and `--dry-run`'d from macOS. **A real, non-`--dry-run` build has now been run from this
+  machine** — `python3 packaging/windows/make_win_app.py dist` against the tree at `8aa18f5`, no
+  drift found (all 14 required sources + 4 core fonts present, the dev-fixture-strip assertion still
+  holds): 20–21 file operations, a 166-file/20.7 MB payload staged at `dist/win/SUD Workbench/`, and
+  — see "Windows: what has never executed" below — a genuinely cross-compiled `.exe` rather than the
+  `.vbs` fallback. That exercises every line in the script except the two things only a Windows
+  machine can supply: winget/python.org actually installing something, and `iscc` actually compiling
+  the installer (still open). `find_py.ps1`/`find_git.ps1`/`setup_venv.ps1`/`bootstrap.ps1` are the
+  first-launch scripts, now parse-checked (not run) with a real `pwsh` — see below;
+  `sud-workbench.iss` is the Inno Setup installer (per-user, unsigned), still never compiled.
 
 ⚠️ **Each bundle ships only its own chrome kit**, and both builds fail if the other survives. For
 macOS dropping `win11-kit/` is a size decision. For Windows dropping `macos-kit/` is a **licensing**
@@ -1411,8 +1418,12 @@ rewriting those URLs as archive URLs would switch the check off by itself.
 
 ## Windows: what has never executed
 
-The Windows track was written from Microsoft's own MIT-licensed sources and **no part of it has run
-on Windows**. Treat every item below as unverified, and say so rather than implying otherwise:
+The Windows track was written from Microsoft's own MIT-licensed sources, and **no part of it has run
+ON WINDOWS** — that header claim still stands and is the one that matters. What one verification
+session changed is two of the sub-claims this section used to make about the macOS build box itself
+("no mingw-w64/zig on this machine", "no `pwsh` here, so not even a syntax check") — both corrected
+below, in place, with the measurement that supersedes each. Everything else is exactly as unverified
+as it reads, and stays that way:
 
 - **`app/win/` entirely** — DWM attributes, and whether Mica survives WebView2 at all (pywebview
   already asks DWM for it, so a failure there is WebView2 painting over it, not a missing call;
@@ -1422,10 +1433,57 @@ on Windows**. Treat every item below as unverified, and say so rather than imply
   buttons, the registry accent (ABGR→RGB) and theme reads, `%LOCALAPPDATA%` resolution,
   `DETACHED_PROCESS`, `explorer /select,`.
 - **The menubar against real keystrokes** — it renders and dismisses correctly headless, but Alt
-  focus, mnemonics under a real IME, and the accelerator dispatcher have never met Windows.
-- **All PowerShell** — no `pwsh` here, so not even a syntax check. `launcher.c` has never been
-  compiled (no mingw-w64/zig on this machine; `brew install zig` switches the build from the VBS
-  launcher to a real `.exe`). `iscc` has never run.
+  focus, mnemonics under a real IME, and the accelerator dispatcher have never met Windows. **Actual
+  first-launch behaviour of the setup scripts on a real machine — `winget` installs, the WinForms
+  progress window under WebView2's message pump, the registry accent/theme watcher — is likewise
+  still entirely unverified**; see the parse-only check below, which deliberately proves none of this.
+- ⚠️ **`launcher.c` HAS now been compiled — a real cross-compile from this machine — reversing the
+  specific claim this section used to make ("no mingw-w64/zig on this machine").** `brew install
+  mingw-w64` put `x86_64-w64-mingw32-gcc` (14.0.0_3, with its `isl` 0.28 dependency, ~1.4 GB) on
+  `PATH`, and `make_win_app.py`'s existing toolchain probe (`find_win_cc`) picked it up with **no
+  code change to either file**: `x86_64-w64-mingw32-gcc launcher.c -o "SUD Workbench.exe" -mwindows
+  -Os -municode -lshell32 -lshlwapi` produced a 158,511-byte binary, twice, byte-identical both times.
+  `file` reports it as `PE32+ executable (GUI) x86-64, for MS Windows`;
+  `x86_64-w64-mingw32-objdump -f` confirms file format `pei-x86-64`, architecture `i386:x86-64`. **What
+  this does NOT verify**: whether the `.exe` actually RUNS correctly on Windows — `wWinMain` spawning
+  `setup_venv.ps1`/`bootstrap.ps1` with the right quoting, `SHGetFolderPathW` resolving
+  `%LOCALAPPDATA%`, the `-mwindows` no-console guarantee holding in practice, the
+  `GetCommandLineW`/`CommandLineToArgvW` round-trip on a real `.conllu` path with spaces. A
+  cross-compile proves the toolchain and the source compile cleanly against real `<windows.h>`
+  headers; it cannot execute the binary it produces.
+- ⚠️ **All four `.ps1` scripts now PARSE clean, checked with a real `pwsh` — reversing "no `pwsh`
+  here, so not even a syntax check."** The plan was a `mcr.microsoft.com/powershell` Docker container;
+  Docker itself turned out to be unusable this session (see the `iscc` item below), so `brew install
+  powershell` was used instead — 7.6.4, pulling in `dotnet` 10.0.302 as a dependency, no Docker
+  involved. `[System.Management.Automation.Language.Parser]::ParseFile($path, [ref]$tokens,
+  [ref]$errors)` against each of `bootstrap.ps1` / `find_git.ps1` / `find_py.ps1` / `setup_venv.ps1`
+  returns **zero** parse errors — 696/415/303/939 tokens, 35/5/2/18 top-level statements
+  respectively. This is a SYNTAX check and nothing more, **deliberately not a run**: `Find-Py`/
+  `Find-Git` call `Get-Command`/registry-adjacent APIs that behave differently on a real Windows box,
+  `Start-Gui`'s `System.Windows.Forms` calls have never met WebView2's message pump, and no `winget`
+  exists here to actually install anything. The marker vocabulary the launcher's fast path reads
+  (`MSG`/`PROGRESS`/`DONE`) is confirmed to be well-formed PowerShell; whether it is ever actually
+  *emitted* by a live run is untested.
+- **`iscc` (Inno Setup) still has never run — the one artifact this session could not produce.** A
+  Docker-based attempt was made as planned (`amake/innosetup`, which does publish an `arm64` image
+  alongside `amd64` — confirmed via the Docker Hub API before pulling) and abandoned after it would
+  not complete: `docker pull hello-world` (a few kilobytes) timed out at 60 s, and `docker system df`
+  — a purely LOCAL metadata query, no network involved — timed out at 20 s. `docker ps`/`docker
+  images` (no daemon I/O beyond reading local state) answered instantly throughout, which narrows the
+  failure to the daemon's pull/build I/O path specifically, not the CLI, the socket, or this
+  repository. That shape — trivial local queries fast, anything touching the Docker Desktop VM's own
+  I/O hanging indefinitely — points at host resource contention (half a dozen other concurrent agent
+  worktrees were active on this same machine at the time, per `git worktree list`) rather than at
+  anything wrong with the `amake/innosetup` image, the network, or `sud-workbench.iss` itself, so the
+  door stays open on a quieter machine or after a Docker Desktop restart. In its place,
+  `sud-workbench.iss` was read in full against documented Inno Setup 6.3+ syntax — the
+  `[Setup]`/`[Languages]`/`[Tasks]`/`[Files]`/`[Icons]`/`[Registry]`/`[Run]`/`[Code]` section shape,
+  the `ArchitecturesAllowed=x64compatible` spelling 6.3 requires over the deprecated `x64`, the `#if
+  LauncherKind == "exe" #else #endif` ISPP conditionals inside the `[Code]` Pascal Script functions —
+  and found consistent with it. **That is inspection, not compilation**, and this session's own
+  `.ps1` result is the reason not to overstate what a read-through is worth: those four scripts also
+  "looked right" under inspection, and inspection is exactly what the parse-check above replaced with
+  a real answer. `sud-workbench.iss` has had no equivalent replacement.
 - **Fonts** — `system-ui` on Windows 11 probably resolves to plain Segoe UI, *not* Segoe UI Variable
   (Mozilla bug 1732404 is WONTFIX on exactly this), which is why the stack names the Variable faces
   explicitly. Unconfirmed in WebView2.
