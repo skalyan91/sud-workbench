@@ -417,25 +417,33 @@ function insertItems(si,tokId,grid){ return grid
   ? [["Insert token above","⌥⌘↑",()=>insertToken(si,tokId-1)],["Insert token below","⌥⌘↓",()=>insertToken(si,tokId)]]
   : [["Insert token left","⌥⌘←",()=>insertSpatial(si,tokId,-1)],["Insert token right","⌥⌘→",()=>insertSpatial(si,tokId,1)]]; }
 function headItems(si,tokId){ return [["Select previous head","⌃⌘[",()=>stepHead(si,tokId,-1)],["Select next head","⌃⌘]",()=>stepHead(si,tokId,1)]]; }
-// right-click a node → edit/move/insert/re-attach/set-root/delete this token (order: Edit, Move, Insert, Select head, Set as root, Delete)
+// right-click a node → edit/split-or-merge/move/insert/re-attach/set-root/delete this token (order:
+// Edit, Split/Merge, Move, Insert, Select head, Set as root, Delete)
 function nodeTokenMenu(x,y,si,tokId){ const s=DOC[si]; if(!s)return; const rtl=sentRTL(s);
+  // SPLITTING AND MERGING ARE ONE BLOCK, RIGHT AFTER EDIT — Split/Flatten/Ungroup (mwtTokenItems) and
+  // the conditional Group/Merge pair all answer the same question ("how many tokens does this
+  // orthographic word span"), so they sit together immediately below the Edit rows rather than
+  // scattered the way Move/Insert/Select-head are (mwtTokenItems used to sit after all three of
+  // those, and Group/Merge were unshifted all the way past Edit to the very top — the MWT tie's own
+  // menu, a few hundred lines up, already puts "Edit surface form" directly above its Flatten/Ungroup
+  // pair; this is the diagram node's menu catching up to that same order).
+  const combineItems=[...mwtTokenItems(si,tokId)];
+  if(selRange&&selRange.s===si&&selRange.to>selRange.from&&tokId>=selRange.from&&tokId<=selRange.to&&!rangeIsMWT(si,selRange.from,selRange.to)){
+    if(mergeIsSolid(s,selRange.from,selRange.to)) combineItems.unshift([`Merge ${selRange.from}–${selRange.to} into one token`,"⌃⌘M",()=>mergeTokens(si,selRange.from,selRange.to)]);   // only a run written with no space in it, in any language (see mergeTokens' own note); under Group, and deliberately: grouping keeps the tokens, merging destroys them, so the reversible one is offered first
+    combineItems.unshift([`Group ${selRange.from}–${selRange.to} as MWT`,"⌘G",()=>addMWT(si,selRange.from,selRange.to)]); }
   const items=[
     ["Edit token","↩",()=>editNodeInline(si,tokId)],
     ["Edit lemma…","⌘L",()=>editLemmaPrompt(si,tokId)],   // the accelerator is named now that ⌘L is the ONLY gesture besides this row — the double-click that used to open it is gone   // item 4: the same editor a double-click on the token opens — that gesture has nothing on screen to advertise it, so the command needs a menu row of its own. Ellipsis, unlike "Edit token" above: this one opens a popover rather than editing in place, which is what the ellipsis means on macOS
+    null, ...combineItems,
     null, ...moveItems(si,tokId,false),
     null, ...insertItems(si,tokId,false),
     null, ...headItems(si,tokId),
-    null, ...mwtTokenItems(si,tokId),
     null, ...markFeatRow(si,tokId),
     null, ["Set as root","⌃⌘R",()=>setAsRoot(si,tokId)],
     null, ["Delete token","⌘⌫",()=>deleteToken(si,tokId-1),true],
   ];
   const rdRow=(typeof readingsMenuItem==="function")?readingsMenuItem(si,tokId,()=>nodeTokenMenu(x,y,si,tokId)):null;   // CJK heteronyms (js/lang/readings.js) — null unless this language has alternative readings AND this token actually has more than one
   if(rdRow){ items.unshift(null); items.unshift(rdRow); }
-  if(selRange&&selRange.s===si&&selRange.to>selRange.from&&tokId>=selRange.from&&tokId<=selRange.to&&!rangeIsMWT(si,selRange.from,selRange.to)){
-    items.unshift(null);
-    if(mergeIsSolid(s,selRange.from,selRange.to)) items.unshift([`Merge ${selRange.from}–${selRange.to} into one token`,"⌃⌘M",()=>mergeTokens(si,selRange.from,selRange.to)]);   // only a run written with no space in it, in any language (see mergeTokens' own note); under Group, and deliberately: grouping keeps the tokens, merging destroys them, so the reversible one is offered first
-    items.unshift([`Group ${selRange.from}–${selRange.to} as MWT`,"⌘G",()=>addMWT(si,selRange.from,selRange.to)]); }
   const tok=s.tokens[tokId-1], lemma=tok&&((tok.lemma&&tok.lemma!=="_")?tok.lemma:tok.form);   // EITHER gloss tier can receive a dictionary sense: the lexical tier takes it whole (MISC Gloss), the morphemic one folds it in beside the grammatical abbreviations (MISC MGloss) — see applyWiktionaryDef, which writes whichever tiers are on
   /* THE DICTIONARY IS AVAILABLE WITH NO GLOSSING TIER ENABLED, on request — the tier gate ((GLOSS_ON||MORPH_ON))
      that used to be part of this condition is gone. Looking a word up is worth doing on its own, and requiring a
@@ -1614,13 +1622,21 @@ function columnMenu(x,y,si){
     false,undefined,true);
   ctx.classList.add("colmenu");   // styling hook: a smaller type size and a trailing padding that matches the checkmark gutter (see .ctx.colmenu in the kits). Added AFTER showCtx, which clears it on every open
 }
-function tokenMenu(x,y,si,idx,target){ const rng=(selRange&&selRange.s===si&&selRange.to>selRange.from&&idx+1>=selRange.from&&idx+1<=selRange.to)?selRange:null;
+// grid row menu — no "Edit" rows here (a grid cell is already its own editor, click to edit in
+// place, so a separate "Edit token" command would be redundant): Split/Merge lead the menu instead,
+// where "immediately after Edit" lands when there is no Edit row to follow — see nodeTokenMenu's own
+// note on why the two families (split/merge vs. move/insert/select-head) don't mix.
+function tokenMenu(x,y,si,idx,target){ const s=DOC[si]; const rng=(selRange&&selRange.s===si&&selRange.to>selRange.from&&idx+1>=selRange.from&&idx+1<=selRange.to)?selRange:null;
   pick(si,idx+1,false); const tokId=idx+1;
+  const combineItems=[...mwtTokenItems(si,tokId)];
+  if(rng && !rangeIsMWT(si,rng.from,rng.to)){
+    if(mergeIsSolid(s,rng.from,rng.to)) combineItems.unshift([`Merge ${rng.from}–${rng.to} into one token`,"⌃⌘M",()=>mergeTokens(si,rng.from,rng.to)]);   // the same pair the diagram's node menu offers, in the same order — Group (keeps the tokens) above Merge (does not), and Merge only across a seam the line writes solid
+    combineItems.unshift([`Group ${rng.from}–${rng.to} as MWT`,"⌘G",()=>addMWT(si,rng.from,rng.to)]); }
   const items=[
-    ...moveItems(si,tokId,true),
+    ...combineItems,
+    null, ...moveItems(si,tokId,true),
     null, ...insertItems(si,tokId,true),
     null, ...headItems(si,tokId),
-    null, ...mwtTokenItems(si,tokId),
     null, ...markFeatRow(si,tokId),
     null, ["Set as root","⌃⌘R",()=>setAsRoot(si,tokId)],
     // item 2: MISC NewPar=Yes — the paragraph that starts in the MIDDLE of a sentence, which is the one
@@ -1631,9 +1647,6 @@ function tokenMenu(x,y,si,idx,target){ const rng=(selRange&&selRange.s===si&&sel
   ];
   const rdRow=(typeof readingsMenuItem==="function")?readingsMenuItem(si,tokId,()=>tokenMenu(x,y,si,idx,target)):null;   // the same CJK heteronym flyout the diagram node menu carries (js/lang/readings.js)
   if(rdRow){ items.unshift(null); items.unshift(rdRow); }
-  if(rng && !rangeIsMWT(si,rng.from,rng.to)){ items.unshift(null);
-    if(mergeIsSolid(s,rng.from,rng.to)) items.unshift([`Merge ${rng.from}–${rng.to} into one token`,"⌃⌘M",()=>mergeTokens(si,rng.from,rng.to)]);   // the same pair the diagram's node menu offers, in the same order — Group (keeps the tokens) above Merge (does not), and Merge only across a seam the line writes solid
-    items.unshift([`Group ${rng.from}–${rng.to} as MWT`,"⌘G",()=>addMWT(si,rng.from,rng.to)]); }
   const gc=target&&target.closest("td.w-deprel, td.w-upos");   // right-clicked a DepRel/UPOS cell → offer its guidelines page
   if(gc){ const sc=gc.querySelector("select,input"), val=sc?sc.value:""; if(val&&val!=="_"){ const rel=gc.classList.contains("w-deprel");
     const url=rel?relGuideUrl(val):posGuideUrl(val);   // relGuideUrl can be null (e.g. unk) — no dedicated page, so omit the row
