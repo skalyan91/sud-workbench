@@ -157,6 +157,21 @@ def _install_theme_watcher(window) -> None:
         except Exception as exc:  # noqa: BLE001
             print(f"[linux] theme watcher: {exc}", file=sys.stderr)
 
+    # ⚠ HOOK EXACTLY ONE READINESS EVENT, NOT BOTH — this loop used to `ev += on_ready` for every
+    # name it found and never broke, so with pywebview exposing BOTH `shown` and `loaded` (the
+    # normal case) `on_ready` — and therefore `refresh()` — ran TWICE at startup, seconds or even
+    # milliseconds apart. That directly contradicts this function's own docstring ("push the
+    # current theme ONCE"), and it is not merely redundant: verified live under `xvfb-run`, the
+    # second `refresh()` firing while the first's background `evaluate_js` thread (`_push_theme`)
+    # is still in flight segfaults inside GTK's own main loop (`Gio.Application.run`) — reproduced
+    # 2/3 runs with a MINIMAL repro (`_install_theme_watcher` called on its own, no menu bar, no
+    # app code) and 0/3 runs once this loop `break`s after its first successful hook. It was also
+    # NOT just a one-time startup race: because `on_ready` re-runs `settings.connect(...)` on every
+    # firing, a double-hook meant every SUBSEQUENT live theme change under `Gtk.Settings`'
+    # `notify::` signals would have called `refresh()` twice as well, for the life of the window.
+    # `_install_menu_bar`'s own hookup (below, in `install()`) already gets this right — it checks
+    # only "shown" — so this now matches that existing pattern rather than introducing a second,
+    # divergent one.
     events = getattr(window, "events", None)
     hooked = False
     for name in ("shown", "loaded"):
@@ -164,6 +179,7 @@ def _install_theme_watcher(window) -> None:
         if ev is not None:
             ev += on_ready
             hooked = True
+            break
     if not hooked:
         on_ready()
 
@@ -191,12 +207,35 @@ _SYMBOL_KEY_NAMES = {
 }
 
 
-def _accel_mask(Gdk, mods) -> int:
-    mask = 0
+def _accel_mask(Gdk, mods):
+    """Returns a real ``Gdk.ModifierType`` flags value, NOT a bare Python ``int``.
+
+    ⚠ THIS WAS THE CAUSE OF AN INTERMITTENT ABORT ON EVERY MENU-BAR INSTALL, not a cosmetic
+    type mismatch. `int(getattr(Gdk.ModifierType, name))` (the previous body) collapses PyGObject's
+    flags type down to a plain int, and `Gtk.Widget.add_accelerator` — called from `build_menu_bar`'s
+    per-row loop, below — raises `TypeError: Expected a Gdk.ModifierType, but got int` the first time
+    a row actually has a modifier (verified live: reproduces byte-for-byte under `xvfb-run`). That
+    exception propagates out of `build_menu_bar` mid-loop, which `_install_menu_bar`'s outer
+    try/except was designed to degrade gracefully from (see its own docstring) — but several
+    `Gtk.MenuItem`/`Gtk.Menu` widgets had already been constructed and left half-wired (appended to a
+    `Gtk.Menu` that itself was never attached to the `Gtk.MenuBar`, never realized, never freed
+    cleanly) by the time the exception fires. Python then garbage-collects that orphaned widget tree
+    while GTK's own idle queue still holds live layout work queued against it, which is what the
+    'pango_layout_is_wrapped: assertion "layout != NULL" failed' → 'Gtk:ERROR
+    …gtk_label_update_layout_width: assertion failed' → SIGABRT chain further downstream actually is
+    — a USE-AFTER-FREE on the GTK/Pango side, not a second, unrelated bug. Reproduced live via the
+    real boot-check command (`timeout 8 xvfb-run -a sud-workbench --empty`): failed non-deterministically
+    with SIGSEGV or SIGABRT depending on GC/idle-queue timing before this fix, clean `exit 124`
+    (still running, the healthy signal) after it, across repeated runs.
+    Keeping `mask` as a `Gdk.ModifierType` throughout (PyGObject flags support `|=` against their own
+    enum members) is the actual fix — verified directly against pywebview's own accelerator call
+    under a real Gtk.init(), not merely inferred from the exception text.
+    """
+    mask = Gdk.ModifierType(0)
     for m in mods:
         name = _MOD_MASK_NAMES.get(m)
         if name:
-            mask |= int(getattr(Gdk.ModifierType, name))
+            mask |= getattr(Gdk.ModifierType, name)
     return mask
 
 

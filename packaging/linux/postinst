@@ -1,0 +1,20 @@
+#!/bin/sh
+# DEBIAN/postinst — refresh the desktop-integration caches this package feeds (mimetype, .desktop
+# database, icon theme) so the file association and app-grid entry are live immediately, with no
+# logout/login needed. Every call is guarded with `command -v` and `|| true`: none of these tools is
+# in DEBIAN/control's Depends (only Recommends — see make_deb.sh's own note on why), and a package
+# install must never fail because an optional desktop-integration helper happens to be absent, e.g.
+# on a minimal/headless box that has no desktop environment to integrate with at all.
+set -e
+
+if command -v update-mime-database >/dev/null 2>&1; then
+  update-mime-database /usr/share/mime >/dev/null 2>&1 || true
+fi
+if command -v update-desktop-database >/dev/null 2>&1; then
+  update-desktop-database /usr/share/applications >/dev/null 2>&1 || true
+fi
+if command -v gtk-update-icon-cache >/dev/null 2>&1; then
+  gtk-update-icon-cache -f -t /usr/share/icons/hicolor >/dev/null 2>&1 || true
+fi
+
+exit 0
