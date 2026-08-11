@@ -19,7 +19,7 @@
 16-17	Laviniaque	_	_	_	_	_	_	_	_
 16	Lavinia	lavinium	PROPN	PROPN	Case=Acc|Gender=Fem|Number=Sing	19	mod	_	_
 17	que	que	CCONJ	CCONJ	_	19	cc	_	_
-18	venit	venio	VERB	VERB	Aspect=Imp|Mood=Ind|Number=Sing|Person=3|Tense=Pres|VerbForm=Fin|Voice=Act	2	mod@relcl	_	_
+18	venit	venio	VERB	VERB	Aspect=Perf|Mood=Ind|Number=Sing|Person=3|Tense=Past|VerbForm=Fin|Voice=Act	2	mod@relcl	_	_
 19	litora	litus	NOUN	NOUN	Case=Acc|Gender=Neut|Number=Plur	11	conj:coord	_	SpaceAfter=No
 20	.	.	PUNCT	PUNCT	_	4	punct	_	_
 
