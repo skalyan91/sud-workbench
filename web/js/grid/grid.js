@@ -479,7 +479,7 @@ function renderGrid(si){
         const oldUpos=t.upos;
         if(key==="deprel"){ t.deprel=withDepBase(t.deprel,ctl.value); afterDeprelEdit(t,sent); }   // keep the "@deep" tail when the relation changes
         else if(key==="deep"){ t.deprel=withDepDeep(t.deprel,ctl.value); }                     // replace only the deep-feature tail
-        else if(key==="upos"){ t.upos=ctl.value; if(XPOS_MIRRORS_UPOS)t.xpos=ctl.value; clearSubjIfNotVA(t); uposSyncGloss(t,oldUpos); }   // item 1: a tag change away from VERB/AUX drops any now-meaningless Subj; Task B: retarget the closed-class gloss prefix IN PLACE, immediately — never a wholesale MGloss rebuild
+        else if(key==="upos"){ t.upos=ctl.value; syncXposMirror(t); clearSubjIfNotVA(t); uposSyncGloss(t,oldUpos); }   // item 1: a tag change away from VERB/AUX drops any now-meaningless Subj; Task B: retarget the closed-class gloss prefix IN PLACE, immediately — never a wholesale MGloss rebuild
         else { t[key]=ctl.value; if(key==="head")afterHeadEdit(t,sent); }   // keep head 0 ⟺ deprel "root"
         if((key==="deps"||key==="misc")&&t[key]==="")t[key]="_";   // empty Deps/Misc round-trips as "_"
         if(key==="form"){ scheduleDoc(); afterFormEdit(si,i+1,true); }
@@ -727,7 +727,22 @@ function docPairVals(col,keyName){ const set=new Set(); try{ DOC.forEach(s=>s.to
     raw.split("|").forEach(seg=>{ const eq=seg.indexOf("="); if(eq>0&&seg.slice(0,eq)===keyName)set.add(seg.slice(eq+1)); }); })); }catch(_){} return set; }   // values already paired with this key in the doc
 function acKeyItems(col){ const base=col==="feats"?Object.keys(UD_FEATS):UD_MISC_KEYS.slice();
   const out=base.slice(); docPairKeys(col).forEach(k=>{ if(!out.includes(k))out.push(k); }); return out; }   // UD inventory first, then any doc-only keys
-function acValItems(col,keyName){ if(col==="feats"&&UD_FEATS[keyName]) return UD_FEATS[keyName].slice();   // item 12: a KNOWN feature → LIMIT strictly to the official value inventory (do NOT append doc-mined values)
+// UD_FEATS[feat] narrowed to what's actually ATTESTED — either already used somewhere in this
+// document (docPairVals above), or in the ACTIVE model's own emitted-label inventory
+// (MODEL_FEATS_INVENTORY, js/io/bridge.js, refreshed on every model change — see app/parse.py's
+// model_feats_inventory for what it reads and why it's per-model rather than this UD-wide table).
+// The two menus this feeds — featPillMenu below and glossAbbrMenu, js/editing/context-menu.js —
+// used to offer the FULL UD list for a known feature regardless of relevance (Ergative on an English
+// document, say); this is the "only show attested values, and ideally what the model can emit" ask.
+// Falls back to the full list whenever nothing is attested yet (a brand-new/empty document, or no
+// model loaded and no prior use of this feature) — an empty menu would be worse than an unfiltered
+// one, and this only ever NARROWS, never invents a value neither UD nor the model recognises.
+function attestedFeatVals(feat){ const full=UD_FEATS[feat]||[]; if(!full.length) return full;
+  const attested=new Set(docPairVals("feats",feat)); (MODEL_FEATS_INVENTORY[feat]||[]).forEach(v=>attested.add(v));
+  if(!attested.size) return full;
+  const out=full.filter(v=>attested.has(v));
+  return out.length?out:full; }
+function acValItems(col,keyName){ if(col==="feats"&&UD_FEATS[keyName]) return attestedFeatVals(keyName);   // item 12: a KNOWN feature → LIMIT to the official inventory, narrowed further to what's attested (see attestedFeatVals) — never append EXTRA doc-mined values beyond that inventory
   const inv=col==="feats"?[]:(UD_MISC_VALS[keyName]||[]);   // unknown FEATS key → no inventory; MISC → its small inventory
   const out=inv.slice(); docPairVals(col,keyName).forEach(v=>{ if(!out.includes(v))out.push(v); }); return out; }   // then doc-only values (the fallback for an unknown feature / free-text MISC key)
 /* Reuse the shared floating dropdown (_acMenu / acEl / acPos / acHi / acFill) for a caller-owned completion:
@@ -823,6 +838,7 @@ function buildFeatEditor(td,sent,t,si,i,key){
     t[key]=next;
     if(next!==cur){ box._edited=true; touchColW(si,si+1); }   // widen the column-width cache for this sentence — see the cache note above computeColW   // a REAL change, not just a re-serialisation — gates the MSeg ITRANS conversion on blur (see msegFix), for the same reason the plain cells gate theirs on ctl._edited
     if(key==="feats"&&next!==cur){ featsSyncGloss(t,cur);   // the OTHER half of the bidirectional MGloss↔FEATS sync — retarget an existing gloss abbreviation to match the FEATS value that just changed (a no-op when no morphemic tier is on)
+      syncXposMirror(t);
       markDirty(); preserveScroll(renderDoc); }   // ANY feats change re-renders — not just ones that happened to touch the gloss sync — so Shared=Yes/Subj=… edits made here show up in the diagram (ghost edges, "shared" pill, …) immediately, not just on the next unrelated render
     else if(key==="misc"&&next!==cur){ markDirty(); preserveScroll(renderDoc); } };   // item 4: a MISC change (SpaceAfter → punctuation merge/spacing, CorrectForm, Reported, …) affects the diagram, so re-render at once
   // — pill interaction (click=edit immediately · drag=reorder · right-click a FEATS key/value=alternatives menu) —

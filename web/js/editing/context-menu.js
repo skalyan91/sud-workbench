@@ -350,9 +350,10 @@ function posSubItems(si,tokId,U){ const s=DOC[si], t=s&&s.tokens[tokId-1]; if(!t
   const feats=subtypeFeatsFor(U); if(!feats.length) return null;
   const curOf=f=>t.upos===U?(getFeat(t.feats,f)||""):"";
   const setSub=(f,v)=>{ closeCtx(); const before=t.feats; pushUndo(si);
-    if(t.upos!==U){ t.upos=U; if(XPOS_MIRRORS_UPOS)t.xpos=U; clearSubjIfNotVA(t); }   // item 1: a tag change away from VERB/AUX drops any now-meaningless Subj
+    if(t.upos!==U){ t.upos=U; clearSubjIfNotVA(t); }   // item 1: a tag change away from VERB/AUX drops any now-meaningless Subj
     feats.forEach(o=>{ if(o!==f) t.feats=clearFeat(t.feats,o); });   // one subtype at a time — picking PRON.Dem drops a stale PRON.Int rather than leaving the token claiming both
     t.feats=(f&&v)?setFeat(t.feats,f,v):t.feats;
+    syncXposMirror(t);   // covers both halves above — a UPOS change and/or the subtype FEATS just set
     featsSyncGloss(t,before); markDirty(); preserveScroll(renderDoc); };   // item 10: NO regenTok — this is a feature edit, and reparsing would overwrite the very feature just set (and any other hand-edited ones)
   const items=[];
   feats.forEach(f=>{ const cur=curOf(f), vals=UD_FEATS[f]||[];
@@ -370,6 +371,7 @@ function posMenu(x,y,si,tokId,opts){ opts=opts||{}; const s=DOC[si]; if(!s)retur
     const cur=extPosOf(t), sp=subtreeSpan(s,target);
     const choose=P=>{ const nv=(P===cur)?"":P; const before=t.feats; pushUndo(si);   // re-picking the current tag clears ExtPos (toggle) — the menu's way to remove it
       t.feats=nv?setFeat(t.feats,"ExtPos",nv):clearFeat(t.feats,"ExtPos");
+      syncXposMirror(t);
       featsSyncGloss(t,before); markDirty(); preserveScroll(renderDoc); };   // items 3/10: feature edit only, re-renders at once, no reparse
     const guide=[`Open the guidelines for the “ExtPos” feature`,"↗",()=>openExternal(featGuideUrl("ExtPos"))];
     optionMenu(x,y,SETTINGS.upos.slice(),UPOS_CATS,r=>UPOS_INFO[r]||"",cur,choose,guide,rtl,null,null,null,
@@ -380,7 +382,7 @@ function posMenu(x,y,si,tokId,opts){ opts=opts||{}; const s=DOC[si]; if(!s)retur
   const subFor=U=>()=>posSubItems(si,tokId,U);   // item 4: every tag gets a right-click submenu of its own dot-suffixed subtypes
   const choose=p=>{ const posChanged=p!==tok.upos, hadSub=UPOS_SUBTYPE_FEATS.some(f=>getFeat(tok.feats,f));
     if(!posChanged&&!hadSub) return;   // same tag, no subtype to drop → nothing to do
-    const before=tok.feats, oldUpos=tok.upos; pushUndo(si); tok.upos=p; if(XPOS_MIRRORS_UPOS)tok.xpos=p; clearSubjIfNotVA(tok);   // item 1: a tag change away from VERB/AUX drops any now-meaningless Subj
+    const before=tok.feats, oldUpos=tok.upos; pushUndo(si); tok.upos=p; syncXposMirror(tok); clearSubjIfNotVA(tok);   // item 1: a tag change away from VERB/AUX drops any now-meaningless Subj
     UPOS_SUBTYPE_FEATS.forEach(f=>tok.feats=clearFeat(tok.feats,f));   // item 6: selecting a PLAIN tag clears any dot-suffixed subtype
     featsSyncGloss(tok,before);
     if(posChanged) uposSyncGloss(tok,oldUpos);   // Task B: retarget the closed-class gloss prefix IN PLACE, immediately — never a wholesale MGloss rebuild (see uposSyncGloss's own note, js/io/bridge.js)
@@ -560,6 +562,7 @@ function applyWiktionaryDef(si,tokId,text,genderUd,genderAbbr){ const s=DOC[si],
     // of MGloss, and on this path nothing ever wrote one.
     if(genderUd) t.feats=setFeat(t.feats,"Gender",genderUd);
     else if(bare) t.feats=clearFeat(t.feats,"Gender");   // …and an uninflected form has its stale gender stripped, exactly as on the morphemic path below
+    syncXposMirror(t);
     markDirty(); preserveScroll(renderDoc);
     toast(genderUd?"Definition and gender applied":"Definition set as gloss"); return; }
   const dotted=enc.replace(/\s+/g,"_");   // Leipzig convention: an UNDERSCORE joins the several English words that gloss ONE morpheme (a dot is reserved for an actual morpheme boundary — see the "." joins below). Just the lexical stem now — gender no longer rides along with it
@@ -584,6 +587,7 @@ function applyWiktionaryDef(si,tokId,text,genderUd,genderAbbr){ const s=DOC[si],
     :                   dotted+"."+abbrevs);  // no attachment hyphen → one morpheme, dot-joined
   mglossSyncFeats(t);   // sets/updates FEATS Gender from the abbreviation just folded into MGloss (glossToFeats resolves M/F/N/CG unambiguously, no UPOS needed)
   if(bare) t.feats=clearFeat(t.feats,"Gender");   // …and on an uninflected form, drops it: mglossSyncFeats only writes the features the gloss NAMES, so a Gender whose abbreviation was just removed above would otherwise sit on in FEATS unmentioned
+  syncXposMirror(t);
   markDirty(); preserveScroll(renderDoc);
   toast(genderUd?"Definition, gender, and morphemic gloss applied":(GLOSS_ON?"Definition set as gloss and applied to the morphemic gloss":"Definition applied to the morphemic gloss")); }
 // Resolve a right-click inside a BRACKETS diagram (flat SVG or wrapped .bwrap) to a token element.
@@ -642,9 +646,12 @@ function openPosRelMenu(hit,x,y,shift){ const tk=tokFromEl(hit.relEl||hit.posEl)
    included), so a mapping the reader has edited in Gloss Mappings shows up in this menu unprompted.
    WHICH feature the run belongs to is mglossFeatNameFor's answer, UPOS and all, so an ambiguous
    abbreviation lands on the same reading the autocomplete and the FEATS back-sync give it.
-   Values are listed in UD's OWN ORDER (UD_FEATS) rather than alphabetically — Sing before Plur, Nom
-   before Acc — with anything only the custom map knows trailing after; each row shows the value's gloss
-   (FEATS_VDESC) beside its abbreviation, and the current one carries the tick.
+   Values are NARROWED TO WHAT'S ATTESTED (attestedFeatVals, js/grid/grid.js) — already used somewhere
+   in this document, or in the active model's own emitted-label inventory (MODEL_FEATS_INVENTORY) —
+   before being listed in UD's OWN ORDER (UD_FEATS) rather than alphabetically — Sing before Plur, Nom
+   before Acc — with anything only the custom map knows trailing after (never narrowed: a mapping the
+   reader hand-added in Gloss Mappings is offered unconditionally, the whole point of adding one); each
+   row shows the value's gloss (FEATS_VDESC) beside its abbreviation, and the current one carries the tick.
    MORPHEMIC TIER ONLY. The lexical Gloss tier renders abbreviation runs the same way, but a Gloss is a
    word's MEANING and its capitals are not a paradigm slot — there is nothing there for a list of
    alternative values to be alternatives to. */
@@ -653,7 +660,7 @@ function glossAbbrMenu(x,y,si,tokId,idx,ab){
   const feat=(typeof mglossFeatNameFor==="function")?mglossFeatNameFor(ab,t.upos):null; if(!feat) return false;
   const seen=new Set(), rows=[];
   const add=v=>{ if(!v||seen.has(v))return; const a=EFF_FEATS_GLOSS[feat+"="+v]; if(!a)return; seen.add(v); rows.push({v,ab:a}); };
-  ((typeof UD_FEATS==="object"&&UD_FEATS&&UD_FEATS[feat])||[]).forEach(add);                       // UD's canonical order first…
+  ((typeof attestedFeatVals==="function"&&attestedFeatVals(feat))||[]).forEach(add);                // attested-first, UD's canonical order otherwise (see attestedFeatVals, js/grid/grid.js) — never an unfiltered "everything UD defines"…
   Object.keys(EFF_FEATS_GLOSS).forEach(fv=>{ if(fv.indexOf(feat+"=")===0) add(fv.slice(feat.length+1)); });   // …then any value only the (possibly customised) map knows about
   if(rows.length<2) return false;   // a one-value feature (Poss=Yes, Reflex=Yes) offers no alternative — fall through to the ordinary token menu rather than opening a list of one
   const desc=(typeof FEATS_VDESC==="object"&&FEATS_VDESC&&FEATS_VDESC[feat])||{};
@@ -675,6 +682,7 @@ function setGlossAbbrevAt(si,tokId,idx,ab){ const s=DOC[si]; if(!s)return; const
   pushUndo(si); if(typeof touchColW==="function") touchColW(si,si+1);   // the MISC column's widest chip can change with the value
   t.misc=setMiscKV(t.misc,TIER_MISC.mgloss,glossEnc(next));
   mglossSyncFeats(t);
+  syncXposMirror(t);
   markDirty(); preserveScroll(renderDoc); }
 document.getElementById("doc").addEventListener("contextmenu",e=>{
   const abEl=e.target.closest&&e.target.closest(".glabbr");   // BEFORE every other resolver: a .glabbr sits inside the gloss row, which sits inside the token group the generic node branch below would otherwise claim
@@ -840,7 +848,7 @@ function editTier(si,tokId,tier,clickXY){ const s=DOC[si]; if(!s||tokId<1||tokId
   // speaks only for the segmentation itself and leaves FEATS alone. What a regrouping implies runs from renderDoc
   // instead — see msegFlagSent.
   const after=changed=>{ if(!changed){ preserveScroll(renderDoc); return; }   // item 1: opening a gloss field and leaving it as it was changes nothing, so it dirties nothing
-    if(tier==="mgloss") mglossSyncFeats(tk);
+    if(tier==="mgloss"){ mglossSyncFeats(tk); syncXposMirror(tk); }
     /* AN MSeg EDIT IS ALSO A STATEMENT ABOUT THE WORD, not only about where its morphemes divide: strip
        the boundary hyphens and what is left is the word itself. Writing that back is the inverse of
        msegPrefillParts, which is what DERIVES the segmentation — so the same test decides the target.

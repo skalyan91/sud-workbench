@@ -764,6 +764,51 @@ def parse(text: str, model_id: str = "") -> dict:
                 "reason": str(exc)}
 
 
+def model_feats_inventory(model_id: str) -> dict:
+    """``{FeatName: sorted[values...]}`` — every ``Feat=Val`` pair the model's own morphologizer can
+    JOINTLY emit alongside *any* word class, read straight off ``morphologizer.labels`` (the same
+    joint ``POS=X|Feat1=Val1|...`` label list :func:`_force_upos`/:func:`_upos_scores` already read —
+    see either's own comment for what that string actually looks like).
+
+    THIS IS THE "what does THIS model actually say", not the UD-wide reference table
+    ``app/data/feats_inventory.json`` already ships (that one lists every value UD *defines*, for
+    every language, independent of any model this app can load). A menu built from the UD-wide table
+    alone can offer a value no installed model has ever produced (Ergative on an English model, say);
+    this narrows it to what's actually reachable — the frontend intersects this with the UD table and
+    with what's already IN the document, never uses it alone (a raw label inventory carries no
+    human-friendly value descriptions, and mixing UNDOCUMENTED values into a menu would be its own
+    kind of wrong).
+
+    Empty dict, never raises, for: an unresolvable/unloadable model id, a Stanza model (a separate
+    external process this app doesn't run label-introspection against — the frontend's own doc-mined
+    fallback already covers that case), or a model whose pipeline carries no ``morphologizer`` at all.
+    Cheap to call repeatedly: :func:`_load_spacy` caches the loaded pipeline, and reading a component's
+    own ``.labels`` triggers no inference."""
+    if not model_id:
+        return {}
+    engine, _, name = model_id.partition(":")
+    if engine != "sud":
+        return {}   # Stanza's label inventory isn't introspectable this way — see docstring
+    if not name:
+        return {}
+    try:
+        nlp = _load_spacy(name)
+        morphologizer = nlp.get_pipe("morphologizer")
+    except Exception:  # noqa: BLE001 — model not installed, or a pipeline shaped without this component
+        return {}
+    from spacy.morphology import Morphology
+    out: dict[str, set] = {}
+    try:
+        for lab in morphologizer.labels:
+            feats = Morphology.feats_to_dict(lab)
+            feats.pop("POS", None)
+            for k, v in feats.items():
+                out.setdefault(k, set()).add(v)
+    except Exception:  # noqa: BLE001 — a morphologizer shaped differently than expected
+        return {}
+    return {k: sorted(v) for k, v in out.items()}
+
+
 def _force_upos(morphologizer, doc, upos) -> None:
     """Re-derive each token's FEATS **for the word class the reader chose**, in place.
 

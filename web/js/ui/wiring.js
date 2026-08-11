@@ -187,7 +187,7 @@ document.getElementById("modelSel").onchange=e=>{ model=e.target.value; const la
   setLang(modelLang(model));   // language follows the model → updates the status pill and RTL
   toast(model?`Model: ${label} · ${langName(DOCLANG)||"?"}`:"Manual annotation · whitespace tokeniser");
   if(DOC.length) preserveScroll(renderDoc);   // re-lay-out in case the language flipped LTR/RTL
-  if(show.translit) fillTranslit(); syncMenu(); };
+  if(show.translit) fillTranslit(); syncMenu(); refreshModelFeatsInventory(); };   // async, fire-and-forget — the FEATS-value/gloss menus just fall back to the UD-wide table until it resolves
 // — status-bar language picker: the language indicator always opens a searchable list of every ISO 639-3
 //   language (name + 2-/3-letter codes). Filters by name OR either code; ↑/↓ + Enter, or click. Selecting a
 //   language sets DOCLANG (via applyLang) and auto-switches the parser model to match it (or None).

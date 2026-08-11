@@ -1567,6 +1567,34 @@ function detectXposMirrorsUpos(){
   DOC.forEach(s=>s.tokens.forEach(t=>{ const x=t.xpos; if(x&&x!=="_"){ anyXpos=true; if(!uposSet.has(x))allSubset=false; } }));
   XPOS_MIRRORS_UPOS=anyXpos&&allSubset;
 }
+// Recompute XPOS whenever UPOS OR FEATS changes — called from every UPOS-edit and every general-
+// FEATS-edit site (posMenu/posSubItems/grid's commitCell for UPOS; buildFeatEditor's serialize,
+// extPosMenu, applyWiktionaryDef, setGlossAbbrevAt, editTier's mgloss branch for FEATS — see each's
+// own call site). There is exactly ONE thing here to recompute FROM: XPOS_MIRRORS_UPOS's own "this
+// doc's XPOS column is nothing but a copy of UPOS" detection. Nothing else in this app — nor in the
+// SUD-spaCy models it drives — can answer "what should XPOS be" from UPOS+FEATS: XPOS comes from
+// spaCy's own `tagger` component, a flat ~49-tag Penn-Treebank-style inventory scored independently
+// of (and, in the pipeline, run BEFORE) the morphologizer that predicts UPOS+FEATS — confirmed by
+// loading the shipped model directly and inspecting `tagger.labels` (no POS/FEATS structure at all)
+// against `morphologizer.labels` (the joint POS=X|Feat=Val labels _force_upos already reads). So a
+// genuine language-specific XPOS tagset (`XPOS_MIRRORS_UPOS===false`) is left exactly as it was —
+// there is no rule this app or its models could apply — and only the mirror case has anything
+// defensible to recompute. Idempotent and cheap either way: safe to call unconditionally.
+function syncXposMirror(t){ if(XPOS_MIRRORS_UPOS) t.xpos=t.upos; }
+// {FeatName:[values...]} the ACTIVE model's own morphologizer can jointly emit — see
+// app/parse.py's model_feats_inventory for what this reads (morphologizer.labels, the SAME joint
+// POS=X|Feat=Val label list _force_upos constrains against) and why it's per-MODEL rather than the
+// UD-wide reference table (app/data/feats_inventory.json) every FEATS-value/gloss-abbreviation menu
+// already draws its full candidate list from. {} = no model selected, a Stanza model (not
+// introspectable this way), or the fetch failed — every caller (attestedFeatVals, js/grid/grid.js)
+// already degrades to "show everything UD defines" when this is empty, so a blank object is a safe
+// default, not a state anything needs to special-case.
+let MODEL_FEATS_INVENTORY={};
+async function refreshModelFeatsInventory(){
+  if(!hasBridge()||!model){ MODEL_FEATS_INVENTORY={}; return; }
+  try{ MODEL_FEATS_INVENTORY=await window.pywebview.api.model_feats_inventory(model)||{}; }
+  catch(e){ MODEL_FEATS_INVENTORY={}; }
+}
 // item 7: the Glossing drawer's two checkboxes toggle the tiers. Checking creates+shows (undoable);
 // unchecking DELETES the tier, confirming ONLY when it has data. All undoable via snap() (captures the flags + MISC).
 async function setTier(kind,on){ const flag=kind==="gloss"?GLOSS_ON:MORPH_ON; if(on===flag){ syncGlossUI(); return; }

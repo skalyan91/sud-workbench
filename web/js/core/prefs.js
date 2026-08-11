@@ -82,7 +82,7 @@ function syncModelToLang(lang){ const selEl=document.getElementById("modelSel");
   if(model && modelLang(model)===lang) return;   // current parser already speaks this language → leave it
   const id=lang?(MODELLANG[lang]||""):"";        // an installed model whose language matches (MODELLANG is keyed by the same UD code form), else None
   model=id; if(selEl){ selEl.value=id; if(selEl.value!==id){ model=""; selEl.value=""; } }   // programmatic .value assignment does NOT fire onchange → no reentrancy
-  syncMenu(); }   // model gained/lost may flip the sentence's RTL-derived menu state
+  syncMenu(); if(typeof refreshModelFeatsInventory==="function") refreshModelFeatsInventory(); }   // …and since onchange never fires here, this IS the choke point for a programmatic model change (js/io/bridge.js) — #modelSel's own onchange (js/ui/wiring.js) covers the manual pick
 let MODELLANG={};   // language code → an installed model id, for auto-selecting a parser when a file is opened
 // Language authority order (see maybeAutoDetectLang): (1) a filename `<langcode>_…` prefix pins the
 //  language and overrides everything; else (2) the Kyoto XPOS ⇒ lzh heuristic; else (3) fastText. The chosen

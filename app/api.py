@@ -872,6 +872,13 @@ class Api:
         `parse._force_upos`."""
         return parse.parse_pretokenized(forms or [], model_id, upos or None)
 
+    def model_feats_inventory(self, model_id: str = "") -> dict:
+        """``{FeatName: [values...]}`` the given model's own morphologizer can jointly emit — see
+        `parse.model_feats_inventory`. The FEATS-value and glossing-abbreviation context menus
+        intersect this with the UD-wide reference table and the document's own attested values, so a
+        menu never offers a value neither the document nor the active parser has ever produced."""
+        return parse.model_feats_inventory(model_id or "")
+
     def token_scores(self, forms: list[str], model_id: str = "",
                      upos: list[str] | None = None) -> dict:
         """The pipeline's RUNNERS-UP for one sentence — what it ranked second, and by how much.
