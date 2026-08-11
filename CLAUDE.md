@@ -1416,6 +1416,38 @@ a machine without git fails inside pip. macOS almost always has git; Windows nev
 box, which is why `find_git.ps1` exists. It derives the need by *parsing* the requirements files, so
 rewriting those URLs as archive URLs would switch the check off by itself.
 
+### Linux (`.deb`, `.rpm`) and Nix — all three real, built and verified via Docker on this machine
+
+Same architecture as macOS/Windows for the two distro packages — ship source, bootstrap a per-user
+venv from the target machine's own `python3.12` on first launch, CORE deps only — deliberately
+**not** used for the Nix flake, whose whole point is a hermetic build with every dependency, Python
+included, resolved by Nix itself.
+
+- **`packaging/linux/make_deb.sh`** + **`README.md`** — built and verified with real `dpkg-deb`/
+  `apt install` inside fresh `ubuntu:24.04` containers. Found and fixed two real crash bugs in
+  `app/linux/shell.py` (a double-hooked GTK theme-watcher event, a `Gdk.ModifierType` collapsed to a
+  bare `int`) and the documented WebKitGTK ≥2.42 headless-rendering fix
+  (`WEBKIT_DISABLE_DMABUF_RENDERER=1`). See that README for the full account, including the one
+  known-and-not-fixed issue (an intermittent `app/api.py` `_apply_menu` GTK thread-safety crash,
+  shared with macOS, out of packaging's remit).
+- **`packaging/linux/make_rpm.sh`** + **`sud-workbench.spec`** + **`README-rpm.md`** — built and
+  verified with real `rpmbuild`/`dnf install` inside fresh `fedora:41` containers, 5/5 clean
+  `timeout 8 xvfb-run -a sud-workbench --empty` boot-checks. Reuses the `.deb` worktree's two
+  `shell.py` fixes; its own distinct finding is that Fedora 41's default `python3` is 3.13 with no
+  `python3.12`-targeted PyGObject build at all, so `--system-site-packages` cannot see `gi` — the
+  spec instead declares the C-toolchain `Requires:` (`python3.12-devel`, `gcc`,
+  `gobject-introspection-devel`, `cairo-gobject-devel`, `pkgconf-pkg-config`) and lets PyGObject/
+  pycairo compile from source against the pinned interpreter at first launch. See that README for
+  the full four-bug account and the file-naming reconciliation against the `.deb` build (three
+  filenames collided with genuinely different content; the RPM's own copies are `find_py-rpm.sh`/
+  `setup_venv-rpm.sh` at the repo level, installed at the ordinary runtime paths).
+- **`flake.nix`** — a hermetic `python312Packages.buildPythonApplication`, Linux/NixOS-only,
+  CORE-only, with nixpkgs pinned to a revision matching `spacy==3.8.14` and 14 PyPI wheels
+  hand-packaged as Nix derivations (`wiktra` via `fetchgit`). `nix build .#default -L` verified to
+  exit 0 for real inside the official `nixos/nix` container. Unlike the two distro packages this
+  does **not** use the venv-bootstrap model — everything is resolved and built by Nix at
+  package-build time, which is the point of packaging it this way at all.
+
 ## Windows: what has never executed
 
 The Windows track was written from Microsoft's own MIT-licensed sources, and **no part of it has run
