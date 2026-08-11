@@ -9,6 +9,10 @@ dist/
 # macOS
 .DS_Store
 
+# `nix build`'s own output symlink (packaging/nix flake) — points into /nix/store, not source.
+result
+result-*
+
 # The grew OCaml backend: a compiled, architecture-specific binary that
 # tools/bundle_grew.sh reproduces, and which app/convert.py treats as an
 # optional prerequisite (falling back to ~/.opam, and degrading to
