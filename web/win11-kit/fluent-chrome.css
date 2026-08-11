@@ -197,6 +197,15 @@
   #btnModels .sfi,#btnGuide .sfi{width:20px; height:20px}
   .tbtn.model{width:auto; padding:0 10px; gap:4px; border-radius:var(--r-control)}
   .tbtn.model .chev{width:9px; height:6px; opacity:.6; flex:none}
+  /* item 14: the notation trigger shows a persistent current selection (item 13's dynamic icon), same as
+     select.sel and the Save As "Where" button — both already draw Fluent's own single ChevronDown glyph
+     (--fluent-chevron-down, fluent-tokens.css; see that token's own comment for why it's one chevron here
+     and macOS's --sf-updown pair is a mac-only distinction). Grows from the 32px icon square into an
+     auto-width capsule to fit the chevron beside the glyph, the same way #btnOptions overrides that shared
+     box above. */
+  #notationBtn.tbtn.icon{width:auto; min-width:0; padding:0 8px; gap:4px; border-radius:var(--r-control)}
+  .chevupdown{width:9px; height:9px; flex:none; opacity:.6; background-color:currentColor;
+    -webkit-mask:var(--fluent-chevron-down) no-repeat center/contain; mask:var(--fluent-chevron-down) no-repeat center/contain}
   .tblabel{display:none; font-weight:var(--fw-normal); color:var(--label-primary); line-height:1; white-space:nowrap}
   .pilllabel{display:none; margin-top:2px; font-size:var(--fs-caption); line-height:var(--lh-caption);
     font-weight:var(--fw-normal); color:var(--label-secondary); text-align:center; white-space:nowrap;

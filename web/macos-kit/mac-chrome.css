@@ -345,6 +345,17 @@
   /* model chevron button: icon + a small disclosure chevron opening the model menu */
   .tbtn.model{width:auto; padding:0 9px; gap:3px; border-radius:999px}
   .tbtn.model .chev{width:9px; height:6px; opacity:.5; flex:none}
+  /* item 14: the notation trigger reads as a native macOS POP-UP button — it shows a persistent CURRENT
+     SELECTION among five mutually exclusive notations (the dynamic icon item 13's fix gave it), the same
+     "the glyph IS the picked value" semantic select.sel and .wherechev already carry — not a one-shot
+     pull-down ACTION (.tbtn.model .chev, just above, which per HIG gets the single chevron.down instead).
+     So it takes the shared up/down disclosure class those two already draw from --sf-updown (mac-tokens.css),
+     rather than inventing a third chevron shape. Needs the chevron to sit beside the icon rather than inside
+     a square, so — the same way #btnOptions overrides that shared box above — it grows from the 30px icon
+     square into an auto-width capsule. */
+  #notationBtn.tbtn.icon{width:auto; min-width:0; padding:0 8px; gap:4px; border-radius:999px}
+  .chevupdown{width:8px; height:12px; flex:none; opacity:.5; background-color:currentColor;
+    -webkit-mask:var(--sf-updown) no-repeat center/contain; mask:var(--sf-updown) no-repeat center/contain}
   /* zoom stepper (a pill: − 100% +) moved into the titlebar */
   .tbzoom{gap:4px; padding:3px}   /* padding follows the shared .tbpill 4px→3px (this pill RESTATES it, so it must be changed here too or the zoom pill keeps the old 5px of visible inner air while every other pill has 4) */   /* HALVED with the shared .tbpill gap (8 → 4) — this pill RESTATES the value rather than inheriting it, which is why halving .tbpill alone left the zoom and model pills wide. If you change one of the three, change all three. */   /* fix 12: gap matched every other pill; room around the − ⃒ actual-size ⃒ + separators. item 1: follows the shared .tbpill gap up to 8px (redundant, like .tbmodel's — .tbzoom is always also a .tbpill — but restated so this pill's spacing stays legible beside its other overrides); it carries TWO separators, so it was the most cramped of the lot */
   .tbzoom .tbtn.icon{width:32px; height:30px}   /* +1px per side with the shared .tbtn.icon above (was 30×28); this pill restates both dimensions, so it has to move with it or its three steppers stay short inside a pill sized for 30px buttons */
@@ -409,6 +420,14 @@
   .fpitem .sfi{width:15px; height:15px; flex:none; opacity:.9}
   .fpitem:hover .sfi{background-color:#fff}
   .fpitem .fpimg{width:16px; height:16px; flex:none; object-fit:contain}   /* native NSWorkspace folder icon */
+  /* item 14: a row's trailing keyboard shortcut (e.g. the notation dropdown's ⌘1–⌘5, openTbGroupMenu) — the
+     label takes all the free width so the shortcut lands flush at the row's trailing edge, exactly like a
+     real NSMenu, rather than trailing the label text mid-row. Dimmed secondary ink, same rule .ctx button's
+     own .kbd/.expand column already uses; on hover it whitens onto the accent fill the same way, at the same
+     .72 opacity, rather than a second colour of its own. */
+  .fpitem .fplabel{flex:1 1 auto; min-width:0}
+  .fpitem .fpkbd{flex:none; margin-inline-start:16px; color:var(--label-tertiary); font-size:12px; direction:ltr; unicode-bidi:isolate}
+  .fpitem:hover .fpkbd{color:#fff; opacity:.72}
   /* native-feeling macOS popup button: rounded field, system font, a trailing double-chevron and a diffuse lift shadow */
   select.sel{appearance:none; -webkit-appearance:none; height:30px; border-radius:8px; border:.5px solid var(--pill-border); cursor:pointer;
     background-color:var(--field-bg); color:var(--text); font:inherit; font-size:13px; font-weight:500; padding:0 28px 0 11px;

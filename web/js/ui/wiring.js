@@ -166,6 +166,12 @@ window.__tbContextMenu=openTbMenu;   // the native drag overlay forwards its rig
 function _tbGroupIsMenu(pill){ if(pill.classList.contains("tbmodel")||pill.classList.contains("tbzoom")) return true;
   return pill.querySelectorAll(".tbtn").length>1; }
 function _sfMask(el){ const s=el&&el.querySelector(".sfi"); return s?s.style.getPropertyValue("--m"):""; }   // item 2: the toolbar button's own SF-Symbol / Lucide-view mask (e.g. var(--sf-undo), var(--sf-nstemma)), reused as the menu row's leading icon
+// item 14: the five notations' keyboard shortcuts, exactly as bound in the native View menu (app/menu_spec.py,
+// "the five diagram notations, bound to ⌘1–⌘5") — hardcoded here rather than read off the menu spec because
+// nothing currently pipes that Python table into the web layer; a literal five-entry map is the whole surface
+// there is to keep in sync if a binding ever moves. Plain macOS glyphs: openTbGroupMenu's own localiseAccel(m)
+// call already sweeps .fpkbd spans for Windows, so this map never has to know about Ctrl+ notation itself.
+const NOTATION_ACCEL={stemma:"⌘1", tree:"⌘2", arcs:"⌘3", brackets:"⌘4", outline:"⌘5"};
 function _tbGroupItems(pill){
   if(pill.classList.contains("tbmodel")){ const sel=pill.querySelector("#modelSel"), items=[];
     if(sel) Array.from(sel.options).forEach(o=>items.push({label:o.textContent, checked:o.value===sel.value, action:()=>{ sel.value=o.value; sel.dispatchEvent(new Event("change")); }}));
@@ -177,7 +183,8 @@ function _tbGroupItems(pill){
     {label:"Zoom In", icon:_sfMask(zb("fsUp")), action:()=>zb("fsUp").click()} ]; }
   return Array.from(pill.querySelectorAll(".tbtn")).map(btn=>({
     label:((btn.querySelector(".tblabel")||{}).textContent)||btn.getAttribute("title")||"", icon:_sfMask(btn),
-    checked:btn.classList.contains("active"), disabled:btn.disabled, action:()=>btn.click() })); }
+    checked:btn.classList.contains("active"), disabled:btn.disabled, kbd:NOTATION_ACCEL[btn.dataset.notation]||"",
+    action:()=>btn.click() })); }   // kbd is "" for every non-notation pill (no dataset.notation → the lookup misses), so this is a no-op there
 function openTbGroupMenu(items,x,y){ closeTbMenu(); _tbPass(true);   // item 3: click-through drag overlay so the menu opens at the label and its rows stay clickable
   const m=document.createElement("div"); m.className="fpmenu tbmodemenu tbgroupmenu"; _tbMenu=m;
   if(!items.some(it=>it&&it.checked)) m.classList.add("tb-nochk");   // item 4: no checked row → collapse the leading checkmark gutter (no dead left margin)
@@ -185,7 +192,8 @@ function openTbGroupMenu(items,x,y){ closeTbMenu(); _tbPass(true);   // item 3: 
     const b=document.createElement("button"); b.type="button"; b.className="fpitem";
     const ck=document.createElement("span"); ck.className="fpcheck"; ck.textContent=it.checked?"✓":""; b.appendChild(ck);
     if(it.icon){ const ic=document.createElement("span"); ic.className="sfi"; ic.style.setProperty("--m",it.icon); b.appendChild(ic); }   // item 2: leading icon = the source toolbar button's mask (SF Symbol, or the Lucide view glyph for stemma/arcs/tree/brackets/outline)
-    const t=document.createElement("span"); t.textContent=it.label; b.appendChild(t);
+    const t=document.createElement("span"); t.className="fplabel"; t.textContent=it.label; b.appendChild(t);   // item 14: .fplabel (not a bare span) so it flex-grows and pushes a trailing .fpkbd to the row's far edge, like a real NSMenu shortcut column
+    if(it.kbd){ const k=document.createElement("span"); k.className="fpkbd"; k.textContent=it.kbd; b.appendChild(k); }
     if(it.disabled){ b.disabled=true; b.style.opacity=".4"; } else b.onclick=()=>{ closeTbMenu(); it.action(); };
     m.appendChild(b); });
   document.body.appendChild(m); localiseAccel(m);   // Windows: _tbGroupItems falls back to a button's `title=` for its label ("Zoom out (⌘−)") — already swept at boot, but a row's own tooltip is built here, so sweep the finished menu too
