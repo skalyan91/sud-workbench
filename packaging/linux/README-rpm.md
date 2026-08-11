@@ -199,8 +199,10 @@ fixes and file reconciliation this document describes.
 ✓ built: packaging/linux/build/rpmbuild/RPMS/noarch/sud-workbench-0.1.0-1.fc41.noarch.rpm
   11M
 ```
-Two harmless RPM warnings on every run (a `%license` comment line containing a literal `%license`
-token, parsed as a macro by rpmbuild's comment scanner — cosmetic, not a build failure).
+(An earlier version of this build produced two harmless "Macro expanded in comment" warnings here —
+a `%license` mentioned in a comment, macro-expanded by rpmbuild's parser even inside a `#` line.
+Cosmetic, never a build failure, and now silenced by escaping it `%%license` in the spec's own
+comment.)
 
 **Install, in a *fresh* container of the same image (not the build container)** — `dnf install`
 resolved every `Requires:` (including `python3.12-devel`, `gcc`, `gobject-introspection-devel`,

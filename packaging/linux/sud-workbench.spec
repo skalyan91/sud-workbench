@@ -39,7 +39,9 @@ Release:        1%{?dist}
 Summary:        Desktop editor for SUD/UD/mSUD dependency treebanks in CoNLL-U
 
 # MIT covers the code and assets original to this project (see LICENSE, shipped under /opt/sud-workbench
-# and tagged %license below). ONE vendored subtree does not carry a declared upstream licence:
+# and tagged %%license below — escaped even in a COMMENT: rpmbuild macro-expands `%license` inside
+# comments too, and warns "Macro expanded in comment" for the literal, unescaped form). ONE vendored
+# subtree does not carry a declared upstream licence:
 # grammars/ (the surfacesyntacticud/tools grew conversion grammars) — see THIRD-PARTY-NOTICES.md's own
 # "Unresolved: grammars/" section, which macOS and Windows already ship under the same open question.
 # This package does not resolve that question; it inherits the same posture rather than quietly

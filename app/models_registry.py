@@ -15,6 +15,7 @@ raising across the boundary where practical.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
@@ -484,6 +485,21 @@ def annotate_train_sentences(entries: list[dict], refresh: bool | str = False, f
                 entry["train_sents"] = total
 
 
+def _version_gt(a: str, b: str) -> bool:
+    """True if version string ``a`` outranks ``b`` as a REAL version number, not a plain string —
+    ``"0.10.0" > "0.9.0"`` compares False under plain string ordering (the two-digit component sorts
+    before the one-digit one lexicographically), which would make :func:`list_available` silently
+    keep offering the older asset once a release ever needs a double-digit component. Falls back to
+    a plain string comparison only if ``packaging`` can't parse one of the two — the same
+    decline-rather-than-guess posture :func:`_unsatisfied_requirements` already takes for the same
+    import (packaging ships alongside spaCy, so its absence would mean something already broken)."""
+    try:
+        from packaging.version import Version
+        return Version(a) > Version(b)
+    except Exception:  # noqa: BLE001 — unparsable version string, or packaging genuinely absent
+        return a > b
+
+
 def list_available(refresh: bool | str = False) -> list[dict]:
     """SUD models from GitHub Releases (highest version per package) + curated Stanza langs,
     each annotated with its UAS/LAS accuracy (re-fetched when ``refresh``)."""
@@ -498,7 +514,7 @@ def list_available(refresh: bool | str = False) -> list[dict]:
             entry["asset_url"] = asset.get("browser_download_url")
             entry["size"] = asset.get("size")
             prev = by_pkg.get(entry["package"])
-            if prev is None or entry["version"] > prev["version"]:
+            if prev is None or _version_gt(entry["version"], prev["version"]):
                 by_pkg[entry["package"]] = entry
     for e in by_pkg.values():                                    # SUD accuracy, keyed by package
         sc = sud_sc.get(e["package"])
@@ -622,6 +638,14 @@ def list_installed() -> list[dict]:
     for lang, tb in sorted(_installed_stanza_models()):
         out.append({"id": f"stanza:{lang}#{tb}", "engine": "stanza", "lang": lang, "treebank": tb,
                     "label": _stanza_label(lang, tb), "installed": True})
+    # The two loops above sort by CODE (package name / (lang, treebank)) purely so their own iteration
+    # is deterministic — that ordering leaked all the way to the toolbar's model dropdown (populateModels
+    # in web/js/io/models.js builds its groups straight from this list, unlike the Manage Models sheet's
+    # merge_installed(), which already re-sorts by label). A code sort reads wrong to a human at a
+    # glance (e.g. Japanese/`ja` ahead of Chinese/`zh` is fine, but plenty of other pairs diverge from
+    # name order) — re-sort the whole list by the same human-readable label every other listing here
+    # already sorts by (list_available(), merge_installed()) before returning it.
+    out.sort(key=lambda e: e.get("label") or e.get("id") or "")
     return out
 
 
@@ -964,6 +988,43 @@ def _ensure_tokenizer_deps(package: str, progress=None, declared=()) -> dict:
     return {"ok": False, "error": "tokeniser dependency unresolved after install"}
 
 
+def _model_md5_path() -> str:
+    return os.path.join(CACHE_DIR, "model_md5.json")
+
+
+def _load_model_md5s() -> dict:
+    try:
+        with open(_model_md5_path(), "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:  # noqa: BLE001 — missing/corrupt cache file: treat as "nothing on record"
+        return {}
+
+
+def _save_model_md5(pkg: str, digest: str) -> None:
+    data = _load_model_md5s()
+    data[pkg] = digest
+    try:
+        with open(_model_md5_path(), "w", encoding="utf-8") as f:
+            json.dump(data, f)
+    except OSError:
+        pass   # bookkeeping only — a failed write just means the next download re-verifies for real
+
+
+def _clear_model_md5(pkg: str) -> None:
+    """Drop ``pkg``'s recorded checksum on removal, so a later re-download of the SAME wheel isn't
+    mistaken for "already installed, nothing to do" against a marker whose install no longer exists
+    (see :func:`remove`, which calls this) — the marker's whole meaning is "this checksum is what's
+    CURRENTLY on disk", and removal falsifies that regardless of what the checksum itself says."""
+    data = _load_model_md5s()
+    if pkg in data:
+        del data[pkg]
+        try:
+            with open(_model_md5_path(), "w", encoding="utf-8") as f:
+                json.dump(data, f)
+        except OSError:
+            pass
+
+
 def download(model_id: str, progress=None) -> dict:
     """Install a model.  ``progress(pct:int|None, note:str)`` is called as it proceeds."""
     ensure_dirs()
@@ -974,6 +1035,7 @@ def download(model_id: str, progress=None) -> dict:
 
     engine = model_id.split(":", 1)[0]
     if engine == "sud":
+        pkg = model_id.split(":", 1)[1]
         found = _asset_url(model_id)
         if not found:
             return {"error": f"no downloadable asset for {model_id}"}
@@ -983,6 +1045,7 @@ def download(model_id: str, progress=None) -> dict:
         try:
             note(0, "Downloading wheel…")
             req = urllib.request.Request(url, headers={"User-Agent": "SUD-Workbench"})
+            digest = hashlib.md5()
             with urllib.request.urlopen(req, timeout=60) as resp, open(tmp, "wb") as out:
                 total = int(resp.headers.get("Content-Length") or 0)
                 done = 0
@@ -991,19 +1054,49 @@ def download(model_id: str, progress=None) -> dict:
                     if not chunk:
                         break
                     out.write(chunk)
+                    digest.update(chunk)
                     done += len(chunk)
                     note(int(done * 100 / total) if total else None, "Downloading wheel…")
+            new_md5 = digest.hexdigest()
+
+            from . import extras
+            extras.activate()   # EXTRAS_DIR on sys.path, so an already-installed copy actually shows up below
+
+            # SKIP BY CONTENT, NOT BY VERSION NUMBER. The asset filename's version is what
+            # list_available() offers, but it is not what decides whether THIS install actually needs
+            # to happen — a re-published wheel that fixed something without bumping its version number
+            # (see CLAUDE.md's own account of exactly that happening to en_sud_ewt) would otherwise look
+            # "already satisfied" to pip and get silently skipped, leaving the fix uninstalled. Compare
+            # the freshly-downloaded wheel's md5 against what's on record for the CURRENTLY installed
+            # copy instead; only skip if the content genuinely hasn't changed AND something is actually
+            # installed (a stale record with nothing on disk — e.g. removed outside this app — must not
+            # short-circuit a real install).
+            if _load_model_md5s().get(pkg) == new_md5 and pkg in _installed_sud_packages():
+                note(100, "Already up to date")
+                return {"ok": True, "id": model_id, "unchanged": True}
+
             note(None, "Installing…")
             # Install into the USER extras dir (like the on-demand tiers), never the app's own
             # site-packages — so a read-only/relocated bundle still works and the shared install
             # isn't mutated. --no-deps keeps pip from re-resolving spaCy and its whole tree into
             # the extras dir (the copy would shadow the core venv's), so anything the model
             # genuinely declares has to be installed deliberately — see _unsatisfied_requirements.
-            from . import extras
-            extras.activate()   # EXTRAS_DIR on sys.path so the just-installed model imports
-            subprocess.run([sys.executable, "-m", "pip", "install", "--no-input", "--upgrade",
+            #
+            # REPLACE, DON'T STACK: pip keeps no record of a --target install (see remove()'s own
+            # comment on this — the same fact that makes `pip uninstall` a no-op for one), so its
+            # --upgrade path cannot be trusted to fully clean up an old version's files before laying
+            # down the new ones; a version bump that also renames or drops a file can leave the old
+            # file sitting alongside the new install, and importlib.metadata would then have two
+            # dist-infos to reconcile. Purge whatever's there first — _remove_targeted() is a no-op
+            # (returns None) if nothing about this package lives under EXTRAS_DIR yet — then install
+            # into a clean slot. --force-reinstall (rather than --upgrade) means pip's own
+            # already-satisfied-at-this-version check can't skip the copy either, belt-and-braces
+            # alongside the md5 check above.
+            _remove_targeted(pkg)
+            subprocess.run([sys.executable, "-m", "pip", "install", "--no-input", "--force-reinstall",
                             "--no-deps", "--target", EXTRAS_DIR, tmp],
                            check=True, capture_output=True, text=True)
+            _save_model_md5(pkg, new_md5)
             declared = _unsatisfied_requirements(tmp)
             if declared:
                 note(None, "Installing model requirements…")
@@ -1024,8 +1117,7 @@ def download(model_id: str, progress=None) -> dict:
                 pass
         _invalidate_parse_cache()
         note(None, "Checking tokeniser…")   # install the model's raw-text tokeniser backend if it needs one
-        dep = _ensure_tokenizer_deps(model_id.split(":", 1)[1], progress=progress,
-                                     declared=declared)
+        dep = _ensure_tokenizer_deps(pkg, progress=progress, declared=declared)
         note(100, "Installed")
         result = {"ok": True, "id": model_id}
         if not dep.get("ok"):
@@ -1160,6 +1252,9 @@ def remove(model_id: str) -> dict:
                 return {"error": f"{pkg} is not installed"}
         elif removed is False:
             return {"error": f"couldn't remove {pkg} — see the log"}
+        _clear_model_md5(pkg)   # the recorded checksum means "this is what's on disk RIGHT NOW" —
+                                 # false the instant the files it describes are gone (see download()'s
+                                 # md5 short-circuit, which trusts this record to skip a real reinstall)
         _invalidate_parse_cache()
         return {"ok": True, "id": model_id}
     if engine == "stanza":
