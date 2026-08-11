@@ -1570,16 +1570,20 @@ function detectXposMirrorsUpos(){
 // Recompute XPOS whenever UPOS OR FEATS changes — called from every UPOS-edit and every general-
 // FEATS-edit site (posMenu/posSubItems/grid's commitCell for UPOS; buildFeatEditor's serialize,
 // extPosMenu, applyWiktionaryDef, setGlossAbbrevAt, editTier's mgloss branch for FEATS — see each's
-// own call site). There is exactly ONE thing here to recompute FROM: XPOS_MIRRORS_UPOS's own "this
-// doc's XPOS column is nothing but a copy of UPOS" detection. Nothing else in this app — nor in the
-// SUD-spaCy models it drives — can answer "what should XPOS be" from UPOS+FEATS: XPOS comes from
-// spaCy's own `tagger` component, a flat ~49-tag Penn-Treebank-style inventory scored independently
-// of (and, in the pipeline, run BEFORE) the morphologizer that predicts UPOS+FEATS — confirmed by
-// loading the shipped model directly and inspecting `tagger.labels` (no POS/FEATS structure at all)
-// against `morphologizer.labels` (the joint POS=X|Feat=Val labels _force_upos already reads). So a
-// genuine language-specific XPOS tagset (`XPOS_MIRRORS_UPOS===false`) is left exactly as it was —
-// there is no rule this app or its models could apply — and only the mirror case has anything
-// defensible to recompute. Idempotent and cheap either way: safe to call unconditionally.
+// own call site). As of THIS writing there is exactly ONE thing here to recompute FROM:
+// XPOS_MIRRORS_UPOS's own "this doc's XPOS column is nothing but a copy of UPOS" detection — every
+// SHIPPED SUD-spaCy model's XPOS comes from spaCy's own `tagger` component, a flat ~49-tag
+// Penn-Treebank-style inventory scored independently of (and, in the pipeline, run BEFORE) the
+// morphologizer that predicts UPOS+FEATS, confirmed by loading a shipped model directly and
+// inspecting `tagger.labels` (no POS/FEATS structure at all) against `morphologizer.labels` (the
+// joint POS=X|Feat=Val labels _force_upos already reads). ⚠ NOT A PERMANENT LIMIT: taggers trained
+// to take UPOS+FEATS as input are in progress (not shipped as of this writing) — once one lands,
+// the `XPOS_MIRRORS_UPOS===false` branch below is exactly where it plugs in (call it here with the
+// token's current upos/feats, in place of leaving xpos untouched), and this comment should be
+// rewritten rather than trusted as still describing every model. Until then, a genuine
+// language-specific XPOS tagset is left exactly as it was — there is no rule any CURRENTLY shipped
+// model supports applying — and only the mirror case has anything to recompute. Idempotent and
+// cheap either way: safe to call unconditionally.
 function syncXposMirror(t){ if(XPOS_MIRRORS_UPOS) t.xpos=t.upos; }
 // {FeatName:[values...]} the ACTIVE model's own morphologizer can jointly emit — see
 // app/parse.py's model_feats_inventory for what this reads (morphologizer.labels, the SAME joint
