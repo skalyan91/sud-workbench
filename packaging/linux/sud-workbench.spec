@@ -39,9 +39,10 @@ Release:        1%{?dist}
 Summary:        Desktop editor for SUD/UD/mSUD dependency treebanks in CoNLL-U
 
 # MIT covers the code and assets original to this project (see LICENSE, shipped under /opt/sud-workbench
-# and tagged %%license below — escaped even in a COMMENT: rpmbuild macro-expands `%license` inside
-# comments too, and warns "Macro expanded in comment" for the literal, unescaped form). ONE vendored
-# subtree does not carry a declared upstream licence:
+# and tagged with the license marker in the FILES section below — spelled out here without its
+# leading percent sign on purpose: rpmbuild macro-expands ANY percent-prefixed word on ANY line,
+# comments included, and warns "Macro expanded in comment" the moment one appears, escaped or not).
+# ONE vendored subtree does not carry a declared upstream licence:
 # grammars/ (the surfacesyntacticud/tools grew conversion grammars) — see THIRD-PARTY-NOTICES.md's own
 # "Unresolved: grammars/" section, which macOS and Windows already ship under the same open question.
 # This package does not resolve that question; it inherits the same posture rather than quietly
@@ -132,7 +133,7 @@ Requires:       git
 # present on essentially every desktop install already, declared explicitly per Fedora packaging
 # guidelines rather than assumed.
 Requires:       hicolor-icon-theme
-# The %post/%postun scriptlets below call update-desktop-database (desktop-file-utils) and
+# The post-install/post-uninstall scriptlets below call update-desktop-database (desktop-file-utils) and
 # gtk-update-icon-cache (already guaranteed by the gtk3 Requires above, so not repeated here) — both
 # guarded with `|| :` so a system missing either degrades to "icon/menu caches refresh on next
 # reboot or manual `update-desktop-database` run" rather than failing the whole install, but
@@ -162,8 +163,8 @@ Arabic) are offered and installed on demand from inside the app, never at packag
 
 %build
 # Nothing to compile: this package ships Python source + static web assets, run against a per-user
-# venv built at first launch (see the header comment). An empty %build is intentional, not an
-# oversight — see make_rpm.sh and README-rpm.md for the reasoning this spec's header summarises.
+# venv built at first launch (see the header comment). This section being empty is intentional, not
+# an oversight — see make_rpm.sh and README-rpm.md for the reasoning this spec's header summarises.
 
 %install
 rm -rf %{buildroot}

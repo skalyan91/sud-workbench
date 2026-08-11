@@ -5,6 +5,13 @@ function miscTranslit(misc){ if(!misc||misc==="_")return""; const m=/(?:^|\|)Tra
 // token glosses live in MISC Gloss (a standard UD MISC attribute); they round-trip through io_conllu with the rest of MISC.
 function miscKV(misc,key){ if(!misc||misc==="_")return""; const m=new RegExp("(?:^|\\|)"+key+"=([^|]*)").exec(misc); return m?m[1]:""; }   // read any MISC Key=Value ("" if absent)
 function miscGloss(misc){ return miscKV(misc,"Gloss"); }
+// Whether a token carries the hand-placed "reported speech" mark (MISC Reported=Yes — see
+// toggleReported/edit-ops.js). Called from document.js/edit-ops.js/context-menu.js/diagram-wrap.js,
+// all of which load BEFORE this file in index.html — safe regardless, since every call site only
+// runs from a later user interaction (menu build, diagram render, command dispatch), never at each
+// script's own top-level execution, so what matters is that isReported exists by the time a user can
+// actually trigger one of those, not which <script> tag declares it.
+function isReported(t){ return miscKV(t&&t.misc,"Reported")==="Yes"; }
 const INVISIBLE_RE=/[​‌‍﻿­]/g;   // zero-width space/joiners, BOM, soft hyphen — invisible Unicode "format" characters that survive both Python's and JS's \s (they're category Cf, not Zs), so they slip past every whitespace-collapse/trim untouched. Wiktionary's scraped HTML sometimes trails one at the end of a definition (e.g. a wrap hint around a citation link) — left in place, it lands right at the gloss's dot-join seam and shows up as an invisible "gap" between the lexical and grammatical parts of a morphemic gloss.
 const GLOSS_WS_RE=/[\r\n\t]/g;   // stray literal CR/LF/tab characters found in an ALREADY-STORED gloss tier (unlike INVISIBLE_RE's zero-width Cf characters, these DO have visible advance — they render as a stray gap hugging a dot-join seam, e.g. around the "." between a lexical stem and a Leipzig abbreviation). Stripped at the same read accessors as INVISIBLE_RE, below.
 function glossEnc(v){ return (v||"").replace(INVISIBLE_RE,"").replace(/[|\t\n]+/g," ").trim(); }   // keep MISC well-formed: no bar (the field delimiter), tab or newline, or invisible junk — a real tab/newline COLLAPSES to a space here (word-separator semantics for freshly-typed/committed text), unlike GLOSS_WS_RE's outright strip for already-stored data at the read accessors

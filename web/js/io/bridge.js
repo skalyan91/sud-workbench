@@ -824,12 +824,18 @@ window.reparse=reparse;
    at its ORIGINAL INDEX, provided that index exists and pass 1 has not already claimed it. Editing one word in
    place leaves every index alone, so the fallback lands exactly where it should — and since it only ever sees
    marks pass 1 could not place, an unchanged word is never at risk from it. */
-const _MARK_FEATS=["Foreign","Reported","Typo"];
+const _MARK_FEATS=["Foreign","Typo"];   // hand-placed marks stored in FEATS
+const _MARK_MISC=["Reported"];          // …and in MISC — Reported moved out of FEATS when toggleReported switched to
+                                          // writing MISC Reported=Yes (see edit-ops.js); captureMarks/restoreMarks must
+                                          // read/write whichever field each mark actually lives in, or the one that
+                                          // moved silently stops round-tripping through a sentence retext at all —
+                                          // exactly the class of bug this whole pair of functions exists to prevent.
 function captureMarks(s){ const seen=Object.create(null), out=[];
   (s&&s.tokens||[]).forEach((t,i)=>{ const f=t.form||"", n=(seen[f]=(seen[f]||0)+1)-1;
     const feats=_MARK_FEATS.filter(k=>hasFeat(t.feats,k,"Yes"));
+    const misc=_MARK_MISC.filter(k=>miscKV(t.misc,k)==="Yes");
     const cf=correctFormOf(t);                                   // itself gated on Typo=Yes, so a stale CorrectForm is not carried
-    if(feats.length||cf) out.push({form:f,nth:n,idx:i,feats,cf}); });
+    if(feats.length||misc.length||cf) out.push({form:f,nth:n,idx:i,feats,misc,cf}); });
   return out; }
 function restoreMarks(s,saved){ if(!saved||!saved.length) return 0;
   const toks=(s&&s.tokens)||[];
@@ -838,6 +844,7 @@ function restoreMarks(s,saved){ if(!saved||!saved.length) return 0;
   const claimed=new Set();
   const apply=(t,m)=>{ claimed.add(t);
     m.feats.forEach(k=>{ t.feats=setFeat(t.feats,k,"Yes"); });
+    (m.misc||[]).forEach(k=>{ t.misc=setMiscKV(t.misc,k,"Yes"); });
     if(m.cf) t.misc=setMiscKV(t.misc,"CorrectForm",m.cf); };
   let n=0; const left=[];
   saved.forEach(m=>{ const t=byKey[m.form+"\u0001"+m.nth]; if(t){ apply(t,m); n++; } else left.push(m); });   // pass 1 — exact: form + which occurrence of it
@@ -2048,7 +2055,7 @@ async function headSyncDeprels(si,ids){ let hit=false;
   for(const id of (ids||[])){ if(await headSyncDeprel(si,id,true)) hit=true; }
   if(hit) renderUnlessEditing();
   return hit; }
-const GESTURE_FEATS=["Shared"];   // FEATS keys settable only via a drag gesture or keyboard shortcut — a token re-parse must preserve them, same as Gloss/MSeg/MGloss. (Subject was here too until it moved to MISC; it is preserved by the `keep` list below instead — see raiseGet/raiseSet, js/core/prefs.js.)
+const GESTURE_FEATS=["Shared","Typo","Foreign"];   // FEATS keys settable only via a drag gesture or keyboard shortcut — a token re-parse must preserve them, same as Gloss/MSeg/MGloss. (Subject was here too until it moved to MISC; it is preserved by the `keep` list below instead — see raiseGet/raiseSet, js/core/prefs.js.) Typo/Foreign joined this list because a POS edit's per-token regen (regenTok→reparseTokenFields) was silently dropping them: no tokeniser or parser predicts either — see the near-identical _MARK_FEATS/captureMarks note above for why a HAND-PLACED mark must survive any parser round-trip — but until now only "Shared" was captured into keepFeats below, so the parser's own (Typo/Foreign-less) FEATS string overwrote t.feats wholesale on every POS change and neither mark came back.
 /* ⚠ SUD'S OWN MISC LAYER IS DERIVED FROM A TREE — AND THIS FUNCTION THROWS THE PARSER'S TREE AWAY.
    The released SUD parsers now predict Idiom/InIdiom/Subject/Reported (app/parse.py's _SUD_MISC_KEYS), and every
    one of the four is read off the analysis the model itself produced: Idiom is "has ExtPos AND has an `unk`
