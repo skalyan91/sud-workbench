@@ -80,9 +80,10 @@ Three checks stand in for one; run all three after non-trivial edits.
 
 `.claude/settings.json` wires a **Stop hook** (`.claude/hooks/rebuild-on-stop.sh`) that, once per
 turn, kicks off `packaging/make_bootstrap_app.sh` in a detached background process whenever anything
-under `app/`, `web/`, `packaging/` or `grammars/` is newer than `.claude/.last-build-stamp`. Output
-goes to `.claude/last-build.log`; an in-flight build holds `.claude/.build.lock`. Don't run a build
-in the foreground just to check your work — read the log.
+under `app/`, `web/` or `packaging/` is newer than `.claude/.last-build-stamp` (`grammars/` is
+deliberately not watched — it's fetched on demand into `APP_DATA`, not part of the source tree).
+Output goes to `.claude/last-build.log`; an in-flight build holds `.claude/.build.lock`. Don't run a
+build in the foreground just to check your work — read the log.
 
 The build is detached with **`os.setsid()`** (the hook re-executes itself with `--run-build` under a
 new session), not `nohup`/`disown` — none of which start a session, so the build stayed in the
@@ -864,18 +865,22 @@ window's `tabbingMode` is explicitly `.disallowed` (see the ⚠ above), so there
 
 Format is **detected** from the relation inventory, per sentence then per document: UD / SUD / mSUD.
 SUD and mSUD are editable; UD is import/export only. Conversion runs grew (via `grewpy`) over the
-`.grs` grammars vendored verbatim from surfacesyntacticud/tools under `grammars/` — see
-`grammars/README.md` for the direction → strategy-name table (strategies are *not* uniformly
-`main`). There is no universal SUD→mSUD grammar. Every conversion entry point takes an optional
-`lang` (the frontend's `DOCLANG`, threaded through `Api.import_ud`/`export_ud_to`/`convert_format`);
-`app/convert.py`'s `_LANG_GRAMMARS` prefers a vendored language-specific `.grs` over the universal
-one when that (language, direction) pair is covered — most language/direction pairs aren't, and
-fall back to the universal grammar. **The mSUD directions are held out of that table on purpose**
-and always run the universal grammar: the language-specific mSUD grammars differ from it in how a
-fused word is SPELLED, not in its syntax (they pass grew an explicit `"_"`/`" "` separator when
-concatenating the merged pieces' Translit/Tone/MGloss, so one fused word came out spelled as
-several), and the vendored files are verbatim upstream copies that a re-vendor would revert, so the
-fix lives in the table rather than in them.
+`.grs` grammars — surfacesyntacticud/tools content with no declared licence, so **fetched on demand
+onto the user's own machine** (`app/grammars.py`, a `module`-shaped extras tier next to
+`app/macron.py`'s identically-motivated Latin-macron fetch — see `THIRD-PARTY-NOTICES.md`'s
+"Resolved: `grammars/`") rather than vendored into this repo the way it once was. The direction →
+strategy-name table (strategies are *not* uniformly `main`) lives in `app/convert.py`'s
+`_GRAMMARS`/`_LANG_GRAMMARS` dicts, the authoritative source now that there is no committed
+`grammars/README.md` to check alongside them. There is no universal SUD→mSUD grammar. Every
+conversion entry point takes an optional `lang` (the frontend's `DOCLANG`, threaded through
+`Api.import_ud`/`export_ud_to`/`convert_format`); `_LANG_GRAMMARS` prefers a language-specific
+`.grs` over the universal one when that (language, direction) pair is covered — most
+language/direction pairs aren't, and fall back to the universal grammar. **The mSUD directions are
+held out of that table on purpose** and always run the universal grammar: the language-specific
+mSUD grammars differ from it in how a fused word is SPELLED, not in its syntax (they pass grew an
+explicit `"_"`/`" "` separator when concatenating the merged pieces' Translit/Tone/MGloss, so one
+fused word came out spelled as several), and the fetched files are verbatim upstream copies a
+re-fetch would revert anyway, so the fix lives in the table rather than in them.
 
 grew's OCaml backend is an **optional external prerequisite**: `app/convert.py` picks up
 `vendor/grew/bin/grewpy_backend` if bundled (built by `tools/bundle_grew.sh`), else `~/.opam/*/bin`.
@@ -884,16 +889,20 @@ disabled, surfaced as a toast. Keep new features degrading that way rather than 
 
 ⚠ **The backend is not optional to the STANZA ENGINE, and that is the consequence everyone misses.**
 Stanza emits UD and this app stores SUD, so `parse._parse_stanza_ud_to_sud` runs the conversion
-grammar on *every* Stanza parse — no backend, no Stanza parsing at all, however cleanly the model
-downloaded. Both macOS builds therefore **ship `vendor/`** (`for d in app web grammars vendor`);
-before that they copied only `app web grammars`, so no user who had not built the app themselves had
-a grew backend and every Stanza model was inert — reported as "the Stanza models do nothing". The
-binary is arch-specific and `[ -e ]`-guarded, so a tree without `vendor/` still builds and still
-degrades. The **Windows** build deliberately does NOT copy it (a Mach-O on `PATH` would be found and
-fail to spawn — worse than finding nothing); it has no grew until something in this repo produces a
-Windows `grewpy_backend`. Manage Models states the consequence at the top of the Stanza group
-whenever `conversion_available()` reports no backend (`js/io/models.js`), so a user is told *before*
-a 400 MB download rather than by a silent no-op after it.
+grammar on *every* Stanza parse — no backend, no grammar fetched (or both), no Stanza parsing at
+all, however cleanly the model downloaded. Both macOS builds therefore **ship `vendor/`** (`for d
+in app web vendor` — `grammars/` was dropped from this list entirely once it stopped being vendored;
+see the conversion section above), so the grew backend is present on first launch; the conversion
+grammar itself still has to be fetched once from Manage Models before Stanza's own SUD conversion
+step can run. Before `vendor/` shipped, macOS copied only `app web grammars`, so no user who had not
+built the app themselves had a grew backend and every Stanza model was inert — reported as "the
+Stanza models do nothing". The `vendor/` binary is arch-specific and `[ -e ]`-guarded, so a tree
+without it still builds and still degrades. The **Windows** build deliberately does NOT copy it (a
+Mach-O on `PATH` would be found and fail to spawn — worse than finding nothing); it has no grew
+until something in this repo produces a Windows `grewpy_backend`. Manage Models states the
+consequence at the top of the Stanza group whenever `conversion_available()` reports no backend
+(`js/io/models.js`), so a user is told *before* a 400 MB download rather than by a silent no-op
+after it.
 
 **DEPS (enhanced dependencies) is not part of SUD and this app does not support it as a column an
 annotator works in.** A save-time auto-fill that used to derive it from FEATS `Shared=Yes`/MISC
@@ -1197,9 +1206,10 @@ second install/progress/UI path beside the first. See `app/macron.py` under Lang
   Byte-reproducible, `--retrieved` required — don't hand-edit it, re-run the script.
 - `app/langid.py` — fastText `lid.176`, model **vendored** at `app/data/lid.176.ftz` so detection is
   fully offline. Drives the document language on open.
-- `app/sud_rules.py` — parses the vendored grew validator patterns
-  (`grammars/validator/modules/relations.json`) once and evaluates the handful of error-level
-  relation↔POS constraints directly, rather than invoking grew per candidate.
+- `app/sud_rules.py` — parses the fetched grew validator patterns
+  (`grammars/validator/modules/relations.json`, under `GRAMMARS_DIR` — see `app/grammars.py`) once
+  and evaluates the handful of error-level relation↔POS constraints directly, rather than invoking
+  grew per candidate.
 - `app/toolbox_import.py` (+ vendored `app/_toolbox_vendor.py`) — SIL Toolbox/FLEx interlinear →
   raw CoNLL-U, dependencies left unset.
 - `app/wiktionary.py` — MediaWiki REST *definition* endpoint (not HTML scraping), for the

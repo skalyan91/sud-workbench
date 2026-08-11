@@ -11,14 +11,18 @@ Tiers (each behind a lazy ``try: import`` in ``translit`` / ``parse``):
   * ``japanese`` — cutlet/fugashi/unidic-lite romanisation dictionaries, ~0.45 GB
   * ``arabic``   — CAMeL Tools Arabic morphology, ~0.3 GB
   * ``la_macron`` — Latin vowel lengths (a DATA tier, not a pip one — see below), ~4 MB
+  * ``grammars`` — UD↔SUD conversion grammars (also a DATA tier), ~450 KB
 
-NOT EVERY TIER IS A PIP INSTALL. ``la_macron`` fetches a data file and compiles it, because what it
-needs is not a package: the Morpheus vowel-length table cannot be bundled with the Latin model for
-licensing reasons and is not on PyPI in any form (see :mod:`app.macron`). A tier therefore declares
-EITHER ``pip`` + ``probe`` or ``module`` — the name of a module supplying its own
-``available()``/``install(progress)``/``status()`` — and :func:`install` dispatches on which. The
-alternative was a second parallel install/progress/UI path for one row in the same list, which is
-how two ways to do the same thing get built.
+NOT EVERY TIER IS A PIP INSTALL. ``la_macron`` and ``grammars`` each fetch a data file rather than
+install a package: the Morpheus vowel-length table can't be bundled with the Latin model for
+licensing reasons and isn't on PyPI in any form (see :mod:`app.macron`), and the surfacesyntacticud/
+tools conversion grammars carry no declared licence at all, so shipping a copy — in this repo or in
+any built package — would republish someone else's work without a grant to (see :mod:`app.grammars`
+and ``THIRD-PARTY-NOTICES.md``). A tier therefore declares EITHER ``pip`` + ``probe`` or
+``module`` — the name of a module supplying its own ``available()``/``install(progress)``/
+``status()`` — and :func:`install` dispatches on which. The alternative was a second parallel
+install/progress/UI path for one row in the same list, which is how two ways to do the same thing
+get built.
 """
 
 from __future__ import annotations
@@ -63,6 +67,11 @@ TIERS: dict[str, dict] = {
         "label": "Latin macrons",
         "module": "macron",     # a DATA tier: app/macron.py fetches through the Latin model's own component
         "note": "Morpheus vowel lengths, fetched from latin-macronizer (~4 MB) — needs the Latin model",
+    },
+    "grammars": {
+        "label": "UD conversion grammars",
+        "module": "grammars",   # a DATA tier: app/grammars.py fetches surfacesyntacticud/tools' converter/grs/
+        "note": "UD↔SUD conversion grammars, fetched from surfacesyntacticud/tools (~450 KB)",
     },
 }
 

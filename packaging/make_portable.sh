@@ -53,7 +53,9 @@ echo "▶ copying app source…"
 # stores SUD, so the conversion grammar runs on every Stanza parse). It matters MORE here than in the
 # bootstrap bundle — this build exists to need nothing from the user's machine, and an opam install is
 # the largest thing it was still quietly assuming.
-for d in app web grammars vendor; do
+# grammars/ is deliberately NOT in this list — it's no longer vendored (unclear upstream licence);
+# app/grammars.py fetches it on demand at runtime instead, same on-demand shape as app/macron.py.
+for d in app web vendor; do
   [ -e "$PROJECT/$d" ] && cp -R "$PROJECT/$d" "$RES/appsrc/$d"
 done
 # don't ship the caches

@@ -552,6 +552,33 @@ let
     meta.license = lib.licenses.mit;
   };
 
+  # The UD<->SUD conversion grammars — surfacesyntacticud/tools, pinned to the same commit
+  # THIRD-PARTY-NOTICES.md records (see app/grammars.py's own header for the full account of why
+  # this is fetched rather than vendored: no declared upstream licence, so shipping a copy in this
+  # repo or any built package would republish someone else's work without a grant to). Fetched
+  # HERMETICALLY here, at the user's own `nix build`/`nix-build` time, from the ORIGINAL upstream —
+  # not from anything this project hosts — which is the Nix-native equivalent of every OTHER
+  # platform's "fetch onto the user's own machine, on demand, from inside the running app"
+  # (app/grammars.py, an extras tier next to app/macron.py's identically-shaped Latin-macron
+  # fetch). Two subtrees, not one — `converter/grs/` (the .grs grammars + their utils/lexicons
+  # siblings) and `validator/modules/` (a SEPARATE top-level directory upstream, confirmed against
+  # the real tree rather than assumed) — matching exactly what app/grammars.py fetches and what the
+  # old vendored `grammars/` directory used to carry (~450 KB, 61 files as it did before).
+  # Named separately from the fetcher call below, rather than read back off grammarsSrc.rev
+  # (fetchFromGitHub's passthru attributes aren't a contract worth depending on): this is the one
+  # source of truth for "which commit", used both to fetch it and to stamp the sentinel file
+  # app/grammars.py's available() checks — matching app/grammars.py's own _REV constant exactly.
+  _grammarsRev = "03c3bbd88e33a0f6331b58d0669edf1031aa9efb";
+
+  grammarsSrc = pkgs.fetchFromGitHub {
+    owner = "surfacesyntacticud";
+    repo = "tools";
+    rev = _grammarsRev;
+    hash = "sha256-z4Tav5PpUDuQqwUFOMDmhmHsOiqtpG+b109bfVIryjg=";   # reported by a real `nix build`
+                                                                    # against this exact rev, same as
+                                                                    # wiktra's own fetchgit hash above.
+  };
+
   # ── the full CORE runtime closure, mirroring requirements-core.txt line for line ──────
   coreDeps = [
     pywebview py.pygobject3 py.pycairo conllu
@@ -571,10 +598,11 @@ let
     # format="other": this project has no setup.py/pyproject.toml at all (it's `python -m
     # app`, run in place — see CLAUDE.md's "Commands" section and every other packaging
     # track's launcher, which all do the same `PYTHONPATH=<src> python -m app`). Rather than
-    # invent packaging metadata upstream doesn't have, this derivation just places `app/`,
-    # `web/`, `grammars/` under one Nix store directory (exactly as WEB_DIR/GRAMMARS_DIR's
-    # own `Path(__file__).resolve().parent.parent / "…"` computation expects — they must be
-    # siblings of `app/`'s own containing directory) and writes a tiny launcher.
+    # invent packaging metadata upstream doesn't have, this derivation just places `app/` and
+    # `web/` under one Nix store directory (siblings, as WEB_DIR's own `Path(__file__).resolve()
+    # .parent.parent / "…"` computation expects) and writes a tiny launcher. `grammars/` is NOT
+    # among these — it's `grammarsSrc` above, copied to its own store path below and pointed at
+    # via the launcher's SUD_GRAMMARS_DIR (see app/paths.py), not a sibling of app/ any more.
     format = "other";
     dontBuild = true;
 
@@ -597,30 +625,47 @@ let
     installPhase = ''
       runHook preInstall
 
-      # app/, web/, grammars/ as siblings — NOT vendor/ (the grew OCaml backend; genuinely
-      # optional, see CLAUDE.md and grewpy's own meta.longDescription above), NOT samples/
-      # (CLAUDE.md: "nothing at runtime reads it"), NOT packaging/ (build-time only). Mirrors
-      # exactly what packaging/make_bootstrap_app.sh copies, minus the size-driven font/kit
-      # stripping that script does for a *distributable bundle* — irrelevant to a Nix build,
-      # and stripping web/win11-kit would be presuming an answer to a question this derivation
-      # doesn't touch: which chrome kit a real Linux user agent should load is
-      # web/index.html's own call (a third "linux"->adwaita-kit branch already exists there;
-      # see its own inline comment), not this derivation's to prejudge by deleting the
-      # alternative.
+      # app/, web/ as siblings — NOT vendor/ (the grew OCaml backend; genuinely optional, see
+      # CLAUDE.md and grewpy's own meta.longDescription above), NOT samples/ (CLAUDE.md: "nothing
+      # at runtime reads it"), NOT packaging/ (build-time only), and NOT grammars/ (see below —
+      # fetched separately, into its own store path, not copied here). Mirrors exactly what
+      # packaging/make_bootstrap_app.sh copies, minus the size-driven font/kit stripping that
+      # script does for a *distributable bundle* — irrelevant to a Nix build, and stripping
+      # web/win11-kit would be presuming an answer to a question this derivation doesn't touch:
+      # which chrome kit a real Linux user agent should load is web/index.html's own call (a
+      # third "linux"->adwaita-kit branch already exists there; see its own inline comment), not
+      # this derivation's to prejudge by deleting the alternative.
       install -d "$out/lib/sud-workbench"
-      cp -r app web grammars "$out/lib/sud-workbench/"
+      cp -r app web "$out/lib/sud-workbench/"
       find "$out/lib/sud-workbench" -name '__pycache__' -type d -prune -exec rm -rf {} +
+
+      # The two subtrees app/grammars.py's own on-demand fetch pulls from surfacesyntacticud/tools
+      # on every OTHER platform — copied here from grammarsSrc (fetched hermetically above) into
+      # their own store path, laid out IDENTICALLY to what that fetch produces under APP_DATA
+      # (.grs files + utils/ + lexicons/ at the root, validator/modules/ alongside), sentinel file
+      # included — so app/grammars.py's available() (a plain "does the sentinel match _REV" check)
+      # reports true here with NO Nix-specific branch in the Python code at all; only the
+      # SUD_GRAMMARS_DIR env var below tells the app to look at this store path instead of
+      # APP_DATA/grammars.
+      install -d "$out/share/sud-workbench-grammars/validator"
+      cp -r "${grammarsSrc}/converter/grs/." "$out/share/sud-workbench-grammars/"
+      cp -r "${grammarsSrc}/validator/modules" "$out/share/sud-workbench-grammars/validator/modules"
+      printf '%s' "${_grammarsRev}" > "$out/share/sud-workbench-grammars/.sud-grammars-rev"
 
       install -d "$out/bin"
       cat > "$out/bin/sud-workbench" <<LAUNCHER
 #!${python3.interpreter}
 # Generated launcher — mirrors packaging/make_bootstrap_app.sh's own run_app() shape (PYTHONPATH
-# set to the directory containing app/, cwd unimportant since WEB_DIR/GRAMMARS_DIR resolve off
-# __file__, not cwd) but as a Python shebang script rather than a shell one, so
-# buildPythonApplication's own postFixup (wrapPythonPrograms) finds it under \$out/bin and wraps
-# it with propagatedBuildInputs' PYTHONPATH automatically — the standard mechanism, not
-# reimplemented by hand here.
-import sys
+# set to the directory containing app/, cwd unimportant since WEB_DIR resolves off __file__, not
+# cwd) but as a Python shebang script rather than a shell one, so buildPythonApplication's own
+# postFixup (wrapPythonPrograms) finds it under \$out/bin and wraps it with propagatedBuildInputs'
+# PYTHONPATH automatically — the standard mechanism, not reimplemented by hand here.
+#
+# SUD_GRAMMARS_DIR points app/paths.py's GRAMMARS_DIR at the copy fetched hermetically above,
+# instead of the APP_DATA location every other platform's on-demand app/grammars.py fetch uses —
+# see app/paths.py's own comment on this variable for why Nix gets its own escape hatch here.
+import os, sys
+os.environ.setdefault("SUD_GRAMMARS_DIR", "$out/share/sud-workbench-grammars")
 sys.path.insert(0, "$out/lib/sud-workbench")
 from app.__main__ import main
 sys.exit(main())

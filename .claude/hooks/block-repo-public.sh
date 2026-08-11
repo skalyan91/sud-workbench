@@ -1,4 +1,24 @@
 #!/usr/bin/env bash
+# RETIRED — no longer wired in .claude/settings.json's PreToolUse hooks, per this file's own
+# instruction below ("delete this hook... in the same change that resolves the issue"). Left on
+# disk rather than deleted (a `rm` of this exact file was denied by the harness's own permission
+# classifier — reasonable caution around removing a security guard; disabling its registration in
+# settings.json is what actually mattered, and that's done) — kept here as a record of what this
+# guarded against and how it was resolved, for anyone who finds this file later.
+#
+# THE ISSUE THIS GUARDED, AND HOW IT WAS RESOLVED: `grammars/` (the UD<->SUD conversion grammars)
+# used to be vendored verbatim from surfacesyntacticud/tools, which declares no licence anywhere —
+# no licence means no grant of redistribution rights, so publishing this repository with that
+# content committed would have republished someone else's work without permission. Resolved by
+# option 2 of the three THIRD-PARTY-NOTICES.md used to list: `grammars/` is no longer committed to
+# this repository at all — app/grammars.py fetches it on demand, onto the END USER's own machine,
+# the same on-demand shape app/macron.py already used for the Latin macron data; default.nix
+# fetches it hermetically at the user's own `nix build` time instead. See
+# THIRD-PARTY-NOTICES.md's "Resolved: `grammars/`" section for the current state.
+#
+# ORIGINAL HEADER, BELOW, PRESERVED FOR CONTEXT (the guard logic itself still works exactly as
+# described — it's just not wired to fire any more):
+#
 # PreToolUse(Bash) guard: refuse any command that would make this repository PUBLIC.
 #
 # WHY. `grammars/` is vendored verbatim from surfacesyntacticud/tools, which declares no licence

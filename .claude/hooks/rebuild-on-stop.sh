@@ -3,8 +3,8 @@
 #
 # Wired as a Stop hook (see .claude/settings.json), so it fires ONCE when the assistant finishes a
 # turn — not on every individual edit (a ~5-min build after each keystroke-edit would be intolerable).
-# It rebuilds only when something under app/, web/, packaging/ or grammars/ has actually changed since
-# the last build (this isn't a git repo, so the check is by file mtime, not `git diff`), and it runs
+# It rebuilds only when something under app/, web/ or packaging/ has actually changed since the
+# last build (this isn't a git repo, so the check is by file mtime, not `git diff`), and it runs
 # the build detached in the BACKGROUND so it never stalls the session. Build output → .claude/last-build.log.
 set -u
 
@@ -35,8 +35,10 @@ LOCK=".claude/.build.lock"          # holds the PID of an in-flight build
 # A build is already running → let it finish; don't stack a second one on the same dist/ output.
 if [ -f "$LOCK" ] && kill -0 "$(cat "$LOCK" 2>/dev/null)" 2>/dev/null; then exit 0; fi
 
-# Nothing changed since the last kickoff → nothing to do. (First run: no stamp ⇒ build.)
-if [ -f "$STAMP" ] && [ -z "$(find app web packaging grammars -type f -newer "$STAMP" 2>/dev/null | head -1)" ]; then
+# Nothing changed since the last kickoff → nothing to do. (First run: no stamp ⇒ build.) grammars/
+# is deliberately NOT watched here any more — it's fetched on demand into APP_DATA (app/grammars.py),
+# not part of the source tree a rebuild needs to pick up.
+if [ -f "$STAMP" ] && [ -z "$(find app web packaging -type f -newer "$STAMP" 2>/dev/null | head -1)" ]; then
   exit 0
 fi
 

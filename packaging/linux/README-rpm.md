@@ -36,7 +36,7 @@ not one ABI. A binary wheel built for Fedora 41's glibc may not load on RHEL 9's
 `rpmbuild` run on Fedora targets Fedora's own Python 3.12 build, which is not binary-compatible
 with, say, openSUSE's. Bundling compiled wheels for every RPM-based distro this package might land
 on is exactly the "portability nightmare" the task brief warns against — so this package ships
-**source only** (`app/`, `web/`, `grammars/`) plus a launcher, and builds its Python environment
+**source only** (`app/`, `web/`) plus a launcher, and builds its Python environment
 **on the machine that will run it**, from **that machine's own** `python3.12` package. The RPM's
 `Requires:` guarantees that interpreter — and the system GTK/WebKit2GTK bindings — exist before
 `sud-workbench` is ever run; first launch only has to `pip install` the pure-Python/thinc-CNN
@@ -154,7 +154,8 @@ packaging/linux/make_rpm.sh --image fedora:41     # explicit (also the default)
 Requires Docker on the build machine (used only to get a real `rpmbuild`/`dnf` toolchain — nothing
 about the output `.rpm` is container-specific). The script:
 
-1. Stages `app/`, `web/`, `grammars/` into a clean tree, applying the same trims every platform's
+1. Stages `app/`, `web/` into a clean tree (`grammars/` is deliberately not part of it any more —
+   see `app/grammars.py`), applying the same trims every platform's
    build already applies — `__pycache__` stripped, the *other two* platforms' chrome kits dropped
    (`macos-kit/`, `win11-kit/` — Linux ships only `web/adwaita-kit/`), the browser design-mode
    fixture (`js/dev-fixture.js` + its `<script>` tag) stripped, `web/fonts/` trimmed to the same

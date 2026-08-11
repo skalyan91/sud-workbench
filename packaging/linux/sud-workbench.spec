@@ -1,9 +1,11 @@
 # RPM spec for SUD Workbench — the Linux (RPM-based-distro) counterpart of
 # packaging/make_bootstrap_app.sh (macOS) and packaging/windows/make_win_app.py (Windows).
 #
-# SAME MODEL AS THE OTHER TWO PLATFORMS, DELIBERATELY: this package ships the app SOURCE (app/ web/
-# grammars/, ~a few MB) plus a launcher and a first-launch bootstrap script. It does NOT vendor a
-# Python interpreter or any compiled wheel. On first run, /usr/bin/sud-workbench builds a per-user
+# SAME MODEL AS THE OTHER TWO PLATFORMS, DELIBERATELY: this package ships the app SOURCE (app/ web/,
+# ~a few MB) plus a launcher and a first-launch bootstrap script. grammars/ is NOT part of that
+# source tree — it's fetched on demand from inside the running app instead (see app/grammars.py),
+# so this spec never sees it. It does NOT vendor a Python interpreter or any compiled wheel. On
+# first run, /usr/bin/sud-workbench builds a per-user
 # venv from the SYSTEM's own Python 3.12 (this package's own Requires: guarantees one exists) and
 # `pip install`s requirements-core.txt into it — exactly the "build against the machine that will
 # run it" reasoning make_bootstrap_app.sh's header gives for macOS, which applies at least as
@@ -42,14 +44,15 @@ Summary:        Desktop editor for SUD/UD/mSUD dependency treebanks in CoNLL-U
 # and tagged with the license marker in the FILES section below — spelled out here without its
 # leading percent sign on purpose: rpmbuild macro-expands ANY percent-prefixed word on ANY line,
 # comments included, and warns "Macro expanded in comment" the moment one appears, escaped or not).
-# ONE vendored subtree does not carry a declared upstream licence:
-# grammars/ (the surfacesyntacticud/tools grew conversion grammars) — see THIRD-PARTY-NOTICES.md's own
-# "Unresolved: grammars/" section, which macOS and Windows already ship under the same open question.
-# This package does not resolve that question; it inherits the same posture rather than quietly
-# excluding grammars/ (which would silently disable UD import/export and conversion — see CLAUDE.md's
-# "Formats and conversion" section) or silently mis-stating the licence as MIT. Every other vendored
-# component named in THIRD-PARTY-NOTICES.md (Baxter-Sagart data, tshet-uinh data, the fastText LID
-# model, …) carries its own compatible-with-redistribution licence and is not a concern here.
+# This RPM carries NO vendored subtree of unresolved licence. It used to: grammars/ (the
+# surfacesyntacticud/tools grew conversion grammars) has no declared upstream licence and was once
+# committed straight into this repo, which is what THIRD-PARTY-NOTICES.md's old "Unresolved:
+# grammars/" section was about. That content is no longer in the repo at all — it's fetched on
+# demand, onto the END USER's own machine, by app/grammars.py (a new extras tier in app/extras.py,
+# the identical licensing-driven shape app/macron.py already uses for the Latin macron data) — so
+# this RPM never packages it and there is nothing left here for License: MIT to misstate. Every
+# vendored component actually named in THIRD-PARTY-NOTICES.md (Baxter-Sagart data, tshet-uinh data,
+# the fastText LID model, …) carries its own compatible-with-redistribution licence.
 License:        MIT
 URL:            https://github.com/SunflowerAI/sud-workbench
 # Group: is obsolete on Fedora (dropped from the packaging guidelines years ago) and unused by dnf,
@@ -171,7 +174,9 @@ rm -rf %{buildroot}
 
 install -d %{buildroot}%{_bindir}
 install -d %{buildroot}/opt/sud-workbench/appsrc
-cp -a app web grammars %{buildroot}/opt/sud-workbench/appsrc/
+# grammars is deliberately absent from this list — see the header comment above: it is fetched on
+# demand by app/grammars.py rather than shipped in the RPM.
+cp -a app web %{buildroot}/opt/sud-workbench/appsrc/
 install -m 0644 requirements-core.txt %{buildroot}/opt/sud-workbench/requirements-core.txt
 install -m 0644 LICENSE %{buildroot}/opt/sud-workbench/LICENSE
 install -m 0644 THIRD-PARTY-NOTICES.md %{buildroot}/opt/sud-workbench/THIRD-PARTY-NOTICES.md

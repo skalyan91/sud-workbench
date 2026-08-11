@@ -41,9 +41,10 @@ The app finds `grewpy_backend` under `~/.opam/*/bin` automatically, or uses a
 bundled copy at `vendor/grew/bin/` if `tools/bundle_grew.sh` has built one (which
 is how a packaged app runs conversions on a machine with no opam). Without either,
 the app still runs and edits SUD/mSUD; only UD import/export and format conversion
-are disabled (surfaced as a toast). The conversion grammars are vendored from
-[surfacesyntacticud/tools](https://github.com/surfacesyntacticud/tools) under
-`grammars/` — see `grammars/README.md`.
+are disabled (surfaced as a toast). The conversion grammars themselves come from
+[surfacesyntacticud/tools](https://github.com/surfacesyntacticud/tools), fetched
+on demand from inside the app (Manage Models → "UD conversion grammars") rather
+than vendored — see `app/grammars.py`.
 
 ## What works now
 
@@ -264,7 +265,8 @@ app/  __main__.py       pywebview bootstrap, application menu, and the AppKit/Py
       model.py          id renumber + head/cycle/root validation
       detect.py         auto-detect UD / SUD / mSUD from the relation inventory
       convert.py        grew (grewpy) conversion: ud↔sud, msud→sud, msud→ud
-      sud_rules.py      relation↔POS constraints, read from the vendored grew validator
+      sud_rules.py      relation↔POS constraints, read from the fetched grew validator
+      grammars.py       fetches the UD↔SUD conversion grammars on demand (surfacesyntacticud/tools)
       parse.py          parser engines: SUD spaCy + Stanza UD→SUD (+ MWT), sentence split
       parse_sud.py      backwards-compat shim over app.parse
       models_registry.py  available/installed models, GitHub-release + Stanza download
@@ -276,11 +278,10 @@ app/  __main__.py       pywebview bootstrap, application menu, and the AppKit/Py
       wiktionary.py     Wiktionary definition lookup (MediaWiki REST API)
       apte.py           Apte Sanskrit-English dictionary lookup (vendored index; C-SALT fallback)
       toolbox_import.py SIL Toolbox/FieldWorks interlinear → CoNLL-U
-      paths.py          Application Support locations (models, caches, extras)
+      paths.py          Application Support locations (models, caches, extras, grammars)
       data/             vendored data: lid.176.ftz, apte1957.tsv.xz, FEATS inventories,
                         romanisation tables
 tools/                  build-time helpers (grew bundling, Apte index generation)
-grammars/               vendored surfacesyntacticud .grs conversion grammars + validator
 web/  index.html        DOM skeleton; loads the modules below as ordered classic scripts
       js/core/          state, prefs, document render, undo, scroll, init (loads last)
       js/diagram/       the SVG renderers: core, render, wrapping, drag-editing

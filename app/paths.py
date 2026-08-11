@@ -40,8 +40,21 @@ STANZA_DIR = os.path.join(APP_DATA, "stanza_resources")   # stanza model_dir
 CACHE_DIR = os.path.join(APP_DATA, "cache")               # e.g. cached release listings
 EXTRAS_DIR = os.path.join(APP_DATA, "site-packages")      # on-demand heavy deps (torch/Stanza/JP/Arabic), added to sys.path at startup
 
+# The UD<->SUD conversion grammars (app/grammars.py fetches them; see that module's header for
+# why they're fetched rather than vendored). `SUD_GRAMMARS_DIR` is Nix's own escape hatch: a Nix
+# build fetches the grammars HERMETICALLY, at the user's own `nix build`/`nix-build` time, into an
+# immutable Nix-store path (see default.nix), and its generated launcher sets this variable so the
+# app uses that pre-fetched copy directly instead of trying to fetch (and write) into APP_DATA —
+# which would be redundant on Nix and, worse, would attempt to `os.makedirs`/write under a
+# read-only store path below. Every OTHER platform fetches on demand from inside the app itself
+# (Manage Models), the same as the `la_macron`/Stanza/Japanese/Arabic tiers, so this env var is
+# unset there and GRAMMARS_DIR is just another APP_DATA subdirectory like STANZA_DIR/EXTRAS_DIR.
+GRAMMARS_DIR = os.environ.get("SUD_GRAMMARS_DIR") or os.path.join(APP_DATA, "grammars")
+
 
 def ensure_dirs() -> None:
     os.makedirs(STANZA_DIR, exist_ok=True)
     os.makedirs(CACHE_DIR, exist_ok=True)
     os.makedirs(EXTRAS_DIR, exist_ok=True)
+    if not os.environ.get("SUD_GRAMMARS_DIR"):   # a Nix build supplies its own — never create/touch it
+        os.makedirs(GRAMMARS_DIR, exist_ok=True)

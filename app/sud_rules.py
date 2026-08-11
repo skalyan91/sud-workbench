@@ -1,7 +1,8 @@
 """Which SUD relations are allowed between two tokens, given their POS tags.
 
-The SUD validator (vendored ``grammars/validator/relations.json``, from surfacesyntacticud/tools)
-expresses relation↔POS constraints as grew patterns, e.g.::
+The SUD validator (``grammars/validator/relations.json``, fetched on demand from
+surfacesyntacticud/tools — see :mod:`app.grammars`) expresses relation↔POS constraints as grew
+patterns, e.g.::
 
     pattern { GOV -[punct]-> DEP; DEP [upos <> PUNCT] }          # punct ⇒ dependent must be PUNCT
     pattern { GOV -[1=comp,2=aux]-> DEP; GOV [upos <> AUX] }     # comp:aux ⇒ governor must be AUX
@@ -18,7 +19,9 @@ import json
 import re
 from pathlib import Path
 
-_RULES_PATH = Path(__file__).resolve().parent.parent / "grammars" / "validator" / "modules" / "relations.json"
+from .paths import GRAMMARS_DIR as _GRAMMARS_DIR_RAW
+
+_RULES_PATH = Path(_GRAMMARS_DIR_RAW) / "validator" / "modules" / "relations.json"
 _RULES: list | None = None
 
 

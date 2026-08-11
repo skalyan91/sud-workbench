@@ -23,7 +23,7 @@ Output layout (see LAYOUT_RATIONALE below):
     SUD Workbench/                 ← the payload: also a working portable directory on its own
       SUD Workbench.exe            ← console-free shim (or launcher.vbs — see build_exe_launcher())
       VERSION.txt, LICENSE.txt, THIRD-PARTY-NOTICES.txt
-      appsrc/{app,web,grammars}    ← same name as Contents/Resources/appsrc on macOS
+      appsrc/{app,web}             ← same name as Contents/Resources/appsrc on macOS
       icon/appicon.ico
       setup/{requirements-core.txt,find_py.ps1,find_git.ps1,setup_venv.ps1,bootstrap.ps1}
     installer/
@@ -62,7 +62,10 @@ APP_NAME = "SUD Workbench"
 # inert too, because Stanza emits UD and this app stores SUD. Manage Models says so at the top of the
 # Stanza group when the backend is missing (js/io/models.js), which is the same warning a macOS user
 # without one sees.
-SRC_TREES = ("app", "web", "grammars")
+# grammars/ is NOT one of these: the UD↔SUD conversion grammars are licensing-unclear upstream
+# content, so they are no longer vendored at all — fetched on demand at runtime instead, same as
+# the macron data (see app/grammars.py, app/extras.py).
+SRC_TREES = ("app", "web")
 
 # Ship the CORE Noto faces only; every other script's face is fetched on first need at runtime
 # (web/js/lang/fontload.js + app/fonts.py). Same list, same reason, as make_bootstrap_app.sh — the

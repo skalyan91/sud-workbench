@@ -70,8 +70,12 @@ STAGE_ROOT="$STAGE/sud-workbench-$VERSION"
 mkdir -p "$STAGE_ROOT"
 
 # ── 1. stage the app source tree, same trims every platform's build applies ────────────────────
-echo "▶ staging app/ web/ grammars/ …"
-for d in app web grammars; do
+echo "▶ staging app/ web/ …"
+# grammars/ used to be a third entry here; it's no longer part of this repo's source tree at all
+# (no declared upstream licence — see app/grammars.py), so there is nothing to stage. The app
+# fetches it itself on demand, the same on-demand shape app/macron.py already uses for the Latin
+# macron data.
+for d in app web; do
   cp -R "$PROJECT/$d" "$STAGE_ROOT/$d"
 done
 find "$STAGE_ROOT" -name '__pycache__' -type d -prune -exec rm -rf {} + 2>/dev/null || true

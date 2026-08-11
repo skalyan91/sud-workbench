@@ -9,8 +9,8 @@ below.
 ## Philosophy: SAME model as macOS/Windows, not a new one
 
 `make_deb.sh` follows `packaging/make_bootstrap_app.sh` (macOS) and
-`packaging/windows/make_win_app.py` exactly: ship the app **source** (`app/`, `web/`, `grammars/`)
-plus a first-launch bootstrap that builds a **per-user venv** from the machine's own Python 3.12 and
+`packaging/windows/make_win_app.py` exactly: ship the app **source** (`app/`, `web/`) plus a
+first-launch bootstrap that builds a **per-user venv** from the machine's own Python 3.12 and
 installs `requirements-core.txt` into it. Nothing is frozen, nothing is cross-compiled, no compiled
 wheel is bundled for a `.deb`-buildable Debian `-dev` archive that would need to match the target's
 own glibc/Python ABI.
@@ -70,7 +70,9 @@ on the system is meant to import from it. That is exactly FHS's definition of `/
 the installation of add-on application software packages... a package to be installed in `/opt/`
 must locate its static files in a separate `/opt/<package>` tree"* — which is also, not
 coincidentally, the same shape `Contents/Resources/appsrc` (macOS) and `appsrc\` (Windows) already
-take. `/opt/sud-workbench/appsrc/{app,web,grammars}` keeps that name across all three platforms.
+take. `/opt/sud-workbench/appsrc/{app,web}` keeps that name across all three platforms — `grammars/`
+is deliberately not part of this tree; it's fetched on demand from inside the running app instead
+(see `app/grammars.py`), same as every other platform.
 
 ## System runtime dependencies — verified, not guessed
 

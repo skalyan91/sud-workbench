@@ -12,19 +12,24 @@ The one exception worth naming is `en_sud_ewt`, pinned as a hard dependency rath
 
 ---
 
-## ⚠ Unresolved: `grammars/`
+## Resolved: `grammars/` — no longer vendored
 
-**The grew conversion grammars have no declared licence.** The whole `grs/` subtree is vendored
-verbatim from [surfacesyntacticud/tools](https://github.com/surfacesyntacticud/tools) at commit
-`03c3bbd88e33a0f6331b58d0669edf1031aa9efb`, and neither that repository nor the vendored files
-state any licence. Absent a licence there is no grant of redistribution rights, so this directory
-is the one component here that **cannot be safely republished**, and it is the blocker on making
-this repository public as it stands.
+**The grew UD↔SUD conversion grammars have no declared licence.** The whole `converter/grs/`
+subtree (plus `validator/modules/`) from
+[surfacesyntacticud/tools](https://github.com/surfacesyntacticud/tools), pinned to commit
+`03c3bbd88e33a0f6331b58d0669edf1031aa9efb`, and neither that repository nor its files state any
+licence — so this content **cannot be safely republished**: absent a licence there is no grant of
+redistribution rights.
 
-Three ways out, in the order worth trying: ask the upstream authors to declare a licence; replace
-the vendored copy with a fetch step that pulls the grammars at install time onto the user's own
-machine; or drop UD conversion from the shipped build. Until one of those happens, treat
-`grammars/` as redistributable only within this private repository.
+This used to be vendored straight into this repository (a committed `grammars/` directory), which
+was the one thing standing between this repo and being made public. It no longer is: `app/
+grammars.py` fetches it **on demand, onto the end user's own machine**, the same on-demand shape
+`app/macron.py` already used for the Latin macron data (see that module and `app/extras.py` for
+the mechanism — one of the three ways out this section used to list, "replace the vendored copy
+with a fetch step that pulls the grammars at install time"). Nix builds fetch it hermetically at
+the user's own `nix build`/`nix-build` time instead (`default.nix`'s `grammarsSrc`), which is the
+same idea applied Nix's own way. Neither this repository nor any package built from it carries a
+copy any more — fetching directly from upstream onto a user's own machine is not redistribution.
 
 Everything else below is properly licensed.
 

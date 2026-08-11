@@ -101,7 +101,7 @@ echo "  output  : $LINUX_OUT"
 # ── 0. validate sources before touching anything ────────────────────────────────────────────────
 echo "▶ checking sources…"
 REQUIRED=(
-  "$PROJECT/app" "$PROJECT/web" "$PROJECT/grammars"
+  "$PROJECT/app" "$PROJECT/web"
   "$PROJECT/requirements-core.txt" "$PROJECT/LICENSE" "$PROJECT/THIRD-PARTY-NOTICES.md"
   "$PROJECT/packaging/icon-flat/appicon-flat-1024.png" "$PROJECT/packaging/icon-flat/appicon-flat.svg"
   "$HERE/find_py.sh" "$HERE/setup_venv.sh" "$HERE/sud-workbench.launcher"
@@ -140,7 +140,10 @@ mkdir -p "$PKGROOT/DEBIAN" \
 echo "▶ copying app source…"
 APPSRC="$PKGROOT/opt/sud-workbench/appsrc"
 mkdir -p "$APPSRC"
-for d in app web grammars; do
+# grammars/ is NOT one of these two — it isn't committed to the repo at all any more (unclear
+# upstream licence; see app/grammars.py's own header), so there's nothing here to copy. It's
+# fetched on demand from inside the running app instead, same shape as app/macron.py's tier.
+for d in app web; do
   cp -R "$PROJECT/$d" "$APPSRC/$d"
 done
 find "$APPSRC" -name '__pycache__' -type d -prune -exec rm -rf {} + 2>/dev/null || true

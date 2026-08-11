@@ -1,11 +1,12 @@
 """UD ↔ SUD ↔ mSUD conversion, isolating all use of grew (via the grewpy client).
 
 Every conversion goes through one code path — serialize the sentence-dict list to
-CoNLL-U (:func:`app.io_conllu.serialize`), rewrite it with a vendored ``.grs`` graph
-grammar under :data:`GRAMMARS_DIR`, then parse the result back
-(:func:`app.io_conllu.parse`).  grew's ``to_conll`` renormalises FEATS/MISC, so a
-converted document is deliberately *not* byte-stable against its source — conversion
-is an explicit transform, not the passthrough that I/O guarantees.
+CoNLL-U (:func:`app.io_conllu.serialize`), rewrite it with a ``.grs`` graph grammar
+fetched on demand under :data:`GRAMMARS_DIR` (see :mod:`app.grammars` for why fetched
+rather than vendored), then parse the result back (:func:`app.io_conllu.parse`).
+grew's ``to_conll`` renormalises FEATS/MISC, so a converted document is deliberately
+*not* byte-stable against its source — conversion is an explicit transform, not the
+passthrough that I/O guarantees.
 
 grewpy is imported lazily: importing it eagerly spawns the OCaml ``grewpy_backend``
 process, which may be absent.  All entry points raise :class:`ConversionUnavailable`
@@ -31,8 +32,9 @@ from pathlib import Path
 from typing import Any
 
 from . import io_conllu
+from .paths import GRAMMARS_DIR as _GRAMMARS_DIR_RAW
 
-GRAMMARS_DIR = Path(__file__).resolve().parent.parent / "grammars"
+GRAMMARS_DIR = Path(_GRAMMARS_DIR_RAW)   # app/grammars.py fetches this on demand — see its own header
 
 # grammar file → grew strategy name (see grammars/README.md for provenance)
 _GRAMMARS = {
@@ -135,7 +137,8 @@ def _load_grs(filename: str):
     _, GRS = _ensure_grew()
     path = GRAMMARS_DIR / filename
     if not path.exists():
-        raise ConversionUnavailable(f"grammar not found: {path}")
+        raise ConversionUnavailable(f"grammar not found: {path} — fetch “UD conversion grammars” "
+                                     "from Manage Models first")
     try:
         grs = GRS(str(path))
     except Exception as exc:  # noqa: BLE001

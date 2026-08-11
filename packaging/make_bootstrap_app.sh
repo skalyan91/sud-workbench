@@ -37,7 +37,9 @@ echo "▶ copying app source…"
 # be true on a machine that could not act on it.
 # The binary is architecture-specific, so a build on an Intel Mac ships an Intel one; `[ -e ]` means a
 # tree with no vendor/ still builds, and the app then degrades exactly as it does today.
-for d in app web grammars vendor; do
+# grammars/ is deliberately NOT in this list — it's no longer vendored (unclear upstream licence);
+# app/grammars.py fetches it on demand at runtime instead, same on-demand shape as app/macron.py.
+for d in app web vendor; do
   [ -e "$PROJECT/$d" ] && cp -R "$PROJECT/$d" "$RES/appsrc/$d"
 done
 find "$RES/appsrc" -name '__pycache__' -type d -prune -exec rm -rf {} + 2>/dev/null || true
