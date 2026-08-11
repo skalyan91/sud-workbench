@@ -1,0 +1,22 @@
+#!/bin/sh
+# DEBIAN/postrm — mirror image of postinst: refresh the same caches on remove/purge so a deleted
+# .desktop file, icon and mimetype registration actually disappear from the shell rather than
+# lingering in a stale cache. Deliberately does NOT touch ~/.local/share/SUD Workbench (the per-user
+# venv + model cache + state.json) on ANY invocation, including purge — that directory is not owned
+# by this package (dpkg has no reach into $HOME anyway) and is per-user data, exactly the posture
+# the macOS .app (never touches ~/Library/Application Support on delete) and the Windows uninstaller
+# (never touches %LOCALAPPDATA%) already take. A user who wants that back has to remove it by hand;
+# that is the safe default for anything holding a user's saved work and preferences.
+set -e
+
+if command -v update-mime-database >/dev/null 2>&1; then
+  update-mime-database /usr/share/mime >/dev/null 2>&1 || true
+fi
+if command -v update-desktop-database >/dev/null 2>&1; then
+  update-desktop-database /usr/share/applications >/dev/null 2>&1 || true
+fi
+if command -v gtk-update-icon-cache >/dev/null 2>&1; then
+  gtk-update-icon-cache -f -t /usr/share/icons/hicolor >/dev/null 2>&1 || true
+fi
+
+exit 0

@@ -1,0 +1,66 @@
+#!/bin/bash
+# /usr/bin/sud-workbench — thin launcher installed by the .deb, the Linux counterpart of
+# make_bootstrap_app.sh's inline "SUD Workbench" launcher (macOS) and launcher.c/launcher.vbs
+# (Windows). Named .launcher in this source tree only so packaging/linux/make_deb.sh has an
+# unambiguous file to `install -m755` as /usr/bin/sud-workbench — the installed name carries no
+# extension, as Debian convention expects for anything on PATH.
+#
+# Launch decision — TWO tiers here where macOS/Windows need three, because DEBIAN/control's
+# Depends: line (python3 (>= 3.12), python3-venv, python3-gi, gir1.2-gtk-3.0, gir1.2-webkit2-4.1,
+# gir1.2-soup-3.0, libgtk-3-0t64, git) is an INSTALL-TIME GUARANTEE enforced by apt/dpkg before this
+# file can even exist on disk. macOS's launcher needs a "no suitable Python, may need Homebrew, may need sudo" branch
+# and Windows' needs "no suitable Python, may need winget/python.org" — Debian's package manager
+# already did that job at `apt install` time, so there is nothing left to detect or fall back to
+# install here. What's left is exactly setup_venv.sh's job:
+#   1. venv already set up (sentinel present) → run the app.
+#   2. first launch → run setup_venv.sh (creates the venv, pip-installs requirements-core.txt),
+#      then run the app.
+set -e
+
+APPDIR="/opt/sud-workbench"
+APPSRC="$APPDIR/appsrc"
+# Matches app/paths.py's APP_DATA exactly — see setup_venv.sh's own header for why this is not a
+# second, independently-invented notion of "where this app's data lives".
+APPSUP="${XDG_DATA_HOME:-$HOME/.local/share}/SUD Workbench"
+VENV="$APPSUP/venv"
+mkdir -p "$APPSUP"
+
+run_app() {
+  export PYTHONPATH="$APPSRC"
+  cd "$APPSRC"
+  exec "$VENV/bin/python" -m app "$@"
+}
+
+# 1) Ready venv → run. The sentinel (.sud-core-ready) means the core install actually finished, so a
+#    half-built venv from an interrupted setup is never mistaken for a ready one — same convention
+#    every platform's launcher follows.
+if [ -x "$VENV/bin/python" ] && [ -f "$VENV/.sud-core-ready" ]; then
+  run_app "$@"
+fi
+
+# 2) First launch: build the venv. Visible feedback matters here — pip installing spaCy/thinc/wiktra
+#    genuinely takes a couple of minutes, and a .desktop launch (double-click, app-grid tile) has no
+#    controlling terminal to show that in, unlike a `sud-workbench` typed into one. Prefer a real
+#    terminal emulator, mirroring macOS's `open_terminal_path`/Windows' visible bootstrap.ps1 path;
+#    `x-terminal-emulator` is the Debian alternatives virtual package every desktop install registers
+#    (xterm, gnome-terminal, konsole, …) — NOT guaranteed on a minimal/headless box, which is exactly
+#    the environment this launcher's own boot-check runs under (xvfb, no window manager, no
+#    registered terminal), so failing over to running setup IN-PROCESS is not a hypothetical branch,
+#    it is what a correctly-working automated verification actually exercises. Either way the app
+#    still launches once pip finishes rather than the launcher failing outright — the same "never
+#    hard-fail, degrade gracefully" posture the rest of this codebase takes toward a missing optional
+#    piece (grew, an extras tier, a theme read).
+if [ -x "$APPDIR/setup/setup_venv.sh" ]; then
+  if command -v x-terminal-emulator >/dev/null 2>&1 && { [ -n "${DISPLAY:-}" ] || [ -n "${WAYLAND_DISPLAY:-}" ]; }; then
+    x-terminal-emulator -e bash -c "\"$APPDIR/setup/setup_venv.sh\" 2>&1 | tee \"$APPSUP/setup.log\"; echo; read -r -p 'Press Return to continue…' _" || true
+  else
+    "$APPDIR/setup/setup_venv.sh" >"$APPSUP/setup.log" 2>&1 || true
+  fi
+fi
+
+if [ -x "$VENV/bin/python" ] && [ -f "$VENV/.sud-core-ready" ]; then
+  run_app "$@"
+fi
+
+echo "sud-workbench: first-launch setup did not finish — see $APPSUP/setup.log" >&2
+exit 1

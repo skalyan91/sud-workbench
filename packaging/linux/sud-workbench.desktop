@@ -1,0 +1,13 @@
+[Desktop Entry]
+Type=Application
+Version=1.0
+Name=SUD Workbench
+GenericName=Treebank Editor
+Comment=View and edit dependency treebanks in CoNLL-U, speaking SUD relation set
+Exec=sud-workbench %F
+TryExec=sud-workbench
+Icon=sud-workbench
+Terminal=false
+Categories=Education;Utility;
+MimeType=text/x-conllu;
+Keywords=CoNLL-U;treebank;dependency;linguistics;annotation;SUD;UD;

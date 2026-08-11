@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Installed to /usr/share/mime/packages/sud-workbench.xml — registers the CoNLL-U mimetype that
+  sud-workbench.desktop's MimeType= line refers to, so a file manager can actually resolve
+  "open .conllu with…" to this application. The Linux counterpart of macOS's CFBundleDocumentTypes
+  block (make_bootstrap_app.sh's Info.plist) and the Windows installer's .conllu/.conll file-type
+  registration (sud-workbench.iss) — same association, expressed in this platform's own mechanism
+  (shared-mime-info, not a bundle plist or a registry key).
+
+  update-mime-database is run from DEBIAN/postinst after this file lands, which is what makes the
+  association live without the user logging out — see make_deb.sh's control-scripts.
+-->
+<mime-info xmlns="http://www.freedesktop.org/standards/shared-mime-info">
+  <mime-type type="text/x-conllu">
+    <comment>CoNLL-U treebank</comment>
+    <glob pattern="*.conllu"/>
+    <glob pattern="*.conll"/>
+  </mime-type>
+</mime-info>
