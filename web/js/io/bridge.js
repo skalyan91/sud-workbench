@@ -110,7 +110,7 @@ function openFolderMenu(){ closeFolderMenu();
   // native macOS proxy-icon placement: the menu sits right ON the title, leading (file) item anchored over the filename
   const r=anchor.getBoundingClientRect(), mw=m.offsetWidth, mh=m.offsetHeight;
   const left=Math.max(6,Math.min(r.left, innerWidth-mw-8));
-  const top=Math.max(menuTopBound(),Math.min(r.top-4, innerHeight-mh-8));   // the proxy-icon menu opens ON the title, i.e. as high as any menu goes — so it is the one most likely to meet the native tab bar (menuTopBound, js/core/scroll.js)
+  const top=Math.max(menuTopBound(),Math.min(r.top-4, innerHeight-mh-8));   // the proxy-icon menu opens ON the title, i.e. as high as any menu goes — menuTopBound (js/core/scroll.js) is a bare 8 now that this app no longer offers macOS window tabbing
   m.style.left=left+"px"; m.style.top=top+"px";
   setTimeout(()=>{ document.addEventListener("mousedown",_fpOutside,true); document.addEventListener("keydown",_fpKey,true); },0);
 }

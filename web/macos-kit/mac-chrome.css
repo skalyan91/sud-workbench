@@ -100,15 +100,13 @@
      ordinary UI content. See --tb-merged-blur's own comment for the new, independent value; this rule and
      `.viewbar` both read the one token, so they still can't drift apart from each other. */
   .titlebar::after{content:none; position:absolute; left:0; right:0; top:0; bottom:0; pointer-events:none; z-index:-1}
-  html.tabbed .titlebar,
   .window:has(.viewbar:not(.hidden)) .titlebar{border-bottom-width:0}   /* border REMOVED (not just transparent): ::after stops at the padding box, so a transparent .5px border left a hairline of raw document between the two bars */
-  html.tabbed .titlebar > .tb-blur,
   .window:has(.viewbar:not(.hidden)) .titlebar > .tb-blur{display:none}
-  /* …AND WHENEVER A WINDOW-TAB BAR IS UP (html.tabbed, set from app/mac/shell.py). Same reasoning as
-     the options bar directly below the title bar: the scroll-edge ramp exists to fade the toolbar into
-     a document scrolling under it, and with an opaque native bar between the two there is no such
-     transition to make — the ramp then reads as a smear against a hard edge. Flat merged surface instead. */
-  html.tabbed .titlebar::after,
+  /* ⚠ THIS RULE PAIR USED TO ALSO FIRE ON `html.tabbed` (a native window-tab bar up, set from
+     app/mac/shell.py) — gone with window tabbing itself (see the module-level note near the top of
+     app/__main__.py). Only the options-bar case survives: the scroll-edge ramp exists to fade the
+     toolbar into a document scrolling under it, and with the options bar's own opaque surface directly
+     beneath there is no such transition to make — flat merged surface instead. */
   .window:has(.viewbar:not(.hidden)) .titlebar::after{content:"";
     -webkit-mask-image:none; mask-image:none; backdrop-filter:saturate(180%) blur(var(--tb-merged-blur,12px)); -webkit-backdrop-filter:saturate(180%) blur(var(--tb-merged-blur,12px)); background:var(--tb-tint)}   /* ONE layer at the same recipe as .viewbar — not two stacked flats (that compounds alpha/blur and read more opaque than the bar below). background:var(--tb-tint) is the same token .viewbar uses (both now read --tb-merged-tint, mac-tokens.css), so the two surfaces paint byte-identical fills.
      SEAM CHECK (asked for explicitly — two independently-composited backdrop-filter regions meeting at a shared
@@ -139,44 +137,10 @@
      their shared edge) rather than a CSS mismatch — and the fix at that point is the architectural one floated
      alongside this item (merging `.titlebar`/`.viewbar` into one compositing pass so there is structurally only
      one region), not another round of recipe-matching. */
-  /* ⚠ AND THE BAND THE NATIVE TAB BAR SITS IN IS PAINTED BY NOTHING — WHICH IS THE ONE PLACE THE
-     DOCUMENT WAS SHOWING THROUGH THE CHROME RAW. The two rules above merge `.titlebar` and `.viewbar`
-     into one surface. ⚠️ SUPERSEDED IN ITS GEOMETRY, NOT IN ITS POINT: the options bar has since moved
-     BELOW the tab bar (see `.viewbar`'s own `top`), so the band is no longer "under both bars" — it runs
-     from the TITLE BAR's bottom edge (--tbH) down to --tabH, and the options bar starts where it ends.
-     The --vbH that used to be added to both ends is gone with the reservation that put it there; every
-     other word below stands, and the height is the same 48px on this machine.
-     `.doc`'s top PADDING is --top-chrome, which only sets where the first block sits at scroll 0: scroll
-     the document and its content passes under ALL the chrome, exactly as the glass design intends. Under
-     the title bar and the options bar it is blurred and tinted; under this band it was neither.
-     MEASURED (two merged windows, options bar open, #doc scrolled 260px, window-server capture, both
-     themes): grid text — "convention / NOUN / NNS / Number=Plur" — legible SHARP behind and either side
-     of the native tab capsule, and the band sampling the raw document (light 247,247,247 · dark 41,41,41)
-     against the options bar's own 12px higher (252,252,252 / 33,33,33). That is the reported "the tab bar
-     should have the same blur and translucency as the options bar", and it is answered from this side
-     rather than the native one: the tab bar is TRANSPARENT — AppKit's own `NSTabBar` draws only a
-     Liquid-Glass `NSGlassEffectView` capsule, and (verified in the live app) that glass composites the
-     WKWebView's own pixels — so whatever the page paints in this band IS the tab bar's background, and
-     there is no public AppKit API that would let us set it any other way (see the note in
-     app/mac/shell.py's _tab_bar_height).
-     THE RECIPE IS `.viewbar`'s, RESTATED VERBATIM rather than shared through a class, on the same terms
-     as `.titlebar::after` two rules up: the three merged-state surfaces must stay byte-identical, so a
-     change to one is a change to all three. After: band light (254,254,254) vs options bar (255,255,255),
-     dark (31,31,31) vs (30,30,30) — i.e. the same 10% pass-through the options bar has, no longer a
-     window onto the document.
-     ON `.body`, NOT `.window`, and that is load-bearing: --tbH is written by syncChrome
-     (js/ui/wiring.js) onto `.body`, and a custom property's var()s resolve where the property is
-     DECLARED — from `.window` it falls back (to this rule's own 44px) and the band then starts 8px
-     high, in the title bar's own last rows. Same trap `--top-chrome` records in app.css.
-     `body:not(.fs-chrome-hidden)` because that class is exactly "the page's own chrome is collapsed", at
-     which point --tbH is zeroed while --tabH is still whatever the last measurement said — the
-     band would then span the whole top of the document for the length of the full-screen transition.
-     z-index 19: directly under `.viewbar`'s 20, so it covers everything in `.doc` (nothing there goes
-     above `.nodeedit`'s 15) and nothing in the chrome. pointer-events:none — the band is over `.doc`'s
-     padding and the scroller must keep the wheel. */
-  html.tabbed body:not(.fs-chrome-hidden) .body::after{content:""; position:absolute; left:0; right:0; pointer-events:none; z-index:19;
-    top:var(--tbH,44px); height:max(0px, calc(var(--tabH,0px) - var(--tbH,44px)));
-    background:var(--tb-merged-tint,var(--toolbar-bg,rgba(246,246,248,.80))); -webkit-backdrop-filter:saturate(180%) blur(var(--tb-merged-blur,12px)); backdrop-filter:saturate(180%) blur(var(--tb-merged-blur,12px))}   /* THE THIRD copy of the merged-state surface (with `.titlebar::after` and `.viewbar`) now reads the same --tb-merged-blur token as the other two — see that token's own comment (mac-tokens.css) for why the old fixed 0.625px is gone. */
+  /* ⚠ THE BAND A NATIVE WINDOW-TAB BAR SAT IN USED TO BE PAINTED HERE (a third copy of the merged-state
+     surface, `html.tabbed body:not(.fs-chrome-hidden) .body::after`) — deleted with window tabbing
+     itself (see the module-level note near the top of app/__main__.py). There is no such band any more:
+     `.viewbar` sits directly below the title bar with nothing native between them. */
   html.mockup .titlebar{padding:6px 12px}
   .lights i{width:12px; height:12px; border-radius:50%; display:block; border:.5px solid rgba(0,0,0,.14)}
   .lights .r{background:#ff5f57} .lights .y{background:#febc2e} .lights .g{background:#28c840}
@@ -481,25 +445,14 @@
   .sblock.findcur mark.findhit{background:var(--warn); color:#fff}
   .sid-in.findsidhit{background:color-mix(in srgb,var(--warn) 32%,transparent)!important}
 
-  /* ⚠ THE OPTIONS BAR SITS BELOW THE NATIVE TAB BAR, WHICH IS THE REVERSE OF WHAT IT USED TO DO — and
-     the reason is where its DROPDOWNS have to open, not where the bar itself is. A `.drawer-pop` hangs
-     down from its own trigger button; with the bar ABOVE the tabs (the old order — an empty
-     `set_titlebar_reserve` accessory of the bar's own height, which AppKit stacked its tab-bar accessory
-     under) every pop hung straight THROUGH the tabs, and the remedy then was to clamp each pop's top past
-     --tabH. Measured here, at a real tabbed geometry: that put all four pops 57px below the button that
-     opened them, against 6px untabbed — reported as "dropdowns open on the opposite side of the tab bar",
-     which is what a menu detached from its own control reads as. With the bar BELOW the tabs its pops are
-     already clear of everything native and open at their own 6px again, in every window state (measured:
-     6px untabbed and tabbed alike), so `clampDrawerPop` is gone with the reservation — nothing is left for
-     it to correct (js/ui/wiring.js has the removal's own note).
-     `max()`, NOT a sum, and the same floor `--top-chrome` takes (app.css): --tabH is the bar's bottom EDGE
-     in page coordinates, not its height, and the web toolbar is drawn inside the same native band. 0 with
-     no tab bar, so an untabbed window resolves to the bare `var(--tbH)` this always was — verified
-     byte-identical geometry in both kits. Restoring the bottom border is part of the move: it is the seam
-     between the options bar and the DOCUMENT, and with the bar down here the document is what is under it
-     again (`html.tabbed .viewbar{border-bottom-width:0}` deleted, not merely overridden — the tab bar it
-     was dodging is now above, where `.titlebar`'s own borderless merged state already accounts for it). */
-  .viewbar{position:absolute; left:0; right:0; top:max(var(--tbH,44px),var(--tabH,0px)); z-index:20; display:flex; align-items:center; gap:10px; padding:6px 16px; background:var(--tb-merged-tint,var(--toolbar-bg,rgba(246,246,248,.80))); -webkit-backdrop-filter:saturate(180%) blur(var(--tb-merged-blur,12px)); backdrop-filter:saturate(180%) blur(var(--tb-merged-blur,12px)); border-bottom:.5px solid var(--viewbar-border,var(--hairline)); flex-wrap:wrap}   /* fix 3: the options bar OVERLAYS the document too — pinned directly below the titlebar (top = the JS-measured --tbH), or below the native tab bar when there is one (--tabH, see the block above this rule), so the doc scrolls UNDER it and is blurred through; its drawer popovers stay above the document */   /* item 7: 20px → 5px (a much earlier pass, back when this bar had its OWN independent blur rather than matching the titlebar) — since folded into the shared merged-state recipe below, so that history is no longer this rule's own to explain. */   /* background NOW MATCHES `.titlebar::after`'s merged-state fill byte-for-byte (both read --tb-merged-tint, mac-tokens.css) rather than each independently reading --toolbar-bg — the two bars must merge into what reads as ONE surface with no seam at the shared border, so an identical recipe on both sides of that border is the baseline requirement (see the win-inactive override right below for the unfocused-window case, which the titlebar's own --tb-tint switches to the same way). */   /* Blur now reads --tb-merged-blur (mac-tokens.css) 1:1 with `.titlebar::after` and the tab-bar band fill, not a literal tracked by hand across three sites — see that token's comment for why the old 0.625px (a fraction of the CLOSED ramp's own radius, inherited by a flat single-layer surface with no ramp to match) is gone, on report that the merged state read as no blur at all and should be a constant frosted one like Preview's toolbar. */
+  /* ⚠ THIS RULE'S `top` USED TO BE `max(var(--tbH,44px),var(--tabH,0px))`, DUCKING BELOW A NATIVE
+     WINDOW-TAB BAR WHEN ONE WAS UP — because a `.drawer-pop` hangs down from its own trigger button,
+     and with the bar ABOVE a tab strip every pop hung straight through it (an AppKit view in the theme
+     frame sits above the WKWebView entirely, so no z-index could win). Simply `var(--tbH,44px)` again
+     now that window tabbing is gone (see the module-level note near the top of app/__main__.py) — there
+     is nothing native left to duck under, and every dropdown is ordinary DOM content that stacks
+     correctly by construction. */
+  .viewbar{position:absolute; left:0; right:0; top:var(--tbH,44px); z-index:20; display:flex; align-items:center; gap:10px; padding:6px 16px; background:var(--tb-merged-tint,var(--toolbar-bg,rgba(246,246,248,.80))); -webkit-backdrop-filter:saturate(180%) blur(var(--tb-merged-blur,12px)); backdrop-filter:saturate(180%) blur(var(--tb-merged-blur,12px)); border-bottom:.5px solid var(--viewbar-border,var(--hairline)); flex-wrap:wrap}   /* fix 3: the options bar OVERLAYS the document too — pinned directly below the titlebar (top = the JS-measured --tbH), so the doc scrolls UNDER it and is blurred through; its drawer popovers stay above the document */   /* item 7: 20px → 5px (a much earlier pass, back when this bar had its OWN independent blur rather than matching the titlebar) — since folded into the shared merged-state recipe below, so that history is no longer this rule's own to explain. */   /* background NOW MATCHES `.titlebar::after`'s merged-state fill byte-for-byte (both read --tb-merged-tint, mac-tokens.css) rather than each independently reading --toolbar-bg — the two bars must merge into what reads as ONE surface with no seam at the shared border, so an identical recipe on both sides of that border is the baseline requirement (see the win-inactive override right below for the unfocused-window case, which the titlebar's own --tb-tint switches to the same way). */   /* Blur now reads --tb-merged-blur (mac-tokens.css) 1:1 with `.titlebar::after`, not a literal tracked by hand across sites — see that token's comment for why the old 0.625px (a fraction of the CLOSED ramp's own radius, inherited by a flat single-layer surface with no ramp to match) is gone, on report that the merged state read as no blur at all and should be a constant frosted one like Preview's toolbar. */
   /* .viewbar's own win-inactive background swap (mirroring .titlebar.win-inactive's old --tb-tint
      override) removed for the same reason — see that rule's own note above. .viewbar now keeps its
      focused background:var(--tb-merged-tint,…) regardless of window focus, staying byte-identical to
@@ -805,22 +758,14 @@
     padding:9px 15px; border-radius:9px; font-size:12.5px; box-shadow:0 10px 30px rgba(0,0,0,.35); opacity:0; pointer-events:none;
     transition:opacity .2s,transform .2s; z-index:70; -webkit-backdrop-filter:blur(10px); backdrop-filter:blur(10px); max-width:80%}
   .toast.show{opacity:1; transform:translateX(-50%) translateY(0)}
-  .scrim{position:absolute; top:var(--tabH,0px); right:0; bottom:0; left:0; background:rgba(0,0,0,.12); display:none; align-items:center; justify-content:center; z-index:50}   /* modal scrim: a subtle, macOS-appropriate dim (not a heavy blackout) that INHIBITS the window behind — it captures pointer events (a full-height layer above the content) so nothing behind is interactive while a dialog is open, and stays light enough to read as "modal" rather than a harsh curtain. Click-outside still dismisses. */
-  /* ⚠ top:var(--tabH) IN PLACE OF THE inset:0 THIS SHARED THE OLD TOP EDGE WITH, ON REPORT — "when the
-     native tab bar is active, sheets should appear at a lower position so as not to be hidden by the tab
-     bar". item 11's own note below is still the reason the scrim centres in the WINDOW rather than the
-     document pane — that stands, and is not what this touches; --tabH (js/core/scroll.js's menuTopBound,
-     app/mac/shell.py) is a DIFFERENT band, the native tab-bar accessory sitting ABOVE `.window` in the
-     window's own theme frame, not inside it. Centring against the full 0..100vh box therefore let a
-     dialog's TOP land in page-coordinate space the tab bar draws over — an AppKit view above the WKWebView
-     entirely, so that portion is invisible and unclickable exactly the way an options-bar drawer-pop was
-     (the same report's other half — answered since by moving the options bar itself below the tab bar,
-     see `.viewbar`, so that half no longer needs a clamp; this one still does, a sheet being centred in
-     the window rather than hung off any bar). Shrinking the scrim's own box to
-     start at --tabH — rather than leaving the scrim full-height and shifting only the SHEET — is what
-     keeps `align-items:center` doing the centring math over the region the reader can actually see, with
-     no second calculation to keep in step with it. 0 with no tab bar, i.e. byte-identical to the old
-     inset:0 for every window this app has actually shipped to until a tabbed one existed. */
+  .scrim{position:absolute; inset:0; background:rgba(0,0,0,.12); display:none; align-items:center; justify-content:center; z-index:50}   /* modal scrim: a subtle, macOS-appropriate dim (not a heavy blackout) that INHIBITS the window behind — it captures pointer events (a full-height layer above the content) so nothing behind is interactive while a dialog is open, and stays light enough to read as "modal" rather than a harsh curtain. Click-outside still dismisses. */
+  /* ⚠ BACK TO PLAIN inset:0. This briefly read top:var(--tabH,0px) instead, to shrink the scrim's own box
+     clear of a native window-tab bar (an AppKit view sitting ABOVE `.window` in the theme frame, so a
+     dialog centred against the full 0..100vh box could land its top in page-coordinate space the bar drew
+     over). Gone with window tabbing itself (see the module-level note near the top of app/__main__.py) —
+     there is no such band to clear any more, so this is byte-identical to --tabH's own permanent-0
+     fallback, restated without the indirection. item 11's own note below is still the reason the scrim
+     centres in the WINDOW rather than the document pane — that is unrelated and stands as written. */
   @media (prefers-color-scheme:dark){ .scrim{background:rgba(0,0,0,.28)} }   /* faint dark-mode equivalent */
   .scrim.show{display:flex}
   .confirmscrim{z-index:90}   /* a confirm/alert (askConfirm) stacks ABOVE an already-open sheet (e.g. "Remove model?" from within the Manage Models sheet) — its own scrim/host pair, never sharing #scrimHost so it can't blow away the sheet underneath */
@@ -864,7 +809,7 @@
   .sheet.aboutsm{width:min(300px,90vw)}   /* same small width as .sm, but NOT an alert — About is a separate-window content dialog, so it stays opaque with the rectangular button (unlike .sm's translucent/pill treatment) */   /* vw, not %: the centred #scrimHost is shrink-to-fit, so a %-width sheet collapses to its content and the px caps never engage — vw resolves the width against the window */
   .sheet{margin-top:0; width:min(460px,90vw); background:var(--panel-bg,#ffffff);
     border-radius:var(--r-dialog,26px); box-shadow:var(--lg-dialog-shadow, 0 0 0.5px rgba(0,0,0,.2), 0 17px 22.5px rgba(0,0,0,.5));
-    border:.5px solid var(--sheet-border); overflow:hidden; animation:drop .22s cubic-bezier(.2,.8,.2,1); max-height:calc(100vh - 32px - var(--tabH,0px)); display:flex; flex-direction:column}   /* item 11: margin-top:0 + a vh cap, both required BY the centring — see the block above .scrim. ⚠ − var(--tabH) added alongside .scrim's own top:var(--tabH) (that rule's note has the report): the 32px cap keeps a tall sheet inside a FULL 100vh scrim, but the scrim's own box is now (100vh − tabH) tall, and an uncapped sheet taller than THAT still overflows a centred flex box symmetrically — half above, half below — pushing its top back into the tab-bar band the scrim's own shrink was meant to clear. 0 with no tab bar, so this is a no-op everywhere the fix above is. */
+    border:.5px solid var(--sheet-border); overflow:hidden; animation:drop .22s cubic-bezier(.2,.8,.2,1); max-height:calc(100vh - 32px); display:flex; flex-direction:column}   /* item 11: margin-top:0 + a vh cap, both required BY the centring — see the block above .scrim. The 32px cap keeps a tall sheet inside a full 100vh scrim so an uncapped sheet can't overflow a centred flex box symmetrically (half above, half below). The − var(--tabH) term this used to also subtract is gone with .scrim's own top:var(--tabH) — see that rule's note. */
   @keyframes drop{from{transform:translateY(-14px); opacity:0}to{transform:none; opacity:1}}
   .sheet header{padding:20px 16px 0} .sheet h3{margin:0; font-size:13px; line-height:16px; font-weight:700; color:var(--label-primary,rgba(0,0,0,.85))}   /* title: SF Pro Bold 13/16 */
   .sheet p{margin:6px 0 0; color:var(--label-primary,rgba(0,0,0,.85)); font-size:11px; line-height:14px; font-weight:400}   /* body: SF Pro Regular 11/14 */

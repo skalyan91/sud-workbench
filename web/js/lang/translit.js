@@ -709,13 +709,14 @@ function openOrthoMenu(x,y){ const m=orEl(); orRender(); m.classList.add("show")
   m.style.left=Math.max(8,Math.min(x,innerWidth-w-8))+"px";
   /* …and the head room is measured from menuTopBound, not a bare 8 — the same fix openLangMenu
      (js/ui/wiring.js) already carries and for the same reason: this menu opens UPWARD out of the
-     status bar, so in a tabbed window it is one of the menus that can run into the native tab bar,
-     which no z-index can draw in front of. Three bands, exactly as openLangMenu's: room for the
-     WHOLE menu above → anchor by the bottom edge with no extra cap (the CSS min(500px,70vh) still
-     applies, so it never grows past what openLangMenu's own list allows either); a usable but
-     smaller band above → keep the upward anchor and cap maxHeight to exactly that band, so the list
-     scrolls inside it instead of running under the tab bar; no usable band at all → drop the menu
-     below the pill instead. */
+     status bar. ⚠ menuTopBound() is a bare 8 now (this app no longer offers macOS window tabbing —
+     see the module-level note near the top of app/__main__.py — so there is no native tab bar left
+     for a menu to run into), but the three-band logic below is unchanged and still correct against
+     whatever menuTopBound() answers: room for the WHOLE menu above → anchor by the bottom edge with
+     no extra cap (the CSS min(500px,70vh) still applies, so it never grows past what openLangMenu's
+     own list allows either); a usable but smaller band above → keep the upward anchor and cap
+     maxHeight to exactly that band, so the list scrolls inside it; no usable band at all → drop the
+     menu below the pill instead. */
   const bound=(typeof menuTopBound==="function")?menuTopBound():8;
   /* ⚠ NEITHER branch below may set `m.style.maxHeight=""` the way openLangMenu's does — openLangMenu's
      "room above" branch clears the OUTER wrapper's (`.langmenu`) maxHeight while the row-floor from

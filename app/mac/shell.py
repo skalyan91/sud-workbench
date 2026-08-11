@@ -77,8 +77,6 @@ _key_provider: dict = {"fn": None}
 # (_reserve — id(window) → the NSTitlebarAccessoryViewController that held the options bar's space —
 #  went with set_titlebar_reserve; see the block where that function used to be, below.)
 _last_tb_js: dict = {"js": None}   # the most recent titlebar metrics JS — every window's numbers are the same, so a new one can start from them (see apply() in _unify_titlebar_on_show)
-_titlebar_apply: dict = {}   # id(pywebview window) → (window, its own titlebar re-measure) — see remeasure below
-_new_tab_handler: dict = {"fn": None}   # set by __main__: what the tab bar's + button and ⌘T do
 
 
 def set_key_provider(fn) -> None:
@@ -288,220 +286,21 @@ def refresh_recent_menu(window, api):
         except Exception:  # noqa: BLE001
             pass
 
-_chrome_base: dict = {"h": None}   # native top chrome (title bar + toolbar) with NO tab bar — one value for all document windows, which share a style
-
-
-def _tab_bar_height(nswin) -> float:
-    """WHERE A VISIBLE TAB BAR ENDS, in page coordinates — 0 when there is none.
-
-    Returned as the window's whole native top chrome (``frame.height - contentLayoutRect.height``)
-    rather than as the bar's own height, because the bar sits at the BOTTOM of that chrome and what
-    the page has to clear is its lower edge. The page's own toolbar is 54px of web content drawn
-    inside a 66px transparent band, so "toolbar height + bar height" (54+36=90) lands 12px INSIDE the
-    bar; the chrome figure (102) is the edge itself, and --tabH is consumed as a floor, not a sum.
-
-    MEASURED, and measured this way, on evidence. The first attempt read the two rects in the same
-    turn as the merge and always got 0 — AppKit lays the bar out a pass later. The second walked the
-    view tree for a *TabBar* class, never found one, and returned its 28.0 fallback — 8px short, which
-    is exactly the clipping it produced. The live numbers: chrome 66 untabbed, 102 tabbed, with the
-    NSToolbarView moved to y=36 INSIDE a 102-tall NSTitlebarContainerView — i.e. the bar takes 36 and
-    takes it ABOVE the toolbar band, which is why the page's own toolbar (--tabH on .titlebar's top)
-    moves down by it as well as the document.
-    0 when the baseline hasn't been seen yet: every window records it on its first tab-bar-less
-    measurement, and a window born INTO a tab group inherits the one another window recorded.
-
-    ⚠️ THIS MODULE MEASURES THE TAB BAR AND WILL NEVER STYLE IT, and that is a conclusion rather than an
-    omission — it was researched and measured before being written down, so it does not need doing again.
-    NO PUBLIC APPKIT API REACHES THE TAB BAR'S OWN RENDERING. ``NSWindowTabGroup`` publishes eight
-    symbols (identifier, isOverviewVisible, isTabBarVisible, windows, selectedWindow, addWindow:,
-    insertWindow:atIndex:, removeWindow:) and not one is about appearance; the private
-    ``NSWindowStackController`` the runtime actually returns adds 144 more with no material/tint/blur/
-    blend/appearance selector among them. ``toolbarStyle`` was tried across all five values and moves
-    the bar's GEOMETRY only — the backing class, the glass corner radius and the titlebar's own effect
-    view came back byte-identical each time. ``NSTitlebarAccessoryViewController`` exposes layout and
-    visibility; the tab bar IS one of those (``_setTabBarAccessoryViewController:``, private) but AppKit
-    owns the instance. Window ``appearance`` selects light/dark and nothing else. The only remaining
-    route is walking NSThemeFrame → NSTitlebarContainerView → NSTitlebarView → NSTabBar →
-    NSTabBarTrackView to reach a glass view's tintColor — undocumented, and this file has already been
-    burnt once by exactly that (the *TabBar*-class walk two paragraphs up, which never found one and
-    shipped an 8px-short fallback). Out of bounds.
-
-    ⚠️ AND IT DOES NOT NEED ONE, because the bar is TRANSPARENT and the page is what shows through it.
-    Measured in the live app (macOS 26.5.1, two merged windows, window-server capture with the document
-    painted a saturated colour): under ``titlebarAppearsTransparent`` + ``NSFullSizeContentView``,
-    ``NSTitlebarBackgroundView`` is hidden, there is no ``NSVisualEffectView`` anywhere in the theme
-    frame, and macOS 26 draws the bar as a bare ``NSTabBar`` holding one Liquid-Glass
-    ``NSGlassEffectView`` capsule. The strip either side of that capsule read the document's own pixels
-    exactly (234,51,195 against a 231,50,193 page) and the capsule read a lightened composite of them —
-    i.e. the glass samples the WKWebView, not the desktop. So the tab bar's background is whatever the
-    page paints in the band from --tbH+--vbH down to --tabH, and the fix for "the tab bar should have the
-    same blur and translucency as the options bar" is a CSS rule on `.body::after`
-    (`html.tabbed …`, web/macos-kit/mac-chrome.css) rather than anything here."""
-    try:
-        chrome = float(nswin.frame().size.height - nswin.contentLayoutRect().size.height)
-        grp = nswin.tabGroup() if hasattr(nswin, "tabGroup") else None
-        if not (grp is not None and grp.isTabBarVisible()):
-            _chrome_base["h"] = chrome
-            return 0.0
-        return chrome   # …the bar's BOTTOM EDGE in page coordinates, which is what the page needs to clear
-    except Exception as exc:  # noqa: BLE001
-        _shell_log(f"[titlebar] tab bar height: {exc}")
-        return 0.0
-
-
-
-def _tab_css(tab_h: float, tab_top: float) -> str:
-    """The JS that hands the page a tab bar's geometry: its bottom edge (--tabH, taken as a floor by
-    .doc's padding), its top edge (--tabTop, which is what lets the page put the SAME air under the
-    bar as there is above it), and the `tabbed` class the chrome branches on — the title bar drops its
-    scroll-edge ramp for a flat merged surface when a bar is under it, exactly as it does when the
-    options bar is open."""
-    # …wrapped in withTopChrome (js/core/scroll.js), which pins the block the reader is on where it is:
-    # this shortens the port FROM THE TOP, and the scroller does not move itself, so without it the tab
-    # bar appears ON TOP of the line being read. The fallback runs the body plainly on any page old
-    # enough not to have the helper. The recap inside is what re-sizes each block's diagram and grid to
-    # the new viewport (js/core/document.js) — the anchor is restored a frame later, from its result.
-    return ("(window.withTopChrome||function(f){f()})(function(){"
-            "document.documentElement.style.setProperty('--tabH','%.1fpx');"
-            "document.documentElement.style.setProperty('--tabTop','%.1fpx');"
-            "document.documentElement.classList.toggle('tabbed',%s);"
-            "window.recapBlocks && recapBlocks();"
-            "});" % (tab_h, tab_top, "true" if tab_h else "false"))
-
-
-def publish_tab_height(window) -> None:
-    """Re-publish --tabH for one window, and NOTHING ELSE.
-
-    ⚠️ NOT remeasure()/apply(): joining a tab group changes only how much of the title-bar band is
-    left to the page, but apply() re-runs the whole titlebar mutation — style mask, toolbar, traffic
-    lights, subview surgery — and doing that around a window pywebview is still showing CRASHES the
-    process (see _measurable). This reads one number on the main thread and pushes one CSS variable,
-    which is all a tab bar's appearance or disappearance actually changes.
-
-    Safe to call as often as you like: the last published pair is remembered ON THE WINDOW (so it is
-    collected with it — no id()-keyed table to go stale), and an unchanged pair skips the bridge call
-    entirely. That is what makes it cheap enough to run on every become-key, which is how a window
-    that MISSED a broadcast repairs itself (see _install_activity_observer)."""
-    def work():
-        try:
-            import threading as _t
-            from PyObjCTools import AppHelper
-            done, res = _t.Event(), {"h": 0.0}
-
-            def read():
-                try:
-                    nswin = getattr(window, "native", None)
-                    if nswin is not None:
-                        res["h"] = _tab_bar_height(nswin)
-                        res["top"] = float(_chrome_base["h"] or 0.0) if res["h"] else 0.0
-                except Exception as exc:  # noqa: BLE001
-                    _shell_log(f"[titlebar] tab height read: {exc}")
-                finally:
-                    done.set()
-            AppHelper.callAfter(read)
-            done.wait(4)
-            pair = (res["h"], res.get("top", 0.0))
-            if getattr(window, "_sud_tabpub", None) == pair:
-                return                      # same geometry as last time → nothing for the page to redo
-            window._sud_tabpub = pair
-            window.evaluate_js(_tab_css(*pair))
-        except Exception as exc:  # noqa: BLE001
-            _shell_log(f"[titlebar] tab height publish: {exc}")
-    threading.Thread(target=work, daemon=True).start()
-
-
-def remeasure(window) -> None:
-    """Re-run a window's titlebar measurement and re-publish --lights-cy/--tabH.
-
-    Needed because JOINING OR LEAVING A TAB GROUP resizes the CONTENT without resizing the WINDOW:
-    pywebview's `resized` event never fires, so the page would keep a --tabH computed when the tab
-    bar wasn't there — the bar would then overlap the app's own toolbar, which is the one thing
-    publishing it is meant to prevent. Off-thread: apply() blocks on the main-thread mutation and
-    then calls evaluate_js."""
-    ent = _titlebar_apply.get(id(window))
-    if ent is not None and _measurable(ent[0]):
-        threading.Thread(target=ent[1], daemon=True).start()
-
-
-def remeasure_all() -> None:
-    for win, fn in list(_titlebar_apply.values()):
-        if _measurable(win):
-            threading.Thread(target=fn, daemon=True).start()
-
-
-def _measurable(window) -> bool:
-    """Is this window finished enough to be re-measured?
-
-    ⚠️ A WINDOW STILL BEING CREATED MUST NOT BE TOUCHED. apply() marshals _mutate onto the main
-    thread, and _mutate performs real surgery on the NSWindow — style mask, toolbar, traffic-light
-    placement, subview walks. Run against a window that pywebview is mid-`first_show` on, that is a
-    HARD CRASH of the process, not an exception: confirmed from crash.log, whose dump showed the main
-    thread inside cocoa.py's first_show while a worker sat in this module's apply(). It bit as soon as
-    a tab merge started calling remeasure_all() for every window, one of which was the tab being
-    created. `loaded` is the same readiness signal _attach_as_tab waits for before merging."""
-    if getattr(window, "native", None) is None:
-        return False
-    ev = getattr(getattr(window, "events", None), "loaded", None)
-    return bool(ev is None or ev.is_set())
-
-
-# ⚠ `set_titlebar_reserve` USED TO LIVE HERE, AND THE ORDERING IT BOUGHT IS THE ONE THE APP NO LONGER
-# WANTS. macOS implements the window-tab bar as a titlebar accessory pinned to the BOTTOM of the
-# title-bar band, so anything the page draws below that band is necessarily below the tabs. Reserving
-# the options bar's height as an empty transparent accessory of our own put it in the band too — and
-# ours landed ABOVE the system's (verified live: with both present the system's clip view sat at y=0
-# and ours at y=36, bottom-up) — which gave the order toolbar / options bar / tabs / document.
-# It worked, and it was the wrong thing to want: an options bar above the tabs has its DROPDOWNS
-# hanging down through them (invisible, unclickable rows — an AppKit view in the theme frame is above
-# the WKWebView entirely), and clamping each dropdown clear of the bar instead put it 57px below the
-# button that opened it, which is what "dropdowns open on the opposite side of the tab bar" reports.
-# The options bar now sits BELOW the tab bar as ordinary page content, i.e. exactly where a page draws
-# by default and with no accessory involved: `.viewbar{top:max(--tbH,--tabH)}`, whose rule in
-# web/macos-kit/mac-chrome.css carries the full account. So this function, the `_reserve` table it kept
-# its per-window accessory in, and Api.titlebar_reserve are all deleted rather than left unused.
-# WHAT WENT WITH IT: this was also the only caller that re-published --tabH on an options-bar toggle
-# (a 0.25s timer, because the reservation changed the native chrome's own height). With no accessory
-# the chrome does not move when the bar opens or closes, so there is nothing to re-publish — syncChrome
-# (js/ui/wiring.js) already owns --vbH, the top anchor and the block re-cap for that toggle.
-# One consequence worth naming, since it quietly fixes something: `_chrome_base["h"]` — the untabbed
-# chrome height, published as --tabTop — is recorded on any measurement taken with no tab bar visible,
-# so with the reservation in play it was 66 or 66+the options bar's height depending on which state the
-# window happened to be in when the last untabbed measurement ran. It is now always the bare 66.
-
-
-def set_new_tab_handler(fn) -> None:
-    """Register what ``⌘T`` / the tab bar's + button should do (``__main__`` hands over its own
-    new-document-window-as-tab call)."""
-    _new_tab_handler["fn"] = fn
-    _enable_tab_plus_button()
-
-
-_tab_plus_done = {"v": False}
-
-
-def _enable_tab_plus_button():
-    """THE + AT THE RIGHT END OF THE TAB BAR. AppKit draws it only for an app that answers
-    ``newWindowForTab:``, and sends that action up the responder chain — so implementing it on
-    NSApplication (the chain's last link) covers every window without touching pywebview's own
-    delegate. Same category mechanism _enable_first_mouse uses on WKWebView, and idempotent for the
-    same reason: a duplicate category registration raises."""
-    if _tab_plus_done["v"]:
-        return
-    _tab_plus_done["v"] = True
-    try:
-        import objc
-        import AppKit
-
-        class NSApplication(objc.Category(AppKit.NSApplication)):   # pyobjc: a category's class name must match the class it extends
-            def newWindowForTab_(self, sender):   # noqa: N802 — ObjC selector name
-                fn = _new_tab_handler.get("fn")
-                if fn is not None:
-                    try:
-                        fn()
-                    except Exception as exc:  # noqa: BLE001
-                        _shell_log(f"[menu] new tab: {exc}")
-    except Exception as exc:  # noqa: BLE001 — no + button is a loss, not a failure
-        _shell_log(f"[menu] tab + button: {exc}")
+# ⚠ THIS MODULE USED TO MEASURE AND PUBLISH THE NATIVE WINDOW-TAB BAR'S GEOMETRY HERE
+# (_tab_bar_height/_tab_css/publish_tab_height/remeasure/remeasure_all/_measurable/_titlebar_apply/
+# _chrome_base, plus set_new_tab_handler/_enable_tab_plus_button and the tabbingIdentifier/
+# addTabbedWindow:ordered: calls elsewhere in this file and in app/__main__.py) — all deleted with the
+# feature it served. Window tabbing was removed on request: multiple open documents should read as
+# multiple ordinary windows, never merged into one window's tab strip (see the module-level note in
+# app/__main__.py for the full account, including why a DOM-painted replacement wasn't possible
+# either — there turned out to be no way to suppress the native bar's own rendering while keeping
+# NSWindowTabGroup's real grouping mechanics alive). `_tab_bar_height`'s own research is still worth
+# reading if this is ever revisited: it is the closest anyone has come to reverse-engineering how
+# macOS 26 actually paints that bar, and it went nowhere. `set_titlebar_reserve`, an earlier attempt at
+# reconciling the options bar with a tab bar, is a separate, older removal (see git history) — the
+# ordering problem it solved does not exist any more either, since there is no tab bar to reconcile
+# anything with. `.viewbar`'s `top` is back to the plain, untabbed expression it would have had if the
+# tab bar had never existed (web/macos-kit/mac-chrome.css).
 
 
 def _enable_first_mouse():
@@ -956,12 +755,6 @@ def _install_activity_observer(AppKit, nswin, pywin):
                     if pw is None:
                         return
                     _push(pw, True)
-                    # …AND RE-READ THE TAB BAR. Selecting a tab makes that window key, so this is the
-                    # moment a window whose --tabH is stale becomes the one the user is looking at —
-                    # and the only moment a stale value can be seen at all. The post-merge broadcast
-                    # is a timer racing AppKit's own tab-bar layout pass; this needs no race, and
-                    # publish_tab_height skips the bridge entirely when the geometry hasn't moved.
-                    publish_tab_height(pw)
 
                 def windowResignedKey_(self, note):  # noqa: N802 — ObjC selector windowResignedKey:
                     pw = _activity_target(note)
@@ -1180,7 +973,6 @@ def _set_dock_icon_on_show(window):
             except Exception as exc:  # noqa: BLE001
                 _shell_log(f"[icon] {exc}")
 
-    _titlebar_apply[id(window)] = (window, apply)   # …so remeasure() above can re-run this window's measurement when a tab bar appears or goes
     events = getattr(window, "events", None)
     hooked = False
     for name in ("shown", "loaded"):
@@ -1263,22 +1055,9 @@ def _unify_titlebar_on_show(window, api=None):
             if zoom is not None:
                 rz = zoom.convertRect_toView_(zoom.bounds(), cv)
                 right = rz.origin.x + rz.size.width
-            # ── the TAB BAR's height, published like the options bar's ──────────────────────────
-            # A native tab bar is a real AppKit view in the title-bar band, while this app's own
-            # toolbar is web content painted UNDER a transparent title bar (fullSizeContentView) — so
-            # the bar lands ON TOP of the web toolbar unless the page moves down by its height, and
-            # --tabH is what moves it (.doc's padding + both bars' `top`, exactly as --vbH does for
-            # the options bar, which is what makes the viewport SHRINK rather than be overlapped).
-            # NOT measured as a growth of the window's top inset, which was the first attempt and read
-            # zero every time: contentLayoutRect is IDENTICAL tabbed and untabbed (66px both ways,
-            # measured on a live pair), because with an empty unified NSToolbar AppKit puts the tab bar
-            # in the band the toolbar already had. So the bar's own view is what gets measured.
-            tab_h = _tab_bar_height(nswin)   # 0 with no tab bar, and records the baseline the tabbed measurement is taken against
-            tab_top = float(_chrome_base["h"] or 0.0) if tab_h else 0.0   # the bar's TOP edge = the chrome height without it
             return (
                 "document.documentElement.style.setProperty('--lights-cy','%.1fpx');"
                 "document.documentElement.style.setProperty('--lights-right','%.1fpx');"
-                + _tab_css(tab_h, tab_top)
             ) % (cy, right + 14)
         except Exception as exc:  # noqa: BLE001
             _shell_log(f"[titlebar] light place: {exc}")
@@ -1405,15 +1184,17 @@ def _unify_titlebar_on_show(window, api=None):
                 _shell_log(f"[menu] about inject: {exc}")
             # ── the WINDOW menu, injected natively and handed to AppKit ──────────────────────────
             # Every multi-window Mac app has one, and it is not decoration: once NSApp.windowsMenu is
-            # set, AppKit MAINTAINS it — the list of open windows at the bottom, and (because the
-            # windows carry a shared tabbingIdentifier, see _mutate) the whole tabbing group: Merge
-            # All Windows, Move Tab to New Window, Show Previous/Next Tab. Those commands exist
-            # nowhere else, so without this menu the tabbing that one-process windows just bought is
-            # unreachable. The three rows we add ourselves are first-responder selectors, like the
-            # Cut/Copy/Paste block below — no target, so they act on the key window by definition.
-            # It is NOT in menu_spec.py: that table drives BOTH platforms, and every row in it is a
-            # command this app implements, whereas these are AppKit's own and the menu's contents are
-            # mostly written by AppKit at runtime. Windows draws its own window list in the shell.
+            # set, AppKit MAINTAINS the list of open windows at the bottom for us. The three rows we
+            # add ourselves are first-responder selectors, like the Cut/Copy/Paste block below — no
+            # target, so they act on the key window by definition. It is NOT in menu_spec.py: that
+            # table drives BOTH platforms, and every row in it is a command this app implements,
+            # whereas these are AppKit's own and the menu's contents are mostly written by AppKit at
+            # runtime. Windows draws its own window list in the shell.
+            # ⚠️ NO MERGE ALL WINDOWS ROW HERE ANY MORE. It used to be — AppKit adds the tab commands to
+            # a windows menu by itself once windows carry a shared tabbingIdentifier, and this row made
+            # mergeAllWindows: reachable explicitly since macOS 26's own Window menu didn't surface one.
+            # Gone with the tabbing identifier itself (see the module-level note near the top of this
+            # file): there is nothing left to merge windows INTO.
             # Idempotent, like everything else in _wire_menu (which re-runs on every menu open).
             try:
                 if "Window" not in menus_by_title:
@@ -1432,16 +1213,7 @@ def _unify_titlebar_on_show(window, api=None):
                     winmenu.addItemWithTitle_action_keyEquivalent_("Zoom", "performZoom:", "")
                     winmenu.addItem_(AppKit.NSMenuItem.separatorItem())
                     winmenu.addItemWithTitle_action_keyEquivalent_("Bring All to Front", "arrangeInFront:", "")
-                    winmenu.addItem_(AppKit.NSMenuItem.separatorItem())
-                    # MERGE ALL WINDOWS, stated explicitly. AppKit adds the tab commands to a windows
-                    # menu by itself on earlier systems, but macOS 26's Window menu did not show one
-                    # (verified live: Fill / Centre / Move & Resize / Full-Screen Tile / Remove Window
-                    # from Set and the window list, no merge row) — and the capability is certainly
-                    # there, since mergeAllWindows: is exactly what addTabbedWindow:ordered: drives.
-                    # First-responder selector, so it acts on the key window and greys itself out when
-                    # there is nothing to merge.
-                    winmenu.addItemWithTitle_action_keyEquivalent_("Merge All Windows", "mergeAllWindows:", "")
-                    AppKit.NSApp.setWindowsMenu_(winmenu)   # …from here on AppKit owns it: window list + the tab commands
+                    AppKit.NSApp.setWindowsMenu_(winmenu)   # …from here on AppKit owns it: the window list
                     menus_by_title["Window"] = winmenu
             except Exception as exc:  # noqa: BLE001 — a missing Window menu is a loss, not a failure
                 _shell_log(f"[menu] window menu: {exc}")
@@ -1638,36 +1410,20 @@ def _unify_titlebar_on_show(window, api=None):
                     pass
                 if hasattr(nswin, "setTitlebarSeparatorStyle_"):
                     nswin.setTitlebarSeparatorStyle_(1)   # NSTitlebarSeparatorStyleNone
-                # NATIVE WINDOW TABBING. One identifier shared by every document window is what lets
-                # macOS group them — "Merge All Windows", ⌃⇥ between tabs, and the + in the tab bar —
-                # and it is only reachable now that the windows live in ONE process: tabbing groups
-                # NSWindows within an application, so the old process-per-window design could not
-                # have it at any price. Mode 0 (NSWindowTabbingModeAutomatic) leaves the choice to
-                # the user's "Prefer tabs when opening documents" setting rather than forcing tabs.
+                # NO NATIVE WINDOW TABBING — EXPLICITLY DISALLOWED, not merely unrequested. Every
+                # document window used to share a tabbingIdentifier so macOS could group them; that is
+                # gone (see the module-level note near the top of this file for why — the short version
+                # is there was no way to suppress the native bar's own rendering while keeping the
+                # group's mechanics alive, and multiple documents should read as multiple ordinary
+                # windows anyway). Mode 2 (NSWindowTabbingModeDisallowed), not simply leaving the
+                # identifier unset, because a bare default still lets the SYSTEM'S "Prefer tabs when
+                # opening documents" setting silently re-group two windows opened in quick succession —
+                # disallowed refuses that regardless of what the user has set system-wide.
                 try:
-                    if hasattr(nswin, "setTabbingIdentifier_"):
-                        nswin.setTabbingIdentifier_("sud-document")
                     if hasattr(nswin, "setTabbingMode_"):
-                        nswin.setTabbingMode_(0)
-                except Exception as exc:  # noqa: BLE001 — tabbing is a nicety; never hold up the window for it
+                        nswin.setTabbingMode_(2)
+                except Exception as exc:  # noqa: BLE001 — never hold up the window over this
                     _shell_log(f"[titlebar] tabbing: {exc}")
-                # …AND A TAB KEEPS ITS GROUP'S FRAME. Everything above resizes the window — the style
-                # mask and, most of all, installing the unified toolbar — and a window that is already
-                # a TAB must not carry that resize alone: tabs in a group share one frame, so the odd
-                # one out simply hangs 68px short (measured), which reads as the title bar dropping.
-                # It is corrected HERE, in the same main-thread turn as the resize that caused it, so
-                # there is one redraw and no visible jump; doing it from a later timer fixed the size
-                # but showed the drop first, then the snap back.
-                try:
-                    grp = nswin.tabGroup() if hasattr(nswin, "tabGroup") else None
-                    peers = [w for w in ((grp.windows() if grp else None) or []) if w is not nswin]
-                    if peers:
-                        want = peers[0].frame()
-                        cur = nswin.frame()
-                        if abs(want.size.height - cur.size.height) > 0.5 or abs(want.size.width - cur.size.width) > 0.5:
-                            nswin.setFrame_display_(want, False)
-                except Exception as exc:  # noqa: BLE001
-                    _shell_log(f"[titlebar] tab frame: {exc}")
                 holder["js"] = _place_lights(nswin, AppKit)
                 # THE THREE OBSERVERS CANNOT COST THE MENU ITS WIRING. They are decorations of the
                 # window (dimming, full-screen forwarding, accent recolouring); the menu below is the

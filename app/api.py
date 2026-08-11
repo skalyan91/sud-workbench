@@ -772,27 +772,15 @@ class Api:
         except Exception as exc:  # noqa: BLE001
             return {"error": str(exc)}
 
-    # ⚠ `titlebar_reserve` USED TO LIVE HERE and is gone with the geometry it served. It handed the
+    # ⚠ `titlebar_reserve` USED TO LIVE HERE and is gone with the geometry it served — it handed the
     # options bar's measured height to app.mac.shell.set_titlebar_reserve, which parked an empty
-    # accessory of that height in the native title-bar band so AppKit would stack the window-tab bar
-    # UNDER it (toolbar / options bar / tabs / document). The options bar now sits BELOW the tab bar
-    # instead — the reason is where its dropdowns open, and the whole account is in
-    # web/macos-kit/mac-chrome.css's `.viewbar` rule — so the reservation buys nothing and would cost
-    # the bar's height twice over. Removed on both sides at once (syncChrome no longer calls it); this
-    # note is here so a reader of the bridge surface finds out why rather than wondering.
-
-    def new_tab(self) -> dict:
-        """Another document window, opened as a TAB of the current one (macOS window tabbing).  Same
-        hand-over shape as :meth:`new_window` below; on a platform without tabbing the callable is
-        absent and this reports unavailable rather than silently opening a separate window."""
-        cb = getattr(self, "_new_tab", None)
-        if cb is None:
-            return {"error": "unavailable"}
-        try:
-            cb()
-            return {"ok": True}
-        except Exception as exc:  # noqa: BLE001
-            return {"error": str(exc)}
+    # accessory of that height in the native title-bar band so AppKit would stack the (then-existing)
+    # window-tab bar UNDER it. `new_tab`/``_new_tab`` are gone for the same underlying reason, one
+    # remove later: this app no longer offers macOS window tabbing at all (see the module-level note
+    # near the top of app/__main__.py), so there is neither a tab bar to reconcile the options bar
+    # with nor a second document window that could open AS a tab of this one. Every document window is
+    # what `new_window` below already gives: an ordinary window, sharing this process's Dock icon and
+    # menu bar. This note is here so a reader of the bridge surface finds out why rather than wondering.
 
     def new_window(self) -> dict:
         """Open another document window (a fresh, empty document).  The callable is handed over by

@@ -303,7 +303,12 @@ document.getElementById("autonumChk").addEventListener("change",e=>{ AUTONUM=e.t
    top is at least --tabH + the bar's height + 6, and menuTopBound() is exactly --tabH. Measured after:
    6px under the button in all four states (untabbed/tabbed × bar shown/hidden), inline `top` never set.
    The clamp is DELETED rather than left in as a guard, since a guard nothing can trigger is a claim about
-   the geometry that no test can keep honest. */
+   the geometry that no test can keep honest.
+   ⚠ AND NOW EVEN THE TAB BAR ITSELF IS GONE (see the module-level note near the top of app/__main__.py),
+   so the whole "clears --tabH by construction" argument above is moot rather than merely satisfied —
+   there is no native view left for a pop to need clearing of at all. menuTopBound() is a bare 8 now, not
+   --tabH; left as history rather than rewritten, since the geometry argument (a bar positioned past every
+   native view needs no clamp) is still the right shape of reasoning for whatever comes next. */
 document.getElementById("toggles").addEventListener("click",e=>{
   if(e.target.closest(".drawer-pop")&&!e.target.closest(".drawer-btn")) return;   // clicks inside an open pop (checkboxes, the translations list/search) don't toggle the drawer
   const btn=e.target.closest(".drawer-btn"); if(!btn)return;   // open/close a drawer
@@ -423,7 +428,11 @@ let CHROME_H={tb:-1,vb:-1};   // last reported bar heights, so a no-op sync neit
    height, so set_titlebar_reserve re-published --tabH (and re-capped the blocks) a beat later on every
    open and close. With no accessory the chrome does not move when the bar is toggled — --tabH is the same
    number open or closed — and this function already captures the anchor, writes --vbH and re-caps for
-   exactly that toggle. One less bridge call per open, and one less 0.25s timer racing the reader. */
+   exactly that toggle. One less bridge call per open, and one less 0.25s timer racing the reader.
+   ⚠️ SUPERSEDED AGAIN, and further simplified rather than merely still true: window tabbing itself is gone
+   now (see the module-level note near the top of app/__main__.py), so "the bar now sits below the tabs"
+   is stale — it sits directly below the title bar, and --tabH does not exist to be the same number open
+   or closed. */
 function syncChrome(){
   const body=document.querySelector(".body"), tb=document.querySelector(".titlebar"), vb=document.querySelector(".viewbar");
   if(!body||!tb)return;

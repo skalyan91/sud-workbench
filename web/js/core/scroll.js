@@ -91,7 +91,7 @@ function scrollableUnder(target){ if(!target||!target.closest) return null;
      that the reader HAS scrolled flush to the toolbar (gap off screen above) still fully in view. 0 for every
      block that is not the first of a sheet, and unpaged, so everywhere else this is the old expression too.
      ⚠️ This runs on EVERY wheel event (the re-check below, not only the first-event decision), which is the
-     budget docTopInset() below reads --tabH off an inline style to protect. sheetGapAbove settles the two
+     budget docTopInset() below (offsetHeight reads, not getComputedStyle) is written to protect. sheetGapAbove settles the two
      cheap DOM questions — is the parent a .docsheet, is this its first .sblock — BEFORE it reads any computed
      style, so a block that is not the first of a sheet never reaches one, and the block that does asks after
      getBoundingClientRect has already flushed layout, so it forces no second reflow. Benchmarked in this very
@@ -225,35 +225,23 @@ function docTopInset(){
   // restoreScrollPos() shove the nearest block ~44px back DOWN — the "snap-back", which left an empty (white)
   // window-background band where the titlebar normally sits. Mirror the collapsed state and report 0 here, matching
   // the 0 padding-top the doc actually has, so nothing re-adds the titlebar height.
-  if(document.body.classList.contains("fs-chrome-hidden")) return 0;   // …and a full-screen window shows no window-tab bar either, so --tabH cannot apply here
+  if(document.body.classList.contains("fs-chrome-hidden")) return 0;
   const tb=document.querySelector(".titlebar"), vb=document.querySelector(".viewbar");
   const tbH=tb?tb.offsetHeight:0, vbH=(vb && !vb.classList.contains("hidden")) ? vb.offsetHeight : 0;
-  /* …AND THE NATIVE WINDOW-TAB BAR, exactly as .doc's padding takes it (app.css): a FLOOR against the
-     TITLE BAR, max() and not a sum, because --tabH is the bar's bottom EDGE in page coordinates and the
-     web toolbar is drawn inside the same band. Missing it here was worth 48px: the padding moved the
-     document down but every manual scroll target (blockSnap, restoreScrollPos, the find bar) and
-     blockFullyInView kept aiming at the untabbed inset, so opening a tab left the block the reader was
-     on sliced by the bar.
-     ⚠ THE OPTIONS BAR IS ADDED TO THAT FLOOR, NOT FLOORED WITH IT — max(tbH,tabH) + vbH, was
-     max(tbH+vbH, tabH) — since the bar now sits BELOW the tab bar (macos-kit/mac-chrome.css's `.viewbar`
-     top) and is therefore chrome of its own beneath it, never chrome the bar's own band could absorb.
-     This is `--top-chrome` restated in JS and the two must not drift: docPadTop() below prefers the
-     used value precisely because they can be read at a torn instant, not because they may disagree.
-     Read off the INLINE style, which is where app/mac/shell.py's publish writes it — a getComputedStyle
-     here would run on every wheel event through blockFullyInView. */
-  const tabH=parseFloat(document.documentElement.style.getPropertyValue("--tabH"))||0;
-  return Math.max(tbH, tabH) + vbH; }
+  // This is `--top-chrome` restated in JS and the two must not drift: docPadTop() below prefers the
+  // used value precisely because they can be read at a torn instant, not because they may disagree.
+  // ⚠ THIS USED TO ALSO FLOOR AGAINST --tabH, a native window-tab bar's bottom edge — deleted with
+  // window tabbing itself (see the module-level note near the top of app/__main__.py). Plain sum again.
+  return tbH + vbH; }
 /* ── HOW FAR DOWN A FLOATING MENU MAY START ────────────────────────────────────────────────────────
    Every popup in this app clamps its top to a bare `8`, on the reasoning that the chrome above it is
-   the app's OWN titlebar — web content, which a menu's z-index sits over perfectly well. The native
-   window-TAB BAR is the exception and no z-index can help: it is an AppKit view in the window's theme
-   frame, drawn above the WKWebView entirely, so a menu positioned under it is not merely behind
-   something, it is unreachable. The only remedy available to the page is not to go there.
-   `--tabH` is that bar's bottom edge in page coordinates, published by app/mac/shell.py and 0
-   whenever the window is not in a tab group (and on Windows, which has no such bar) — so this is the
-   old constant 8 in every case except the one it is for. Read off the INLINE style, the same place
-   and for the same reason docTopInset does. */
-function menuTopBound(){ return Math.max(8, parseFloat(document.documentElement.style.getPropertyValue("--tabH"))||0); }
+   the app's OWN titlebar — web content, which a menu's z-index sits over perfectly well.
+   ⚠ THIS USED TO ALSO FLOOR AGAINST --tabH: a native window-TAB BAR was the one exception no z-index
+   could help, an AppKit view in the window's theme frame drawn above the WKWebView entirely, so a menu
+   positioned under it was unreachable rather than merely behind something. Gone with window tabbing
+   itself (see the module-level note near the top of app/__main__.py) — there is no such view left to
+   be unreachable behind, so this is the bare constant every popup already clamps to. */
+function menuTopBound(){ return 8; }
 /* A status-bar pull-down's max-height is a viewport-relative CSS cap (min(Npx,70vh) — see menuTopBound's
    own kind of concern, "never overflow the top of the document viewport"), which on a short window can
    land partway through a row: CSS has no way to floor a vh-derived length to a whole multiple of a row's

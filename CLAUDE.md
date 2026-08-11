@@ -722,91 +722,26 @@ consonant's head-stroke at ONE height (a dashed shirorekha) and Noto Sans Gujara
 at one height. Both consumers move for them: the running line by the numbers above, and the brackets by
 +1.01px (Gujarati) / +1.43px (Nandinagari), the same register as Devanagari's own documented +0.99px.
 
-⚠ **A z-index cannot beat the native window-tab bar.** Every floating popup clamps its top to
-`menuTopBound()` (`js/core/scroll.js`) rather than to a bare `8`: the app's own titlebar is web content
-a menu paints over happily, but the tab bar is an AppKit view in the window's theme frame, above the
-WKWebView entirely, so a menu positioned under it is unreachable rather than merely behind something.
-`--tabH` is that bar's bottom edge, published by `app/mac/shell.py` and 0 when the window is not in a
-tab group (and on Windows), so this is the old constant everywhere else. The status-bar language menu
-opens *upward* and is the tallest thing in the app, so it is capped by `max-height` instead of moved —
-its list already scrolls.
-⚠️ **"Every" did not include the OPTIONS BAR's own dropdowns, and they are the ones most exposed to it.**
-`.drawer-pop` is placed by CSS alone (`position:absolute; top:calc(100% + 6px)`), so it never reached
-`menuTopBound` at all. And in a tabbed window the tab bar used to sit *below* the options bar, not above
-it — `set_titlebar_reserve` (`app/mac/shell.py`) put an empty accessory of the bar's own height into the
-title-bar band and AppKit stacked the tabs under it (toolbar, options bar, tabs, document) — so a
-dropdown hung DOWN from the bar straight THROUGH the tabs. Measured at a real tabbed geometry
-(`--tabH` 140, bar spanning 104..140): the options bar at 52..90, all four pops opening at top 90, each
-losing a 36px band of invisible unclickable rows.
-⚠️ **CLAMPING THE DROPDOWN CLOSED THAT AND WAS REJECTED ON SIGHT, SO THE OPTIONS BAR MOVED BELOW THE TABS
-INSTEAD** — the fix the round above recorded as "the one this does NOT need". That reasoning ("the bar is
-clear of the tabs by construction, so its own `top` is already right") is *true and answers a different
-question*: clear of the tabs is not the same as next to its own dropdowns. `clampDrawerPop` pushed each
-pop past `--tabH` and thereby opened all four **57px below the button that opened them** (6px untabbed,
-measured) — reported as "dropdowns open on the opposite side of the tab bar", which is what a menu
-detached from its own control reads as. `.viewbar{top:max(--tbH,--tabH)}` (`macos-kit/mac-chrome.css`,
-mirrored in the Fluent kit where `--tabH` is always 0) puts the bar under everything native, and the pops
-are back at their own 6px in every state with no clamp at all — `clampDrawerPop` is deleted, not kept as
-a guard, since a guard nothing can trigger is a claim no test keeps honest.
-⚠️ **THE RESERVATION WENT WITH IT — `set_titlebar_reserve`, `Api.titlebar_reserve` and `reserveTitlebar`
-are all gone**, because an accessory that pushes the tabs down is exactly wrong once the bar is below
-them: it would cost the bar's height twice, once as empty native band and once as the bar's real box.
-**The document does not move**: `--top-chrome` is now `max(--tbH,--tabH) + --vbH` — the floor is INSIDE
-the sum, was around it (`max(--tbH+--vbH, --tabH)`) — and `docTopInset()` states the same expression in
-JS, so tabbed with the bar open the first block still starts at **141px**, measured identical before and
-after. The reservation used to buy those 39px *inside* `--tabH`; the bar now spends them below it. The
-tabbed geometry this leaves (chrome 66 + a 36px bar = `--tabH` 102) is not new — it is exactly what a
-tabbed window with the options bar CLOSED has always had, i.e. the numbers `_tab_bar_height`'s own
-docstring records from the live app. Three things follow for free: `--tabH` no longer moves when the
-options bar is toggled (so the 0.25 s re-publish the reservation needed is gone, and the toggle's
-`withTopChrome` capture is one synchronous step instead of racing a bridge round-trip), `_chrome_base`
-is always the bare 66 rather than 66-or-66-plus-the-bar depending on when it was last read, and the
-bar's `border-bottom` comes back when tabbed — the seam below it is the DOCUMENT again.
-⚠️ **AND THE COLLAPSED FULL-SCREEN BAR IS PINNED TO `top:0`** (`app.css`), which is a NEW exposure this
-created rather than an old one tidied: `translateY(-102%)` hides the bar from wherever `top` put it, and
-102% of the BAR's own ~39px is all the slide there is. `--tbH` was zeroed by `syncChrome` in the same
-statement that adds `fs-chrome-hidden`, but `--tabH` is published from Python on a background thread, so
-a window that was tabbed when it entered full screen would hold ~102px for that round-trip and leave the
-bar on screen at ~62px. A full-screen window shows no tab bar, so 0 is right for the whole state.
-⚠️ **A NATIVE POPOVER WINDOW WAS THE OTHER CANDIDATE AND IS A REAL PROJECT, NOT A SHORTCUT.** pywebview
-6.2.1 has no popover, no panel and no child-window attachment: `create_window` offers `frameless`/
-`on_top`/`transparent`/`x`/`y`, and its `WindowHost` subclasses **`NSWindow`, not `NSPanel`**. A dropdown
-drawn that way therefore needs a non-activating `NSPanel` (or it steals key from the document window),
-`addChildWindow_ordered_` so it follows the parent's move/resize/space, page-px → screen-point
-positioning off the button, a global mouse monitor for dismiss-on-click-outside, and a bridge round-trip
-for every checkbox — none of which exists here, and all of it for popups that now need no help at all.
-
-⚠ **THE TAB BAR IS TRANSPARENT, SO THE PAGE OWNS ITS BACKGROUND — AND THE PAGE WAS PAINTING NOTHING
-THERE.** `.titlebar` and `.viewbar` merge into one flat glass surface; the tabs land between them, from
-the title bar's own bottom edge (`--tbH`) down to `--tabH`, and the options bar starts where that band
-ends. (Written when the order was the other way round — both bars stopping at `--tbH + --vbH` with the
-tabs below — so the rule's `top`/`height` have since lost the `--vbH` they carried at each end; the band
-is the same **48px** on this machine and every word below stands.) That band is what no rule covered, and
-`.doc`'s top padding only decides where the first block sits at scroll 0, so a scrolled document passes
-under ALL the chrome exactly as the glass design intends. Under the two bars it is blurred and tinted;
-under this band it was neither. Measured (two merged windows, options bar open, `#doc` scrolled 260px,
-window-server capture): grid text — "convention / NOUN / NNS / Number=Plur" — legible **sharp** behind
-and either side of the tab capsule, the band sampling raw document (light 247,247,247 · dark 41,41,41)
-against the options bar 12px higher (252,252,252 / 33,33,33). That is the reported "the tab bar should
-have the same blur and translucency as the options bar". `html.tabbed body:not(.fs-chrome-hidden)
-.body::after` (macos-kit/mac-chrome.css) fills it with `.viewbar`'s recipe restated verbatim — the THIRD
-copy of the merged-state surface, so a change to one is a change to all three. After: 254,254,254 /
-31,31,31, i.e. the same 10% pass-through the options bar has. On `.body` and **not** `.window`, because
-`syncChrome` writes `--tbH` onto `.body` and a custom property's `var()`s resolve where the
-property is DECLARED — from `.window` it falls back to the rule's own 44px and the band starts in the
-title bar's last rows (measured against the old geometry, where the same trap started it under the
-options bar and double-composited its tint: the bar read 252→255).
-⚠️ **AND NOTHING NATIVE COULD HAVE DONE IT**, which was researched and measured before being written
-down (the long-form record is in `_tab_bar_height`'s docstring). `NSWindowTabGroup` publishes eight
-symbols and none is about appearance; the private `NSWindowStackController` the runtime really returns
-adds 144 more with no material/tint/blur/blend selector among them; `toolbarStyle` moves the bar's
-GEOMETRY only (tried across all five values — backing class, glass corner radius and the titlebar's own
-effect view came back byte-identical); a titlebar accessory exposes layout and visibility. What IS true
-is better than a knob: under `titlebarAppearsTransparent` + `NSFullSizeContentView` there is no
-`NSVisualEffectView` anywhere in the theme frame, macOS 26 draws the bar as a bare `NSTabBar` holding
-one Liquid-Glass `NSGlassEffectView` capsule, and that glass **composites the WKWebView's own pixels**
-(probed with a saturated page: the strip either side of the capsule read the document exactly). So the
-band is the tab bar's background, and CSS is the whole of the API.
+⚠ **THIS APP DOES NOT OFFER macOS WINDOW TABBING, ON REQUEST, AND EVERYTHING BELOW THAT USED TO SAY
+OTHERWISE IS HISTORY.** A long-running section here used to document a real, working native window-tab
+bar and the considerable CSS/JS machinery (`--tabH`/`--tabTop`, `.body::after`'s merged-band paint,
+`clampDrawerPop`, `set_titlebar_reserve`, `menuTopBound()`'s tab-bar clamp) that reconciled it with this
+app's own web-drawn chrome — most pointedly, "a z-index cannot beat a native AppKit view", which is why
+the options bar had to duck below the tab bar rather than simply layer over it. All of that is gone: the
+request was "no tabs — multiple open documents should be multiple ordinary windows, sharing a Dock icon
+and menu bar", and a real investigation (three independent attempts: calling `toggleTabBar_` directly,
+routing the same command through the responder chain, and hiding the private view AppKit lays the
+accessory into) found no way to suppress the native bar's own rendering while keeping
+`NSWindowTabGroup`'s real grouping mechanics (Merge All Windows, ⌃⇥, the Window menu's tab list) alive —
+so a DOM-painted replacement wasn't viable either, and the feature was removed outright rather than
+faked. The full investigation record lives in the module-level note near the top of `app/__main__.py`;
+`app/mac/shell.py`'s own former `_tab_bar_height` research (how macOS 26 actually paints that bar — the
+closest anyone got to reverse-engineering it) is preserved there in a comment for whoever revisits this.
+Every window now sets `NSWindow.tabbingMode` to **`.disallowed`**, explicitly, not merely unset — a bare
+default still lets the system's own "Prefer tabs when opening documents" setting silently re-group two
+windows opened in quick succession, and disallowed refuses that regardless of the user's system-wide
+setting. `.viewbar`'s `top` is back to the plain `var(--tbH,44px)` it would have had if a tab bar had
+never existed, `menuTopBound()` is a bare `8`, and `--top-chrome` is a plain sum again.
 
 **Two chrome kits, one loaded.** `web/macos-kit/` (Liquid-Glass) and `web/win11-kit/` (Fluent) are
 self-contained, reusable, and **share 150 token names** — that identity is the whole
@@ -892,10 +827,13 @@ Wiktionary lookup, prefs and recent files (persisted in `state.json` under `path
 
 `_new_document_window` opens another document window **in this process** — `webview.create_window`
 called from a non-main thread, the same way `api.py`'s `_open_window` already makes Help / About /
-Model Manager. It replaced a `subprocess.Popen([sys.executable, "-m", "app"])` per window, and the
-reason is native window tabbing: macOS groups NSWindows **within an application**, so process-per-
-window could not have Merge All Windows / ⌃⇥ at any price. One `Api` per window, as before; what is
-now shared is the menu bar, the model/parse caches and the single `state.json` writer.
+Model Manager. It replaced a `subprocess.Popen([sys.executable, "-m", "app"])` per window, so that
+multiple open documents share ONE Dock icon and ONE menu bar rather than reading as unrelated apps.
+One `Api` per window, as before; what is now shared is the menu bar, the model/parse caches and the
+single `state.json` writer.
+⚠️ **This is NOT for native window tabbing** — the app doesn't offer that (see the ⚠ "THIS APP DOES NOT
+OFFER macOS WINDOW TABBING" above, and the fuller investigation in `app/__main__.py`'s own module-level
+comment). Every additional window is an ordinary window, not a tab.
 
 ⚠️ **Nothing may close over "the" window.** There is one NSMenu for N documents, so every command
 resolves its target when it RUNS: `_key_pair()` reads `NSApp.keyWindow` against the `_WINDOWS`
@@ -906,10 +844,9 @@ window is key — every window's frontend pushes selection state, and a backgrou
 hide rows according to a selection nobody can see; the delegate re-applies the key window's cached
 state (`force=True`) whenever a menu opens.
 
-`_wire_menu` also injects a **Window menu** and hands it to `NSApp.setWindowsMenu_`, after which
-AppKit maintains it: the window list, and the tab commands that the shared `tabbingIdentifier`
-(`"sud-document"`, set in `_mutate`) makes available. Verified live: `addTabbedWindow_ordered_` —
-the API Merge All Windows itself calls — puts two document windows in one tab group.
+`_wire_menu` also injects a **Window menu** and hands it to `NSApp.setWindowsMenu_`, after which AppKit
+maintains the window list at the bottom of it for free. No tab commands live there any more — every
+window's `tabbingMode` is explicitly `.disallowed` (see the ⚠ above), so there is nothing to merge.
 
 **Two hard-won invariants — violating either produces an intermittent, hard-to-diagnose hang:**
 

@@ -400,9 +400,8 @@ function bootMenubar() {
   if (typeof window.__newWindow !== "function") {
     window.__newWindow = function () { if (hasBridge()) try { window.pywebview.api.new_window(); } catch (e) {} };
   }
-  if (typeof window.__newTab !== "function") {
-    window.__newTab = function () { if (hasBridge()) try { window.pywebview.api.new_tab(); } catch (e) {} };   // the menu row's own js string; macOS also reaches _new_document_window directly from the MenuAction and from the tab bar's + button
-  }
+  // No __newTab twin: this app doesn't offer macOS window tabbing (see app/__main__.py's
+  // module-level note) — every additional document opens as an ordinary window.
   // Caption buttons: the web layer draws .capbtn, Python owns the window. Guarded so the title-bar
   // module can define its own without a load-order fight — either definition calls the same bridge.
   if (typeof window.__caption !== "function") {

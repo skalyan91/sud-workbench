@@ -50,14 +50,15 @@
   .fsbtn:hover{background:color-mix(in srgb,var(--accent) 10%,var(--field-bg))}
   .fontctl #fsVal{font-size:11px; color:var(--muted); min-width:36px; display:grid; place-items:center; padding:0 8px; font-variant-numeric:tabular-nums}   /* restore horizontal padding around the % */
 
-  /* HOW FAR DOWN THE PAGE'S OWN CONTENT STARTS: the lower of (title bar + options bar) and a
-     window-tab bar's bottom edge (--tabH, from app/mac/shell.py; 0 when no bar is up, which collapses
-     this to --tbH). NOTHING IS ADDED BEYOND THE BAR — the document begins where the bar ends, exactly
-     as it begins where the options bar ends. An earlier version padded the document by the 12px that
-     sits ABOVE the bar too, to centre it in its band; that made the bar look inset compared with the
-     options bar, which is the reference. */
-  .body{--top-chrome:calc(max(var(--tbH,44px),var(--tabH,0px)) + var(--vbH,0px))}   /* ON .body, NOT :root — that is where syncChrome (js/ui/wiring.js) sets --tbH/--vbH, and a custom property's var()s are substituted where the property is DECLARED, not where it is used: declared on :root this read --tbH as its 44px fallback and mis-sized the reservation, since the real toolbar is 54. --tabH comes from documentElement and inherits down to here. */   /* ⚠ THE FLOOR IS NOW INSIDE THE SUM, NOT AROUND IT — max(tbH,tabH) + vbH, was max(tbH+vbH, tabH) — because the OPTIONS BAR NOW SITS BELOW THE NATIVE TAB BAR (mac-chrome.css's `.viewbar` top, and the block above it for why) and so is chrome the document has to clear IN ADDITION to the bar, never chrome the bar could absorb. --tabH is still a floor against --tbH alone, for the same reason as ever: it is an EDGE, and the web toolbar is drawn inside the same native band. Untabbed (tabH 0) this is tbH+vbH exactly as before; tabbed with the bar closed it is tabH exactly as before; and tabbed with the bar OPEN it is unchanged too, at 141px measured — the reservation used to buy those 39px inside --tabH and the bar now spends them below it. docTopInset() (js/core/scroll.js) states the same expression in JS and must move with it. */
-  .doc{flex:1; overflow:auto; min-height:0; padding:var(--top-chrome) 0 44px; scroll-padding-top:var(--top-chrome)}   /* --tabH: WHERE A NATIVE WINDOW-TAB BAR ENDS (its bottom edge in page coordinates, 0 when there is none), measured in app/mac/shell.py and taken here as a FLOOR — max(), not a sum — because the page must simply start below whichever is lower, the web toolbar or the bar. Same intent as --vbH: real chrome above the page, so the viewport shrinks by it rather than being overlapped. THE DOCUMENT MOVES DOWN, THE TOOLBAR DOES NOT: the bar sits at the BOTTOM of the title-bar band, directly above the content (AppKit's own numbers, read bottom-up: a 102-tall NSTitlebarContainerView with NSToolbarView at y=36 h=66 — i.e. the toolbar keeps the top 66 and the bar takes the lowest 36). Giving .titlebar a matching `top` was tried and is wrong: it slides the web toolbar down INTO the bar, which then paints over it. 0 unless this window is in a tab group showing its bar. */   /* the document scrolls UNDER the translucent titlebar and options bar and is blurred through them, which is the whole point of the glass — so the scroller starts at the top of the window and its top PADDING is what puts the first block below the bars. (Briefly this was a margin instead, which did start the scrollbar below the bars but also cut the document off at a hard line.) */
+  /* HOW FAR DOWN THE PAGE'S OWN CONTENT STARTS: title bar + options bar. NOTHING IS ADDED BEYOND THE
+     BAR — the document begins where the options bar ends, and where the title bar ends when it is
+     closed. An earlier version padded the document by the 12px that sits ABOVE the bar too, to centre
+     it in its band; that made the bar look inset compared with the options bar, which is the reference.
+     ⚠ THIS USED TO ALSO FLOOR AGAINST --tabH, a native window-tab bar's bottom edge — deleted with
+     window tabbing itself (see the module-level note near the top of app/__main__.py). Plain sum again,
+     with nothing left to duck under. */
+  .body{--top-chrome:calc(var(--tbH,44px) + var(--vbH,0px))}   /* ON .body, NOT :root — that is where syncChrome (js/ui/wiring.js) sets --tbH/--vbH, and a custom property's var()s are substituted where the property is DECLARED, not where it is used: declared on :root this read --tbH as its 44px fallback and mis-sized the reservation, since the real toolbar is 54. */
+  .doc{flex:1; overflow:auto; min-height:0; padding:var(--top-chrome) 0 44px; scroll-padding-top:var(--top-chrome)}   /* the document scrolls UNDER the translucent titlebar and options bar and is blurred through them, which is the whole point of the glass — so the scroller starts at the top of the window and its top PADDING is what puts the first block below the bars. (Briefly this was a margin instead, which did start the scrollbar below the bars but also cut the document off at a hard line.) */
   /* …and the SCROLLBAR alone is held below the chrome. A scroller's track runs its full height, so with the
      document correctly passing under the bars the bar ran up behind them too, ending above the content it
      scrolls. `margin-top` on the track piece is the one lever that insets a track without moving the scroller,
@@ -91,13 +92,9 @@
   body.fs-chrome-hidden .titlebar, body.fs-chrome-hidden .viewbar{ transform:translateY(-102%); opacity:0; pointer-events:none; transition:transform .2s ease, opacity .2s ease; }
   /* ⚠ AND THE COLLAPSED OPTIONS BAR IS PINNED BACK TO 0, because translateY(-102%) hides a bar only from
      wherever its `top` put it — the transform is 102% of the BAR's own height (~39px), not of its offset.
-     While --tbH was the bar's only term this was free: syncChrome zeroes --tbH in the same statement that
-     adds this class. The bar's `top` is now max(--tbH,--tabH) (it sits below the native tab bar — see
-     macos-kit/mac-chrome.css), and --tabH is published from app/mac/shell.py on a background thread, so a
-     window that was TABBED when it entered full screen holds the old ~102px for as long as that
-     round-trip takes and a 39px slide would leave the bar on screen at ~62px. A full-screen window shows
-     no tab bar, so 0 is the answer for the whole of that state and there is nothing to wait for. The
-     .fs-reveal rule below is more specific and still wins for the revealed case. */
+     --tbH is the bar's only term (it sits directly below the title bar, plain var(--tbH,44px) — see
+     macos-kit/mac-chrome.css), and syncChrome zeroes --tbH in the same statement that adds this class,
+     so this is free. The .fs-reveal rule below is more specific and still wins for the revealed case. */
   body.fs-chrome-hidden .viewbar{ top:0 }
   body.fs-chrome-hidden.fs-reveal .titlebar, body.fs-chrome-hidden.fs-reveal .viewbar{ transform:none; opacity:1; pointer-events:auto; }
   body.fs-chrome-hidden.fs-reveal .viewbar{ top:var(--fsRevealTbH,44px); }   /* --tbH is 0 while collapsed → pin the revealed options bar below the revealed titlebar */
