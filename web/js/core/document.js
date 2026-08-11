@@ -2226,18 +2226,20 @@ function positionBracketAnnots(){ document.querySelectorAll("#doc .bwrap").forEa
   // Subject-raising always "subj"). Item 7: fanned against the SAME buckets wArcs/cArcs just resolved (never the
   // reverse). Item 6: labels decollided against wlabs/clabs (already finalized above) — only ghost labels move.
   const ghostPairs=[];
-  ghostToks.forEach(dep=>dep.dataset.ghostheads.split(",").forEach(pair=>{ const [ghOid,rel]=pair.split(":"); ghostPairs.push({dep,ghOid,rel}); }));
+  ghostToks.forEach(dep=>dep.dataset.ghostheads.split(",").forEach(pair=>{ const [ghOid,rel,kind]=pair.split(":"); ghostPairs.push({dep,ghOid,rel,kind}); }));
   const ghostFan=ghostPairs.map(({dep,ghOid})=>{ const headTok=box.querySelector(`.bwtok[data-tok="${ghOid}"]`); if(!headTok) return null;
     const Dr=rectOf(dep), Hr=rectOf(headTok), depUp=Dr.t<Hr.t, a={hk:ghOid,dk:dep.dataset.tok,xh:Hr.cx,xd:Dr.cx};
     if(Math.abs(Dr.t-Hr.t)>=6){ if(depUp) a.dkey="B"+a.dk; else a.hkey="B"+a.hk; }
     return a; });
   fanGhostArcs([...wArcs,...cArcs],ghostFan.filter(Boolean),fanStep());
   const ghostLabelObstacles=[...wlabs,...clabs].map(L=>({x:L.mx,y:L.fy!=null?L.fy:L.apex,hx:meas(L.text,POS_F)/2+3,hy:7}));   // every REAL label's FINAL position (post-decollide) — read, never altered
-  ghostPairs.forEach(({dep,ghOid,rel},gi)=>{ const headTok=box.querySelector(`.bwtok[data-tok="${ghOid}"]`); if(!headTok)return;
+  ghostPairs.forEach(({dep,ghOid,rel,kind},gi)=>{ const headTok=box.querySelector(`.bwtok[data-tok="${ghOid}"]`); if(!headTok)return;
     const Dr=rectOf(dep), Hr=rectOf(headTok), col=relColor(rel), fan=ghostFan[gi]||{};
+    const [gtok,gother]=ghostTokOther(kind,+dep.dataset.tok,+ghOid);
     if(Math.abs(Dr.t-Hr.t)<6){ const XH=Hr.cx+(fan.offH||0), XD=Dr.cx+(fan.offD||0), h=arcHgt(Math.abs(XD-XH)), base=Math.min(Hr.t,Dr.t)-relpad;
       const hRel=headTok.querySelector(".bwrel"), startY=hRel?(headTok.offsetTop+hRel.offsetTop-3):undefined;   // item 8: raise the start to clear the head token's OWN deprel label, exactly like a real within-line bump
       const g=E("g",{class:"ghost-g"+(sel.s===si0&&sel.t===+dep.dataset.tok?" sel":""),"data-s":si0,"data-dep":dep.dataset.tok});
+      wireGhostClick(g,si0,kind,gtok,gother);
       const apex=drawBump(g,XH,XD,base,base-h,0,AH,col,true,startY);   // item 8: apex is now the TRUE (bezYExtent) crown when raised, matching a real bump — not the flat 0.75h estimate
       g.querySelectorAll(".arc-path").forEach(p=>p.classList.add("arc-ghost")); g.querySelectorAll(".ah").forEach(p=>p.classList.add("ah-ghost"));
       if(show.labels){ const mx=(XH+XD)/2, half=meas(rel,POS_F)/2+3, hh=7, y0=apex-8; let y=y0, guard=0;
@@ -2252,6 +2254,7 @@ function positionBracketAnnots(){ document.querySelectorAll("#doc .bwrap").forEa
       const upP=[depUp?DX:HX, tokBot(depUp?dep:headTok)+GAPU], loP=[depUp?HX:DX, loRelTop-3];
       const tip=depUp?upP:loP, frm=depUp?loP:upP, gap=[tokBot(depUp?dep:headTok), loRelTop];
       const g=E("g",{class:"ghost-g"+(sel.s===si0&&sel.t===+dep.dataset.tok?" sel":""),"data-s":si0,"data-dep":dep.dataset.tok});
+      wireGhostClick(g,si0,kind,gtok,gother);
       drawCrossLine(g,frm,tip,col,AH,false,gap);
       g.querySelectorAll(".arc-path").forEach(p=>p.classList.add("arc-ghost")); g.querySelectorAll(".ah").forEach(p=>p.classList.add("ah-ghost"));
       if(show.labels){ const mx=(upP[0]+loP[0])/2, my=(upP[1]+loP[1])/2, half=meas(rel,POS_F)/2+3, hh=7; let y=my, guard=0;
@@ -2335,7 +2338,7 @@ function scrollNearest(el){ if(!el) return;
   }
 }
 function setRange(s,anchor,focus){ selRange={s,anchor,focus,from:Math.min(anchor,focus),to:Math.max(anchor,focus)}; }
-function pick(s,t,scroll=true,reflow=true){ sel={s,t}; CURBLOCK=s;   // selecting a token IS arriving at its block, so the two stay in step here; only the scroll spy moves one without the other (see the CURBLOCK note in js/core/prefs.js)
+function pick(s,t,scroll=true,reflow=true){ sel={s,t}; CURBLOCK=s; selGhost=null;   // selecting a token IS arriving at its block, so the two stay in step here; only the scroll spy moves one without the other (see the CURBLOCK note in js/core/prefs.js). selGhost=null: an ordinary click always wins the reader's most recent choice — see selGhost's own comment, js/core/prefs.js
   if(typeof clearBlockRange==="function") clearBlockRange();   // an ordinary click starts a new selection, so it drops any sentence range — the same rule every list follows
   if(typeof updateFileBlock==="function")updateFileBlock();   // keep the "Sentence X of Y" subtitle in step with the selection
   if(s<0||s>=DOC.length){ sel={s:-1,t:0}; selRange=null; syncMenu(); return; }   // empty document / no selection
@@ -2402,6 +2405,15 @@ function applySel(){
   document.querySelectorAll("#doc .node,#doc .tok-group,#doc .bwtok").forEach(g=>g.classList.toggle("sel",+g.getAttribute("data-s")===sel.s&&(gwHolds(g,sel.t)||elInSpan(g,mwtSpan))));   // gwHolds, not a bare data-tok test: a goeswith cell draws a whole WORD (two or more tokens sharing one annotation stack), so selecting EITHER half lights the whole word — see the goeswith block in js/diagram/diagram-core.js. For every other cell it IS the bare data-tok test.   // .bwtok (wrapped brackets) was missing here — a selection change via a reflow=false path (e.g. grid-cell focus) left its bold highlight stuck on the PREVIOUS token until an unrelated full render happened
   const selDep=gwUnitId(sel.s,sel.t);   // a goeswith continuation's word wears the HEAD's incoming relation — see gwUnitId. Without this, selecting the second half of a word accented its two forms, its shared POS and its slur but left the very relation label above them plain, which is exactly the "a form whose annotations stayed behind" the rule below exists to prevent
   document.querySelectorAll("#doc .arc,#doc .edge-g,#doc .ghost-g").forEach(g=>g.classList.toggle("sel",g.hasAttribute("data-dep")&&+g.getAttribute("data-s")===sel.s&&+g.getAttribute("data-dep")===selDep));   // ghost edges carry the SAME data-s/data-dep contract as a real edge — without this they only picked up .sel on a full re-render, lagging behind every OTHER selection highlight (which this live class-toggle pass already updates instantly). hasAttribute guard: a ghost-g with NO data-dep at all (e.g. the Subject=Generic ∅, which has no real token of its own) must never match — +null coerces to 0, which used to false-match whenever sel.s===0 (sentence 1) && sel.t===0 (nothing selected), the common initial state
+  // A DIRECTLY-CLICKED ghost (pickGhost/selGhost, js/diagram/diagram-edit.js) — SEPARATE from the .sel pass just
+  // above: that one lights every ghost sharing a dependent with the current TOKEN selection (the existing "item 3"
+  // rule, kept as-is); .gsel lights only the ONE ghost the reader actually clicked (data-gkind/data-gtok/
+  // data-gother identify it — see wireGhostClick), which is what Delete/Backspace (js/grid/columns.js) acts on.
+  // Covers both the SVG ghost-g elements and the outline's HTML .oline-ghost rows — wireGhostClick tags both alike.
+  document.querySelectorAll("#doc .ghost-g[data-gkind],#doc .oline-ghost[data-gkind]").forEach(g=>{
+    const other=g.hasAttribute("data-gother")?+g.getAttribute("data-gother"):null;
+    g.classList.toggle("gsel", !!selGhost && selGhost.s===+g.getAttribute("data-gs") && selGhost.kind===g.getAttribute("data-gkind")
+      && selGhost.tok===+g.getAttribute("data-gtok") && selGhost.other===other); });
   document.querySelectorAll("#doc .oline").forEach(g=>{ g.classList.toggle("sel",+g.dataset.s===sel.s&&(gwHolds(g,sel.t)||elInSpan(g,mwtSpan)));   // …and the MWT span for the same reason the cell pass above takes it: an outline ROW is that notation's token cell, so every component of a selected MWT lights there too.   // gwHolds for the same reason as the cell pass above: an outline row that draws a whole goeswith word lights for EITHER of its parts
     g.classList.toggle("insub", +g.dataset.s===sel.s && (g.dataset.anc||"").split(" ").includes(String(sel.t))); });
   document.querySelectorAll("#doc .punctsat").forEach(g=>g.classList.toggle("sel",+g.dataset.s===sel.s&&(+g.dataset.tok===sel.t||elInSpan(g,mwtSpan))));   // HTML folded-punctuation satellites (outline / wrapped brackets) — a satellite is drawn AS PART OF its token's cell, so it follows that token into an MWT selection rather than staying plain beside a lit form

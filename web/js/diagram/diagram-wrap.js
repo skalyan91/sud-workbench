@@ -16,7 +16,7 @@ function bracketsWrapped(si){
   // ghost pairs, grouped by ORIGIN (the token whose OWN element carries data-ghostheads, drawn as the ghost's
   // dependent) — Shared=Yes: the token itself; Subj: the raised argument the crawl finds, NOT the predicate.
   const ghostsByOrigin=Array.from({length:n},()=>[]);
-  ghostPairsFor(t).forEach(([o,tg,rel])=>{ if(o>=0&&o<n&&tg>=0&&tg<n) ghostsByOrigin[o].push([tg,rel]); });
+  ghostPairsFor(t).forEach(([o,tg,rel,kind])=>{ if(o>=0&&o<n&&tg>=0&&tg<n) ghostsByOrigin[o].push([tg,rel,kind]); });
   // tree spans, then a DISPLAY tree: attach every token to the SMALLEST constituent whose surface span contains
   // it. That display tree is always projective, so it linearises cleanly in surface order and the brackets nest
   // exactly as in the flat view. A token whose display-parent isn't its real head is an INTERRUPTER (it sits, in
@@ -138,7 +138,7 @@ function bracketsWrapped(si){
   const wordSpan=i=>{ const grp=document.createElement("span"); grp.className="bwtok"+(sel.s===si&&sel.t===OID(i)?" sel":""); grp.dataset.s=si; grp.dataset.tok=OID(i); grp.style.cursor="pointer"; grp.style.width=wordW(i)+"px"; grp.addEventListener("click",()=>pick(si,OID(i)));   // reserve the widest-row width (rel/POS/translit are absolute, so JS sizes the box as the flex column did before) — a firm `width` (not `minWidth`): wordW already reserves the BOLD width too, so the box never needs to grow when a token is selected; it bolds in place, centred, exactly like unwrapped brackets
     if(selDesc.has(i)) grp.classList.add("inspan");   // in the selected constituent → covered by the continuous wash (drawn as a per-line overlay after layout)
     if(isInt(i)){ grp.classList.add("bwint"); grp.dataset.inthead=OID(head[i]-1); grp.dataset.intrel=t[i].deprel; grp.dataset.intcol=relColor(t[i].deprel); }
-    { const ghosts=ghostsByOrigin[i].map(([tg,rel])=>OID(tg)+":"+rel);   // ghost targets: pairs of (OTHER token, relation label to show on that dashed arc) — Shared=Yes → one per other conjunct, labelled with this token's OWN deprel; Subject-raising → one, always labelled "subj" (positionBracketAnnots draws them)
+    { const ghosts=ghostsByOrigin[i].map(([tg,rel,kind])=>OID(tg)+":"+rel+":"+kind);   // ghost targets: pairs of (OTHER token, relation label, kind) to show on that dashed arc — Shared=Yes → one per other conjunct, labelled with this token's OWN deprel; Subject-raising → one, always labelled "subj" (positionBracketAnnots draws them). kind travels along so a click there can tell which FEATS/MISC value to clear (see ghostTokOther)
       if(ghosts.length) grp.dataset.ghostheads=ghosts.join(","); }
     if(mwtComp.has(i)) grp.classList.add("bwmwt");
     if(repOff[i]) grp.style.top=(-repOff[i])+"px";   // item 11: .bwtok is position:relative, so a NEGATIVE `top` steps the whole token cell (form + its below-stack) UP off the line visually; interrupter arcs/ties measured from offsetTop follow it (offsetTop includes `top`), so a reported token's arcs lift with it
@@ -269,15 +269,21 @@ function arcHgt(width,ROW){ return Math.abs(width)*ARC_K; }
 // casing (half-width = (arc-stroke+3.5)/2) clear of a neighbour's body (half-width = arc-stroke/2, + 1px margin),
 // the horizontal step must be that gap divided by sinθ.
 function fanStep(){ const st=parseFloat(css("--arc-stroke"))||1.7; return ((st+3.5)/2 + st/2 + 1)/Math.sin(ARC_ANGLE); }
-// Fan the endpoints of arcs meeting at a shared node: the incoming (central) edge sits dead-centre, the outgoing
-// edges fan outward by a uniform `spread`, the shortest taking the outermost slot. THE one routine every arc/bracket
-// view calls, so the fan can't drift between them. Each arc a carries head-key hk, dep-key dk, head-x xh, dep-x xd
-// and length len (any monotone-in-width measure); it is mutated with offH / offD, the horizontal endpoint offsets.
+// Fan the endpoints of arcs meeting at a shared node: LONGER spans sit more central than shorter ones
+// wherever two or more share a side (the incoming edge to this node's own head is not special-cased into
+// the centre slot any more — see the matching, more fully-commented block in arcs(), js/diagram/
+// diagram-render.js, which this mirrors so the fan can't drift between the flat and wrapped/bracket
+// views). A side with no edge eligible for the centre slot still fans outward from one step out, exactly
+// as before. THE one routine every arc/bracket view calls. Each arc a carries head-key hk, dep-key dk,
+// head-x xh, dep-x xd and length len (any monotone-in-width measure); it is mutated with offH / offD, the
+// horizontal endpoint offsets.
 function fanArcs(arcs,spread){ const ep={}; const reg=(k,len,side,central,set)=>{(ep[k]=ep[k]||[]).push({len,side,central,set});};
   arcs.forEach(a=>{ reg(a.hkey??a.hk,a.len,Math.sign(a.xd-a.xh)||1,false,o=>a.offH=o);   // this node is the head → outgoing edge fans. a.hkey/a.dkey override only the FAN-BUCKET key (not a.hk/a.dk, which are read downstream) so a cross-line arc's UPPER-line endpoint can bucket with the bottom-of-line endpoints instead of the top-side ones at the same token
-                    reg(a.dkey??a.dk,a.len,Math.sign(a.xh-a.xd)||1,true, o=>a.offD=o); }); // this node is the dependent → incoming edge central
-  Object.values(ep).forEach(arr=>{ arr.filter(e=>e.central).forEach(e=>e.set(0));
-    [-1,1].forEach(side=>{ arr.filter(e=>e.side===side&&!e.central).sort((p,q)=>q.len-p.len).forEach((e,j)=>e.set(side*(j+1)*spread)); }); }); }
+                    reg(a.dkey??a.dk,a.len,Math.sign(a.xh-a.xd)||1,true, o=>a.offD=o); }); // this node is the dependent → incoming edge is eligible for the centre slot on ITS side (see above)
+  Object.values(ep).forEach(arr=>{ arr.filter(e=>e.central&&e.side===0).forEach(e=>e.set(0));   // a side-0 sentinel (no caller currently registers one, but arcs() reserves it for the root stub) — always centre, never ranked
+    [-1,1].forEach(side=>{ const grp=arr.filter(e=>e.side===side).sort((p,q)=>q.len-p.len);   // this side's whole pool — head edge (if it fans this way) pooled with every dependent edge fanning this way, ranked by length alone
+      const hasCentral=grp.some(e=>e.central);   // only a side that actually hosts the head edge is ever eligible for the dead-centre slot — a side with no head edge still fans from one step out
+      grp.forEach((e,j)=>e.set(side*(hasCentral?j:j+1)*spread)); }); }); }
 // cubic control points for an arc bump from (x1,base) to (x2,base) of height h: each control sits at height h
 // above its endpoint and cot(θ)·h inward, so the take-off tangent makes θ with the baseline. Apex is 0.75·h.
 function arcCtrl(x1,x2,base,h){ const sgn=Math.sign(x2-x1)||1, dx=ARC_COT*h;
@@ -757,21 +763,24 @@ function arcsWrapped(si){
   // labels decollided against the real ones — only ghost labels ever move.
   // ghostPairsFor gives [originIdx,targetIdx,rel] — here `i` is the ORIGIN (drawn as the ghost's dependent,
   // matching data-dep below) and `oh` is the target (Shared: the other conjunct; Subj: the predicate).
-  const ghostPairs=ghostPairsFor(t).map(([o,tg,rel])=>({i:o,oh:tg,rel}));
+  const ghostPairs=ghostPairsFor(t).map(([o,tg,rel,kind])=>({i:o,oh:tg,rel,kind}));
   const ghostFan=ghostPairs.map(p=>{ const a={hk:p.oh,dk:p.i,xh:NX(p.oh),xd:NX(p.i)};
     if(rowOf(p.oh)!==rowOf(p.i)){ const iUp=rowOf(p.i).ord<rowOf(p.oh).ord; if(iUp) a.dkey="B"+a.dk; else a.hkey="B"+a.hk; }   // item 1's own cross-line bucket split, applied to ghosts too
     return a; });
   fanGhostArcs(fanAll,ghostFan,SPREAD);
   const ghostG=[];
-  ghostPairs.forEach((p,gi)=>{ const {i,oh,rel}=p, col=relColor(rel), fan=ghostFan[gi], rDep=rowOf(i), rOth=rowOf(oh);
+  ghostPairs.forEach((p,gi)=>{ const {i,oh,rel,kind}=p, col=relColor(rel), fan=ghostFan[gi], rDep=rowOf(i), rOth=rowOf(oh);
+    const [gtok,gother]=ghostTokOther(kind,OID(i),OID(oh));
     if(rDep===rOth){ const x1=NX(oh)+(fan.offH||0), x2=NX(i)+(fan.offD||0), h=Math.min(arcHgt(Math.abs(x2-x1),ROW),rDep.arcZone-8), top=rDep.arcZone-h;
       const g=E("g",{class:"ghost-g"+(sel.s===si&&sel.t===OID(i)?" sel":""),"data-s":si,"data-dep":OID(i)});
+      wireGhostClick(g,si,kind,gtok,gother);
       const apex=drawBump(g,x1,x2,rDep.arcZone,top,NR,AH,col,true,null,false,repArcEnds(rep,rDep.arcZone,oh,i,h));   // item 11: a ghost duplicates a real attachment, so it lifts by exactly the same shared rule the real bump above uses
       g.querySelectorAll(".arc-path").forEach(pp=>pp.classList.add("arc-ghost")); g.querySelectorAll(".ah").forEach(pp=>pp.classList.add("ah-ghost"));
       svg.appendChild(g); ghostG.push({g,mx:(x1+x2)/2,apex,rel,col});
     } else { const iUp=rDep.ord<rOth.ord, up=iUp?i:oh, lo=iUp?oh:i, upX=NX(up)+(up===i?(fan.offD||0):(fan.offH||0)), loX=NX(lo)+(lo===i?(fan.offD||0):(fan.offH||0));
       const upP=[upX,NBOT(up)], loP=[loX,NTOP(lo)], tip=(i===up)?upP:loP, frm=(i===up)?loP:upP;
       const g=E("g",{class:"ghost-g"+(sel.s===si&&sel.t===OID(i)?" sel":""),"data-s":si,"data-dep":OID(i)});
+      wireGhostClick(g,si,kind,gtok,gother);
       drawCrossLine(g,frm,tip,col,AH,false,[repBase(rep,rowOf(up).stackBot,up),repBase(rep,rowOf(lo).wordY,lo)-ASC]);   // item 11: same report-lifted band bounds crossGeom() gives the real cross-line arcs
       g.querySelectorAll(".arc-path").forEach(pp=>pp.classList.add("arc-ghost")); g.querySelectorAll(".ah").forEach(pp=>pp.classList.add("ah-ghost"));
       svg.appendChild(g); ghostG.push({g,mx:(upP[0]+loP[0])/2,apex:(upP[1]+loP[1])/2,rel,col}); } });
@@ -915,7 +924,7 @@ function projWrapped(si,kind){
   // the coordination, alongside the real edge wpDraw already draws to whichever conjunct it's actually attached to.
   // ghostPairsFor gives [originIdx,targetIdx,rel] — `d` (dependent) is the origin, `h` (head) is the target,
   // matching this view's own edge-object convention.
-  const ghostEdges=ghostPairsFor(t).map(([o,tg,rel])=>({d:o,h:tg,rel}));
+  const ghostEdges=ghostPairsFor(t).map(([o,tg,rel,ghKind])=>({d:o,h:tg,rel,ghKind}));
   const proj = kind==="stemma" ? stemmaProj : true;
   const anyMwt=rows.some(r=>{ const rt=rowTies(D,r.s,r.e); return rt.mwt.length||rt.xpos.length; });
   // one uniform row height. With deprels above, the word gets an equal gap above (deprel) and below (POS), and the
@@ -1042,11 +1051,13 @@ function wpDraw(box){ const wp=box._wp; if(!wp) return;
   if(wp.showLbl) wp.edges.forEach(e=>{ const g=E("g",{class:"edge-g"+(sel.s===wp.si&&sel.t===wp.oid[e.d]?" sel":""),"data-s":wp.si,"data-dep":wp.oid[e.d],"data-head":wp.oid[e.h]});
     drawLabel(g,(NX(e.d)+NX(e.h))/2,(NY(e.d)+NY(e.h))/2,e.rel,relColor(e.rel));
     g.style.cursor="pointer"; g.addEventListener("click",()=>pick(wp.si,wp.oid[e.d])); svg.appendChild(g); });
-  // Shared=Yes ghost edges: dashed, dimmed, decorative (see stemma()'s own comment) — no data-dep/data-s, no click handler
+  // Shared=Yes / Subject-raising ghost edges: dashed, dimmed, decorative — but, like every other notation, a click
+  // target of their own (wireGhostClick) so the reader can select and Delete/Backspace the one FEATS/MISC value each draws.
   (wp.ghostEdges||[]).forEach(e=>{ const ink=arcInk(relColor(e.rel)); let a1=[NX(e.d),NY(e.d)], a2=[NX(e.h),NY(e.h)], ah=null;
     if(show.arrows){ const dir=arrowDir(e.rel); if(dir){ const tip=dir==="dep"?a1:a2,frm=dir==="dep"?a2:a1;
       ah=arrowPath(frm,tip,5.25); if(dir==="dep")a1=backoff(tip,frm,5.25); else a2=backoff(tip,frm,5.25); } }
     const g=E("g",{class:"ghost-g"});
+    { const [gtok,gother]=ghostTokOther(e.ghKind,wp.oid[e.d],wp.oid[e.h]); wireGhostClick(g,wp.si,e.ghKind,gtok,gother); }
     if(ah) g.appendChild(E("path",{class:"ah ah-ghost",d:ah,fill:ink}));
     g.appendChild(E("path",{class:"edge edge-ghost",d:`M ${a1[0]} ${a1[1]} L ${a2[0]} ${a2[1]}`,stroke:ink}));
     if(wp.showLbl){ drawLabel(g,(NX(e.d)+NX(e.h))/2,(NY(e.d)+NY(e.h))/2,e.rel,relColor(e.rel)); const lb=g.lastElementChild; if(lb)lb.classList.add("lbl-ghost"); }
@@ -1212,9 +1223,9 @@ function tree(si){
   // stemma()'s own comment. depth[] (adjusted above) already keeps every ghost target above its dependents, so the
   // dependent (origin) always draws at the "d" role and the target at "h" — orientGhost is a defensive fallback only.
   const orientGhost=(origin,target)=>depth[origin]<depth[target]?{d:target,h:origin}:{d:origin,h:target};
-  const ghostEdges=ghostPairs.map(([o,tg,rel])=>{ const {d,h}=orientGhost(o,tg);
-    return {d,h,rel,origin:o,y1:ny(depth[d])-A,y2:parentEndY(h)}; });
-  const maxD=Math.max(0,...depth),total=Math.max(2,...x.map((xx,i)=>xx+lw2(i)/2+hgw2(i)))+6,H=TOP+maxD*LV+16+belowReserveH(trLayer(),belowTierN(),false);   // Item 8: the bottom tier tail folds in descent(POS_F) per row, matching belowStack. lw2/hgw2 (not nw/hgw) so a ∅ pushed to the canvas edge still gets cropped in
+  const ghostEdges=ghostPairs.map(([o,tg,rel,kind])=>{ const {d,h}=orientGhost(o,tg);
+    return {d,h,rel,kind,origin:o,target:tg,y1:ny(depth[d])-A,y2:parentEndY(h)}; });
+  const maxD=Math.max(0,...depth),total=Math.max(2,...x.map((xx,i)=>xx+lw2(i)/2+hgw2(i)))+6,H=TOP+maxD*LV+16+belowReserveH(trLayer(),belowTierN(),false);   // Item 8: the bottom tier tail folds in descent(POS_F) per row, matching belowStack. lw2/hgw2 (not nw/hgw) so a ∅ pushed to the canvas edge still gets cropped in — H kept on the newer belowReserveH() consolidation (post-dates the ghost-edge patch's own base); only kind/target:tg are this patch's real addition
   if(RTL) for(let i=0;i<N;i++) x[i]=total-x[i];   // mirror the tidy tree for right-to-left (N, not n — the ∅ mirrors too)
   const svg=E("svg",{class:"tree",width:total,height:H,viewBox:`0 0 ${total} ${H}`}); const boxes=[];
   // edges as ONE cased unit (Item 21): pre-compute stroke path + arrowhead, draw all casings behind, then strokes on top
@@ -1243,6 +1254,7 @@ function tree(si){
     if(show.arrows){ const dir=arrowDir(e.rel); if(dir){ const tip=dir==="dep"?dEnd:hEnd,frm=dir==="dep"?hEnd:dEnd;
       ah=arrowPath(frm,tip,5.25); if(dir==="dep") dEnd=backoff(tip,frm,5.25); else hEnd=backoff(tip,frm,5.25); } }
     const g=E("g",{class:"ghost-g"+(sel.s===si&&sel.t===OID(e.origin)?" sel":""),"data-s":si,"data-dep":OID(e.origin)});   // item 3
+    { const [gtok,gother]=ghostTokOther(e.kind,OID(e.origin),OID(e.target)); wireGhostClick(g,si,e.kind,gtok,gother); }
     if(ah) g.appendChild(E("path",{class:"ah ah-ghost",d:ah,fill:ink}));
     g.appendChild(E("path",{class:"edge edge-ghost",d:`M ${hEnd[0]} ${hEnd[1]} L ${dEnd[0]} ${dEnd[1]}`,stroke:ink}));
     boxes.push({x:(dEnd[0]+hEnd[0])/2,y:(dEnd[1]+hEnd[1])/2,hx:Math.abs(hEnd[0]-dEnd[0])/2,hy:Math.abs(hEnd[1]-dEnd[1])/2+2});   // item 2
@@ -1396,7 +1408,7 @@ function brackets(si){
   // treatment as a real interrupter arc, purely decorative (no data-dep/data-s, no click, no fan-bucket sharing
   // with the real interrupters — see .ghost-g). Heights count toward maxAH so a tall ghost never clips the top.
   // ghostPairsFor gives [originIdx,targetIdx,rel] — `d` (dependent) is the origin, `h` (head) is the target.
-  const ghostArcs=ghostPairsFor(t).map(([o,tg,rel])=>({d:o,h:tg,rel,hgt:arcHgt(Math.abs(wx[o]-wx[tg]),38)}));
+  const ghostArcs=ghostPairsFor(t).map(([o,tg,rel,kind])=>({d:o,h:tg,rel,kind,hgt:arcHgt(Math.abs(wx[o]-wx[tg]),38)}));
   // Subject=Generic no longer folds in here: it's drawn as its own small bracket pair in the seq itself (see the seq
   // construction above), not as an interrupter-style ghost arc — a real dependent's own bracket, not a decorative bump.
   const maxAH=Math.max(12,...np.map(a=>a.hgt),...ghostArcs.map(a=>a.hgt));
@@ -1485,6 +1497,7 @@ function brackets(si){
     const te=trimT(P,1,AH-AEXT), sl=(te>0.001&&te<0.999)?subCurve(P,0,te):P;
     const dstr=`M ${sl[0][0]} ${sl[0][1]} C ${sl[1][0]} ${sl[1][1]}, ${sl[2][0]} ${sl[2][1]}, ${sl[3][0]} ${sl[3][1]}`;
     const g=E("g",{class:"ghost-g"+(sel.s===si&&sel.t===OID(a.d)?" sel":""),"data-s":si,"data-dep":OID(a.d)});   // item 3
+    { const [gtok,gother]=ghostTokOther(a.kind,OID(a.d),OID(a.h)); wireGhostClick(g,si,a.kind,gtok,gother); }
     g.appendChild(E("path",{class:"arc-path arc-ghost",d:dstr,stroke:ink}));
     g.appendChild(E("path",{class:"ah ah-ghost",d:arrowPath(P[2],P[3],AH),fill:ink}));
     const apex=(hasHRel||hasDRel)?bezYExtent(P)[0]:base-ml-0.75*a.hgt, mx=(XH+XD)/2;
@@ -1579,7 +1592,7 @@ function outline(si){const D=displaySent(DOC[si]), t=D.tokens, n=t.length, OID=k
   // ghostsAt is indexed by TARGET (the row a ghost nests under); each entry names its ORIGIN (gi, the token
   // actually displayed as the ghost row) — ghostPairsFor gives [originIdx,targetIdx,rel].
   const ghostsAt=Array.from({length:n},()=>[]);
-  ghostPairsFor(t).forEach(([o,tg,rel])=>{ if(tg>=0&&tg<n&&o>=0&&o<n) ghostsAt[tg].push({gi:o,rel}); });
+  ghostPairsFor(t).forEach(([o,tg,rel,kind])=>{ if(tg>=0&&tg<n&&o>=0&&o<n) ghostsAt[tg].push({gi:o,rel,kind}); });
   const mwtOf={}; (D.mwt||[]).forEach(m=>mwtOf[m.from-1]=m);   // annotate the first word of each multi-word token
   const box=document.createElement("div"); box.className="text-conv outline"; box.dir=RTL?"rtl":"ltr";
   box.style.paddingBottom=(15-TOK_Y_LOWER+descent(NODE_F))+"px";   // bottom = the same 15px base the top uses + the outline form font's descender depth, so the last row's descenders clear the edge (CSS can't call descent()) — LESS TOK_Y_LOWER, which the top takes
@@ -1646,13 +1659,13 @@ function outline(si){const D=displaySent(DOC[si]), t=D.tokens, n=t.length, OID=k
     row.style.cursor="pointer"; row.addEventListener("click",()=>pick(si,OID(i)));
     box.appendChild(row);   // MWTs are omitted from the outline — no good way to place them in a dependency tree
     kids[i].slice().sort((a,b)=>a-b).forEach(c=>w(c,d+1,chain,myReps));
-    ghostsAt[i].forEach(({gi,rel})=>{ const grow=document.createElement("div"); grow.className="oline oline-ghost"+(inSel(gi)?" sel":"");   // item 3: highlighted like a real row when ITS token is the current selection
+    ghostsAt[i].forEach(({gi,rel,kind})=>{ const grow=document.createElement("div"); grow.className="oline oline-ghost"+(inSel(gi)?" sel":"");   // item 3: highlighted like a real row when ITS token is the current selection
       grow.dataset.s=si; grow.dataset.tok=OID(gi); if(myReps.length)grow.dataset.reproots=myReps.join(" "); grow.style.marginInlineStart=((d+1)*22)+"px";
       if(show.labels){ const relEl=document.createElement("span"); relEl.className="orel"+(isMorphRel(rel)?" morph-lbl":""); setRelLabel(relEl,rel); relEl.title=relTitle(rel);
         if(show.colour) relEl.style.color=relColor(rel); grow.appendChild(relEl); }
       const gform=document.createElement("span"); gform.className="oform"+formDeco(t[gi])+italDeco(t[gi]); gform.textContent=bform(t[gi]); grow.appendChild(gform);
       const gpos=document.createElement("span"); gpos.className="opos"; gpos.textContent=posDisp(t[gi]); gpos.title=posTitle(t[gi].upos); grow.appendChild(gpos);
-      grow.style.cursor="pointer"; grow.addEventListener("click",()=>pick(si,OID(gi)));
+      { const [gtok,gother]=ghostTokOther(kind,OID(gi),OID(i)); wireGhostClick(grow,si,kind,gtok,gother); }   // a click on this ghost row selects THIS ghost directly (distinct from the token-proxy .sel above) — same mechanism as every SVG ghost-g
       box.appendChild(grow); });
     if(hasGenericSubj(t,i)){ const grow=document.createElement("div"); grow.className="oline oline-ghost";   // item 2: Subject=Generic — a real ROW, like any other token, nested under its head; never selectable/editable (nothing real to click)
       grow.style.marginInlineStart=((d+1)*22)+"px";

@@ -136,6 +136,46 @@ function hasGenericSubj(t,i){ return show.extRel && raiseGet(t[i],"Subject")==="
 // real token would), just never editable/interactable/grid-visible. This is the width of that reserved band —
 // the ∅ glyph itself plus clearance — inserted immediately before token i's own slot when i has Subject=Generic.
 function genericSubjGapW(t,i,font){ return hasGenericSubj(t,i) ? (meas("∅",font||WORD_F)+10) : 0; }
+// ── ghost-edge selection & deletion (Shared=Yes fan-out / Subject-raising) ──────────────────────────────────────
+// Every renderer's ghostPairsFor pair is [originIdx,targetIdx,rel,kind] (0-based) with a fixed meaning per kind:
+// Shared=Yes → origin carries the FEATS Shared=Yes; Subject-raising → target (the predicate) carries the MISC
+// Subject=… value, origin is the raised argument the crawl found. `tok` below is always the one that carries the
+// annotation and is what deleteGhostEdge clears; `other` is whichever end isn't, kept only so two ghosts sharing
+// one `tok` (Shared=Yes fanning to several other conjuncts) render as distinct selections. Takes 1-based ids
+// (OIDs), matching what every call site already has in hand at the point it wires up a ghost-g.
+function ghostTokOther(kind,originOid,targetOid){ return kind==="shared" ? [originOid,targetOid] : [targetOid,originOid]; }
+// Wire one rendered ghost element (an SVG <g class="ghost-g">, or the outline's HTML <div class="oline-ghost">) up
+// for direct selection: the data-g* identity applySel()'s .gsel pass (js/core/document.js) matches against
+// `selGhost`, plus the click itself. This is the ONLY path that ever sets selGhost — no menu or automatic pass may
+// select a ghost, matching CLAUDE.md's "ONLY A CLICK OR A RECTANGLE SELECTS A NODE" (the same rule setAsRoot was
+// once found to violate). `.ghost-g[data-gkind]` also gets pointer-events back from `.ghost-g`'s own blanket
+// `pointer-events:none` (app.css) — every OTHER ghost (the Subj=Generic ∅, and its own bracket/connector) carries
+// no data-gkind and stays exactly as inert as before.
+function wireGhostClick(g,si,kind,tok,other){ g.setAttribute("data-gs",si); g.setAttribute("data-gkind",kind); g.setAttribute("data-gtok",tok);
+  if(other!=null) g.setAttribute("data-gother",other);
+  g.style.cursor="pointer"; g.addEventListener("click",e=>{ e.stopPropagation(); pickGhost(si,kind,tok,other); }); }
+function pickGhost(si,kind,tok,other){ selGhost={s:si,kind,tok,other:other==null?null:other}; sel={s:-1,t:0}; selRange=null; CURBLOCK=si;
+  document.querySelectorAll("#doc tbody tr.sel").forEach(tr=>tr.classList.remove("sel"));
+  document.querySelectorAll(".sblock.sel-block").forEach(b=>b.classList.toggle("sel-block",+b.dataset.i===si));
+  if(typeof syncMenu==="function") syncMenu();
+  if(conv==="brackets"){ preserveScroll(renderDoc); } else if(typeof applySel==="function") applySel(); }   // brackets has no live .sel toggle of its own (see pick()'s identical branch) — a full re-render is what settles the wash/.gsel there too
+// Delete/Backspace with a ghost edge selected (js/grid/columns.js's keydown handler): clears the ONE FEATS/MISC
+// value the selected ghost draws — Shared=Yes wholesale (clearFeat drops the whole key), or the MISC Subject key
+// (raiseSet …,"" — the same clear clearSubjIfNotVA/attachGenericSubj's toggle-off use) — through the SAME
+// pushUndo/markDirty/preserveScroll(renderDoc) path every other mutation in this file uses, never a parallel ad
+// hoc write. Never touches the real (solid) edge either token otherwise participates in: only the one FEATS/MISC
+// key moves. Fires no pick() on any OTHER token (CLAUDE.md's "NO pick() ON ANY OF THOSE PATHS" for a menu-driven
+// mutation) — it selects the token whose annotation it just cleared, exactly as attachAsRaisedSubj/
+// attachAsSharedConjunct already do for the edit that CREATES one of these.
+function deleteGhostEdge(){ if(!selGhost) return false;
+  const {s:si,kind,tok}=selGhost, s=DOC[si]; if(!s||tok<1||tok>s.tokens.length){ selGhost=null; return false; }
+  const t=s.tokens[tok-1];
+  pushUndo(si);
+  if(kind==="shared") t.feats=clearFeat(t.feats,"Shared"); else raiseSet(t,"Subject","");
+  selGhost=null;
+  markDirty(); preserveScroll(renderDoc); pick(si,tok,false);
+  toast(kind==="shared"?`Cleared token ${tok}'s shared-conjunct marking`:`Cleared token ${tok}'s Subject-raising`);
+  return true; }
 // dropping a token (`tokId`, the raised argument — e.g. "he") onto a VERB/AUX's edge (`edgeDepId`, the embedded
 // PREDICATE — e.g. "go"): MISC Subject is set on the PREDICATE, not on the dragged token, matching the corpus
 // convention (Subject marks the predicate whose subject is raised/shared). `type` is the DRAGGED token's own deprel
@@ -204,7 +244,7 @@ async function attachAsSharedConjunct(si,depId,conjDepId){ const s=DOC[si]; if(!
   const updateMarquee=e=>{ const L=Math.min(MARQ.x0,e.clientX),T=Math.min(MARQ.y0,e.clientY),W=Math.abs(e.clientX-MARQ.x0),H=Math.abs(e.clientY-MARQ.y0);
     MARQ.div.style.left=L+"px"; MARQ.div.style.top=T+"px"; MARQ.div.style.width=W+"px"; MARQ.div.style.height=H+"px";
     const hits=marqueeHits(MARQ.si,{l:L,t:T,r:L+W,b:T+H}); MARQ.hits=hits;
-    if(hits){ setRange(MARQ.si,hits.min,hits.max); sel={s:MARQ.si,t:hits.max}; applySel(); }   // live range highlight WITHOUT a full re-render (applySel just toggles the .rng/.rangesel classes)
+    if(hits){ setRange(MARQ.si,hits.min,hits.max); sel={s:MARQ.si,t:hits.max}; selGhost=null; applySel(); }   // live range highlight WITHOUT a full re-render (applySel just toggles the .rng/.rangesel classes)
     else { selRange=null; applySel(); } };
   const endMarquee=()=>{ if(MARQ&&MARQ.div)MARQ.div.remove(); MARQ=null; };
   docEl.addEventListener("pointerdown",e=>{ if(e.button!==0||!draggable())return;
@@ -376,7 +416,7 @@ async function attachAsSharedConjunct(si,depId,conjDepId){ const s=DOC[si]; if(!
   docEl.addEventListener("pointerup",e=>{ if(!MARQ)return; const m=MARQ; endMarquee();   // item 1: finalise a marquee (its own listener so it never contends with the node/edge drag pointerup above)
     try{docEl.releasePointerCapture(e.pointerId);}catch(_){}
     if(m.moved){ DSUPPRESS=true; setTimeout(()=>DSUPPRESS=false,0);   // swallow the click that would otherwise deselect
-      if(m.hits){ setRange(m.si,m.hits.min,m.hits.max); sel={s:m.si,t:m.hits.max}; UIZONE="diagram"; applyZone(); syncMenu(true); preserveScroll(renderDoc); }
+      if(m.hits){ setRange(m.si,m.hits.min,m.hits.max); sel={s:m.si,t:m.hits.max}; selGhost=null; UIZONE="diagram"; applyZone(); syncMenu(true); preserveScroll(renderDoc); }
       else { selRange=null; pick(m.si,0,false,false); } } },true);
   docEl.addEventListener("pointercancel",e=>{ if(MARQ){ endMarquee(); return; }
     if(!DDRAG)return; const d=DDRAG; DDRAG=null; endDrag(e);

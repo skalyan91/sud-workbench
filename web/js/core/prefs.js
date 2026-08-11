@@ -248,6 +248,24 @@ function morphSeams(s){ const seams=new Set();
 //       gated off), it lies strictly to one side of both, and the tie-break ALWAYS resolves: the token on the far
 //       side from it takes the mark. Two siblings under a head to their left → the LATER one; under a head to their
 //       right → the EARLIER one.
+//  2½. WORD CLASS, where rules 1 and 2 found NOTHING inside the word to decide from — no in-word ancestor tie on
+//      either side, and (this rule only runs where rule 3 below is skipped, i.e.) no direct link between the two
+//      either. This is rule 3's own open-vs-closed branch, RE-RUN rather than restated: that branch reads only the
+//      two tokens' UPOSes, never their relation, so `linked` was never actually a precondition of it — it is a
+//      precondition of the branches AFTER it (both-closed, both-open), which read arrowDir/nounhood off a relation
+//      that has to exist between the two for those questions to mean anything. An open/closed pair has no such
+//      requirement, so asking it again here, once rules 1–2 have had first refusal, costs nothing and is checked
+//      (over every MWT-internal seam in every sample this app ships) to never disagree with what rule 3 alone
+//      would already have said wherever a pair happens to satisfy both.
+//      WHY THIS IS NEEDED: SUD attaches an enclitic like Latin "-que" (CCONJ) as `cc` to the HEAD OF THE
+//      COORDINATION it introduces — which is not always the word "-que" is orthographically fused onto. In
+//      "Laviniaque" (samples/la_virgil.conllu) "que" is `cc` on "litora", three tokens later, while its fused
+//      host "Lavinia" is merely a `mod` sibling of that same "litora"; the two components of ONE ORTHOGRAPHIC WORD
+//      share no direct link and no ancestor inside their own MWT range, so rules 1–2 are silent and — without this
+//      branch — the seam CENTRES on a word that is not remotely in question orthographically: CCONJ is closed,
+//      PROPN is open, a closed-class conjunction fused onto an open-class stem is exactly what rule 3 already
+//      calls "the bound member of the pair", and the syntactic detour "-que" took to reach its OWN head three
+//      tokens away says nothing about where the boundary inside "Laviniaque" belongs.
 //  3. A DIRECT LINK between the two themselves — one is the head of the other — decides by what the two tokens ARE:
 //     · one OPEN class against one CLOSED class → the CLOSED-class token, that being the bound member of the pair.
 //     · both CLOSED → THE SEMANTICALLY DEPENDENT ONE, which is the one test in these four rules that asks what the
@@ -276,9 +294,10 @@ function morphSeams(s){ const seams=new Set();
 //     SCONJ. PUNCT/SYM/X and a missing UPOS are in NEITHER set, so a pair involving one of them is not an
 //     open-against-closed pair, not a both-closed pair and not a both-open pair — no branch of rule 3 applies and
 //     it falls through to rule 4, exactly as an unclassifiable token should.
-//  4. IN ANY OTHER CASE the seam is centred (owner 0) — two tokens whose trees never meet at all, a pair rule 3
-//     can't tell apart, a symmetric relation between two nouns. (Not two tokens under a common head: that is a
-//     rule-2 tie, and the tie-break there always names an owner.)
+//  4. IN ANY OTHER CASE the seam is centred (owner 0) — two tokens whose trees never meet at all and are alike in
+//     word class too (rule 2½ found nothing either), a pair rule 3 can't tell apart, a symmetric relation between
+//     two nouns. (Not two tokens under a common head: that is a rule-2 tie, and the tie-break there always names
+//     an owner.)
 // This supersedes the older three-test order (morph group, then a dominance gate, then word class, then
 // arrowDir's semantic dependence). "Which of the two leans on the other" answered a different question from
 // "which of the two does this boundary belong to", and these rules answer the second one directly — so arrowDir
@@ -383,7 +402,26 @@ function seamOwner(s,k){ const ta=s.tokens[k-1], tb=s.tokens[k]; if(!ta||!tb) re
       return (H>k+1)?k:((H>0&&H<k)?k+1:0); }   // head to the RIGHT of the pair → the earlier token is further from it; to the LEFT → the later one. H can only be one of the two, or 0, on a malformed tree → rule 4
     if(da) return k;
     if(db) return k+1;
-    return 0; }   // neither is tied to an ancestor of the other → rule 4
+    // 2½. NEITHER TOKEN'S TREE POSITION CLAIMS THE BOUNDARY — no direct link, no ancestor tie inside the word
+    // either — but the word can still answer on the one test rule 3 asks of the tokens THEMSELVES rather than of
+    // a relation between them: word class. Re-running rule 3's own open-vs-closed branch here, not restating it:
+    // that branch never actually depended on `linked` — it reads the two UPOSes and nothing else — so it costs
+    // nothing to ask again where rules 1–2 found nothing, and it is checked (over every MWT-internal seam in
+    // every sample this app ships) to never once disagree with a linked pair's own rule-3 answer where both
+    // apply, which is what makes re-running it here safe rather than a second, competing standard. Real case:
+    // SUD attaches Latin "-que" (CCONJ) as `cc` to the HEAD OF THE COORDINATION it introduces, not to the word
+    // it is orthographically fused onto — "Laviniaque" (samples/la_virgil.conllu) has "que" attached three
+    // tokens later, to "litora", with its fused host "Lavinia" merely a sibling `mod` of that same "litora" — so
+    // neither rule-2 test above finds a tie INSIDE the word "Laviniaque" at all, and without this branch the
+    // seam centred ("Lavinia = que") for a word whose two halves are, orthographically, not remotely in
+    // question: a closed-class enclitic fused onto an open-class stem, exactly rule 3's "bound member" case.
+    // NOTHING ELSE of rule 3 belongs here — no nounhood test, no arrowDir: both read the pair's RELATION, and
+    // there is no established relation between the two at this point, which is the whole reason execution
+    // reached this line rather than rule 3 itself.
+    const wa=wordClass(ta), wb=wordClass(tb);
+    if(wa==="closed"&&wb==="open") return k;
+    if(wa==="open"&&wb==="closed") return k+1;
+    return 0; }   // neither tree position nor word class settles it → rule 4
   // 3. directly linked → word class first, then nounhood, then the relation
   const wa=wordClass(ta), wb=wordClass(tb), hd=(hb===k)?k:k+1;   // hd = whichever of the two heads the other (a HEAD-cycle between them resolves to k; the tree is malformed either way)
   if(wa==="closed"&&wb==="open") return k;     // one open against one closed → the closed one, that being the bound member of the pair
@@ -493,6 +531,20 @@ function sentRTL(sent){ if(sent.rtl!==undefined) return sent.rtl;   // explicit 
 function flipX(c,total){ return RTL ? c.map(x=>total-x) : c; }   // mirror a set of x-centres when right-to-left
 let sel={s:-1,t:0};   // item 9: {s:-1,t:0} IS "nothing selected", and it is the state a document starts in — opening a file (or re-parsing a sentence) no longer jumps the selection to token 1. It used to seed {s:0,t:2}, the sample document's second token, which the boot render then made real before any load path had spoken. Everything that reads a selection already guards for s<0 (selEmphasis returns null → nothing dims, menuState reports has:false, pick() short-circuits), so the empty state renders as a complete document with no accent anywhere; what a LOAD sets instead is the reading focus — see clearSelToBlock in js/io/bridge.js.
 let selRange=null;   // {s, from, to} — a continuous token range shift-selected in a grid, for grouping into an MWT
+// {s,kind,tok,other} — a directly-clicked ghost/dashed edge (Shared=Yes fan-out / Subject-raising: SubjRaising,
+// ObjRaising, OblRaising), set ONLY by a click on the dashed line/row itself (pickGhost, js/diagram/diagram-edit.js)
+// and never by any menu or automatic pass, per the same "ONLY A CLICK OR A RECTANGLE SELECTS A NODE" rule `sel`
+// itself follows. Kept SEPARATE from `sel` rather than reusing it: ONE annotation can draw SEVERAL ghost lines off
+// the SAME token (Shared=Yes fans out to every OTHER conjunct in the coordination), so a bare token id can't tell
+// two of a token's own ghosts apart, and piggybacking on `sel`/pick() would also mean an ORDINARY click on the
+// token that happens to carry the annotation — nowhere near any dashed line — could be Backspaced into deleting
+// it by accident. tok = the ONE token whose FEATS/MISC actually carries the annotation (Shared=Yes → the origin;
+// Subject=… → the predicate) — what deleteGhostEdge (js/diagram/diagram-edit.js) clears. other = the ghost's
+// other endpoint, carried only so two ghosts sharing one `tok` render as distinct selections; delete never reads
+// it. kind is "shared" or "subj". Cleared wherever `sel` is set directly (pick(), deselectAll(), the two marquee-
+// commit sites in diagram-edit.js) — a plain click always wins the reader's most recent choice, ghost or token,
+// never both at once.
+let selGhost=null;
 /* IS AN INLINE EDITOR OPEN? makeEditable's field (js/editing/context-menu.js) is a bare `<input class="nodeedit">`
    created over whatever it edits — a diagram node, a transliteration row, an MWT tie — and it carries none of the
    data-si/ti/col attributes preserveScroll uses to put focus back after a render. So any re-render while it is

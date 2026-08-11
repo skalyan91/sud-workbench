@@ -36,6 +36,12 @@ addEventListener("keydown",e=>{
   // focus, arrow/Tab/Enter navigation here must stay out of it, full stop.
   const ae0=document.activeElement;
   const inField=ae0&&(/INPUT|SELECT|TEXTAREA/.test(ae0.tagName)||ae0.isContentEditable);
+  // Plain (no-modifier) Backspace/Delete with a ghost edge selected (selGhost, js/core/prefs.js — set ONLY by a
+  // click on the dashed line/row itself, see pickGhost) clears the ONE FEATS/MISC value it draws. Unmodified
+  // Backspace/Delete has no OTHER binding at this level (a token/sentence delete is ⌘⌫, just below) and selGhost
+  // is mutually exclusive with `sel` (pick() always clears it), so this can never fire from an ordinary token
+  // selection — only from an explicit ghost click, matching CLAUDE.md's reader-driven-only selection rule.
+  if(!e.metaKey&&!e.ctrlKey&&!e.shiftKey&&!e.altKey&&(e.key==="Backspace"||e.key==="Delete")&&selGhost){ if(inField)return; e.preventDefault(); deleteGhostEdge(); return; }
   // The ⌥⌘ family goes through cmdOptKey (js/core/platform.js) — Ctrl+Alt on Windows. Read that function's
   // note before adding a ⌃⌘ arrow handler here: the two families share one Windows chord.
   if(cmdOptKey(e)&&e.key==="ArrowUp"){ e.preventDefault(); insertAboveSel(); return; }   // ⌥⌘↑ insert above (token when a token is selected, else the sentence)

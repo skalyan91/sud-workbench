@@ -120,7 +120,7 @@ function resetUndo(){ UNDO.length=0; REDO.length=0; pendingSnap=null; updateUndo
   if(typeof invalidateColW==="function") invalidateColW();   // item 3: opening a NEW file drops the previous file's history so you can't undo across the open (and syncs the toolbar Undo/Redo enabled state) — and the previous file's column-width cache is equally meaningless against the one being opened (js/grid/grid.js)
   if(typeof invalidateDiaCache==="function") invalidateDiaCache(); }   // …and every si in it now names a sentence from whatever's being opened, not what was on screen a moment ago
 document.getElementById("btnUndo").onclick=undo; document.getElementById("btnRedo").onclick=redo; updateUndoUI();
-function deselectAll(){ sel={s:-1,t:0}; selRange=null; applySel(); document.querySelectorAll("#doc .sblock.sel-block").forEach(b=>b.classList.remove("sel-block")); syncMenu(); }
+function deselectAll(){ sel={s:-1,t:0}; selRange=null; selGhost=null; applySel(); document.querySelectorAll("#doc .sblock.sel-block").forEach(b=>b.classList.remove("sel-block")); syncMenu(); }
 document.getElementById("doc").addEventListener("click",e=>{ if(e.target===e.currentTarget||e.target.classList.contains("addsent")) deselectAll(); });   // click below the last block → clear the block selection
 // context-aware insert/delete: a token when a token is selected, else the whole sentence block
 function insertAboveSel(){ if(sel.s<0)return; if(sel.t>0) insertToken(sel.s,sel.t-1); else insertAt(sel.s); }

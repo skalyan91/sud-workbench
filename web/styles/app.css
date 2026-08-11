@@ -959,6 +959,7 @@
      coordination. .ghost-g wraps every notation's ghost edge (stemma/tree straight edges, arcs/arcsWrapped/
      brackets curved arcs) so it's never a click/drag target. */
   .ghost-g{pointer-events:none}
+  .ghost-g[data-gkind]{pointer-events:auto}   /* a ghost that carries an annotation identity (Shared=Yes fan / Subject-raising — wireGhostClick, js/diagram/diagram-edit.js) IS a click target: the reader selects it directly and Delete/Backspace clears the one FEATS/MISC value it draws (deleteGhostEdge). Every OTHER ghost — the Subj=Generic ∅ and its own bracket/connector, which carry no data-gkind — stays exactly as inert as before. */
   .edge-ghost,.arc-ghost{opacity:.72; stroke-dasharray:1.4 2.6}   /* DASHED AGAIN, at BOTH strengths. It was made solid on the argument that dashing is reserved for morphology (.morph-edge/.morph-lbl) — but that argument rested on hue doing the ghost's separating for it: a ghost carried the RELATION colour at .55 while the real edge beside it carried the accent, so nothing else had to say "duplicate". A ghost in the selection now takes the accent too (below), so hue can no longer say it, and the ghost needs a cue of its own again. Reserved-for-morphology is preserved as far as it can be: this is a fine STIPPLE (1.4 on, 2.6 off — barely more than a dotted line) against .morph-edge's long 3-2 dash, at ≤.75 opacity against its .72-on-full-hue, and a morph edge is never a ghost's sibling in the same group. Dashed in BOTH states deliberately: the pattern must not be what changes on selection, or the ghost would carry a second, geometric selection cue — the accent stays the whole signal (see the .arc.sel note below). Costs no layout width, so the meas() reservations are untouched. */
   .ah-ghost{opacity:.72}
   .lbl-ghost{opacity:.72}
@@ -985,13 +986,15 @@
          accented, so no part of the ghost's geometry reports the selection.
      Nothing here changes a weight, a size or a stroke-width — the standing invariant is untouched. Both states are
      covered, .sel (single token) and .rng (marquee/range), exactly as the real edge rules below cover both. */
-  .ghost-g.sel .edge-ghost,.ghost-g.sel .arc-ghost,.ghost-g.rng .edge-ghost,.ghost-g.rng .arc-ghost{opacity:.88; stroke:var(--accent)}   /* .75 -> .88, raised in step with the base .55 -> .72 above: the selected state has to stay VISIBLY stronger than the resting one, and at .75-over-.72 the two had all but converged. beats the `stroke` PRESENTATION attribute drawBump/drawCrossLine set from arcInk(relColor(…)), without !important — same mechanism as the real .arc.sel rule below */
-  .ghost-g.sel .ah-ghost,.ghost-g.rng .ah-ghost{opacity:.88; fill:var(--accent)}   /* the arrowhead is part of the same ghost edge; it cannot be dashed (it is a filled triangle), so presence alone recedes it */
-  .ghost-g.sel .lbl-ghost,.ghost-g.rng .lbl-ghost{opacity:.88; fill:var(--accent)}
-  .ghost-g.sel .leader-ghost,.ghost-g.rng .leader-ghost{opacity:.88; stroke:var(--accent)}   /* the tie from a lifted ghost label back to its crown belongs to the ghost, so it changes register with it */
+  .ghost-g.sel .edge-ghost,.ghost-g.sel .arc-ghost,.ghost-g.rng .edge-ghost,.ghost-g.rng .arc-ghost,
+  .ghost-g.gsel .edge-ghost,.ghost-g.gsel .arc-ghost{opacity:.88; stroke:var(--accent)}   /* .75 -> .88, raised in step with the base .55 -> .72 above: the selected state has to stay VISIBLY stronger than the resting one, and at .75-over-.72 the two had all but converged. beats the `stroke` PRESENTATION attribute drawBump/drawCrossLine set from arcInk(relColor(…)), without !important — same mechanism as the real .arc.sel rule below. .gsel is a ghost picked by a DIRECT click on the dashed line itself (pickGhost) — same register as .sel/.rng, so a selected ghost looks the same whichever way it got selected */
+  .ghost-g.sel .ah-ghost,.ghost-g.rng .ah-ghost,.ghost-g.gsel .ah-ghost{opacity:.88; fill:var(--accent)}   /* the arrowhead is part of the same ghost edge; it cannot be dashed (it is a filled triangle), so presence alone recedes it */
+  .ghost-g.sel .lbl-ghost,.ghost-g.rng .lbl-ghost,.ghost-g.gsel .lbl-ghost{opacity:.88; fill:var(--accent)}
+  .ghost-g.sel .leader-ghost,.ghost-g.rng .leader-ghost,.ghost-g.gsel .leader-ghost{opacity:.88; stroke:var(--accent)}   /* the tie from a lifted ghost label back to its crown belongs to the ghost, so it changes register with it */
   .ghost-g.sel .node-lbl,.ghost-g.sel .tok-word,.ghost-g.rng .node-lbl,.ghost-g.rng .tok-word,
-  .ghost-g.sel .brk-ghost,.ghost-g.rng .brk-ghost{opacity:.88; fill:var(--accent)}
-  .ghost-g.sel .proj-ghost,.ghost-g.rng .proj-ghost{opacity:.88; stroke:var(--accent)}
+  .ghost-g.sel .brk-ghost,.ghost-g.rng .brk-ghost,
+  .ghost-g.gsel .node-lbl,.ghost-g.gsel .tok-word,.ghost-g.gsel .brk-ghost{opacity:.88; fill:var(--accent)}
+  .ghost-g.sel .proj-ghost,.ghost-g.rng .proj-ghost,.ghost-g.gsel .proj-ghost{opacity:.88; stroke:var(--accent)}
   /* Those last two lines are the Subj=Generic ∅ node — its glyph, its bracket pair (brackets view) and its
      node→baseline connector — folded in so the ∅ can never be the one ghost left grey inside an accented group.
      They are INERT today and deliberately so: the ∅ group carries no data-dep at all, because the predicate is
@@ -1054,7 +1057,9 @@
      THEM (.osubbox, the range band) really are the translucent washes the halo exists for. */
   #doc .oline.sel{text-shadow:none}   /* (1,2,0) — beats .oline's own (0,1,0) without resting on source order, the same way the inverse-ink rules below are lifted clear of the dim rules */
   .oline-ghost{opacity:.5}   /* Shared=Yes ghost row: a dimmed copy of the dependent's row under every OTHER conjunct in the coordination */
-  .oline-ghost.sel,.oline-ghost.rng{opacity:.85}   /* item 3: still brighter when selected, though never fully opaque (stays visually a "ghost"). .rng joins it because a range is the selection generalised — the same reason applySel now toggles .rng on .ghost-g. The row's own ink already takes the accent through the ordinary .oline.sel/.oline.rng rules (this IS an .oline), so the outline's ghost has always been "accented but recessed"; only its recession lives here. It keeps .5→.85 rather than the SVG ghosts' .55→.75: this recedes a whole duplicated ROW of content — form, relation, POS, translit — not a single hairline, and a row that faint reads as unreadable rather than as quiet. */
+  .oline-ghost.sel,.oline-ghost.rng,.oline-ghost.gsel{opacity:.85}   /* item 3: still brighter when selected, though never fully opaque (stays visually a "ghost"). .rng joins it because a range is the selection generalised — the same reason applySel now toggles .rng on .ghost-g. The row's own ink already takes the accent through the ordinary .oline.sel/.oline.rng rules (this IS an .oline), so the outline's ghost has always been "accented but recessed"; only its recession lives here. It keeps .5→.85 rather than the SVG ghosts' .55→.75: this recedes a whole duplicated ROW of content — form, relation, POS, translit — not a single hairline, and a row that faint reads as unreadable rather than as quiet. .gsel is a ghost picked by a DIRECT click on the row (pickGhost, js/diagram/diagram-edit.js) — it carries no .oline.sel render-time class of its own, so its ink comes from the explicit rule right below instead of riding .oline.sel's */
+  .oline-ghost.gsel .oform,.oline-ghost.gsel .opos{color:var(--accent); fill:var(--accent)}
+  .oline-ghost.gsel .orel{color:var(--accent)!important}   /* matches .oline.sel .orel's !important — the HTML label carries the relation colour as an inline style, which only !important beats (see that rule's own note) */
   .osubbox{position:absolute; z-index:0; background:color-mix(in srgb,var(--accent) 7%,transparent); border-radius:6px; pointer-events:none; display:none}   /* subtree — subdued */
   /* The outline's selected-row band, now the SAME full-bodied darkened accent the grid's selected row takes
      (see the note beside table.grid tbody tr.sel) — and for the reason this view alone needed it: the outline is

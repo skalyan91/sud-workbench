@@ -16,12 +16,12 @@ function otherConjuncts(tokens,x){ if(!show.extRel) return []; return conjunctsO
 // every ghost pair [originIdx0based, targetIdx0based] for a token array — the SAME enumeration Shared=Yes/Subj-
 // raising ghost rendering uses everywhere else, exposed once here so stemma()/tree() can also feed it into
 // applyGhostDepth (below) BEFORE they compute any Y-position from depth.
-function ghostPairsFor(t){ const n=t.length, pairs=[];   // [originIdx, targetIdx, rel] triples — rel travels WITH the pair so a token that happened to carry BOTH Shared=Yes and a Subj value (unusual, but not disallowed) still labels each of its ghosts correctly, rather than one clobbering the other's label
+function ghostPairsFor(t){ const n=t.length, pairs=[];   // [originIdx, targetIdx, rel, kind] quadruples — rel travels WITH the pair so a token that happened to carry BOTH Shared=Yes and a Subj value (unusual, but not disallowed) still labels each of its ghosts correctly, rather than one clobbering the other's label. kind ("shared"/"subj") names which ANNOTATION the pair draws — needed because rel alone can't (a Shared=Yes token's own deprel may itself literally read "subj") — and is what ghostTokOther/wireGhostClick (js/diagram/diagram-edit.js) use to know which of the pair's two tokens actually carries the FEATS/MISC value a click-to-delete has to clear.
   for(let i=0;i<n;i++){ if(!hasFeat(t[i].feats,"Shared","Yes")) continue; const hid=parseInt(t[i].head,10); if(!(hid>=1&&hid<=n)) continue;
-    otherConjuncts(t,hid).forEach(oc=>{ const oh=oc-1; if(oh===hid-1||oh<0||oh>=n) return; pairs.push([i,oh,t[i].deprel]); }); }
+    otherConjuncts(t,hid).forEach(oc=>{ const oh=oc-1; if(oh===hid-1||oh<0||oh>=n) return; pairs.push([i,oh,t[i].deprel,"shared"]); }); }
   // Subj lives on the PREDICATE (i, e.g. "go"); the crawl finds the RAISED ARGUMENT (oh, e.g. "he") — which is
   // the ghost's ORIGIN/dependent (it renders as a ghost subj dependent OF the predicate), not the other way round.
-  for(let i=0;i<n;i++){ const oh=subjGhostTarget(t,i); if(oh==null||oh<0||oh>=n||oh===i) continue; pairs.push([oh,i,"subj"]); }
+  for(let i=0;i<n;i++){ const oh=subjGhostTarget(t,i); if(oh==null||oh<0||oh>=n||oh===i) continue; pairs.push([oh,i,"subj","subj"]); }
   return pairs; }
 // item 4 (stemma/tree only): a node's rendered DEPTH is no longer determined purely by its own real ancestry —
 // a ghost's ORIGIN (the Shared/Subj token, the dependent end of the ghost edge) is pushed to sit BELOW its
@@ -140,8 +140,8 @@ function stemma(si,{proj,catNodes}){
   // defensive fallback (draw whichever is geometrically deeper as "d") only matters if the parent-floor clamp
   // in applyGhostDepth couldn't fully resolve a pathological case.
   const orientGhost=(origin,target)=>depth[origin]<depth[target]?{d:target,h:origin}:{d:origin,h:target};
-  const ghostEdges=ghostPairs.map(([o,tg,rel])=>{ const {d,h}=orientGhost(o,tg);
-    return {d,h,rel,origin:o,y1:ny(depth[d])-A,y2:ny(depth[h])+BB}; });
+  const ghostEdges=ghostPairs.map(([o,tg,rel,kind])=>{ const {d,h}=orientGhost(o,tg);
+    return {d,h,rel,kind,origin:o,target:tg,y1:ny(depth[d])-A,y2:ny(depth[h])+BB}; });   // +BB not +B: the ghost-edge patch predates NODE_DESC_EXTRA/BB (Subject=Generic ∅ depth reserve) — kept for the real fix, the ghost agent's own +B was simply stale
   const total=Math.max(2,...c.map((cx,i)=>cx+lw[i]/2))+2;
   mirror(c,total);                                          // NOW flip for RTL, after label spacing is settled
   const belowH=proj?belowReserveH(trLayer(),belowTierN(),show.pos):0, tieH=proj?mwtDepth(D):0;   // Item 1/8: every below-row (translit, each gloss, POS) folds in descent(POS_F), matching belowStack's descender-matched per-row step
@@ -217,6 +217,7 @@ function stemma(si,{proj,catNodes}){
     if(show.arrows){ const dir=arrowDir(e.rel); if(dir){ const tip=dir==="dep"?a1:a2,frm=dir==="dep"?a2:a1;
       ah=arrowPath(frm,tip,5.25); if(dir==="dep") a1=backoff(tip,frm,5.25); else a2=backoff(tip,frm,5.25); } }
     const g=E("g",{class:"ghost-g"+(sel.s===si&&sel.t===OID(e.d)?" sel":""),"data-s":si,"data-dep":OID(e.d)});   // item 3: highlighted when its DEPENDENT is selected, like a real edge
+    { const [gtok,gother]=ghostTokOther(e.kind,OID(e.origin),OID(e.target)); wireGhostClick(g,si,e.kind,gtok,gother); }   // a click on the dashed line itself selects THIS ghost (distinct from the token-proxy .sel above) — see pickGhost/deleteGhostEdge
     if(ah) g.appendChild(E("path",{class:"ah ah-ghost",d:ah,fill:ink}));
     g.appendChild(E("path",{class:"edge edge-ghost",d:`M ${a1[0]} ${a1[1]} L ${a2[0]} ${a2[1]}`,stroke:ink}));
     boxes.push({x:(a1[0]+a2[0])/2,y:(a1[1]+a2[1])/2,hx:Math.abs(a2[0]-a1[0])/2,hy:Math.abs(a2[1]-a1[1])/2+2});   // item 2: the ghost's own line extent counts toward fitTight's crop
@@ -304,21 +305,34 @@ function arcs(si){
     .map(a=>({...a,lo:Math.min(a.from,a.to),hi:Math.max(a.from,a.to)}))
     .sort((a,b)=>(a.hi-a.lo)-(b.hi-b.lo));
   const rootI=t.findIndex((tk)=>{const h=parseInt(tk.head,10); return h===0||isNaN(h)||h<1||h>n;});
-  /* spread the endpoints above each node so arcs meeting at one token fan out by a uniform step: the
-     edge up to the head (or, at the root, the root stub) sits dead-centre, and the edges down to the
-     dependents fan out to either side, the shortest taking the outermost slot. The fan is computed FIRST
-     so each arc's height is measured from its FANNED endpoints, not the raw node centres. */
+  /* spread the endpoints above each node so arcs meeting at one token fan out by a uniform step, LONGER
+     spans sitting more central than shorter ones wherever two or more share a side — the root stub is
+     the one exception, forced dead-centre unconditionally (it isn't really "on a side": it's a vertical
+     stub drawn separately, and its Infinity length would win the centre slot on length alone regardless).
+     The edge up to THIS node's own head used to be special-cased into the centre slot no matter its
+     length; it no longer is — it is pooled with whatever dependent edges fan the SAME side and ranked by
+     length right alongside them, so a short head edge can no longer out-centre a longer dependent edge
+     fanning the same way. Measured live on samples/la_virgil.conllu s1: "Italiam" (11) is the HEAD of
+     "litora" (19, span 8, fans right) and the DEPENDENT of "venit" (18, span 7, also fans right) — the
+     old rule sat the shorter head-edge dead-centre and pushed the longer dependent-edge out a step;
+     length alone now decides, and "litora"'s edge is the one at centre. A side with no head edge on it
+     is unaffected either way — nothing there was ever eligible for the centre slot, and still isn't, so
+     it keeps fanning from one step out (this is what keeps the SET of slots used per side, and so every
+     ghost arc's fan-outward-of-the-reals in fanGhostArcs below, unchanged — only WHICH real edge sits in
+     which slot moves). The fan is computed FIRST so each arc's height is measured from its FANNED
+     endpoints, not the raw node centres. */
   const SPREAD=fanStep(), epAt={};   // uniform fan step between endpoints meeting at one node
   const regEp=(node,len,side,central,set)=>{(epAt[node]=epAt[node]||[]).push({len,side,central,set});};
   list.forEach(a=>{const len=a.hi-a.lo;
     regEp(a.from,len,Math.sign(c[a.to-1]-c[a.from-1])||1,false,o=>a.off1=o);   // side by actual x (mirrors under RTL) → outgoing edge fans
-    regEp(a.to,  len,Math.sign(c[a.from-1]-c[a.to-1])||1,true, o=>a.off2=o);}); // this node is the dependent → incoming edge is central
+    regEp(a.to,  len,Math.sign(c[a.from-1]-c[a.to-1])||1,true, o=>a.off2=o);}); // this node is the dependent → incoming edge is eligible for the centre slot on ITS side (see above)
   let rootOff=0;
-  if(rootI>=0) regEp(rootI+1,Infinity,0,true,o=>rootOff=o);
+  if(rootI>=0) regEp(rootI+1,Infinity,0,true,o=>rootOff=o);   // side 0 is a sentinel, not a real fan side — never matched by the ±1 grouping below, so it needs its own unconditional centring
   Object.values(epAt).forEach(arr=>{
-    arr.filter(e=>e.central).forEach(e=>e.set(0));                                    // head edge / root stub → centre
-    [-1,1].forEach(side=>{ arr.filter(e=>e.side===side && !e.central)
-      .sort((p,q)=>q.len-p.len).forEach((e,j)=>e.set(side*(j+1)*SPREAD)); }); });     // dependents fan outward, shortest furthest
+    arr.filter(e=>e.central&&e.side===0).forEach(e=>e.set(0));                        // the root stub only — always centre
+    [-1,1].forEach(side=>{ const grp=arr.filter(e=>e.side===side).sort((p,q)=>q.len-p.len);   // this side's whole pool — the head edge if it fans this way, plus every dependent edge fanning this way — ranked by length alone
+      const hasCentral=grp.some(e=>e.central);   // only a side that actually hosts the head edge is ever eligible for the dead-centre slot (one centre per node, as before) — a side with no head edge still fans from one step out, never slot 0
+      grp.forEach((e,j)=>e.set(side*(hasCentral?j:j+1)*SPREAD)); }); });               // longest first (j=0) → most central; shortest last → outermost
   // endpoints sit directly on the fanned targets → measure arc width (and Hobby height) from THEM
   list.forEach(a=>{ a.X1=c[a.from-1]+(a.off1||0); a.X2=c[a.to-1]+(a.off2||0); a.mx=(a.X1+a.X2)/2;
     a.h=arcHgt(Math.abs(a.X2-a.X1),ROW); a.col=relColor(a.dep); });
@@ -329,7 +343,7 @@ function arcs(si){
   // arc to its re-derived target (subjGhostTarget) — same decorative treatment.
   // ghostPairsFor gives [originIdx,targetIdx,rel] 0-based; here "to" is the arc's dependent-side token id (1-based,
   // matching a real arc's own `to`) and "from" is its head-side (the OTHER conjunct, or the Subj predicate).
-  const ghostPairs=ghostPairsFor(t).map(([o,tg,rel])=>({from:tg+1,to:o+1,dep:rel}));
+  const ghostPairs=ghostPairsFor(t).map(([o,tg,rel,kind])=>({from:tg+1,to:o+1,dep:rel,kind}));
   // item 7: fan each ghost's endpoints against the SAME per-token buckets the reals already resolved (epAt/off1/
   // off2, set above) — continuing past whatever slot a real occupies there (including its own central "0" slot),
   // never the reverse. maxRealSlot tracks, per node+side, how far out the reals already reach.
@@ -346,7 +360,7 @@ function arcs(si){
     const dSide=Math.sign(c[p.from-1]-c[p.to-1])||1, dK=p.to+"|"+dSide;
     ghostSlot[dK]=(ghostSlot[dK]!=null?ghostSlot[dK]:(maxRealSlot[dK]||0))+1;
     const X1=c[p.from-1]+hSide*ghostSlot[hK]*SPREAD, X2=c[p.to-1]+dSide*ghostSlot[dK]*SPREAD, h=arcHgt(Math.abs(X2-X1),ROW);
-    return {from:p.from,to:p.to,dep:p.dep,X1,X2,mx:(X1+X2)/2,h,col:relColor(p.dep)}; });
+    return {from:p.from,to:p.to,dep:p.dep,kind:p.kind,X1,X2,mx:(X1+X2)/2,h,col:relColor(p.dep)}; });
   // item 2: Subject=Generic folds into this SAME ghostArcs array — same endpoint-fanning at the predicate's shared
   // bucket, same label-decollision pass below — rather than being computed as a disconnected afterthought (which
   // is what let its label collide with a real label sitting at the same spot). Its "∅" side has no real token to
@@ -401,7 +415,8 @@ function arcs(si){
     const te=trimT(P,1,AH-AEXT), sl=(te>0.001&&te<0.999)?subCurve(P,0,te):P;
     const dstr=`M ${sl[0][0]} ${sl[0][1]} C ${sl[1][0]} ${sl[1][1]}, ${sl[2][0]} ${sl[2][1]}, ${sl[3][0]} ${sl[3][1]}`;
     const g=E("g",{class:"ghost-g"+(!a.isEmpty&&sel.s===si&&sel.t===OID(a.to-1)?" sel":""),"data-s":si});   // item 3 (Shared=Yes/Subject-raising — real dependent, highlights correctly). isEmpty (Subject=Generic): NEVER via selection — the predicate is this relation's HEAD, and highlighting a dependency edge on its HEAD's selection has the direction backwards; the ∅ dependent has no real token to select instead, so no data-dep/.sel at all here
-    if(!a.isEmpty) g.setAttribute("data-dep",OID(a.to-1));
+    if(!a.isEmpty){ g.setAttribute("data-dep",OID(a.to-1));
+      const [gtok,gother]=ghostTokOther(a.kind,OID(a.to-1),OID(a.from-1)); wireGhostClick(g,si,a.kind,gtok,gother); }   // Subject=Generic (isEmpty) has no real "other" token and stays inert, exactly as before
     g.appendChild(E("path",{class:"arc-path arc-ghost",d:dstr,stroke:ink}));
     g.appendChild(E("path",{class:"ah ah-ghost",d:arrowPath(P[2],P[3],AH),fill:ink}));   // NO outset argument, deliberately: a ghost draws no .arc-casing/.ah-casing at all (it is meant to read as a duplicate, not to occlude what it crosses), so there is no halo for the head to match — same for the stemma ghost head above
     if(a.isEmpty){ const glbl=E("text",{class:"tok-word",x:a.X2,y:repBase(rep,wordY,a.from-1)+TOK_Y_LOWER,"text-anchor":"middle"}); glbl.textContent="∅"; g.appendChild(glbl);   // …and, being a virtual TOKEN on that row, it lowers with every real one (its box below is arc geometry and stays)   // Subject=Generic: the ∅ glyph itself sits on the WORD row, not the arc-attachment height a.y1 uses — and it's now at X2 (the arrowhead end), since the ∅ is the dependent. Its row is the PREDICATE's own (lifted) word baseline, via the shared repBase — a ∅ inside a report steps off the line with the predicate it hangs from

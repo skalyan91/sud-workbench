@@ -868,11 +868,18 @@ function buildFeatEditor(td,sent,t,si,i,key){
       ref = hit ? hit.p : (rows[bestRow+1] ? rows[bestRow+1][0].p : null);
     }
     if(marker.parentNode!==box || marker.nextSibling!==ref) box.insertBefore(marker,ref); };   // marker.parentNode!==box catches the marker's FIRST placement of a drag: before it's ever been inserted, marker.nextSibling is trivially null, which coincidentally equals ref whenever the very first computed drop point is "insert at the end" (ref=null, e.g. dragging the one early pill toward the last slot) — a bare nextSibling check reads that as "already there" and skips the insert, so the marker (and the reorder it drives) silently never appears for that whole gesture shape
-  const editPill=pill=>{ arm(); const cur=pill.dataset.val;   // turn the pill back into editable Key=Value text
+  const editPill=(pill,pt)=>{ arm(); const cur=pill.dataset.val;   // turn the pill back into editable Key=Value text
+    // pt (optional) — the {x,y} VIEWPORT point (clientX/clientY) of the click that opened this edit.
+    // Given one, the caret lands at the character nearest that point (caretAtPoint, js/core/document.js
+    // — the SAME canvas-measureText walk the plain grid cells use at item 5/7 above, so the zoom trap it
+    // already accounts for — cssZoomOf, since a .pilledit lives inside the zoomed .sblock — is handled once,
+    // not reimplemented here). With no pt (dblclick, or any future programmatic opener that wants the whole
+    // value up for replacement rather than a point to click INTO) the field selects everything, as before.
     const pw=pill.getBoundingClientRect().width;   // the chip's exact rendered footprint → open the input at precisely this width (the ring is an inset box-shadow, so it adds no width and the input never overshoots the chip)
     const ie=document.createElement("input"); ie.className="pilledit"; ie.value=cur; ie.spellcheck=false; ie.draggable=false; ie.contentEditable="false";
     const fit=()=>{ const cs=getComputedStyle(ie); ie.style.width=Math.max(pw+2.5,Math.ceil(meas(ie.value||" ",`${cs.fontStyle} ${cs.fontWeight} ${cs.fontSize} ${cs.fontFamily}`))+27.5)+"px"; };   // the inset ring sits 1px inside each edge → border-box pw+2.5 lands the visible ring a touch past the chip edge (user's preferred). Height already matches the chip (18px); only width is set here
-    box.insertBefore(ie,pill); pill.remove(); fit(); ie.addEventListener("input",fit); ie.focus(); ie.select();
+    box.insertBefore(ie,pill); pill.remove(); fit(); ie.addEventListener("input",fit); ie.focus();
+    if(pt&&typeof caretAtPoint==="function") caretAtPoint(ie,pt.x,pt.y); else ie.select();
     const restore=v=>{ const np=mkPill(v); if(np) box.insertBefore(np,ie); ie.remove(); anchors(); };
     const commit=()=>{ if(ie._done) return; ie._done=true; if(_acInput===ie)acClose(); restore(ie.value); serialize(); };
     // item 12/13: drive the SAME constrained, categorised FEATS (and MISC) autocomplete on an EXISTING pill being edited
@@ -938,18 +945,35 @@ function buildFeatEditor(td,sent,t,si,i,key){
      grouped by FEATS_CATS/FEATS_CAT exactly as the free-typing autocomplete groups them). Both write through
      the SAME chip machinery a hand edit uses — mkPill + box.insertBefore/remove + anchors() + serialize() —
      not a parallel model write, so a menu pick round-trips (undo, touchColW, featsSyncGloss, markDirty,
-     re-render) exactly like retyping the chip would. box.focus() first (not arm() directly) so a pick ALSO
-     restores focus/caret the same way the × button's own click handler already does — its comment explains
-     why: focusin is what arms pendingSnap.
+     re-render) exactly like retyping the chip would.
      MISC-only, this is not: MISC's few keys with a value inventory at all (SpaceAfter, Reported, …) are
      bookkeeping, not a paradigm, so there is nothing here worth offering "the other values of" — gated on
-     key==="feats" and a MISC pill's right-click falls through to the ordinary token menu untouched. */
+     key==="feats" and a MISC pill's right-click falls through to the ordinary token menu untouched.
+     ⚠ box.focus() alone (a first cut) was wrong on report: "the caret ends up at the head of the cell" and "a
+     caret appears where there wasn't one before". Both are the SAME contenteditable gotcha CLAUDE.md documents
+     for minting a chip — focusing a contenteditable DIV that ISN'T already focused collapses the caret to
+     position 0 — and it bites HARDER here than there: `showCtx`'s rows are real `<button>`s with a bare
+     `onclick`, so picking a row has already moved `document.activeElement` off `box` by the time `applyVal`
+     runs, meaning `box.focus()` is *always* a fresh-focus event, never a same-element no-op. Worse,
+     `serialize()`'s own `preserveScroll(renderDoc)` (in the onChange below) captures `pillCaretGet` off
+     whatever `box.focus()` just left behind — so it faithfully "preserves" the corrupted position-0 caret
+     across the re-render, and conjures one even when `box` was never focused at all (the reader merely
+     right-clicked a pill in a field they hadn't touched). Fixed by capturing the caret UP FRONT, before the
+     menu (and its focus-stealing rows) ever opens — `pillCaretGet` returns null when `box` had no live
+     selection, which is exactly "no caret to begin with" and is left alone. `arm()` (not box.focus()) is what
+     the × button's own handler really needed from focusing — arming pendingSnap for undo — and doesn't touch
+     focus or the caret at all. Only when a caret genuinely existed does `applyVal` re-focus and re-seat it,
+     and only on the FRESH cell serialize()'s render produced — the closure's own `box` is a detached node by
+     then (renderDoc rebuilds grid cells; preserveScroll's own restore re-queries by data-si/data-ti/data-col
+     for the same reason), so the re-seat re-queries too, exactly as preserveScroll does. */
   const featPillMenu=(pill,e)=>{ if(key!=="feats") return false;
     const val=pill.dataset.val, eq=val.indexOf("="); if(eq<0) return false;   // a bare (no "=") segment has no key/value halves to alternate
     const onVal=e.target.closest&&e.target.closest(".pv"), onKey=e.target.closest&&e.target.closest(".pk");
     if(!onVal&&!onKey) return false;   // "=", the × button, or the chip's own padding — no menu opinion there
     const feat=val.slice(0,eq), curVal=val.slice(eq+1);
-    const applyVal=next=>{ if(next===val) return; box.focus(); const np=mkPill(next); if(np) box.insertBefore(np,pill); pill.remove(); anchors(); serialize(); };   // NOT named `pick` — that would shadow the global token-selection pick() this same closure's box.focus() goes on to trigger via focusin
+    const savedCaret=pillCaretGet(box);   // captured NOW, before showCtx's own rows steal focus — null if box had no live caret, which is exactly when none should reappear
+    const applyVal=next=>{ if(next===val) return; arm(); const np=mkPill(next); if(np) box.insertBefore(np,pill); pill.remove(); anchors(); serialize();
+      if(savedCaret){ const nc=document.querySelector(`[data-si="${si}"][data-ti="${i}"][data-col="${key}"]`); if(nc){ nc.focus(); pillCaretSet(nc,savedCaret); } } };   // NOT named `pick` — that would shadow the global token-selection pick()
     if(onVal){ const vals=acValItems("feats",feat);
       if(vals.length<2) return false;   // a one-value feature (Poss=Yes, Reflex=Yes, …) offers no alternative — same rule glossAbbrMenu uses
       const desc=FEATS_VDESC[feat]||{};
@@ -979,7 +1003,7 @@ function buildFeatEditor(td,sent,t,si,i,key){
         placeMarker(ev.clientX,ev.clientY,pill); };
       const onUp=()=>{ pill.removeEventListener("pointermove",onMove); pill.removeEventListener("pointerup",onUp); pill.removeEventListener("pointercancel",onUp);
         if(dragging){ pill.classList.remove("dragging"); box.classList.remove("pdragging"); if(marker&&marker.parentNode){ box.insertBefore(pill,marker); marker.remove(); } anchors(); serialize(); box.focus(); }
-        else editPill(pill); };   // no drag → a plain click opens the chip for editing, immediately (see the block comment above wirePill)
+        else editPill(pill,{x:sx,y:sy}); };   // no drag → a plain click opens the chip for editing, immediately (see the block comment above wirePill), caret at the click point (sx/sy from pointerdown — !dragging means pointerup is within the 4px threshold of it, so it's the click position)
       pill.addEventListener("pointermove",onMove); pill.addEventListener("pointerup",onUp); pill.addEventListener("pointercancel",onUp); });
   };
   const mkPill=raw=>{ const v=stripZW(raw).trim(); if(!v) return null;   // strip any caret-anchor ZW so it never enters a chip's serialised value
