@@ -96,6 +96,13 @@
     --sf-narcs:url("data:image/svg+xml;charset=utf-8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'><path d='M22 17a10 10 0 0 0-20 0'/><path d='M6 17a6 6 0 0 1 12 0'/><path d='M10 17a2 2 0 0 1 4 0'/></svg>");
     --sf-nbrackets:url("data:image/svg+xml;charset=utf-8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'><path d='M16 3h3a1 1 0 0 1 1 1v16a1 1 0 0 1-1 1h-3'/><path d='M8 21H5a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h3'/></svg>");
     --sf-noutline:url("data:image/svg+xml;charset=utf-8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'><path d='M8 5h13'/><path d='M13 12h8'/><path d='M13 19h8'/><path d='M3 10a2 2 0 0 0 2 2h3'/><path d='M3 5v12a2 2 0 0 0 2 2h3'/></svg>");
+    /* the notation-picker BUTTON's own glyph (item 13) — list-lines + an up/down chevron pair, the same
+       visual idea as Finder's "view options" toolbar button (a fixed icon that never changes with the
+       current selection, unlike the five glyphs above). Hand-drawn ORIGINAL line art in this file's own
+       stroke convention (24×24, width 1.6, round caps/joins) rather than a traced copy of Apple's own
+       glyph or a named third-party icon — safe to reuse verbatim in the Fluent kit too, unlike the 12
+       real SF Symbols elsewhere in this file (see this file's own header on why those stay Apple-only). */
+    --sf-notationmenu:url("data:image/svg+xml;charset=utf-8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'><path d='M3 6h8'/><path d='M3 12h8'/><path d='M3 18h8'/><path d='m15 9 3-3 3 3'/><path d='m15 15 3 3 3-3'/></svg>");
     /* ── the page-layout pill (items 3 + 7) ──
        Moved here from styles/app.css, the only file that used to declare this pair: a pill glyph is chrome, and
        app.css loads after both kits, so its copy won on Windows too and the Fluent kit could not have a pair of

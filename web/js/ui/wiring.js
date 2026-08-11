@@ -83,6 +83,14 @@ function updateNotationPill(){ document.querySelectorAll('#notationPill [data-no
 function setNotation(v){ if(!v||v===notation)return; const sel=document.getElementById("convSel"); if(sel){ sel.value=v; sel.dispatchEvent(new Event("change")); } }
 window.setNotation=setNotation;
 document.querySelectorAll('#notationPill [data-notation]').forEach(b=>{ b.onclick=()=>setNotation(b.dataset.notation); });
+// item 13: the VISIBLE trigger is #notationBtn (a single Finder-"view options"-style icon button) — the five
+// buttons above stay in the DOM, hidden, purely as _tbGroupItems' own source of truth (label/icon/checked all
+// read straight off them, so there is nothing to keep in sync by hand). openTbGroupMenu is the SAME popup
+// Text-Only mode already opens for this exact pill (see the .pilllabel click handler further down) — reused
+// here as this button's ONLY behaviour, in every display mode, not just Text-Only.
+document.getElementById("notationBtn").addEventListener("click",e=>{ e.preventDefault(); e.stopPropagation();
+  const pill=document.getElementById("notationPill"), r=e.currentTarget.getBoundingClientRect();
+  openTbGroupMenu(_tbGroupItems(pill), r.left, r.bottom+4); });
 // item 3: page-layout pill — the same shape as the notation pill (two segments, the active one pressed). The
 // class goes on #doc rather than on each block, so the sheets, the page ground and the measure cap are all one
 // stylesheet switch; renderDoc reads PAGED itself to decide where a sheet ENDS (a `# newdoc`).

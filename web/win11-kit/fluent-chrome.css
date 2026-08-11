@@ -179,7 +179,7 @@
   /* the 1px rule between adjacent buttons inside a group */
   .tbpill > .tbtn + .tbtn::before,.tbmodel > .tbtn::before{content:""; position:absolute; left:-.5px; top:6px; bottom:6px;
     width:1px; background:var(--sep-line); pointer-events:none; z-index:1}
-  #notationPill > .tbtn + .tbtn::before{content:none}   /* a segmented picker's members are adjacent by design; a rule between them would read as a division */
+  #notationPill > .tbtn + .tbtn::before{content:none}   /* a segmented picker's members are adjacent by design; a rule between them would read as a division — item 13: #notationPill is permanently `hidden` now (index.html), replaced on screen by the single #notationBtn dropdown, so this no longer renders; kept as still-true of the pill's own geometry */
   .tbpill > .tbtn:hover::before,.tbpill > .tbtn:hover + .tbtn::before,.tbmodel > .tbtn:hover::before,
   .tbmodel > .tbtn:hover + .tbtn::before,.tbpill > .tbtn.active::before,.tbpill > .tbtn.active + .tbtn::before,
   .tbmodel > .tbtn.active::before,.tbmodel > .tbtn.active + .tbtn::before{background:transparent}

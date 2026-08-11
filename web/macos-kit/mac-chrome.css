@@ -212,6 +212,10 @@
   /* Mail-style hairline dividers between adjacent buttons inside a pill group (theme-aware, vertically inset) */
   .tbpill > .tbtn{position:relative}
   .tbpill > .tbtn + .tbtn::before,.tbmodel > .tbtn::before{content:""; position:absolute; left:-2.5px; top:5px; bottom:5px; width:1px; background:var(--sep-line); pointer-events:none; z-index:1; transition:background .12s}   /* 1px × 18px faint hairline (≈#d9d9d9 light) between grouped buttons, theme-aware; fix 2: centred in the gap with more breathing room. item 3: the divider sits in the inter-button gap (x=0..G). At left:-2px the 1px line landed at x=2..3 → 2px of space on its LEFT but only 1px on its RIGHT (the reported left-heavy asymmetry). Centring is left:−(G+1)/2 (space left of the line = G−X, right of it = X−1), so the 4px gap took −2.5px; item 1's 8px gap takes −4.5px → the line at x=3.5..4.5, an equal 3.5px either side */
+  /* item 13: #notationPill is permanently `hidden` now (index.html) — its five buttons only exist as
+     _tbGroupItems' data source (js/ui/wiring.js) for the single #notationBtn dropdown that replaced
+     them on screen, so the two rules below no longer render anything. Left as-is rather than deleted:
+     harmless, and still literally true of the pill's own internal geometry. */
   #notationPill{gap:4px}   /* fix 12: inter-button separation EQUALS the pill's 4px inner padding. item 1: this stays 4px while the shared .tbpill gap goes to 8px — that widening is the SEPARATOR's air, and this pill has no separators (rule below), so its icons would only drift apart for nothing */
   #notationPill > .tbtn + .tbtn::before{content:none}   /* Finder's view segmented control has NO separators between its icons */
   /* fix 12: hovering a grouped button dissolves the separators touching it (its own leading edge + the

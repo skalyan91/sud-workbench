@@ -92,13 +92,25 @@
         </div>
         <span class="pilllabel">Insert Text</span>
       </div>
-      <div class="tbgroup tbg-wide">
-        <div class="tbpill" id="notationPill" role="group" aria-label="Diagram notation">
+      <!-- item 13: the five notations, compressed to one Finder-"view options"-style button — a single icon that
+           opens a dropdown, rather than five buttons wide. The five real buttons stay in the DOM (just hidden,
+           `hidden` attribute below): setNotation, ⌘1–⌘5 (menu_spec.py) and the native View menu all call/read
+           them exactly as before. #notationPill deliberately comes FIRST here, before the new trigger pill: the
+           existing Text-Only-mode handler (the ".pilllabel" click listener, js/ui/wiring.js) finds a group's
+           FIRST .tbpill and, seeing more than one .tbtn in it, opens openTbGroupMenu positioned off the (visible,
+           in that mode) pilllabel — unmodified, for free, simply because the real 5-button pill sorts first.
+           #notationBtn's own click handler (js/ui/wiring.js) covers Icon/Icon+Text mode, where it — not
+           #notationPill — is what's actually on screen. -->
+      <div class="tbgroup">
+        <div class="tbpill" id="notationPill" role="group" aria-label="Diagram notation" hidden>
           <button class="tbtn icon" data-notation="stemma" title="Stemma"><span class="sfi" style="--m:var(--sf-nstemma)"></span><span class="tblabel">Stemma</span></button>
           <button class="tbtn icon" data-notation="tree" title="Hierarchy"><span class="sfi" style="--m:var(--sf-ntree)"></span><span class="tblabel">Hierarchy</span></button>
           <button class="tbtn icon" data-notation="arcs" title="Arcs"><span class="sfi" style="--m:var(--sf-narcs)"></span><span class="tblabel">Arcs</span></button>
           <button class="tbtn icon" data-notation="brackets" title="Brackets"><span class="sfi" style="--m:var(--sf-nbrackets)"></span><span class="tblabel">Brackets</span></button>
           <button class="tbtn icon" data-notation="outline" title="Outline"><span class="sfi" style="--m:var(--sf-noutline)"></span><span class="tblabel">Outline</span></button>
+        </div>
+        <div class="tbpill">
+          <button class="tbtn icon" id="notationBtn" title="Diagram notation" aria-haspopup="menu"><span class="sfi" style="--m:var(--sf-notationmenu)"></span><span class="tblabel">View</span></button>
         </div>
         <span class="pilllabel">View</span>
       </div>
