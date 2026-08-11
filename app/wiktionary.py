@@ -18,7 +18,7 @@ from __future__ import annotations
 import re
 import unicodedata
 from concurrent.futures import ThreadPoolExecutor
-from urllib.parse import quote
+from urllib.parse import quote, unquote
 
 _CACHE: dict[tuple[str, str], dict] = {}   # (word, lang) → {"candidates":[{"text","entry_upos","head_upos"}],"error"}
 _CONDENSE_CACHE: dict[str, list[dict]] = {}
@@ -678,11 +678,53 @@ def _noun_genders(search_form: str, language: str) -> list[str | None]:
     return out
 
 
-def _collect(search_form: str, lang: str) -> dict:
+_FORM_OF_MAX_DEPTH = 3   # a chain of "alternative form of an alternative form of …" is rare but not impossible, and each hop is a live network fetch — unbounded recursion against an external service is the one thing this must never do
+
+
+def _form_of_target(html: str) -> str:
+    """The "headword#Language" fragment one API definition's raw HTML points at, if — and only if —
+    the WHOLE definition is one of Wiktionary's ``{{form of}}``-family templates (alternative form
+    of, obsolete spelling of, plural of, simple past of, standard spelling of, …): Module:form_of
+    always renders one of those as a single ``<span class="form-of-definition …">`` wrapping a
+    ``<span class="form-of-definition-link"><i><a href="/wiki/TARGET#Lang">…</a></i></span>`` — a
+    convention shared across every language and every template in the family (verified live: Latin
+    `adspiro` → "alternative form of aspīrō", English `cats` → "plural of cat", `ran` → "simple past
+    of run", `colour` → "standard spelling of color", all four the identical shape). "" when the
+    definition doesn't match — a REAL sense, however its English gloss happens to be phrased; a
+    hand-written definition never carries this class, so presence alone is the whole test, same as
+    this file's existing reliance on Wiktionary's other tooling-facing classes (`usage-label-sense`,
+    `zh-see`, `gender`)."""
+    from bs4 import BeautifulSoup
+    soup = BeautifulSoup(html or "", "html.parser")
+    fo = soup.find("span", class_="form-of-definition")
+    if fo is None:
+        return ""
+    a = (fo.find("span", class_="form-of-definition-link") or fo).find("a", href=True)
+    if a is None:
+        return ""
+    href = str(a["href"])   # bs4 types an attribute as str | list[str] (a multi-valued attribute like class=); href is never the latter in practice, but the annotation is, so coerce rather than assume
+    for prefix in ("/wiki/", "./"):
+        if href.startswith(prefix):
+            return href[len(prefix):]
+    return href.lstrip("/")
+
+
+def _collect(search_form: str, lang: str, _depth: int = 0) -> dict:
     """Every condensed candidate on ONE page title, uncached and UNFILTERED, from all three places a
     language's senses can live (the /page/definition/ endpoint, a "Definitions" section, a Sanskrit
     "Root" section).  Split out of :func:`_fetch` so a page that turns out to be a soft redirect can
-    be re-run against the headword it points at (see :func:`_zh_see_target`)."""
+    be re-run against the headword it points at (see :func:`_zh_see_target`).
+
+    ⚠ AND A DEFINITION THAT IS ITSELF A REDIRECT IS FOLLOWED, TRANSPARENTLY, RATHER THAN SHOWN AS THE
+    "DEFINITION". Latin `adspiro`'s one Verb entry reads "alternative form of aspīrō" — a real, non-
+    blank string that would otherwise sail through every filter below as if it were a sense, when it
+    is a pure cross-reference and the actual senses are on `aspiro`'s own page. :func:`_form_of_target`
+    recognises the shape and this recurses on it (`_depth` capped by `_FORM_OF_MAX_DEPTH`, and never
+    chasing a page back into itself), so the candidates that land here are `aspiro`'s real ones —
+    the SAME substitution :func:`_fetch`'s Chinese `zh-see` chase already makes for a soft redirect
+    with no senses of its own at all, just done per-DEFINITION instead of per-PAGE, since a form-of
+    note can sit beside real senses in another entry on the very same page (a homonym with two
+    etymologies, one a headword of its own and one an alternative spelling of something else)."""
     candidates = []
     error = None
     lang_heading = None   # the page's own heading text for this language (e.g. "Sanskrit", "French") — an exact, unambiguous anchor id, straight from the API's own "language" field
@@ -707,7 +749,19 @@ def _collect(search_form: str, lang: str) -> dict:
                     gender = genders[noun_i] if noun_i < len(genders) else None
                     noun_i += 1
                 for d in entry.get("definitions", []) or []:
-                    text = _clean(d.get("definition", ""))
+                    raw = d.get("definition", "")
+                    followed = False
+                    if _depth < _FORM_OF_MAX_DEPTH:
+                        target = _form_of_target(raw)
+                        headword = unquote(target.partition("#")[0]) if target else ""
+                        if headword and headword.lower() != search_form.lower():   # never chase a page back into itself
+                            alt = _collect(headword, lang, _depth + 1)
+                            if alt["candidates"]:   # a target that turned out to have nothing of its own (offline, deleted, a redirect Wiktionary itself hasn't filled in yet) falls through to the literal note below rather than silently vanishing
+                                candidates.extend(alt["candidates"])
+                                followed = True
+                    if followed:
+                        continue
+                    text = _clean(raw)
                     if text:
                         for sub in _condense(text):
                             candidates.append({"text": sub["text"], "entry_upos": entry_upos, "head_upos": sub["upos"], "gender": gender})
