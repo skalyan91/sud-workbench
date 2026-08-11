@@ -2536,30 +2536,35 @@ const AH_MITRE=Math.sqrt(1+AH_RATIO*AH_RATIO)/AH_RATIO;
    Verified numerically (scratch: perpendicular distance from each casing edge to its stroke-head counterpart)
    at 1.7500 on all three edges, for horizontal, diagonal and arbitrary-angle heads alike.
    out = 0 (or omitted) reproduces the original path bit-for-bit, so every un-cased call site is untouched.
-   ⚠ ON REPORT — that uniform 1.75px, though geometrically exact, still reads as thinner at the TIP than at
-   the back/shaft once a SECOND edge fans in close beside it (samples/la_virgil.conllu, "Italiam": venit→
-   Italiam's head sits one fanStep — ~8px — from a second, differently-coloured edge converging on the same
-   node). Against the page background the casing is near-invisible either way (--casing barely differs from
-   --content-bg — confirmed: doubling the offset moved zero visible pixels in an isolated render), so what a
-   crowded neighbour actually meets is the casing's OCCLUSION footprint, not a visible halo — and at the tip,
-   where two fanned edges run close to parallel, occlusion measured perpendicular to THIS head's own edge is
-   the wrong test: a neighbour crossing at a shallow angle needs clearance measured along ITS OWN direction,
-   which for a near-parallel neighbour is the perpendicular distance divided by sin of the angle between them
-   — the SAME csc(α) the mitre above already uses for the apex, applied a second time, to the apex's forward
-   reach specifically. extFront (T, actually drawn) gets the doubled factor; extBase (Tb, base's own
-   reference point) keeps the original single factor, so the base and flank width are UNCHANGED at their
-   already-exact 1.75px — only the tip reaches further. out = 0 collapses extFront/extBase/T/Tb together,
-   reproducing the un-amplified path bit-for-bit, so every un-cased call site is still untouched. */
-function arrowPath(from,tip,s,out){const o=out||0,extBase=AEXT+o*AH_MITRE,extFront=AEXT+o*AH_MITRE*AH_MITRE,L=s+o*(AH_MITRE+1);
-  const [ux,uy]=normv(from,tip),T=[tip[0]+ux*extFront,tip[1]+uy*extFront],
-    Tb=[tip[0]+ux*extBase,tip[1]+uy*extBase],px=-uy,py=ux,base=[Tb[0]-ux*L,Tb[1]-uy*L],w=L*AH_RATIO;
+   ⚠ SUPERSEDED AS THE CASING'S OWN GEOMETRY, ROUND THREE — kept for what it still gets right, not called from
+   any `.ah-casing` site any more. This `out` mechanism is a MITRE (sharp-corner) offset: exact, and exactly what
+   was asked for the first two rounds, but a mitre is also what the report ("what I actually wanted was round
+   mitres") turned out not to want — a sharp point at the tip, and, cheaply, sharp wings at the two back corners
+   too. Getting a ROUND join out of this function would mean hand-building a tangent arc at each vertex (the
+   "Hand-computed rounded-corner polygon" alternative) for a result CSS already produces for free: `.ah-casing`
+   (styles/app.css) now strokes the PLAIN head — arrowPath(from,tip,s), out omitted — with
+   stroke-width:2·AH_OUTSET and stroke-linejoin:round, which is a true morphological dilation (Minkowski sum
+   with a disk of radius AH_OUTSET) at every vertex, apex included, and clamped by construction the way a mitre
+   at an acute angle is not. AH_OUTSET itself is untouched and still the one number both rules answer to — see
+   its own comment. The mitre math stays here, correct and unused, on the same footing as every other
+   "superseded, not deleted" note in this file: if a future caller ever wants an EXACT sharp outset again (a
+   round join is a strictly larger shape than a mitre one at the same offset, so the two are not interchangeable
+   for every purpose), this is still that function. */
+function arrowPath(from,tip,s,out){const o=out||0,ext=AEXT+o*AH_MITRE,L=s+o*(AH_MITRE+1);
+  const [ux,uy]=normv(from,tip),T=[tip[0]+ux*ext,tip[1]+uy*ext],px=-uy,py=ux,base=[T[0]-ux*L,T[1]-uy*L],w=L*AH_RATIO;
   return `M ${T[0]} ${T[1]} L ${base[0]+px*w} ${base[1]+py*w} L ${base[0]-px*w} ${base[1]-py*w} Z`;}
 /* stop a line at the (overshot) arrowhead base — backoff(tip,frm,s) returns exactly arrowPath(frm,tip,s)'s base
-   point. DELIBERATELY BLIND TO AH_OUTSET: the STROKE's stop must not move, and the casing line shares the very
-   same `d` as the stroke it haloes (one path, two widths), so there is only one stop point to place. It still
-   hides: the casing head's base sits a further AH_OUTSET back along the axis, so the stop lands *inside* the
-   casing triangle, where that triangle is (s + AH_OUTSET·AH_MITRE)·AH_RATIO ≈ 5.2px half-wide — comfortably
-   over the casing line's own 2.5px half-width (--arc-stroke + 3.5px). */
+   point, which is now — since `.ah-casing` strokes the PLAIN head rather than filling a pre-outset one, above —
+   the literal, undecorated base of the casing head's own `d` as well as the real head's. DELIBERATELY BLIND TO
+   AH_OUTSET regardless: the STROKE's stop must not move, and the casing line shares the very same `d` as the
+   stroke it haloes (one path, two widths), so there is only one stop point to place. It still hides: a round
+   stroke-linejoin dilates a closed path's BASE EDGE outward along that edge's own normal — which, for this
+   isosceles triangle, is exactly the axial direction — so the casing head's PAINTED base still sits AH_OUTSET
+   further back along the axis than this stop point even though the `d` it strokes does not encode that offset
+   the way the old mitred-polygon `d` did. The stop lands *inside* the rendered casing triangle exactly as
+   before: that triangle paints out to (s + AH_OUTSET·AH_MITRE)·AH_RATIO + AH_OUTSET ≈ 6.9px half-wide at its
+   widest (base corners, after the round dilation) — comfortably over the casing line's own 2.5px half-width
+   (--arc-stroke + 3.5px). */
 function backoff(tip,frm,d){const [ux,uy]=normv(frm,tip); return [tip[0]-ux*(d-AEXT), tip[1]-uy*(d-AEXT)];}
 function edgeAngle(x1,y1,x2,y2){let a=Math.atan2(y2-y1,x2-x1); if(a>Math.PI/2)a-=Math.PI; if(a<-Math.PI/2)a+=Math.PI; return a;}
 function labelAngle(x1,y1,x2,y2){const a=edgeAngle(x1,y1,x2,y2); return Math.abs(a)>Math.PI/4?0:a;}   // steeper than 45° → horizontal label

@@ -940,7 +940,50 @@
   .edge{fill:none; stroke-width:var(--edge-stroke); stroke-linecap:round}
   .arc-path{fill:none; stroke-width:var(--arc-stroke); stroke-linecap:round; transition:opacity .12s}
   .arc-casing{fill:none; stroke:var(--casing); stroke-width:calc(var(--arc-stroke) + 3.5px); stroke-linecap:round; pointer-events:stroke}   /* Item 4: the arc-stroke casing halo now uses the SHARED --casing (the background-mixed text-halo colour every other diagram element uses via paint-order:stroke / text-shadow), so arcs carry the same lifted halo as the deprel/POS labels instead of the plainer --block-occlude. Still opaque → a front arrow occludes one it crosses; in a .sel-block --casing tracks the focused-block background (=--occlude), never the span wash. pointer-events:stroke → clicking the casing selects the arc */
-  .ah-casing{fill:var(--casing); stroke:none; pointer-events:fill}   /* Item 4: arrowhead halo on the SAME shared --casing as the arc stroke above; also selectable */
+  .ah-casing{fill:var(--casing); stroke:var(--casing); stroke-width:3.5px; stroke-linejoin:round; stroke-linecap:round; pointer-events:fill}   /* Item 4: arrowhead halo on the SAME shared --casing as the arc stroke above; also selectable.
+     ⚠ ROUND MITRE, NOT SHARP — round three (report: "what I actually wanted was round mitres"). The casing `d` this
+     rule now paints is the REAL, un-outset arrowhead path (js/diagram/diagram-core.js's arrowPath(from,tip,s), no
+     `out` argument) — the SAME path `.ah` fills on top of it — and the OUTWARD growth that used to come from a
+     second, larger, hand-mitred polygon (arrowPath(...,AH_OUTSET), a sharp-cornered similar triangle offset by
+     AH_MITRE=cscθ at the apex — see that constant's own comment for the exact trig) now comes from STROKING this
+     rule's own fill outline: a closed triangle path stroked with stroke-linejoin:round paints a true morphological
+     dilation (Minkowski sum with a disk of radius stroke-width/2) at EVERY vertex — apex included, and unlike a
+     mitre join it cannot spike, which is the standard reason "round" exists as an alternative join at all. 3.5px
+     is not invented here either: it is exactly double AH_OUTSET (1.75px), so the stroke's outer edge stands the
+     same 1.75px proud of the real arrowhead on every side that the old mitred polygon did — .arc-casing above
+     already states its own outset the same way (`--arc-stroke + 3.5px`, i.e. 1.75px each side of centreline), and
+     AH_OUTSET's own comment derives 1.75 FROM that 3.5. The stroke's INNER half (which would otherwise eat into
+     the real triangle) is inert: `.ah` paints the true arrowhead on top of this layer in the same draw order as
+     before, so only the outer half is ever seen. stroke-linecap:round is irrelevant to a CLOSED path (Z) but kept
+     for consistency with every other cased element in this file.
+     ⚠ VERIFIED TWO WAYS, because the real scene alone was not going to settle it (see below). (1) An ISOLATED
+     harness (.claude/scratch_round/isolated_test.html, WKWebView-free — plain Chrome) rendered this exact,
+     copy-pasted arrowPath()/AH_MITRE code at 20× scale, side by side: OLD (a second filled polygon at
+     arrowPath(...,AH_OUTSET), no stroke) against NEW (this rule, stroked). At that scale the result is
+     unambiguous — OLD is a sharp-cornered halo on all three vertices, tip included; NEW is fully rounded on
+     all three, the tip reading as a blunt nib rather than a point. This is the geometric proof; a screenshot
+     of the real diagram at real size was never going to show a 1.75px join clearly enough to BE one on its
+     own. (2) The REAL scene anyway, for the integration: samples/la_virgil.conllu sentence 1, arcs notation,
+     the arrowhead into "Italiam" (dep 11 ← head 18), real bridge, real WKSnapshotConfiguration, before/after
+     the SAME apex point (.ah's own bounding-box centre, byte-identical pre/post-change so the crop itself
+     never moves — getScreenCTM was tried first and DOESN'T track this app's zoom, only getBoundingClientRect
+     does; see roundsnap.py's own note). At native (FS=1) resolution — unfocused (matching the original
+     report's screenshot, --casing near-invisible against --content-bg) AND focused/selected (real contrast) —
+     the pixel diff is small but genuinely there and correctly located: a ~26–28px cluster (of 160×160 sampled)
+     sitting exactly on the casing's outer edge near the tip, max per-channel delta ~51–60/255, in BOTH states.
+     Small is expected and correct, not a shortfall: AH_OUTSET is 1.75px, so a rounded vs. mitred corner at
+     this scale differs by a sub-few-pixel sliver, further softened by anti-aliasing — exactly the "a real
+     geometric change can be visually imperceptible at this contrast/scale" finding this investigation started
+     from (item 2 in its own history). The isolated test is what proves the SHAPE is right; the real-scene diff
+     is what proves this build actually PAINTS that shape, at the reported location, in both states. Checked for
+     regression at the same time: shaft and the two back corners read correctly in every capture (rounded now,
+     same as the tip, on purpose — see the per-vertex-hybrid note below) with no clipping, seam, or NaN geometry
+     anywhere in the diff. A per-vertex sharp/round hybrid (round the tip only, mitre the back corners) was
+     considered and rejected: nothing in any of these captures distinguishes the back corners from the tip
+     badly enough to earn the extra hand-rolled arc math the "Hand-computed rounded-corner polygon" alternative
+     would have cost, and the line casing's own round linecap already stops INSIDE this triangle regardless
+     (backoff() is deliberately blind to AH_OUTSET, see its own comment) — the two technologies were never
+     abutting at a seam a join style could show at, at either vertex. */
   .leader-casing{fill:none; stroke:var(--casing); stroke-width:4.3px; stroke-linecap:round}   /* Item 4: a lifted deprel label's leader casing on the shared --casing, matching the arc stroke and the label halo, so the whole arc+label unit shares one halo colour */
   .softcase{--occlude:color-mix(in srgb, var(--washcol, var(--content-bg)) 15%, var(--focus-ground, var(--content-bg)));   /* the ground the wash sits ON is the block's own, so inside a focused block this picks up its 5 % accent tint via --focus-ground (.sblock.sel-block) rather than fading toward the plain page — see the residue note in the .dim-* block above for why it can't just be var(--occlude) here */
     --washcase:color-mix(in srgb, var(--occlude), var(--casing-lift) 22%)}   /* occlusion = wash; --washcase = the wash-tinted text halo (lifted --occlude). The box keeps the AMBIENT --casing (background, or the sel-block tint); only the FORM text the span wash actually covers tints to --washcase (below). NOTE the contract this states is about the HALO TINT alone, and only that: the wash tints the halo of the subtree's FORMS and of the brackets over them, never the halo of the deprel/POS/translit annotations or of the arcs. It is no longer a statement about what a selection recolours at large — a selection now also accents the selected token's POS and incoming deprel, and recedes the rest of the sentence on two levels (see the .dim-peri/.dim-out note above). Those ride `color`/`fill`/`opacity`; the halo colours here are untouched by them, which is why the two can coexist. */

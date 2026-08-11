@@ -430,7 +430,7 @@ function drawBump(g,x1,x2,arcZone,top,NR,AH,col,arrow,startY,morph,ends){
   const ink=arcInk(col);   // stroke/arrowhead recede toward bg; drawBump's caller keeps col for the label
   g.__edgeP=P;   // the UNTRIMMED control points, parked on the group for the ghost-label de-collision (edgeObstacle above). Untrimmed because `sl` stops at the arrowhead BASE while the head itself fills on to P[3] — the obstacle is the whole drawn edge, head included. Recorded rather than re-derived at the reading end, and rather than parsed back out of `d`, because an edge may be REDRAWN after this (growCrossArcs re-solves a whole band; decollide grows a root stub) and the reader must see the final geometry, not the first attempt.
   g.appendChild(E("path",{class:"arc-casing",d:dstr}));
-  if(arrow) g.appendChild(E("path",{class:"ah-casing",d:arrowPath(P[2],P[3],AH,AH_OUTSET)}));
+  if(arrow) g.appendChild(E("path",{class:"ah-casing",d:arrowPath(P[2],P[3],AH)}));   // same `d` as the real head below — round halo via stroke (styles/app.css .ah-casing), not a second larger mitred polygon; see AH_MITRE's "SUPERSEDED" comment, diagram-core.js
   g.appendChild(E("path",{class:"arc-path"+(morph?" morph-edge":""),d:dstr,stroke:ink}));
   if(arrow) g.appendChild(E("path",{class:"ah",d:arrowPath(P[2],P[3],AH),fill:ink}));
   return ends?Math.min(ends.y1,ends.y2)-ARC_APEX*h:startY!=null?bezYExtent(P)[0]:arcZone-0.75*h;   // visible crown y (label sits above it); with per-endpoint baselines the bump is still symmetric ABOUT ITS OWN crown, which arcCtrl2 puts h above the higher end — the same min(y1,y2)−0.75h the flat view's apexY uses: the raised (asymmetric) bump's TRUE peak from bezYExtent — NOT the control-point height P[1][1], which floats above the curve and would leave a lifted label + its leader hanging above the arc (matches the flat-brackets raised-bump crown at drawLabel, bezYExtent(P)[0]). The symmetric bump's peak is exactly arcZone-0.75h.
@@ -448,7 +448,7 @@ function drawCrossLine(g,frm,tip,col,AH,casing,gap,openTop,morph){
   if(Math.atan2(Math.abs(tip[1]-frm[1]),Math.abs(tip[0]-frm[0]))>=ARC_ANGLE){
     const b=backoff(tip,frm,AH), d=`M ${frm[0]} ${frm[1]} L ${b[0]} ${b[1]}`;
     g.__edgeP=[frm,frm,tip,tip];   // same obstacle record drawBump keeps (see there): the straight branch as the degenerate cubic edgeObstacle traces as a segment — frm→TIP, not frm→b, so the arrowhead's own reach counts as edge
-    if(casing){ g.appendChild(E("path",{class:"arc-casing",d})); g.appendChild(E("path",{class:"ah-casing",d:arrowPath(frm,tip,AH,AH_OUTSET)})); }
+    if(casing){ g.appendChild(E("path",{class:"arc-casing",d})); g.appendChild(E("path",{class:"ah-casing",d:arrowPath(frm,tip,AH)})); }   // same `d` as .ah below — round halo via stroke, see AH_MITRE's "SUPERSEDED" comment, diagram-core.js
     g.appendChild(E("path",{class:"arc-path"+(morph?" morph-edge":""),d,stroke:ink}));
     g.appendChild(E("path",{class:"ah",d:arrowPath(frm,tip,AH),fill:ink}));
   } else {
@@ -456,7 +456,7 @@ function drawCrossLine(g,frm,tip,col,AH,casing,gap,openTop,morph){
     const d=`M ${P[0][0]} ${P[0][1]} C ${P[1][0]} ${P[1][1]}, ${P[2][0]} ${P[2][1]}, ${P[3][0]} ${P[3][1]}`;
     g.__edgeP=P;   // as above — and it MATTERS that this is written on every redraw: growCrossArcs re-runs this very call on the same <g> with a raised endpoint and a widened band, so a copy taken at the first draw would describe an arc that is no longer there
     const aFrm=bezInDir(P,AH+2);   // Item 10: aim the arrowhead along the curve's REAL incoming direction near the tip — the true tangent for a bowed arc, the chord for a near-straight one — NOT the bare P[2]→P[3] end tangent, which for a nearly-straight S points off at the take-off angle θ and rotates the head wrongly
-    if(casing){ g.appendChild(E("path",{class:"arc-casing",d})); g.appendChild(E("path",{class:"ah-casing",d:arrowPath(aFrm,P[3],AH,AH_OUTSET)})); }
+    if(casing){ g.appendChild(E("path",{class:"arc-casing",d})); g.appendChild(E("path",{class:"ah-casing",d:arrowPath(aFrm,P[3],AH)})); }   // same `d` as .ah below — round halo via stroke, see AH_MITRE's "SUPERSEDED" comment, diagram-core.js
     g.appendChild(E("path",{class:"arc-path"+(morph?" morph-edge":""),d,stroke:ink}));
     g.appendChild(E("path",{class:"ah",d:arrowPath(aFrm,P[3],AH),fill:ink}));
   }
@@ -720,7 +720,7 @@ function arcsWrapped(si){
     for(let i=r.s;i<=r.e;i++){ if(heads[i]-1>=0)continue; const X=r.LX(i), top=r.rTop, col=relColor("root"), ink=arcInk(col),
       tip=[X,repBase(rep,r.arcZone,i)],frm=[X,top],b=backoff(tip,frm,AH), g=E("g",{class:"arc","data-s":si,"data-dep":OID(i)});   // item 11: a reported root lifts its stub's FOOT too, exactly as the flat view's rootY does (shared repBase)
       g.appendChild(E("path",{class:"arc-casing",d:`M ${X} ${top} L ${b[0]} ${b[1]}`}));
-      g.appendChild(E("path",{class:"ah-casing",d:arrowPath(frm,tip,AH,AH_OUTSET)}));
+      g.appendChild(E("path",{class:"ah-casing",d:arrowPath(frm,tip,AH)}));   // same `d` as .ah below — round halo via stroke, see AH_MITRE's "SUPERSEDED" comment, diagram-core.js
       const rp=E("path",{class:"arc-path",d:`M ${X} ${top} L ${b[0]} ${b[1]}`,stroke:ink}); g.appendChild(rp);
       g.appendChild(E("path",{class:"ah",d:arrowPath(frm,tip,AH),fill:ink}));
       g.__edgeP=[frm,frm,tip,tip];   // the stub as an obstacle for the ghost labels, in drawBump's own record shape (degenerate cubic = the segment); down to TIP, so the arrowhead counts. Re-stated after decollide below, which may grow this very stub up to a lifted root label
@@ -1021,7 +1021,7 @@ function wpDraw(box){ const wp=box._wp; if(!wp) return;
   // edges run node-centre → node-centre, so an incoming and an outgoing edge meet directly at the node (no gap, no dot)
   wp.edges.forEach(e=>{ e._ink=arcInk(relColor(e.rel)); let a1=[NX(e.d),NY(e.d)], a2=[NX(e.h),NY(e.h)];
     if(show.arrows){const dir=arrowDir(e.rel); if(dir){const tip=dir==="dep"?a1:a2,frm=dir==="dep"?a2:a1;
-      e._ah=arrowPath(frm,tip,5.25); e._ahc=arrowPath(frm,tip,5.25,AH_OUTSET); if(dir==="dep")a1=backoff(tip,frm,5.25); else a2=backoff(tip,frm,5.25);} else {e._ah=null;e._ahc=null;}} else {e._ah=null;e._ahc=null;}
+      e._ah=arrowPath(frm,tip,5.25); e._ahc=e._ah; if(dir==="dep")a1=backoff(tip,frm,5.25); else a2=backoff(tip,frm,5.25);} else {e._ah=null;e._ahc=null;}} else {e._ah=null;e._ahc=null;}   // ._ahc == ._ah: the round halo is a stroke now (.ah-casing, styles/app.css), not a second larger mitred polygon — see AH_MITRE's "SUPERSEDED" comment, diagram-core.js
     e._d=`M ${a1[0]} ${a1[1]} L ${a2[0]} ${a2[1]}`; });
   { const cg=E("g",{class:"edge-cases"}); cg.setAttribute("aria-hidden","true");   // Item 21: edges + arrowheads cased as ONE unit behind the strokes (occludes proj-lines/tokens behind, edges don't case against each other)
     wp.edges.forEach(e=>{ cg.appendChild(E("path",{class:"arc-casing",d:e._d})); if(e._ahc) cg.appendChild(E("path",{class:"ah-casing",d:e._ahc})); }); svg.appendChild(cg); }
@@ -1231,7 +1231,7 @@ function tree(si){
   // edges as ONE cased unit (Item 21): pre-compute stroke path + arrowhead, draw all casings behind, then strokes on top
   edges.forEach(e=>{ e._ink=arcInk(relColor(e.rel)); let dEnd=[x[e.d],e.y1], hEnd=[x[e.h],e.y2];
     if(show.arrows){const dir=arrowDir(e.rel); if(dir){const tip=dir==="dep"?dEnd:hEnd,frm=dir==="dep"?hEnd:dEnd;
-      e._ah=arrowPath(frm,tip,5.25); e._ahc=arrowPath(frm,tip,5.25,AH_OUTSET); if(dir==="dep") dEnd=backoff(tip,frm,5.25); else hEnd=backoff(tip,frm,5.25);} else {e._ah=null;e._ahc=null;}} else {e._ah=null;e._ahc=null;}
+      e._ah=arrowPath(frm,tip,5.25); e._ahc=e._ah; if(dir==="dep") dEnd=backoff(tip,frm,5.25); else hEnd=backoff(tip,frm,5.25);} else {e._ah=null;e._ahc=null;}} else {e._ah=null;e._ahc=null;}   // ._ahc == ._ah: round halo is a stroke now (.ah-casing, styles/app.css), not a second larger mitred polygon — see AH_MITRE's "SUPERSEDED" comment, diagram-core.js
     e._d=`M ${hEnd[0]} ${hEnd[1]} L ${dEnd[0]} ${dEnd[1]}`; });
   { const cg=E("g",{class:"edge-cases"}); cg.setAttribute("aria-hidden","true");
     edges.forEach(e=>{ cg.appendChild(E("path",{class:"arc-casing",d:e._d})); if(e._ahc) cg.appendChild(E("path",{class:"ah-casing",d:e._ahc})); }); svg.appendChild(cg); }
@@ -1480,7 +1480,7 @@ function brackets(si){
     const dstr=`M ${sl[0][0]} ${sl[0][1]} C ${sl[1][0]} ${sl[1][1]}, ${sl[2][0]} ${sl[2][1]}, ${sl[3][0]} ${sl[3][1]}`;
     const g=E("g",{class:"arc","data-s":si,"data-dep":OID(a.d),"data-head":OID(a.h)});
     g.appendChild(E("path",{class:"arc-casing",d:dstr}));                       // opaque halo so crossing interrupter arcs occlude cleanly
-    g.appendChild(E("path",{class:"ah-casing",d:arrowPath(P[2],P[3],AH,AH_OUTSET)}));
+    g.appendChild(E("path",{class:"ah-casing",d:arrowPath(P[2],P[3],AH)}));   // same `d` as .ah below — round halo via stroke, see AH_MITRE's "SUPERSEDED" comment, diagram-core.js
     g.appendChild(E("path",{class:"arc-path",d:dstr,stroke:ink}));
     g.appendChild(E("path",{class:"ah",d:arrowPath(P[2],P[3],AH),fill:ink}));
     if(show.labels){const apex=hasHRel?bezYExtent(P)[0]:base-ml-0.75*a.hgt, mx=(XH+XD)/2; drawLabel(g,mx,apex-8,a.rel,col); boxes.push({x:mx,y:apex-8,hx:meas(a.rel,POS_F)/2+2,hy:7});}   // label above the arc's visible peak (the raised bump's true crown when the start is lifted)
