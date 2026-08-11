@@ -657,7 +657,24 @@ def _noun_genders(search_form: str, language: str) -> list[str | None]:
     The gender sits in the headword line's own markup — `<span class="gender"><abbr>m</abbr>` —
     immediately after the headword; only the FIRST such abbr per Noun section is read (a second
     "or feminine" alternate-form link elsewhere in that line is a DIFFERENT word, not this one's
-    gender)."""
+    gender).
+
+    ⚠ AND ONLY THAT FIRST ABBR OF THE SECTION'S OWN HEADWORD LINE, NOT OF ITS WHOLE SUBTREE — which
+    is what `sec.find(...)` searched, and Parsoid nests a Noun heading's SUBSECTIONS (Usage notes,
+    Synonyms, Derived terms, Translations, …) right inside that same `<section>` (`_fetch_html`'s own
+    "flat, sequential" describes SIBLING top-level sections; a subsection is a CHILD of its parent's
+    section, confirmed live by walking `find_parents("section")`). A Translations table is exactly
+    where a same-headword foreign entry's own `<span class="gender">` lives, and it is the first
+    Wiktionary's own document order to a naive whole-subtree search now — for English `color`/
+    `colour`, whose own headword line carries no gender at all, that promoted French *couleur*'s "f"
+    to the ENGLISH noun's gender. Confirmed live: the offending span's ancestor chain is `li > ul >
+    td.translations-cell > tr > tbody > table.translations > div.NavContent > div.NavFrame >
+    section` — several subsection boundaries below the Noun section's own opening `<p>`/`<ol>`.
+    Scoped by ancestry (`cand.find_parent("section") is sec`) rather than by assuming the headword
+    line is specifically a `<p>` tag: every subsection this could ever collide with is ITS OWN
+    nested `<section>`, so "nearest enclosing section is this one, not a child of it" is exactly
+    "belongs to the headword line, not to a subsection" — true of the markup shape, not of one
+    element name that could vary page to page."""
     soup = _fetch_html(search_form)
     if soup is None:
         return []
@@ -673,7 +690,8 @@ def _noun_genders(search_form: str, language: str) -> list[str | None]:
             continue
         if not in_lang or text != "Noun":
             continue
-        abbr = sec.find("span", class_="gender")
+        abbr = next((cand for cand in sec.find_all("span", class_="gender")
+                     if cand.find_parent("section") is sec), None)
         out.append(abbr.get_text(strip=True).strip() if abbr else None)
     return out
 
