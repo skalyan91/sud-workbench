@@ -4,6 +4,27 @@ const scrim=document.getElementById("scrim"),scrimHost=document.getElementById("
 function openSheet(node){scrimHost.innerHTML=""; scrimHost.appendChild(node); localiseAccel(node);   // Windows: rewrite this sheet's accelerator glyphs (the Help sheet's whole .kbd column, any `title=`) — sheets are built fresh on every open, so the boot sweep in js/core/init.js can never have seen them
   scrim.classList.add("show"); const f=node.querySelector("textarea,input"); if(f)setTimeout(()=>f.focus(),30);}
 function closeSheet(){scrim.classList.remove("show");}
+/* PLAIN ENTER IN A SINGLE-LINE FIELD SUBMITS THE SHEET'S OWN DEFAULT BUTTON. Every sheet in this file is
+   a plain <div>, not a <form> — there is no native browser page to inherit "Enter submits" from, so a
+   filename field (Save As, Rename, Export as UD, Export Diagram, the "keep this new document?" prompt —
+   all of them sheetChooseSaveLocation) just sat there doing nothing on Enter, unlike a real macOS save
+   panel. Opt-in per sheet (enterSubmits(s), called by the sheet builders that want it) rather than
+   attached in openSheet() for every sheet unconditionally: a MULTI-FIELD editor (Gloss Mappings, the
+   Toolbox marker table) has no single obvious "the rest of this row doesn't matter yet, submit everything"
+   moment — Enter there would silently drop a still-being-typed row as incomplete — and a live filter
+   field (Manage Models' search box) has no "submit" gesture to give Enter at all. Scoped to <input> only:
+   a <textarea>'s Enter is content, not a submit gesture (sheetInsert's fields are multi-sentence text and
+   use their own ⌘Enter for exactly this reason). Gated on !e.defaultPrevented so a field's OWN Enter
+   handling wins first — bindFeatInput's autocomplete-pick calls preventDefault() when ITS dropdown is
+   open and highlighted, and bubble order guarantees that listener (on the input itself) runs before this
+   one (on the sheet, an ancestor) ever sees the event. */
+function enterSubmits(sheet){
+  const TEXTY=new Set(["text","search","email","url","tel","number","password"]);
+  sheet.addEventListener("keydown",e=>{
+    if(e.key!=="Enter"||e.defaultPrevented) return;
+    const t=e.target; if(t.tagName!=="INPUT"||!TEXTY.has(t.type)) return;
+    const btn=sheet.querySelector(".actions .tbtn.primary"); if(!btn||btn.disabled) return;
+    e.preventDefault(); btn.click(); }); }
 scrim.addEventListener("click",e=>{if(e.target===scrim)closeSheet();});
 document.addEventListener("keydown",e=>{ if(e.key==="Escape" && scrim.classList.contains("show") && !confirmScrim.classList.contains("show")){ e.preventDefault(); e.stopPropagation(); closeSheet(); } },true);   // Escape dismisses the open dialog/sheet (capture phase so it wins over field-level handlers inside the sheet) — skipped while a confirm alert is stacked on top; ITS OWN handler (below) owns Escape then
 // a small confirm/alert ("Remove this model?", "Discard unsaved changes?") — a SEPARATE scrim/host pair (never #scrimHost)
@@ -100,6 +121,7 @@ async function sheetChooseSaveLocation(opts){ opts=opts||{};
     act.querySelector("[data-cancel]").onclick=()=>{ closeWherePop(); closeSheet(); resolve({action:"cancel"}); };
     if(opts.deleteLabel) act.querySelector("[data-delete]").onclick=()=>{ closeWherePop(); closeSheet(); resolve({action:"delete"}); };
     act.querySelector("[data-save]").onclick=()=>{ closeWherePop(); closeSheet(); resolve({action:"save",folder:currentFolder,filename:nameInp.value.trim()}); };
+    enterSubmits(s);   // Enter in the filename field clicks Save — this one sheet is Save As, Rename, Export as UD, Export Diagram and the "keep this new document?" prompt, all five at once
     openSheet(s); setTimeout(()=>nameInp.select(),30); }); }
 // the Where button's own dropdown — a separate popup from the titlebar's folder-path proxy menu (openFolderMenu),
 // but reusing the SAME .fpmenu/.fpitem/.fpimg classes (native folder icon, same row height/hover) for a
@@ -409,6 +431,7 @@ function sheetSettings(){
   act.querySelector("[data-go]").onclick=()=>{ SETTINGS.scheme=sci.value.trim()||"SUD";
     SETTINGS.upos=up.value.split(/\n+/).map(x=>x.trim()).filter(Boolean); SETTINGS.deprel=dr.value.split(/\n+/).map(x=>x.trim()).filter(Boolean);
     closeSheet(); refresh(); toast("Settings saved"); };
+  enterSubmits(s);   // Enter in the scheme-name field saves — the two textareas below are unaffected (enterSubmits only fires on <input>), so Enter still means "new line" while editing the tag/relation lists
   return s;
 }
 /* item 13 — drive the SHARED FEATS autocomplete (acShowGrouped/acShowCustom/acKeyItems/acValItems/acFill/…) on a plain
