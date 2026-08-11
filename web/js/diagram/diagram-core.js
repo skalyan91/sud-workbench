@@ -2535,9 +2535,24 @@ const AH_MITRE=Math.sqrt(1+AH_RATIO*AH_RATIO)/AH_RATIO;
                widening term, and no need to fudge AH_RATIO.
    Verified numerically (scratch: perpendicular distance from each casing edge to its stroke-head counterpart)
    at 1.7500 on all three edges, for horizontal, diagonal and arbitrary-angle heads alike.
-   out = 0 (or omitted) reproduces the original path bit-for-bit, so every un-cased call site is untouched. */
-function arrowPath(from,tip,s,out){const o=out||0,ext=AEXT+o*AH_MITRE,L=s+o*(AH_MITRE+1);
-  const [ux,uy]=normv(from,tip),T=[tip[0]+ux*ext,tip[1]+uy*ext],px=-uy,py=ux,base=[T[0]-ux*L,T[1]-uy*L],w=L*AH_RATIO;
+   out = 0 (or omitted) reproduces the original path bit-for-bit, so every un-cased call site is untouched.
+   ⚠ ON REPORT — that uniform 1.75px, though geometrically exact, still reads as thinner at the TIP than at
+   the back/shaft once a SECOND edge fans in close beside it (samples/la_virgil.conllu, "Italiam": venit→
+   Italiam's head sits one fanStep — ~8px — from a second, differently-coloured edge converging on the same
+   node). Against the page background the casing is near-invisible either way (--casing barely differs from
+   --content-bg — confirmed: doubling the offset moved zero visible pixels in an isolated render), so what a
+   crowded neighbour actually meets is the casing's OCCLUSION footprint, not a visible halo — and at the tip,
+   where two fanned edges run close to parallel, occlusion measured perpendicular to THIS head's own edge is
+   the wrong test: a neighbour crossing at a shallow angle needs clearance measured along ITS OWN direction,
+   which for a near-parallel neighbour is the perpendicular distance divided by sin of the angle between them
+   — the SAME csc(α) the mitre above already uses for the apex, applied a second time, to the apex's forward
+   reach specifically. extFront (T, actually drawn) gets the doubled factor; extBase (Tb, base's own
+   reference point) keeps the original single factor, so the base and flank width are UNCHANGED at their
+   already-exact 1.75px — only the tip reaches further. out = 0 collapses extFront/extBase/T/Tb together,
+   reproducing the un-amplified path bit-for-bit, so every un-cased call site is still untouched. */
+function arrowPath(from,tip,s,out){const o=out||0,extBase=AEXT+o*AH_MITRE,extFront=AEXT+o*AH_MITRE*AH_MITRE,L=s+o*(AH_MITRE+1);
+  const [ux,uy]=normv(from,tip),T=[tip[0]+ux*extFront,tip[1]+uy*extFront],
+    Tb=[tip[0]+ux*extBase,tip[1]+uy*extBase],px=-uy,py=ux,base=[Tb[0]-ux*L,Tb[1]-uy*L],w=L*AH_RATIO;
   return `M ${T[0]} ${T[1]} L ${base[0]+px*w} ${base[1]+py*w} L ${base[0]-px*w} ${base[1]-py*w} Z`;}
 /* stop a line at the (overshot) arrowhead base — backoff(tip,frm,s) returns exactly arrowPath(frm,tip,s)'s base
    point. DELIBERATELY BLIND TO AH_OUTSET: the STROKE's stop must not move, and the casing line shares the very
