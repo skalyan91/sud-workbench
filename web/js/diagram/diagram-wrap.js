@@ -136,6 +136,18 @@ function bracketsWrapped(si){
   const closeHead=i=>{ const s=document.createElement("span"); s.className="bwclose"; s.textContent=bform(t[i])+gwOf(t[i]).map(p=>bform(p.tok)).join(""); return s; };   // the head repeated (muted) beside a closing bracket on its own line (host form only, no folded punctuation). A goeswith word is repeated WHOLE and unslurred: this is a reminder of which constituent just closed, not a second rendering of the word
   const repOff=reportOffsets(D);   // item 7: per-token reported-speech offsets
   const wordSpan=i=>{ const grp=document.createElement("span"); grp.className="bwtok"+(sel.s===si&&sel.t===OID(i)?" sel":""); grp.dataset.s=si; grp.dataset.tok=OID(i); grp.style.cursor="pointer"; grp.style.width=wordW(i)+"px"; grp.addEventListener("click",()=>pick(si,OID(i)));   // reserve the widest-row width (rel/POS/translit are absolute, so JS sizes the box as the flex column did before) — a firm `width` (not `minWidth`): wordW already reserves the BOLD width too, so the box never needs to grow when a token is selected; it bolds in place, centred, exactly like unwrapped brackets
+    // item 25/8: --ownpad, on report ("token wash in brackets view is still not restricted to the token's own
+    // AVM depth"). --undpad (set once above, for the whole box) is deliberately the ROW-WIDE max — every
+    // .bwtok's STRUCTURAL padding-bottom has to agree so the below-stack rows (POS/gloss/translit) line up
+    // across a wrapped line, and that's real, load-bearing (a1503fb's own note). But .pcand/.dtarget/.findtok
+    // (app.css) painted a plain `background` on THAT SAME padding box — so a token with no FEATS at all,
+    // sitting next to one with a tall AVM, washed exactly as deep as its neighbour: measured live (CDP),
+    // 153.75px vs 81.86px for the identical plain token with vs without a heavy-AVM row-mate, entirely driven
+    // by the NEIGHBOUR's AVM, never its own (which is 0 either way). --ownpad is the SAME belowReserveH formula
+    // as --undpad, but with THIS token's OWN avmHeight (not avmRowMaxH's row max) — app.css's ::before-based
+    // wash layer (not the token's own background — that stays keyed to --undpad, untouched) reads it to stop
+    // short of the shared reserve instead of filling all of it.
+    grp.style.setProperty("--ownpad",(belowReserveH(hasTr(t),belowTierN(),show.pos,avmHeight(t[i]))+TOK_TR_GAP)+"px");
     if(selDesc.has(i)) grp.classList.add("inspan");   // in the selected constituent → covered by the continuous wash (drawn as a per-line overlay after layout)
     if(isInt(i)){ grp.classList.add("bwint"); grp.dataset.inthead=OID(head[i]-1); grp.dataset.intrel=t[i].deprel; grp.dataset.intcol=relColor(t[i].deprel); }
     { const ghosts=ghostsByOrigin[i].map(([tg,rel,kind])=>OID(tg)+":"+rel+":"+kind);   // ghost targets: pairs of (OTHER token, relation label, kind) to show on that dashed arc — Shared=Yes → one per other conjunct, labelled with this token's OWN deprel; Subject-raising → one, always labelled "subj" (positionBracketAnnots draws them). kind travels along so a click there can tell which FEATS/MISC value to clear (see ghostTokOther)

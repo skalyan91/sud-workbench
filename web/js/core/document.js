@@ -2142,12 +2142,27 @@ function reserveBracketArcRoom(){ document.querySelectorAll("#doc .bwrap").forEa
 function positionBracketAnnots(){ document.querySelectorAll("#doc .bwrap").forEach(box=>{
   box.querySelectorAll(".bwannot").forEach(s=>s.remove());
   const ints=[...box.querySelectorAll(".bwint")], mwts=box._ties||[], ghostToks=[...box.querySelectorAll(".bwtok[data-ghostheads]")];
-  if(!ints.length && !mwts.length && !ghostToks.length) return;
+  // si0/s0 hoisted up here (were computed further down, right before mwts.forEach/the AVM loop, which still
+  // reuse this same binding) — the early-return guard right below needs s0 too now.
+  const si0=+(box.closest(".sblock")?.dataset.i??-1), s0=DOC[si0];
+  // item 25/9: +hasAvm, on report ("token wash in brackets view is still not restricted to the token's own AVM
+  // depth") traced further. This guard predates the AVM tier entirely (present since the initial commit) and
+  // was never widened when AVM's own per-token drawAVM loop landed inside THIS function, below (item 22/25/4)
+  // — so a box with no interrupter, no MWT tie and no ghost arc returned before ever creating the .bwannot
+  // overlay those AVM boxes paint into, regardless of whether any of its own tokens carry a FEATS box. Confirmed
+  // live (CDP): a plain projective sentence — "plain" [ADJ, no FEATS], "heavy" [ADJ, a dozen FEATS], "noun"
+  // [root] — with no MWT/interrupter/ghost, forced to wrap, never drew a SINGLE avm-attr/avm-val for "heavy":
+  // avmLayout(t)/avmRowMaxH(t) still computed a real height (so --undpad/--ownpad correctly reserved room for
+  // it — the token's below-stack padding was never wrong), the box was just silently, permanently EMPTY where
+  // the AVM should have painted. hasAvm asks the exact question avmRowMaxH already answers for --undpad's own
+  // reserve (this box's whole token range, sentence-wide — one .bwrap IS one sentence) — reused, not re-derived.
+  const hasAvm=show.avm && s0 && s0.tokens && avmRowMaxH(s0.tokens)>0;
+  if(!ints.length && !mwts.length && !ghostToks.length && !hasAvm) return;
   const W=Math.max(box.clientWidth,box.scrollWidth), H=box.scrollHeight;
   const svg=E("svg",{class:"bwannot",width:W,height:H,viewBox:`0 0 ${W} ${H}`});
   const rectOf=tok=>{ const f=tok.querySelector(".bwform")||tok, ox=(f===tok?0:tok.offsetLeft), oy=(f===tok?0:tok.offsetTop);   // .bwtok is position:relative → the form's offsets are token-relative; add the token's own box-relative offset
     return {l:ox+f.offsetLeft,t:oy+f.offsetTop,w:f.offsetWidth,h:f.offsetHeight,cx:ox+f.offsetLeft+f.offsetWidth/2}; };
-  const AH=parseFloat(css("--arrow"))||5.5, GAPU=8, GAPL=6, tokBot=tok=>tok.offsetTop+tok.offsetHeight, si0=+(box.closest(".sblock")?.dataset.i??-1);
+  const AH=parseFloat(css("--arrow"))||5.5, GAPU=8, GAPL=6, tokBot=tok=>tok.offsetTop+tok.offsetHeight;
   // partition interrupter arcs into within-line bumps and cross-line edges, exactly as the wrapped ARC view does
   const within=[], cross=[];
   ints.forEach(dep=>{ const headTok=box.querySelector(`.bwtok[data-tok="${dep.dataset.inthead}"]`); if(!headTok)return;
@@ -2193,7 +2208,7 @@ function positionBracketAnnots(){ document.querySelectorAll("#doc .bwrap").forEa
     svg.appendChild(g);
     if(show.labels && rel) clabs.push({g,dep:+dep.dataset.tok,mx:(upP[0]+loP[0])/2,apex:(upP[1]+loP[1])/2,text:rel,col,level:Math.hypot(upP[0]-loP[0],upP[1]-loP[1]),frm,tip,gap,arcEls:[...g.childNodes]}); });   // frm/tip/gap/arcEls: Item 4 lets a lifted label grow the arc up to it
   if(show.labels){ decollide(clabs,[],svg,si0); growCrossArcs(clabs,AH,null,si0); }   // fold cross-line labels into the SAME de-collision pass as the within-line bumps; then grow/widen: raise any arc whose label cleared its top endpoint, widen the band, re-solve the band
-  const s0=DOC[si0];   // item 25/4: hoisted above mwts.forEach so undBot() can resolve each token's own model object too — was declared just before the AVM loop below, which still reuses this same binding
+  // s0 (item 25/4: resolves each token's own model object for undBot()/the AVM loop below) is now hoisted all the way up to the top of this function, beside si0 — the early-return guard needs it too (item 25/9)
   mwts.forEach(m=>{ const a=box.querySelector(`.bwtok[data-tok="${m.fromTok}"]`), b=box.querySelector(`.bwtok[data-tok="${m.toTok}"]`); if(!a||!b)return;
     const A=rectOf(a), B=rectOf(b); if(Math.abs(A.t-B.t)>4) return;          // components split across lines → no spanning tie
     // item 25/4: +AVM, on report ("in wrapped brackets, the MWT brackets crash into the AVMs") — .bwund's own
