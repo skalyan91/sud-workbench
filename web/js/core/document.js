@@ -2132,6 +2132,25 @@ function reserveBracketArcRoom(){ document.querySelectorAll("#doc .bwrap").forEa
     const stackBot=Math.max(undBot(a),undBot(b));
     const tieReach=htmlTieBottom(m)+9;   // htmlTieBottom already folds in the SAME lead (5+tieLead()) positionBracketAnnots' yb seats the tie's top with below, so this is just that reach + a little slack — was "15−capHeight+htmlTieBottom(m)+9", double-counting the lead now that htmlTieBottom carries it too (see htmlTieBottom's own comment)
     grow(lines[la+1], (stackBot+tieReach)-lines[la+1].offsetTop);   // grow() is a no-op when the standard inter-line gap already clears the tie; read live so multiple ties / earlier arc growth stay cumulative-correct
+    // Report ("not enough space between the lines of wrapped brackets [with MWTs] … look at what the between-line
+    // space would be in the absence of MWTs"). Measured live (CDP, both a synthetic star-tree sentence and the
+    // real Sanskrit s1 from samples/brihat_jataka.conllu): the grow() just above DOES already push the total
+    // gap (previous line's plain token-stack bottom → next line's word top) past WRAP_ARC_STDGAP=60 on its own —
+    // Item 3a's own floor, applied to that pair of points, is already a no-op here, so duplicating it verbatim
+    // (an earlier attempt) changed nothing. The real shortfall is elsewhere: the tie's own "+9" reach is a
+    // BARE-COLLISION slack, not a breathing-room one — it was carried over from flat arcs' own ~9px form-to-
+    // crop-edge gap (b037931), where "+9" is the SVG's entire trailing margin, nothing else follows it. Here,
+    // real text — the next wrapped line — follows immediately, so the VISIBLE clearance a reader sees below the
+    // tie's ink is that same bare +9, not the total margin (most of which the tie's own stack+form+translit
+    // height already consumes). Measured directly (getBoundingClientRect, real s1 MWTs): actual clearance
+    // ~8.8–12.8px, vs a same-box arc-occupied gap with nothing hanging into it, whose entire ~49–68px reserve
+    // reads as clear space — a reader comparing the two sees the MWT gap as starkly tighter even though the
+    // TOTAL margins are comparable. Floor the CLEARANCE itself — tie bottom → next line's word top — at
+    // WRAP_ARC_STDGAP, the same standard Item 3a already holds every arc-occupied gap in this view to, so an
+    // MWT's hanging stack gets the SAME breathing room after it that any other occupied gap gets after its own
+    // content, not merely enough to avoid touching it.
+    const tieBot=stackBot+tieReach;
+    grow(lines[la+1], WRAP_ARC_STDGAP-(formTopOf(la+1)-tieBot));
   });
 }); }
 // interrupter cross-line arcs + MWT surface-form ties for wrapped brackets, laid over the text after layout.
