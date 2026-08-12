@@ -2700,21 +2700,27 @@ function drawAVM(svg,cx,y0,t,si,tokId,boxes){ const L=avmLayout(t); if(!L) retur
 // styling — `.avm-row`'s SVG rules use `fill`, meaningless on HTML text) purely so the EXISTING right-click
 // handler (context-menu.js's `.closest(".avm-row")`) picks it up for free — same data-feat contract, same
 // tokFromEl walk-up (the outline row itself already carries data-s/data-tok).
-// item 23: NO literal "[" "]" glyphs any more — those read weaker than the SVG notations' own DRAWN brackets,
-// so an outline AVM looked like a different, plainer notation rather than the same one laid out inline. The
-// bracket is now `.oavm-item::before/::after` (app.css), the SAME border-drawn-bracket technique the AVM's
-// OWN pre-SVG design used (`.avm::before/::after`, before it became native SVG — see drawAVM's own comment
-// for why THAT context moved off borders) — legitimate again here because outline is genuinely HTML, not the
-// WebKit/Chrome SVG-vs-foreignObject gap drawAVM was dodging. Border colour reuses arcInk()'s own formula
-// (the mix `.mwt-tie` already paints with) so the drawn bracket reads as the same ink as the SVG one, not a
-// CSS-default grey standing in for it.
+// item 23 round 2 — CORRECTED. Item 23 read "AVM brackets should be styled and spaced exactly like MWT
+// brackets" as license to draw a bracket per FEATURE PAIR (`.oavm-item::before/::after`, one border-drawn
+// "[" "]" around each "ATTR val"), dropping the literal glyphs entirely. That was the wrong grouping: what
+// was actually asked for is the traditional interlinear notation's own convention — ONE bracket pair around
+// the WHOLE attribute-value MATRIX, not one around every attribute individually (a real AVM, HPSG-style or
+// interlinear, is `[ATTR1 val1  ATTR2 val2]`, a single feature structure, never `[ATTR1 val1] [ATTR2 val2]`
+// as if they were unrelated). So: literal "[" "]" TEXT NODES are back per item — plain running text, not a
+// drawn glyph, exactly avmInline's OWN pre-93fa0d8/pre-item-23 behaviour (see git history) — and the
+// border-drawn bracket technique item 23 introduced MOVES from `.oavm-item` to `.oavm` itself (app.css),
+// wrapping every item the loop below appends in ONE outer pair instead of several inner ones. The
+// typography match item 23 also made (.oavm-attr/.oavm-val now sized/weighted/coloured exactly like
+// .avm-attr/.avm-val) stays — that part of the report was correct and orthogonal to the bracket grouping.
 function avmInline(t){ const struct=(typeof avmStruct==="function")?avmStruct(t):[]; if(!struct.length) return null;
   const span=document.createElement("span"); span.className="oavm";
   struct.forEach((it,i)=>{ if(i) span.appendChild(document.createTextNode(" "));
     const item=document.createElement("span"); item.className="oavm-item avm-row"; item.dataset.feat=it.group||it.feat; item.tabIndex=0;
+    item.appendChild(document.createTextNode("["));
     const attr=document.createElement("span"); attr.className="oavm-attr"; attr.textContent=(it.group||it.feat).toUpperCase(); item.appendChild(attr);
     item.appendChild(document.createTextNode(" "));
     const val=document.createElement("span"); val.className="oavm-val"; val.textContent=it.group?it.combined:it.val; item.appendChild(val);
+    item.appendChild(document.createTextNode("]"));
     span.appendChild(item); });
   return span; }
 function xHeight(f){_cv.font=f; const m=_cv.measureText("x"); return m.actualBoundingBoxAscent||6;}   // the x-height of a (POS) glyph — subtracted from the inter-tier step to seat the MWT bracket (POS tags now render via c2sc small caps, whose visual height sits at x-height, not full cap height)

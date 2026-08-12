@@ -1196,6 +1196,17 @@
   .seam-mark.sel{fill:var(--accent); color:var(--accent)}
   #doc.zone-grid .seam-mark.sel{fill:var(--accent-dim); color:var(--accent-dim)}
   span.seam-mark{position:absolute; top:0; pointer-events:none}   /* HTML (wrapped brackets / outline): out of flow, so the row it hangs off keeps its own width and stays centred on its own text */
+  /* …EXCEPT in outline specifically, on request: unlike every other notation (SVG satellites hanging past the
+     form's own ink, or the wrapped-brackets `.bwrap` case just above sharing that same convention), outline
+     wants a seam mark to occupy REAL space in its row rather than float past it. `position:static` alone does
+     it — undoes exactly the ONE declaration (`position:absolute`) that pulls the mark out of flow, so it falls
+     back to being an ordinary inline child of its host (`.oform`, appended after the host's own text node by
+     htmlSeamMark) and the browser lays it out — and everything after it in the row's own flex order — around
+     the mark's real width, instead of overlapping it. `inset-inline-start/end` on `.seam-post`/`.seam-pre`
+     below need no matching override: those properties simply do not apply to a statically positioned element,
+     so they fall away for free once this rule wins on `position`. Scoped to `.outline` alone — `.bwrap` (wrapped
+     brackets) keeps the zero-width convention untouched, since only outline's own behaviour was asked to differ. */
+  .outline span.seam-mark{position:static}
   /* ⚠ AND, ON THE FORM ROW, IT UN-MAGNIFIES ITSELF — the HTML half of "A SEAM MARK IS NOT PART OF THE WORD,
      so the ornamental magnification does not reach it" (svgSeamMark, js/diagram/diagram-core.js). The SVG
      notations enforce that by writing an explicit unmagnified `style.font` onto the mark; the HTML ones
@@ -1239,21 +1250,26 @@
      this is HTML text, not SVG). `.oavm-item` doubles as `.avm-row` in the DOM (see avmInline's own note) so
      the existing right-click menu picks it up with no handler changes; the cursor:pointer it needs comes from
      that shared rule. */
-  .oavm{margin-inline-start:9px; unicode-bidi:isolate}
-  /* item 23: the bracket itself — no more literal "[" "]" characters (avmInline no longer inserts them; see its
-     own comment). Drawn with the SAME border-trick the AVM's OWN pre-SVG design used (`.avm::before/::after`,
-     git history 90f6bf4 — a vertical border edge with the far side open, so it reads as "[" / "]"), legitimate
-     again here because outline is genuinely HTML: the SVG notations left this technique behind specifically to
-     dodge a WebKit/Chrome foreignObject-vs-SVG engine gap (see drawAVM's own comment) that an HTML-only context
-     never had. border-color reuses arcInk()'s own color-mix formula (the ink `.mwt-tie`/`.mwt-tie-h` already
-     paint with) so the drawn bracket reads as the SAME ink as the SVG one, not a plain CSS grey standing in for
-     it. 4px box (vs. the SVG bracket's 5px AVM_BRK_W) and 8px side padding — scaled down with the smaller
-     10.5px face above, same proportion the SVG box keeps between AVM_BRK_W and its own (tightened) AVM_PAD_H. */
-  .oavm-item{position:relative; padding:1px 8px}
-  .oavm-item::before,.oavm-item::after{content:""; position:absolute; top:0; bottom:0; width:4px; border:1px solid color-mix(in srgb, var(--tie-hue), var(--content-bg) var(--edge-mix)); pointer-events:none}
-  .oavm-item::before{left:0; border-right:none}   /* "[" — open on the content side */
-  .oavm-item::after{right:0; border-left:none}    /* "]" — the mirror */
+  /* item 23 round 2 — CORRECTED (see avmInline's own comment, js/diagram/diagram-core.js, for the full story):
+     the drawn bracket wraps the WHOLE matrix now, not each item. Each item goes back to literal "[" "]" TEXT —
+     plain running punctuation, no special styling of its own, the traditional interlinear-gloss convention —
+     while `.oavm` itself takes the ONE drawn bracket the individual items wrongly had before: the SAME
+     border-trick the AVM's OWN pre-SVG design used (`.avm::before/::after`, git history 90f6bf4 — a vertical
+     border edge with the far side open, so it reads as "[" / "]"), legitimate here because outline is
+     genuinely HTML: the SVG notations left this technique behind specifically to dodge a WebKit/Chrome
+     foreignObject-vs-SVG engine gap (see drawAVM's own comment) that an HTML-only context never had.
+     border-color reuses arcInk()'s own color-mix formula (the ink `.mwt-tie`/`.mwt-tie-h` already paint with)
+     so the drawn bracket reads as the SAME ink as the SVG one, not a plain CSS grey standing in for it. */
+  .oavm{margin-inline-start:9px; unicode-bidi:isolate; position:relative; padding:1px 8px}
+  .oavm::before,.oavm::after{content:""; position:absolute; top:0; bottom:0; width:4px; border:1px solid color-mix(in srgb, var(--tie-hue), var(--content-bg) var(--edge-mix)); pointer-events:none}
+  .oavm::before{left:0; border-right:none}   /* "[" — open on the content side */
+  .oavm::after{right:0; border-left:none}    /* "]" — the mirror */
+  .oavm-item{padding:0 1px}   /* just enough for the hover fill below to clear the text, like every other row's own click target — the bracket is `.oavm`'s now, not this */
   .oavm-item:hover{background:var(--block-sel); border-radius:3px}
+  /* item 22/3, still true after round 2 above: 10.5px/weight-571/c2sc for the attr, 10.5px/weight-700 for the
+     val — the SAME formatting convention as the SVG AVM's own .avm-attr/.avm-val (color, not fill — this is
+     HTML text, not SVG), muted-attr / value-reads-like-a-POS-tag (--tie-hue) colour split included. This part
+     of item 23's report was correct and is untouched by the bracket-grouping correction above. */
   .oavm-attr{font-family:var(--token-font); font-size:10.5px; font-weight:571; font-feature-settings:"c2sc" 1; color:var(--dia-muted); opacity:.62}
   .oavm-val{font-family:var(--token-font); font-size:10.5px; font-weight:700; color:var(--tie-hue)}
   .text-conv .tpos{font-size:9px; color:var(--muted); vertical-align:super; margin-left:1.5px; letter-spacing:.02em}
