@@ -728,7 +728,19 @@ function arcsWrapped(si){
   // the drawn geometry of one cross-line arc, by DEPENDENT token index
   const crossGeom=i=>{ const {up,lo,upP,loP}=crossEnds(i);
     return {up,lo,upP,loP, tip:(i===up)?upP:loP, frm:(i===up)?loP:upP,   // arrowhead at the dependent
-            gap:[repBase(rep,rowOf(up).stackBot,up), repBase(rep,rowOf(lo).wordY,lo)-ASC]}; };           // the arc may bow within the inter-line gap: up to the upper row's stack bottom, down to the lower row's word top. item 11: BOTH bounds follow their own token's report lift — the band has to keep containing the (lifted) endpoints, or arcCtrlChord's clamp would flatten the arc against a boundary it already sits above
+            // item 22 fix — this band's TOP bound used to be rowOf(up).stackBot (the ROW's own tallest
+            // below-stack), the SAME figure NBOT(up) itself used to seat upP off before the per-token AVM
+            // fix. Once NBOT moved to tokStackBot(up) (THIS token's own reach, possibly well short of the
+            // row's tallest AVM neighbour) this bound was left behind, sometimes sitting BELOW (numerically
+            // greater than) upP[1] itself — the curve's own start point then lay OUTSIDE the box
+            // arcCtrlChord's binary search fits it into, so `fits()` could never succeed and the search
+            // drove the scale to ~0, collapsing the S to a near-straight chord and, with it, the take-off
+            // angle the arrowhead is built to arrive at (θ=ARC_ANGLE) — read live via CDP: an arc landing on
+            // a light-AVM token sharing a line with a heavy-AVM one measured a take-off well under θ, where
+            // every other cross-line arc in the app measures exactly θ. tokStackBot(up) is the SAME analytic
+            // figure NBOT bases upP on, so the band's top and the endpoint that has to fit inside it can
+            // never disagree again.
+            gap:[repBase(rep,tokStackBot(up),up), repBase(rep,rowOf(lo).wordY,lo)-ASC]}; };           // the arc may bow within the inter-line gap: up to the upper token's OWN stack bottom, down to the lower row's word top. item 11: BOTH bounds follow their own token's report lift — the band has to keep containing the (lifted) endpoints, or arcCtrlChord's clamp would flatten the arc against a boundary it already sits above
   // cross-line arcs FIRST (so they sit behind the POS tags / transliterations): straight line from the bottom
   // of the node on the upper line to the top of the node on the lower line, arrowhead at the dependent
   const clabs=[];   // cross-line labels folded into the SAME de-collision pass as within-line arc labels (Item 1)
@@ -812,7 +824,7 @@ function arcsWrapped(si){
       const upP=[upX,NBOT(up)], loP=[loX,NTOP(lo)], tip=(i===up)?upP:loP, frm=(i===up)?loP:upP;
       const g=E("g",{class:"ghost-g"+(sel.s===si&&sel.t===OID(i)?" sel":""),"data-s":si,"data-dep":OID(i)});
       wireGhostClick(g,si,kind,gtok,gother);
-      drawCrossLine(g,frm,tip,col,AH,false,[repBase(rep,rowOf(up).stackBot,up),repBase(rep,rowOf(lo).wordY,lo)-ASC]);   // item 11: same report-lifted band bounds crossGeom() gives the real cross-line arcs
+      drawCrossLine(g,frm,tip,col,AH,false,[repBase(rep,tokStackBot(up),up),repBase(rep,rowOf(lo).wordY,lo)-ASC]);   // item 11: same report-lifted band bounds crossGeom() gives the real cross-line arcs — item 22: tokStackBot(up), not rowOf(up).stackBot, for the same reason crossGeom's own gap[0] just changed: this band's top has to match whatever NBOT(up) actually seated upP at, or a ghost landing on a light-AVM token gets the identical collapsed-angle bug a real cross-line arc did
       g.querySelectorAll(".arc-path").forEach(pp=>pp.classList.add("arc-ghost")); g.querySelectorAll(".ah").forEach(pp=>pp.classList.add("ah-ghost"));
       svg.appendChild(g); ghostG.push({g,mx:(upP[0]+loP[0])/2,apex:(upP[1]+loP[1])/2,rel,col}); } });
   // Every REAL edge in this diagram, as the flattened obstacles the ghost-label pass below lifts off. Read off the
