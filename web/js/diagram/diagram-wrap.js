@@ -609,9 +609,28 @@ function arcsWrapped(si){
   // consistent. Uses each token's absolute x (NX); offsets are horizontal → placement-independent, computed once here.
   const fanAll=[];
   rows.forEach(r=>r.arcsIn.forEach(a=>{ a.hk=a.head; a.dk=a.dep; a.xh=NX(a.head); a.xd=NX(a.dep); a.len=Math.abs(a.dep-a.head); fanAll.push(a); }));
-  crossArcs.forEach(a=>{ a.xh=NX(a.hk); a.xd=NX(a.dk);
+  crossArcs.forEach(a=>{
     const iUp=rowOf(a.dk).ord<rowOf(a.hk).ord;   // is the DEPENDENT the upper-line token?
     if(iUp) a.dkey="B"+a.dk; else a.hkey="B"+a.hk;   // Item 1: the cross-line arc's UPPER-line endpoint sits at the BOTTOM of that line (NBOT); give it a bottom-side fan bucket ("B"+token) so it fans ONLY against other cross-line bottom-endpoints there — never the within-line TOP-side endpoints sharing that token (Item 16's single combined fan wrongly spread it against them). The LOWER end keeps its plain token key → still fans with that line's within-line arcs (same, top side).
+    // Item 20: a.xh/a.xd here feed ONLY fanArcs' fan-SIDE sign (Math.sign(xd-xh) / Math.sign(xh-xd)) below —
+    // never the real drawn geometry (crossEnds() further down re-derives x fresh via NX()+offset). Setting
+    // them to each token's real NX() — as this used to — compared ROW-LOCAL positions across TWO DIFFERENT
+    // rows: `r.LX=i=>r.c[i-r.s]+r.offX` lays every row out flush from its OWN x=0 (offX is 0 for every LTR
+    // row; RTL's own per-row offX doesn't fix this either, since it's still each row's own frame), so which
+    // one came out bigger was an ACCIDENT of the two tokens' unrelated positions within their own rows —
+    // not which way the arc actually continues. Confirmed on a constructed test case: the SAME cross-line
+    // arc's own endpoint flipped which side of its token it fanned toward depending purely on how far along
+    // its OTHER row happened to place its far endpoint — nothing about the arc's own direction changed, only
+    // an unrelated row's incidental layout did, which is the "not applied consistently" symptom, not a
+    // one-off — that accidental sign is what decides BOTH which other arcs a cross-line endpoint competes
+    // against for the long-inward/short-outward ranking AND which direction its own offset even points.
+    // The one thing that IS consistent, whichever token each row happens to place where: reading order
+    // only ever continues FORWARD — the upper endpoint (line N, exiting toward line N+1) is always the one
+    // still heading onward, the lower endpoint (line N+1, arrived from line N) is always the one arriving
+    // from before. So the upper endpoint's own registration always takes the "forward" side (LTR: +1,
+    // rightward — the direction reading order advances in; RTL mirrors, so -1) and the lower endpoint's
+    // always takes the opposite — fixed by ROLE, not measured off either token's accidental position.
+    if(iUp===!RTL){ a.xh=1; a.xd=0; } else { a.xh=0; a.xd=1; }   // iUp: dep is the upper/forward endpoint → its registration (Math.sign(xh-xd)) must land on the forward side, so xh>xd (LTR) or xh<xd (RTL); !iUp mirrors it onto xd for the head's registration
     fanAll.push(a); });
   fanArcs(fanAll,SPREAD);   // sets offH/offD on every within-line AND cross-line arc from the same per-token fan
   rows.forEach(r=>{ r.arcsIn.forEach(a=>{ a.h=arcHgt(Math.abs((r.LX(a.dep)+(a.offD||0))-(r.LX(a.head)+(a.offH||0))),ROW); });   // arc height (→ Hobby handle length) from the FANNED endpoints
