@@ -506,6 +506,23 @@
   .tok-pos{font-size:15px; font-weight:400; font-feature-settings:"c2sc" 1; fill:var(--tie-hue); font-family:var(--token-font);   /* POS tags: same size + weight as the transliteration (TRANS_F/.translit, 15px normal) — c2sc renders the (already all-caps) tag as small caps instead of relying on a bumped weight/shrunk size for the "tag" register. No letter-spacing: 15px is the tracking curve's own reference size (TOK_REF_SIZE, trackCurve()), where it's 0 — was a flat .02em. cpsp dropped: it's calibrated for genuine full-height capitals, not the c2sc-substituted small-cap glyph forms, and over-spaced them. POS luminance = the subj/comp/mod deprel labels': --c-other is the palette's neutral member, derived at their SAME L≈0.656 (and matching dark contrast), so POS sits at the same lightness as the coloured labels in both themes */
     paint-order:stroke; stroke:var(--casing); stroke-width:3px; stroke-linejoin:round}
   .tok-hit,.tok-wash{fill:transparent; cursor:pointer}   /* .tok-wash: a separate rect covering ONLY the word→POS band, so the drag-target highlight (below) never washes the arcs above the token */
+  /* item 22: the AVM tier (js/diagram/diagram-core.js's avmHTML) — real HTML, not SVG shapes, painted inside a
+     <foreignObject> wherever a notation draws its below-stack. Nested brackets read as nested boxes: the outer
+     .avm border is the matrix's own outer bracket pair, .avm-group's own border is AGR/TAM's inner one — plain
+     CSS borders rather than hand-drawn bracket glyphs, which is still recognisably AVM notation (many papers
+     typeset it as a bordered table for exactly this reason) and immeasurably simpler to keep correct across
+     zoom/theme/RTL than stretchy bracket art would be. Monospace + small, matching the grid's own FEATS cells
+     (var(--mono-font)) rather than the gloss tiers' prose font — an AVM reads as data, not as running text. */
+  .avm{display:inline-flex; flex-direction:column; gap:1px; border:1px solid var(--dia-muted); border-radius:3px;
+    padding:2px 5px; font-family:var(--mono-font); font-size:10.5px; line-height:1.5; color:var(--dia-muted);
+    text-align:start; unicode-bidi:isolate; -webkit-user-select:none; user-select:none}   /* UI chrome, not document prose — see the notation dropdown's own item 15 note on why every such element states this explicitly rather than relying on it being inherited */
+  .avm-row{display:flex; align-items:baseline; gap:5px; white-space:nowrap; cursor:pointer; border-radius:2px}
+  .avm-row:hover{background:var(--block-sel)}   /* same hover fill the grid's own row-hover already uses, so a right-clickable AVM row reads as one more of those rather than a novel affordance */
+  .avm-attr{opacity:.62}
+  .avm-val{font-weight:600}
+  .avm-group{display:flex; align-items:baseline; gap:4px; border:1px solid var(--dia-muted); border-radius:2px; padding:1px 4px; margin:0 -1px}
+  .avm-glabel{opacity:.62; font-weight:700; align-self:center}
+  .avm-grows{display:flex; flex-direction:column; gap:1px}
   .translit{font-size:15px; fill:var(--dia-muted); font-style:italic; font-family:var(--token-font); text-anchor:middle; letter-spacing:.02em;   /* same size as the form/script above it */   /* italic tracking bump (ITALIC_TRACK, diagram-core.js) — trackCurve(15)=0 (reference size), so this IS the italic term alone; kept in sync with _measOneUncached's italicTrackOf() by hand, per the tracking-curve convention */
     paint-order:stroke; stroke:var(--casing); stroke-width:3px; stroke-linejoin:round}
   .mwt-tie,.mwt-tie-h{fill:none; stroke:color-mix(in srgb, var(--tie-hue), var(--content-bg) var(--edge-mix))}   /* surface-form tie under a multi-word token, coloured like an "other"-relation arc: same color-mix(--c-other, --content-bg, --edge-mix) formula arcInk() applies to a relColor(), so the bracket reads as the SAME ink as a neutral arc/arrowhead instead of the plainer --dia-muted (still true as a claim about HUE, but the LIGHTNESS gap it leans on has narrowed a lot since --dia-muted became black-at-50 % flattened: OKLab L .508 → .600 against --c-other's .655, i.e. Δ.147 → Δ.055. Re-measure before citing this as a contrast argument) */

@@ -1239,7 +1239,7 @@ function diaFlagsSig(){
   // an unambiguous field separator.
   return [FS,AVAILW,idW,DOCLANG,TRANSLIT_SCHEME,ORTHO_SCHEME,STORED_SCHEME,
     stemmaProj?1:0,stemmaCat?1:0,
-    show.pos?1:0,show.labels?1:0,show.colour?1:0,show.arrows?1:0,show.extRel?1:0,show.wrap?1:0,show.translit?1:0,show.mergePunct?1:0,
+    show.pos?1:0,show.labels?1:0,show.colour?1:0,show.arrows?1:0,show.extRel?1:0,show.wrap?1:0,show.translit?1:0,show.mergePunct?1:0,show.avm?1:0,
     GLOSS_ON?1:0,GLOSS_VIS?1:0,MORPH_ON?1:0,MORPH_VIS?1:0
   ].join("|");
 }
@@ -1757,6 +1757,7 @@ function endRenderHold(){ if(RENDER_HOLD>0) RENDER_HOLD--;
 function renderDoc(){
   if(RENDER_HOLD>0){ RENDER_PENDING=true; return; }   // batched — see the note above
   if(typeof refreshFontStacks==="function") refreshFontStacks();   // diagram-core.js: re-reads #doc's LIVE --token-font/--mono-font (a scheme-scoped override, e.g. Ranjana, may have changed it since the last render) into LIVE_TOKEN_STACK/LIVE_MONO_STACK and every measurement font string derived from them (WORD_F, GLOSS_F, …), ONCE per render rather than per meas() call. Must run before computeColW() (→ marginNumWidth) and before anything below that measures token width, or this render would still lay out against the PREVIOUS scheme's metrics. Guarded (as document.js already guards TOKEN_STACK-dependent reads elsewhere) for any harness that renders before diagram-core.js has loaded
+  if(typeof _avmHCache!=="undefined") _avmHCache.clear();   // item 22: avmHeight's cache is keyed on the FEATS string alone, which stays correct across a FEATS edit for free (a new string ⇒ a new key) but NOT across a zoom/CSS change that alters the AVM box's rendered pixel height without touching any token's FEATS — cheapest correct fix is dropping it once per render, the same moment refreshFontStacks above re-reads live metrics for the same reason
   msegFlagDoc();   // what an MWT grouping implies about its members — the MSeg tier's decorative continuation mark, and in Sanskrit a featureless non-final member's Compound=Yes. A dozen scattered operations move those ranges (grouping, ungrouping, splitting, flattening, inserting/deleting a token, an auto-regroup after a parse), so deriving it HERE, once, at the single point they all funnel through, is what keeps it from ever going stale; it's idempotent and cheap, and marks nothing dirty of its own accord — see msegFlagSent
   computeWindow(curBlock());   // recentre the rendered window on whatever sentence the reader is on — see the virtualization note above buildBlock. MUST run before computeColW(): that scans the CURRENT window (js/grid/grid.js), so the window has to be known first
   pruneDiaCache(winLo,winHi);   // drop every cached diagram outside the range this render is about to (re)build — see the "NOTATION-SWITCH DIAGRAM CACHE" note above buildBlock. AFTER computeWindow (winLo/winHi just moved), BEFORE the buildBlock loop below reads the cache

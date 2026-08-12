@@ -741,6 +741,11 @@ function tierFont(tier,tk){ return tier==="mseg"?(isForeign(tk)?MSEG_UP_F:MSEG_F
 // widest below-token gloss row for a token, in its real font (0 when no gloss tier is on). An empty tier draws "…"
 // (gl-empty) so it contributes that narrow placeholder width — a real gloss dominates. Folded into every slot-width max.
 function glossSlotW(t){ let w=0; belowTiers().forEach(tier=>{ const dtxt=tierDisp(t,tier)||"…"; w=Math.max(w,tier==="mseg"?meas(dtxt,tierFont(tier,t)):measGloss(dtxt,tierFont(tier,t))); }); return w; }   // tierDisp, not tierText: the slot has to reserve what the row PAINTS, and under Latin's macron scheme the MSeg row paints the macronised segmentation, which is wider than the stored bare one
+// item 22: the AVM's own width, the SAME role glossSlotW plays for the gloss tiers — every caller below that
+// folds glossSlotW into a slot-width max folds this in beside it, or an AVM box (which, unlike a one-line
+// gloss, commonly runs WIDER than its own token — "Definite" alone is longer than "The") crowds or overlaps
+// its neighbour exactly the way an unreserved gloss row used to.
+function avmSlotW(t){ const b=avmBox(t); return b?b.w:0; }
 /* MEASUREMENTS ARE CACHED, because the same handful of strings is measured over and over: one load of
    the sample document makes 4,985 calls with 183 DISTINCT (text, font, extra-css) triples, and a
    notation switch 6,883 with 325 — 96% repeats. Each miss is a real cost: the body below writes into
@@ -2486,7 +2491,55 @@ function belowGap(){ return 18+descent(POS_F)+(TOK_MAG>1?descent(WORD_F)*(1-1/TO
 function belowRows(hasTr,tierCount,hasPos){ return (hasTr?1:0)+tierCount+(hasPos?1:0); }
 // total vertical reserve those rows need: n·belowGap() for the n row-to-row steps, plus STACKED_GAP
 // exactly once (n>0) — see its own note at refreshFontStacks() for what it replaces and why once, not per row.
-function belowReserveH(hasTr,tierCount,hasPos){ const n=belowRows(hasTr,tierCount,hasPos); return n*belowGap()+(n>0?STACKED_GAP:0); }
+// item 22: +avmH (the AVM box's own reserved height for whichever token(s) this call is sizing for — 0 for a
+// callsite that hasn't been taught to pass one yet, or for a sentence/row with AVM off or no FEATS at all) —
+// a FOURTH, independent term, not folded into n·belowGap(): the AVM tier isn't one more uniform text row (its
+// height depends on how many FEATS the token carries, unlike every other below-row, which is why it needs its
+// own measured term rather than joining the n this function already counts in belowRows).
+function belowReserveH(hasTr,tierCount,hasPos,avmH){ const n=belowRows(hasTr,tierCount,hasPos); return n*belowGap()+(n>0?STACKED_GAP:0)+(avmH>0?avmH+8:0); }   // +8 matches belowStack's own flat clearance step above the AVM box exactly — see its note there for why it isn't another belowGap()
+/* ── item 22: THE AVM TIER's OWN RENDERING — avmStruct (js/grid/grid.js) already built the grouped structure;
+   this is just the HTML for it. A REAL, CSS-styled box (nested brackets read as nested boxes: an outer
+   border for the whole matrix, an inner border around AGR/TAM's own sub-rows), not hand-drawn SVG shapes —
+   built once here and reused two ways: measured off-screen for its height (avmHeight, mounted via _mavm,
+   the SAME "must be a #doc descendant or var(--script-mag) etc. resolve to nothing" rule every other _m*
+   measuring element in this file already follows) and painted for real inside a <foreignObject> wherever a
+   notation draws its below-stack (belowStack below, and the wrapped views' own equivalents). One HTML
+   string, so the measured box and the painted one are BYTE-IDENTICAL — they can't drift apart into
+   "reserved for one height, drew a different one", the exact failure mode a hand-duplicated pair invites. */
+function avmHTML(t){ const struct=(typeof avmStruct==="function")?avmStruct(t):[]; if(!struct.length) return "";
+  const row=(feat,val)=>`<div class="avm-row" data-feat="${esc(feat)}" tabindex="0"><span class="avm-attr">${esc(feat)}</span><span class="avm-val">${esc(val)}</span></div>`;
+  const body=struct.map(it=>it.group
+    ? `<div class="avm-group"><span class="avm-glabel">${esc(it.group)}</span><div class="avm-grows">${it.rows.map(r=>row(r.feat,r.val)).join("")}</div></div>`
+    : row(it.feat,it.val)).join("");
+  return `<div class="avm">${body}</div>`; }
+const _mavm=document.createElement("div");
+_mavm.setAttribute("aria-hidden","true");
+_mavm.style.cssText="position:absolute;left:-99999px;top:0;pointer-events:none;visibility:hidden";
+function _measMountAVM(){ const doc=document.getElementById("doc"); if(doc&&_mavm.parentNode!==doc) doc.appendChild(_mavm); }
+// item 22: keyed on the FEATS string itself (not the token) — every token sharing the same FEATS (extremely
+// common: every 3rd-person singular present verb in a document, say) renders the identical AVM at the
+// identical height, so this is a real cache, not a one-shot memo, and stays correct across a re-render
+// (cleared there — see renderDoc's own call) since a stale entry can only ever be as wrong as a stale FEATS
+// string, which a re-render is the one thing that can't have without the document itself changing.
+let _avmHCache=new Map();
+// item 22: ONE measurement pass, both dimensions — a <foreignObject> (unlike SVG <text>) needs an explicit
+// width AND height, so belowStack's draw call needs the same box avmHeight already measures for the layout
+// reserve; splitting them into two functions would mean two DOM writes/reads (and, worse, two chances for
+// the CSS that renders the real box to drift from the CSS the reserve was sized against).
+function avmBox(t){ const feats=(t&&t.feats)||""; if(!feats||feats==="_"||!show.avm) return null;
+  if(_avmHCache.has(feats)) return _avmHCache.get(feats);
+  const html=avmHTML(t); if(!html){ _avmHCache.set(feats,null); return null; }
+  _measMountAVM(); if(!_mavm.isConnected) return null;   // no #doc to mount in (harness loading this file alone) — null rather than a wrong-font guess, matching every other _m*'s "detached ⇒ bail" rule
+  _mavm.innerHTML=html;
+  const r=_mavm.getBoundingClientRect(), box={html,w:r.width,h:r.height};
+  _avmHCache.set(feats,box);
+  return box; }
+function avmHeight(t){ const b=avmBox(t); return b?b.h:0; }
+// item 22: the reserve a shared row/level height needs is the TALLEST AVM among the tokens sharing it — every
+// belowReserveH call site that sizes ONE ROW'S worth of vertical room (as opposed to one specific token's own
+// hit-rect) passes this rather than a single token's avmHeight. Takes a plain token ARRAY so both a whole
+// sentence (D.tokens) and one wrapped row's own slice (r.idx.map(i=>t[i])) can call it the same way.
+function avmRowMaxH(toks){ return Math.max(0,...(toks||[]).map(avmHeight)); }
 function xHeight(f){_cv.font=f; const m=_cv.measureText("x"); return m.actualBoundingBoxAscent||6;}   // the x-height of a (POS) glyph — subtracted from the inter-tier step to seat the MWT bracket (POS tags now render via c2sc small caps, whose visual height sits at x-height, not full cap height)
 // sizeSid() — the JS width-measurement this comment described — is GONE: .sid-in is a contenteditable
 // span now (js/core/document.js's buildBlock), not an <input>, and a span with no explicit width simply
@@ -2776,7 +2829,7 @@ function linear(sent, depAbove){const gap=8,pad=2,SP=meas(" ",WORD_F),tk=sent.to
   // sit in their own independent row and shouldn't stretch a tie meant to visually group surface-form parts)
   const wform=tk.map(t=>fmeas(t,WORD_F));
   // slot = widest of word and (when shown) POS/transliteration/above-token deprel; uniform spacing → same minimum gap as tokens
-  const w=tk.map((t,i)=>Math.max(wform[i], show.pos?meas(posDisp(t),POS_F):0, trLayer()?meas(trTxt(t),trFont(t)):0, depAbove?meas(t.deprel||"",POS_F):0, glossSlotW(t), 16));   // item 13: fold in the gloss-tier rows so a wide gloss can't crowd/overlap its neighbour
+  const w=tk.map((t,i)=>Math.max(wform[i], show.pos?meas(posDisp(t),POS_F):0, trLayer()?meas(trTxt(t),trFont(t)):0, depAbove?meas(t.deprel||"",POS_F):0, glossSlotW(t), avmSlotW(t), 16));   // item 13: fold in the gloss-tier rows so a wide gloss can't crowd/overlap its neighbour. item 22: +AVM, same reasoning
   const hg=tk.map(t=>tailW(t,WORD_F));   // real-width room reserved to each host's inline-end for its folded punctuation (node centre c[i] stays on the host, so arc endpoints are unchanged)
   const ld=tk.map(t=>leadW(t,WORD_F));   // item 2: room reserved at the host's inline-START for right-merging punctuation that leads it
   // Subject=Generic: reserve a virtual ∅-token band just BEFORE this token's own slot (not widening the slot itself,
@@ -2830,7 +2883,7 @@ function tidyLayout(size,root,childrenOf,{lw,hgw,ldw,elw,SPW,NGAP}){
    invariant after moving nodes around, and a second literal there could drift from this one. */
 const STEMMA_PAD=2;
 function stemmaLayout(sent,catNodes,posBelow){const pad=STEMMA_PAD, SP=meas(" ",WORD_F)+8;   // gap matches arc view; slot also fits the baseline POS tag so they don't crowd
-  const lw=sent.tokens.map(t=>Math.max(fmeas(t,WORD_F),catNodes?meas(posDisp(t)||"X",POS_F):fmeas(t,NODE_F), posBelow?meas(posDisp(t)||"X",POS_F):0, trLayer()?meas(trTxt(t),trFont(t)):0, glossSlotW(t)));   // item 13: include the gloss-tier width so glosses stay spaced
+  const lw=sent.tokens.map(t=>Math.max(fmeas(t,WORD_F),catNodes?meas(posDisp(t)||"X",POS_F):fmeas(t,NODE_F), posBelow?meas(posDisp(t)||"X",POS_F):0, trLayer()?meas(trTxt(t),trFont(t)):0, glossSlotW(t), avmSlotW(t)));   // item 13: include the gloss-tier width so glosses stay spaced. item 22: +AVM, same reasoning
   const c=[], ldw=[]; let x=pad; sent.tokens.forEach((t,i)=>{ const lead=genericSubjGapW(sent.tokens,i,catNodes?POS_F:NODE_F)+leadW(t,NODE_F); ldw.push(lead); x+=lead; c.push(x+lw[i]/2); x+=lw[i]+tailW(t,NODE_F)+SP; });   // reserve inline-START room for right-merging leads (item 2) + inline-end room for trailing satellites; node centre stays on the host (arc endpoints unchanged). Subject=Generic: a virtual ∅-token band inserted just before, same idea as linear()
   const total=x-SP+pad;
   /* `ldw` is that inline-START reserve, kept PER NODE rather than being consumed into `x` and forgotten: it is
@@ -2857,6 +2910,21 @@ function belowStack(g,x,y0,tk,boxes,trRow){ let y=y0+STACKED_GAP;   // trRow: re
     boxes&&boxes.push({x,y:y-4,hx:(tier==="mgloss"?measGloss(dtxt,tierFont(tier,tk)):meas(dtxt,tierFont(tier,tk)))/2,hy:7});
     if(tier==="mseg"||tier==="mgloss") svgSeamMark(g,tk,x,y,(tier==="mgloss"?measGloss(dtxt,tierFont(tier,tk)):meas(dtxt,tierFont(tier,tk)))/2,tierFont(tier,tk),boxes,null,tier); });   // Item 8: each gloss / morphemic-gloss tier gains the SAME +descent(POS_F) top gap as the POS row, so all sub-token tiers share the descender-based breathing room; BELOW the transliteration and ABOVE the POS row; double-click or Enter to edit → MISC. The SEGMENTATION tier (mseg) and the MORPHEMIC GLOSS tier (mgloss) both take a seam mark — a mark drawn regardless of whether THIS tier happens to be annotated for this token (measured off the "…" placeholder's own width when it isn't), because the seam it decorates is a fact about the SEGMENTATION, not about this tier's own annotation coverage. Gating on `txt` used to silently drop the mark wherever MGloss was sparser than MSeg (a common, unremarkable state for hand-glossed data) — the row still shows a "…" cell there, so a boundary that MSeg draws cleanly would vanish from MGloss for that one seam while surviving on the very next one, reading as the mark randomly relocating/centring rather than a coverage gap. Both are PER-MORPHEME rows that a word-break genuinely interrupts; the lexical GLOSS tier (a single whole-word meaning, on request unchanged) does not
   if(show.pos && tk.upos){ y+=belowGap(); const pd=posDisp(tk); const e=E("text",{class:"tok-pos",x:x,y:y,"text-anchor":"middle"}); e.textContent=pd; svgTip(e,posTitle(tk.upos)); g.appendChild(e); boxes&&boxes.push({x,y,hx:meas(pd,POS_F)/2,hy:6}); }   // POS hover tooltip (Item 2). Item 1: +descent(POS_F) extra top gap on the POS step — the label font's (POS_F) descender depth, mirroring how the above-token rows fold in descent(WORD_F) — so the POS row isn't crowded by the descenders of the row above it. Every below-reserve that feeds a row height (stackH / belowH / stackBot / --undpad) folds in the SAME descent(POS_F), so POS stays aligned across renderers and nothing clips.
+  // item 22: the AVM tier — below the POS row, on request. A <foreignObject>, not SVG shapes: the nested-
+  // bracket box is genuine HTML/CSS (borders, flex), the one thing this codebase already reaches for
+  // foreignObject to paint when SVG text/shapes can't do the job cleanly (see the SMP-script note above).
+  // avmBox is ONE measured {html,w,h} — the SAME box belowReserveH's callers already sized their reserve
+  // against via avmHeight, so what gets drawn here can never come out taller than what was reserved for it.
+  const avm=(typeof avmBox==="function")?avmBox(tk):null;
+  if(avm){ y+=8;   // a flat 8px step, not another belowGap(): the AVM is not one more uniform text row (see belowReserveH's own note) — its OWN box supplies its height, this is just the clearance above it
+    const fo=document.createElementNS("http://www.w3.org/2000/svg","foreignObject");
+    fo.setAttribute("x",x-avm.w/2); fo.setAttribute("y",y); fo.setAttribute("width",avm.w); fo.setAttribute("height",avm.h);
+    fo.style.overflow="visible";
+    const div=document.createElementNS("http://www.w3.org/1999/xhtml","div");
+    div.setAttribute("xmlns","http://www.w3.org/1999/xhtml"); div.innerHTML=avm.html;
+    fo.appendChild(div); g.appendChild(fo);
+    boxes&&boxes.push({x,y:y+avm.h/2,hx:avm.w/2,hy:avm.h/2});
+    y+=avm.h; }
   return y;
 }
 /* multi-word tokens: a rounded tie under the baseline spanning the fused words, carrying the surface form.

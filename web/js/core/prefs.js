@@ -38,13 +38,13 @@ function prefTranslit(lang){ const t=PREFS.translit;
 function prefStored(lang){ return (PREFS.stored&&PREFS.stored[lang])||""; }
 let _prefsT=null;
 function savePrefs(){ if(!hasBridge())return;
-  PREFS.show={colour:show.colour,labels:show.labels,pos:show.pos,arrows:show.arrows,mergePunct:show.mergePunct,wrap:show.wrap,grids:show.grids}; PREFS.notation=notation; PREFS.paged=PAGED;
+  PREFS.show={colour:show.colour,labels:show.labels,pos:show.pos,arrows:show.arrows,mergePunct:show.mergePunct,wrap:show.wrap,grids:show.grids,avm:show.avm}; PREFS.notation=notation; PREFS.paged=PAGED;
   clearTimeout(_prefsT); _prefsT=setTimeout(()=>{ try{ window.pywebview.api.save_prefs(PREFS); }catch(e){} },300); }   // debounced
 async function loadPrefs(){ if(!hasBridge())return; let p; try{ p=await window.pywebview.api.get_prefs(); }catch(e){ return; } if(!p||typeof p!=="object")return;
   PREFS.ortho=(p.ortho&&typeof p.ortho==="object")?p.ortho:{}; PREFS.translit=(p.translit&&typeof p.translit==="object")?p.translit:{}; PREFS.stored=(p.stored&&typeof p.stored==="object")?p.stored:{};
   PREFS.glossMap=(p.glossMap&&typeof p.glossMap==="object")?p.glossMap:{}; if(typeof rebuildGlossMaps==="function")rebuildGlossMaps();   // item 13: restore custom gloss↔FEATS mappings and rebuild the effective + inverse maps
   PREFS.gridCols=(p.gridCols&&typeof p.gridCols==="object")?p.gridCols:{};   // the grid's pinned column choices. No per-key validation: colPin tests `typeof p[k]==="boolean"` at every read, so a junk value from a hand-edited prefs file reads as "never chose" and the width rule simply takes the column back
-  if(p.show&&typeof p.show==="object"){ ["colour","labels","pos","arrows","mergePunct","wrap","grids"].forEach(k=>{ if(typeof p.show[k]==="boolean") show[k]=p.show[k]; }); }
+  if(p.show&&typeof p.show==="object"){ ["colour","labels","pos","arrows","mergePunct","wrap","grids","avm"].forEach(k=>{ if(typeof p.show[k]==="boolean") show[k]=p.show[k]; }); }
   if(typeof p.notation==="string"&&p.notation){ notation=p.notation; }
   if(typeof p.paged==="boolean"){ PAGED=p.paged; }   // only an explicit stored choice moves it off the paged default
   if(typeof applyPageMode==="function") applyPageMode();   // reflect it on #doc + the toolbar pill (the re-render below repaints the sheets)
@@ -87,7 +87,7 @@ let MODELLANG={};   // language code → an installed model id, for auto-selecti
 // Language authority order (see maybeAutoDetectLang): (1) a filename `<langcode>_…` prefix pins the
 //  language and overrides everything; else (2) the Kyoto XPOS ⇒ lzh heuristic; else (3) fastText. The chosen
 //  language drives the parser via applyLang(lang,true)→syncModelToLang.
-let show={graphs:true,grids:true,colour:true,labels:true,pos:true,arrows:false,mergePunct:true,translit:false,wrap:true,extRel:true};   // translit starts OFF — turned on by the status-bar transliteration menu when a scheme is picked. extRel = Shared=Yes/Subject-raising ghost edges (dashed, decorative), on by default
+let show={graphs:true,grids:true,colour:true,labels:true,pos:true,arrows:false,mergePunct:true,translit:false,wrap:true,extRel:true,avm:false};   // translit starts OFF — turned on by the status-bar transliteration menu when a scheme is picked. extRel = Shared=Yes/Subject-raising ghost edges (dashed, decorative), on by default. avm (item 22) starts OFF like every other opt-in tier — see the Show/Hide drawer's own checkbox, index.html
 // Document-level glossing TIERS (item 4). Visibility flags; the data lives in MISC and round-trips there.
 //  · GLOSS_ON  → a single Gloss tier (MISC Gloss), one editable row per token.
 //  · MORPH_ON  → a morphemic gloss: TWO tiers, morpheme segmentation (MISC MSeg) + morpheme gloss (MISC MGloss),

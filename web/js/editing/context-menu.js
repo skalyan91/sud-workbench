@@ -688,7 +688,28 @@ function setGlossAbbrevAt(si,tokId,idx,ab){ const s=DOC[si]; if(!s)return; const
   mglossSyncFeats(t);
   syncXposMirror(t);
   markDirty(); preserveScroll(renderDoc); }
+/* ── item 22: AN AVM ROW'S OWN MENU — the SAME gesture as glossAbbrMenu just above, and the same "narrowed to
+   attested, UD's own order" source (attestedFeatVals, js/grid/grid.js) — but the AVM IS FEATS (avmStruct), so
+   there is no abbreviation-vs-Feat=Val translation step glossAbbrMenu needs: the row already names its own
+   feature, and every candidate is UD's own value spelling, not a Leipzig gloss. Picking one writes straight
+   to FEATS via avmSetFeat, the same call a hand-typed FEATS-grid edit makes. A one-value feature (Poss=Yes)
+   still offers no alternative — same "nothing to be an alternative to" judgement glossAbbrMenu makes — but,
+   unlike that menu, IS still worth opening here: an AVM row has no OTHER edit gesture (no text field under
+   it to type into), so a single "clear this feature" option is offered instead of declining outright. */
+function avmValueMenu(x,y,si,tokId,feat){
+  const s=DOC[si]; if(!s) return false; const t=s.tokens[tokId-1]; if(!t) return false;
+  const cur=getFeat(t.feats,feat);
+  const vals=(typeof attestedFeatVals==="function"?attestedFeatVals(feat):null)||UD_FEATS[feat]||[];
+  if(!vals.length) return false;
+  const desc=(typeof FEATS_VDESC==="object"&&FEATS_VDESC&&FEATS_VDESC[feat])||{};
+  const rows=vals.map(v=>({label:v, expand:desc[v]||"", check:v===cur, opt:true, fn:()=>avmSetFeat(si,tokId,feat,v)}));
+  if(vals.length>1) rows.push(null,{label:"Clear "+feat, fn:()=>avmSetFeat(si,tokId,feat,null)});   // item 1's own "clear this" convention (a leading `null` closes the checkmark group so this row sits flush, un-ticked, at the flyout's own level)
+  showCtx(x,y,[{header:feat}].concat(rows), rows.length>12, sentRTL(s));
+  return true; }
 document.getElementById("doc").addEventListener("contextmenu",e=>{
+  const avmEl=e.target.closest&&e.target.closest(".avm-row");   // item 22: BEFORE every other resolver, same reasoning as .glabbr just below — an AVM row sits inside the token group the generic node branch would otherwise claim
+  if(avmEl){ const tk=tokFromEl(avmEl);
+    if(tk && avmValueMenu(e.clientX,e.clientY,tk.si,tk.tokId,avmEl.dataset.feat)){ e.preventDefault(); e.stopPropagation(); return; } }
   const abEl=e.target.closest&&e.target.closest(".glabbr");   // BEFORE every other resolver: a .glabbr sits inside the gloss row, which sits inside the token group the generic node branch below would otherwise claim
   if(abEl){ const gl=abEl.closest(".gl-edit"), tk=gl&&tokFromEl(gl);
     if(gl&&tk&&(gl.dataset.tier||"gloss")==="mgloss"){
