@@ -887,6 +887,33 @@ function smpUnshaped(s){
    anything that's already correctly placed — makes every getComputedStyle() below answer for real; the
    `finally` detaches it again exactly as found, since the actual caller still owns where this element
    belongs and inserts it itself moments later. */
+/* item 25: swap `el` (an SVG <text> whose content js/lang/smp-shape.js has already shaped, per `shape`)
+   for a plain <path> painting shape.d directly. No foreignObject, no HTML box model — every one of
+   smpReshape's own hand-measured corrections below (the centring half-padding, foBaselineDrop, arcShift,
+   ARC_SEAM_LIFT_PX/ARC_SEAM_XSHIFT_PX) exists to bridge HTML layout back into this SVG's own coordinate
+   space; a <path> never leaves it, so none of them apply and none are touched — this is a NEW, PARALLEL
+   route, not a rewrite of the old one (see smpReshape's own note on where the two now diverge).
+   Attributes copy verbatim except x/y (a <path> has neither) and text-anchor (consumed below instead,
+   since <path> has no anchoring of its own) — so class-based CSS (fill, the paint-order:stroke casing
+   halo every OTHER glyph in this file already gets, dimming, selection) and every data-* the delegated
+   click/contextmenu handlers key on transfer unchanged: a <path> is exactly as addressable as the <text>
+   it replaces, styled by the SAME rules with no .fo-form-style parallel CSS needed. The <title> tooltip
+   child (svgTip) moves over bodily, not rebuilt, so its content can't drift from whatever the caller set.
+   Position is a `transform="translate(…)"`, not baked into `d` — shape.d is already in the shaped run's
+   own local coordinates (glyph 0 at local (0,0)), so a transform places it without re-parsing a single
+   path command; ox folds in the ORIGINAL element's own text-anchor (default "middle", matching every
+   token-glyph <text> in this file) against shape.w, the run's real shaped advance width. */
+function smpSwapPath(el,shape){
+  const anchor=el.getAttribute("text-anchor")||"middle";
+  const x=parseFloat(el.getAttribute("x"))||0, y=parseFloat(el.getAttribute("y"))||0;
+  const ox=anchor==="middle"?x-shape.w/2:anchor==="end"?x-shape.w:x;
+  const path=document.createElementNS(SVGNS,"path");
+  for(const a of el.attributes) if(a.name!=="x"&&a.name!=="y"&&a.name!=="text-anchor") path.setAttribute(a.name,a.value);
+  path.setAttribute("d",shape.d);
+  path.setAttribute("transform","translate("+ox+","+y+")");
+  while(el.firstChild) path.appendChild(el.firstChild);   // the <title> tooltip child, if any (svgTip) — moved, not rebuilt
+  if(el.parentNode) el.parentNode.replaceChild(path,el);
+  return path; }
 function smpReshape(root){
   if(!root||!root.querySelectorAll) return;
   const mounted=!root.isConnected;
@@ -916,7 +943,27 @@ function smpReshape(root){
   let hadSMP=false;
   for(const el of texts){ if(smpUnshaped(ownText(el))){ hadSMP=true; break; } }
   for(const el of texts){ const s=ownText(el);
-    if(!smpUnshaped(s) && !(hadSMP && isPunctSat(el))) continue;
+    const punctSatSMP=hadSMP&&isPunctSat(el);
+    if(!smpUnshaped(s) && !punctSatSMP && !SMP_RE.test(s||"")) continue;
+    /* item 25: try the REAL fix first, on every engine — smpSwapPath (below) paints HarfBuzz-shaped glyph
+       outlines as a plain SVG <path>, which shapes identically wherever it runs, so unlike the
+       foreignObject fallback further down (which specifically exploits WebKit's OWN native HTML text
+       path, and is therefore gated on IS_CHROMIUM via smpUnshaped) this is never engine-gated — Chrome
+       gets the same treatment as WebKit. `hasSMP` — SMP_RE alone, no IS_CHROMIUM — is deliberately a
+       DIFFERENT, wider test than smpUnshaped's own: shaping doesn't care which engine asked for it.
+       A punct-sat daṇḍa's own text is plain BMP (SMP_RE never matches it) and has nothing here to shape
+       — it keeps riding the OLD foreignObject path below exactly as before, matching whatever its SMP
+       neighbour ends up doing, which is what punctSatSMP has always been for. */
+    if(SMP_RE.test(s||"")){
+      const cs0=getComputedStyle(el);
+      const fam=(cs0.fontFamily||"").split(",")[0].trim().replace(/^["']|["']$/g,"");
+      const sizePx=parseFloat(cs0.fontSize)||0;
+      if(fam&&sizePx){
+        const shape=(typeof smpShapeSync==="function")?smpShapeSync(s,fam,sizePx):null;
+        if(shape&&shape.d){ smpSwapPath(el,shape); continue; }   // shaped and ready — paint it, skip the HTML fallback below entirely
+        if(typeof smpShapeEnsure==="function"&&typeof smpNotePending==="function") smpNotePending(smpShapeEnsure(s,fam,sizePx));   // not ready yet — kick off shaping in the background; this render falls through to the fallback below exactly as it always has, and a later render picks up the native path once it lands
+      } }
+    if(!smpUnshaped(s) && !punctSatSMP) continue;   // no native shape yet, and this engine already shapes it fine natively (Chrome) — leave the plain <text> exactly as it was
     const cs=getComputedStyle(el), f=cs.font||((cs.fontWeight!=="400"?cs.fontWeight+" ":"")+cs.fontSize+" "+cs.fontFamily);
     const w=_measDOM(s,f); if(!(w>0)) continue;
     const x=parseFloat(el.getAttribute("x"))||0, y=parseFloat(el.getAttribute("y"))||0;

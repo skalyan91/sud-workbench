@@ -138,3 +138,21 @@ async function smpShapeEnsure(text,family,sizePx){ const key=_shapeKey(text,fami
   try{ shape=await _shapeSMP(text,family,sizePx); }catch(e){ shape=null; }
   _shapeCache.set(key,shape);
   return shape; }
+
+// item 25: coalesced re-render once a BURST of newly-kicked-off shapes all resolve — the SAME
+// _fontSettle/_fontPending pattern fontload.js's own document.fonts "loadingdone" listener already uses,
+// for the identical reason: smpReshape (diagram-core.js) runs once PER SENTENCE, so a document with
+// several SMP sentences would otherwise fire one re-render per sentence as each shape lands — each one
+// re-measuring/re-laying-out a diagram that is about to be thrown away and rebuilt again moments later.
+// smpReshape calls this every time IT kicks off a smpShapeEnsure that wasn't already cached; once no more
+// arrive for 80ms (the same settle window fontload.js uses, for the same "several faces/shapes of one
+// document land in a burst" reason), the whole batch is awaited and exactly one re-render follows.
+let _smpPending=[], _smpSettle=null;
+function smpNotePending(promise){
+  _smpPending.push(promise);
+  clearTimeout(_smpSettle);
+  _smpSettle=setTimeout(async()=>{
+    const batch=_smpPending; _smpPending=[];
+    try{ await Promise.all(batch); }catch(e){ /* individual failures already cached as null by smpShapeEnsure — nothing to do here */ }
+    if(typeof DOC!=="undefined"&&DOC.length&&typeof preserveScroll==="function"&&typeof renderDoc==="function") preserveScroll(renderDoc);
+  },80); }
