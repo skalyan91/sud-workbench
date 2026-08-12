@@ -2245,7 +2245,18 @@ function positionBracketAnnots(){ document.querySelectorAll("#doc .bwrap").forEa
     svg.appendChild(E("path",{class:"mwt-tie-cas",d:tieD}));   // occlusion halo behind the tie (matches the SVG-view mwtTie)
     svg.appendChild(E("path",{class:"mwt-tie",d:`M ${x0} ${yb} L ${x0} ${yb+dp+0.421875} M ${x1} ${yb+dp+0.421875} L ${x1} ${yb}`}));   // end-pins: the full weight — each extends 0.421875px (half the bar's own .75·--arc-stroke width, now 1.125px — item 1) PAST the bar's centreline so its (thicker) stroke fully covers the corner the (thinner) bar's stroke reaches, instead of butting flush and leaving a notch
     svg.appendChild(E("path",{class:"mwt-tie-h",d:`M ${x0} ${yb+dp} L ${x1} ${yb+dp}`}));   // the horizontal bar, drawn thinner — per psychophysics, a horizontal stroke reads heavier than a vertical one of the same width
-    const fyb=yb+dp+20, STEP=belowGap();
+    // fyb: the form row's baseline, `dp` below the tie plus mwtFormLead() — the SAME call tieLayout()/mwtTie()
+    // (js/diagram/diagram-core.js) use for every OTHER notation's MWT tie. This used to be a bare "+20", which is
+    // exactly mwtFormLead()'s value at TOK_MAG===1 and had drifted from it: mwtFormLead() picked up a
+    // magnification-dependent ascent term (commit c3113ec, "Draw the scripts SVG will not shape as HTML…") so an
+    // enlarged script (Devanagari and the rest of INDIC_SCRIPTS at 1.5×, the ORNAMENTAL_SCRIPTS at 2×) needs MORE
+    // room between the tie and the form's ink top than an unmagnified one does — mwtTie's own rows grew to match,
+    // this bare "20" never did. On report ("mwt-g is 82px tall in brackets, but 96px tall in arcs" — Devanagari,
+    // BMP, so smpReshape's own SMP-only fix, dfb4af7, cannot be it): live-measured, the wrapped-brackets MWT
+    // form's own INK TOP sat 4px ABOVE the tie bar it is supposed to hang below (arcs' equivalent sits a clean
+    // 2.75px under it) — the magnified glyph's ascent was reaching up past a seat that never grew to give it the
+    // room mwtFormLead() already reserves everywhere else.
+    const fyb=yb+dp+mwtFormLead(), STEP=belowGap();
     if(m.kind==="xpos"){ drawTieLabel(svg,mx,fyb,m.pos,"mwt-pos","mwt-pos-cas",POS_F,null); tagXPosLabel(svg.lastElementChild,si0,m); return; }   // item 1: an ExtPos-only bracket — the value itself is the label, in the POS register
     const mfd=bform(m); let ly=fyb;
     const iastRow=iastFormEdit();   // Sanskrit + a real script → the surface form is edited on the IAST ROW, never on the derived glyph; same contract (and same {data-s, data-mwtfrom} tagging) as the SVG views' mwtTie
@@ -2257,7 +2268,7 @@ function positionBracketAnnots(){ document.querySelectorAll("#doc .bwrap").forEa
     const cas=E("text",{class:"mwt-cas",x:mx,y:fyb,"text-anchor":"middle"}); cas.textContent=mfd; cas.setAttribute("aria-hidden","true"); svg.appendChild(cas);   // opaque backing behind the reconstructed word (and over the translit row above)
     const fe=E("text",{class:"mwt-form",x:mx,y:fyb,"text-anchor":"middle"}); fe.textContent=mfd;
     if(si0>=0&&m.fromTok!=null){ fe.setAttribute("data-s",si0); fe.setAttribute("data-mwtfrom",m.fromTok); fe.style.cursor=formCursor(); svgTip(fe,iastRow?"multi-word token — click to edit the surface form (on the IAST row below, which this glyph is derived from)":"multi-word token — click to edit the surface form"); }   // same click-to-edit contract as the SVG views' mwtTie: the delegated #doc click/contextmenu handlers key off data-s + data-mwtfrom. `_ties` already stores fromTok as OID(from−1) — the ORIGINAL token id editMWTInline looks up — so a display fold can't misaddress it. Without these attributes the WRAPPED bracket view was the one tie-drawing notation whose surface form couldn't be edited at all, and its right-click menu resolved si/from to NaN.
-    svg.appendChild(fe);   // item 8/9: SCRIPT + sandhi-fused surface form (m.ortho), like single tokens. +20 matches mwtTie's extra top-gap so the 15px MWT form clears the tokens above (see .bwrap.hasmwt padding). Appended LAST → paints on top of the translit row (Item 9)
+    svg.appendChild(fe);   // item 8/9: SCRIPT + sandhi-fused surface form (m.ortho), like single tokens. fyb (mwtFormLead() above) matches mwtTie's own top-gap so the 15px MWT form clears the tokens above (see .bwrap.hasmwt padding), magnified script included. Appended LAST → paints on top of the translit row (Item 9)
     // item 8 — gather the tie's whole stack into ONE .mwt-g carrying the COMPONENT RANGE, so a selected MWT accents
     // as a unit and rides applySel()'s live class toggle. box._ties already stores fromTok/toTok as ORIGINAL token
     // ids (OID(from−1)/OID(to−1)), which is the space selRange speaks — so no remapping is needed here.

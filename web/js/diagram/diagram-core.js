@@ -3351,8 +3351,8 @@ function rowTies(D,s0,e0){ const reb=o=>({...o,from:o.from-s0,to:o.to-s0});
           mwt:(D.mwt||[]).filter(m=>m.from-1>=s0&&m.to-1<=e0).map(m=>({...reb(m),_from:m._from!=null?m._from:m.from,_to:m._to!=null?m._to:m.to})),   // _from/_to must be pinned to the ORIGINAL ids BEFORE reb() rebases from/to onto this row, or the tie could no longer match the component range selRange holds (item 8)
           xpos:(D.xpos||[]).filter(x=>x.from-1>=s0&&x.to-1<=e0).map(reb)}; }
 // item 1 — how far ONE wrapped-bracket tie reaches below its own tie TOP, down to the baseline of its deepest
-// label. Mirrors positionBracketAnnots' drawing offsets (PIN 6, form +20, each further row a full inter-tier
-// step) and is what reserveBracketArcRoom / the .hasmwt bottom padding both reserve against.
+// label. Mirrors positionBracketAnnots' drawing offsets (PIN 6, form +mwtFormLead(), each further row a full
+// inter-tier step) and is what reserveBracketArcRoom / the .hasmwt bottom padding both reserve against.
 // `lead`: the SAME gap tieLead()/mwtTie seat every SVG tie's body with (below-stack bottom → tie top), so an
 // HTML tie's reserved depth stays in step with wherever positionBracketAnnots (js/core/document.js) actually
 // draws it — see the `yb` there, which computes the tie's top the identical way: undBot + 5 + tieLead() + r.dy.
@@ -3382,9 +3382,9 @@ function rowTies(D,s0,e0){ const reb=o=>({...o,from:o.from-s0,to:o.to-s0});
 // AVM is (correctly) not this function's concern at all — every caller already has it covered before it calls in.
 function htmlTieBottom(r){ const PIN=6, STEP=belowGap(), lead=5+tieLead();
   if(r.kind==="gw") return lead+r.dy+gwDepth();                            // the tie has no label under it — it reaches only as far as the glyph's own ink
-  if(r.kind==="xpos") return lead+r.dy+PIN+20;                             // the ExtPos value IS the label
+  if(r.kind==="xpos") return lead+r.dy+PIN+mwtFormLead();                  // the ExtPos value IS the label
   const n=belowRows((trLayer()&&trTxt(r)),0,!!r.pos);
-  return lead+r.dy+PIN+20+n*STEP+(n>0?STACKED_GAP:0); }                    // MWT surface form, then its transliteration row, then any ExtPos annotation — STACKED_GAP once (belowReserveH's math), for the same reason belowStack seeds it once rather than per row
+  return lead+r.dy+PIN+mwtFormLead()+n*STEP+(n>0?STACKED_GAP:0); }         // MWT surface form, then its transliteration row, then any ExtPos annotation — STACKED_GAP once (belowReserveH's math), for the same reason belowStack seeds it once rather than per row. mwtFormLead(), not a bare 20: this RESERVES the room positionBracketAnnots' fyb (document.js) actually DRAWS into, and that draw site grows with a magnified script's ascent (INDIC_SCRIPTS/ORNAMENTAL_SCRIPTS) — a fixed 20 here under-reserved exactly that excess, which is what let the drawn form's ink lift clear of its own reservation (see the note on `fyb` in document.js for the live-measured report this pairs with)
 function mwtDepth(D){ return tieLayout(D).depth; }   // extra vertical room the bracket stack needs below the below-stack bottom. Item 1 made this tier-aware — one entry per bracket TIER, each as deep as the deepest label that tier carries (an MWT surface form, plus its transliteration row and/or an ExtPos annotation) — so an ExtPos bracket that pushes an overlapping MWT tie down a tier also grows every reserve that folds in mwtDepth (arcsWrapped's per-row tieBot, projWrapped, belowH) in lockstep. With a single plain MWT tie and no ExtPos it returns exactly the former fixed 39+descent(POS_F)−xHeight(POS_F) (39 with no POS row), +belowGap() for a transliteration row — the seating those constants were tuned for is unchanged.
 
 /* labels are always horizontal and centred on their edge (x-height middle); collision avoidance is
