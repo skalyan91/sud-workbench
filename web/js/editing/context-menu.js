@@ -478,6 +478,7 @@ function nodeTokenMenu(x,y,si,tokId){ const s=DOC[si]; if(!s)return; const rtl=s
     null, ...insertItems(si,tokId,false),
     null, ...headItems(si,tokId),
     null, ...markFeatRow(si,tokId),
+    null, ...addFeatureRow(si,tokId),
     null, ["Set as root","⌃⌘R",()=>setAsRoot(si,tokId)],
     // item 2 of the parity fix: MISC NewPar=Yes, matching the grid's own tokenMenu row (same label/shortcut/
     // checkmark, same shared toggleTokNewPar) — grouped with Set as root exactly as the grid groups it.
@@ -747,14 +748,54 @@ function avmValueMenu(x,y,si,tokId,key){
   members.forEach(feat=>{
     const cur=getFeat(t.feats,feat);
     const vals=(typeof attestedFeatVals==="function"?attestedFeatVals(feat):null)||UD_FEATS[feat]||[];
-    if(!vals.length) return;
+    if(!vals.length && !cur) return;   // nothing to pick AND nothing to clear
     const desc=(typeof FEATS_VDESC==="object"&&FEATS_VDESC&&FEATS_VDESC[feat])||{};
     items.push({header:feat});
-    vals.forEach(v=>items.push({label:v, expand:desc[v]||"", check:v===cur, opt:true, fn:()=>avmSetFeat(si,tokId,feat,v)}));
-    if(vals.length>1) items.push(null,{label:"Clear "+feat, fn:()=>avmSetFeat(si,tokId,feat,null)}); });   // item 1's own "clear this" convention (a leading `null` closes the checkmark group so this row sits flush, un-ticked, at the flyout's own level)
+    // BUGFIX (parity audit): alternates are only worth OFFERING when there's more than one candidate to pick
+    // between — that's what `vals.length>1` was actually testing for. It used to ALSO gate the Clear row below,
+    // which conflated "is there an alternative value" with "is this feature genuinely set" — a feature whose
+    // attested set has narrowed to exactly one value (permanently true for Reflex=Yes/Abbr=Yes; commonly true
+    // early in annotation for any feature the document has so far only used one value of) silently lost its
+    // Clear option, contradicting this function's own comment above ("a single clear-this-feature option is
+    // offered instead of declining outright"). The two checks are now separate: `vals.length>1` still gates the
+    // picker rows (nothing to switch a single-candidate feature TO — re-picking the one listed value was already
+    // a no-op, avmSetFeat returns early when next===t.feats), while Clear is gated on `cur` alone.
+    if(vals.length>1) vals.forEach(v=>items.push({label:v, expand:desc[v]||"", check:v===cur, opt:true, fn:()=>avmSetFeat(si,tokId,feat,v)}));
+    if(cur) items.push(null,{label:"Clear "+feat, fn:()=>avmSetFeat(si,tokId,feat,null)}); });   // item 1's own "clear this" convention (a leading `null` closes the checkmark group so this row sits flush, un-ticked, at the flyout's own level)
   if(!items.length) return false;
   showCtx(x,y,items, items.length>12, sentRTL(s));
   return true; }
+/* ── parity audit fix: the AVM tier's missing "create a NEW feature" gesture. avmValueMenu just above only
+   ever EDITS a feature already present in FEATS — avmStruct (js/grid/grid.js) only ever emits a row for a
+   feature already set, so a token with feats="_" draws no AVM box at all, and there is nothing to right-click.
+   This is the token-menu row (wired into nodeTokenMenu below) that closes the other half of that gap: it lets
+   a token gain its FIRST value for any standard UD/SUD feature it doesn't carry yet, on a token with or
+   without an existing AVM box, by reading t.feats directly rather than going through avmStruct/avmLayout.
+   Scoped to the exact same standard feature set the AVM tier itself draws from (UD_FEATS minus AVM_EXCLUDE,
+   js/grid/grid.js) — no arbitrary/custom key, on request — and further narrowed to features NOT already set:
+   an already-set one is edited through its own AVM row instead (avmValueMenu above), via the SAME avmSetFeat
+   write either way, so behaviour (FEATS serialization, syncXposMirror, undo, dirty-marking, re-render) stays
+   identical to every other FEATS edit path.
+   ONE FLYOUT, header-grouped by feature (mirrors posSubItems' own dot-suffix picker, a few hundred lines up) —
+   not a chained "pick the feature, THEN pick the value" pair of flyouts: the context-menu system supports only
+   one nested flyout (openSub's singleton ctx2), so a `sub` row rendered INSIDE that flyout has nowhere further
+   to open. */
+function addFeatureItems(si,tokId){
+  const s=DOC[si], t=s&&s.tokens[tokId-1]; if(!t) return [];
+  const cands=Object.keys(UD_FEATS).filter(f=>!AVM_EXCLUDE.has(f)&&getFeat(t.feats,f)==null);
+  const items=[];
+  cands.forEach(f=>{
+    const vals=(typeof attestedFeatVals==="function"?attestedFeatVals(f):null)||UD_FEATS[f]||[];
+    if(!vals.length) return;
+    const desc=(typeof FEATS_VDESC==="object"&&FEATS_VDESC&&FEATS_VDESC[f])||{};
+    items.push({header:f});
+    vals.forEach(v=>items.push({label:v, expand:desc[v]||"", fn:()=>avmSetFeat(si,tokId,f,v)})); });
+  return items; }
+// the nodeTokenMenu row itself — omitted entirely when every standard feature is already set (same guard
+// shape as markFeatRow just above it), so the menu never grows for a token with nothing left to add.
+function addFeatureRow(si,tokId){
+  const items=addFeatureItems(si,tokId);
+  return items.length ? [{label:"Add feature…", sub:()=>addFeatureItems(si,tokId), subFit:true}] : []; }
 // item 3 — shared by BOTH triggers below (right-click and double-click), so the two gestures can't come to
 // different conclusions about what was hit. A combined AGR/TAM row's own value carries one [data-subfeat]
 // span/tspan per member (drawAVM/avmInline, diagram-core.js). Landing on one of THOSE scopes the menu to that
