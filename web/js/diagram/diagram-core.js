@@ -2588,7 +2588,7 @@ function belowRows(hasTr,tierCount,hasPos){ return (hasTr?1:0)+tierCount+(hasPos
 // space between the POS tag and the AVM, so that it matches the space above the POS tag") — belowGap() IS
 // that space (the same row-to-row step every other below-stack row is seeded by), so this reuses it rather
 // than re-deriving a second number that could drift from it.
-function belowReserveH(hasTr,tierCount,hasPos,avmH){ const n=belowRows(hasTr,tierCount,hasPos); return n*belowGap()+(n>0?STACKED_GAP:0)+(avmH>0?avmH+belowGap():0); }   // belowGap() matches belowStack's own clearance step above the AVM box exactly — see its note there
+function belowReserveH(hasTr,tierCount,hasPos,avmH){ const n=belowRows(hasTr,tierCount,hasPos); return n*belowGap()+(n>0?STACKED_GAP:0)+(avmH>0?avmH+avmTopGap():0); }   // avmTopGap() matches belowStack's own clearance step above the AVM box exactly — see its own note
 /* ── item 22, round 2: THE AVM TIER's OWN RENDERING, REDRAWN AS NATIVE SVG — no <foreignObject>. Round 1 was
    a real HTML/CSS box (nested borders read as brackets) painted inside a foreignObject, measured off-screen
    via a hidden #doc-mounted div. That measured centred to sub-pixel precision under headless Chrome — but the
@@ -2659,6 +2659,27 @@ function avmSlotW(t){ const b=avmLayout(t); return b?b.w:0; }
 // hit-rect) passes this rather than a single token's avmHeight. Takes a plain token ARRAY so both a whole
 // sentence (D.tokens) and one wrapped row's own slice (r.idx.map(i=>t[i])) can call it the same way.
 function avmRowMaxH(toks){ return Math.max(0,...(toks||[]).map(avmHeight)); }
+/* item 25/4, round 2 — the clearance from whatever baseline sits ABOVE the AVM (the POS row's own baseline,
+   at every call site) to the AVM box's own TOP EDGE, on request ("more space between the POS tag and the
+   AVM, matching the space above the POS tag" — then, once belowGap() itself was tried and read as visibly
+   too much, "now there's too much space").
+   belowGap() alone overshot because it is a BASELINE-TO-BASELINE step, tuned for text-to-text transitions
+   where the FOLLOWING row's own glyph ascent eats back up into that step before its ink actually starts —
+   which is exactly why the real visible gap above the POS row itself (measured live, word→POS, headless
+   Chrome) is only ~1.6px despite belowGap() computing to ~21.6: POS_F's own ascent (~14px) and the row
+   above's descent both carve into the nominal step. A BOX has no ascent of its own to donate back — its
+   ink starts exactly at its padding-inset top edge — so handing it the bare belowGap() as a top-edge offset
+   left the full step as pure whitespace, visibly more than the same step reads as between two text rows.
+   The fix treats the AVM as one MORE row in the identical baseline-step sequence, then converts that
+   notional baseline back into a box-top offset the same way any row's own ink-top sits above ITS baseline:
+   a hypothetical AVM "baseline" belowGap() below the POS baseline, minus AVM_PAD_V and the first row's own
+   ascent(AVM_VAL_F) (the exact offset avmLayout's own row math seats that first row's text at, inside the
+   box) — the same quantity every other row's ascent would have subtracted, using the box's own metrics in
+   place of a glyph's. Verified live: 21.6 (belowGap()) − 2 (AVM_PAD_V) − 9.8 (ascent(AVM_VAL_F)) ≈ 9.8px,
+   between the two rejected extremes (flat 8, "too little"; bare belowGap()=21.6, "too much") and principled
+   rather than a third guess — it is the same row-to-row relationship every other transition in this stack
+   already has, just computed against a box's metrics instead of a font's. */
+function avmTopGap(){ return belowGap()-AVM_PAD_V-ascent(AVM_VAL_F); }
 // item 22 round 2 — paints ONE avm box into `svg` (an existing <g>/<svg> — belowStack's own diagram-root
 // group for a flat notation, or a wrapped view's own overlay <svg>), centred on cx, top edge at y0. Returns
 // the box's own bottom y (y0+h), the same "hand back where you left off" contract belowStack's other rows use.
@@ -3096,7 +3117,7 @@ function belowStack(g,x,y0,tk,boxes,trRow){ let y=y0+STACKED_GAP;   // trRow: re
   // item 22: the AVM tier — below the POS row, on request. Native SVG now (drawAVM, see its own note) — `g`
   // is this token's own group (already carrying data-s/data-tok, see every belowStack call site), so drawAVM
   // needs no si/tokId of its own: tokFromEl's ".closest('[data-s]')" walk finds it on `g` regardless.
-  if(avmLayout(tk)) y=drawAVM(g,x,y+belowGap(),tk,null,null,boxes);   // item 25/4: belowGap(), not a flat 8px, on request — "more space between the POS tag and the AVM, matching the space above the POS tag"; belowReserveH's own avmH term was raised to match
+  if(avmLayout(tk)) y=drawAVM(g,x,y+avmTopGap(),tk,null,null,boxes);   // item 25/4 round 2: avmTopGap() — see its own note for why bare belowGap() (tried first) read as visibly too much
   return y;
 }
 /* multi-word tokens: a rounded tie under the baseline spanning the fused words, carrying the surface form.

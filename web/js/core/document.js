@@ -2288,7 +2288,7 @@ function positionBracketAnnots(){ document.querySelectorAll("#doc .bwrap").forEa
       const f=tok.querySelector(".bwform")||tok, u=tok.querySelector(".bwund"), fTop=tok.offsetTop+(f===tok?0:f.offsetTop);
       const bot=u?fTop+u.offsetTop+u.offsetHeight:fTop+(f===tok?tok.offsetHeight:f.offsetHeight);
       const ox=(f===tok?0:tok.offsetLeft), cx=ox+f.offsetLeft+f.offsetWidth/2;
-      drawAVM(svg,cx,bot+belowGap(),t,si0,oid,null); }); }   // item 25/4: belowGap(), not a flat 8px — see belowStack's own identical change
+      drawAVM(svg,cx,bot+avmTopGap(),t,si0,oid,null); }); }   // item 25/4 round 2: avmTopGap() — see belowStack's own note. `bot` here is a live DOM edge, not a baseline, so this is a slightly looser match to "the space above POS" than the other two call sites (which measure from a real baseline) — but avmTopGap()'s own VALUE is a plain small clearance number either way, and matching the other two sites exactly means one formula to keep in sync rather than a fourth, untested one for this context alone
   box.appendChild(svg); }); }
 // continuous span wash for wrapped brackets: one rounded rect per line, spanning the selected constituent's
 // elements on that line (drawn behind the text)

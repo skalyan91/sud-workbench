@@ -1363,7 +1363,7 @@ function tree(si){
     // already carries STACKED_GAP once, from its own seed — see dropYD's note above), which is exactly what the
     // hasPos=false belowReserveH calls sizing this level (LV/H, above) already reserved room against.
     { const STEP=belowGap(), nodeBot=dropYD+(trTxt(t[i])?STEP:0)+belowTierN()*STEP;
-      if(avmLayout(t[i])) drawAVM(g,x[i],nodeBot+STEP,t[i],null,null,loB); }   // item 25/4: STEP (=belowGap()), not a flat 8px — see belowStack's own identical change
+      if(avmLayout(t[i])) drawAVM(g,x[i],nodeBot+avmTopGap(),t[i],null,null,loB); }   // item 25/4 round 2: avmTopGap() — see belowStack's own identical change/note; not row-specific (it converts one MORE belowGap() step into a box-top offset using the box's own metrics, whatever row precedes it)
     g.appendChild(lbl); gwFormSVG(g,lbl,t[i],x[i],nyD,NODE_F,"node-lbl",si,loB);   // goeswith: the continuation parts join the head on the node row, so the ONE translit/gloss stack drawn above spans the whole word
     if(gwOf(t[i]).length){ const ids=[OID(i)].concat(gwOf(t[i]).map(p=>p.oid));
       g.setAttribute("data-gw",ids.join(" "));
