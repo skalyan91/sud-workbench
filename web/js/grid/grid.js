@@ -784,7 +784,13 @@ const AVM_GROUPS={AGR:["Person","Number","Gender","Clusivity"], TAM:["Tense","As
 // morphological content the diagram states NOWHERE else; these two are syntactic/discourse facts that
 // already have a dedicated mark, so listing them again here would be the same "told twice" problem
 // NumType/PronType/VerbForm were excluded for, just via a different second notation instead of the POS tag.
-const AVM_EXCLUDE=new Set(["NumType","PronType","VerbForm","ExtPos","Shared"]);
+// item 25/3: Foreign and Typo, same reasoning again — Foreign already renders the form itself in italics
+// (isForeign/italDeco/frnUp, diagram-core.js — the token's OWN glyph carries the mark), and Typo already
+// draws a strikethrough over the form (svgMarks). Reported is listed too, on request, though it's inert
+// here by construction: isReported reads t.misc, never t.feats (miscKV(t.misc,"Reported")), and avmStruct
+// only ever looks at t.feats — Reported was never going to reach an AVM row regardless of this Set, but
+// naming it keeps this list matching the mark-already-exists reasoning it's part of, in full.
+const AVM_EXCLUDE=new Set(["NumType","PronType","VerbForm","ExtPos","Shared","Foreign","Typo","Reported"]);
 /* The token's FEATS as an ordered, FLAT AVM row list — no nesting any more (item 23): [{group:"AGR",
    members:[...set ones...], combined:"3.Sing.Fem"}, {group:"TAM",...} (either omitted outright if the token
    sets NONE of that group's features — an empty bracket is worse than no bracket), then every remaining set,
