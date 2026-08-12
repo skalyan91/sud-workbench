@@ -1726,7 +1726,7 @@ function refreshFontStacks(){
   MWT_F=WORD_F;   // TRANS_F/TRANS_UP_F used to be set on this line; they are now set earlier, beside TR_ROW_DESC, which measures one of them — see its note
   GRID_ITAL_F='italic 462 13px '+LIVE_MONO_STACK;
   GLOSS_F=weightCurve(13.2)+' 13.2px '+LIVE_TOKEN_STACK; MSEG_F='italic 15px '+LIVE_TOKEN_STACK; MSEG_UP_F='15px '+LIVE_TOKEN_STACK; MGLOSS_F=weightCurve(13.2)+' 13.2px '+LIVE_TOKEN_STACK;
-  AVM_ATTR_F=weightCurve(10.5)+' 10.5px '+LIVE_TOKEN_STACK; AVM_VAL_F='700 10.5px '+LIVE_TOKEN_STACK;
+  AVM_ATTR_F=weightCurve(10.5)+' 10.5px '+LIVE_TOKEN_STACK; AVM_VAL_F=weightCurve(10.5)+' 10.5px '+LIVE_TOKEN_STACK;   // was a flat 700 (unnecessarily bold, on report) — weight is a SIZE property here, not an emphasis one; weightCurve(10.5) matches the attr label beside it (both 571) rather than reading heavier for no reason
   GW_TIE_F=magFont(26);
 }
 // THE SEAM MARK (seamMark — "=" at a multi-word-token seam, "-" at an mSUD "/m" morpheme seam; see prefs.js) as
