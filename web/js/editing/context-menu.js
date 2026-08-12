@@ -174,7 +174,16 @@ function showCtx(x,y,items,twoCol,rtlArg,fit){ const norm=items.map(normItem);
   ctx.style.left=Math.max(8,Math.min(left,innerWidth-w-8))+"px"; ctx.style.top=Math.max(menuTopBound(),Math.min(y,innerHeight-h-8))+"px"; }   // menuTopBound (js/core/scroll.js): a bare 8 now — this app no longer offers macOS window tabbing, so there is no native tab bar left for a menu to be drawn under
 function closeCtx(){ ctx.classList.remove("show"); closeSub(); void ctx.offsetHeight;   // same forced-reflow fix as closeSub, for ctx's own backdrop-filter layer
   if(typeof setPillMenuOpen==="function") setPillMenuOpen("fmtPill",false); }   // the Format pill borrows this shared #ctx for its own menu (fmtMenu, js/io/formats.js) and its chevron has to point back UP however the menu was dismissed — Escape, a pick, a click outside, or another menu stealing #ctx. Unconditional and idempotent: for every OTHER #ctx menu the pill is already un-flagged, so clearing it again costs a no-op class toggle. typeof-guarded because this file loads before js/ui/wiring.js, which defines the helper — harmless at runtime (closeCtx only ever runs from a handler, long after both are defined), but the guard is what the codebase's forward-reference rule asks for
-addEventListener("click",closeCtx); addEventListener("scroll",e=>{ if(e.target===ctx||ctx.contains(e.target)||e.target===ctx2||ctx2.contains(e.target)) return;   // a scroll INSIDE the menu itself (e.g. the Wiktionary "Definitions of …" flyout's own overflow-y:auto list) must not dismiss it — only a scroll of whatever's BEHIND the menu should
+addEventListener("click",closeCtx);
+// item 3: a right-click OUTSIDE an open menu (on a target none of #doc's own contextmenu branches will claim —
+// blank canvas, a diagram's own margin, another window region) never dismissed #ctx before: nothing downstream
+// of a non-match ever calls closeCtx, so the stale menu just sat there behind whatever the browser's native
+// menu showed on top of it. Capture phase, so this runs BEFORE #doc's own (bubble-phase) contextmenu listener —
+// closeCtx is unconditional and idempotent, so a right-click that DOES land on a new menu trigger still opens
+// it correctly: this closes the old one first, then the matching branch below calls showCtx again and reopens
+// fresh at the new target. Global (not #doc-scoped), matching the click-outside rule just above it.
+addEventListener("contextmenu",closeCtx,true);
+addEventListener("scroll",e=>{ if(e.target===ctx||ctx.contains(e.target)||e.target===ctx2||ctx2.contains(e.target)) return;   // a scroll INSIDE the menu itself (e.g. the Wiktionary "Definitions of …" flyout's own overflow-y:auto list) must not dismiss it — only a scroll of whatever's BEHIND the menu should
   if(ctx.classList.contains("show") && Date.now()-(ctx._openedAt||0)<250) return; closeCtx(); },true);   // ignore the programmatic scroll from the pick()/re-render that immediately precedes a menu open; a genuine later user-scroll still closes it
 addEventListener("keydown",e=>{ if(e.key!=="Escape")return;   // item 3: Escape dismisses an open flyout (e.g. a POS-subtype submenu) FIRST, keeping the parent menu; a second Escape closes the parent
   if(ctx2.classList.contains("show")){ closeSub(); e.preventDefault(); e.stopPropagation(); return; }
@@ -728,21 +737,23 @@ function avmValueMenu(x,y,si,tokId,key){
   if(!items.length) return false;
   showCtx(x,y,items, items.length>12, sentRTL(s));
   return true; }
+// item 3 — shared by BOTH triggers below (right-click and double-click), so the two gestures can't come to
+// different conclusions about what was hit. A combined AGR/TAM row's own value carries one [data-subfeat]
+// span/tspan per member (drawAVM/avmInline, diagram-core.js). Landing on one of THOSE scopes the menu to that
+// ONE UD feature — avmValueMenu's existing standalone-row branch (AVM_GROUPS[key] falsy for a real feature
+// name) already does exactly this, so passing the subfeat straight through as `key` needs no new menu logic at
+// all. Anywhere else in the row — the ATTR label, the dot separators, the row's own padding — still resolves to
+// avmEl.dataset.feat (the GROUP name on a combined row), i.e. the current "whole group" menu: clicking the
+// group's own NAME reads as "edit the group", a specific VALUE reads as "edit just that one member". A
+// standalone row's avmEl.dataset.feat already IS the one real feature, so this branch is a no-op there —
+// .closest("[data-subfeat]") never matches (no such attribute exists on that row at all).
+function avmMenuAt(e,x,y){ const avmEl=e.target.closest&&e.target.closest(".avm-row"); if(!avmEl) return false;
+  const tk=tokFromEl(avmEl); if(!tk) return false;
+  const subEl=e.target.closest&&e.target.closest("[data-subfeat]");
+  const key=(subEl && avmEl.contains(subEl)) ? subEl.dataset.subfeat : avmEl.dataset.feat;
+  return avmValueMenu(x,y,tk.si,tk.tokId,key); }
 document.getElementById("doc").addEventListener("contextmenu",e=>{
-  const avmEl=e.target.closest&&e.target.closest(".avm-row");   // item 22: BEFORE every other resolver, same reasoning as .glabbr just below — an AVM row sits inside the token group the generic node branch would otherwise claim
-  if(avmEl){ const tk=tokFromEl(avmEl);
-    // item 2 — a combined AGR/TAM row's own value now carries one [data-subfeat] span/tspan per member
-    // (drawAVM/avmInline, diagram-core.js). Landing on one of THOSE scopes the menu to that ONE UD feature —
-    // avmValueMenu's existing standalone-row branch (AVM_GROUPS[key] falsy for a real feature name) already
-    // does exactly this, so passing the subfeat straight through as `key` needs no new menu logic at all.
-    // Anywhere else in the row — the ATTR label, the dot separators, the row's own padding — still resolves to
-    // avmEl.dataset.feat (the GROUP name on a combined row), i.e. the current "whole group" menu: clicking the
-    // group's own NAME reads as "edit the group", a specific VALUE reads as "edit just that one member". A
-    // standalone row's avmEl.dataset.feat already IS the one real feature, so this branch is a no-op there —
-    // .closest("[data-subfeat]") never matches (no such attribute exists on that row at all).
-    const subEl=e.target.closest&&e.target.closest("[data-subfeat]");
-    const key=(subEl && avmEl.contains(subEl)) ? subEl.dataset.subfeat : avmEl.dataset.feat;
-    if(tk && avmValueMenu(e.clientX,e.clientY,tk.si,tk.tokId,key)){ e.preventDefault(); e.stopPropagation(); return; } }
+  if(avmMenuAt(e,e.clientX,e.clientY)){ e.preventDefault(); e.stopPropagation(); return; }   // item 22: BEFORE every other resolver, same reasoning as .glabbr just below — an AVM row sits inside the token group the generic node branch would otherwise claim
   const abEl=e.target.closest&&e.target.closest(".glabbr");   // BEFORE every other resolver: a .glabbr sits inside the gloss row, which sits inside the token group the generic node branch below would otherwise claim
   if(abEl){ const gl=abEl.closest(".gl-edit"), tk=gl&&tokFromEl(gl);
     if(gl&&tk&&(gl.dataset.tier||"gloss")==="mgloss"){
@@ -806,12 +817,17 @@ document.getElementById("doc").addEventListener("contextmenu",e=>{
    because a triple-click's third mousedown carries detail 3 and the run may already have selected on
    an earlier engine. */
 document.getElementById("doc").addEventListener("mousedown",e=>{
-  if(e.detail>=2 && posRelHit(e.target)) e.preventDefault(); },true);
+  if(e.detail>=2 && (posRelHit(e.target)||e.target.closest&&e.target.closest(".avm-row"))) e.preventDefault(); },true);   // item 3: same word-selection suppression, extended to an AVM row's own double-click trigger below
 document.getElementById("doc").addEventListener("dblclick",e=>{
   const hit=posRelHit(e.target); if(!hit) return;
   e.preventDefault(); e.stopPropagation();
   try{ const g=getSelection(); if(g&&g.rangeCount&&document.getElementById("doc").contains(g.anchorNode)) g.removeAllRanges(); }catch(_){}
   openPosRelMenu(hit,e.clientX,e.clientY,e.shiftKey); });
+// item 3: an AVM row's menu, ALSO on double-click — the same shorter road this block's own note gives for
+// retagging/relabelling, and the same shared resolver (avmMenuAt, above) the right-click trigger uses, so the
+// two gestures can't disagree about what was hit.
+document.getElementById("doc").addEventListener("dblclick",e=>{
+  if(avmMenuAt(e,e.clientX,e.clientY)){ e.preventDefault(); e.stopPropagation(); } });
 /* NO pick() ON ANY OF THOSE PATHS: OPENING A MENU IS NOT SELECTING. Right-clicking a token used to
    select it — collapsing a multi-token range you had just marqueed, if the click landed outside it —
    which is neither what the platform menus do nor what the rest of this app does: the deprel, POS,
@@ -830,6 +846,7 @@ document.getElementById("doc").addEventListener("dblclick",e=>{
 // handled here alongside the tier/translit/MWT-form editors, none of which are draggable either.
 document.getElementById("doc").addEventListener("click",e=>{
   if(e.target.closest(".node,.tok-group,.bwtok")) return;   // these three classes only ever exist inside a draggable notation (stemma/tree/arcs/brackets) — pointerup above already opens the right editor for whatever was actually clicked (form vs. a nested tier), and DSUPPRESS's timing isn't reliable enough to trust this click won't ALSO fire and reopen a second, wrong editor
+  if(e.target.closest(".avm-row")) return;   // item 3: an AVM row (outline's own — the SVG notations already returned above, via .node/.tok-group/.bwtok) is edited through its right-click/double-click MENU only, never inline text entry; with no exclusion here a plain single click fell through to the generic `.oline` branch below and opened the TOKEN's form editor instead — which also broke the double-click trigger just above, since its first click was busy replacing the row with an <input> before the second click could land on the same element
   const trEl=e.target.closest(".tr-edit"); if(trEl){ const tk=tokFromEl(trEl); if(tk){ e.preventDefault(); editTransInline(tk.si,tk.tokId,{x:e.clientX,y:e.clientY}); return; } }   // edit the romanisation shown under a token — or, where the romanisation is non-deterministic, the STORED transliteration it is derived from (trRowEdit decides when the row carries .tr-edit at all)
   const glEl=e.target.closest(".gl-edit"); if(glEl){ const tk=tokFromEl(glEl); if(tk){ e.preventDefault(); editTier(tk.si,tk.tokId,glEl.dataset.tier||"gloss",{x:e.clientX,y:e.clientY}); return; } }   // edit a gloss / morphemic tier → MISC
   const mwtEl=e.target.closest(".mwt-form,.mwt-tr-edit"); if(mwtEl&&mwtEl.hasAttribute("data-mwtfrom")){ e.preventDefault();

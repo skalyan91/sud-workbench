@@ -528,8 +528,7 @@
      the diagram's 15px reference reads visibly lighter at a flat 400 unless the weight is bumped to
      compensate, exactly as every other small annotation row in this file already does. */
   .avm-row{cursor:pointer}
-  .avm-hit{fill:transparent}
-  .avm-row:hover .avm-hit{fill:var(--block-sel)}   /* stands in for display:contents's own "both children take the hover fill" trick — one shared rect behind the row instead */
+  .avm-hit{fill:transparent}   /* still the row's real click/right-click target (see .bwannot .avm-row's own note below) — only the hover FILL is gone, on report */
   .avm-attr{font-family:var(--token-font); font-size:10.5px; font-weight:571; font-feature-settings:"c2sc" 1; fill:var(--dia-muted); opacity:.62; unicode-bidi:isolate}   /* c2sc renders the (already-uppercased, see avmLayout) name as small caps, matching .tok-pos's identical convention for the POS tag it sits beside */
   .avm-val{font-family:var(--token-font); font-size:10.5px; font-weight:571; fill:var(--tie-hue); unicode-bidi:isolate}   /* value colour matches the POS tag's (.tok-pos, --tie-hue) it sits beside, per report — the attr LABEL stays on --dia-muted above; only the value is content the way a POS tag is. Weight was a flat 700 (unnecessarily bold, on report); 571 is weightCurve(10.5) (js/diagram/diagram-core.js) — same as .avm-attr beside it — so it reads at the size-appropriate weight the curve gives every other tier, not an emphasis bump */
   .translit{font-size:15px; fill:var(--dia-muted); font-style:italic; font-family:var(--token-font); text-anchor:middle; letter-spacing:.02em;   /* same size as the form/script above it */   /* italic tracking bump (ITALIC_TRACK, diagram-core.js) — trackCurve(15)=0 (reference size), so this IS the italic term alone; kept in sync with _measOneUncached's italicTrackOf() by hand, per the tracking-curve convention */
@@ -1273,12 +1272,11 @@
      foreignObject-vs-SVG engine gap (see drawAVM's own comment) that an HTML-only context never had.
      border-color reuses arcInk()'s own color-mix formula (the ink `.mwt-tie`/`.mwt-tie-h` already paint with)
      so the drawn bracket reads as the SAME ink as the SVG one, not a plain CSS grey standing in for it. */
-  .oavm{margin-inline-start:9px; unicode-bidi:isolate; position:relative; padding:1px 8px}
-  .oavm::before,.oavm::after{content:""; position:absolute; top:0; bottom:0; width:2.8px; border:1px solid color-mix(in srgb, var(--tie-hue), var(--content-bg) var(--edge-mix)); pointer-events:none}   /* item 25/7: 4px → 2.8px, the same 0.7 (=10.5/15) scale-down AVM_BRK_W (diagram-core.js) just took, on the identical "a tick this long reads chunkier at the AVM's own 10.5px scale" report, applied here for the same reason */
+  .oavm{margin-inline-start:9px; unicode-bidi:isolate; position:relative; padding:1px 5px}   /* was 1px 8px — still too much air between the outer bracket and the AGR/TAM content, on report */
+  .oavm::before,.oavm::after{content:""; position:absolute; top:0; bottom:0; width:2px; border:1px solid color-mix(in srgb, var(--tie-hue), var(--content-bg) var(--edge-mix)); pointer-events:none}   /* item 25/7 took this 4px → 2.8px; still read too long against the row's own 10.5px content, on report — 2px, a further cut in the same direction */
   .oavm::before{left:0; border-right:none}   /* "[" — open on the content side */
   .oavm::after{right:0; border-left:none}    /* "]" — the mirror */
-  .oavm-item{padding:0 1px; color:color-mix(in srgb, var(--tie-hue), var(--content-bg) var(--edge-mix))}   /* just enough for the hover fill below to clear the text, like every other row's own click target — the bracket is `.oavm`'s now, not this. `color` here is for the literal "[" "]" text nodes ONLY (avmInline, diagram-core.js) — .oavm-attr/.oavm-val both carry their OWN explicit colour and so are unaffected — on report ("the inner brackets should be the same colour as the outer brackets"): unset, they fell through to the row's plain text colour instead of matching .oavm::before/::after's OWN arcInk()-mix border-color just outside them */
-  .oavm-item:hover{background:var(--block-sel); border-radius:3px}
+  .oavm-item{padding:0 1px; color:color-mix(in srgb, var(--tie-hue), var(--content-bg) var(--edge-mix))}   /* padding: still the row's own click target, same size a hover fill would have cleared — the bracket is `.oavm`'s now, not this. `color` here is for the literal "[" "]" text nodes ONLY (avmInline, diagram-core.js) — .oavm-attr/.oavm-val both carry their OWN explicit colour and so are unaffected — on report ("the inner brackets should be the same colour as the outer brackets"): unset, they fell through to the row's plain text colour instead of matching .oavm::before/::after's OWN arcInk()-mix border-color just outside them */
   /* item 22/3, still true after round 2 above: 10.5px/weight-571/c2sc for the attr, 10.5px/weight-700 for the
      val — the SAME formatting convention as the SVG AVM's own .avm-attr/.avm-val (color, not fill — this is
      HTML text, not SVG), muted-attr / value-reads-like-a-POS-tag (--tie-hue) colour split included. This part
