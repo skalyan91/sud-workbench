@@ -3360,25 +3360,31 @@ function rowTies(D,s0,e0){ const reb=o=>({...o,from:o.from-s0,to:o.to-s0});
 // same tie — .bwrap.hasmwt's bottom padding (diagram-wrap.js) and the inter-line growth that keeps a wrapped
 // tie from colliding with the next line (reserveBracketArcRoom, document.js) — and both would under-reserve if
 // they didn't count the same lead the draw site spends.
-// item 25/7: +r.avmH, on report ("space below an MWT tie in brackets view is smaller than in other views" —
-// and, once traced further, "MWT forms/transliterations are crashing into the next line"). This function never
-// referenced the AVM tier AT ALL, even after positionBracketAnnots' own undBot (the DRAW side, right above)
-// was taught avmTopGap()+av.h a round ago: that fix only changed where the tie/form stack actually PAINTS, not
-// how much room either of htmlTieBottom's two RESERVING callers set aside for it — so an MWT whose component
-// token carries a tall AVM now draws lower than either .bwrap.hasmwt's own bottom padding (diagram-wrap.js) or
-// reserveBracketArcRoom's inter-line growth (document.js) budgeted for, squeezing whatever sits below it: the
-// box's own bottom margin on the last line (reads as "less space below the tie"), or the START of the NEXT
-// wrapped line on an interior one (reads as "crashes into the next line" — the same shortfall, two symptoms).
-// r.avmH is the tallest avmHeight() among ONLY the tie's own component tokens (set once, at box._ties
-// construction in bracketsWrapped — see its own comment), not a row-wide max: mirrors a1503fb's own rule for
-// seating off the tokens a tie actually touches. avmTopGap(), not a bare belowGap(), is the right clearance
-// term above the box — see that function's own note; belowReserveH folds the identical pair in for the same
-// reason.
-function htmlTieBottom(r){ const PIN=6, STEP=belowGap(), lead=5+tieLead(), avm=r.avmH>0?r.avmH+avmTopGap():0;
-  if(r.kind==="gw") return lead+r.dy+gwDepth()+avm;                        // the tie has no label under it — it reaches only as far as the glyph's own ink (+ its component's AVM, if any)
-  if(r.kind==="xpos") return lead+r.dy+PIN+20+avm;                        // the ExtPos value IS the label
+// item 25/7, ROUND 2 — the +r.avmH this function briefly carried (added on report "space below an MWT tie in
+// brackets view is smaller than in other views" / "MWT forms crashing into the next line") is GONE again, on a
+// live follow-up ("still too tight compared to, say, arcs") that turned out to be a DOUBLE-COUNT, not a residual
+// shortfall. Both of htmlTieBottom's callers already sit on top of an AVM-INCLUSIVE base by the time they ever
+// call this function:
+//   · reserveBracketArcRoom (document.js): `stackBot`, its own undBot(a,b), was ALREADY taught avmTopGap()+av.h
+//     in the SAME round this function was — adding r.avmH here on top doubled the AVM term into ONE grow() call.
+//   · .bwrap.hasmwt's bottom padding (diagram-wrap.js): every .bwtok on the LAST line already carries
+//     padding-bottom:var(--undpad) — belowReserveH(...,avmRowMaxH(t)), the ROW-WIDE tallest AVM, i.e. AT LEAST
+//     this tie's own two components' avmHeight — as real, reserved (if invisible) box height BEFORE this
+//     function's return value is added on top as MORE padding.
+// Verified live (CDP), a synthetic MWT+heavy-FEATS test case: with r.avmH folded in, a last-line box reserved
+// 152.6px below the tie's own form — an 8px arc/flat MWT tie needs roughly 9px of breathing room below it before
+// whatever follows (measured directly: flat arcs, the SAME sentence, form-bottom to the SVG's own tight-cropped
+// edge). Stripping r.avmH back out drops that reserve to 67px (the un-grown floor) — much closer to arcs' own
+// figure, and the ROOT bug this function was written to fix (an interior-line MWT crashing into the next line)
+// is STILL clear without it: reserveBracketArcRoom's own undBot fix (not this one) is what actually stops that
+// collision — confirmed by re-running its own regression case with r.avmH removed here: still -5.4px (clear,
+// just an honest margin now instead of a padded one), was +41px (real overlap) before EITHER fix landed.
+// AVM is (correctly) not this function's concern at all — every caller already has it covered before it calls in.
+function htmlTieBottom(r){ const PIN=6, STEP=belowGap(), lead=5+tieLead();
+  if(r.kind==="gw") return lead+r.dy+gwDepth();                            // the tie has no label under it — it reaches only as far as the glyph's own ink
+  if(r.kind==="xpos") return lead+r.dy+PIN+20;                             // the ExtPos value IS the label
   const n=belowRows((trLayer()&&trTxt(r)),0,!!r.pos);
-  return lead+r.dy+PIN+20+n*STEP+(n>0?STACKED_GAP:0)+avm; }               // MWT surface form, then its transliteration row, then any ExtPos annotation — STACKED_GAP once (belowReserveH's math), for the same reason belowStack seeds it once rather than per row
+  return lead+r.dy+PIN+20+n*STEP+(n>0?STACKED_GAP:0); }                    // MWT surface form, then its transliteration row, then any ExtPos annotation — STACKED_GAP once (belowReserveH's math), for the same reason belowStack seeds it once rather than per row
 function mwtDepth(D){ return tieLayout(D).depth; }   // extra vertical room the bracket stack needs below the below-stack bottom. Item 1 made this tier-aware — one entry per bracket TIER, each as deep as the deepest label that tier carries (an MWT surface form, plus its transliteration row and/or an ExtPos annotation) — so an ExtPos bracket that pushes an overlapping MWT tie down a tier also grows every reserve that folds in mwtDepth (arcsWrapped's per-row tieBot, projWrapped, belowH) in lockstep. With a single plain MWT tie and no ExtPos it returns exactly the former fixed 39+descent(POS_F)−xHeight(POS_F) (39 with no POS row), +belowGap() for a transliteration row — the seating those constants were tuned for is unchanged.
 
 /* labels are always horizontal and centred on their edge (x-height middle); collision avoidance is
