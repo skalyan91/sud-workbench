@@ -66,7 +66,8 @@ function updateViewOptions(){
   const ar=document.querySelector('#toggles [data-t="arrows"]'); ar.closest("label").style.display=arrowsOK()?"":"none"; ar.checked=arrowsOK()&&show.arrows;
   const posOK=conv==="arcs"||conv==="brackets"||(isStemma()&&stemmaProj);   // POS-below option only where there are baseline tokens
   const pc=document.querySelector('#toggles [data-t="pos"]'); pc.closest("label").style.display=posOK?"":"none"; pc.checked=show.pos;
-  const gc=document.querySelector('[data-t="grids"]'); if(gc)gc.checked=show.grids;   // keep the "Show grids" checkbox in step with the ⌃⌘G toggle / menu
+  const gb=document.getElementById("btnGrids");   // keep #btnGrids's pressed state in step with the ⌃⌘G toggle / menu — was the standalone "Show grids" checkbox (#gridsChk, removed on request: the diagram itself now closes the gaps that used to make the grid load-bearing)
+  if(gb){ gb.classList.toggle("active",show.grids); gb.setAttribute("aria-pressed",String(show.grids)); gb.title=show.grids?"Hide all annotation grids (⌃⌘G)":"Show all annotation grids (⌃⌘G)"; }
   syncMenu();   // notation change may flip whether "Wrap Long Lines" is available → refresh the conditional menu item
 }
 
@@ -315,7 +316,7 @@ document.getElementById("toggles").addEventListener("change",e=>{ const cb=e.tar
   const k=cb.dataset.t; if(!k)return;
   if(k==="arrows" && !arrowsOK()){cb.checked=false; return;}
   show[k]=cb.checked; updateViewOptions(); preserveScroll(renderDoc); savePrefs(); });   // (transliteration is no longer a checkbox — it is driven by the status-bar transliteration menu)
-document.getElementById("gridsChk").addEventListener("change",e=>{ show.grids=e.target.checked; updateViewOptions(); preserveScroll(renderDoc); savePrefs(); });   // "Show grids" now lives outside #toggles (before the zoom controls)
+document.getElementById("btnGrids").addEventListener("click",toggleGrids);   // was the standalone "Show grids" checkbox's own change listener, removed on request — #btnGrids now drives the same shared toggleGrids() the ⌃⌘G shortcut and native View-menu row already called
 document.getElementById("autonumChk").addEventListener("change",e=>{ AUTONUM=e.target.checked; });
 /* ⚠ AN OPTIONS-BAR DROPDOWN NEEDS NO CLAMP OF ITS OWN, AND THE ONE IT BRIEFLY HAD IS THE REASON THE BAR
    MOVED. `.drawer-pop` is placed by CSS alone — `position:absolute; top:calc(100% + 6px)` in
@@ -562,5 +563,5 @@ try{
 // renderDoc from the visible viewport) goes stale and blocks can overflow. Re-render on resize, debounced, so block
 // heights keep tracking the viewport. A SEPARATE listener from the trClose/syncChrome resize handlers above.
 let _capRzT; addEventListener("resize",()=>{ clearTimeout(_capRzT); _capRzT=setTimeout(()=>preserveScroll(renderDoc),150); });
-function toggleGrids(){ show.grids=!show.grids; updateViewOptions(); preserveScroll(renderDoc); toast(show.grids?"Annotation grids shown":"Annotation grids hidden"); }
+function toggleGrids(){ show.grids=!show.grids; updateViewOptions(); preserveScroll(renderDoc); savePrefs(); toast(show.grids?"Annotation grids shown":"Annotation grids hidden"); }   // savePrefs() added on the checkbox→button swap: the removed #gridsChk listener called it on every change, but this shared function (also driven by ⌃⌘G and the native menu) never did — so a toggle via THOSE paths silently never persisted; folding it in here fixes all three triggers at once, not just the new button
 window.toggleGrids=toggleGrids;

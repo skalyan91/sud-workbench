@@ -303,7 +303,7 @@ MENUS: list[dict] = [
         # shape "Paragraph Starts at Token" already uses to sit beside its own pair.
         item("Toggle Grids", "window.toggleGrids && toggleGrids()",
              key="g", mods=("ctrl", "cmd"), win_mods=("ctrl", "shift", "cmd"),
-             sf="tablecells", fluent="Table"),
+             sf="tablecells", fluent="Table", check="grids"),   # checkmark added alongside #btnGrids (the new titlebar button that replaced the standalone "Show grids" checkbox) so all three triggers (shortcut/menu/button) read the same state
         item("Merge Punctuation", "window.toggleMergePunct && toggleMergePunct()",
              key=".", mods=("cmd",), sf="arrow.triangle.merge", fluent="Merge"),
         item("Wrap Long Lines", "window.toggleWrap && toggleWrap()",

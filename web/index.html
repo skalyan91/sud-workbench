@@ -120,6 +120,17 @@
         </div>
         <span class="pilllabel">Options</span>
       </div>
+      <!-- grid off by default, on request — the diagram itself now closes the gaps (FEATS add/clear, DEPREL
+           free-text, MWT group drag, NewPar, CorrectForm) that used to make the grid load-bearing, so it's an
+           opt-in panel instead of always-on chrome. Same simple on/off toggle shape as #btnOptions above —
+           toggleGrids() (js/ui/wiring.js) already existed (⌃⌘G / the native View-menu row already called it),
+           this button is a new trigger for it, not new toggle logic. -->
+      <div class="tbgroup">
+        <div class="tbpill">
+          <button class="tbtn icon" id="btnGrids" title="Show all annotation grids (⌃⌘G)" aria-pressed="false"><span class="sfi" style="--m:var(--sf-grid)"></span><span class="tblabel">Grids</span></button>
+        </div>
+        <span class="pilllabel">Grids</span>
+      </div>
       <!-- item 3: page-like layout — Paged caps the document to a fixed measure on a wide screen and lays it on
            sheets (a `# newdoc` ends one and starts the next); Unpaged uses the full window width. -->
       <div class="tbgroup tbg-wide">
@@ -240,7 +251,6 @@
       <span class="spring" style="flex:1"></span>
       <span class="vsep" aria-hidden="true"></span>
       <label class="chk" id="autonumChk" title="Continue sentence-ID numbering when sentences are inserted or deleted"><input type="checkbox" checked>Auto-number</label>
-      <label class="chk" id="gridsChk" title="Show all annotation grids (⌃⌘G)"><input type="checkbox" data-t="grids" checked>Show grids</label>
     </div>
 
     <div class="doc" id="doc"></div>

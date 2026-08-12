@@ -738,6 +738,7 @@ function menuState(){ const has=sel.s>=0&&sel.t>0, s=has?DOC[sel.s]:null;
           newdoc:hasNewdoc(curSent()), newpar:hasNewpar(curSent()),
           tokNewpar:has&&isNewParTok(s.tokens[sel.t-1]),   // …and the mid-sentence one, which IS token-scoped
           paged:PAGED,
+          grids:show.grids,   // checkmark for the native "Toggle Grids" row, matching #btnGrids's own pressed state (js/ui/wiring.js) — added on the checkbox→button swap
           wrapOK:(conv==="arcs"||conv==="brackets"||conv==="stemma"||conv==="tree")}; }
 function curSent(){ const i=curBlock(); return (i>=0&&i<DOC.length)?DOC[i]:null; }
 function syncMenu(force){ if(force)_lastMenu=null; if(!hasBridge())return; const st=menuState(), key=JSON.stringify(st);
