@@ -1533,7 +1533,16 @@ function tierNonEmpty(kind){ const keys=_tierKeys(kind); return DOC.some(s=>s.to
 // item 1: the Glossing-tier checkboxes reflect the CURRENT document's own MISC — a lexical Gloss tier iff any
 // token carries MISC Gloss, a morphemic tier iff any carries MSeg/MGloss — never carried across files. Call this
 // after any operation that REPLACES the document (open, append-into-blank, format conversion).
-function syncGlossTiersFromDoc(){ GLOSS_ON=tierNonEmpty("gloss"); MORPH_ON=tierNonEmpty("morph"); GLOSS_VIS=true; MORPH_VIS=true; if(MORPH_ON)normaliseMsegMarks(); if(typeof syncGlossUI==="function")syncGlossUI(); }
+function syncGlossTiersFromDoc(){ GLOSS_ON=tierNonEmpty("gloss"); MORPH_ON=tierNonEmpty("morph"); GLOSS_VIS=true; MORPH_VIS=true;
+  if(MORPH_ON){ normaliseMsegMarks(); morphSeedBaselineFromDoc(); }   // this path turns the tier "on" WITHOUT ever calling morphPrefillSent (a loaded/converted file's own MISC already has the data — there is nothing to prefill), so without this the baseline stayed unset for every token and the tier read as "edited" the instant it was opened, before the reader had touched anything. AFTER normaliseMsegMarks: the baseline has to match what MSeg settles on, not what the file spelled before stripping was applied
+  if(typeof syncGlossUI==="function")syncGlossUI(); }
+// Companion to morphPrefillSent for the one path that turns the morphemic tier "on" without deriving anything:
+// a file (or format conversion) arriving with its OWN MSeg/MGloss already in MISC. There is no prefill to run —
+// the data is already there — but `_msegPre`/`_mglossPre` still have to be set to it, or morphEdited() has no
+// baseline to diff against and reads every such token as hand-edited from the moment the document opens.
+function morphSeedBaselineFromDoc(){ DOC.forEach(s=>s.tokens.forEach(t=>{
+  const ms=miscKV(t.misc,"MSeg"); if(ms) t._msegPre=ms;
+  const mg=miscKV(t.misc,"MGloss"); if(mg) t._mglossPre=mg; })); }
 // The word-continuation mark is decoration and never belongs in MISC — but older files carry one in their stored
 // MSeg, from back when this app wrote it there (a plain "-" put on every FEATS Compound=Yes token; briefly "⹀").
 // Strip it on open so it can't read as a morpheme boundary, or come back out through an edit — the same "integrate
@@ -1861,9 +1870,18 @@ function msegMirrorSeams(t){ if(!t) return false;
 // a re-parse hands it a fresh set of tokens — the tiers are FEATS-derived, so new FEATS mean a new MGloss.
 function morphPrefillSent(s){ if(!s||!s.tokens) return;
   s.tokens.forEach(t=>{ const seg=msegPrefillParts(t);   // ONE segmentation per token, shared by both rows, so MSeg's boundaries and MGloss's attachment hyphens can never disagree about where the affixes are
+    // Either branch below has to end with `_msegPre`/`_mglossPre` matching whatever the MISC value now IS —
+    // a token that already carried one (kept below, in the else) is exactly as untouched-by-the-user as one
+    // this call just derived (set below, in the if): both are "the value at the moment the tier was turned
+    // on", and that is the baseline morphEdited() diffs against. Skipping the else used to leave the baseline
+    // unset for any token that walked in with data already on it, so morphEdited() read that pre-existing
+    // value against an EMPTY baseline and reported "edited" — the false deletion warning on a tier that was
+    // enabled and immediately disabled without a single keystroke.
     if(!miscKV(t.misc,"MSeg")){ const pv=glossEnc(seg.seg); if(pv){ t.misc=setMiscKV(t.misc,"MSeg",pv); t._msegPre=pv; } }
+    else t._msegPre=miscKV(t.misc,"MSeg");
     if(!miscKV(t.misc,"MGloss")){ const lex=(GLOSS_ON&&!UPOS_LEIPZIG_ABBR[t.upos])?miscKV(t.misc,"Gloss").replace(/-/g,"_"):"";
-      const mg=glossEnc(composeMGlossPrefill(lex,t.feats,t.upos,seg)); if(mg){ t.misc=setMiscKV(t.misc,"MGloss",mg); t._mglossPre=mg; } } }); }
+      const mg=glossEnc(composeMGlossPrefill(lex,t.feats,t.upos,seg)); if(mg){ t.misc=setMiscKV(t.misc,"MGloss",mg); t._mglossPre=mg; } }
+    else t._mglossPre=miscKV(t.misc,"MGloss"); }); }
 // item: a re-parse replaced this sentence's tokens outright, so both morphemic tiers came back empty — re-seed them
 // from the FEATS the parse just produced. No-op unless the morphemic tier is on. The caller owns the undo snapshot
 // (a re-parse pushes one before it starts), so this rides along inside that single undoable step.
@@ -2171,7 +2189,7 @@ async function reparseTokenFields(si,tokIds,opts){
         if(mg!==keep.MGloss) t.misc=setMiscKV(t.misc,"MGloss",mg); }
       else if(MORPH_ON){ const lex=(GLOSS_ON&&!UPOS_LEIPZIG_ABBR[t.upos])?miscKV(t.misc,"Gloss").replace(/-/g,"_"):"";   // nothing to preserve → compose one fresh, exactly as before (a token that had NO MGloss yet gets one, the same way morphPrefillSent would)
         const mg=glossEnc(composeMGlossPrefill(lex,t.feats,t.upos,seg));
-        if(mg) t.misc=setMiscKV(t.misc,"MGloss",mg); } }
+        if(mg){ t.misc=setMiscKV(t.misc,"MGloss",mg); t._mglossPre=mg; } } }   // …and _mglossPre goes with it, exactly as morphPrefillSent's own compose-fresh branch sets it — this is a DERIVED value, not the reader's, and without a baseline morphEdited() would call it "edited" the moment this reparse lands, before anyone has looked at it
     msegRefill(t); });   // …and the segmentation tier alongside it, so the two morphemic rows never come back half-filled. Item 3: a REFILL, not a fill-if-empty — this is the path a form edit's background re-parse takes to revise the token's LEMMA, and the segmentation is computed from that lemma, so an MSeg still holding its previous auto-prefill has to follow it. msegRefill is what refuses to touch one the user has since typed over
   await annotateTranslitMisc(si); if(show.translit)fillTranslit();   // item 5: a secondary pass (re)writes MISC Translit/LTranslit + refills the display row
   return true; }
