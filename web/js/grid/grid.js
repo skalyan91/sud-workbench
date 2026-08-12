@@ -918,7 +918,18 @@ function buildFeatEditor(td,sent,t,si,i,key){
     if(key==="feats"&&next!==cur){ featsSyncGloss(t,cur);   // the OTHER half of the bidirectional MGloss↔FEATS sync — retarget an existing gloss abbreviation to match the FEATS value that just changed (a no-op when no morphemic tier is on)
       syncXposMirror(t);
       markDirty(); preserveScroll(renderDoc); }   // ANY feats change re-renders — not just ones that happened to touch the gloss sync — so Shared=Yes/Subj=… edits made here show up in the diagram (ghost edges, "shared" pill, …) immediately, not just on the next unrelated render
-    else if(key==="misc"&&next!==cur){ markDirty(); preserveScroll(renderDoc); } };   // item 4: a MISC change (SpaceAfter → punctuation merge/spacing, CorrectForm, Reported, …) affects the diagram, so re-render at once
+    else if(key==="misc"&&next!==cur){   // item 4: a MISC change (SpaceAfter → punctuation merge/spacing, CorrectForm, Reported, …) affects the diagram, so re-render at once
+      // on report (grid/diagram parity audit): every diagram-side MGloss edit calls mglossSyncFeats+syncXposMirror
+      // (context-menu.js), and every diagram-side Translit edit's OWN row is kept live by fillTranslit() being
+      // called from ~15 other edit/reload hooks — but this MISC-pill commit, the grid's own MGloss/Translit edit
+      // path, called neither. A grid MGloss edit therefore silently stopped back-deriving FEATS from the typed
+      // Leipzig abbreviations (correct in the diagram, wrong here), and a grid Translit edit correctly updated
+      // the saved value but left the diagram's cached, on-screen romanisation stale until an UNRELATED edit
+      // happened to trigger fillTranslit(). Scoped to the SPECIFIC key that changed (miscKV before/after), not
+      // fired on every unrelated MISC pill edit — matching the diagram's own precision.
+      if(miscKV(next,"MGloss")!==miscKV(cur,"MGloss")){ mglossSyncFeats(t); syncXposMirror(t); }
+      if(miscKV(next,"Translit")!==miscKV(cur,"Translit") && show.translit) fillTranslit();   // gated on show.translit, matching every other fillTranslit() call site in the codebase — no point refreshing a hidden row
+      markDirty(); preserveScroll(renderDoc); } };
   // — pill interaction (click=edit immediately · drag=reorder · right-click a FEATS key/value=alternatives menu) —
   // A plain click USED to only select the chip (outline + cursor:grab), requiring a second, undiscoverable
   // dbl-click to actually open it for editing — editPill (below) was reachable from nowhere else. Selection
