@@ -2660,7 +2660,11 @@ function avmLayout(t){ const feats=(t&&t.feats)||""; if(!feats||feats==="_"||!sh
   if(!struct.length){ _avmCache.set(feats,null); return null; }
   // .toUpperCase() here, not a CSS text-transform — matches posDisp's own convention of baking the capitals
   // into the string the c2sc feature then renders as small caps, rather than relying on the two to agree at render time
-  const rows=struct.map(it=>it.group ? {key:it.group,attr:it.group.toUpperCase(),val:it.combined} : {key:it.feat,attr:it.feat.toUpperCase(),val:it.val});
+  // item 2: `vals` rides along ONLY on a group row (undefined on a standalone one) — drawAVM's own branch below
+  // reads its presence, not `key`'s, to decide whether a row paints as several independently-clickable tspans
+  // or one plain string; avmStruct (grid.js) is the one place that can answer "which UD feature is EACH piece
+  // of the combined value" (it alone has `set` in scope), so this is a passthrough, not a second derivation.
+  const rows=struct.map(it=>it.group ? {key:it.group,attr:it.group.toUpperCase(),val:it.combined,vals:it.vals} : {key:it.feat,attr:it.feat.toUpperCase(),val:it.val});
   const attrW=Math.max(0,...rows.map(r=>_measOne(r.attr,AVM_ATTR_F,";font-feature-settings:'c2sc' 1")));
   const valW=Math.max(0,...rows.map(r=>meas(r.val,AVM_VAL_F)));
   const lineH=ascent(AVM_VAL_F)+descent(AVM_VAL_F);
