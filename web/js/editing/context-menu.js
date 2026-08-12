@@ -356,7 +356,11 @@ function posSubItems(si,tokId,U){ const s=DOC[si], t=s&&s.tokens[tokId-1]; if(!t
     syncXposMirror(t);   // covers both halves above — a UPOS change and/or the subtype FEATS just set
     featsSyncGloss(t,before); markDirty(); preserveScroll(renderDoc); };   // item 10: NO regenTok — this is a feature edit, and reparsing would overwrite the very feature just set (and any other hand-edited ones)
   const items=[];
-  feats.forEach(f=>{ const cur=curOf(f), vals=UD_FEATS[f]||[];
+  // item 18: narrowed to ATTESTED values (attestedFeatVals, js/grid/grid.js) — the same call
+  // acValItems/glossAbbrMenu already route through, which this submenu had been left reading
+  // straight off UD_FEATS instead of. PronType alone carries 11 official values; a document that
+  // only ever uses three of them doesn't need the other eight offered here either.
+  feats.forEach(f=>{ const cur=curOf(f), vals=(typeof attestedFeatVals==="function"?attestedFeatVals(f):null)||UD_FEATS[f]||[];
     items.push({header:f}); vals.forEach(v=>items.push({label:esc(subtypeSuffix(f,v)), expand:shortVDesc((FEATS_VDESC[f]||{})[v]||""), check:cur===v, opt:true, fn:()=>setSub(f,v)})); });   // item 3: bare subtype value (the "U." prefix is redundant here) + a SHORT expansion that can't cross the one-column midline
   // item 3 — the guidelines link for the subtype the token CURRENTLY carries, pinned STICKY to the flyout bottom (no clear button — a plain-tag pick from the parent menu already clears the subtype)
   let setF=null,setV=""; feats.forEach(f=>{ const v=curOf(f); if(v){ setF=f; setV=v; } });
@@ -839,7 +843,15 @@ function editTier(si,tokId,tier,clickXY){ const s=DOC[si]; if(!s||tokId<1||tokId
   const proxy={ get v(){ return tierText(tk,tier); },
     set v(val){ const enc=glossEnc(val), prev=tier==="mseg"?tierText(tk,"mseg"):"";
       tk.misc=setMiscKV(tk.misc,key,tier==="mseg"?msegStrip(enc,!!seamPost(tk),!!seamPre(tk)):enc);
-      if(tier==="mseg") mglossSplitTypedHyphen(tk,prev,tierText(tk,"mseg")); } };   // a hyphen TYPED here says where the boundary goes, so a gloss already written as lexical-plus-grammatical divides along it ("walk.PST" over "walk-ed" → "walk-PST"). Narrow on purpose — see mglossSplitTypedHyphen (js/editing/edit-ops.js) for the three conditions and why the machine-driven mglossReslot answers this case differently. Read `prev` from MISC rather than trusting the field's own opening value: the mark msegStrip removes never entered it
+      // item 19: mglossSplitTypedHyphen is deliberately narrow (see its own note) — it ONLY reads a single newly-
+      // typed hyphen that cuts a two-part gloss cleanly, and declines everything else, INCLUDING a hyphen being
+      // REMOVED (a merge, its first condition `A.includes("-")` exits on that immediately) or several hyphens
+      // changing in one edit. Those were previously left with no fallback at all — the general re-slotter
+      // (mglossReslot, the SAME one a lemma-driven segmentation change already goes through, js/grid/grid.js and
+      // js/io/bridge.js) now picks up whatever the narrow rule declines, so a typed MSeg edit of ANY shape keeps
+      // MGloss in step, not just the one shape the narrow rule was written for.
+      if(tier==="mseg"){ const next=tierText(tk,"mseg");
+        if(!mglossSplitTypedHyphen(tk,prev,next)) mglossReslot(tk,prev,next); } } };   // a hyphen TYPED here says where the boundary goes, so a gloss already written as lexical-plus-grammatical divides along it ("walk.PST" over "walk-ed" → "walk-PST"). Read `prev` from MISC rather than trusting the field's own opening value: the mark msegStrip removes never entered it
   // item 12b: on a committed MGloss edit, sync the token's FEATS from the recognised unambiguous gloss tokens —
   // adds a feature that's missing, UPDATES one whose value the edited gloss now disagrees with, and leaves any
   // feature the gloss text doesn't speak to untouched. This shares the edit's single undo snapshot

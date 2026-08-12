@@ -96,10 +96,28 @@ def _parse_id(raw: str):
     return ("tok", int(raw))
 
 
+class ConllUParseError(ValueError):
+    """A line is neither a `#` comment, a blank sentence-separator, nor a well-formed
+    token/MWT/empty-node line — surfaced with the ORIGINAL file's line number and the raw text,
+    instead of letting whatever `int()`/`.split()` call first choked on it leak out as a bare,
+    contextless traceback line (api.py's open()/open_path() already do `str(exc)` straight to
+    the user, so this exception's own message IS what they see)."""
+    def __init__(self, lineno: int, raw: str, reason: str):
+        self.lineno, self.raw = lineno, raw
+        super().__init__(f"Line {lineno}: {reason}\n    {raw!r}")
+
+
 def parse(text: str) -> list[dict]:
-    """Parse CoNLL-U source text into a list of sentence dicts."""
+    """Parse CoNLL-U source text into a list of sentence dicts.
+
+    Raises :class:`ConllUParseError` (a plain line number + the offending text, not a Python
+    internals message) on a line that is neither a comment, a blank separator, nor a 10-column
+    token/MWT/empty-node line — most often a stray raw newline that leaked into a `# text*`
+    comment upstream (see _parse_block's own note) rather than damage inside this file's own
+    writer, which sanitises exactly that case before it ever gets this far (see _update_comments).
+    """
     sentences: list[dict] = []
-    block_lines: list[str] = []
+    block_lines: list[tuple[int, str]] = []
 
     def flush():
         if not block_lines:
@@ -107,19 +125,19 @@ def parse(text: str) -> list[dict]:
         sentences.append(_parse_block(block_lines))
         block_lines.clear()
 
-    for line in text.split("\n"):
+    for lineno, line in enumerate(text.split("\n"), start=1):
         # strip a single trailing CR (CRLF files) but keep the raw content
         if line.endswith("\r"):
             line = line[:-1]
         if line.strip() == "":
             flush()
         else:
-            block_lines.append(line)
+            block_lines.append((lineno, line))
     flush()
     return sentences
 
 
-def _parse_block(lines: list[str]) -> dict:
+def _parse_block(lines: list[tuple[int, str]]) -> dict:
     comments: list[str] = []
     tokens: list[dict] = []
     mwt: list[dict] = []
@@ -131,7 +149,7 @@ def _parse_block(lines: list[str]) -> dict:
     bounds: dict[str, Any] = {}
     last_tok_id = 0
 
-    for line in lines:
+    for lineno, line in lines:
         if line.startswith("#"):
             comments.append(line)
             body = line[1:].strip()
@@ -158,7 +176,24 @@ def _parse_block(lines: list[str]) -> dict:
         cols = line.split("\t")
         # pad/truncate to exactly 10 columns, keeping raw strings
         cols = (cols + ["_"] * 10)[:10]
-        kind = _parse_id(cols[0])
+        try:
+            kind = _parse_id(cols[0])
+        except ValueError:
+            if "\t" not in line:
+                # the single most common real-world cause: a `# text*` comment upstream held a
+                # literal (unescaped) newline instead of one written as "\n", so the writer that
+                # produced this file split it into the comment PLUS this bare orphan line — see
+                # ConllUParseError's own note, and _update_comments below for how this file's own
+                # writer avoids ever doing that to a translation.
+                reason = ("this line has no tab characters at all, so it's not a real token "
+                          "row — it looks like a stray continuation of the comment just above it "
+                          "(a raw line break where the source should have written \"\\n\")")
+            else:
+                reason = ("a token/MWT/empty-node line must start with an integer ID (\"7\"), "
+                          "an MWT range (\"3-4\"), or an empty-node id (\"3.1\") — "
+                          f"the first column here is {cols[0]!r}")
+            raise ConllUParseError(lineno, line, reason) from None
+
         if kind[0] == "tok":
             tok: dict[str, Any] = {"id": kind[1]}
             for i, name in enumerate(COLS[1:], start=1):
@@ -197,16 +232,28 @@ def _token_line(idx: int, tok: dict) -> str:
     return "\t".join(cols)
 
 
+def _oneline(s: str) -> str:
+    """Collapse embedded newlines to spaces — every `# key = value` comment this writer emits is
+    ONE physical line, and a raw "\\n" surviving into it splits the file into that (truncated)
+    comment plus an orphan line the reader can't make sense of as anything (see ConllUParseError
+    and its "no tab characters at all" diagnosis in parse(), which is exactly this shape). This is
+    the one place that guarantee is enforced, so every caller below routes through it rather than
+    trusting its own value is already newline-free — a value crossing this boundary is usually
+    free-form text (a pasted or auto-generated translation, an edited `# text`) that had no reason
+    to promise that on its own. No-op, and therefore byte-stable, for a value that never had one."""
+    return " ".join(s.split("\n"))
+
+
 def _update_comments(sent: dict) -> list[str]:
     """Return the sentence's comment lines, refreshing sent_id/text/translations if edited."""
     comments = list(sent.get("comments") or [])
     updates = {}
     if sent.get("sid") is not None:
-        updates["sent_id"] = str(sent["sid"])
+        updates["sent_id"] = _oneline(str(sent["sid"]))
     if sent.get("text") is not None:
         # `# text` is a single physical comment line — collapse any display line breaks the UI preserved
         # (item 12) back to spaces so the file stays valid. No-op for newline-free text → byte-stable.
-        updates["text"] = " ".join(str(sent["text"]).split("\n"))
+        updates["text"] = _oneline(str(sent["text"]))
 
     # Translations round-trip as `# text_LANG = …` comments. When the sentence dict
     # carries a `translations` list it is authoritative: existing `# text_*` lines are
@@ -225,7 +272,10 @@ def _update_comments(sent: dict) -> list[str]:
             key = "text_" + lang
             if key not in trans_map:
                 trans_order.append(key)
-            trans_map[key] = str(t.get("text", ""))
+            # _oneline: a machine-translated/auto-generated string is exactly the kind of value
+            # most likely to arrive carrying a real "\n" instead of the escaped "\\n" CoNLL-U
+            # needs — this is the corruption this whole fix exists for; see _oneline's own note.
+            trans_map[key] = _oneline(str(t.get("text", "")))
 
     # Document-level scheme metadata (`# translit_scheme = …`). A field that is
     # None passes through verbatim (byte-stable for docs that don't carry it); a non-empty string is
@@ -235,7 +285,7 @@ def _update_comments(sent: dict) -> list[str]:
     for key in _META_KEYS:
         v = sent.get(key)
         if v is not None:
-            meta[key] = str(v)
+            meta[key] = _oneline(str(v))
 
     # Document/paragraph boundaries. Absent (None) ⇒ not managed at all, so the comment passes through
     # verbatim; anything else (True / an id / False) ⇒ this sentence dict is authoritative about the marker.
