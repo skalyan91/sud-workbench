@@ -1496,6 +1496,8 @@
   html:not(.win-inactive) #doc:not(.zone-diagram) table.grid tbody tr:is(.sel,.mwtsel) td.col-id,
   html:not(.win-inactive) #doc:not(.zone-diagram) table.grid tbody tr:is(.sel,.mwtsel) .cin,
   html:not(.win-inactive) #doc:not(.zone-diagram) table.grid tbody tr:is(.sel,.mwtsel) .csel{color:#fff}
+  html:not(.win-inactive) #doc:not(.zone-diagram) table.grid tbody tr:is(.sel,.mwtsel) .cin{caret-color:#fff}   /* on report ("carets should be white too") — caret-color defaults to currentColor, which the rule above already sets to #fff, but that's an implicit assumption this app doesn't otherwise lean on for carets (see .nodeedit's own explicit caret-color); stating it directly removes any doubt */
+  html:not(.win-inactive) #doc:not(.zone-diagram) table.grid tbody tr:is(.sel,.mwtsel) .csel{background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='9' height='6' viewBox='0 0 10 7'><path d='M1 1l4 4 4-4' fill='none' stroke='%23fff' stroke-width='1.4' stroke-linecap='round' stroke-linejoin='round'/></svg>")}   /* on report ("this also applies to chevrons") — .csel's own dropdown chevron (below) is a background-image with its stroke colour BAKED INTO the SVG (%238a8a8e), not currentColor-driven the way a mask-image icon would be, so the row-selection rule above turning `color` white never reached it. Same path, same glyph, stroke swapped to white */
   /* UNFOCUSED WINDOW: the selection drops the accent for a neutral grey, as every macOS list does — so the ink
      goes back to normal too, which is why the white above is gated on it as well as on the zone. Carries an id
      to outrank the zone-diagram rule below (1,2,5): a window that is not key greys its selection whichever pane
