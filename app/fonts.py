@@ -19,6 +19,7 @@ from __future__ import annotations
 import base64
 import os
 import re
+import tempfile
 import urllib.parse
 import urllib.request
 
@@ -88,10 +89,39 @@ def _fetch_and_cache(family: str, path_finder, cache_ext: str, ua: dict) -> tupl
     if not data:
         return None, False, f"could not fetch {family}: {err}"
     path = os.path.join(FONT_DIR, _slug(family) + "." + cache_ext)
-    tmp = path + ".part"
-    with open(tmp, "wb") as fh:
-        fh.write(data)
-    os.replace(tmp, path)
+    # ⚠ THE TEMP NAME MUST BE UNIQUE PER CALL, not per family — pywebview dispatches each bridge call
+    # (window.pywebview.api.font_face/font_face_raw) onto its OWN thread (the same "unserialized bridge
+    # threads" fact _dialog_lock, app/api.py, already exists to work around for create_file_dialog), and
+    # the JS side's own per-family Promise cache (js/lang/smp-shape.js's _fontBytesCache) only dedupes
+    # calls made from the SAME render pass — a font requested again from a LATER render (a script switch
+    # mid-fetch, a re-render firing before the first fetch lands) reaches this function as a genuinely
+    # SEPARATE call, on a genuinely separate thread, with no JS-side memory of the one still in flight.
+    # Two such calls racing on the OLD fixed `path + ".part"` name both `open(tmp,"wb")` the SAME path —
+    # each truncates it, and whichever thread's write() calls land last wins, however that interleaves —
+    # so the file that then survives os.replace() can be an interleaved MIX of two different downloads,
+    # not either complete file: NOT a torn write os.replace()'s own atomicity can prevent (the tmp file
+    # itself is already corrupt by the time replace() runs), and not a case cached_path()'s size-only
+    # sanity check ever catches (a merged file this size is still well over the 1024-byte floor). Once
+    # written, this cache is checked before ever fetching again — see path_finder() above — so a single
+    # unlucky race corrupts a family's cache PERMANENTLY, for every later call, until someone clears it by
+    # hand: measured live as exactly this — a script rendered correctly, then silently started showing
+    # tofu after enough switching to hit the race, and never recovered on its own. tempfile.mkstemp(),
+    # not a hand-rolled suffix (pid, a counter, …): it's the one call in the standard library whose whole
+    # contract is "atomically create a file whose name no other call — in this process or any other — can
+    # already be using", via O_EXCL under the hood, so two threads can never even momentarily collide on
+    # the same tmp path the way a merely-probably-unique suffix could. Concurrent fetches for the same
+    # family therefore always write to genuinely DIFFERENT files; os.replace() is still what makes the
+    # FINAL rename atomic, so whichever finishes last simply wins outright, complete either way.
+    fd, tmp = tempfile.mkstemp(dir=FONT_DIR, prefix=os.path.basename(path) + ".")
+    try:
+        with os.fdopen(fd, "wb") as fh:
+            fh.write(data)
+        os.replace(tmp, path)
+    finally:
+        try:
+            os.remove(tmp)   # only present if os.replace() itself failed (e.g. cross-device) — the success path already moved it
+        except OSError:
+            pass
     return path, False, ""
 
 

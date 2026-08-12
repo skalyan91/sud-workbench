@@ -953,10 +953,27 @@ function smpReshape(root){
        DIFFERENT, wider test than smpUnshaped's own: shaping doesn't care which engine asked for it.
        A punct-sat daṇḍa's own text is plain BMP (SMP_RE never matches it) and has nothing here to shape
        — it keeps riding the OLD foreignObject path below exactly as before, matching whatever its SMP
-       neighbour ends up doing, which is what punctSatSMP has always been for. */
+       neighbour ends up doing, which is what punctSatSMP has always been for.
+       ⚠ THE FAMILY IS NOT cs.fontFamily.split(",")[0] — that was tried first and is WRONG, on report ("it
+       worked for a bit, then stopped"), root-caused live: only ONE script (Ranjana, a cmap collision case
+       — see syncSchemeAttr's own note, js/lang/translit.js) ever gets an explicit --token-font override at
+       all. Every other Brahmic script relies on the browser's own PER-GLYPH fallback across --token-font's
+       one long, STATIC stack — ensureScriptFont (fontload.js) injects the @font-face so the family becomes
+       resolvable, but never reorders the stack to put it first. So getComputedStyle(el).fontFamily's own
+       FIRST entry is essentially always "Noto Sans" (or whichever family the stack genuinely leads with),
+       REGARDLESS of which script is actually on screen — confirmed live: this app's font cache held only
+       notosans.raw.ttf after testing a Kawi document, meaning that wrong-but-plausible family was the one
+       actually fetched and shaped against, which HAS NO KAWI GLYPHS AT ALL — every glyph came back gid0
+       (.notdef), the exact tofu reported. The FIX is to ask what script `s` is actually IN — fontScriptRes()
+       (fontload.js) is the SAME \p{Script=…} detection docScripts() already uses to decide what to fetch
+       in the first place, so this asks the identical question fontload.js's own mechanism answers, instead
+       of re-deriving it (wrongly) from computed style. fontStackName() (fontload.js) then names the family
+       exactly as ensureScriptFont itself would — the two can never disagree about what a script is called. */
     if(SMP_RE.test(s||"")){
       const cs0=getComputedStyle(el);
-      const fam=(cs0.fontFamily||"").split(",")[0].trim().replace(/^["']|["']$/g,"");
+      let fam="";
+      if(typeof fontScriptRes==="function"&&typeof fontStackName==="function"){
+        for(const [name,re] of fontScriptRes()){ if(re.test(s)){ fam=fontStackName(name); break; } } }
       const sizePx=parseFloat(cs0.fontSize)||0;
       if(fam&&sizePx){
         const shape=(typeof smpShapeSync==="function")?smpShapeSync(s,fam,sizePx):null;
@@ -2566,12 +2583,17 @@ function belowReserveH(hasTr,tierCount,hasPos,avmH){ const n=belowRows(hasTr,tie
    with nothing left for the two rendering contexts to disagree about.
    This also answers the OTHER half of the same report directly: "AVM brackets should be styled and spaced
    exactly like MWT brackets." The bracket is drawn with mwtTie's OWN .mwt-tie/.mwt-tie-h/.mwt-tie-cas classes
-   (styles/app.css), reused VERBATIM rather than matched by hand — the same move .mwt-grid-tie already makes
-   for its own 90°-rotated copy of this identical shape (see that rule's own comment). Long spine takes
-   .mwt-tie-h's lighter weight, short top/bottom serifs take .mwt-tie's full weight — the SAME role-not-
-   orientation swap .mwt-grid-tie documents for its rotation ("the spine runs the full height … and wants
-   the lighter weight"): AVM's bracket is a tie standing on its side, exactly as the grid's already is. */
-const AVM_ROW_GAP=2, AVM_PAD_V=4, AVM_COL_GAP=9, AVM_PAD_H=10, AVM_BRK_W=5, AVM_BRK_EXT=0.5625;   // AVM_BRK_EXT: the SAME literal mwtTie's own end-pins use — half of .mwt-tie-h's stroke-width at --arc-stroke:1.5px (.75×1.5/2) — kept in step BY HAND with that rule, exactly as its own comment already warns any consumer of the figure to
+   (styles/app.css), reused VERBATIM rather than matched by hand. The weight split was FIRST tried by analogy
+   with .mwt-grid-tie's own 90°-rotated copy of this shape (long spine → .mwt-tie-h's lighter weight, short
+   serifs → .mwt-tie's full weight) — but live testing said that read wrong here, and the analogy turns out to
+   borrow the wrong justification: .mwt-grid-tie lightens its spine because that spine runs the full height of
+   a MULTI-ROW MWT group and would carry too much ink at full weight at that length (see that rule's own
+   comment) — a condition an AVM box's one-or-few-row spine never approaches. What DOES carry over from mwtTie
+   is the ORIENTATION its "-h" suffix already names, not a length-based role: a horizontal stroke reads
+   heavier than a vertical one of equal width (the horizontal–vertical illusion), so .mwt-tie-h belongs on
+   whichever segment is horizontal. Turned 90°, that is the short top/bottom SERIFS; the long vertical SPINE
+   takes .mwt-tie's full weight instead — the reverse of the first cut, and of .mwt-grid-tie's own split. */
+const AVM_ROW_GAP=2, AVM_PAD_V=2, AVM_COL_GAP=6, AVM_PAD_H=5, AVM_BRK_W=5, AVM_BRK_EXT=0.5625;   // PAD_V/COL_GAP/PAD_H tightened (from 4/9/10) so the bracket sits snug on the attr/val ink rather than floating around it — per live-tested report. AVM_BRK_EXT: still the SAME literal mwtTie's own end-pins use — half of .mwt-tie-h's stroke-width at --arc-stroke:1.5px (.75×1.5/2), kept in step BY HAND with that rule — now carried by the SPINE (see drawAVM), since the weight roles swapped and the overshoot is anchored to the CLASS (the full-weight stroke always overshoots the thin one), not to which segment happens to hold it
 // item 22: keyed on the FEATS string (not the token) — every token sharing FEATS (extremely common: every
 // 3rd-person singular present verb in a document, say) lays out identically, so this is a real cache, not a
 // one-shot memo, cleared on re-render (see renderDoc's own call) since a stale entry can only be as wrong as
@@ -2612,14 +2634,16 @@ function avmRowMaxH(toks){ return Math.max(0,...(toks||[]).map(avmHeight)); }
 function drawAVM(svg,cx,y0,t,si,tokId,boxes){ const L=avmLayout(t); if(!L) return y0;
   const x0=cx-L.w/2, x1=cx+L.w/2, y1=y0+L.h;
   // the bracket: mwtTie's own 3-segment tie shape, once per side, turned 90° — casing (one combined L path),
-  // spine (long, thin — .mwt-tie-h), two short serifs (full weight — .mwt-tie, each overshooting the spine's
-  // own centreline by AVM_BRK_EXT so its thicker stroke fully covers the corner the thinner spine's reaches,
-  // exactly as mwtTie's own end-pins overshoot its bar — see that rule's comment for the arithmetic this mirrors)
+  // spine (long, full weight — .mwt-tie) and two short serifs (thinner — .mwt-tie-h: the "-h" is mwtTie's own
+  // ORIENTATION suffix, and the serifs are the horizontal segments once the shape is turned 90°). The spine
+  // overshoots the serifs' y-centrelines (y0/y1) by AVM_BRK_EXT, outward on its own (vertical) length, so its
+  // thicker stroke fully covers the corner the thinner serifs' reaches — the same invariant mwtTie's own
+  // end-pins follow (the full-weight stroke overshoots the thin one), just carried by the spine here since
+  // the weight roles are swapped from mwtTie's own unrotated shape.
   [[x0,x0+AVM_BRK_W],[x1,x1-AVM_BRK_W]].forEach(([xEdge,xIn])=>{
     svg.appendChild(E("path",{class:"mwt-tie-cas",d:`M ${xIn} ${y0} L ${xEdge} ${y0} L ${xEdge} ${y1} L ${xIn} ${y1}`}));
-    svg.appendChild(E("path",{class:"mwt-tie-h",d:`M ${xEdge} ${y0} L ${xEdge} ${y1}`}));
-    const ext=xIn>xEdge?-AVM_BRK_EXT:AVM_BRK_EXT;
-    svg.appendChild(E("path",{class:"mwt-tie",d:`M ${xIn} ${y0} L ${xEdge+ext} ${y0} M ${xEdge+ext} ${y1} L ${xIn} ${y1}`})); });
+    svg.appendChild(E("path",{class:"mwt-tie-h",d:`M ${xIn} ${y0} L ${xEdge} ${y0} M ${xEdge} ${y1} L ${xIn} ${y1}`}));
+    svg.appendChild(E("path",{class:"mwt-tie",d:`M ${xEdge} ${y0-AVM_BRK_EXT} L ${xEdge} ${y1+AVM_BRK_EXT}`})); });
   const attrX=x0+AVM_PAD_H+L.attrW, valX=attrX+AVM_COL_GAP;
   L.rows.forEach((r,i)=>{ const ry=y0+AVM_PAD_V+ascent(AVM_VAL_F)+i*(L.lineH+AVM_ROW_GAP);
     const g=E("g",{class:"avm-row","data-feat":r.key,tabindex:"0"});
@@ -3144,10 +3168,21 @@ function tieIdRange(from,to){ const a=[]; for(let k=from;k<=to;k++) a.push(k); r
    mis-computed; the tie simply brackets the forms and the romanisation is wider than the forms.
    (A variant that widened the tie to whichever row is wider under iastFormEdit() was built and measured — tie
    0.5…107.2, enclosing the romanisation — and rejected: hugging the form ink is the intended behaviour.) */
-function mwtTie(svg,c,w,D,y,boxes,si){ const PIN=5, L=tieLayout(D); if(!L.rows.length) return; y+=L.lead;
+// item 22 — `y` used to be ONE shared seating height for every row this call draws (a caller-computed
+// row-wide or sentence-wide MAX below-stack bottom), which meant a single AVM-heavy token anywhere in the
+// sentence/row pushed EVERY MWT/ExtPos tie down to clear it, including ties nowhere near that token. `y` may
+// now ALSO be an ARRAY — each token's own measured/computed below-stack bottom, same indexing as `c`/`w` —
+// in which case each row seats off the max of ONLY the tokens IT spans (r.from-1..r.to-1), never the whole
+// array. A plain number is still accepted (every row shares it, exactly as before) for any caller that has
+// no per-token figures to offer. The "+5" is the seating gap every caller used to add itself before handing
+// `y` in — folded in here now that there are two shapes of input to add it to, so neither path can forget it.
+function mwtTie(svg,c,w,D,y,boxes,si){ const PIN=5, L=tieLayout(D); if(!L.rows.length) return;
+  const rowBase=r=>{ if(!Array.isArray(y)) return y+5+L.lead;
+    let m=y[r.from-1]; for(let k=r.from;k<=r.to-1;k++) if(y[k]>m) m=y[k]; return m+5+L.lead; };
   L.rows.forEach(r=>{ const a=r.from-1,b=r.to-1; if(a<0||b>=c.length||a>b)return;
   const mark0=svg.childNodes.length;   // item 8: everything this row appends from here on is MOVED into one .mwt-g group at the end (below) — recorded rather than re-pointing a dozen appendChild calls at a group, so the drawing order (casing → tie → rows → form last) stays exactly as written
-  const x0=Math.min(c[a]-w[a]/2,c[b]-w[b]/2)-2, x1=Math.max(c[a]+w[a]/2,c[b]+w[b]/2)+2, mx=(x0+x1)/2, dp=PIN, ty=y+r.dy;
+  const rowY=rowBase(r);   // item 22: THIS row's own seating, computed fresh per row so a per-token `y` array can't leak one row's AVM height into a neighbouring, unrelated tie
+  const x0=Math.min(c[a]-w[a]/2,c[b]-w[b]/2)-2, x1=Math.max(c[a]+w[a]/2,c[b]+w[b]/2)+2, mx=(x0+x1)/2, dp=PIN, ty=rowY+r.dy;
   if(r.kind==="gw"){ gwSlurSVG(svg,x0+2,x1-2,ty,si,r.ids,boxes); return; }   // the goeswith slur ends ON the word's ink (w[] is the FORM width, and the unit's whole form at that), not on the ±2 the bracket pads itself by — a slur hugs its notes
   const tieD=`M ${x0} ${ty} L ${x0} ${ty+dp} L ${x1} ${ty+dp} L ${x1} ${ty}`;
   svg.appendChild(E("path",{class:"mwt-tie-cas",d:tieD}));   // occlusion halo first, so a cross-line arc crossing the tie is cleanly broken
@@ -3155,23 +3190,23 @@ function mwtTie(svg,c,w,D,y,boxes,si){ const PIN=5, L=tieLayout(D); if(!L.rows.l
   svg.appendChild(E("path",{class:"mwt-tie-h",d:`M ${x0} ${ty+dp} L ${x1} ${ty+dp}`}));   // the horizontal bar, drawn thinner — per psychophysics, a horizontal stroke reads heavier than a vertical one of the same width
   // item 1 — an ExtPos-only bracket: the value itself IS the label, drawn in the POS register (.mwt-pos matches
   // .tok-pos), over the same opaque backing the MWT form gets so a crossing line is occluded cleanly.
-  if(r.kind==="xpos"){ const fy=y+r.dfy;
+  if(r.kind==="xpos"){ const fy=rowY+r.dfy;
     drawTieLabel(svg,mx,fy,r.pos,"mwt-pos","mwt-pos-cas",POS_F,boxes);
     if(si!=null) tagXPosLabel(svg.lastElementChild,si,r); return; }   // returns BEFORE the .mwt-g wrap below on purpose: an ExtPos-only bracket owns no multi-word token, so there is no component range for it to be "selected" by (item 8) — its own label is already click-selectable via tagXPosLabel
   const m=r.m, mfd=bform(m);   // item 8/9: honour the selected SCRIPT (and, for Sanskrit, the sandhi-fused reconstruction) — via m.ortho, exactly like single tokens
-  const fy=y+r.dfy;
+  const fy=rowY+r.dfy;
   const fromId=m._from!=null?m._from:m.from;   // the ORIGINAL token id — m._from when a display fold (merge-punctuation) has remapped from/to into DISPLAY order — because editMWTInline and the tie's menus both look the MWT up in s.mwt by that original id
   // Under iastFormEdit() (Sanskrit + a real script) the tie's glyph is a DERIVED, display-only rendering of the
   // stored IAST, exactly as a single token's is — so the SAME rule applies here: the romanisation ROW below is
   // the editable field and the glyph above is select-only. Both rows carry the {data-s, data-mwtfrom} pair, so
   // the delegated click/contextmenu handlers resolve the MWT from either one and decide which may open an editor.
   const iastRow=iastFormEdit();
-  const mrt=trTxt(m); if(mrt&&r.dtr){ const tr=E("text",{class:"translit mwt-tr"+(iastRow?" mwt-tr-edit":""),x:mx,y:y+r.dtr,"text-anchor":"middle"}); tr.textContent=mrt; svg.appendChild(tr);   // Item 9: draw the MWT transliteration row FIRST, so the MWT form (and its opaque backing) below paints ON TOP where the two rows crowd — mirrors how .stext is raised above .strans
+  const mrt=trTxt(m); if(mrt&&r.dtr){ const tr=E("text",{class:"translit mwt-tr"+(iastRow?" mwt-tr-edit":""),x:mx,y:rowY+r.dtr,"text-anchor":"middle"}); tr.textContent=mrt; svg.appendChild(tr);   // Item 9: draw the MWT transliteration row FIRST, so the MWT form (and its opaque backing) below paints ON TOP where the two rows crowd — mirrors how .stext is raised above .strans
     if(si!=null){ tr.setAttribute("data-s",si); tr.setAttribute("data-mwtfrom",fromId); }   /* THE ROW IS TAGGED FOR THE MENU IN EVERY LANGUAGE, and for the EDITOR only under iastFormEdit(). Right-clicking an MWT's transliteration used to fall through to the ordinary token menu everywhere except Sanskrit, because data-mwtfrom (which is what the delegated contextmenu handler resolves an MWT from) was attached only on the iast row — yet the row belongs to the MWT whichever language it is in, so its menu is the MWT's. The .mwt-tr-edit class stays gated, because THAT is what the click-to-edit handler matches, and outside iastFormEdit this row is a derived romanisation of the surface form that nothing writes back. */
     if(si!=null&&iastRow){ tr.style.cursor="text";   // tagged ONLY under iastFormEdit(): everywhere else this row is a plain romanisation of the surface form (m.translit), nothing writes it back, and the surface form itself is already the editable field.   // cursor:text, not pointer — this row IS a text field you type into, so it takes the same I-beam the other click-to-edit diagram texts carry (.tr-edit / .gl-edit / .cform, all cursor:text in app.css). A pointer would promise a button.
       svgTip(tr,"multi-word token — click to edit the surface form (the script glyph above is derived from it)"); }
-    boxes&&boxes.push({x:mx,y:y+r.dtr-4,hx:meas(mrt,TRANS_F)/2,hy:7}); }
-  if(r.pos&&r.dpos){ drawTieLabel(svg,mx,y+r.dpos,r.pos,"mwt-pos","mwt-pos-cas",POS_F,boxes);   // item 1: the coinciding-span case — the MWT bracket simply gains the ExtPos as a POS annotation instead of a second bracket being drawn over the same tokens
+    boxes&&boxes.push({x:mx,y:rowY+r.dtr-4,hx:meas(mrt,TRANS_F)/2,hy:7}); }
+  if(r.pos&&r.dpos){ drawTieLabel(svg,mx,rowY+r.dpos,r.pos,"mwt-pos","mwt-pos-cas",POS_F,boxes);   // item 1: the coinciding-span case — the MWT bracket simply gains the ExtPos as a POS annotation instead of a second bracket being drawn over the same tokens
     if(si!=null) tagXPosLabel(svg.lastElementChild,si,r); }
   const cas=E("text",{class:"mwt-cas",x:mx,y:fy,"text-anchor":"middle"}); cas.textContent=mfd; cas.setAttribute("aria-hidden","true"); svg.appendChild(cas);   // opaque backing behind the form → a line (or the translit row above) passing behind the reconstructed word is occluded
   const e=E("text",{class:"mwt-form",x:mx,y:fy,"text-anchor":"middle"}); e.textContent=mfd;   // +20: the MWT form is full 15px (matches tokens), so 20px seats it a comfortable ~9px below the tie
