@@ -97,8 +97,10 @@ document.querySelectorAll('#notationPill [data-notation]').forEach(b=>{ b.onclic
 // Text-Only mode already opens for this exact pill (see the .pilllabel click handler further down) — reused
 // here as this button's ONLY behaviour, in every display mode, not just Text-Only.
 document.getElementById("notationBtn").addEventListener("click",e=>{ e.preventDefault(); e.stopPropagation();
-  const pill=document.getElementById("notationPill"), r=e.currentTarget.getBoundingClientRect();
-  openTbGroupMenu(_tbGroupItems(pill), r.left, r.bottom+4); });
+  const btn=e.currentTarget;
+  if(_tbMenu&&_tbMenuOwner===btn){ closeTbMenu(); return; }   // item 16: click while ITS OWN menu is open → toggle closed, don't reopen it
+  const pill=document.getElementById("notationPill"), r=btn.getBoundingClientRect();
+  openTbGroupMenu(_tbGroupItems(pill), r.left, r.bottom+4, btn); });
 // item 3: page-layout pill — the same shape as the notation pill (two segments, the active one pressed). The
 // class goes on #doc rather than on each block, so the sheets, the page ground and the measure cap are all one
 // stylesheet switch; renderDoc reads PAGED itself to decide where a sheet ENDS (a `# newdoc`).
@@ -134,13 +136,16 @@ function applyTbMode(mode){ const tb=document.querySelector(".titlebar"); if(!tb
   if(hasBridge()){ requestAnimationFrame(()=>requestAnimationFrame(()=>{ try{ window.pywebview.api.remeasure_titlebar(); }catch(e){} })); } }
 function setTbMode(mode){ applyTbMode(mode); PREFS.tbmode=TBMODE; savePrefs(); }
 let _tbMenu=null;
+let _tbMenuOwner=null;   // item 16: whichever trigger's click opened the current menu — a second click on THAT SAME trigger should toggle it closed, not reopen it; see the notationBtn/pilllabel handlers and _tbOutside below
 // item 3: the native titlebar drag overlay (an NSView above the webview) swallows left-clicks over the toolbar,
 // so a menu row opened under it couldn't be clicked. While a titlebar menu is open we ask the shell to make that
 // overlay click-through (bridge → __main__ toggles the drag view's hit-testing), so the menu can open AT the
 // cursor and still receive clicks; it's restored on close.
 function _tbPass(on){ try{ if(hasBridge()) window.pywebview.api.titlebar_passthrough(!!on); }catch(e){} }
-function closeTbMenu(){ if(_tbMenu){ _tbMenu.remove(); _tbMenu=null; document.removeEventListener("mousedown",_tbOutside,true); document.removeEventListener("keydown",_tbKey,true); _tbPass(false); } }
-function _tbOutside(e){ if(_tbMenu&&!_tbMenu.contains(e.target)) closeTbMenu(); }
+function closeTbMenu(){ if(_tbMenu){ _tbMenu.remove(); _tbMenu=null; _tbMenuOwner=null; document.removeEventListener("mousedown",_tbOutside,true); document.removeEventListener("keydown",_tbKey,true); _tbPass(false); } }
+function _tbOutside(e){ if(!_tbMenu||_tbMenu.contains(e.target)) return;
+  if(_tbMenuOwner&&_tbMenuOwner.contains(e.target)) return;   // item 16: a mousedown back on the OWNING trigger is not an "outside" click — leave the menu open so the trigger's own click handler gets first say (toggle-closed), instead of this handler closing it a beat earlier and the click handler immediately reopening it
+  closeTbMenu(); }
 function _tbKey(e){ if(e.key==="Escape"&&_tbMenu){ e.preventDefault(); e.stopPropagation(); closeTbMenu(); } }   // item 13: Esc dismisses the open Text-Only menu (like an outside-click)
 function openTbMenu(x,y){ closeTbMenu(); _tbPass(true);   // item 3: make the native drag overlay click-through so the menu can open AT the cursor and still receive clicks
   const m=document.createElement("div"); m.className="fpmenu tbmodemenu"; _tbMenu=m;
@@ -185,8 +190,8 @@ function _tbGroupItems(pill){
     label:((btn.querySelector(".tblabel")||{}).textContent)||btn.getAttribute("title")||"", icon:_sfMask(btn),
     checked:btn.classList.contains("active"), disabled:btn.disabled, kbd:NOTATION_ACCEL[btn.dataset.notation]||"",
     action:()=>btn.click() })); }   // kbd is "" for every non-notation pill (no dataset.notation → the lookup misses), so this is a no-op there
-function openTbGroupMenu(items,x,y){ closeTbMenu(); _tbPass(true);   // item 3: click-through drag overlay so the menu opens at the label and its rows stay clickable
-  const m=document.createElement("div"); m.className="fpmenu tbmodemenu tbgroupmenu"; _tbMenu=m;
+function openTbGroupMenu(items,x,y,owner){ closeTbMenu(); _tbPass(true);   // item 3: click-through drag overlay so the menu opens at the label and its rows stay clickable
+  const m=document.createElement("div"); m.className="fpmenu tbmodemenu tbgroupmenu"; _tbMenu=m; _tbMenuOwner=owner||null;
   if(!items.some(it=>it&&it.checked)) m.classList.add("tb-nochk");   // item 4: no checked row → collapse the leading checkmark gutter (no dead left margin)
   items.forEach(it=>{ if(it.sep){ const s=document.createElement("div"); s.className="fpsep"; m.appendChild(s); return; }
     const b=document.createElement("button"); b.type="button"; b.className="fpitem";
@@ -205,7 +210,9 @@ function openTbGroupMenu(items,x,y){ closeTbMenu(); _tbPass(true);   // item 3: 
   label.addEventListener("click",e=>{ if(TBMODE!=="text")return;   // only interactive in Text Only
     e.preventDefault(); e.stopPropagation();
     const pill=label.parentElement.querySelector(".tbpill"); if(!pill)return;
-    if(_tbGroupIsMenu(pill)){ const r=label.getBoundingClientRect(); openTbGroupMenu(_tbGroupItems(pill), r.left, r.bottom+4); }
+    if(_tbGroupIsMenu(pill)){
+      if(_tbMenu&&_tbMenuOwner===label){ closeTbMenu(); return; }   // item 16: same toggle-close as notationBtn
+      const r=label.getBoundingClientRect(); openTbGroupMenu(_tbGroupItems(pill), r.left, r.bottom+4, label); }
     else{ const btn=pill.querySelector(".tbtn"); if(btn) btn.click(); } }); }); })();
 document.getElementById("modelSel").onchange=e=>{ model=e.target.value; const label=model?(MODELINFO[model]||model):"";
   setLang(modelLang(model));   // language follows the model → updates the status pill and RTL
