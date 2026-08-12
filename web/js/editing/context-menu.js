@@ -475,6 +475,9 @@ function nodeTokenMenu(x,y,si,tokId){ const s=DOC[si]; if(!s)return; const rtl=s
     null, ...headItems(si,tokId),
     null, ...markFeatRow(si,tokId),
     null, ["Set as root","⌃⌘R",()=>setAsRoot(si,tokId)],
+    // item 2 of the parity fix: MISC NewPar=Yes, matching the grid's own tokenMenu row (same label/shortcut/
+    // checkmark, same shared toggleTokNewPar) — grouped with Set as root exactly as the grid groups it.
+    {label:"Paragraph starts here", kbd:"⌥⇧⌘P", check:isNewParTok(s.tokens[tokId-1]), fn:()=>toggleTokNewPar(si,tokId)},
     null, ["Delete token","⌘⌫",()=>deleteToken(si,tokId-1),true],
   ];
   const rdRow=(typeof readingsMenuItem==="function")?readingsMenuItem(si,tokId,()=>nodeTokenMenu(x,y,si,tokId)):null;   // CJK heteronyms (js/lang/readings.js) — null unless this language has alternative readings AND this token actually has more than one
