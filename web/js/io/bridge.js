@@ -1358,8 +1358,12 @@ const AMBIG_UPOS={
   "Definite=Ind":["NOUN","PROPN"], "PronType=Ind":["PRON","ADV"],
   "Voice=Rcp":["VERB","AUX"], "PronType=Rcp":["PRON","DET"],
   "Case=Dis":["NOUN","PROPN","PRON","ADJ"], "NumType=Dist":["NUM","DET"],
-  "Case=Equ":["NOUN","PROPN","PRON","DET","NUM"], "Degree=Equ":["ADJ","ADV"],
-  "Number=Inv":["NOUN","PROPN","PRON","DET","ADJ","NUM"], "Voice=Inv":["VERB","AUX"],
+  // item 21: the Case=Equ/Degree=Equ and Number=Inv/Voice=Inv pairs that used to live here are gone — FEATS_GLOSS
+  // (js/grid/grid.js) was pruned to standard-Leipzig-only, and EQU/Degree=Equ and INV/Voice=Inv were both
+  // custom-coined (not standard Leipzig), so neither abbreviation is ever generated or recognised any more —
+  // GLOSS_FEATS (rebuildGlossMaps, this file) is built FROM that table, so it no longer has "EQU"/"INV" keys
+  // to disambiguate in the first place. Left removed rather than kept-but-dead: this table is read by UPOS,
+  // never iterated as a list of "abbreviations that exist", so a stale entry here wouldn't error, just mislead.
 };
 // a Person abbreviation ("1"/"2"/"3"/"4" by default, but derived from GLOSS_FEATS so a custom PREFS.glossMap
 // override is honoured too) immediately followed by a Number abbreviation ("SG"/"PL"/…), with NO separating dot
