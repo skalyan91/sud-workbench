@@ -503,9 +503,15 @@ const ORNAMENTAL_SCRIPTS=new Set(["Ranjana","Soyombo","Bhaiksuki","Siddham"]);
    still under investigation; now that the actual "Balinese/Javanese clipped" root cause (a WebKit
    opacity-compositing bug, fixed in diagram-core.js) turned out to have nothing to do with STACK_DROP/
    STACKED_GAP at all, there is no remaining reason to keep Kawi singled out. ⚠ Burmese joined and Tibetan
-   left, on request — Burmese's own stacked medial consonants (subscript ya/ra/wa) need the same room this
-   set already gives Grantha/Javanese/Balinese; Tibetan's don't, now that it's out. */
-const STACKING_SCRIPTS=new Set(["Grantha","Javanese","Balinese","Kawi","Burmese","ZanabazarSquare"]);
+   left, on an earlier request — Burmese's own stacked medial consonants (subscript ya/ra/wa) need the same
+   room this set already gives Grantha/Javanese/Balinese; Tibetan's didn't, at the time. ⚠ TIBETAN IS BACK
+   IN, on a fresh request — the Sanskrit→Tibetan post-options just added (TibetanSyllabize/
+   TibetanSanskritPalatals, app/translit.py) put real subjoined consonant stacks on screen (kṣṇa → a
+   genuine ཀྵྞ-style stack, not the flat run Tibetan prose usually is), which is exactly the "letters pile
+   up vertically, not just side by side" shape this set exists to give room to — the earlier removal was
+   right for Tibetan's OWN native orthography and never anticipated Sanskrit loanwords being rendered
+   through it. */
+const STACKING_SCRIPTS=new Set(["Grantha","Javanese","Balinese","Kawi","Burmese","ZanabazarSquare","Tibetan"]);
 /* ⚠ DIAGRAM_STACKING_SCRIPTS — the narrower, Tibetan-excluded subset this app used to derive from the set
    above, feeding the diagram's own below-token reserve (stackDropExtra(), js/diagram/diagram-core.js) — is
    REMOVED, along with that function and STACK_DROP entirely, on request ("I think STACK_DROP was a bad

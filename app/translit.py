@@ -1668,11 +1668,24 @@ def _sanskrit(text: str, target: str) -> str:
             return ak.process(src, target, seg, post_options=post) or ""
 
         d1, d2 = _DANDA_IAST if target == "IAST" else _DANDA.get(target, _DANDA_DEFAULT)
+        # a script daṇḍa sits FLUSH against the syllable before it — no Indic orthography puts a plain
+        # space there — so, on request, strip whatever trailing separator the preceding word-piece's own
+        # CONVERTED text ends in: a plain space for every space-delimited script, or (found live while
+        # verifying the space fix, same principle) Tibetan's own tsheg (་ U+0F0B), which TibetanSyllabize
+        # inserts before every syllable including — with nothing here to stop it — the one immediately
+        # ahead of a daṇḍa. IAST is deliberately left alone: "word |" is a conventional print spacing for
+        # the romanised marker, a different thing from a script's own daṇḍa.
+        def _strip_pre_danda(s: str) -> str:
+            return s.rstrip(" ་") if target == "Tibetan" else s.rstrip(" ")
         out = []
         for piece in _DANDA_SPLIT.split(text):   # word-segments interleaved with daṇḍa markers + newlines
             if piece in ("//", "||", "‖", "॥"):   # "‖" (U+2016) = the double-daṇḍa display glyph → script's double daṇḍa
+                if target != "IAST" and out:
+                    out[-1] = _strip_pre_danda(out[-1])
                 out.append(d2)
             elif piece in ("/", "|", "।"):
+                if target != "IAST" and out:
+                    out[-1] = _strip_pre_danda(out[-1])
                 out.append(d1)
             elif piece == "\n":
                 out.append("\n")   # item 20: keep the hard line break verbatim (multi-line verse stays multi-line)
