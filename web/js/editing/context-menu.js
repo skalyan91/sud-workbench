@@ -238,7 +238,7 @@ function deprelMenuGroups(vocab){
 function relTitle(r){ const e=deprelExpand(r); return (e||r||"relation")+" — right-click to change (deep features on each relation's submenu)"; }
 function posTitle(p){ return (UPOS_INFO[p]||p||"part of speech")+" — right-click to change"; }
 // build a categorised menu: every option grouped under headers, with right-aligned expansions and a check on the current one
-function optionMenu(x,y,all,cats,expandOf,current,choose,guide,rtl,subFor,customSet,subNote,noteTop,subColSize){
+function optionMenu(x,y,all,cats,expandOf,current,choose,guide,rtl,subFor,customSet,subNote,noteTop,subColSize,freeAdd){
   const placed=new Set(), items=[];
   if(noteTop) items.push({note:noteTop});   // item 2: a leading scope note (e.g. the external-POS menu explaining which span it tags)
   if(subFor) items.push({note:subNote||"Right-click to show available deep features for a relation"});   // the relation menu's deep features and (item 4) the POS menu's UPOS subtypes both hang off a right-click submenu, so each passes its own hint
@@ -249,6 +249,7 @@ function optionMenu(x,y,all,cats,expandOf,current,choose,guide,rtl,subFor,custom
   const other=customSet?extra.filter(r=>!customSet.has(r)):extra, custom=customSet?extra.filter(r=>customSet.has(r)):[];   // customSet (relMenu only) → session-added relations get their OWN "Custom" heading instead of "Other"
   if(other.length){ items.push({header:"Other"}); other.forEach(r=>items.push(row(r))); }
   if(custom.length){ items.push({header:"Custom"}); custom.forEach(r=>items.push(row(r))); }
+  if(freeAdd){ items.push(null,{input:true, value:"", placeholder:freeAdd.placeholder||"New…", commit:freeAdd.commit}); }   // relMenu only: free-text authoring of a genuinely new option, mirroring deepSubItems' own free-text row one level down — same {input:true,...} shape (renderMenu never auto-closes an input row; the commit callback must call closeCtx() itself, same as deepSubItems' setDF does)
   if(guide){ items.push(null,guide); }
   showCtx(x,y,items,true,rtl); }   // true → two-column layout (balanced) for tall menus
 /* ── HOW LIKELY DOES THE PIPELINE THINK EACH OF THESE IS? ───────────────────────────────────────────
@@ -316,7 +317,17 @@ function relMenu(x,y,si,tokId){ const s=DOC[si]; if(!s)return; const dep=s.token
   const subFor=r=>()=>deepSubItems(si,tokId,r,dfMap[r]||[]);   // EVERY relation gets a right-click deep-feature submenu (its taxonomy ∪ file features, or just an add-field)
   const choose=d=>{ if(d==="root"&&rb!=="root"){ setAsRoot(si,tokId); return; }   // not yet root → the FULL re-attach (migrates the old root's dependents, demotes it to udep), not a naive head=0 flip
     if(d!==dep.deprel){ pushUndo(si); dep.deprel=d; afterDeprelEdit(dep,s); markDirty(); preserveScroll(renderDoc); } };   // left-click sets the BARE relation — so clicking the current relation drops its @feature (= "(none)"); a feature is set via the row's submenu. Task B: no regenTok — structural, must never trigger a gloss/MGloss recompute
-  optionMenu(x,y,cands,deprelMenuGroups(cands),deprelExpand,depBase(dep.deprel),choose,guide,sentRTL(s),subFor);   // deprelMenuGroups interleaves any user-added relation into its own family/Other — no separate "Custom" heading needed
+  // free-text authoring of a genuinely NEW base relation (parity with the grid's own DepRel cell, which is
+  // unrestricted free text — grid.js's deprelin). Mints the typed value into SETTINGS.deprel on commit, same as
+  // the grid does on blur (duplicated rather than factored into a shared helper: grid.js is being edited
+  // concurrently by another agent on unrelated MGloss/Translit bugs, and this is a 2-line check), then hands the
+  // committed string to `choose` — the SAME function every picker row already calls — so there is exactly one
+  // place that writes a token's deprel, not two.
+  const commitNewRel=v=>{ closeCtx(); const d=(v||"").trim(); if(!d||d==="_") return;
+    if(!SETTINGS.deprel.includes(d)){ SETTINGS.deprel.push(d); SETTINGS.deprel.sort(); }
+    choose(d); };
+  optionMenu(x,y,cands,deprelMenuGroups(cands),deprelExpand,depBase(dep.deprel),choose,guide,sentRTL(s),subFor,
+    undefined,undefined,undefined,undefined,{placeholder:"New relation…",commit:commitNewRel});   // deprelMenuGroups interleaves any user-added relation into its own family/Other — no separate "Custom" heading needed
   /* …and then fade each row by how likely the parser thinks that relation is FOR THIS EDGE — the arc it
      weighed if this is one it considered, the synthesised state if the reader made the attachment
      themselves. Pooled to the base relation by `relWeightsFor`, which is the same pooling the rows'
