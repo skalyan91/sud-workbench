@@ -790,7 +790,7 @@ const AVM_GROUPS={AGR:["Person","Number","Gender","Clusivity"], TAM:["Tense","As
 // here by construction: isReported reads t.misc, never t.feats (miscKV(t.misc,"Reported")), and avmStruct
 // only ever looks at t.feats — Reported was never going to reach an AVM row regardless of this Set, but
 // naming it keeps this list matching the mark-already-exists reasoning it's part of, in full.
-const AVM_EXCLUDE=new Set(["NumType","PronType","VerbForm","ExtPos","Shared","Foreign","Typo","Reported"]);
+const AVM_EXCLUDE=new Set(["NumType","PronType","Poss","VerbForm","ExtPos","Shared","Foreign","Typo","Reported"]);   // Poss joins NumType/PronType on report — same "Lexical features" category (FEATS_CAT), already folded into the POS tag itself, so an AVM row for it is a second, redundant place the same fact is shown
 /* The token's FEATS as an ordered, FLAT AVM row list — no nesting any more (item 23): [{group:"AGR",
    members:[...set ones...], combined:"3.Sing.Fem", vals:[{feat:"Person",val:"3"},{feat:"Number",val:"Sing"},
    {feat:"Gender",val:"Fem"}]}, {group:"TAM",...} (either omitted outright if the token sets NONE of that
