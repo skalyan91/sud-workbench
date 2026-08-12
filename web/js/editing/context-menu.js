@@ -469,6 +469,10 @@ function nodeTokenMenu(x,y,si,tokId){ const s=DOC[si]; if(!s)return; const rtl=s
   const items=[
     ["Edit token","↩",()=>editNodeInline(si,tokId)],
     ["Edit lemma…","⌘L",()=>editLemmaPrompt(si,tokId)],   // the accelerator is named now that ⌘L is the ONLY gesture besides this row — the double-click that used to open it is gone   // item 4: the same editor a double-click on the token opens — that gesture has nothing on screen to advertise it, so the command needs a menu row of its own. Ellipsis, unlike "Edit token" above: this one opens a popover rather than editing in place, which is what the ellipsis means on macOS
+    // set/edit MISC CorrectForm independent of Typo (parity fix): omitted on a goeswith head, mirroring
+    // correctFormShown's own exclusion there (diagram-core.js) — that token's CorrectForm means something else
+    // structurally (the joined halves, already shown by the slur) and is never drawn as a correction.
+    ...(gwOf(s.tokens[tokId-1]).length?[]:[["Edit correct form…",null,()=>editCorrectFormPrompt(si,tokId)]]),
     null, ...combineItems,
     null, ...moveItems(si,tokId,false),
     null, ...insertItems(si,tokId,false),

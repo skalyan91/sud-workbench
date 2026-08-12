@@ -608,8 +608,13 @@ function toggleTypo(){ if(typeof stextMarkTypo==="function" && stextMarkTypo()) 
    span carries the token ids of the unit it covers (see stxUnitEl), which is what makes it findable by id; if
    it cannot be found — no decoration on that word, a line that failed to align — the diagram anchor is still
    the right fallback rather than no prompt at all. */
-function askCorrectForms(si,queue,anchorFor,undoRef){ const s=DOC[si]; if(!s||!queue.length) return;
-  const id=queue.shift(), t=s.tokens[id-1]; if(!t) return askCorrectForms(si,queue,anchorFor,undoRef);
+/* `standalone` (parity fix, item 3) — set from the diagram's own "Edit correct form…" row (editCorrectFormPrompt,
+   below), which opens this SAME prompt on a token with no Typo-marking gesture underway. The two callers above
+   pre-push one undo snapshot before ever calling this (toggleMarkFeat did, for the marking itself) and hand it
+   in as `undoRef` so Escape can revert the WHOLE gesture; a standalone call has no such gesture to revert, so it
+   takes its own snapshot lazily (only once something is actually about to change) and Escape simply closes. */
+function askCorrectForms(si,queue,anchorFor,undoRef,standalone){ const s=DOC[si]; if(!s||!queue.length) return;
+  const id=queue.shift(), t=s.tokens[id-1]; if(!t) return askCorrectForms(si,queue,anchorFor,undoRef,standalone);
   const inLine=(typeof anchorFor==="function")?anchorFor(id):null;   // supplied by the caller that knows where the marking came from; null → the diagram/grid anchors below
   const el=inLine||tokGroupOf(si,id)||document.querySelector(`#doc tr[data-s="${si}"][data-tok="${id}"]`);
   const b=el?el.getBoundingClientRect():null, rtl=sentRTL(s);
@@ -617,16 +622,30 @@ function askCorrectForms(si,queue,anchorFor,undoRef){ const s=DOC[si]; if(!s||!q
     {rtl, title:`Correct form of “${bform(t)}”`, value:miscKV(t.misc,"CorrectForm"),
      hint:"Optional — leave blank for none.",
      ok:v=>{ const cur=miscKV(t.misc,"CorrectForm");
-       if(v!==cur){ t.misc=setMiscKV(t.misc,"CorrectForm",v); if(typeof touchColW==="function") touchColW(si,si+1); markDirty(); preserveScroll(renderDoc); }
-       askCorrectForms(si,queue,anchorFor,undoRef); },
+       if(v!==cur){ if(standalone) pushUndo(si);   // the toggle-driven flow's snapshot was already pushed by toggleMarkFeat before this ever ran; this is the standalone flow's own, taken only now that something is actually changing
+         t.misc=setMiscKV(t.misc,"CorrectForm",v);
+         // Typo=Yes and CorrectForm are a pair everywhere they're READ (correctFormOf/correctFormShown/cformW in
+         // diagram-core.js all gate on Typo=Yes) — a CorrectForm written without it would render nowhere and
+         // reserve no layout width. So setting a non-blank correction also turns Typo on if it wasn't already.
+         // A no-op on the toggle-driven flow, where Typo is already Yes by the time this runs. Not reversed on
+         // blank: clearing CorrectForm here leaves Typo exactly as found (this only PAIRS the two on creation,
+         // it doesn't mirror toggleTypo's own OFF→clear rule, which fires off an explicit Typo removal, not off
+         // blanking CorrectForm).
+         if(v && !hasFeat(t.feats,"Typo","Yes")){ const before=t.feats; t.feats=setFeat(t.feats,"Typo","Yes"); featsSyncGloss(t,before); }
+         if(typeof touchColW==="function") touchColW(si,si+1); markDirty(); preserveScroll(renderDoc); }
+       askCorrectForms(si,queue,anchorFor,undoRef,standalone); },
      /* item 2 — ESCAPE CANCELS THE MARKING, not merely the prompt. Typo=Yes and its CorrectForm are one gesture:
         the box opens as part of marking, so backing out of the box means backing out of the mark. Leaving the
         token struck through with no correction was the app deciding the user had meant half of what they typed.
         It undoes the tokens still OUTSTANDING — this one and everything left in the queue — and not the ones
         already answered: those were committed by an Enter of their own, and Escape has never reached backwards
         over a confirmed step. Undo still covers the whole command, since the marking pushed one entry before its
-        first write and nothing here pushes another. */
+        first write and nothing here pushes another.
+        NONE OF THIS APPLIES when `standalone` — there is no marking to back out of, and the token may already
+        have carried a real Typo/CorrectForm from before this command ever opened; wiping either on Escape would
+        destroy data the user never asked to touch. Standalone Escape is a plain close. */
      cancel:()=>{ queue.length=0;
+       if(standalone) return;
        /* A CANCELLED COMMAND SHOULD LEAVE NO TRACE, and that includes the title bar. This used to clear the
           marks back by hand, which restored the document but left the marking's own undo entry standing — and
           markDirty derives DIRTY from UNDO.length, so the file stayed dirty over a change the user had just
@@ -639,6 +658,14 @@ function askCorrectForms(si,queue,anchorFor,undoRef){ const s=DOC[si]; if(!s||!q
          if(miscKV(tk.misc,"CorrectForm")){ tk.misc=setMiscKV(tk.misc,"CorrectForm",""); any=true; } });
        if(any){ markDirty(); preserveScroll(renderDoc); if(typeof syncMenu==="function") syncMenu(true); }
        toast("Typo marking cancelled"); }}); }
+// Diagram menu entry point (parity fix, item 3): set/edit a token's CorrectForm independent of Typo state.
+// editCorrectFormInline/.cform can't serve here — that element only exists in the DOM once correctFormShown()
+// is already true, i.e. Typo=Yes already set (see diagram-core.js) — so a token with neither has nothing to
+// click. This reuses askCorrectForms' own textPrompt (already used with no live .cform, by the running-sentence
+// Typo path in document.js) rather than reimplementing the prompt, with standalone:true swapping its
+// revert-the-whole-marking cancel handler for a plain close (see askCorrectForms' own note above).
+function editCorrectFormPrompt(si,tokId){ const s=DOC[si], t=s&&s.tokens[tokId-1]; if(!t) return;
+  askCorrectForms(si,[tokId],null,null,true); }
 window.toggleForeign=toggleForeign; window.toggleTypo=toggleTypo;
 function toggleMergePunct(){ show.mergePunct=!show.mergePunct; const cb=document.querySelector('#toggles [data-t="mergePunct"]'); if(cb)cb.checked=show.mergePunct;
   updateViewOptions(); preserveScroll(renderDoc); toast(show.mergePunct?"Punctuation merged":"Punctuation unmerged"); }
