@@ -776,7 +776,15 @@ const AVM_GROUPS={AGR:["Person","Number","Gender","Clusivity"], TAM:["Tense","As
 // item 23: NumType/PronType/VerbForm move to the POS tag's own dot-suffix instead (UPOS_SUBTYPE_FEATS,
 // js/editing/context-menu.js, which posDisp — diagram-core.js — already reads to grow e.g. "PRON.DEM"/
 // "VERB.INF" on the tag itself) — never shown here, so a reader isn't told the same fact in two places.
-const AVM_EXCLUDE=new Set(["NumType","PronType","VerbForm"]);
+// item 25/2: ExtPos and Shared are excluded for the SAME reason, on request — each already has its OWN
+// notation elsewhere in the diagram rather than needing a second one here: ExtPos draws as the bracket's
+// own label wherever an MWT/ExtPos tie exists (mwtTie/positionBracketAnnots — "an ExtPos-only bracket:
+// the value itself IS the label"), and Shared drives the ghost-arc mechanism (drawBump/drawCrossLine's
+// ghost branch — "Shared=Yes ghosts show the dependent's own deprel"). The AVM is meant to carry
+// morphological content the diagram states NOWHERE else; these two are syntactic/discourse facts that
+// already have a dedicated mark, so listing them again here would be the same "told twice" problem
+// NumType/PronType/VerbForm were excluded for, just via a different second notation instead of the POS tag.
+const AVM_EXCLUDE=new Set(["NumType","PronType","VerbForm","ExtPos","Shared"]);
 /* The token's FEATS as an ordered, FLAT AVM row list — no nesting any more (item 23): [{group:"AGR",
    members:[...set ones...], combined:"3.Sing.Fem"}, {group:"TAM",...} (either omitted outright if the token
    sets NONE of that group's features — an empty bracket is worse than no bracket), then every remaining set,
