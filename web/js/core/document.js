@@ -1757,7 +1757,7 @@ function endRenderHold(){ if(RENDER_HOLD>0) RENDER_HOLD--;
 function renderDoc(){
   if(RENDER_HOLD>0){ RENDER_PENDING=true; return; }   // batched — see the note above
   if(typeof refreshFontStacks==="function") refreshFontStacks();   // diagram-core.js: re-reads #doc's LIVE --token-font/--mono-font (a scheme-scoped override, e.g. Ranjana, may have changed it since the last render) into LIVE_TOKEN_STACK/LIVE_MONO_STACK and every measurement font string derived from them (WORD_F, GLOSS_F, …), ONCE per render rather than per meas() call. Must run before computeColW() (→ marginNumWidth) and before anything below that measures token width, or this render would still lay out against the PREVIOUS scheme's metrics. Guarded (as document.js already guards TOKEN_STACK-dependent reads elsewhere) for any harness that renders before diagram-core.js has loaded
-  if(typeof _avmHCache!=="undefined") _avmHCache.clear();   // item 22: avmHeight's cache is keyed on the FEATS string alone, which stays correct across a FEATS edit for free (a new string ⇒ a new key) but NOT across a zoom/CSS change that alters the AVM box's rendered pixel height without touching any token's FEATS — cheapest correct fix is dropping it once per render, the same moment refreshFontStacks above re-reads live metrics for the same reason
+  if(typeof _avmCache!=="undefined") _avmCache.clear();   // item 22: avmLayout's cache is keyed on the FEATS string alone, which stays correct across a FEATS edit for free (a new string ⇒ a new key) but NOT across a zoom/CSS change that alters the AVM box's measured size without touching any token's FEATS — cheapest correct fix is dropping it once per render, the same moment refreshFontStacks above re-reads live metrics for the same reason
   msegFlagDoc();   // what an MWT grouping implies about its members — the MSeg tier's decorative continuation mark, and in Sanskrit a featureless non-final member's Compound=Yes. A dozen scattered operations move those ranges (grouping, ungrouping, splitting, flattening, inserting/deleting a token, an auto-regroup after a parse), so deriving it HERE, once, at the single point they all funnel through, is what keeps it from ever going stale; it's idempotent and cheap, and marks nothing dirty of its own accord — see msegFlagSent
   computeWindow(curBlock());   // recentre the rendered window on whatever sentence the reader is on — see the virtualization note above buildBlock. MUST run before computeColW(): that scans the CURRENT window (js/grid/grid.js), so the window has to be known first
   pruneDiaCache(winLo,winHi);   // drop every cached diagram outside the range this render is about to (re)build — see the "NOTATION-SWITCH DIAGRAM CACHE" note above buildBlock. AFTER computeWindow (winLo/winHi just moved), BEFORE the buildBlock loop below reads the cache
@@ -2263,6 +2263,20 @@ function positionBracketAnnots(){ document.querySelectorAll("#doc .bwrap").forEa
         if(y<my-0.5) g.insertBefore(E("line",{class:"leader leader-ghost",x1:mx,y1:y+hh,x2:mx,y2:my,stroke:arcInk(col)}),g.firstChild);   // item 6
         drawLabel(g,mx,y,rel,col); const lb=g.lastElementChild; if(lb)lb.classList.add("lbl-ghost"); ghostLabelObstacles.push({x:mx,y,hx:half,hy:hh}); }
       svg.appendChild(g); } });
+  // item 22: the AVM tier, in the SAME svg overlay the MWT ties above already use. bracketsWrapped's own
+  // `--undpad` (js/diagram/diagram-wrap.js) already reserves avmRowMaxH(t) worth of room below every token's
+  // below-stack, but nothing ever painted into it — the `below` array that function builds is otrans/gloss/
+  // bwpos only, never avm. Seated off THIS token's own LIVE below-stack bottom (the identical undBot(tok)
+  // formula the MWT tie above measures itself against, copied rather than shared — see that block's own note
+  // for why it's a live measurement and not the shared padding figure) so a token with a taller-than-usual
+  // gloss stack can't collide with its own AVM box.
+  { const s0=DOC[si0];
+    box.querySelectorAll(".bwtok").forEach(tok=>{ const oid=+tok.dataset.tok, t=s0&&s0.tokens&&s0.tokens[oid-1];
+      if(!t||!avmLayout(t)) return;
+      const f=tok.querySelector(".bwform")||tok, u=tok.querySelector(".bwund"), fTop=tok.offsetTop+(f===tok?0:f.offsetTop);
+      const bot=u?fTop+u.offsetTop+u.offsetHeight:fTop+(f===tok?tok.offsetHeight:f.offsetHeight);
+      const ox=(f===tok?0:tok.offsetLeft), cx=ox+f.offsetLeft+f.offsetWidth/2;
+      drawAVM(svg,cx,bot+8,t,si0,oid,null); }); }   // +8: the same flat clearance belowStack's own AVM step uses, not another belowGap() — see that note
   box.appendChild(svg); }); }
 // continuous span wash for wrapped brackets: one rounded rect per line, spanning the selected constituent's
 // elements on that line (drawn behind the text)

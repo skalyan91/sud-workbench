@@ -1331,6 +1331,13 @@ function tree(si){
     { const rt=trTxt(t[i]); if(rt){ const ty=dropYD+belowGap(); const e=E("text",{class:"translit"+frnUp(t[i]),x:x[i],y:ty,"text-anchor":"middle"}); e.textContent=rt; if(trRowEdit())e.classList.add("tr-edit"); g.appendChild(e); boxes.push({x:x[i],y:nyD+14,hx:meas(rt,trFont(t[i]))/2,hy:7}); svgSeamMark(g,t[i],x[i],ty,meas(rt,trFont(t[i]))/2,trFont(t[i]),loB,null,"translit"); } }   // Item 8: same descender-matched top gap (belowGap()) the other renderers give the translit row   // …and nyD+14, never nyL+14 — see the note just above
     belowTiers().forEach((tier,ti)=>{ const step=(trTxt(t[i])?belowGap():0)+(ti+1)*(belowGap()), gyD=dropYD+step, txt=tierDisp(t[i],tier), dtxt=txt||"…"; const e=E("text",{class:"gloss gl-edit"+(txt?"":" gl-empty")+frnUp(t[i]),x:x[i],y:gyD,"text-anchor":"middle","data-tier":tier,tabindex:"0"}); setGlossText(e,tier,dtxt); g.appendChild(e); boxes.push({x:x[i],y:gyD-4,hx:meas(dtxt,trFont(t[i]))/2,hy:7});   // gyD−4, not the old layout-level gy−4: the box states where this row is DRAWN, for the reason the note above the translit row gives
       if(tier==="mseg"||tier==="mgloss") svgSeamMark(g,t[i],x[i],gyD,(tier==="mgloss"?measGloss(dtxt,tierFont(tier,t[i])):meas(dtxt,tierFont(tier,t[i])))/2,tierFont(tier,t[i]),loB,null,tier); });   // gloss / morphemic tiers under the node (hierarchy has no per-node POS row) — the segmentation AND morphemic-gloss rows carry the seam mark (both per-morpheme, drawn off the "…" placeholder's own width where this tier isn't annotated for this token — see the note beside diagram-core.js's belowStack); the lexical gloss row doesn't
+    // item 22: the AVM tier — hierarchy has no per-node POS row for it to sit under (the comment above), so it
+    // seats under the LAST drawn row instead (translit, then gloss tiers) — nodeBot mirrors the goeswith slur's
+    // own identical "this node's drawn stack bottom" computation a few lines down (STEP=belowGap(); dropYD
+    // already carries STACKED_GAP once, from its own seed — see dropYD's note above), which is exactly what the
+    // hasPos=false belowReserveH calls sizing this level (LV/H, above) already reserved room against.
+    { const STEP=belowGap(), nodeBot=dropYD+(trTxt(t[i])?STEP:0)+belowTierN()*STEP;
+      if(avmLayout(t[i])) drawAVM(g,x[i],nodeBot+8,t[i],null,null,loB); }   // +8: the same flat clearance belowStack's own AVM step uses, not another belowGap() — see that note
     g.appendChild(lbl); gwFormSVG(g,lbl,t[i],x[i],nyD,NODE_F,"node-lbl",si,loB);   // goeswith: the continuation parts join the head on the node row, so the ONE translit/gloss stack drawn above spans the whole word
     if(gwOf(t[i]).length){ const ids=[OID(i)].concat(gwOf(t[i]).map(p=>p.oid));
       g.setAttribute("data-gw",ids.join(" "));
@@ -1675,6 +1682,7 @@ function outline(si){const D=displaySent(DOC[si]), t=D.tokens, n=t.length, OID=k
     { const rt=trTxt(t[i]); if(rt){ const tr=document.createElement("span"); tr.className="otrans"+(trRowEdit()?" tr-edit":"")+frnUp(t[i]); tr.textContent=rt; row.appendChild(tr); } }   // right next to the form
     belowTiers().forEach(tier=>{ const txt=tierDisp(t[i],tier); const gs=document.createElement("span"); gs.className="gloss gl-edit"+(txt?"":" gl-empty")+frnUp(t[i]); gs.dataset.tier=tier; gs.tabIndex=0; setGlossText(gs,tier,txt||"…"); row.appendChild(gs); });   // tierDisp, not tierText: what the row PAINTS (under Latin's macron scheme the MSeg row shows the macronised segmentation while MISC keeps the bare one — see tierDisp, js/core/prefs.js)   // gloss / morphemic tiers, between translit and POS (outline lays these out inline)
     const pos=document.createElement("span"); pos.className="opos"; pos.textContent=posDisp(t[i]); pos.title=posTitle(t[i].upos); row.appendChild(pos);
+    { const av=avmInline(t[i]); if(av) row.appendChild(av); }   // item 22/3: the linearised AVM, last on the row — after POS, matching the stacked notations' own "AVM sits below the POS row" ordering
     row.style.cursor="pointer"; row.addEventListener("click",()=>pick(si,OID(i)));
     box.appendChild(row);   // MWTs are omitted from the outline — no good way to place them in a dependency tree
     kids[i].slice().sort((a,b)=>a-b).forEach(c=>w(c,d+1,chain,myReps));

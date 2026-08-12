@@ -506,36 +506,31 @@
   .tok-pos{font-size:15px; font-weight:400; font-feature-settings:"c2sc" 1; fill:var(--tie-hue); font-family:var(--token-font);   /* POS tags: same size + weight as the transliteration (TRANS_F/.translit, 15px normal) — c2sc renders the (already all-caps) tag as small caps instead of relying on a bumped weight/shrunk size for the "tag" register. No letter-spacing: 15px is the tracking curve's own reference size (TOK_REF_SIZE, trackCurve()), where it's 0 — was a flat .02em. cpsp dropped: it's calibrated for genuine full-height capitals, not the c2sc-substituted small-cap glyph forms, and over-spaced them. POS luminance = the subj/comp/mod deprel labels': --c-other is the palette's neutral member, derived at their SAME L≈0.656 (and matching dark contrast), so POS sits at the same lightness as the coloured labels in both themes */
     paint-order:stroke; stroke:var(--casing); stroke-width:3px; stroke-linejoin:round}
   .tok-hit,.tok-wash{fill:transparent; cursor:pointer}   /* .tok-wash: a separate rect covering ONLY the word→POS band, so the drag-target highlight (below) never washes the arcs above the token */
-  /* item 23: the AVM tier (js/diagram/diagram-core.js's avmHTML) — real HTML, not SVG shapes, painted inside a
-     <foreignObject> wherever a notation draws its below-stack. REAL brackets now, on request, not a bordered
-     box: `.avm`'s own ::before/::after are each a thin vertical stroke with short top/bottom serifs (border-
-     top+bottom+one side, the other side left open) stretched the full height of the grid — the "[ … ]" pair
-     an AVM is conventionally typeset with, not a box that also closes across the top and bottom. A CSS grid,
-     not flex rows: EVERY row (including a combined AGR/TAM one) is exactly one .avm-attr + one .avm-val pair,
-     and a shared `grid-template-columns` is what keeps every row's value starting at the same x regardless of
-     how long that row's own attribute name is — the alignment the request asked for falls out of the layout
-     model for free, rather than needing per-row width bookkeeping. `.avm-row` itself is `display:contents`:
-     it contributes NO box (so it can't break the 2-column grid its two children need to join), and exists
-     purely as a real DOM node for the click handler to find via .closest(".avm-row") and read data-feat off —
-     see that handler's own note (context-menu.js) for why a combined row's data-feat is its GROUP name rather
-     than a single UD feature. Noto Sans (var(--token-font) — its own first family), not the grid's monospace:
-     an AVM reads as linguistic notation, not tabular data, and Noto Sans is what the rest of the diagram's own
-     prose (the token forms, POS tags) is already set in. font-weight is this file's own documented "weight
-     curve" value for 10.5px (571 — see the :root comment, macos-kit/mac-tokens.css) — the Noto stack has no
-     optical-size axis, so text set smaller than the diagram's 15px reference reads visibly lighter at a flat
-     400 unless the weight is bumped to compensate, exactly as every other small annotation row in this file
-     already does. */
-  .avm{display:inline-grid; grid-template-columns:max-content max-content; column-gap:9px; row-gap:2px;
-    position:relative; padding:2px 10px; font-family:var(--token-font); font-size:10.5px; font-weight:571;   /* weight curve @10.5px */
-    line-height:1.5; color:var(--dia-muted); text-align:start; unicode-bidi:isolate;
-    -webkit-user-select:none; user-select:none}   /* UI chrome, not document prose — see the notation dropdown's own item 15 note on why every such element states this explicitly rather than relying on it being inherited */
-  .avm::before,.avm::after{content:""; position:absolute; top:1px; bottom:1px; width:5px; border:1px solid var(--dia-muted); pointer-events:none}
-  .avm::before{left:0; border-right:none}   /* "[" — a vertical stroke with top/bottom serifs, open on the content side */
-  .avm::after{right:0; border-left:none}   /* "]" — the mirror */
-  .avm-row{display:contents; cursor:pointer}   /* generates no box of its own — see the block note above for why */
-  .avm-row:hover .avm-attr,.avm-row:hover .avm-val{background:var(--block-sel)}   /* display:contents leaves .avm-row nothing to paint a hover fill ON, so both its children take it instead — same visual result (the whole row highlights, since they sit flush adjacent in the grid), same fill the grid's own row-hover already uses */
-  .avm-attr{font-feature-settings:"c2sc" 1; opacity:.62; white-space:nowrap}   /* c2sc renders the (already-uppercased, see avmHTML) name as small caps, matching .tok-pos's identical convention for the POS tag it sits beside */
-  .avm-val{font-weight:700; white-space:nowrap}
+  /* item 23/round 2: the AVM tier (js/diagram/diagram-core.js's drawAVM) — native SVG now, not HTML inside a
+     <foreignObject> (see drawAVM's own comment for why the foreignObject design was dropped: a WebKit/Chrome
+     engine gap it couldn't be reproduced-or-ruled-out against, matching this file's own smpReshape precedent
+     for the SAME class of gap). The bracket itself is `.mwt-tie`/`.mwt-tie-h`/`.mwt-tie-cas` (below) reused
+     VERBATIM, not a rule of its own — see drawAVM's comment for the role-not-orientation swap that lets an
+     MWT tie's shape stand on its side as an AVM bracket with no new CSS at all. Attr/val columns are laid out
+     in JS (avmLayout) rather than a CSS grid now — SVG has no grid model — but the OUTCOME is the same
+     shared-column alignment the CSS grid gave for free before: every row's value starts at the same x
+     regardless of how long that row's own attribute name is, computed once in avmLayout and painted at fixed
+     x's in drawAVM. `.avm-row` is a real <g>, found by the SAME .closest(".avm-row") the click handler
+     already used (context-menu.js) — the DOM contract (data-feat, a combined row's group name standing in
+     for a single UD feature) is unchanged, only the ELEMENT it lives on moved from a `display:contents` <div>
+     to an SVG <g>. `.avm-hit` is a transparent rect per row (SVG has no `background`) that stands in for the
+     hover fill `display:contents`'s own children used to carry directly. Noto Sans (var(--token-font)), not
+     the grid's monospace — an AVM reads as linguistic notation, not tabular data, matching the rest of the
+     diagram's own prose (token forms, POS tags). font-weight 571 is this file's own documented "weight
+     curve" value for 10.5px (see the :root comment, macos-kit/mac-tokens.css; AVM_ATTR_F computes the same
+     figure via weightCurve(10.5) in JS) — the Noto stack has no optical-size axis, so text set smaller than
+     the diagram's 15px reference reads visibly lighter at a flat 400 unless the weight is bumped to
+     compensate, exactly as every other small annotation row in this file already does. */
+  .avm-row{cursor:pointer}
+  .avm-hit{fill:transparent}
+  .avm-row:hover .avm-hit{fill:var(--block-sel)}   /* stands in for display:contents's own "both children take the hover fill" trick — one shared rect behind the row instead */
+  .avm-attr{font-family:var(--token-font); font-size:10.5px; font-weight:571; font-feature-settings:"c2sc" 1; fill:var(--dia-muted); opacity:.62; unicode-bidi:isolate}   /* c2sc renders the (already-uppercased, see avmLayout) name as small caps, matching .tok-pos's identical convention for the POS tag it sits beside */
+  .avm-val{font-family:var(--token-font); font-size:10.5px; font-weight:700; fill:var(--dia-muted); unicode-bidi:isolate}
   .translit{font-size:15px; fill:var(--dia-muted); font-style:italic; font-family:var(--token-font); text-anchor:middle; letter-spacing:.02em;   /* same size as the form/script above it */   /* italic tracking bump (ITALIC_TRACK, diagram-core.js) — trackCurve(15)=0 (reference size), so this IS the italic term alone; kept in sync with _measOneUncached's italicTrackOf() by hand, per the tracking-curve convention */
     paint-order:stroke; stroke:var(--casing); stroke-width:3px; stroke-linejoin:round}
   .mwt-tie,.mwt-tie-h{fill:none; stroke:color-mix(in srgb, var(--tie-hue), var(--content-bg) var(--edge-mix))}   /* surface-form tie under a multi-word token, coloured like an "other"-relation arc: same color-mix(--c-other, --content-bg, --edge-mix) formula arcInk() applies to a relColor(), so the bracket reads as the SAME ink as a neutral arc/arrowhead instead of the plainer --dia-muted (still true as a claim about HUE, but the LIGHTNESS gap it leans on has narrowed a lot since --dia-muted became black-at-50 % flattened: OKLab L .508 → .600 against --c-other's .655, i.e. Δ.147 → Δ.055. Re-measure before citing this as a contrast argument) */
@@ -1233,6 +1228,19 @@
   .oline.rng .translit,.oline.rng .otrans,.oline.rng .gloss,
   .bwtok.rng .otrans,.bwtok.rng .gloss{fill:var(--accent); color:var(--accent)}
   .opos{font-family:var(--token-font); font-size:15px; font-weight:400; font-feature-settings:"c2sc" 1; color:var(--tie-hue); margin-inline-start:9px; unicode-bidi:isolate}   /* matches the transliteration's size/weight (15px normal), c2sc small caps for the tag register; luminance matches --c-other (the subj/comp/mod deprel L). No letter-spacing: 15px is the tracking curve's reference size (0). cpsp dropped — see .tok-pos */
+  /* item 22/3: the LINEARISED AVM (avmInline, js/diagram/diagram-core.js) — outline lays every tier inline
+     along one row rather than stacking them below the token, so the stacked notations' own bracket box (drawAVM)
+     has no "below the POS tag" to sit under here; this is the same "[ATTR val]" pairing set as plain running
+     text instead, real "[" "]" characters rather than the drawn bracket. Same 9px start-margin as .opos beside
+     it, same c2sc/muted-attr + bold-val register as the SVG version's .avm-attr/.avm-val (color, not fill —
+     this is HTML text, not SVG). `.oavm-item` doubles as `.avm-row` in the DOM (see avmInline's own note) so
+     the existing right-click menu picks it up with no handler changes; the cursor:pointer it needs comes from
+     that shared rule. */
+  .oavm{margin-inline-start:9px; unicode-bidi:isolate}
+  .oavm-item{padding:0 1px}
+  .oavm-item:hover{background:var(--block-sel); border-radius:3px}
+  .oavm-attr{font-family:var(--token-font); font-size:13px; font-feature-settings:"c2sc" 1; color:var(--dia-muted); opacity:.62}
+  .oavm-val{font-family:var(--token-font); font-size:13px; font-weight:700; color:var(--dia-muted)}
   .text-conv .tpos{font-size:9px; color:var(--muted); vertical-align:super; margin-left:1.5px; letter-spacing:.02em}
 
   /* Finder list-view geometry, in one place: the frame's own curve, the row band's curve, and how far that band

@@ -707,7 +707,7 @@ function setGlossAbbrevAt(si,tokId,idx,ab){ const s=DOC[si]; if(!s)return; const
    gesture (no text field under it to type into), so a single "clear this feature" option is offered instead
    of declining outright.
    item 23: `key` names a REAL feature for a standalone row, but a combined AGR/TAM row's own data-feat is
-   its GROUP name instead (avmHTML) — AVM_GROUPS[key] (js/grid/grid.js) is exactly how avmStruct itself tells
+   its GROUP name instead (avmLayout, js/diagram/diagram-core.js) — AVM_GROUPS[key] (js/grid/grid.js) is exactly how avmStruct itself tells
    the two apart, so the same test here dispatches to whichever this call actually is. A combined row's menu
    is the SAME picker repeated once per feature the token currently has SET within that group (Person's own
    header + values, then Number's, …) — one flat multi-section list, not a second level of submenu — so
