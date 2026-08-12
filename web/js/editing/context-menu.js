@@ -472,7 +472,11 @@ function nodeTokenMenu(x,y,si,tokId){ const s=DOC[si]; if(!s)return; const rtl=s
     // set/edit MISC CorrectForm independent of Typo (parity fix): omitted on a goeswith head, mirroring
     // correctFormShown's own exclusion there (diagram-core.js) — that token's CorrectForm means something else
     // structurally (the joined halves, already shown by the slur) and is never drawn as a correction.
-    ...(gwOf(s.tokens[tokId-1]).length?[]:[["Edit correct form…",null,()=>editCorrectFormPrompt(si,tokId)]]),
+    // isGwHeadId, NOT gwOf(s.tokens[tokId-1]): gwOf reads t._gw, which only the display-fold transform sets on
+    // its OWN copies of the tokens (diagram-core.js's own note on gwOf/isGwHeadId) — s.tokens[tokId-1] here is
+    // the RAW DOC token, which never carries _gw, so gwOf on it is always [] and the row would never be hidden.
+    // isGwHeadId(s,id) is the raw-token equivalent (the same one the grid's own formDeco call uses for this).
+    ...(isGwHeadId(s,tokId)?[]:[["Edit correct form…",null,()=>editCorrectFormPrompt(si,tokId)]]),
     null, ...combineItems,
     null, ...moveItems(si,tokId,false),
     null, ...insertItems(si,tokId,false),
