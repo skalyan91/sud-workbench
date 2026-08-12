@@ -2609,8 +2609,21 @@ function belowReserveH(hasTr,tierCount,hasPos,avmH){ const n=belowRows(hasTr,tie
    is the ORIENTATION its "-h" suffix already names, not a length-based role: a horizontal stroke reads
    heavier than a vertical one of equal width (the horizontal–vertical illusion), so .mwt-tie-h belongs on
    whichever segment is horizontal. Turned 90°, that is the short top/bottom SERIFS; the long vertical SPINE
-   takes .mwt-tie's full weight instead — the reverse of the first cut, and of .mwt-grid-tie's own split. */
-const AVM_ROW_GAP=2, AVM_PAD_V=2, AVM_COL_GAP=6, AVM_PAD_H=5, AVM_BRK_W=5, AVM_BRK_EXT=0.5625;   // PAD_V/COL_GAP/PAD_H tightened (from 4/9/10) so the bracket sits snug on the attr/val ink rather than floating around it — per live-tested report. AVM_BRK_EXT: still the SAME literal mwtTie's own end-pins use — half of .mwt-tie-h's stroke-width at --arc-stroke:1.5px (.75×1.5/2), kept in step BY HAND with that rule — now carried by the SPINE (see drawAVM), since the weight roles swapped and the overshoot is anchored to the CLASS (the full-weight stroke always overshoots the thin one), not to which segment happens to hold it
+   takes .mwt-tie's full weight instead — the reverse of the first cut, and of .mwt-grid-tie's own split.
+   round 4 — REVERTED. Live-tested side by side against an actual grid MWT bracket (screenshot + getComputedStyle
+   comparison, both at the SAME --arc-stroke chain and the SAME zoom:var(--fs)=1) and the orientation argument
+   above, while internally consistent, produced a bracket that is NOT "styled exactly like MWT brackets" — the
+   founding requirement this whole redraw (93fa0d8) exists to satisfy — once actually set beside the one other
+   place a "this spans several parts" bracket is drawn in the app. The grid's spine (.gtie-spine) computes to
+   1.125px, its pins (.gtie-pin) to 1.5px; AVM's round-3 spine/serif computed to the OPPOSITE pairing (1.5/
+   1.125) — same two numbers, reversed roles, and the reversal is what a side-by-side comparison actually
+   shows: the grid's bracket reads visibly LIGHTER along its main spine than round 3's AVM one does, because
+   the spine is the segment that dominates a viewer's sense of the shape's weight. Matching the grid — not the
+   orientation rule — is what "the same thickness as MWT brackets in grids" turns out to mean once measured
+   against it, so the spine is back on .mwt-tie-h and the serifs on .mwt-tie, restoring round 2's original
+   pairing (and with it mwtTie's own unrotated one, and .mwt-grid-tie's) as the ONE convention every "this
+   marks a multi-word/multi-part span" bracket in the app now shares. */
+const AVM_ROW_GAP=2, AVM_PAD_V=2, AVM_COL_GAP=6, AVM_PAD_H=7, AVM_BRK_W=5, AVM_BRK_EXT=0.5625;   // PAD_V/COL_GAP tightened (from 4/9) in round 3 and left there — that report was about the bracket floating clear of the ink, which they still don't. PAD_H alone went back up (5→7, still well short of the original 10) in round 4, on MEASURED grounds, not a blind re-loosening: a live report of "Voice's label sits too close to the left bracket" traced to the shared-column layout's own arithmetic — attrX is ONE x every row's attr right-aligns to, set by the WIDEST attr in the box (a real UD label: "Voice"/"Polarity"/"Definite" run 26–42px at this size), so whichever row owns that width sits its own text flush against exactly AVM_PAD_H of clearance while every narrower row in the same box gets visibly more — not a bug (the whole point of a shared column is that every row's value starts at the same x, see avmLayout's own note), but 5px of clearance for the WIDEST case read as cramped where a shorter label's OWN slack made the same 5px invisible elsewhere. 7px was chosen by rendering "Voice" (and "Polarity", the longest real UD feature name that reaches this tier) at several candidate values and comparing against a short label ("AGR") in the SAME box until the long-label case stopped reading tight — see the commit message for the measured before/after. AVM_BRK_EXT: still the SAME literal mwtTie's own end-pins use — half of .mwt-tie-h's stroke-width at --arc-stroke:1.5px (.75×1.5/2), kept in step BY HAND with that rule — carried by the SERIFS again (see drawAVM), now that they are back to the full-weight role and must overshoot the (thin) spine's centreline, exactly as mwtTie's own pins overshoot its bar
 // item 22: keyed on the FEATS string (not the token) — every token sharing FEATS (extremely common: every
 // 3rd-person singular present verb in a document, say) lays out identically, so this is a real cache, not a
 // one-shot memo, cleared on re-render (see renderDoc's own call) since a stale entry can only be as wrong as
@@ -2650,17 +2663,20 @@ function avmRowMaxH(toks){ return Math.max(0,...(toks||[]).map(avmHeight)); }
 // wrapped overlay, an <svg> appended straight to #doc rather than nested inside the token's own group).
 function drawAVM(svg,cx,y0,t,si,tokId,boxes){ const L=avmLayout(t); if(!L) return y0;
   const x0=cx-L.w/2, x1=cx+L.w/2, y1=y0+L.h;
-  // the bracket: mwtTie's own 3-segment tie shape, once per side, turned 90° — casing (one combined L path),
-  // spine (long, full weight — .mwt-tie) and two short serifs (thinner — .mwt-tie-h: the "-h" is mwtTie's own
-  // ORIENTATION suffix, and the serifs are the horizontal segments once the shape is turned 90°). The spine
-  // overshoots the serifs' y-centrelines (y0/y1) by AVM_BRK_EXT, outward on its own (vertical) length, so its
-  // thicker stroke fully covers the corner the thinner serifs' reaches — the same invariant mwtTie's own
-  // end-pins follow (the full-weight stroke overshoots the thin one), just carried by the spine here since
-  // the weight roles are swapped from mwtTie's own unrotated shape.
+  // round 4 — the bracket: mwtTie's own 3-segment tie shape, once per side, turned 90° — casing (one combined
+  // L path), spine (long, THIN — .mwt-tie-h) and two short serifs (FULL weight — .mwt-tie). Back to round 2's
+  // original pairing (see the box comment above const AVM_PAD_H for the measured, side-by-side reason): this
+  // is the SAME role split mwtTie's own unrotated bar/pins use, and the SAME one .mwt-grid-tie's own rotated
+  // copy uses (.gtie-spine thin / .gtie-pin full) — one convention now, not two. The SERIFS overshoot the
+  // spine's own x-centrelines (xEdge) by AVM_BRK_EXT, along their own (horizontal) length, so their thicker
+  // stroke fully covers the corner the thinner spine's reaches — the same invariant mwtTie's own end-pins
+  // follow (the full-weight stroke overshoots the thin one), carried by the serifs again now that they hold
+  // the full-weight class.
   [[x0,x0+AVM_BRK_W],[x1,x1-AVM_BRK_W]].forEach(([xEdge,xIn])=>{
     svg.appendChild(E("path",{class:"mwt-tie-cas",d:`M ${xIn} ${y0} L ${xEdge} ${y0} L ${xEdge} ${y1} L ${xIn} ${y1}`}));
-    svg.appendChild(E("path",{class:"mwt-tie-h",d:`M ${xIn} ${y0} L ${xEdge} ${y0} M ${xEdge} ${y1} L ${xIn} ${y1}`}));
-    svg.appendChild(E("path",{class:"mwt-tie",d:`M ${xEdge} ${y0-AVM_BRK_EXT} L ${xEdge} ${y1+AVM_BRK_EXT}`})); });
+    svg.appendChild(E("path",{class:"mwt-tie-h",d:`M ${xEdge} ${y0} L ${xEdge} ${y1}`}));
+    const ext=xIn>xEdge?-AVM_BRK_EXT:AVM_BRK_EXT;
+    svg.appendChild(E("path",{class:"mwt-tie",d:`M ${xIn} ${y0} L ${xEdge+ext} ${y0} M ${xEdge+ext} ${y1} L ${xIn} ${y1}`})); });
   const attrX=x0+AVM_PAD_H+L.attrW, valX=attrX+AVM_COL_GAP;
   L.rows.forEach((r,i)=>{ const ry=y0+AVM_PAD_V+ascent(AVM_VAL_F)+i*(L.lineH+AVM_ROW_GAP);
     const g=E("g",{class:"avm-row","data-feat":r.key,tabindex:"0"});
