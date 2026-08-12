@@ -61,11 +61,26 @@ function fanGhostArcs(realArcs,ghostArcs,spread){
   const maxReal={};
   const bump=(k,off)=>{ const slot=Math.round(Math.abs(off||0)/spread); maxReal[k]=Math.max(maxReal[k]||0,slot); };
   realArcs.forEach(a=>{ bump(a.hkey??a.hk,a.offH); bump(a.dkey??a.dk,a.offD); });
-  const ghostSlot={};
-  ghostArcs.forEach(a=>{ const hk=a.hkey??a.hk, hSide=Math.sign(a.xd-a.xh)||1, hK=hk+"|"+hSide;
-    ghostSlot[hK]=(ghostSlot[hK]!=null?ghostSlot[hK]:(maxReal[hk]||0))+1; a.offH=hSide*ghostSlot[hK]*spread;
+  // on report ("ghost arcs still aren't fanned in such a way that longer arcs sit inward from shorter ones"):
+  // this used to hand out slots in plain ARRAY order — whatever order ghostArcs happened to be built in — with
+  // no reference to arc length at all, unlike fanArcs (diagram-wrap.js) which sorts each side's whole pool by
+  // length DESCENDING before assigning slots (`grp.sort((p,q)=>q.len-p.len)`), so its longest arc always lands
+  // in the innermost slot. Ghosts never got that ordering because the objects fanGhostArcs receives never
+  // carried a `len` at all (every call site's own ghost-arc literal has xh/xd but no len — grep-verified) — so
+  // there was nothing to sort BY, not just a missing sort call. Fixed by computing len here directly (the
+  // endpoint's own horizontal span, |xd-xh| — the same quantity fanArcs' own callers pass in for a real arc)
+  // and grouping+sorting each side-bucket longest-first before handing out slots, exactly mirroring fanArcs'
+  // own convention: a longer ghost sits closer to the real arcs it's fanned outside of (the innermost ghost
+  // slot), a shorter one further out. The bucket's own STARTING offset (maxReal[key]) is unchanged — only the
+  // ORDER slots are handed out in, within a bucket, is new.
+  const buckets={};
+  ghostArcs.forEach(a=>{ const len=Math.abs(a.xd-a.xh);
+    const hk=a.hkey??a.hk, hSide=Math.sign(a.xd-a.xh)||1, hK=hk+"|"+hSide;
+    (buckets[hK]=buckets[hK]||{key:hk,items:[]}).items.push({len,set:o=>a.offH=hSide*o*spread});
     const dk=a.dkey??a.dk, dSide=Math.sign(a.xh-a.xd)||1, dK=dk+"|"+dSide;
-    ghostSlot[dK]=(ghostSlot[dK]!=null?ghostSlot[dK]:(maxReal[dk]||0))+1; a.offD=dSide*ghostSlot[dK]*spread; }); }
+    (buckets[dK]=buckets[dK]||{key:dk,items:[]}).items.push({len,set:o=>a.offD=dSide*o*spread}); });
+  Object.values(buckets).forEach(({key,items})=>{ items.sort((p,q)=>q.len-p.len);
+    const base=maxReal[key]||0; items.forEach((e,j)=>e.set(base+j+1)); }); }
 function renderSentence(si){
   const el=_renderSentence(si);
   /* …and then, where the engine cannot shape this script in SVG at all, swap every affected <text> for
