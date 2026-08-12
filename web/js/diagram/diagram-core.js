@@ -2186,6 +2186,23 @@ function dandaGlyph(form){   // → the script daṇḍa for a daṇḍa marker 
   if(form==="||"||form==="//"||form==="‖"||form==="॥") return d[1];   // feature 17: "‖" (U+2016) is the double-daṇḍa DISPLAY glyph the store folds "||"/"//" into (the token FORM in an IAST sample IS "‖"); match it so the double daṇḍa converts to the script glyph like the single one — the diagram folds daṇḍa PUNCT into hanging satellites drawn via hangForm=dandaGlyph||p.form (never t.ortho), so without this a "‖" showed raw instead of ॥/༎. "॥"/"।" are the same tokens as a DEVANAGARI-stored file spells them.
   if(form==="|"||form==="/"||form==="।") return d[0];
   return null; }
+/* the running sentence already sits a daṇḍa FLUSH against the syllable before it under a real script
+   (translit._sanskrit, commit 778b411 "Treat Tibetan as a stacking script; strip the separator before
+   a daṇḍa") — but that stripping runs on the WHOLE romanised sentence in ONE call, so a word and its
+   following daṇḍa are both present for it to act on. fillOrtho's per-token pass (js/lang/translit-load.js)
+   asks the SCRIPT for one token's form at a time, so a daṇḍa PUNCT token ("|" on its own) reaches
+   _sanskrit in complete isolation — nothing before it in that call for the separator-strip to find, so
+   the fix never touched a diagram at all. The gap a reader actually sees there comes from a different
+   place entirely: displaySent's punctuation fold (below) computes `p.sp` once, from the token's STORED
+   SpaceAfter — a fact about the IAST print convention ("word |"), unaware there is any script in play.
+   dandaFlush is the diagram-side counterpart of _sanskrit's own strip: true exactly when the glyph is
+   being drawn as a script's native daṇḍa (dandaGlyph already answered that) and the script isn't "iast" —
+   the same carve-out _sanskrit's own `target == "IAST"` check makes, because romanised Sanskrit keeps the
+   conventional printed space and only an actual Brahmic/Tibetan mark sits flush. */
+function dandaFlush(form){ return ORTHO_SCHEME!=="iast" && !!dandaGlyph(form); }
+// the fold's own `p.sp` (stored SpaceAfter, see displaySent) overridden by dandaFlush — one place every
+// hang/lead renderer below reads instead of `p.sp` directly, so the override can't drift between them.
+function dandaSp(p){ return !!p.sp && !dandaFlush(p.form); }
 // item 11: the SCRIPT drives the MAIN GLYPH. "Original" (default, ORTHO_SCHEME="") → the stored form;
 // "None" (ORTHO_SCHEME="none") → the DISPLAYED transliteration becomes the main glyph; a script id → that script.
 function bform(t){ const f=(t&&t.mform!=null)?t.mform:(t?t.form:"");
@@ -2453,7 +2470,7 @@ function spaceAfterNo(tok){ return /(?:^|\|)SpaceAfter=No(?:\||$)/.test((tok&&to
 // word space before it iff SpaceAfter allows one (p.sp). The layout reserves this so the marks take REAL space.
 function hangForm(p){ return dandaGlyph(p.form)||p.form; }   // item 17: a daṇḍa punct mark shows the active Indic script's native glyph
 function hangW(t,f){ if(!t.hangs||!t.hangs.length) return 0; const SPW=meas(" ",f); let w=0;
-  t.hangs.forEach(p=>{ w+=(p.sp?SPW:0)+meas(hangForm(p),f); }); return w; }
+  t.hangs.forEach(p=>{ w+=(dandaSp(p)?SPW:0)+meas(hangForm(p),f); }); return w; }
 /* item 6 — a Typo=Yes token may carry the intended spelling in MISC CorrectForm. It is drawn beside the
    struck-through form as a normal token (upright, undecorated), but it is a DISPLAY COMPANION, not a token of
    its own: no id, no POS/gloss rows, no arc endpoint. It therefore rides the SAME inline-end "tail" mechanism
@@ -2482,7 +2499,7 @@ function cformW(t,f){ const cf=gwOf(t).length?"":correctFormOf(t); return cf?mea
 // the full inline-end tail of a token: its correct form (item 6) then its folded-punctuation satellites
 function tailW(t,f){ return cformW(t,f)+hangW(t,f); }
 // item 2 — the inline-START width: right-merging punctuation that LEADS a token (a word-space on its host side iff p.sp)
-function leadW(t,f){ if(!t.leads||!t.leads.length) return 0; const SPW=meas(" ",f); let w=0; t.leads.forEach(p=>{ w+=(p.sp?SPW:0)+meas(hangForm(p),f); }); return w; }
+function leadW(t,f){ if(!t.leads||!t.leads.length) return 0; const SPW=meas(" ",f); let w=0; t.leads.forEach(p=>{ w+=(dandaSp(p)?SPW:0)+meas(hangForm(p),f); }); return w; }
 // SVG: draw a host's folded punctuation as separate, selectable, unannotated <text> marks hanging off its inline-end
 // (leftwards under RTL). Each mark abuts the previous element, or is one word space from it iff p.sp, and maps back
 // to its original token for selection via pick(si, orig+1). Consecutive marks each get their own selectable <g>/<text>.
@@ -2500,7 +2517,7 @@ function drawHangsSVG(parent,t,cx,y,f,cls,si,boxes,oid){ const show=correctFormS
   if(show){ const cf=correctFormOf(t), cw=meas(cf,f), cxm=cur+dir*(SPW+cw/2);   // item 6: the correct form leads the tail, one word space from the struck-through form it corrects. cf may be "" mid-edit (correctFormShown keeps the element alive via CFORM_EDIT even then — see its own comment)
     const ce=E("text",{class:cls+" cform",x:cxm,y:y,"text-anchor":"middle","data-s":si,"data-tok":oid,"data-host":host}); ce.textContent=cf; if(cf)svgTip(ce,`correct form of “${bform(t)}”`); parent.appendChild(ce);   // the companion IS the host's own ink (same data-tok), but it is drawn at the diagram root like a satellite, so it needs data-host to be dimmed at all
     boxes&&boxes.push({x:cxm,y:y-8,hx:Math.max(cw/2,4),hy:12}); cur+=dir*(SPW+cw); }
-  (t.hangs||[]).forEach(p=>{ if(p.sp) cur+=dir*SPW; const st=satTok(si,p.orig), pf=hangForm(p), mw=meas(pf,isForeign(st)?"italic "+f:f), mx=cur+dir*mw/2, oid=p.orig+1;   // a Foreign satellite renders italic like any other form, so it measures italic too
+  (t.hangs||[]).forEach(p=>{ if(dandaSp(p)) cur+=dir*SPW; const st=satTok(si,p.orig), pf=hangForm(p), mw=meas(pf,isForeign(st)?"italic "+f:f), mx=cur+dir*mw/2, oid=p.orig+1;   // a Foreign satellite renders italic like any other form, so it measures italic too
     const g=E("g",{class:"tok-group punct-sat"+(sel.s===si&&sel.t===oid?" sel":""),"data-s":si,"data-tok":oid,"data-host":host});
     const e=E("text",{class:cls+formDeco(st)+italDeco(st),x:mx,y:y,"text-anchor":"middle"}); e.textContent=pf; g.appendChild(e);
     g.style.cursor="pointer"; g.addEventListener("click",ev=>{ ev.stopPropagation(); pick(si,oid); }); parent.appendChild(g);
@@ -2509,7 +2526,7 @@ function drawHangsSVG(parent,t,cx,y,f,cls,si,boxes,oid){ const show=correctFormS
 // rightward RTL). Nearest-to-host first (the last lead in reading order abuts the form), so iterate reversed.
 function drawLeadsSVG(parent,t,cx,y,f,cls,si,boxes,host){ if(!t.leads||!t.leads.length) return;   // `host` = the ORIGINAL id of the token these marks lead, for the emphasis level — see drawHangsSVG's data-host note
   const dir=RTL?1:-1, SPW=meas(" ",f); let cur=cx+dir*fmeas(t,f)/2;   // start flush at the host form's REAL inline-start edge — the bold reserve dropped here for the same reason as in drawHangsSVG above
-  [...t.leads].reverse().forEach(p=>{ if(p.sp) cur+=dir*SPW; const st=satTok(si,p.orig), pf=hangForm(p), mw=meas(pf,isForeign(st)?"italic "+f:f), mx=cur+dir*mw/2, oid=p.orig+1;   // the mark's own SpaceAfter → a gap on its host side
+  [...t.leads].reverse().forEach(p=>{ if(dandaSp(p)) cur+=dir*SPW; const st=satTok(si,p.orig), pf=hangForm(p), mw=meas(pf,isForeign(st)?"italic "+f:f), mx=cur+dir*mw/2, oid=p.orig+1;   // the mark's own SpaceAfter → a gap on its host side
     const g=E("g",{class:"tok-group punct-sat"+(sel.s===si&&sel.t===oid?" sel":""),"data-s":si,"data-tok":oid,"data-host":host});
     const e=E("text",{class:cls+formDeco(st)+italDeco(st),x:mx,y:y,"text-anchor":"middle"}); e.textContent=pf; g.appendChild(e);
     g.style.cursor="pointer"; g.addEventListener("click",ev=>{ ev.stopPropagation(); pick(si,oid); }); parent.appendChild(g);
@@ -2519,7 +2536,7 @@ function drawLeadsSVG(parent,t,cx,y,f,cls,si,boxes,host){ if(!t.leads||!t.leads.
 function appendLeadHTML(container,t,si,cls,host){ if(!t.leads||!t.leads.length) return; const SPW=meas(" ",WORD_F);   // `host` — see drawHangsSVG's data-host note
   t.leads.forEach(p=>{ const oid=p.orig+1, s=document.createElement("span");
     s.className=(cls||"punctsat")+((sel.s===si&&sel.t===oid)?" sel":"")+formDeco(satTok(si,p.orig))+italDeco(satTok(si,p.orig)); s.textContent=hangForm(p);
-    if(p.sp) s.style.marginInlineEnd=SPW+"px";
+    if(dandaSp(p)) s.style.marginInlineEnd=SPW+"px";
     s.dataset.s=si; s.dataset.tok=oid; if(host!=null)s.dataset.host=host; s.style.cursor="pointer";
     s.addEventListener("click",ev=>{ ev.stopPropagation(); pick(si,oid); }); container.appendChild(s); }); }
 // HTML (outline / wrapped brackets): the same folded punctuation as separate, selectable inline spans beside the host.
@@ -2529,7 +2546,7 @@ function appendHangHTML(container,t,si,cls,oid){ const show=correctFormShown(t,s
     c.style.marginInlineStart=SPW+"px"; if(cf)c.title=`correct form of “${bform(t)}”`; c.dataset.s=si; c.dataset.tok=oid; c.dataset.host=host; container.appendChild(c); }
   (t.hangs||[]).forEach(p=>{ const oid=p.orig+1, s=document.createElement("span");
     s.className=(cls||"punctsat")+((sel.s===si&&sel.t===oid)?" sel":"")+formDeco(satTok(si,p.orig))+italDeco(satTok(si,p.orig)); s.textContent=hangForm(p);
-    if(p.sp) s.style.marginInlineStart=SPW+"px";
+    if(dandaSp(p)) s.style.marginInlineStart=SPW+"px";
     s.dataset.s=si; s.dataset.tok=oid; s.dataset.host=host; s.style.cursor="pointer";
     s.addEventListener("click",ev=>{ ev.stopPropagation(); pick(si,oid); }); container.appendChild(s); }); }
 function descent(f){_cv.font=f; const m=_cv.measureText("gjpqy"); return m.actualBoundingBoxDescent||3;}   // how far tokens hang below the baseline
