@@ -2322,7 +2322,23 @@ function positionBracketAnnots(){ document.querySelectorAll("#doc .bwrap").forEa
       const bot=u?fTop+u.offsetTop+u.offsetHeight:fTop+(f===tok?tok.offsetHeight:f.offsetHeight);
       const ox=(f===tok?0:tok.offsetLeft), cx=ox+f.offsetLeft+f.offsetWidth/2;
       drawAVM(svg,cx,bot+avmTopGap(),t,si0,oid,null); }); }   // item 25/4 round 2: avmTopGap() — see belowStack's own note. `bot` here is a live DOM edge, not a baseline, so this is a slightly looser match to "the space above POS" than the other two call sites (which measure from a real baseline) — but avmTopGap()'s own VALUE is a plain small clearance number either way, and matching the other two sites exactly means one formula to keep in sync rather than a fourth, untested one for this context alone
-  box.appendChild(svg); }); }
+  box.appendChild(svg);
+  // On report ("space between a MWT tie and its form... displays differently [from arcs] despite identical
+  // measured geometry — same HarfBuzz stack?"): NO — this svg (.bwannot, built fresh above, every render)
+  // never went through it at all. renderSentence (js/diagram/diagram-render.js) sweeps each sentence's own
+  // root with smpReshape() ONCE, right after building it — swapping any supplementary-plane Brahmic glyph
+  // (Sanskrit etc.) from plain SVG `<text>` (which WebKit can't shape) to a HarfBuzz-shaped path/foreignObject.
+  // But THIS svg doesn't exist yet at that point: positionBracketAnnots runs as its own later pass in
+  // renderDoc (below every renderSentence call, since it needs LIVE layout — offsetTop/offsetHeight — off
+  // the already-inserted .bwrap), and appends .bwannot straight into a box that was already swept. So an MWT
+  // tie's own fused form here (the ONE piece of Brahmic text this whole function draws) silently kept using
+  // the browser's own native shaping the entire time — every OTHER MWT tie (arcs/stemma/tree/flat brackets,
+  // all drawn during renderSentence, inside the root smpReshape already covers) has always been reshaped
+  // correctly. The measured BOX geometry the report's own script found — tie-to-form gap — was never wrong;
+  // what differed was the GLYPH ink inside an identical box, which getBoundingClientRect() can't see at all.
+  // smpReshape is designed for exactly this second sweep (see its own "no-op on every engine/script that
+  // shapes normally" note) — safe to re-run on freshly-appended content.
+  if(typeof smpReshape==="function") smpReshape(svg); }); }
 // continuous span wash for wrapped brackets: one rounded rect per line, spanning the selected constituent's
 // elements on that line (drawn behind the text)
 function positionBracketWash(){ document.querySelectorAll("#doc .bwrap").forEach(box=>{
