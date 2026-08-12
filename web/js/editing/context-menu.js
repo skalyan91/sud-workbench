@@ -731,7 +731,18 @@ function avmValueMenu(x,y,si,tokId,key){
 document.getElementById("doc").addEventListener("contextmenu",e=>{
   const avmEl=e.target.closest&&e.target.closest(".avm-row");   // item 22: BEFORE every other resolver, same reasoning as .glabbr just below — an AVM row sits inside the token group the generic node branch would otherwise claim
   if(avmEl){ const tk=tokFromEl(avmEl);
-    if(tk && avmValueMenu(e.clientX,e.clientY,tk.si,tk.tokId,avmEl.dataset.feat)){ e.preventDefault(); e.stopPropagation(); return; } }
+    // item 2 — a combined AGR/TAM row's own value now carries one [data-subfeat] span/tspan per member
+    // (drawAVM/avmInline, diagram-core.js). Landing on one of THOSE scopes the menu to that ONE UD feature —
+    // avmValueMenu's existing standalone-row branch (AVM_GROUPS[key] falsy for a real feature name) already
+    // does exactly this, so passing the subfeat straight through as `key` needs no new menu logic at all.
+    // Anywhere else in the row — the ATTR label, the dot separators, the row's own padding — still resolves to
+    // avmEl.dataset.feat (the GROUP name on a combined row), i.e. the current "whole group" menu: clicking the
+    // group's own NAME reads as "edit the group", a specific VALUE reads as "edit just that one member". A
+    // standalone row's avmEl.dataset.feat already IS the one real feature, so this branch is a no-op there —
+    // .closest("[data-subfeat]") never matches (no such attribute exists on that row at all).
+    const subEl=e.target.closest&&e.target.closest("[data-subfeat]");
+    const key=(subEl && avmEl.contains(subEl)) ? subEl.dataset.subfeat : avmEl.dataset.feat;
+    if(tk && avmValueMenu(e.clientX,e.clientY,tk.si,tk.tokId,key)){ e.preventDefault(); e.stopPropagation(); return; } }
   const abEl=e.target.closest&&e.target.closest(".glabbr");   // BEFORE every other resolver: a .glabbr sits inside the gloss row, which sits inside the token group the generic node branch below would otherwise claim
   if(abEl){ const gl=abEl.closest(".gl-edit"), tk=gl&&tokFromEl(gl);
     if(gl&&tk&&(gl.dataset.tier||"gloss")==="mgloss"){

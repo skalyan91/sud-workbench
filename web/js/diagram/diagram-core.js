@@ -2724,7 +2724,16 @@ function drawAVM(svg,cx,y0,t,si,tokId,boxes){ const L=avmLayout(t); if(!L) retur
     if(si!=null&&tokId!=null){ g.setAttribute("data-s",si); g.setAttribute("data-tok",tokId); }
     g.appendChild(E("rect",{class:"avm-hit",x:x0+AVM_BRK_W,y:y0+AVM_PAD_V+i*(L.lineH+AVM_ROW_GAP)-1,width:L.w-AVM_BRK_W*2,height:L.lineH+1}));
     const ae=E("text",{class:"avm-attr",x:attrX,y:ry,"text-anchor":"end"}); ae.textContent=r.attr; g.appendChild(ae);
-    const ve=E("text",{class:"avm-val",x:valX,y:ry,"text-anchor":"start"}); ve.textContent=r.val; g.appendChild(ve);
+    const ve=E("text",{class:"avm-val",x:valX,y:ry,"text-anchor":"start"});
+    // item 2 — a GROUP row's combined value ("3.Sing.Masc") splits into one <tspan data-subfeat> per member,
+    // dot-separated by plain (unaddressable) tspans of their own: tspans lay out inline exactly like one flat
+    // string (no dx/dy of their own), so the ink and spacing are UNCHANGED from before this split — only the
+    // hit-testing granularity is new. A standalone row's `r.vals` is undefined (avmLayout only attaches it to
+    // a group row), so it falls through to the old single-text-node path untouched.
+    if(r.vals){ r.vals.forEach((mv,vi)=>{ if(vi){ const sep=E("tspan",{class:"avm-val-sep"}); sep.textContent="."; ve.appendChild(sep); }
+        const sp=E("tspan",{class:"avm-subval","data-subfeat":mv.feat}); sp.textContent=mv.val; ve.appendChild(sp); }); }
+    else ve.textContent=r.val;
+    g.appendChild(ve);
     svg.appendChild(g); });
   boxes&&boxes.push({x:cx,y:y0+L.h/2,hx:L.w/2,hy:L.h/2});
   return y1; }
@@ -2756,7 +2765,17 @@ function avmInline(t){ const struct=(typeof avmStruct==="function")?avmStruct(t)
     item.appendChild(document.createTextNode("["));
     const attr=document.createElement("span"); attr.className="oavm-attr"; attr.textContent=(it.group||it.feat).toUpperCase(); item.appendChild(attr);
     item.appendChild(document.createTextNode(" "));
-    const val=document.createElement("span"); val.className="oavm-val"; val.textContent=it.group?it.combined:it.val; item.appendChild(val);
+    const val=document.createElement("span"); val.className="oavm-val";
+    // item 2 — same split as the SVG AVM's drawAVM (diagram-core.js), same reason: a GROUP row's combined value
+    // becomes one <span data-subfeat> per member (dot-joined by plain, unaddressable "." text nodes) instead of
+    // one flat text node, so a right-click on "Sing" alone can resolve to Number without touching Person/Gender.
+    // Plain HTML inline flow, unlike the SVG tspans, but the same non-goal applies: no added spacing, since a
+    // span with no margin/padding of its own sits flush against its text-node neighbours exactly as running
+    // text would. it.vals is undefined on a standalone (non-group) row, so that case is untouched.
+    if(it.group){ it.vals.forEach((mv,vi)=>{ if(vi) val.appendChild(document.createTextNode("."));
+        const sp=document.createElement("span"); sp.className="oavm-subval"; sp.dataset.subfeat=mv.feat; sp.textContent=mv.val; val.appendChild(sp); }); }
+    else val.textContent=it.val;
+    item.appendChild(val);
     item.appendChild(document.createTextNode("]"));
     span.appendChild(item); });
   return span; }
@@ -3337,11 +3356,25 @@ function rowTies(D,s0,e0){ const reb=o=>({...o,from:o.from-s0,to:o.to-s0});
 // same tie — .bwrap.hasmwt's bottom padding (diagram-wrap.js) and the inter-line growth that keeps a wrapped
 // tie from colliding with the next line (reserveBracketArcRoom, document.js) — and both would under-reserve if
 // they didn't count the same lead the draw site spends.
-function htmlTieBottom(r){ const PIN=6, STEP=belowGap(), lead=5+tieLead();
-  if(r.kind==="gw") return lead+r.dy+gwDepth();                            // the tie has no label under it — it reaches only as far as the glyph's own ink
-  if(r.kind==="xpos") return lead+r.dy+PIN+20;                             // the ExtPos value IS the label
+// item 25/7: +r.avmH, on report ("space below an MWT tie in brackets view is smaller than in other views" —
+// and, once traced further, "MWT forms/transliterations are crashing into the next line"). This function never
+// referenced the AVM tier AT ALL, even after positionBracketAnnots' own undBot (the DRAW side, right above)
+// was taught avmTopGap()+av.h a round ago: that fix only changed where the tie/form stack actually PAINTS, not
+// how much room either of htmlTieBottom's two RESERVING callers set aside for it — so an MWT whose component
+// token carries a tall AVM now draws lower than either .bwrap.hasmwt's own bottom padding (diagram-wrap.js) or
+// reserveBracketArcRoom's inter-line growth (document.js) budgeted for, squeezing whatever sits below it: the
+// box's own bottom margin on the last line (reads as "less space below the tie"), or the START of the NEXT
+// wrapped line on an interior one (reads as "crashes into the next line" — the same shortfall, two symptoms).
+// r.avmH is the tallest avmHeight() among ONLY the tie's own component tokens (set once, at box._ties
+// construction in bracketsWrapped — see its own comment), not a row-wide max: mirrors a1503fb's own rule for
+// seating off the tokens a tie actually touches. avmTopGap(), not a bare belowGap(), is the right clearance
+// term above the box — see that function's own note; belowReserveH folds the identical pair in for the same
+// reason.
+function htmlTieBottom(r){ const PIN=6, STEP=belowGap(), lead=5+tieLead(), avm=r.avmH>0?r.avmH+avmTopGap():0;
+  if(r.kind==="gw") return lead+r.dy+gwDepth()+avm;                        // the tie has no label under it — it reaches only as far as the glyph's own ink (+ its component's AVM, if any)
+  if(r.kind==="xpos") return lead+r.dy+PIN+20+avm;                        // the ExtPos value IS the label
   const n=belowRows((trLayer()&&trTxt(r)),0,!!r.pos);
-  return lead+r.dy+PIN+20+n*STEP+(n>0?STACKED_GAP:0); }                    // MWT surface form, then its transliteration row, then any ExtPos annotation — STACKED_GAP once (belowReserveH's math), for the same reason belowStack seeds it once rather than per row
+  return lead+r.dy+PIN+20+n*STEP+(n>0?STACKED_GAP:0)+avm; }               // MWT surface form, then its transliteration row, then any ExtPos annotation — STACKED_GAP once (belowReserveH's math), for the same reason belowStack seeds it once rather than per row
 function mwtDepth(D){ return tieLayout(D).depth; }   // extra vertical room the bracket stack needs below the below-stack bottom. Item 1 made this tier-aware — one entry per bracket TIER, each as deep as the deepest label that tier carries (an MWT surface form, plus its transliteration row and/or an ExtPos annotation) — so an ExtPos bracket that pushes an overlapping MWT tie down a tier also grows every reserve that folds in mwtDepth (arcsWrapped's per-row tieBot, projWrapped, belowH) in lockstep. With a single plain MWT tie and no ExtPos it returns exactly the former fixed 39+descent(POS_F)−xHeight(POS_F) (39 with no POS row), +belowGap() for a transliteration row — the seating those constants were tuned for is unchanged.
 
 /* labels are always horizontal and centred on their edge (x-height middle); collision avoidance is

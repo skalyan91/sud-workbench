@@ -792,16 +792,22 @@ const AVM_GROUPS={AGR:["Person","Number","Gender","Clusivity"], TAM:["Tense","As
 // naming it keeps this list matching the mark-already-exists reasoning it's part of, in full.
 const AVM_EXCLUDE=new Set(["NumType","PronType","VerbForm","ExtPos","Shared","Foreign","Typo","Reported"]);
 /* The token's FEATS as an ordered, FLAT AVM row list — no nesting any more (item 23): [{group:"AGR",
-   members:[...set ones...], combined:"3.Sing.Fem"}, {group:"TAM",...} (either omitted outright if the token
-   sets NONE of that group's features — an empty bracket is worse than no bracket), then every remaining set,
-   non-excluded feature as {feat,val}, in UD_FEATS' own declared order]. Attribute names and values are UD's
-   OWN spellings verbatim (Person, not PERS; Sing, not SG) — on request, this tier stays isomorphic to FEATS,
-   not a second Leipzig-style gloss; FEATS_GLOSS/MGloss is the tier that abbreviates. */
+   members:[...set ones...], combined:"3.Sing.Fem", vals:[{feat:"Person",val:"3"},{feat:"Number",val:"Sing"},
+   {feat:"Gender",val:"Fem"}]}, {group:"TAM",...} (either omitted outright if the token sets NONE of that
+   group's features — an empty bracket is worse than no bracket), then every remaining set, non-excluded
+   feature as {feat,val}, in UD_FEATS' own declared order]. Attribute names and values are UD's OWN spellings
+   verbatim (Person, not PERS; Sing, not SG) — on request, this tier stays isomorphic to FEATS, not a second
+   Leipzig-style gloss; FEATS_GLOSS/MGloss is the tier that abbreviates.
+   `vals` (per-member {feat,val} pairs, same order as `members`/`combined`'s own dot-join) is item 2's own
+   addition — a per-value right-click needs to know which UD feature EACH piece of "3.Sing.Fem" names, not just
+   the group's, and only avmStruct has `set` in scope to answer that; `combined` stays exactly as it was (every
+   pre-existing reader of it — avmLayout's WIDTH measurement in particular — is unaffected) rather than being
+   derived FROM `vals` at the two render sites, which would be the same fact stated twice. */
 function avmStruct(t){ const feats=(t&&t.feats)||""; if(!feats||feats==="_") return [];
   const set={}; feats.split("|").forEach(seg=>{ const eq=seg.indexOf("="); if(eq>0) set[seg.slice(0,eq)]=seg.slice(eq+1); });
   const used=new Set(), out=[];
   for(const g of ["AGR","TAM"]){ const members=AVM_GROUPS[g].filter(f=>set[f]!=null);
-    if(members.length){ members.forEach(f=>used.add(f)); out.push({group:g, members, combined:members.map(f=>set[f]).join(".")}); } }
+    if(members.length){ members.forEach(f=>used.add(f)); out.push({group:g, members, combined:members.map(f=>set[f]).join("."), vals:members.map(f=>({feat:f,val:set[f]}))}); } }
   Object.keys(UD_FEATS).forEach(f=>{ if(set[f]!=null&&!used.has(f)&&!AVM_EXCLUDE.has(f)) out.push({feat:f,val:set[f]}); });
   return out; }
 // item 22: an AVM row's right-click edit — same mechanism glossAbbrMenu/acValItems already use (attested-value-
