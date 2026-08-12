@@ -1245,13 +1245,40 @@ function clearFeat(featsStr,name){ const cur=(featsStr&&featsStr!=="_")?featsStr
 // item 1: Subj only ever lives on a VERB/AUX (it marks a predicate whose subject is raised/shared) — call this
 // right after ANY UPOS change so a token retagged away from VERB/AUX can't keep a now-meaningless Subj value.
 function clearSubjIfNotVA(t){ if(t.upos!=="VERB"&&t.upos!=="AUX"&&raiseGet(t,"Subject")) raiseSet(t,"Subject",""); }   // Subject lives on a PREDICATE, so a token retagged away from VERB/AUX must not keep it
-// a Shared=Yes dependent must stay attached to a conj relation's head to keep the marker meaningful — call
-// this right after ANY reparent (t.head just changed) with the token's sentence, so a rehead onto a token whose
-// deprel isn't conj-based (or onto no token at all, e.g. head 0) drops the now-stale Shared=Yes.
+// a Shared=Yes dependent must stay attached to a genuine member of SOME coordination to keep the marker meaningful
+// — call this right after ANY reparent (t.head just changed) with the token's sentence, so a rehead onto a token
+// that isn't part of a coordination at all (or onto no token, e.g. head 0) drops the now-stale Shared=Yes.
+// "Member of a coordination" is NOT just "head.deprel is conj-family": attachAsSharedConjunct (js/diagram/
+// diagram-edit.js) attaches the shared dependent to WHICHEVER conjunct sits nearer in linear order, and that can
+// be the coordination's FIRST/head conjunct just as easily as a later one — the first conjunct's own deprel is
+// whatever its real role is (subj, comp:obj, …), never itself "conj". A head.deprel-only check therefore passed a
+// later-conjunct attachment but wiped a first-conjunct one on the very next reparent, even a no-op one reattaching
+// to the same head — caught by direct testing, not a theoretical gap. conjunctsOf (js/diagram/diagram-render.js)
+// is the one function that already gets this right in both directions (it's what decides which ghost edges the
+// rendering side draws for a Shared=Yes token), so this defers to it rather than re-deriving the rule a second,
+// divergeable way: hid is a genuine coordination member iff conjunctsOf finds more than just itself there.
 function syncSharedFeat(t,s){ if(!hasFeat(t.feats,"Shared","Yes"))return;
-  const hid=parseInt(t.head,10), head=(s&&hid>=1&&hid<=s.tokens.length)?s.tokens[hid-1]:null;
-  if(head&&famOf(head.deprel)==="conj")return;
+  const hid=parseInt(t.head,10);
+  if(s&&hid>=1&&hid<=s.tokens.length&&typeof conjunctsOf==="function"&&conjunctsOf(s.tokens,hid).length>1)return;
   t.feats=clearFeat(t.feats,"Shared"); }
+// a MISC Subject value (SubjRaising/ObjRaising/OblRaising, plus the untyped Instantiated/Raising — see below) lives
+// on the embedded PREDICATE and names a controller found by CRAWLING: subjRaiseTargetFor (js/diagram/diagram-edit.js)
+// climbs UP the predicate's own (this token's) head chain hunting a VERB/AUX ancestor with a subj/comp:obj/comp:obl
+// dependent, and nothing about the ghost edge attachAsRaisedSubj drew is separately persisted — it is re-derived
+// from that same crawl on every render. Which means the crawl's FIRST step reads this token's OWN head, so a
+// reparent of a Subject-carrying predicate is exactly the edit that can sever the chain the value depends on — call
+// this right after ANY reparent (t.head just changed) with the token's sentence, so a rehead that breaks the crawl
+// drops the now-stale value, the same way syncSharedFeat drops a stale Shared=Yes for a conjunct reheaded off its
+// coordination. subjRaiseTargetFor already handles Instantiated/Raising itself (tries subj, then comp:obj, comp:obl
+// in turn — see UNTYPED_RAISING), so passing it the raw value covers all five live values with no switch here.
+// Generic is DELIBERATELY EXEMPT: attachGenericSubj's own comment says it "has no real crawl target at all" — it
+// isn't in SUBJ_TYPE_OF or UNTYPED_RAISING, so subjRaiseTargetFor returns null for it BY DESIGN, not because a
+// rehead broke anything (an arbitrary/understood subject has no structural precondition on the predicate's head to
+// begin with). Testing it here would delete a legitimately-set Generic on literally every reparent of its verb.
+function syncSubjectFeat(t,s){ const val=raiseGet(t,"Subject"); if(!val||val==="Generic")return;
+  const tid=(s&&s.tokens)?s.tokens.indexOf(t)+1:0;   // this token's own 1-based id — subjRaiseTargetFor's crawl starts here, at its (just-changed) head
+  if(tid>0&&typeof subjRaiseTargetFor==="function"&&subjRaiseTargetFor(s.tokens,tid,val)!=null)return;   // typeof-guarded: js/diagram/diagram-edit.js (where subjRaiseTargetFor lives) loads AFTER this file, same reason afterHeadEdit guards headSyncDeprel
+  raiseSet(t,"Subject",""); }
 // item 13 — EFFECTIVE forward map = built-in FEATS_GLOSS overlaid with the user's custom mappings (PREFS.glossMap; custom
 // wins). GLOSS_FEATS is its inverse (abbreviation → list of Feat=Val that produce it). Some abbreviations are AMBIGUOUS
 // (reachable from >1 Feat=Val, e.g. INV←Number=Inv/Voice=Inv, NEG←Polarity=Neg/PronType=Neg, EQU←Case=Equ/Degree=Equ,

@@ -3,6 +3,7 @@
 // keep the root invariant coupled: a token has head 0  ⟺  its deprel is "root"
 function afterHeadEdit(t,s,defer){ if(parseInt(t.head,10)===0) t.deprel=withDepBase(t.deprel,"root"); else if(depBase(t.deprel)==="root") t.deprel=withDepBase(t.deprel,"udep");   // (keeps any @deep tail)
   if(s) syncSharedFeat(t,s);   // `s` = the token's sentence — pass it whenever the caller has it, so a rehead away from a conj head drops a stale Shared=Yes
+  if(s) syncSubjectFeat(t,s);   // …and likewise a rehead of a Subject-raising predicate whose crawl (subjRaiseTargetFor) no longer resolves drops the now-stale Subject value
   normGoesWith(t,s);   // …and a token that is ALREADY a goeswith continuation, dragged onto a new head, is a continuation of THAT word now
   /* …AND THE RELATION IS RE-ASKED OF THE PARSER, because a relation describes an EDGE and the edge has
      just moved: a `subj` dragged under a noun is no longer a statement about anything. The two rules
@@ -24,7 +25,7 @@ function afterHeadEdit(t,s,defer){ if(parseInt(t.head,10)===0) t.deprel=withDepB
      through `headSyncDeprels` once the whole structural edit has landed and been drawn. */
   if(s && typeof headSyncDeprel==="function"){ const si=DOC.indexOf(s), tokId=s.tokens.indexOf(t)+1;
     if(si>=0&&tokId>0){ if(defer) defer.push(tokId); else headSyncDeprel(si,tokId); } } }   // …and a token that is ALREADY a goeswith continuation, dragged onto a new head, is a continuation of THAT word now: its dependents follow it there (see normGoesWith). Not a no-op even though the relation didn't change — the head did, and every consequence below hangs off the head
-function afterDeprelEdit(t,s){ if(depBase(t.deprel)==="root"){ t.head="0"; if(s)syncSharedFeat(t,s); } else if(parseInt(t.head,10)===0) t.deprel=withDepBase(t.deprel,"root");
+function afterDeprelEdit(t,s){ if(depBase(t.deprel)==="root"){ t.head="0"; if(s){ syncSharedFeat(t,s); syncSubjectFeat(t,s); } } else if(parseInt(t.head,10)===0) t.deprel=withDepBase(t.deprel,"root");
   normGoesWith(t,s); }
 /* ── ASSIGNING `goeswith` NORMALISES THE DEPENDENT ─────────────────────────────────────────────────────────────
    `goeswith` is not a relabelling of one edge like `mod` or `comp:obj`. It is a claim about the ORTHOGRAPHY — that
