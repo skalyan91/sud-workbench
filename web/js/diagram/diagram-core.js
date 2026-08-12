@@ -2584,7 +2584,11 @@ function belowRows(hasTr,tierCount,hasPos){ return (hasTr?1:0)+tierCount+(hasPos
 // a FOURTH, independent term, not folded into n·belowGap(): the AVM tier isn't one more uniform text row (its
 // height depends on how many FEATS the token carries, unlike every other below-row, which is why it needs its
 // own measured term rather than joining the n this function already counts in belowRows).
-function belowReserveH(hasTr,tierCount,hasPos,avmH){ const n=belowRows(hasTr,tierCount,hasPos); return n*belowGap()+(n>0?STACKED_GAP:0)+(avmH>0?avmH+8:0); }   // +8 matches belowStack's own flat clearance step above the AVM box exactly — see its note there for why it isn't another belowGap()
+// item 25/4: the clearance above the AVM box is belowGap() itself, not a flat constant, on request ("more
+// space between the POS tag and the AVM, so that it matches the space above the POS tag") — belowGap() IS
+// that space (the same row-to-row step every other below-stack row is seeded by), so this reuses it rather
+// than re-deriving a second number that could drift from it.
+function belowReserveH(hasTr,tierCount,hasPos,avmH){ const n=belowRows(hasTr,tierCount,hasPos); return n*belowGap()+(n>0?STACKED_GAP:0)+(avmH>0?avmH+belowGap():0); }   // belowGap() matches belowStack's own clearance step above the AVM box exactly — see its note there
 /* ── item 22, round 2: THE AVM TIER's OWN RENDERING, REDRAWN AS NATIVE SVG — no <foreignObject>. Round 1 was
    a real HTML/CSS box (nested borders read as brackets) painted inside a foreignObject, measured off-screen
    via a hidden #doc-mounted div. That measured centred to sub-pixel precision under headless Chrome — but the
@@ -3086,7 +3090,7 @@ function belowStack(g,x,y0,tk,boxes,trRow){ let y=y0+STACKED_GAP;   // trRow: re
   // item 22: the AVM tier — below the POS row, on request. Native SVG now (drawAVM, see its own note) — `g`
   // is this token's own group (already carrying data-s/data-tok, see every belowStack call site), so drawAVM
   // needs no si/tokId of its own: tokFromEl's ".closest('[data-s]')" walk finds it on `g` regardless.
-  if(avmLayout(tk)) y=drawAVM(g,x,y+8,tk,null,null,boxes);   // a flat 8px step, not another belowGap(): the AVM is not one more uniform text row (see belowReserveH's own note) — its OWN box supplies its height, this is just the clearance above it
+  if(avmLayout(tk)) y=drawAVM(g,x,y+belowGap(),tk,null,null,boxes);   // item 25/4: belowGap(), not a flat 8px, on request — "more space between the POS tag and the AVM, matching the space above the POS tag"; belowReserveH's own avmH term was raised to match
   return y;
 }
 /* multi-word tokens: a rounded tie under the baseline spanning the fused words, carrying the surface form.

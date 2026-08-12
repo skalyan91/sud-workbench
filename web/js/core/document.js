@@ -2179,9 +2179,21 @@ function positionBracketAnnots(){ document.querySelectorAll("#doc .bwrap").forEa
     svg.appendChild(g);
     if(show.labels && rel) clabs.push({g,dep:+dep.dataset.tok,mx:(upP[0]+loP[0])/2,apex:(upP[1]+loP[1])/2,text:rel,col,level:Math.hypot(upP[0]-loP[0],upP[1]-loP[1]),frm,tip,gap,arcEls:[...g.childNodes]}); });   // frm/tip/gap/arcEls: Item 4 lets a lifted label grow the arc up to it
   if(show.labels){ decollide(clabs,[],svg,si0); growCrossArcs(clabs,AH,null,si0); }   // fold cross-line labels into the SAME de-collision pass as the within-line bumps; then grow/widen: raise any arc whose label cleared its top endpoint, widen the band, re-solve the band
+  const s0=DOC[si0];   // item 25/4: hoisted above mwts.forEach so undBot() can resolve each token's own model object too — was declared just before the AVM loop below, which still reuses this same binding
   mwts.forEach(m=>{ const a=box.querySelector(`.bwtok[data-tok="${m.fromTok}"]`), b=box.querySelector(`.bwtok[data-tok="${m.toTok}"]`); if(!a||!b)return;
     const A=rectOf(a), B=rectOf(b); if(Math.abs(A.t-B.t)>4) return;          // components split across lines → no spanning tie
-    const undBot=tok=>{ const f=tok.querySelector(".bwform")||tok, u=tok.querySelector(".bwund"), fTop=tok.offsetTop+(f===tok?0:f.offsetTop); return u?fTop+u.offsetTop+u.offsetHeight:fTop+(f===tok?tok.offsetHeight:f.offsetHeight); };   // item 6: the BOTTOM of the token's below-stack (POS + any gloss/translit tiers), measured live — so the tie clears the POS even when gloss layers sit between the form and the POS
+    // item 25/4: +AVM, on report ("in wrapped brackets, the MWT brackets crash into the AVMs") — .bwund's own
+    // LIVE height (u.offsetHeight) never included the AVM box to begin with: it is drawn separately, straight
+    // into this SAME svg overlay, not as a DOM child that would grow .bwund's own measured height the way an
+    // otrans/gloss/bwpos row does. So the tie's seat (yb, below) was computed as if no AVM existed under
+    // either component, even on a token that plainly has one — the tie then drew ABOVE the AVM it should have
+    // cleared. avmLayout(t)'s own h, plus the identical belowGap() clearance the AVM's own draw call now uses
+    // (see that call a few lines down), is folded in here so undBot() states the token's TRUE below-stack
+    // bottom — AVM included — exactly as it already did for every other below-stack row.
+    const undBot=tok=>{ const f=tok.querySelector(".bwform")||tok, u=tok.querySelector(".bwund"), fTop=tok.offsetTop+(f===tok?0:f.offsetTop);
+      const base=u?fTop+u.offsetTop+u.offsetHeight:fTop+(f===tok?tok.offsetHeight:f.offsetHeight);
+      const t=s0&&s0.tokens&&s0.tokens[(+tok.dataset.tok)-1], av=t&&avmLayout(t);
+      return av?base+belowGap()+av.h:base; };   // item 6: the BOTTOM of the token's below-stack (POS + any gloss/translit tiers), measured live — so the tie clears the POS even when gloss layers sit between the form and the POS
     const mark0=svg.childNodes.length;   // item 8: everything this tie appends from here on is MOVED into one .mwt-g group at the end — recorded rather than re-pointing a dozen appendChild calls, so the drawing order (casing → tie → translit → form last) stays exactly as written. Mirrors the SVG mwtTie
     // yb: the tie's TOP, seated the SAME way the SVG views' shared mwtTie/tieLead seat every OTHER notation's
     // tie — undBot (this HTML view's own name for the below-stack bottom mwtTie calls stackBot) + 5 (the
@@ -2270,13 +2282,13 @@ function positionBracketAnnots(){ document.querySelectorAll("#doc .bwrap").forEa
   // formula the MWT tie above measures itself against, copied rather than shared — see that block's own note
   // for why it's a live measurement and not the shared padding figure) so a token with a taller-than-usual
   // gloss stack can't collide with its own AVM box.
-  { const s0=DOC[si0];
+  {   // s0 hoisted above mwts.forEach now — undBot() there needs it too, see that block's own note
     box.querySelectorAll(".bwtok").forEach(tok=>{ const oid=+tok.dataset.tok, t=s0&&s0.tokens&&s0.tokens[oid-1];
       if(!t||!avmLayout(t)) return;
       const f=tok.querySelector(".bwform")||tok, u=tok.querySelector(".bwund"), fTop=tok.offsetTop+(f===tok?0:f.offsetTop);
       const bot=u?fTop+u.offsetTop+u.offsetHeight:fTop+(f===tok?tok.offsetHeight:f.offsetHeight);
       const ox=(f===tok?0:tok.offsetLeft), cx=ox+f.offsetLeft+f.offsetWidth/2;
-      drawAVM(svg,cx,bot+8,t,si0,oid,null); }); }   // +8: the same flat clearance belowStack's own AVM step uses, not another belowGap() — see that note
+      drawAVM(svg,cx,bot+belowGap(),t,si0,oid,null); }); }   // item 25/4: belowGap(), not a flat 8px — see belowStack's own identical change
   box.appendChild(svg); }); }
 // continuous span wash for wrapped brackets: one rounded rect per line, spanning the selected constituent's
 // elements on that line (drawn behind the text)
