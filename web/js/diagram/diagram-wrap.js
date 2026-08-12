@@ -597,7 +597,17 @@ function arcsWrapped(si){
   // item 11: both go through the SHARED repBase (js/diagram/diagram-core.js) first — a reported token's whole cell
   // (its word row AND the below-stack under it) steps up off the line, so the cross-line endpoints hanging above and
   // below that cell must step up with it, or the arc lands in the gap the token has just vacated.
-  const rowOf=i=>rows.find(r=>i>=r.s&&i<=r.e), NX=i=>rowOf(i).LX(i), NTOP=i=>repBase(rep,rowOf(i).wordY,i)-XGAP, NBOT=i=>repBase(rep,rowOf(i).stackBot,i)+PGAP;   // top endpoint clears the upper token's stack by the same gap within-line arcs leave below their endpoints
+  const rowOf=i=>rows.find(r=>i>=r.s&&i<=r.e), NX=i=>rowOf(i).LX(i), NTOP=i=>repBase(rep,rowOf(i).wordY,i)-XGAP;
+  // item 22: the BOTTOM endpoint used to clear rowOf(i).stackBot — the ROW's own tallest below-stack (already
+  // tightened from the sentence-wide max to a per-row one, see r.stackBot's own note) — so a cross-line arc
+  // landing on a short-AVM (or no-AVM) token still got pushed down to clear some OTHER, unrelated token's tall
+  // AVM box merely because the two shared a wrapped line. The endpoint belongs to ONE token; it now clears only
+  // THAT token's own below-stack (same belowReserveH the row-wide figure is built from, with avmHeight(t[i]) in
+  // place of avmRowMaxH(row) — the identical analytical formula, just not maxed over tokens this endpoint never
+  // touches). Computed here rather than read off a live DOM measurement because, like r.stackBot, it has to
+  // exist BEFORE the row is drawn (arc heights/labels/inter-row gaps all consume it first).
+  const tokStackBot=i=>rowOf(i).wordY+belowReserveH(hasTr(t),belowTierN(),show.pos,avmHeight(t[i]));
+  const NBOT=i=>repBase(rep,tokStackBot(i),i)+PGAP;
   // Cross-line arcs (head + dependent on DIFFERENT wrapped rows, so the arc spans the inter-row gap).
   const crossArcs=[];
   for(let i=0;i<n;i++){ const h=heads[i]-1; if(h<0)continue; if(rowOf(i)===rowOf(h))continue;
@@ -759,14 +769,16 @@ function arcsWrapped(si){
     if(show.labels) rlabs.forEach(L=>{ if(!L.root||!L.rootPath) return; const g=L.rootPath.parentNode, ty=(L.fy<L.y0-0.5)?L.fy+L.hh:L.apex;
       if(g) g.__edgeP=[[L.mx,ty],[L.mx,ty],L.tip,L.tip]; });
     // tokens + below stack (drawn last → on top of the cross-line edges)
+    const rowBelowBot=[];   // item 22: each of THIS row's tokens' own measured below-stack bottom (row-local index, matching r.c/r.wform/rowTies) — mwtTie seats each tie off only the tokens it spans, not r.stackBot's row-wide max
     r.idx.forEach(i=>{ const tk=t[i], X=r.LX(i), lw=r.lw[i-r.s], g=E("g",{class:"tok-group"+(sel.s===si&&sel.t===OID(i)?" sel":""),"data-s":si,"data-tok":OID(i)});
       const wy=repBase(rep,r.wordY,i);   // item 11: reported-speech step UP off the line — the same shared repBase the arc endpoints above went through, so word and arc leave the line together
       const wyD=wy+TOK_Y_LOWER, loB=loBoxes(boxes);   // …and then the DRAW baseline, TOK_Y_LOWER below it (js/diagram/diagram-core.js). `r.wordY`/`r.arcZone`/`r.stackBot` stay the LAYOUT row geometry — the within-row bumps, the cross-line arcs' band bounds and every box here are all stated in it, so only the token's own ink moves
       const hy=Math.min(r.arcZone-NR, wyD-14);
-      g.appendChild(E("rect",{class:"tok-hit",x:X-lw/2-3,y:hy,width:lw+6,height:r.stackBot+6+TOK_Y_LOWER+TOK_TR_GAP-hy}));
-      g.appendChild(E("rect",{class:"tok-wash",x:X-lw/2-3,y:wyD-14,width:lw+6,height:r.stackBot+6+TOK_Y_LOWER+TOK_TR_GAP-(wyD-14)}));   // wash only the word+POS band, not the arcs above   // both reaches grow by the same 2.5 the stack dropped, so the (lowered) POS row stays inside them
+      const tokBot=tokStackBot(i)+6+TOK_Y_LOWER+TOK_TR_GAP;   // item 6: THIS token's own reach (same tokStackBot NBOT uses above), not r.stackBot's row-wide max — a short-AVM token's hover/selection wash no longer reaches down through a neighbour's tall AVM box
+      g.appendChild(E("rect",{class:"tok-hit",x:X-lw/2-3,y:hy,width:lw+6,height:tokBot-hy}));
+      g.appendChild(E("rect",{class:"tok-wash",x:X-lw/2-3,y:wyD-14,width:lw+6,height:tokBot-(wyD-14)}));   // wash only the word+POS band, not the arcs above   // both reaches grow by the same 2.5 the stack dropped, so the (lowered) POS row stays inside them
       const f=E("text",{class:"tok-word"+italDeco(tk),x:X,y:wyD,"text-anchor":"middle"}); f.textContent=bform(tk);   // host form only
-      belowStack(g,X,wyD+TOK_TR_GAP,tk,loB,hasTr(t));   // the flat arc view's own +2.5 (TOK_TR_GAP, js/diagram/diagram-core.js) — the wrapped variant of a notation must not drift from the flat one, and the row-layout `r.stackBot` (which the cross-line arcs' band bounds are measured from) stays untouched so no edge moves
+      rowBelowBot[i-r.s]=belowStack(g,X,wyD+TOK_TR_GAP,tk,loB,hasTr(t));   // the flat arc view's own +2.5 (TOK_TR_GAP, js/diagram/diagram-core.js) — the wrapped variant of a notation must not drift from the flat one, and the row-layout `r.stackBot` (which the cross-line arcs' band bounds are measured from) stays untouched so no edge moves
       g.appendChild(f); gwFormSVG(g,f,tk,X,wyD,WORD_F,"tok-word",si,loB);   // goeswith: continuation parts beside the head (see gwFormSVG); the slur comes from this row's own tie layer (mwtTie below)
       if(gwOf(tk).length) g.setAttribute("data-gw",[OID(i)].concat(gwOf(tk).map(p=>p.oid)).join(" "));
       svgMarks(g,X,wyD,tk,WORD_F); svgFormSeamMark(g,tk,X,wyD,WORD_F,loB);   // Item 11: form appended LAST → paints on TOP of the POS/translit stack; item 4: marks in front, then the seam mark off the form's inline end
@@ -774,7 +786,7 @@ function arcsWrapped(si){
       g.addEventListener("mouseenter",()=>dim(si,OID(i))); g.addEventListener("mouseleave",()=>dim(si,null)); svg.appendChild(g);
       boxes.push({x:X,y:wy-8,hx:lw/2+((i===r.s||i===r.e)?Math.ceil(4*FS):0),hy:12});   // Item 10 / item 4: reserve casing/Noto fudge for the row's END slots (LTR rightmost = r.e, RTL rightmost = r.s), SCALED by the block zoom (×FS), so the widest row's last token — form, POS, relation label and casing halo — never clips at the fitTight viewBox edge even magnified by zoom:var(--fs)
       drawHangsSVG(svg,tk,X,wyD,WORD_F,"tok-word",si,loB,OID(i)); drawLeadsSVG(svg,tk,X,wyD,WORD_F,"tok-word",si,loB,OID(i)); });   // folded punctuation (and item 6's correct form) beside the word
-    mwtTie(svg, r.c.map(x=>x+r.offX), r.wform, rowTies(D,r.s,r.e), r.stackBot+TOK_Y_LOWER+TOK_TR_GAP+5, loBoxes(boxes), si);   // the tie hangs off the DRAWN stack bottom, so it keeps its distance under the lowered word
+    mwtTie(svg, r.c.map(x=>x+r.offX), r.wform, rowTies(D,r.s,r.e), rowBelowBot, loBoxes(boxes), si);   // item 22: per-token rowBelowBot (already carries the DRAWN TOK_Y_LOWER+TOK_TR_GAP lowering, via wyD above), not r.stackBot's row-wide max — each tie seats off only the tokens it spans
   });
   // Ghost edges (Shared=Yes AND Subject-raising): dashed, dimmed — decorative, not a diagram element of their own,
   // but still: (item 7) fan-shared with the real arcs at any token they land on (never the reverse), (item 2)
@@ -998,13 +1010,15 @@ function projWrapped(si,kind){
   const toks=document.createElement("div"); toks.className="wp-toks"; toks.style.height=oneRowH+"px"; toks.style.width=svgW+"px";
   const rep=reportOffsets(D);   // item 7: per-token reported-speech offsets, shared by every wrapped row
   rows.forEach(r=>{ const rsvg=E("svg",{class:"tree",width:svgW,height:oneRowH,viewBox:`0 0 ${svgW} ${oneRowH}`});
+    const rowBelowBot=[];   // item 22: each of THIS row's tokens' own measured below-stack bottom (row-local index, matching r.c/r.wform/rowTies) — `stackBot` above stays the UNIFORM reserve every row's oneRowH shares (by design — see its own note), but the tie itself now seats off only the tokens it spans, not that shared figure
     r.idx.forEach(i=>{ const tk=t[i], X=r.LX(i), lw=r.lw[i-r.s], g=E("g",{class:"tok-group"+(sel.s===si&&sel.t===OID(i)?" sel":""),"data-s":si,"data-tok":OID(i)});
       const wy=wordY-rep[i];   // item 11: reported-speech step UP off the line
-      g.appendChild(E("rect",{class:"tok-hit",x:X-lw/2-3,y:Math.min(0,wy-14),width:lw+6,height:stackBot+6-Math.min(0,wy-14)}));
+      const tokBot=wordY+belowReserveH(hasTr(t),belowTierN(),show.pos,avmHeight(tk))+6;   // item 6: THIS token's own reach — `stackBot` stays the uniform reserve oneRowH shares across every row (by design), but the hover/selection wash must not reach any further than what this token itself draws
+      g.appendChild(E("rect",{class:"tok-hit",x:X-lw/2-3,y:Math.min(0,wy-14),width:lw+6,height:tokBot-Math.min(0,wy-14)}));
       const washTop = deprelsAbove ? (yDep-9) : (wy-14);   // when the deprel rides above the token, the drag-target wash starts above the LABEL so it encompasses the whole token cell (relation + form + POS) — matching the unwrapped stemma, whose node wash spans its full cell; otherwise wash just the word+POS band
-      g.appendChild(E("rect",{class:"tok-wash",x:X-lw/2-3,y:washTop,width:lw+6,height:stackBot+6-washTop}));
+      g.appendChild(E("rect",{class:"tok-wash",x:X-lw/2-3,y:washTop,width:lw+6,height:tokBot-washTop}));
       const f=E("text",{class:"tok-word"+italDeco(tk),x:X,y:wy,"text-anchor":"middle"}); f.textContent=bform(tk);   // host form only
-      belowStack(g,X,wy,tk,null,hasTr(t));
+      rowBelowBot[i-r.s]=belowStack(g,X,wy,tk,null,hasTr(t));
       g.appendChild(f); gwFormSVG(g,f,tk,X,wy,WORD_F,"tok-word",si,null);   // goeswith: continuation parts beside the head; the slur comes from this row's tie layer (mwtTie below)
       if(gwOf(tk).length) g.setAttribute("data-gw",[OID(i)].concat(gwOf(tk).map(p=>p.oid)).join(" "));
       svgMarks(g,X,wy,tk,WORD_F); svgFormSeamMark(g,tk,X,wy,WORD_F,null);   // Item 11: form appended LAST; item 4: marks in front, then the seam mark off the form's inline end
@@ -1013,7 +1027,7 @@ function projWrapped(si,kind){
     if(deprelsAbove) r.idx.forEach(i=>{ const dep=t[i].deprel||(parseInt(t[i].head,10)===0?"root":""); if(!dep)return;   // deprels that couldn't fit in the tree, shown above their token
       const lg=E("g",{class:"edge-g","data-s":si,"data-dep":OID(i)}); drawLabel(lg,r.LX(i),yDep,dep,relColor(dep));
       lg.style.cursor="pointer"; lg.addEventListener("click",()=>pick(si,OID(i))); rsvg.appendChild(lg); });
-    mwtTie(rsvg, r.c.map(x=>x+r.offX), r.wform, rowTies(D,r.s,r.e), stackBot+5, null, si);
+    mwtTie(rsvg, r.c.map(x=>x+r.offX), r.wform, rowTies(D,r.s,r.e), rowBelowBot, null, si);   // item 22: per-token rowBelowBot, not the uniform row-height `stackBot` — each tie seats off only the tokens it spans
     const rd=document.createElement("div"); rd.className="wp-row"; rd.style.height=oneRowH+"px"; rd.appendChild(rsvg); toks.appendChild(rd); });
   // — assemble: the tree (drawn to fill its box at layout time) pinned over the one-line scrollable token box —
   const box=document.createElement("div"); box.className="diagram wrapproj"; box.dir=RTL?"rtl":"ltr";
@@ -1550,7 +1564,7 @@ function brackets(si){
      Grantha −4.37, Soyombo −6.95, Siddhaṃ −9.01, every one of them identical to the hundredth of a pixel
      before and after, i.e. the two changes cancel exactly as they are meant to. */
   const BRK_LIFT=centreBracketLift(BRK_PAINT,WORD_F);   // BRK_PAINT states .brk's PAINTED face (app.css: 16px/600), not RF — RF is 15px and exists to measure slot WIDTHS, and a 1px size error here is 0.4px of lift, which is a fifth of the whole correction. WORD_F is the token's own magnified face, the one .tok-word paints in
-  let stackBot=yWord;
+  const belowBot=Array(n);   // item 22: each token's OWN measured below-stack bottom, indexed like wx/wform — mwtTie seats each MWT/ExtPos tie off only the tokens it spans, not the sentence-wide max
   seq.forEach(it=>{ if(it.t==="w"){
       const g=E("g",{class:"tok-group"+(sel.s===si&&sel.t===OID(it.i)?" sel":""),"data-s":si,"data-tok":OID(it.i)});
       const wy=yWord-rep[it.i], wyD=wy+TOK_Y_LOWER, loB=loBoxes(boxes);   // wy = the LAYOUT baseline (every box here, and the interrupter arcs' own `base`, are stated in it); wyD = where the form and its stack DRAW — see TOK_Y_LOWER (js/diagram/diagram-core.js)
@@ -1567,7 +1581,7 @@ function brackets(si){
          it is also what opens this notation's crop headroom (the label is its topmost ink). */
       const r=relOf(it.i); if(r){ drawLabel(g,it.x,rly+TOK_Y_LOWER,r,relColor(t[it.i].deprel)); boxes.push({x:it.x,y:rly,hx:meas(r,POS_F)/2+2,hy:7}); }
       const f=E("text",{class:"tok-word"+(selI>=0&&isAnc(selI,it.i)?" inspan":"")+italDeco(t[it.i]),x:it.x,y:wyD,"text-anchor":"middle"}); f.textContent=bform(t[it.i]);   // host form only, under the wash; the deprel label + POS siblings in the group stay default
-      stackBot=Math.max(stackBot, belowStack(g,it.x,wyD+TOK_TR_GAP,t[it.i],loB,hasTr(t)));   // transliteration + POS below the word   // +TOK_TR_GAP: the same 2.5px arcs takes, on request that stemma and brackets be "sized to match" it (js/diagram/diagram-core.js). Only the rows move; the form stays on wyD
+      belowBot[it.i]=belowStack(g,it.x,wyD+TOK_TR_GAP,t[it.i],loB,hasTr(t));   // transliteration + POS below the word   // +TOK_TR_GAP: the same 2.5px arcs takes, on request that stemma and brackets be "sized to match" it (js/diagram/diagram-core.js). Only the rows move; the form stays on wyD
       g.appendChild(f); gwFormSVG(g,f,t[it.i],it.x,wyD,WORD_F,"tok-word",si,loB);   // goeswith: continuation parts beside the head; the slur comes from the tie layer (mwtTie below)
       if(gwOf(t[it.i]).length) g.setAttribute("data-gw",[OID(it.i)].concat(gwOf(t[it.i]).map(p=>p.oid)).join(" "));
       svgMarks(g,it.x,wyD,t[it.i],WORD_F); svgFormSeamMark(g,t[it.i],it.x,wyD,WORD_F,loB);   // Item 11: form appended LAST → paints on TOP of the POS/translit stack; item 4: marks in front, then the seam mark off the form's inline end
@@ -1606,7 +1620,7 @@ function brackets(si){
       const b=E("text",battr); b.textContent=it.glyph; svg.appendChild(b);   // original glyph at the mirrored position (so RTL reads correctly)
       if(it.owner!=null){ b.style.cursor="pointer"; b.addEventListener("click",()=>pick(si,OID(it.owner))); }   // clicking a bracket selects the span it delimits
       boxes.push({x:it.x,y:by-6-brkLift,hx:it.w/2,hy:9}); } });
-  mwtTie(svg,wx,wform,D,stackBot+5,loBoxes(boxes),si);   // surface-form ties for multi-word tokens — hug the FORM's own ink width, not the (deprel-label-widened) slot   // stackBot already came back lowered, so the tie keeps its distance under the word
+  mwtTie(svg,wx,wform,D,belowBot,loBoxes(boxes),si);   // surface-form ties for multi-word tokens — hug the FORM's own ink width, not the (deprel-label-widened) slot. item 22: per-token belowBot, not a sentence-wide max — an AVM-heavy token elsewhere no longer pushes an unrelated tie down with it
   fitTight(svg,boxes);
   return wrapDiagram(svg,si);}
 function outline(si){const D=displaySent(DOC[si]), t=D.tokens, n=t.length, OID=k=>D.map[k]+1, sent={tokens:t},{children,root}=structure(sent); RTL=D.rtl;

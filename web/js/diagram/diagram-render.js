@@ -149,7 +149,7 @@ function stemma(si,{proj,catNodes}){
   const maxRep=Math.max(0,...rep);   // #3: the deepest reported raising (highest step off the line). The baseline drops by this — see baseY — so the gap is sized to the deepest reporting level
   const baseY=TOP+maxD*LV+(proj?LV+maxRep:0), lowest=proj?baseY:ny(maxD), H=lowest+16+belowH+tieH;   // baseline sits one level (LV) below the lowest node; #3: dropped a further maxRep so a token raised by its reported-speech step (by=baseY−rep[i]) STILL clears the lowest tier by the full LV — the most-raised token lands exactly one level below, the rest hang beneath it
   const svg=E("svg",{class:"tree",width:total,height:H,viewBox:`0 0 ${total} ${H}`}); const boxes=[];
-  let baseBot=baseY;
+  const belowBot=[];   // item 22: each token's OWN measured below-stack bottom (index = token position), so mwtTie can seat each MWT/ExtPos tie off only the tokens it spans instead of the sentence-wide max
   // Subject=Generic: the ∅ virtual token — computed HERE (declaration + positions) so the proj baseline block below,
   // the ghost-label decollision pass, and the node-band draw can all reference it (was declared far below its
   // first use in the proj block → a temporal-dead-zone ReferenceError that blanked the whole diagram).
@@ -162,7 +162,8 @@ function stemma(si,{proj,catNodes}){
     const bg=E("g",{class:"tok-group"+(sel.s===si&&sel.t===OID(i)?" sel":""),"data-s":si,"data-tok":OID(i)});   // baseline words are clickable too
     const bwidth=Math.max(24,bformW[i]+8);
     const hitW=Math.max(bwidth, trTxt(t[i])?meas(trTxt(t[i]),trFont(t[i]))+10:0, show.pos&&t[i].upos?meas(posDisp(t[i]),POS_F)+10:0);   // widen to the transliteration/POS below (a short word can romanise to a wider string)
-    bg.appendChild(E("rect",{class:"tok-hit tok-wash",x:c[i]-hitW/2,y:byD-14,width:hitW,height:24+belowH+TOK_Y_LOWER+TOK_TR_GAP}));   // baseline hit already spans just the word+POS band → doubles as the drag-target wash   // seated on the DRAW baseline so the wash stays centred on the glyph it highlights, and grown by the same 2.5 so the (lowered) POS row is still inside it
+    const tokBelowH=proj?belowReserveH(trLayer(),belowTierN(),show.pos,avmHeight(t[i])):0;   // item 6: THIS token's own reach — belowH (above) stays the diagram's sentence-wide max for the SVG's total height H, but the wash must not reach any further than what this token itself draws
+    bg.appendChild(E("rect",{class:"tok-hit tok-wash",x:c[i]-hitW/2,y:byD-14,width:hitW,height:24+tokBelowH+TOK_Y_LOWER+TOK_TR_GAP}));   // baseline hit already spans just the word+POS band → doubles as the drag-target wash   // seated on the DRAW baseline so the wash stays centred on the glyph it highlights, and grown by the same 2.5 so the (lowered) POS row is still inside it
     const bw=E("text",{class:"baseword"+italDeco(t[i]),x:c[i],y:byD}); bw.textContent=bform(t[i]); boxes.push({x:c[i],y:by-6,hx:bwidth/2,hy:9});   // host form only, centred on c[i]
     /* ⚠ +TOK_TR_GAP, the SAME 2.5px the arc view's own below-stack takes (js/diagram/diagram-core.js), on
        request once that landed: "arcs view is perfect; the token-transliteration gap in stemmas and
@@ -170,7 +171,7 @@ function stemma(si,{proj,catNodes}){
        constant's note gives — the hierarchy wants this same step tighter. Only the ROWS move; the
        baseline word's own <text> stays on byD. Stemma's NON-proj mode needs nothing: its nodes carry no
        below-stack at all, the transliteration existing only on this baseline row. */
-    baseBot=Math.max(baseBot, belowStack(bg,c[i],byD+TOK_TR_GAP,t[i],loB,hasTr(t)));
+    belowBot[i]=belowStack(bg,c[i],byD+TOK_TR_GAP,t[i],loB,hasTr(t));
     bg.appendChild(bw); gwFormSVG(bg,bw,t[i],c[i],byD,NODE_F,"baseword",si,loB); svgMarks(bg,c[i],byD,t[i],NODE_F); svgFormSeamMark(bg,t[i],c[i],byD,NODE_F,loB);   // Item 11: baseline form appended LAST → paints on TOP of the POS/translit stack; item 4: marks in front of it. The seam mark rides beside the form, like the below-stack rows carry their own   // goeswith: the continuation parts join the head on this row (and re-seat it), so the ONE below-stack drawn above spans the whole word. The slur itself comes from the tie layer below (mwtTie)
     if(gwOf(t[i]).length) bg.setAttribute("data-gw",[OID(i)].concat(gwOf(t[i]).map(p=>p.oid)).join(" "));   // selecting EITHER half lights the whole word — see gwHolds/applySel
     bg.style.cursor="pointer"; bg.addEventListener("click",()=>pick(si,OID(i))); svg.appendChild(bg);
@@ -183,7 +184,7 @@ function stemma(si,{proj,catNodes}){
       const g=E("g",{class:"ghost-g","data-s":si});   // NEVER highlighted via the predicate's own selection — see the diagonal ghost edge below for why (same relation, same direction mistake to avoid)
       const glbl=E("text",{class:"node-lbl",x:ge.emptyX,y:by+TOK_Y_LOWER+NODE_Y_EXTRA}); glbl.textContent="∅"; g.appendChild(glbl);   // the ∅ is a virtual TOKEN, so it lowers with every real one; its box stays on the layout baseline like theirs
       svg.appendChild(g); boxes.push({x:ge.emptyX,y:by-6,hx:8,hy:9}); });
-    mwtTie(svg,c,bformW,D,baseBot+5,loBoxes(boxes),si); }   // baseBot already came back from the lowered belowStack, so the tie hangs the same distance under the (lowered) word — and loBoxes puts its crop back on the layout baseline
+    mwtTie(svg,c,bformW,D,belowBot,loBoxes(boxes),si); }   // item 22: per-token belowBot (not a sentence-wide max) — each tie seats off only the tokens it spans, so an AVM-heavy token elsewhere in the sentence can no longer push an unrelated tie down with it
   // edges as ONE cased unit: pre-compute each stroke path + arrowhead, then draw ALL their casings first (a single
   // layer behind every edge → the edge-set occludes the tokens/proj-lines behind it cleanly, but edges DON'T case
   // against each OTHER), then the strokes + arrowheads on top (per-edge groups keep click/selection). Item 21.
@@ -468,13 +469,22 @@ function arcs(si){
   /* label TEXTS last → in front of all arcs, their opaque casing occluding crossing edges cleanly */
   labs.forEach(L=>{ const lg=E("g",{class:"arc","data-s":si,"data-dep":L.dep}); lg.style.cursor="pointer"; lg.addEventListener("click",()=>pick(si,L.dep));
     drawLabel(lg,L.mx,L.fy,L.text,L.col); svg.appendChild(lg); });
-  const stackH=wordY+TOK_Y_LOWER+TOK_TR_GAP+belowReserveH(trLayer(),belowTierN(),show.pos,avmRowMaxH(t))+8;   // hit-rect reach: cover the transliteration + gloss + POS rows below the word (Item 1/8: every below-row folds in descent(POS_F), matching belowStack's descender-matched step)   // +TOK_Y_LOWER because the whole stack now DRAWS that much lower (see TOK_Y_LOWER, js/diagram/diagram-core.js) — the reach has to follow the ink, not the layout. item 22: +AVM, the tallest in the sentence — every token on this one flat baseline shares the same reach
-  let stackBot=wordY;
+  // item 22/item 6 — hit-rect reach: cover the transliteration + gloss + POS + AVM rows below the word (Item
+  // 1/8: every below-row folds in descent(POS_F), matching belowStack's descender-matched step). +TOK_Y_LOWER
+  // because the whole stack now DRAWS that much lower (see TOK_Y_LOWER, js/diagram/diagram-core.js) — the reach
+  // has to follow the ink, not the layout. THIS USED TO BE ONE SHARED CONSTANT (avmRowMaxH(t), the tallest AVM
+  // in the WHOLE sentence) — so a short-AVM (or no-AVM) token's hover/selection wash reached exactly as far
+  // down as its neighbour's tall AVM box, well past its own content. tokStackH is now computed PER TOKEN, from
+  // that same token's own avmHeight (the identical analytical formula avmRowMaxH itself maxes over — see its
+  // own definition — just not maxed over tokens this token's wash was never drawn to cover).
+  const tokStackH=tk=>wordY+TOK_Y_LOWER+TOK_TR_GAP+belowReserveH(trLayer(),belowTierN(),show.pos,avmHeight(tk))+8;
+  const belowBot=[];   // item 22: each token's OWN measured below-stack bottom (index = token position) — mwtTie seats each MWT/ExtPos tie off only the tokens it actually spans, not the row-wide max
   t.forEach((tk,i)=>{const g=E("g",{class:"tok-group"+(sel.s===si&&sel.t===OID(i)?" sel":""),"data-s":si,"data-tok":OID(i)});
     const wy=repBase(rep,wordY,i);   // item 11: the word, its below-stack, its hit/wash band and its tail all lift by rep[i] — the SAME shared repBase the arc endpoint above went through — so the reported token and its arc float off the line together
     const wyD=wy+TOK_Y_LOWER, loB=loBoxes(boxes);   // wy = the LAYOUT baseline every `boxes` entry here records; wyD = where the word and its stack actually draw. The ARCS above keep arcZone/repArcEnds untouched, so what this opens is the arc-to-glyph clearance
     const hy=Math.min(arcZone-NR, wyD-14);   // hit/wash top follows the (lifted) content so a raised word isn't left above the band
     const f=E("text",{class:"tok-word"+italDeco(tk),x:c[i],y:wyD,"text-anchor":"middle"}); f.textContent=bform(tk);   // host form only; folded punctuation is drawn as separate satellites below
+    const stackH=tokStackH(tk);   // item 6: THIS token's own reach, not the row-wide max
     const hit=E("rect",{class:"tok-hit",x:c[i]-w[i]/2-3,y:hy,width:w[i]+6,height:stackH-hy});
     g.appendChild(hit); g.appendChild(E("rect",{class:"tok-wash",x:c[i]-w[i]/2-3,y:wyD-14,width:w[i]+6,height:stackH-(wyD-14)}));   // wash covers only the word+POS band, not the arcs the tall hit-rect spans
     /* ⚠ THE BELOW-STACK IS SEEDED TOK_TR_GAP LOWER THAN THE WORD IT HANGS FROM, on request ("in arcs, the
@@ -484,7 +494,7 @@ function arcs(si){
        js/diagram/diagram-core.js), so neither number may live in the shared function. Only the ROWS move —
        the word's own <text> stays on wyD — and the boxes move with them (loB subtracts only TOK_Y_LOWER),
        because unlike that lowering this is a real change of position the crop must reserve. 0 outside lzh. */
-    stackBot=Math.max(stackBot, belowStack(g,c[i],wyD+TOK_TR_GAP,tk,loB,hasTr(t)));   // transliteration + POS below the word
+    belowBot[i]=belowStack(g,c[i],wyD+TOK_TR_GAP,tk,loB,hasTr(t));   // transliteration + POS below the word
     g.appendChild(f);   // Item 11: form appended LAST → paints on TOP of the POS/translit stack
     gwFormSVG(g,f,tk,c[i],wyD,WORD_F,"tok-word",si,loB);   // goeswith: the continuation parts join the head on the word row (and re-seat it); the one below-stack drawn above already spans the whole word, and the slur comes from the tie layer (mwtTie below)
     if(gwOf(tk).length) g.setAttribute("data-gw",[OID(i)].concat(gwOf(tk).map(p=>p.oid)).join(" "));   // selecting EITHER half lights the whole word — see gwHolds/applySel
@@ -494,7 +504,7 @@ function arcs(si){
     g.addEventListener("mouseenter",()=>dim(si,OID(i))); g.addEventListener("mouseleave",()=>dim(si,null)); svg.appendChild(g);
     boxes.push({x:c[i],y:wy-8,hx:w[i]/2,hy:12});
     drawHangsSVG(svg,tk,c[i],wyD,WORD_F,"tok-word",si,loB,OID(i)); drawLeadsSVG(svg,tk,c[i],wyD,WORD_F,"tok-word",si,loB,OID(i));});   // folded punctuation (and item 6's correct form) as separate elements beside the word
-  mwtTie(svg,c,wform,D,stackBot+5,loBoxes(boxes),si);   // surface-form ties for multi-word tokens — hug the FORM's own ink width, not the (POS/deprel-widened) slot
+  mwtTie(svg,c,wform,D,belowBot,loBoxes(boxes),si);   // surface-form ties for multi-word tokens — hug the FORM's own ink width, not the (POS/deprel-widened) slot. item 22: per-token belowBot, not a row-wide max — an AVM-heavy token elsewhere on the line no longer pushes an unrelated tie down with it
   fitTight(svg,boxes);
   return wrapDiagram(svg,si);
 }
