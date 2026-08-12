@@ -2187,13 +2187,17 @@ function positionBracketAnnots(){ document.querySelectorAll("#doc .bwrap").forEa
     // into this SAME svg overlay, not as a DOM child that would grow .bwund's own measured height the way an
     // otrans/gloss/bwpos row does. So the tie's seat (yb, below) was computed as if no AVM existed under
     // either component, even on a token that plainly has one — the tie then drew ABOVE the AVM it should have
-    // cleared. avmLayout(t)'s own h, plus the identical belowGap() clearance the AVM's own draw call now uses
-    // (see that call a few lines down), is folded in here so undBot() states the token's TRUE below-stack
-    // bottom — AVM included — exactly as it already did for every other below-stack row.
+    // cleared. avmLayout(t)'s own h, plus avmTopGap() — see that function's own note for why it, not bare
+    // belowGap(), is the right clearance above an AVM box (this line originally read +belowGap(), written
+    // before avmTopGap() existed, and was never updated when that landed a round later: on report, "more
+    // space above a MWT bracket … than in other views" — belowGap() (~21.6px) against avmTopGap() (~9.8px)
+    // is exactly the ~12px of extra seating this term was quietly adding only in wrapped brackets) — is
+    // folded in here so undBot() states the token's TRUE below-stack bottom, AVM included, on the SAME
+    // clearance convention belowStack's own identical call now uses.
     const undBot=tok=>{ const f=tok.querySelector(".bwform")||tok, u=tok.querySelector(".bwund"), fTop=tok.offsetTop+(f===tok?0:f.offsetTop);
       const base=u?fTop+u.offsetTop+u.offsetHeight:fTop+(f===tok?tok.offsetHeight:f.offsetHeight);
       const t=s0&&s0.tokens&&s0.tokens[(+tok.dataset.tok)-1], av=t&&avmLayout(t);
-      return av?base+belowGap()+av.h:base; };   // item 6: the BOTTOM of the token's below-stack (POS + any gloss/translit tiers), measured live — so the tie clears the POS even when gloss layers sit between the form and the POS
+      return av?base+avmTopGap()+av.h:base; };   // item 6: the BOTTOM of the token's below-stack (POS + any gloss/translit tiers), measured live — so the tie clears the POS even when gloss layers sit between the form and the POS
     const mark0=svg.childNodes.length;   // item 8: everything this tie appends from here on is MOVED into one .mwt-g group at the end — recorded rather than re-pointing a dozen appendChild calls, so the drawing order (casing → tie → translit → form last) stays exactly as written. Mirrors the SVG mwtTie
     // yb: the tie's TOP, seated the SAME way the SVG views' shared mwtTie/tieLead seat every OTHER notation's
     // tie — undBot (this HTML view's own name for the below-stack bottom mwtTie calls stackBot) + 5 (the

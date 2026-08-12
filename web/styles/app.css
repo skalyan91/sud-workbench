@@ -1264,7 +1264,7 @@
   .oavm::before,.oavm::after{content:""; position:absolute; top:0; bottom:0; width:4px; border:1px solid color-mix(in srgb, var(--tie-hue), var(--content-bg) var(--edge-mix)); pointer-events:none}
   .oavm::before{left:0; border-right:none}   /* "[" — open on the content side */
   .oavm::after{right:0; border-left:none}    /* "]" — the mirror */
-  .oavm-item{padding:0 1px}   /* just enough for the hover fill below to clear the text, like every other row's own click target — the bracket is `.oavm`'s now, not this */
+  .oavm-item{padding:0 1px; color:color-mix(in srgb, var(--tie-hue), var(--content-bg) var(--edge-mix))}   /* just enough for the hover fill below to clear the text, like every other row's own click target — the bracket is `.oavm`'s now, not this. `color` here is for the literal "[" "]" text nodes ONLY (avmInline, diagram-core.js) — .oavm-attr/.oavm-val both carry their OWN explicit colour and so are unaffected — on report ("the inner brackets should be the same colour as the outer brackets"): unset, they fell through to the row's plain text colour instead of matching .oavm::before/::after's OWN arcInk()-mix border-color just outside them */
   .oavm-item:hover{background:var(--block-sel); border-radius:3px}
   /* item 22/3, still true after round 2 above: 10.5px/weight-571/c2sc for the attr, 10.5px/weight-700 for the
      val — the SAME formatting convention as the SVG AVM's own .avm-attr/.avm-val (color, not fill — this is
