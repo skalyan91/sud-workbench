@@ -112,6 +112,22 @@ and is copied verbatim.
 and never reaches a file, so nothing in this app has to REVERSE it — the third file above generates
 it FORWARD, for display only.)
 
+## JS libraries — `web/js/vendor/`
+
+| Component | Files | Upstream | Licence |
+|---|---|---|---|
+| HarfBuzz (WASM build) + harfbuzzjs | `harfbuzz/hb.js`, `harfbuzz/hbjs.js`, `harfbuzz/hb-wasm-data.js` (hb.wasm, base64-embedded) | [harfbuzz/harfbuzzjs](https://github.com/harfbuzz/harfbuzzjs) @ `0.4.6` | MIT (+ a small Apache-licensed subcomponent — see `harfbuzz/LICENSE-harfbuzzjs.txt`) |
+
+Used by `js/lang/smp-shape.js` (item 25) to shape the SMP Brahmic scripts (Kawi, Grantha, Siddhaṃ,
+Soyombo, Sharada, Newa, Bhaiksuki, Modi, Tirhuta, Zanabazar Square) as native SVG `<path>` geometry,
+replacing an HTML/`<foreignObject>` fallback that existed because WebKit's own SVG `<text>` renderer
+fails to shape these scripts (see that module's own note for the measured evidence). `hb.wasm` is
+embedded as base64 rather than fetched as a sibling file — the same "hand the WebView a `data:`
+payload, don't trust a same-directory `fetch()`" reasoning `app/fonts.py` already documents for the
+script webfonts. The actual font bytes HarfBuzz shapes against are never vendored here: they come
+from the same on-demand Google Fonts fetch `app/fonts.py`/`fontload.js` already make for `@font-face`
+(a separate raw-`.ttf` request, `fonts.fetch_raw`, since this WASM build cannot decompress WOFF).
+
 ## Latin vowel lengths — FETCHED AT RUNTIME, never shipped
 
 Nothing about Latin macronisation is vendored here any more. The lookup *code* is the

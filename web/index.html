@@ -392,6 +392,13 @@
 <script src="js/core/state.js"></script>
 <script src="js/lang/translit.js"></script>
 <script src="js/core/prefs.js"></script>
+<!-- item 25: HarfBuzz (vendored, THIRD-PARTY-NOTICES.md) — createHarfBuzz/hbjs must both be defined
+     before smp-shape.js runs; hb-wasm-data.js is just a data constant (HB_WASM_B64), order among the
+     three doesn't matter beyond "all three before smp-shape.js", which this block keeps by construction. -->
+<script src="js/vendor/harfbuzz/hb-wasm-data.js"></script>
+<script src="js/vendor/harfbuzz/hb.js"></script>
+<script src="js/vendor/harfbuzz/hbjs.js"></script>
+<script src="js/lang/smp-shape.js"></script>
 <script src="js/diagram/diagram-core.js"></script>
 <script src="js/diagram/diagram-render.js"></script>
 <script src="js/diagram/diagram-wrap.js"></script>

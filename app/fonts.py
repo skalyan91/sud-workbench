@@ -38,8 +38,8 @@ def _slug(family: str) -> str:
     return re.sub(r"[^a-z0-9]", "", family.lower())
 
 
-def _get(url: str, timeout: int = 20) -> bytes:
-    req = urllib.request.Request(url, headers={"User-Agent": _UA})
+def _get(url: str, timeout: int = 20, headers: dict | None = None) -> bytes:
+    req = urllib.request.Request(url, headers=headers if headers is not None else {"User-Agent": _UA})
     with urllib.request.urlopen(req, timeout=timeout) as resp:
         return resp.read()
 
@@ -53,46 +53,97 @@ def cached_path(family: str) -> str | None:
     return None
 
 
+def _fetch_and_cache(family: str, path_finder, cache_ext: str, ua: dict) -> tuple[str | None, bool, str]:
+    """Shared fetch-and-cache dance behind both fetch() and fetch_raw(): find `family` already on
+    disk under `path_finder`, or ask the Google Fonts CSS API for it — with whichever request
+    headers `ua` supplies, since that (not the family name) is what decides which file format the
+    API answers with (see fetch()'s and fetch_raw()'s own notes). Returns (path, cached, error);
+    `path` is None only on total failure. Cached under `cache_ext` — a SEPARATE suffix per caller,
+    since fetch() and fetch_raw() deliberately want DIFFERENT formats for the SAME family and must
+    not silently hand each other's cached file back (fetch()'s woff2 is exactly the file HarfBuzz's
+    WASM build cannot decompress — see fetch_raw()'s own note)."""
+    os.makedirs(FONT_DIR, exist_ok=True)
+    path = path_finder(family)
+    if path:
+        return path, True, ""
+    fam = urllib.parse.quote(family.replace(" ", "+"), safe="+")
+    data, url, err = b"", "", "unavailable"
+    for tmpl in (CSS_API, CSS_API_STATIC):
+        try:
+            css = _get(tmpl.format(fam=fam), headers=ua).decode("utf-8", "replace")
+        except Exception as exc:  # noqa: BLE001 — offline, blocked, or no such family
+            err = str(exc)
+            continue
+        m = _SRC_RE.search(css)
+        if not m:
+            err = "no font file in the API response"
+            continue
+        url = m.group(1).strip("'\"")
+        try:
+            data = _get(url, timeout=60, headers=ua)
+        except Exception as exc:  # noqa: BLE001
+            err = str(exc)
+            continue
+        break
+    if not data:
+        return None, False, f"could not fetch {family}: {err}"
+    path = os.path.join(FONT_DIR, _slug(family) + "." + cache_ext)
+    tmp = path + ".part"
+    with open(tmp, "wb") as fh:
+        fh.write(data)
+    os.replace(tmp, path)
+    return path, False, ""
+
+
 def fetch(family: str) -> dict:
     """Get `family` on disk and hand it back as a data: URI the webview can drop straight into an
     @font-face. Returns {"uri", "family", "cached", "bytes"} or {"error"} — never raises, because a
     missing script font degrades to the system fallback rather than being worth interrupting anyone."""
-    os.makedirs(FONT_DIR, exist_ok=True)
-    path, cached = cached_path(family), True
+    path, cached, err = _fetch_and_cache(family, cached_path, "woff2", {"User-Agent": _UA})
     if not path:
-        cached = False
-        fam = urllib.parse.quote(family.replace(" ", "+"), safe="+")
-        data, url, err = b"", "", "unavailable"
-        for tmpl in (CSS_API, CSS_API_STATIC):
-            try:
-                css = _get(tmpl.format(fam=fam)).decode("utf-8", "replace")
-            except Exception as exc:  # noqa: BLE001 — offline, blocked, or no such family
-                err = str(exc)
-                continue
-            m = _SRC_RE.search(css)
-            if not m:
-                err = "no font file in the API response"
-                continue
-            url = m.group(1).strip("'\"")
-            try:
-                data = _get(url, timeout=60)
-            except Exception as exc:  # noqa: BLE001
-                err = str(exc)
-                continue
-            break
-        if not data:
-            return {"error": f"could not fetch {family}: {err}"}
-        ext = "woff2" if ".woff2" in url else "ttf"
-        path = os.path.join(FONT_DIR, _slug(family) + "." + ext)
-        tmp = path + ".part"
-        with open(tmp, "wb") as fh:
-            fh.write(data)
-        os.replace(tmp, path)
+        return {"error": err}
+    # a family the API answered in .ttf (no weight axis — see CSS_API_STATIC) still caches under the
+    # extension _get_and_cache was told, "woff2" — cached_path() itself checks BOTH extensions, so a
+    # later call still finds it; only the ext on THIS write can be wrong, and the mime line below reads
+    # the real on-disk name rather than trusting cache_ext, so a wrongly-named woff2 file that is
+    # actually a ttf still serves with the correct font/ttf mime
     with open(path, "rb") as fh:
         blob = fh.read()
     mime = "font/woff2" if path.endswith(".woff2") else "font/ttf"
     return {"family": family, "cached": cached, "bytes": len(blob),
             "uri": "data:%s;base64,%s" % (mime, base64.b64encode(blob).decode("ascii"))}
+
+
+def _cached_raw_path(family: str) -> str | None:
+    p = os.path.join(FONT_DIR, _slug(family) + ".raw.ttf")
+    return p if os.path.exists(p) and os.path.getsize(p) > 1024 else None
+
+
+def fetch_raw(family: str) -> dict:
+    """item 25: the SAME family, but the RAW, uncompressed .ttf the Google Fonts CSS API answers with
+    when asked WITHOUT a browser User-Agent (see this module's own docstring: "A browser UA is what
+    makes the API answer with woff2 … the default urllib one gets ttf") — a completely separate fetch
+    and a separate on-disk cache (`.raw.ttf`, never `.woff2`/`.ttf` alone, so this can never collide
+    with fetch()'s own cache for the same family) from fetch()'s own woff2-preferring request.
+
+    Exists because the harfbuzzjs WASM build js/js/lang/smp-shape.js vendors cannot decompress WOFF —
+    measured directly: shaping against fetch()'s own cached Noto Sans Kawi woff2 shaped every glyph to
+    gid0 (.notdef) with real advances but empty outlines (the cmap/glyf tables read as present but
+    unusable), while the identical text against this function's raw .ttf shaped correctly, subjoined
+    conjuncts and all. WOFF's compression is exactly what the browser's OWN font engine exists to
+    undo for @font-face — reproducing that here would mean carrying a second, redundant decompressor
+    (zlib for WOFF1, brotli for WOFF2) purely to hand HarfBuzz bytes it could have had uncompressed
+    for the price of one fewer request header. fetch()'s own woff2 is far smaller and is exactly right
+    for @font-face's own purpose; this is a second, DELIBERATELY less-compressed copy for a consumer
+    @font-face was never serving in the first place.
+    """
+    path, cached, err = _fetch_and_cache(family, _cached_raw_path, "raw.ttf", {})
+    if not path:
+        return {"error": err}
+    with open(path, "rb") as fh:
+        blob = fh.read()
+    return {"family": family, "cached": cached, "bytes": len(blob),
+            "uri": "data:font/ttf;base64,%s" % base64.b64encode(blob).decode("ascii")}
 
 
 def installed() -> list[dict]:

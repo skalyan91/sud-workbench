@@ -946,6 +946,12 @@ class Api:
         from . import fonts
         return fonts.fetch(family)
 
+    def font_face_raw(self, family: str) -> dict:
+        """item 25: the SAME face, but the RAW .ttf js/lang/smp-shape.js's vendored HarfBuzz build
+        needs — see fonts.fetch_raw's own note for why this can't just reuse font_face's woff2."""
+        from . import fonts
+        return fonts.fetch_raw(family)
+
     def fonts_installed(self) -> dict:
         from . import fonts
         return {"fonts": fonts.installed()}

@@ -17,7 +17,9 @@ result-*
 # tools/bundle_grew.sh reproduces, and which app/convert.py treats as an
 # optional prerequisite (falling back to ~/.opam, and degrading to
 # "SUD/mSUD editing only" when it is absent). Not source.
-vendor/
+# Anchored to the repo root: an unanchored `vendor/` also matched web/js/vendor/ (item 25's harfbuzzjs,
+# genuine committed source — see THIRD-PARTY-NOTICES.md) purely by sharing the directory name.
+/vendor/
 
 # Stop-hook build bookkeeping — transient, per-machine (see CLAUDE.md
 # "Automatic rebuild"). The hook itself and settings.json ARE tracked.
