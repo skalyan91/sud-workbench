@@ -2506,11 +2506,17 @@ function belowReserveH(hasTr,tierCount,hasPos,avmH){ const n=belowRows(hasTr,tie
    notation draws its below-stack (belowStack below, and the wrapped views' own equivalents). One HTML
    string, so the measured box and the painted one are BYTE-IDENTICAL — they can't drift apart into
    "reserved for one height, drew a different one", the exact failure mode a hand-duplicated pair invites. */
+// item 23: FLAT now — no .avm-group/.avm-glabel/.avm-grows any more (avmStruct itself already fuses AGR/TAM
+// into one combined row apiece). `.avm-row` is `display:contents` in CSS (see app.css) — it contributes no
+// box of its own, so its two children land as ordinary items in `.avm`'s own 2-column grid, which is what
+// keeps every row's VALUE column aligned regardless of how long that row's own attribute name/group label
+// is — the row element still exists as a real DOM node purely so the click handler (context-menu.js) has
+// something to find via .closest(".avm-row") and read data-feat/data-group off. data-feat carries a real
+// UD_FEATS name for a standalone row, or the group's own name ("AGR"/"TAM") for a combined one — avmValueMenu
+// tells the two apart the same way avmStruct itself does, by checking AVM_GROUPS for that key.
 function avmHTML(t){ const struct=(typeof avmStruct==="function")?avmStruct(t):[]; if(!struct.length) return "";
-  const row=(feat,val)=>`<div class="avm-row" data-feat="${esc(feat)}" tabindex="0"><span class="avm-attr">${esc(feat)}</span><span class="avm-val">${esc(val)}</span></div>`;
-  const body=struct.map(it=>it.group
-    ? `<div class="avm-group"><span class="avm-glabel">${esc(it.group)}</span><div class="avm-grows">${it.rows.map(r=>row(r.feat,r.val)).join("")}</div></div>`
-    : row(it.feat,it.val)).join("");
+  const row=(key,attr,val)=>`<div class="avm-row" data-feat="${esc(key)}" tabindex="0"><span class="avm-attr">${esc(attr.toUpperCase())}</span><span class="avm-val">${esc(val)}</span></div>`;   // .toUpperCase() here, not a CSS text-transform — matches posDisp's own convention of baking the capitals into the string the c2sc feature then renders as small caps, rather than relying on the two to agree at render time
+  const body=struct.map(it=>it.group ? row(it.group,it.group,it.combined) : row(it.feat,it.feat,it.val)).join("");
   return `<div class="avm">${body}</div>`; }
 const _mavm=document.createElement("div");
 _mavm.setAttribute("aria-hidden","true");

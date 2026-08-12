@@ -1655,7 +1655,17 @@ def _sanskrit(text: str, target: str) -> str:
                                 # ak.process("IAST", "Devanagari", "मूर्ति") and returned mojibake.
             if not src or src == "Zyyy":   # Zyyy = "common" (punctuation/whitespace only) → treat as IAST
                 src = "IAST"   # UD Sanskrit forms are usually IAST romanisation
-            return ak.process(src, target, seg) or ""
+            # Tibetan-target post-options, on request: Syllabize inserts the tsheg (་) between syllables —
+            # Tibetan orthography marks that boundary explicitly and aksharamukha does not by default, so
+            # unsyllabized output reads as one unbroken glyph run. Sanskrit Palatals corrects the c/ch/j/jh
+            # series to the letters Tibetan borrowing convention actually uses for Sanskrit loanwords,
+            # rather than the (wrong, for Sanskrit) native-Tibetan-phonology mapping aksharamukha defaults
+            # to for those four consonants. Both are aksharamukha's own post_options, named after the target
+            # script (postOptionList matches a caller's option string against PostProcess's own function
+            # names, e.g. TibetanSyllabize/TibetanSanskritPalatals) — gated on target=="Tibetan" because
+            # that naming means they simply don't exist as options for any other script.
+            post = ["TibetanSyllabize", "TibetanSanskritPalatals"] if target == "Tibetan" else []
+            return ak.process(src, target, seg, post_options=post) or ""
 
         d1, d2 = _DANDA_IAST if target == "IAST" else _DANDA.get(target, _DANDA_DEFAULT)
         out = []

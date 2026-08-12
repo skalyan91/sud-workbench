@@ -87,7 +87,7 @@ let MODELLANG={};   // language code → an installed model id, for auto-selecti
 // Language authority order (see maybeAutoDetectLang): (1) a filename `<langcode>_…` prefix pins the
 //  language and overrides everything; else (2) the Kyoto XPOS ⇒ lzh heuristic; else (3) fastText. The chosen
 //  language drives the parser via applyLang(lang,true)→syncModelToLang.
-let show={graphs:true,grids:true,colour:true,labels:true,pos:true,arrows:false,mergePunct:true,translit:false,wrap:true,extRel:true,avm:false};   // translit starts OFF — turned on by the status-bar transliteration menu when a scheme is picked. extRel = Shared=Yes/Subject-raising ghost edges (dashed, decorative), on by default. avm (item 22) starts OFF like every other opt-in tier — see the Show/Hide drawer's own checkbox, index.html
+let show={graphs:true,grids:true,colour:true,labels:true,pos:true,arrows:false,mergePunct:true,translit:false,wrap:true,extRel:true,avm:true};   // translit starts OFF — turned on by the status-bar transliteration menu when a scheme is picked. extRel = Shared=Yes/Subject-raising ghost edges (dashed, decorative), on by default. avm (item 22) starts ON, on request (item 23) — this default is just the FIRST-EVER-LAUNCH value; loadPrefs() below already overwrites it from a returning reader's own saved choice the moment a bridge exists, so this only governs a fresh install/browser-preview session
 // Document-level glossing TIERS (item 4). Visibility flags; the data lives in MISC and round-trips there.
 //  · GLOSS_ON  → a single Gloss tier (MISC Gloss), one editable row per token.
 //  · MORPH_ON  → a morphemic gloss: TWO tiers, morpheme segmentation (MISC MSeg) + morpheme gloss (MISC MGloss),

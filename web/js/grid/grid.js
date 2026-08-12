@@ -756,8 +756,8 @@ function attestedFeatVals(feat){ const full=UD_FEATS[feat]||[]; if(!full.length)
   if(!attested.size) return full;
   const out=full.filter(v=>attested.has(v));
   return out.length?out:full; }
-/* ── item 22: the AVM tier — an HPSG-style attribute-value matrix of a token's FEATS, isomorphic to it (a VIEW,
-   not a second store: every row reads straight off t.feats and every edit writes straight back — see
+/* ── item 22/23: the AVM tier — an HPSG-style attribute-value matrix of a token's FEATS, isomorphic to it (a
+   VIEW, not a second store: every row reads straight off t.feats and every edit writes straight back — see
    avmSetFeat below). Two conventional groupings, named the way the request itself named them:
      AGR (the HPSG "index"/agreement bundle — a nominal's own referential φ-features, or a verb's agreement
      target; the same four whichever role the token plays, which is the HPSG point of having one bundle at
@@ -767,21 +767,28 @@ function attestedFeatVals(feat){ const full=UD_FEATS[feat]||[]; if(!full.length)
      Tense, Aspect, Mood, Evident (evidentiality is conventionally discussed alongside mood/modality in the
      TAM literature, not filed as a fourth unrelated category).
    Voice and Case are deliberately NOT folded into either group — Voice is argument-structure/diathesis, not
-   TAM proper, and Case is a HEAD feature in most frameworks' own AVMs, not agreement. Everything else UD_FEATS
-   defines (Case, VerbForm, Voice, PronType, NumType, Definite, Degree, Polarity, Poss, Reflex, Deixis,
-   NounClass, Animacy, Polite, Abbr, Foreign, Typo, ExtPos, DeixisRef, Shared) is its own top-level row. */
+   TAM proper, and Case is a HEAD feature in most frameworks' own AVMs, not agreement.
+   item 23: each group is now ONE row with a COMBINED value (Person.Number.Gender.Clusivity, dot-joined in that
+   fixed order, whichever of the four are actually set) — the same "several categories, one fused cell" shape
+   Leipzig-style interlinear glosses already use throughout this app (mglossReslot/setGlossText's own dot-joins),
+   not a nested sub-bracket per feature. */
 const AVM_GROUPS={AGR:["Person","Number","Gender","Clusivity"], TAM:["Tense","Aspect","Mood","Evident"]};
-/* The token's FEATS as an ordered AVM structure: [{group:"AGR",rows:[{feat,val}...]}, {group:"TAM",rows:[...]}
-   (either omitted entirely if the token sets NONE of that group's features — an empty bracket is worse than no
-   bracket), then every remaining set feature as {feat,val} in UD_FEATS' own declared order]. Attribute names and
-   values are UD's OWN spellings verbatim (Person, not PERS; Sing, not SG) — on request, this tier stays
-   isomorphic to FEATS, not a second Leipzig-style gloss; FEATS_GLOSS/MGloss is the tier that abbreviates. */
+// item 23: NumType/PronType/VerbForm move to the POS tag's own dot-suffix instead (UPOS_SUBTYPE_FEATS,
+// js/editing/context-menu.js, which posDisp — diagram-core.js — already reads to grow e.g. "PRON.DEM"/
+// "VERB.INF" on the tag itself) — never shown here, so a reader isn't told the same fact in two places.
+const AVM_EXCLUDE=new Set(["NumType","PronType","VerbForm"]);
+/* The token's FEATS as an ordered, FLAT AVM row list — no nesting any more (item 23): [{group:"AGR",
+   members:[...set ones...], combined:"3.Sing.Fem"}, {group:"TAM",...} (either omitted outright if the token
+   sets NONE of that group's features — an empty bracket is worse than no bracket), then every remaining set,
+   non-excluded feature as {feat,val}, in UD_FEATS' own declared order]. Attribute names and values are UD's
+   OWN spellings verbatim (Person, not PERS; Sing, not SG) — on request, this tier stays isomorphic to FEATS,
+   not a second Leipzig-style gloss; FEATS_GLOSS/MGloss is the tier that abbreviates. */
 function avmStruct(t){ const feats=(t&&t.feats)||""; if(!feats||feats==="_") return [];
   const set={}; feats.split("|").forEach(seg=>{ const eq=seg.indexOf("="); if(eq>0) set[seg.slice(0,eq)]=seg.slice(eq+1); });
   const used=new Set(), out=[];
-  for(const g of ["AGR","TAM"]){ const rows=AVM_GROUPS[g].filter(f=>set[f]!=null).map(f=>{ used.add(f); return {feat:f,val:set[f]}; });
-    if(rows.length) out.push({group:g,rows}); }
-  Object.keys(UD_FEATS).forEach(f=>{ if(set[f]!=null&&!used.has(f)) out.push({feat:f,val:set[f]}); });
+  for(const g of ["AGR","TAM"]){ const members=AVM_GROUPS[g].filter(f=>set[f]!=null);
+    if(members.length){ members.forEach(f=>used.add(f)); out.push({group:g, members, combined:members.map(f=>set[f]).join(".")}); } }
+  Object.keys(UD_FEATS).forEach(f=>{ if(set[f]!=null&&!used.has(f)&&!AVM_EXCLUDE.has(f)) out.push({feat:f,val:set[f]}); });
   return out; }
 // item 22: an AVM row's right-click edit — same mechanism glossAbbrMenu/acValItems already use (attested-value-
 // narrowed UD_FEATS list, UD's canonical order), but writing UD Feat=Val straight to FEATS instead of a Leipzig

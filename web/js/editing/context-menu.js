@@ -325,11 +325,20 @@ function relMenu(x,y,si,tokId){ const s=DOC[si]; if(!s)return; const dep=s.token
    DET.Poss. universaldependencies.org/u/feat groups exactly these under "Lexical features"; ExtPos, Foreign and
    Typo belong to the same group but get their own commands here (items 1/2/3) and are deliberately left out,
    and SUD's own Shared (FEATS) and Subject/Object (MISC) are bookkeeping, not word classes. Everything else in the FEATS inventory is
-   inflectional and belongs on the morphemic-gloss tier, which is where its Leipzig abbreviation already goes. */
-const UPOS_SUBTYPE_FEATS=["PronType","NumType","Poss","Reflex","Abbr"];
+   inflectional and belongs on the morphemic-gloss tier, which is where its Leipzig abbreviation already goes.
+   item 23: VerbForm joins this set BY EXCEPTION to that last rule — UD itself classes it as an inflectional,
+   not a lexical, feature, so on that classification alone it would stay off the tag. It's added anyway, on
+   request, alongside PronType/NumType being pulled OUT of the AVM tier at the same time (js/grid/grid.js's
+   AVM_EXCLUDE) — the two moves are one decision: those three read as properties of the WORD CLASS a reader
+   wants at a glance next to the tag, not as part of the fuller morphological picture the AVM/MGloss tiers are
+   for, whatever UD's own filing of the feature says. */
+const UPOS_SUBTYPE_FEATS=["PronType","NumType","VerbForm","Poss","Reflex","Abbr"];
 // Where each one is actually attested, per its own page at universaldependencies.org/u/feat/* — so a VERB's POS
-// menu doesn't offer VERB.Ord. Abbr is unlisted on purpose: any word class can be abbreviated.
-const UPOS_SUBTYPE_ON={PronType:["PRON","DET","ADV","ADJ"],NumType:["NUM","DET","ADJ","ADV"],Poss:["DET","PRON","ADJ"],Reflex:["PRON","DET"]};
+// menu doesn't offer VERB.Ord. Abbr is unlisted on purpose: any word class can be abbreviated. VerbForm's own
+// range (per universaldependencies.org/u/feat/VerbForm.html) is wider than the other four — every non-finite
+// form crosses word-class lines by design (a participle is VERB.Part or ADJ.Part depending on the treebank, a
+// gerund/verbal noun NOUN.Vnoun) — so its own list is the widest of the set.
+const UPOS_SUBTYPE_ON={PronType:["PRON","DET","ADV","ADJ"],NumType:["NUM","DET","ADJ","ADV"],VerbForm:["VERB","AUX","ADJ","NOUN"],Poss:["DET","PRON","ADJ"],Reflex:["PRON","DET"]};
 function subtypeFeatsFor(upos){ return UPOS_SUBTYPE_FEATS.filter(f=>!UPOS_SUBTYPE_ON[f]||UPOS_SUBTYPE_ON[f].includes(upos)); }
 // The suffix a Feat=Val wears in the dot-suffixed tag: the VALUE where it carries the content (PRON.Dem), the
 // FEATURE name where the value is a bare "Yes" and so says nothing on its own (DET.Poss, not DET.Yes).
@@ -688,23 +697,36 @@ function setGlossAbbrevAt(si,tokId,idx,ab){ const s=DOC[si]; if(!s)return; const
   mglossSyncFeats(t);
   syncXposMirror(t);
   markDirty(); preserveScroll(renderDoc); }
-/* ── item 22: AN AVM ROW'S OWN MENU — the SAME gesture as glossAbbrMenu just above, and the same "narrowed to
-   attested, UD's own order" source (attestedFeatVals, js/grid/grid.js) — but the AVM IS FEATS (avmStruct), so
-   there is no abbreviation-vs-Feat=Val translation step glossAbbrMenu needs: the row already names its own
-   feature, and every candidate is UD's own value spelling, not a Leipzig gloss. Picking one writes straight
-   to FEATS via avmSetFeat, the same call a hand-typed FEATS-grid edit makes. A one-value feature (Poss=Yes)
-   still offers no alternative — same "nothing to be an alternative to" judgement glossAbbrMenu makes — but,
-   unlike that menu, IS still worth opening here: an AVM row has no OTHER edit gesture (no text field under
-   it to type into), so a single "clear this feature" option is offered instead of declining outright. */
-function avmValueMenu(x,y,si,tokId,feat){
+/* ── item 22/23: AN AVM ROW'S OWN MENU — the SAME gesture as glossAbbrMenu just above, and the same "narrowed
+   to attested, UD's own order" source (attestedFeatVals, js/grid/grid.js) — but the AVM IS FEATS (avmStruct),
+   so there is no abbreviation-vs-Feat=Val translation step glossAbbrMenu needs: a standalone row already
+   names its own feature, and every candidate is UD's own value spelling, not a Leipzig gloss. Picking one
+   writes straight to FEATS via avmSetFeat, the same call a hand-typed FEATS-grid edit makes. A one-value
+   feature (Poss=Yes) still offers no alternative — same "nothing to be an alternative to" judgement
+   glossAbbrMenu makes — but, unlike that menu, IS still worth opening here: an AVM row has no OTHER edit
+   gesture (no text field under it to type into), so a single "clear this feature" option is offered instead
+   of declining outright.
+   item 23: `key` names a REAL feature for a standalone row, but a combined AGR/TAM row's own data-feat is
+   its GROUP name instead (avmHTML) — AVM_GROUPS[key] (js/grid/grid.js) is exactly how avmStruct itself tells
+   the two apart, so the same test here dispatches to whichever this call actually is. A combined row's menu
+   is the SAME picker repeated once per feature the token currently has SET within that group (Person's own
+   header + values, then Number's, …) — one flat multi-section list, not a second level of submenu — so
+   "3.Sing.Fem" stays a single fused DISPLAY value while every one of the features fused into it is still
+   independently, fully editable. */
+function avmValueMenu(x,y,si,tokId,key){
   const s=DOC[si]; if(!s) return false; const t=s.tokens[tokId-1]; if(!t) return false;
-  const cur=getFeat(t.feats,feat);
-  const vals=(typeof attestedFeatVals==="function"?attestedFeatVals(feat):null)||UD_FEATS[feat]||[];
-  if(!vals.length) return false;
-  const desc=(typeof FEATS_VDESC==="object"&&FEATS_VDESC&&FEATS_VDESC[feat])||{};
-  const rows=vals.map(v=>({label:v, expand:desc[v]||"", check:v===cur, opt:true, fn:()=>avmSetFeat(si,tokId,feat,v)}));
-  if(vals.length>1) rows.push(null,{label:"Clear "+feat, fn:()=>avmSetFeat(si,tokId,feat,null)});   // item 1's own "clear this" convention (a leading `null` closes the checkmark group so this row sits flush, un-ticked, at the flyout's own level)
-  showCtx(x,y,[{header:feat}].concat(rows), rows.length>12, sentRTL(s));
+  const members=(typeof AVM_GROUPS==="object"&&AVM_GROUPS[key])?AVM_GROUPS[key].filter(f=>getFeat(t.feats,f)!=null):[key];
+  const items=[];
+  members.forEach(feat=>{
+    const cur=getFeat(t.feats,feat);
+    const vals=(typeof attestedFeatVals==="function"?attestedFeatVals(feat):null)||UD_FEATS[feat]||[];
+    if(!vals.length) return;
+    const desc=(typeof FEATS_VDESC==="object"&&FEATS_VDESC&&FEATS_VDESC[feat])||{};
+    items.push({header:feat});
+    vals.forEach(v=>items.push({label:v, expand:desc[v]||"", check:v===cur, opt:true, fn:()=>avmSetFeat(si,tokId,feat,v)}));
+    if(vals.length>1) items.push(null,{label:"Clear "+feat, fn:()=>avmSetFeat(si,tokId,feat,null)}); });   // item 1's own "clear this" convention (a leading `null` closes the checkmark group so this row sits flush, un-ticked, at the flyout's own level)
+  if(!items.length) return false;
+  showCtx(x,y,items, items.length>12, sentRTL(s));
   return true; }
 document.getElementById("doc").addEventListener("contextmenu",e=>{
   const avmEl=e.target.closest&&e.target.closest(".avm-row");   // item 22: BEFORE every other resolver, same reasoning as .glabbr just below — an AVM row sits inside the token group the generic node branch would otherwise claim
