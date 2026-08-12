@@ -2111,11 +2111,25 @@ function reserveBracketArcRoom(){ document.querySelectorAll("#doc .bwrap").forEa
   // is NOT the last, grow the following line's gap so the tie + fused form (+ its transliteration) clear it — mirroring
   // the wrapped-arc view, which already reserves mwtDepth(D) in its per-row tieBot. The last line is covered by
   // .bwrap.hasmwt's bottom padding, and split-across-lines MWTs draw no spanning tie (so need no room).
+  // item 25/7: si0/s0 — resolve the SENTENCE model so this pass's own undBot can fold in a component token's AVM
+  // height, same as positionBracketAnnots' undBot (below, the DRAW side) already does. This copy of undBot had NO
+  // AVM term at all (not even the old stale belowGap() one) — it predates the AVM tier's own MWT-tie fix, which
+  // only ever touched positionBracketAnnots' undBot, never noticing this second, independent copy existed here.
+  // Report, traced from "space below an MWT tie is smaller [[in brackets] than other views" once the box's-own-
+  // bottom-padding half (htmlTieBottom, diagram-core.js) was fixed: "MWT forms/transliterations are crashing
+  // into the next line" — the SAME shortfall, on an INTERIOR wrapped line instead of the box's last one. This
+  // grow() call is what is supposed to widen the gap to line la+1 so a tall tie+form(+translit) stack clears it;
+  // without AVM here, a component token's tall FEATS box pushed the actual tie/form (drawn later, correctly, by
+  // positionBracketAnnots) well past what this pass ever asked grow() to make room for.
+  const si0r=+(box.closest(".sblock")?.dataset.i??-1), s0r=DOC[si0r];
   (box._ties||[]).forEach(m=>{
     const a=box.querySelector(`.bwtok[data-tok="${m.fromTok}"]`), b=box.querySelector(`.bwtok[data-tok="${m.toTok}"]`); if(!a||!b) return;
     const la=lineOf(a), lb=lineOf(b); if(la<0||la!==lb||la>=lines.length-1) return;   // components split across lines → no tie; last line → the .hasmwt bottom padding already reserves the room
-    const undBot=tok=>{ const f=tok.querySelector(".bwform")||tok, u=tok.querySelector(".bwund"), fTop=tok.offsetTop+(f===tok?0:f.offsetTop); return u?fTop+u.offsetTop+u.offsetHeight:fTop+(f===tok?tok.offsetHeight:f.offsetHeight); };
-    const stackBot=Math.max(undBot(a),undBot(b));   // item 6: reserve from the below-stack bottom (POS + any gloss/translit tiers), NOT the bare form bottom — so the reserved gap accounts for gloss layers pushing the POS (and hence the tie) down
+    const undBot=tok=>{ const f=tok.querySelector(".bwform")||tok, u=tok.querySelector(".bwund"), fTop=tok.offsetTop+(f===tok?0:f.offsetTop);
+      const base=u?fTop+u.offsetTop+u.offsetHeight:fTop+(f===tok?tok.offsetHeight:f.offsetHeight);
+      const tk=s0r&&s0r.tokens&&s0r.tokens[(+tok.dataset.tok)-1], av=tk&&avmLayout(tk);
+      return av?base+avmTopGap()+av.h:base; };   // item 6: reserve from the below-stack bottom (POS + any gloss/translit tiers) — AND any AVM below that — NOT the bare form bottom — so the reserved gap accounts for gloss layers (and a tall FEATS box) pushing the POS (and hence the tie) down
+    const stackBot=Math.max(undBot(a),undBot(b));
     const tieReach=htmlTieBottom(m)+9;   // htmlTieBottom already folds in the SAME lead (5+tieLead()) positionBracketAnnots' yb seats the tie's top with below, so this is just that reach + a little slack — was "15−capHeight+htmlTieBottom(m)+9", double-counting the lead now that htmlTieBottom carries it too (see htmlTieBottom's own comment)
     grow(lines[la+1], (stackBot+tieReach)-lines[la+1].offsetTop);   // grow() is a no-op when the standard inter-line gap already clears the tie; read live so multiple ties / earlier arc growth stay cumulative-correct
   });
