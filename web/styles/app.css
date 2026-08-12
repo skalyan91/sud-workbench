@@ -1663,6 +1663,13 @@
   .insnote:empty{display:none}   /* an empty note must not still spend the block's 6px gap */
   .sheet .actions .inserr{margin-inline-end:auto; text-align:start; color:var(--accent-red,#ff383c); font-size:11.5px; line-height:1.35}   /* margin-auto on the leading side pushes the buttons back to the trailing edge the row's justify-content puts them at */
   .sheet .tbtn .kbd{margin-inline-start:7px; font-weight:510; opacity:.72; direction:ltr; unicode-bidi:isolate}   /* the shortcut glyph on a default button (Insert's ⌘↩), in this app's own menu convention (see .ctx .kbd): the SAME size and weight as the label it trails, dimmed rather than shrunk, and held in LTR order so ⌘↩ never reverses under an RTL system language */
+  /* every shortcut span the app draws, wherever it lives — .kbd (.ctx/.sheet rows), .fpkbd (fpmenu-family
+     rows: the notation dropdown, the mirrored menu bar), .ctxkbd (localiseAccel's own third name, platform.js) —
+     takes tabular figures. A shortcut is a SINGLE glyph run read as a unit, not prose; proportional digits (a
+     "1" narrower than a "5") shift the run's optical centre depending on which key it names, which shows up
+     as neighbouring rows' shortcuts not lining up at the same trailing edge. One rule, not one per class, so a
+     row that grows a new shortcut column never has to remember to add it by hand. */
+  .kbd,.fpkbd,.ctxkbd{font-variant-numeric:tabular-nums}
   /* THE RULE, stated generally because it governs any alert this app grows, not just the one that exists today:
      WHENEVER AN ALERT HAS THREE STACKED BUTTONS THEY READ, TOP TO BOTTOM, PRIMARY → DESTRUCTIVE → SECONDARY.
      Today's only such alert is the three-button save prompt (askConfirm with opts.saveLabel, js/ui/sheets.js),

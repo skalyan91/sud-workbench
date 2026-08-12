@@ -3,6 +3,12 @@
   body{margin:0; font-family:var(--ui-font); font-size:13px; color:var(--text);
     background:var(--win-bg); -webkit-font-smoothing:antialiased}
   .mono{font-family:var(--ui-mono)}
+  /* UI chrome is not document prose: a click-drag across a toolbar/menu/pill label must never leave a
+     blue text selection behind it, the way it would on a real macOS control. Real <button>s already get
+     this for free from WebKit's own UA stylesheet; stated explicitly here anyway so it does not depend on
+     that (a future button-shaped <div>/<span> — .fmtpill's own span-based pills already ARE one, fixed
+     just below — inherits nothing from the UA sheet and needs the same rule spelled out). */
+  button{-webkit-user-select:none; user-select:none}
   /* the app fills the real native window; the fake window chrome (rounded card,
      shadow, wallpaper, traffic-light dots) only appears in browser "mockup" mode */
   .window{width:100%; height:100vh; display:flex; flex-direction:column; background:var(--win-bg); overflow:hidden; position:relative}   /* fix 3: positioned ancestor for the absolutely-overlaid titlebar */
@@ -239,6 +245,18 @@
   .titlebar.win-inactive .tbtn .sfi{background-color:var(--muted)}          /* incl. the active/selected notation glyph */
   .titlebar.win-inactive .tbfname,.titlebar.win-inactive #modelSel{color:var(--muted)}   /* title + model name → gray */
   .titlebar.win-inactive .tbpill > .tbtn + .tbtn::before,.titlebar.win-inactive .tbmodel > .tbtn::before{background:var(--muted); opacity:.35}   /* separators (incl. the zoom stepper's, which are now the generic .tbpill > .tbtn + .tbtn dividers) → gray */
+  /* …but NOT a separator the rule just above dissolved (fix 12, hover/durably-selected) — restated under
+     .win-inactive because the plain gray rule's own selector (.titlebar.win-inactive .tbpill > .tbtn + .tbtn::before,
+     5 classes) OUTRANKS fix 12's (.tbpill > .tbtn.active::before, 3 classes) regardless of which comes later
+     in the file, so losing focus was silently repainting a separator the user had just made disappear next to
+     a selected/hovered button — a hairline "appearing" for no reason the window content itself gave any cause
+     for. Same 5-class weight as the rule above (…win-inactive .tbpill > .tbtn.active::before — the extra
+     .active/:hover swaps in for one of the two .tbtn's, so the count doesn't change), so source order settles
+     the tie: this must stay AFTER it. */
+  .titlebar.win-inactive .tbpill > .tbtn:hover::before,.titlebar.win-inactive .tbpill > .tbtn:hover + .tbtn::before,
+  .titlebar.win-inactive .tbmodel > .tbtn:hover::before,.titlebar.win-inactive .tbmodel > .tbtn:hover + .tbtn::before,
+  .titlebar.win-inactive .tbpill > .tbtn.active::before,.titlebar.win-inactive .tbpill > .tbtn.active + .tbtn::before,
+  .titlebar.win-inactive .tbmodel > .tbtn.active::before,.titlebar.win-inactive .tbmodel > .tbtn.active + .tbtn::before{background:transparent}
   .titlebar.win-inactive .tbficon{filter:grayscale(1); opacity:.55}         /* file proxy icon → desaturated gray */
   .tbmodel > .tbtn::before{left:-2.5px}   /* fix 5 / item 3: centre the 1px divider in the model pill's gap like every other pill. This restates the shared rule's inset because the selector above pairs it with a DIFFERENT first element (a <select>, not a .tbtn) — and restating it is exactly how it went wrong: the −4.5px was solved for the 8px gap of the day, the gap was later halved back to 4px on the shared .tbpill rule AND on .tbmodel's own `gap`, and this line was left behind. MEASURED at −4.5px against the 4px gap: 1px of line with −0.5px of air on its left and 3.5px on its right, i.e. the line had walked out of the gap and was touching the select. Centring is left:−(G+1)/2 (space left = G−X, right = X−1), so G=4 gives −2.5px → an equal 1.5px either side. If the gap ever moves again, this number moves with it. */
   .tbmodel #modelSel:hover ~ .tbtn::before{background:transparent}   /* fix 5: hovering the model dropdown ALSO dissolves the divider (the button-side dissolve is handled by the shared .tbmodel > .tbtn:hover::before rule) */
@@ -354,8 +372,8 @@
      a square, so — the same way #btnOptions overrides that shared box above — it grows from the 30px icon
      square into an auto-width capsule. */
   #notationBtn.tbtn.icon{width:auto; min-width:0; padding:0 8px; gap:4px; border-radius:999px}
-  .chevupdown{width:8px; height:12px; flex:none; opacity:.5; background-color:currentColor;
-    -webkit-mask:var(--sf-updown) no-repeat center/contain; mask:var(--sf-updown) no-repeat center/contain}
+  .chevupdown{width:11px; height:16px; flex:none; opacity:.5; background-color:currentColor;
+    -webkit-mask:var(--sf-updown) no-repeat center/contain; mask:var(--sf-updown) no-repeat center/contain}   /* SAME literal box as .wherechev (the only other place this exact glyph is drawn) — that is the size this codebase already measured as "reads as a real SF Symbol", not a fraction of it. Against the icon's 24px height (.tbtn.icon .sfi, app.css) that puts the chevron at ~2/3 — a Finder-toolbar-scale disclosure indicator, not a caption-sized afterthought */
   /* zoom stepper (a pill: − 100% +) moved into the titlebar */
   .tbzoom{gap:4px; padding:3px}   /* padding follows the shared .tbpill 4px→3px (this pill RESTATES it, so it must be changed here too or the zoom pill keeps the old 5px of visible inner air while every other pill has 4) */   /* HALVED with the shared .tbpill gap (8 → 4) — this pill RESTATES the value rather than inheriting it, which is why halving .tbpill alone left the zoom and model pills wide. If you change one of the three, change all three. */   /* fix 12: gap matched every other pill; room around the − ⃒ actual-size ⃒ + separators. item 1: follows the shared .tbpill gap up to 8px (redundant, like .tbmodel's — .tbzoom is always also a .tbpill — but restated so this pill's spacing stays legible beside its other overrides); it carries TWO separators, so it was the most cramped of the lot */
   .tbzoom .tbtn.icon{width:32px; height:30px}   /* +1px per side with the shared .tbtn.icon above (was 30×28); this pill restates both dimensions, so it has to move with it or its three steppers stay short inside a pill sized for 30px buttons */
@@ -896,7 +914,8 @@
      status-bar pull-down pills (#tokInfo Language, #orthoPill Script, #translitPill Transliteration): one
      border/padding/radius/hover rule so the four status-bar menu triggers read as one family and can't
      drift apart. .disabled is translitPill's Sanskrit-with-no-script state (item 6 there: shown but inert). */
-  .fmtpill{border:.5px solid var(--hairline-strong); background:transparent; cursor:pointer; font:inherit; color:inherit; padding:1px 8px; border-radius:6px; line-height:1.7}
+  .fmtpill{border:.5px solid var(--hairline-strong); background:transparent; cursor:pointer; font:inherit; color:inherit; padding:1px 8px; border-radius:6px; line-height:1.7;
+    -webkit-user-select:none; user-select:none}   /* #tokInfo/#orthoPill/#translitPill are <span>s wearing this class, not real <button>s (#fmtPill is) — a span gets none of a button's UA-default non-selectability, so a drag across "tokeniser: whitespace" etc. would otherwise leave a real text selection */
   .fmtpill:hover{background:rgba(127,127,127,.14)}
   .fmtpill.disabled{opacity:.5; cursor:default}
   .fmtpill.disabled:hover{background:none}
