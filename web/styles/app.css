@@ -656,6 +656,18 @@
      The grid needs no equivalent: its selected row already highlights every cell, POS and DEPREL included. */
   .node.sel .node-cat,.node.rng .node-cat,.tok-group.sel .tok-pos,.tok-group.rng .tok-pos,
   .oline.sel .opos,.oline.rng .opos,.bwtok.sel .bwpos,.bwtok.rng .bwpos{fill:var(--accent); color:var(--accent)}
+  /* item 25/8: a selected token's AVM goes ALL ACCENT here — the opposite of outline's own "all white" rule
+     (see .oline.sel .oavm-attr's own note for why the two notations deliberately diverge). Scoped to .node/
+     .tok-group (never .bwtok — wrapped brackets' AVM lives in positionBracketAnnots' own SVG overlay, a
+     SIBLING of .bwtok rather than a descendant, so a plain descendant selector can't reach it; that half
+     needs its own JS-side selection wiring, not CSS, and is tracked separately). path.mwt-tie/path.mwt-tie-h
+     here can ONLY be an AVM's own bracket, never a real MWT tie — mwtTie() appends its own .mwt-g directly
+     to the diagram root, never nested inside a token's .node/.tok-group, so this is safe from bleeding into
+     an unrelated MWT bracket that happens to share the same two classes. */
+  .node.sel .avm-attr,.node.rng .avm-attr,.tok-group.sel .avm-attr,.tok-group.rng .avm-attr,
+  .node.sel .avm-val,.node.rng .avm-val,.tok-group.sel .avm-val,.tok-group.rng .avm-val{fill:var(--accent); opacity:1}
+  .node.sel path.mwt-tie,.node.rng path.mwt-tie,.tok-group.sel path.mwt-tie,.tok-group.rng path.mwt-tie,
+  .node.sel path.mwt-tie-h,.node.rng path.mwt-tie-h,.tok-group.sel path.mwt-tie-h,.tok-group.rng path.mwt-tie-h{stroke:var(--accent)}
   .arc.sel .lbl,.arc.rng .lbl,.edge-g.sel .lbl,.edge-g.rng .lbl,.tok-group.sel .lbl,.tok-group.rng .lbl{fill:var(--accent)}   /* SVG relation label — beats drawLabel's `fill` PRESENTATION attribute without !important, exactly as .brk.sel does */
   .arc.sel .leader,.arc.rng .leader,.edge-g.sel .leader,.edge-g.rng .leader{stroke:var(--accent)}   /* …AND ITS LEADER. A lifted label and the dashed line tying it back to its arc are ONE object — the leader exists only to say "this label belongs to that arc" — so a blue label on a relation-coloured leader read as two things, and at a glance the leader looked like it pointed at some other arc. The ghost pair already worked this way (.ghost-g.sel .leader-ghost); this is the same rule for the real one, and it beats the `stroke` presentation attribute drawLabel sets from arcInk() without !important, exactly as the ghost rule does */
   .oline.sel .orel,.oline.rng .orel,.bwtok.sel .bwrel,.bwtok.rng .bwrel{color:var(--accent)!important}   /* …but the HTML labels carry the relation colour as an INLINE STYLE (outline/bracketsWrapped set el.style.color=relColor(...) when show.colour), which no amount of specificity beats — !important is the only override, and it is confined to these two selectors */
@@ -1261,7 +1273,7 @@
      border-color reuses arcInk()'s own color-mix formula (the ink `.mwt-tie`/`.mwt-tie-h` already paint with)
      so the drawn bracket reads as the SAME ink as the SVG one, not a plain CSS grey standing in for it. */
   .oavm{margin-inline-start:9px; unicode-bidi:isolate; position:relative; padding:1px 8px}
-  .oavm::before,.oavm::after{content:""; position:absolute; top:0; bottom:0; width:4px; border:1px solid color-mix(in srgb, var(--tie-hue), var(--content-bg) var(--edge-mix)); pointer-events:none}
+  .oavm::before,.oavm::after{content:""; position:absolute; top:0; bottom:0; width:2.8px; border:1px solid color-mix(in srgb, var(--tie-hue), var(--content-bg) var(--edge-mix)); pointer-events:none}   /* item 25/7: 4px → 2.8px, the same 0.7 (=10.5/15) scale-down AVM_BRK_W (diagram-core.js) just took, on the identical "a tick this long reads chunkier at the AVM's own 10.5px scale" report, applied here for the same reason */
   .oavm::before{left:0; border-right:none}   /* "[" — open on the content side */
   .oavm::after{right:0; border-left:none}    /* "]" — the mirror */
   .oavm-item{padding:0 1px; color:color-mix(in srgb, var(--tie-hue), var(--content-bg) var(--edge-mix))}   /* just enough for the hover fill below to clear the text, like every other row's own click target — the bracket is `.oavm`'s now, not this. `color` here is for the literal "[" "]" text nodes ONLY (avmInline, diagram-core.js) — .oavm-attr/.oavm-val both carry their OWN explicit colour and so are unaffected — on report ("the inner brackets should be the same colour as the outer brackets"): unset, they fell through to the row's plain text colour instead of matching .oavm::before/::after's OWN arcInk()-mix border-color just outside them */
@@ -1272,6 +1284,14 @@
      of item 23's report was correct and is untouched by the bracket-grouping correction above. */
   .oavm-attr{font-family:var(--token-font); font-size:10.5px; font-weight:571; font-feature-settings:"c2sc" 1; color:var(--dia-muted); opacity:.62}
   .oavm-val{font-family:var(--token-font); font-size:10.5px; font-weight:700; color:var(--tie-hue)}
+  /* item 25/8: a SELECTED outline row's AVM reads as ALL WHITE (var(--text), the same primary ink .oform
+     itself does NOT take here — see the contrast this draws with the SVG notations' own rule below, on
+     request: outline stays plain/uniform on selection where the other notations go accent). Every one of
+     the AVM's own registers (muted attr, tie-hue val, the drawn bracket, the plain "[" "]" text on
+     .oavm-item) collapses to the one colour; .oavm-attr's own opacity:.62 is lifted too, or it would still
+     read dimmed despite being white. */
+  .oline.sel .oavm-attr,.oline.sel .oavm-val,.oline.sel .oavm-item{color:var(--text); opacity:1}
+  .oline.sel .oavm::before,.oline.sel .oavm::after{border-color:var(--text)}
   .text-conv .tpos{font-size:9px; color:var(--muted); vertical-align:super; margin-left:1.5px; letter-spacing:.02em}
 
   /* Finder list-view geometry, in one place: the frame's own curve, the row band's curve, and how far that band
