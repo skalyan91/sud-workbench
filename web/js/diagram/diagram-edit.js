@@ -11,6 +11,13 @@ let DDRAG=null, DSUPPRESS=false, DGHOST=null, DCARET=null;
    entry point, and the two remaining callers pick their own token first. */
 const ddNode=el=>el&&el.closest?el.closest("#doc .node, #doc .tok-group, #doc .bwtok"):null;   // brackets draw each word as a .bwtok — draggable like a stemma node
 const ddEdge=el=>el&&el.closest?el.closest("#doc .edge-g, #doc .arc"):null;
+// the shared MWT-tie wrapper — one <g class="mwt-g" data-s data-mwtfrom data-mwtto> per tie, emitted by BOTH
+// mwtTie (js/diagram/diagram-core.js, every SVG notation) and the wrapped-brackets HTML path (js/core/document.js).
+// data-mwtfrom/data-mwtto are the ORIGINAL (never display-folded) 1-based token ids — exactly m.from/m.to in
+// s.mwt — so gfrom/gto below need no remapping. A SIBLING of ddNode's token groups, never nested inside one
+// (mwtTie draws the tie alongside the tokens it spans, not around them), so this is purely additive: it can
+// never steal a hit ddNode/ddEdge would otherwise have claimed.
+const ddMwtGroup=el=>el&&el.closest?el.closest("#doc .mwt-g[data-mwtfrom]"):null;
 const DNODE_Q=`.node[data-s="{s}"], .tok-group[data-s="{s}"], .bwtok[data-s="{s}"]`;   // every drawn token in a sentence, across the draggable notations
 async function setDiagramHead(si,depId,headId){ const s=DOC[si]; if(!s||depId<1||depId>s.tokens.length)return;
   const dep=s.tokens[depId-1], head=(headId>=1&&headId<=s.tokens.length)?s.tokens[headId-1]:null;
@@ -258,7 +265,7 @@ async function attachAsSharedConjunct(si,depId,conjDepId){ const s=DOC[si]; if(!
     const activeEditor=document.activeElement, hadEditor=activeEditor&&activeEditor.classList&&activeEditor.classList.contains("nodeedit");
     if(hadEditor) activeEditor.blur();   // finish()'s own commit path unconditionally calls preserveScroll(renderDoc) — a FULL #doc rebuild — so `e.target` (resolved by the browser against the OLD tree before this handler ran) may now be a detached node whose closest("#doc …") can never match (its ancestor chain no longer reaches #doc at all); re-resolve the click target fresh against the rebuilt DOM instead of trusting e.target
     const target=hadEditor?document.elementFromPoint(e.clientX,e.clientY):e.target;
-    const edge=ddEdge(target), node=ddNode(target);
+    const edge=ddEdge(target), node=ddNode(target), mwtg=ddMwtGroup(target);
     /* NO pick() ON EITHER GRAB: PRESSING IS NOT SELECTING. A press here is still ambiguous — it becomes a
        tap or a drag only once the pointer moves (or doesn't) — and selecting up front resolved it as a tap
        immediately, so dragging a token to re-head or reorder it lit the token up on the way past, and a drag
@@ -268,14 +275,16 @@ async function attachAsSharedConjunct(si,depId,conjDepId){ const s=DOC[si]; if(!
        (commitDrop → setDiagramHead / attachAsSharedConjunct / attachAsRaisedSubj / reorderByX) is addressed
        by those ids. A drop that COMMITS still selects what it edited — that is the edit's own result, not the
        gesture's, and each of those functions does it for itself. */
-    if(edge && edge.getAttribute("data-dep")!=null){   // drag an edge/arc/label → re-head its dependent
+    if(mwtg){   // grab an MWT's tie → drag the WHOLE range as one atomic reorder unit (reorderTokenGroup, js/editing/edit-ops.js). gfrom/gto are 0-based, matching that function's own params and s.tokens indices — data-mwtfrom/-to are 1-based original ids (see ddMwtGroup)
+      DDRAG={kind:"mwtgroup",si:+mwtg.getAttribute("data-s"),gfrom:+mwtg.getAttribute("data-mwtfrom")-1,gto:+mwtg.getAttribute("data-mwtto")-1,x0:e.clientX,y0:e.clientY,moved:false};
+    } else if(edge && edge.getAttribute("data-dep")!=null){   // drag an edge/arc/label → re-head its dependent
       DDRAG={kind:"head",si:+edge.getAttribute("data-s"),dep:+edge.getAttribute("data-dep"),x0:e.clientX,y0:e.clientY,moved:false};
     } else if(node){                                    // drag a node onto another node → make that node its head
       DDRAG={kind:"node",si:+node.getAttribute("data-s"),tok:+node.getAttribute("data-tok"),x0:e.clientX,y0:e.clientY,moved:false};
     } else { const dia=target&&target.closest&&target.closest(".diagram"), blk=dia&&dia.closest(".sblock");   // empty diagram space → arm a marquee (committed on move, so a plain click still falls through to deselect)
       if(dia&&blk) MARQ={si:+blk.dataset.i,x0:e.clientX,y0:e.clientY,moved:false};
       return; }
-    DLAST={kind:DDRAG.kind,si:DDRAG.si,tok:DDRAG.tok,dep:DDRAG.dep,x0:e.clientX,y0:e.clientY,t:Date.now()}; });   // snapshot the grab so a drag-lock second tap (whose own pointerdown WebKit may swallow) can still start a drag from a bare pointermove.  NB: no setPointerCapture here — capturing on pointerdown would retarget the follow-up click to #doc (WebKit), so plain clicks would stop selecting.  Capture on first move instead.
+    DLAST={kind:DDRAG.kind,si:DDRAG.si,tok:DDRAG.tok,dep:DDRAG.dep,gfrom:DDRAG.gfrom,gto:DDRAG.gto,x0:e.clientX,y0:e.clientY,t:Date.now()}; });   // snapshot the grab so a drag-lock second tap (whose own pointerdown WebKit may swallow) can still start a drag from a bare pointermove.  NB: no setPointerCapture here — capturing on pointerdown would retarget the follow-up click to #doc (WebKit), so plain clicks would stop selecting.  Capture on first move instead.
   docEl.addEventListener("pointermove",e=>{
     if(MARQ){ if(!(e.buttons&1)){ endMarquee(); return; }   // button released outside → abandon
       if(!MARQ.moved && Math.hypot(e.clientX-MARQ.x0,e.clientY-MARQ.y0)>4){ MARQ.moved=true; try{docEl.setPointerCapture(e.pointerId);}catch(_){}
@@ -286,15 +295,18 @@ async function attachAsSharedConjunct(si,depId,conjDepId){ const s=DOC[si]; if(!
     // while the primary button is held (e.buttons&1 rules out plain hover-after-tap).  Harmless when pointerdown did fire.
     if(!DDRAG && (e.buttons&1) && draggable()){
       if(DLAST && Date.now()-DLAST.t<1500){
-        DDRAG={kind:DLAST.kind,si:DLAST.si,tok:DLAST.tok,dep:DLAST.dep,x0:DLAST.x0,y0:DLAST.y0,moved:false}; }
-      else {   // FIRST-LOAD: WebKit swallows the very first pointerdown after a fresh load, so the grab's pointerdown never ran and DLAST is still null — reconstruct the grab from the node/edge under the pointer so the first double-tap-drag reorders too
-        const el=document.elementFromPoint(e.clientX,e.clientY), edge=ddEdge(el), node=ddNode(el);
-        if(edge && edge.getAttribute("data-dep")!=null){ DDRAG={kind:"head",si:+edge.getAttribute("data-s"),dep:+edge.getAttribute("data-dep"),x0:e.clientX,y0:e.clientY,moved:false}; }
+        DDRAG={kind:DLAST.kind,si:DLAST.si,tok:DLAST.tok,dep:DLAST.dep,gfrom:DLAST.gfrom,gto:DLAST.gto,x0:DLAST.x0,y0:DLAST.y0,moved:false}; }
+      else {   // FIRST-LOAD: WebKit swallows the very first pointerdown after a fresh load, so the grab's pointerdown never ran and DLAST is still null — reconstruct the grab from the node/edge/tie under the pointer so the first double-tap-drag reorders too
+        const el=document.elementFromPoint(e.clientX,e.clientY), edge=ddEdge(el), node=ddNode(el), mwtg=ddMwtGroup(el);
+        if(mwtg){ DDRAG={kind:"mwtgroup",si:+mwtg.getAttribute("data-s"),gfrom:+mwtg.getAttribute("data-mwtfrom")-1,gto:+mwtg.getAttribute("data-mwtto")-1,x0:e.clientX,y0:e.clientY,moved:false}; }
+        else if(edge && edge.getAttribute("data-dep")!=null){ DDRAG={kind:"head",si:+edge.getAttribute("data-s"),dep:+edge.getAttribute("data-dep"),x0:e.clientX,y0:e.clientY,moved:false}; }
         else if(node){ DDRAG={kind:"node",si:+node.getAttribute("data-s"),tok:+node.getAttribute("data-tok"),x0:e.clientX,y0:e.clientY,moved:false}; }   // …and no pick() here either, for the stronger version of the reason above: this branch only ever runs from a pointermove with the button held, i.e. a gesture already known to be a DRAG
-        if(DDRAG) DLAST={kind:DDRAG.kind,si:DDRAG.si,tok:DDRAG.tok,dep:DDRAG.dep,x0:e.clientX,y0:e.clientY,t:Date.now()}; } }
+        if(DDRAG) DLAST={kind:DDRAG.kind,si:DDRAG.si,tok:DDRAG.tok,dep:DDRAG.dep,gfrom:DDRAG.gfrom,gto:DDRAG.gto,x0:e.clientX,y0:e.clientY,t:Date.now()}; } }
     if(!DDRAG)return;
-    if(!DDRAG.moved && Math.hypot(e.clientX-DDRAG.x0,e.clientY-DDRAG.y0)>4){ DDRAG.moved=true; document.body.classList.add("dg-drag"); try{docEl.setPointerCapture(e.pointerId);}catch(_){} dragGhost(DDRAG,e); paintHeadCandidates(DDRAG); }
+    if(!DDRAG.moved && Math.hypot(e.clientX-DDRAG.x0,e.clientY-DDRAG.y0)>4){ DDRAG.moved=true; document.body.classList.add("dg-drag"); try{docEl.setPointerCapture(e.pointerId);}catch(_){} dragGhost(DDRAG,e); if(DDRAG.kind!=="mwtgroup") paintHeadCandidates(DDRAG); }   // a group drag never offers "become the head of X" — there is no single dependent/head to redirect, so the parser-candidate wash is skipped outright rather than relying on paintHeadCandidates' own d.tok===undefined no-op
     if(DDRAG.moved){ e.preventDefault(); DDRAG.lastX=e.clientX; DDRAG.lastY=e.clientY; moveGhost(e); document.querySelectorAll("#doc .dtarget").forEach(n=>n.classList.remove("dtarget"));   // remember the live drop point → a pointercancel can still commit there
+      if(DDRAG.kind==="mwtgroup"){ const blk=document.querySelector(`.sblock[data-i="${DDRAG.si}"]`); if(blk) dropCaret(DDRAG.si,e.clientX,e.clientY,blk,{gfrom:DDRAG.gfrom,gto:DDRAG.gto}); }   // a group drag only ever reorders — no re-head, no shared-conjunct/raise attach — so it always shows the drop caret, exactly like kind:"node" hovering empty space below
+      else {
       const t=ddNode(document.elementFromPoint(e.clientX,e.clientY)), self=DDRAG.kind==="node"&&t&&+t.getAttribute("data-tok")===DDRAG.tok, overNode=t&&+t.getAttribute("data-s")===DDRAG.si&&!self;
       if(overNode){ const tid=+t.getAttribute("data-tok");   // a stemma draws a token as an upper node + a baseline word group — highlight both, so the transliteration under the baseline is covered too
         document.querySelectorAll(`#doc .node[data-s="${DDRAG.si}"][data-tok="${tid}"], #doc .tok-group[data-s="${DDRAG.si}"][data-tok="${tid}"], #doc .bwtok[data-s="${DDRAG.si}"][data-tok="${tid}"]`).forEach(n=>n.classList.add("dtarget")); }
@@ -304,7 +316,7 @@ async function attachAsSharedConjunct(si,depId,conjDepId){ const s=DOC[si]; if(!
           const cd=+edgeEl.getAttribute("data-dep");
           if(cd!==fromId && (isConjDep(DDRAG.si,cd)||raiseMirror(DDRAG.si,fromId,cd))){ overEdge=true; edgeEl.classList.add("dtarget"); } } }   // isRaiseTargetDep is deliberately NOT a gate here — see raiseMirror's own note: the argument-onto-predicate direction was withdrawn, leaving the predicate-onto-argument one as the only raising drop   // …raiseMirror: dragging the PREDICATE onto an argument's edge highlights too, or the mirror gesture would give no sign it was going to work right up until the drop
       if(DDRAG.kind==="node"){ if(overNode||overEdge) clearCaret();   // hovering another node/conj edge → it becomes the head (no drop caret)
-        else { const blk=document.querySelector(`.sblock[data-i="${DDRAG.si}"]`); if(blk)dropCaret(DDRAG.si,e.clientX,e.clientY,blk,DDRAG.tok); } } } });   // empty space → reorder: show where it would land
+        else { const blk=document.querySelector(`.sblock[data-i="${DDRAG.si}"]`); if(blk)dropCaret(DDRAG.si,e.clientX,e.clientY,blk,DDRAG.tok); } } } } });   // empty space → reorder: show where it would land
   function endDrag(e){ document.body.classList.remove("dg-drag"); clearGhost(); clearCaret();
     document.querySelectorAll("#doc .dtarget").forEach(n=>n.classList.remove("dtarget"));
     clearHeadCandidates();
@@ -375,6 +387,10 @@ async function attachAsSharedConjunct(si,depId,conjDepId){ const s=DOC[si]; if(!
        inside the chain. */
     try{ await _commitDrop(d,clientX,clientY); } finally { restore(); } }
   async function _commitDrop(d,clientX,clientY){
+    if(d.kind==="mwtgroup"){   // a group drag only ever reorders — never re-heads onto a node and never attaches onto an edge (there's no single dependent/predicate to redirect), so it skips straight past both of those branches below and never even resolves what's under the pointer for them
+      const under=document.elementFromPoint(clientX,clientY), sblk=under&&under.closest&&under.closest(`.sblock[data-i="${d.si}"]`);
+      if(sblk) reorderMwtGroupByX(d.si,d.gfrom,d.gto,clientX,clientY,sblk);
+      return; }
     const el=document.elementFromPoint(clientX,clientY), tgt=ddNode(el), onNode=tgt&&+tgt.getAttribute("data-s")===d.si;
     const fromId=d.kind==="head"?d.dep:d.tok;
     if(onNode){ const toId=+tgt.getAttribute("data-tok"); if(toId!==fromId) return setDiagramHead(d.si,fromId,toId); return; }   // edge/node dropped onto a node → that node becomes the head
@@ -398,6 +414,17 @@ async function attachAsSharedConjunct(si,depId,conjDepId){ const s=DOC[si]; if(!
     const trEl=e.target.closest?e.target.closest(".tr-edit"):null, glEl=e.target.closest?e.target.closest(".gl-edit"):null,
           gwEl=e.target.closest?e.target.closest("[data-gwtok]"):null;
     if(!d.moved){   // A PLAIN TAP — and the gesture is only NOW known to be one, which is why this is where the token gets selected (the grab itself no longer does it; see the pointerdown above). scroll=false still: the grid row is revealed by scrollNearest immediately below instead, which is the same reveal pick()'s scroll=true path would do
+      /* kind:"mwtgroup" — DO NOTHING. Before this gesture existed, a tap on the tie fell into the marquee-arm
+         branch (ddNode/ddEdge never matched .mwt-g) and a no-movement pointerup ran the marquee's own deselect
+         no-op; the separate, purely-bubbling "click" listener (js/editing/context-menu.js, .mwt-form/.mwt-tr-edit)
+         then reopened the MWT form editor regardless, since neither this handler nor pointerdown ever called
+         preventDefault() or set DSUPPRESS on that path. Introducing kind:"mwtgroup" pulls .mwt-g OUT of the
+         marquee path, so it has to preserve that same "get out of the click's way" contract itself: no pick(),
+         no DSUPPRESS, no preventDefault — just return, and let the native click (already in flight, since
+         pointerdown never called preventDefault either) reach that same listener and open the editor exactly as
+         before. editMWTInline selects the component range itself (selectMWTRange), so nothing is lost by not
+         picking here. Verified live via CDP — see the commit message. */
+      if(d.kind==="mwtgroup") return;
       const tapId=d.kind==="head"?d.dep:(gwEl?+gwEl.getAttribute("data-gwtok"):d.tok);   // a goeswith CONTINUATION selects ITSELF, not the head whose group it is drawn inside
       pick(d.si,tapId,false,false);
       scrollNearest(document.querySelector(`#doc tr[data-s="${d.si}"][data-tok="${tapId}"]`));
@@ -427,6 +454,8 @@ async function attachAsSharedConjunct(si,depId,conjDepId){ const s=DOC[si]; if(!
   // stemma/arcs/tree: nearest insertion slot, minus the slot just AFTER the dragged token (redundant with the one
   // just before it). Returns {to} (the reorder target index), {cx} (caret x) and {lTop,lBot} (the cursor's row band,
   // used to size the caret) — all derived from the SAME chosen slot, so the caret and the reorder stay in sync.
+  // `dragTok` is EITHER a single 1-based token id (the original, unchanged single-token gesture) OR a
+  // `{gfrom,gto}` 0-based range (an MWT group drag) — see the isGroup branch below for what changes.
   function reorderGap(si,clientX,clientY,blk,dragTok){
     // WRAPPED stemma/hierarchy (projWrapped): the reorder targets are the baseline word groups in the scrollable
     // .wp-toks strip — NOT the tree .node points above (which sit at varied depths and span the whole, unwrapped
@@ -448,18 +477,24 @@ async function attachAsSharedConjunct(si,depId,conjDepId){ const s=DOC[si]; if(!
     const lTop=Math.min(...line.map(g=>g.top)), lBot=Math.max(...line.map(g=>g.bot));
     if(lineAware) above=nodes.filter(g=>g.cy<lTop).length;   // whole rows above the cursor's row → all earlier in reading order
     const row=line.slice().sort((a,b)=>a.cx-b.cx), m=row.length;
-    const k=row.findIndex(nd=>nd.id===dragTok), skip=k<0?-1:(rtl?k:k+1);   // reading-after slot index (redundant with the one before)
     const gx=g=> g===0?row[0].left-5 : g===m?row[m-1].right+5 : (row[g-1].right+row[g].left)/2;
-    let bg=-1,bd=Infinity; for(let g=0;g<=m;g++){ if(g===skip)continue; const d=Math.abs(gx(g)-clientX); if(d<bd){bd=d; bg=g;} }
-    if(bg<0)return null;
     // reorder target index = number of tokens before the gap in reading order. Token ids ARE contiguous reading order,
     // so read it straight off the token flanking the gap (LTR: the one to the reading-left = row[bg-1]; RTL: reading-left = row[bg]).
     // This is immune to the dragged token's node being present or absent in the DOM query — the old above+bg count went
     // one short (token landed one slot early) whenever the dragged node was missing from a wrapped row above the cursor.
-    const to = rtl ? (bg===m?0:row[bg].id) : (bg===0?0:row[bg-1].id);
-    return {cx:gx(bg), to, lTop, lBot}; }
+    const toOf=g=> rtl ? (g===m?0:row[g].id) : (g===0?0:row[g-1].id);
+    const isGroup=dragTok&&typeof dragTok==="object";
+    let skip;   // the gap index/es that must NOT accept the caret
+    if(isGroup){   // EVERY gap whose resulting `to` falls inside reorderTokenGroup's own no-op guard (to>=gfrom && to<=gto+1) — i.e. every gap inside the group's own span, immediately before it and immediately after it, computed by re-using the very formula (toOf) that decides the reorder target, so this can never drift from what a drop there would actually do. No separate RTL case needed: toOf already carries the RTL/LTR arithmetic.
+      const {gfrom,gto}=dragTok; skip=new Set();
+      for(let g=0;g<=m;g++){ const t=toOf(g); if(t>=gfrom&&t<=gto+1) skip.add(g); } }
+    else { const k=row.findIndex(nd=>nd.id===dragTok); skip=new Set(); if(k>=0) skip.add(rtl?k:k+1); }   // reading-after slot index (redundant with the one before)
+    let bg=-1,bd=Infinity; for(let g=0;g<=m;g++){ if(skip.has(g))continue; const d=Math.abs(gx(g)-clientX); if(d<bd){bd=d; bg=g;} }
+    if(bg<0)return null;
+    return {cx:gx(bg), to:toOf(bg), lTop, lBot}; }
   // brackets: nearest gap BETWEEN two adjacent glyphs (bracket or token), inside the outermost brackets, minus the
-  // gap just after the dragged token
+  // gap just after the dragged token. `dragTok` is EITHER a single 1-based token id OR a `{gfrom,gto}` 0-based
+  // range (an MWT group drag) — see the isGroup branch below, mirroring reorderGap's own dual signature.
   function bracketDropSlot(si,clientX,clientY,blk,dragTok){
     let all=[], brs=[], toks=[]; const seen={};
     blk.querySelectorAll(`.brk[data-s="${si}"], .bwbr[data-s="${si}"], .tok-group[data-s="${si}"], .bwtok[data-s="${si}"]`).forEach(el=>{
@@ -475,19 +510,27 @@ async function attachAsSharedConjunct(si,depId,conjDepId){ const s=DOC[si]; if(!
     const lTop=Math.min(...line.map(g=>g.top)), lBot=Math.max(...line.map(g=>g.bot)), onLine=g=>g.cy>=lTop&&g.cy<=lBot;   // a glyph is on this row if its centre sits in the token band
     let glyphs=all.filter(onLine); if(glyphs.length<2)glyphs=all.slice();
     glyphs.sort((a,b)=>a.cx-b.cx);
-    const rtl=blk.dir==="rtl", k=glyphs.findIndex(g=>g.tok===dragTok), skip=new Set();   // gaps that must NOT accept the caret: the one just after the dragged token, PLUS the one after each closing bracket that immediately follows it (dropping there is the same reading position as after the token)
-    if(k>=0){ if(rtl){ skip.add(k-1); if(glyphs[k-1]&&glyphs[k-1].close) skip.add(k-2); if(glyphs[k+1]&&glyphs[k+1].br&&!glyphs[k+1].close) skip.add(k); }
-              else { skip.add(k); if(glyphs[k+1]&&glyphs[k+1].close) skip.add(k+1); if(glyphs[k-1]&&glyphs[k-1].br&&!glyphs[k-1].close) skip.add(k-1); } }   // bar: the gap just after the dragged token, the gap after the ONE closing bracket immediately following it, AND the gap after an open bracket immediately PRECEDING it — all the same reading position as the token's own slot
+    const rtl=blk.dir==="rtl";
+    // tokens BEFORE a given caret x, in reading order = the reorder target index: whole rows above, then, within
+    // this row, those on the reading-before side of the caret. Reading order = surface order = token-id order
+    // (DOM order too). Read from token IDS (contiguous reading order), not by counting DOM token nodes: the
+    // reading-latest token still before the caret has id = that count, and whole rows above are covered by (min id
+    // on this row − 1). Immune to a dragged/absent node shifting it by one. Factored out of the final compute
+    // below so a group drag can also ask it of every CANDIDATE gap, to find which ones would no-op.
+    const lineTk=toks.filter(onLine);
+    const beforeAt=cx_=>{ const beforeSide=lineTk.filter(g=> rtl?g.cx>cx_:g.cx<cx_);
+      return beforeSide.length ? Math.max(...beforeSide.map(g=>g.tok)) : (lineTk.length ? Math.min(...lineTk.map(g=>g.tok))-1 : 0); };
+    const isGroup=dragTok&&typeof dragTok==="object", skip=new Set();
+    if(isGroup){   // EVERY gap whose resulting `before` falls inside reorderTokenGroup's own no-op guard (to>=gfrom && to<=gto+1) — same "ask the real formula" approach reorderGap's own isGroup branch takes, so the two can never disagree about what no-ops
+      const {gfrom,gto}=dragTok;
+      for(let i=0;i<glyphs.length-1;i++){ const g=(glyphs[i].right+glyphs[i+1].left)/2, b=beforeAt(g); if(b>=gfrom&&b<=gto+1) skip.add(i); } }
+    else { const k=glyphs.findIndex(g=>g.tok===dragTok);   // gaps that must NOT accept the caret: the one just after the dragged token, PLUS the one after each closing bracket that immediately follows it (dropping there is the same reading position as after the token)
+      if(k>=0){ if(rtl){ skip.add(k-1); if(glyphs[k-1]&&glyphs[k-1].close) skip.add(k-2); if(glyphs[k+1]&&glyphs[k+1].br&&!glyphs[k+1].close) skip.add(k); }
+                else { skip.add(k); if(glyphs[k+1]&&glyphs[k+1].close) skip.add(k+1); if(glyphs[k-1]&&glyphs[k-1].br&&!glyphs[k-1].close) skip.add(k-1); } } }   // bar: the gap just after the dragged token, the gap after the ONE closing bracket immediately following it, AND the gap after an open bracket immediately PRECEDING it — all the same reading position as the token's own slot
     let cx=null,bd=Infinity;
     for(let i=0;i<glyphs.length-1;i++){ if(skip.has(i))continue; const g=(glyphs[i].right+glyphs[i+1].left)/2, d=Math.abs(g-clientX); if(d<bd){bd=d; cx=g;} }   // gap = between the glyphs' facing EDGES (a long word's centre is far from its edge)
     if(cx==null)return null;
-    // tokens BEFORE the drop in reading order = the reorder target index: whole rows above, then, within this row,
-    // those on the reading-before side of the caret. Reading order = surface order = token-id order (DOM order too).
-    // tokens before the caret in reading order = the reorder target index. Read it from token IDS (contiguous reading
-    // order), not by counting DOM token nodes: the reading-latest token still before the caret has id = that count, and
-    // whole rows above are covered by (min id on this row − 1). Immune to a dragged/absent node shifting it by one.
-    const lineTk=toks.filter(onLine), beforeSide=lineTk.filter(g=> rtl?g.cx>cx:g.cx<cx);
-    let before = beforeSide.length ? Math.max(...beforeSide.map(g=>g.tok)) : (lineTk.length ? Math.min(...lineTk.map(g=>g.tok))-1 : 0);
+    const before=beforeAt(cx);
     const lineBrs=brs.filter(onLine), pool=lineBrs.length?lineBrs:brs;
     let ref=pool[0],rbd=Infinity; pool.forEach(b=>{ const d=Math.abs(b.cx-cx); if(d<rbd){rbd=d; ref=b;} });   // hug the nearest bracket on this row → the caret takes just its height
     return {cx, top:ref.top, bot:ref.bot, before}; }
@@ -501,8 +544,31 @@ async function attachAsSharedConjunct(si,depId,conjDepId){ const s=DOC[si]; if(!
     const r=reorderGap(si,clientX,clientY,blk,tok); if(!r)return;
     if(r.to===tok-1){ attachGenericSubj(si,tok); return; }
     reorderToken(si, tok-1, r.to); }
-  // a floating clone of the dragged word that follows the cursor, plus a caret at the prospective drop slot
+  // would inserting at 0-based target index `to` land strictly INSIDE another MWT's own span (splitting it),
+  // excluding the range actually being dragged? Landing exactly at another MWT's own boundary (right before or
+  // right after its whole span) is a legitimate move and is NOT a conflict — only landing between its components
+  // is. reorderTokenGroup/remapMWT were never designed to detect or recover from an interleaved MWT, so this is
+  // checked BEFORE the commit rather than after (mirrors attachAsRaisedSubj's own refuse-before-writing shape).
+  function mwtGroupTargetConflicts(si,gfrom,gto,to){ const s=DOC[si]; if(!s) return false;
+    return (s.mwt||[]).some(m2=>{ const f2=m2.from-1, t2=m2.to-1;
+      if(f2===gfrom && t2===gto) return false;   // the range being dragged itself
+      return to>f2 && to<=t2; }); }
+  // the MWT group analogue of reorderByX: resolve the drop target the SAME way (reorderGap/bracketDropSlot, now
+  // handed the {gfrom,gto} range so their own skip logic hides every gap that would no-op — see those functions'
+  // own isGroup branches), then commit via reorderTokenGroup (js/editing/edit-ops.js) instead of reorderToken.
+  // No attachGenericSubj-style repurposing of the "just before" caret: that gesture is VERB/AUX-specific and has
+  // no analogue for a token range.
+  function reorderMwtGroupByX(si,gfrom,gto,clientX,clientY,blk){
+    const grp={gfrom,gto};
+    let to;
+    if(conv==="brackets"){ const slot=bracketDropSlot(si,clientX,clientY,blk,grp); if(!slot||slot.top==null)return; to=slot.before; }
+    else { const r=reorderGap(si,clientX,clientY,blk,grp); if(!r)return; to=r.to; }
+    if(mwtGroupTargetConflicts(si,gfrom,gto,to)){ toast("Can't move there — it would land inside another multi-word token"); return; }
+    reorderTokenGroup(si,gfrom,gto,to); }
+  // a floating clone of the dragged word (or, for an MWT group, its own fused surface form) that follows the
+  // cursor, plus a caret at the prospective drop slot
   function dragGhost(d,e){ let txt, rel=null; if(d.kind==="head"){ const dep=DOC[d.si]&&DOC[d.si].tokens[d.dep-1]; txt=(dep&&dep.deprel)||"dep"; rel=dep&&dep.deprel; }   // dragging a relation → show its label
+      else if(d.kind==="mwtgroup"){ const m=mwtAtSel(DOC[d.si],d.gfrom+1); txt=(m&&m.form)||"•"; }
       else { const src=DOC[d.si]&&DOC[d.si].tokens[d.tok-1]; txt=(src&&src.form)||"•"; }
     const g=document.createElement("div"); g.className="dg-ghost"+(d.kind==="head"?" dg-ghost-rel":""); g.textContent=txt;
     if(rel!=null) g.style.color=relColor(rel);   // same colour as the relation's diagram label
