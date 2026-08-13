@@ -344,14 +344,6 @@ function arcs(si){
     regEp(a.to,  len,Math.sign(c[a.from-1]-c[a.to-1])||1,true, o=>a.off2=o);}); // this node is the dependent → incoming edge is eligible for the centre slot on ITS side (see above)
   let rootOff=0;
   if(rootI>=0) regEp(rootI+1,Infinity,0,true,o=>rootOff=o);   // side 0 is a sentinel, not a real fan side — never matched by the ±1 grouping below, so it needs its own unconditional centring
-  Object.values(epAt).forEach(arr=>{
-    arr.filter(e=>e.central&&e.side===0).forEach(e=>e.set(0));                        // the root stub only — always centre
-    [-1,1].forEach(side=>{ const grp=arr.filter(e=>e.side===side).sort((p,q)=>q.len-p.len);   // this side's whole pool — the head edge if it fans this way, plus every dependent edge fanning this way — ranked by length alone
-      const hasCentral=grp.some(e=>e.central);   // only a side that actually hosts the head edge is ever eligible for the dead-centre slot (one centre per node, as before) — a side with no head edge still fans from one step out, never slot 0
-      grp.forEach((e,j)=>e.set(side*(hasCentral?j:j+1)*SPREAD)); }); });               // longest first (j=0) → most central; shortest last → outermost
-  // endpoints sit directly on the fanned targets → measure arc width (and Hobby height) from THEM
-  list.forEach(a=>{ a.X1=c[a.from-1]+(a.off1||0); a.X2=c[a.to-1]+(a.off2||0); a.mx=(a.X1+a.X2)/2;
-    a.h=arcHgt(Math.abs(a.X2-a.X1),ROW); a.col=relColor(a.dep); });
   // Shared=Yes: the real arc draws normally (to whichever conjunct it's actually attached to, like any other
   // arc — no more "spring from the conj edge's apex" override); a dashed "ghost" arc (same deprel/label) is
   // added to every OTHER conjunct in the coordination (otherConjuncts) — purely decorative, drawn below.
@@ -360,31 +352,45 @@ function arcs(si){
   // ghostPairsFor gives [originIdx,targetIdx,rel] 0-based; here "to" is the arc's dependent-side token id (1-based,
   // matching a real arc's own `to`) and "from" is its head-side (the OTHER conjunct, or the Subj predicate).
   const ghostPairs=ghostPairsFor(t).map(([o,tg,rel,kind])=>({from:tg+1,to:o+1,dep:rel,kind}));
-  // item 7: fan each ghost's endpoints against the SAME per-token buckets the reals already resolved (epAt/off1/
-  // off2, set above) — continuing past whatever slot a real occupies there (including its own central "0" slot),
-  // never the reverse. maxRealSlot tracks, per node+side, how far out the reals already reach.
-  const maxRealSlot={};
-  const bumpRealSlot=(node,off)=>{ const o=off||0;
-    if(o===0){ const k1=node+"|1",k2=node+"|-1"; maxRealSlot[k1]=Math.max(maxRealSlot[k1]||0,0); maxRealSlot[k2]=Math.max(maxRealSlot[k2]||0,0); }
-    else { const side=Math.sign(o), k=node+"|"+side; maxRealSlot[k]=Math.max(maxRealSlot[k]||0,Math.round(Math.abs(o)/SPREAD)); } };
-  list.forEach(a=>{ bumpRealSlot(a.from,a.off1); bumpRealSlot(a.to,a.off2); });
-  const genericToks=[]; for(let i=0;i<n;i++) if(hasGenericSubj(t,i)) genericToks.push(i);
-  const ghostSlot={};
+  // on report ("ghost arc fanning… I'm talking about the fanning of ghost arcs relative to non-ghost arcs"):
+  // ghosts used to be computed in a SEPARATE, LATER pass that unconditionally fanned every ghost outside every
+  // real arc at a shared endpoint, regardless of relative length — a real arc always won the inner slots, a
+  // ghost was always pushed past all of them. That was deliberate (see this function's own git history) but is
+  // exactly what was being reported as still wrong: a long ghost sitting outside a short real arc reads
+  // backwards next to the "longer sits inward" rule every other fan in this app follows. Fixed by registering
+  // ghost endpoints into the SAME epAt pool real arcs use, BEFORE the one sort/assign pass below runs — so a
+  // real and a ghost sharing an endpoint are ranked by length together, on equal footing, and whichever is
+  // actually longer lands closer to centre — including the dead-centre slot itself, if a ghost genuinely is
+  // the longest thing on that side. `central` (always false for a ghost) doesn't reserve slot 0 for itself; it
+  // only gates whether slot 0 is IN PLAY on this side at all (a side hosting no real head edge never uses it,
+  // same as before this change) — exactly the same "central is a gate, not a claim" rule this function's own
+  // earlier fix already established for two real edges competing on one side (see the comment above list's own
+  // fan pass), now extended to a real and a ghost competing the identical way.
+  ghostPairs.forEach(p=>{ const len=Math.abs(p.from-p.to);   // token-index span, the SAME unit list's own `a.hi-a.lo` uses — not a pixel distance, so a ghost and a real arc compare on equal terms regardless of how wide any token between them happens to be
+    regEp(p.from,len,Math.sign(c[p.to-1]-c[p.from-1])||1,false,o=>p._hOff=o);
+    regEp(p.to,  len,Math.sign(c[p.from-1]-c[p.to-1])||1,false,o=>p._dOff=o); });
+  const usedSlot={};   // per node+side, how many slots THIS pass consumed — Subject=Generic (below) shares these same buckets and must continue counting from here, not recompute its own notion of "how far out the reals reach"
+  Object.entries(epAt).forEach(([node,arr])=>{
+    arr.filter(e=>e.central&&e.side===0).forEach(e=>e.set(0));                        // the root stub only — always centre
+    [-1,1].forEach(side=>{ const grp=arr.filter(e=>e.side===side).sort((p,q)=>q.len-p.len);   // this side's whole pool — real AND ghost together — ranked by length alone
+      const hasCentral=grp.some(e=>e.central);   // only a side that actually hosts a REAL head edge is ever eligible for the dead-centre slot (one centre per node, as before) — a side with no head edge still fans from one step out, never slot 0
+      grp.forEach((e,j)=>e.set(side*(hasCentral?j:j+1)*SPREAD));               // longest first (j=0) → most central; shortest last → outermost
+      usedSlot[node+"|"+side]=hasCentral?grp.length:grp.length+1; }); });
+  // endpoints sit directly on the fanned targets → measure arc width (and Hobby height) from THEM
+  list.forEach(a=>{ a.X1=c[a.from-1]+(a.off1||0); a.X2=c[a.to-1]+(a.off2||0); a.mx=(a.X1+a.X2)/2;
+    a.h=arcHgt(Math.abs(a.X2-a.X1),ROW); a.col=relColor(a.dep); });
   const ghostArcs=ghostPairs.map(p=>{
-    const hSide=Math.sign(c[p.to-1]-c[p.from-1])||1, hK=p.from+"|"+hSide;
-    ghostSlot[hK]=(ghostSlot[hK]!=null?ghostSlot[hK]:(maxRealSlot[hK]||0))+1;
-    const dSide=Math.sign(c[p.from-1]-c[p.to-1])||1, dK=p.to+"|"+dSide;
-    ghostSlot[dK]=(ghostSlot[dK]!=null?ghostSlot[dK]:(maxRealSlot[dK]||0))+1;
-    const X1=c[p.from-1]+hSide*ghostSlot[hK]*SPREAD, X2=c[p.to-1]+dSide*ghostSlot[dK]*SPREAD, h=arcHgt(Math.abs(X2-X1),ROW);
+    const X1=c[p.from-1]+(p._hOff||0), X2=c[p.to-1]+(p._dOff||0), h=arcHgt(Math.abs(X2-X1),ROW);
     return {from:p.from,to:p.to,dep:p.dep,kind:p.kind,X1,X2,mx:(X1+X2)/2,h,col:relColor(p.dep)}; });
+  const genericToks=[]; for(let i=0;i<n;i++) if(hasGenericSubj(t,i)) genericToks.push(i);
   // item 2: Subject=Generic folds into this SAME ghostArcs array — same endpoint-fanning at the predicate's shared
   // bucket, same label-decollision pass below — rather than being computed as a disconnected afterthought (which
   // is what let its label collide with a real label sitting at the same spot). Its "∅" side has no real token to
   // fan/look up, so that endpoint is the pre-reserved gap centre directly; isEmpty flags it for the draw pass.
   genericToks.forEach(i=>{ const gapAmt=genericSubjGapW(t,i), emptyX0=c[i]-w[i]/2-gapAmt/2;
     const dSide=Math.sign(emptyX0-c[i])||1, dK=(i+1)+"|"+dSide;   // shares the SAME "to" bucket any other arc landing on this predicate uses
-    ghostSlot[dK]=(ghostSlot[dK]!=null?ghostSlot[dK]:(maxRealSlot[dK]||0))+1;
-    const predX=c[i]+dSide*ghostSlot[dK]*SPREAD, h=arcHgt(Math.abs(emptyX0-predX),ROW);   // the predicate is the HEAD of this subj relation, the ∅ is its dependent — X1 (tail) sits at the predicate, X2 (arrowhead) at the ∅, matching a real subj arc's head→dependent direction
+    usedSlot[dK]=(usedSlot[dK]||0)+1;
+    const predX=c[i]+dSide*usedSlot[dK]*SPREAD, h=arcHgt(Math.abs(emptyX0-predX),ROW);   // the predicate is the HEAD of this subj relation, the ∅ is its dependent — X1 (tail) sits at the predicate, X2 (arrowhead) at the ∅, matching a real subj arc's head→dependent direction
     ghostArcs.push({from:i+1,to:i+1,dep:"subj",X1:predX,X2:emptyX0,mx:(emptyX0+predX)/2,h,col:relColor("subj"),isEmpty:true}); });
   const maxHeight=Math.max(12,...list.map(a=>a.h),...ghostArcs.map(a=>a.h));   // ghost heights count too, so a distant ghost target never clips the top padding
   const arcZone=TOP+ARC_APEX*maxHeight+4, wordY=arcZone+WORD_OFF;   // reserve to the tallest arc's visible PEAK (0.75·h), not its handle height — so the top clearance over the crown is constant regardless of arc height (the crown then lands at TOP+4)
