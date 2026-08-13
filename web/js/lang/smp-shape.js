@@ -63,29 +63,58 @@ function _loadHB(){ if(_hbReady) return _hbReady;
 // vendors cannot decompress WOFF at all — every glyph shaped to gid0 (.notdef) with real advances but
 // empty outlines against font_face's own cached woff2, and shaped correctly (subjoined conjuncts and all)
 // against the identical text once fed the raw .ttf. Decoded here into raw bytes for HarfBuzz to shape
-// against, never into an @font-face src. Cached per family (a Promise, so concurrent callers share one
-// in-flight fetch rather than issuing the bridge call twice for the same font).
+// against, never into an @font-face src.
+// ⚠ CACHED PER (family,weight), NOT PER FAMILY ALONE — on report ("the Arabic tokens... look way too
+// light... falling back to Noto Sans Arabic Light"), root-caused live against the ACTUAL bytes Google's
+// CSS API hands back for a non-core family's unauthenticated (no browser UA — see this file's own note
+// on why) request: it does NOT answer with one variable-weight file the way the browser-UA `fetch()`
+// path does — it expands into ONE STATIC PER-WEIGHT INSTANCE PER `@font-face` BLOCK (100/200/…/900,
+// confirmed live for "Noto Sans Arabic": 9 separate non-variable .ttf files, none carrying an `fvar`
+// table HarfBuzz's own `setVariations` could act on at all), and app/fonts.py's old `_SRC_RE.search()`
+// simply took the FIRST block in the response — weight 100 (Thin), nowhere near any caller's actual
+// target — exactly the SAME class of "wrong FILE, not wrong axis call" bug 4d38780 already found and
+// fixed for the two CORE bundled families, just for a family that isn't bundled and so still goes out to
+// the network. `fonts.fetch_raw` (app/fonts.py) now picks the block matching a REQUESTED weight instead
+// of blindly taking the first one — which means the bytes this bridge call answers with are no longer a
+// function of `family` alone, so neither is what belongs in either cache below: two different weights of
+// the SAME family are now, correctly, two different files, and must not share one cache slot (which
+// would silently hand every later caller whichever weight the FIRST caller happened to request, no
+// matter what its own `weight` argument asked for — the identical "one shared mutable resource, several
+// distinct wants" hazard `weight`'s own note below already describes for `setVariations`, just one layer
+// up, at the level of WHICH FILE gets fetched rather than which axis position gets set on it). Cached as
+// Promises, so concurrent callers still share one in-flight fetch for the same (family,weight) pair.
 const _fontBytesCache=new Map();
-function _fetchFontBytes(family){
-  if(_fontBytesCache.has(family)) return _fontBytesCache.get(family);
+function _fetchFontBytes(family,weight){
+  const key=family+"|"+weight;
+  if(_fontBytesCache.has(key)) return _fontBytesCache.get(key);
   const p=(async()=>{
     if(!(window.pywebview&&window.pywebview.api&&window.pywebview.api.font_face_raw)) throw new Error("no bridge");
-    const r=await window.pywebview.api.font_face_raw(family);
+    const r=await window.pywebview.api.font_face_raw(family,weight);
     if(!r||r.error||!r.uri) throw new Error((r&&r.error)||"no font uri");
     const m=/^data:[^;]+;base64,(.*)$/.exec(r.uri);
     if(!m) throw new Error("unexpected font uri shape");
     return _b64ToBytes(m[1]); })();
-  _fontBytesCache.set(family,p); return p; }
+  _fontBytesCache.set(key,p); return p; }
 
-// item 25: one HarfBuzz face+font per family, built once from the bytes above and reused across every
-// shaping call for that family — hb_face_create/hb_font_create are real parses, not worth repeating per string.
+// item 25/28: one HarfBuzz face+font per (family,weight) — hb_face_create/hb_font_create are real parses,
+// not worth repeating per string, but see _fetchFontBytes' own note just above for why the KEY grew a
+// weight component: a request for "Noto Sans Arabic" at weight 400 and one at weight 700 can now be
+// genuinely different bytes underneath (two static instances, not one variable file with a movable axis),
+// so they need two distinct hb_face/hb_font pairs, not one shared object mutated in place between calls.
+// For a family that DOES resolve to one variable file regardless of the weight asked for (the two CORE
+// bundled faces — see app/fonts.py's `_bundled_path`, which ignores its own `weight` argument entirely and
+// always returns the same on-disk file) this parses the SAME bytes twice under two different cache keys
+// rather than once — a small, one-time redundant parse per distinct weight a family is ever actually
+// shaped at, not per shape call, and correctness (not reuse) is what this cache exists for in the first
+// place.
 const _hbFontCache=new Map();
-function _getHBFont(family){
-  if(_hbFontCache.has(family)) return _hbFontCache.get(family);
-  const p=(async()=>{ const hb=await _loadHB(), bytes=await _fetchFontBytes(family);
+function _getHBFont(family,weight){
+  const key=family+"|"+weight;
+  if(_hbFontCache.has(key)) return _hbFontCache.get(key);
+  const p=(async()=>{ const hb=await _loadHB(), bytes=await _fetchFontBytes(family,weight);
     const blob=hb.createBlob(bytes), face=hb.createFace(blob,0), font=hb.createFont(face);
     return {hb,font}; })();
-  _hbFontCache.set(family,p); return p; }
+  _hbFontCache.set(key,p); return p; }
 
 // item 25: ONE shaped glyph's outline, repositioned from the glyph's own local origin to (gx,gy) in this
 // run's coordinate space. font.glyphToJson (hbjs) already parses hb_font_draw_glyph's M/L/Q/C/Z path into
@@ -128,25 +157,31 @@ function _glyphSVGPath(font,gid,gx,gy){ const segs=font.glyphToJson(gid); if(!se
 // shape() advance/position numbers AND glyphToPath's outline coordinates come out pre-scaled to sizePx,
 // with no separate upem-derived scale factor to apply by hand (the default scale, unset, is the font's own
 // upem — raw font units, which is not what any caller here wants).
-// ⚠ `weight` (item 26 regression fix, added after the font-file bug below was found and fixed): a plain
-// CSS font-weight NUMBER (e.g. 571 — AVM_ATTR_F's own weightCurve(10.5)), applied via HarfBuzz's OWN
-// variable-font axis call (hb_font_set_variations, "wght") BEFORE shaping. _getHBFont's font object is
-// shared/cached PER FAMILY, not per weight — every caller of THIS function that wants a specific weight
-// has to set it fresh, every call, or a later caller's setVariations would silently keep governing an
-// earlier caller's glyphs (there is no "reset to default" between calls otherwise). Left unset (undefined/
-// 0/NaN), the shared font simply keeps whatever axis position it last had — for the item-25 SMP scripts,
-// which never pass this parameter at all, that is always "whatever the font's own default happens to be"
-// (fvar's own default, e.g. wght=400), exactly as before this parameter existed. THE BUG THIS FIXES: even
-// once _getHBFont were pointed at the CORRECT (bundled, c2sc-carrying) font file, without this call
-// HarfBuzz would still shape every .avm-attr/.glabbr run at the variable font's DEFAULT weight (400) —
-// visibly lighter than the 571 the CSS actually asks for and the browser's own @font-face rendering
-// already honours automatically (browsers map a recognised "wght"-registered axis from font-weight
-// without being told to) — part of the live-reported "way too light" regression, on top of (and
-// independent from) the wrong-font-file bug _bundled_path (app/fonts.py) fixes.
+// ⚠ `weight` (item 26 regression fix, extended by item 28 to the Arabic/general-token trigger too): a
+// plain CSS font-weight NUMBER (e.g. 571 — AVM_ATTR_F's own weightCurve(10.5); 400 — .tok-word/.node-lbl/
+// .baseword/.mwt-form's flat `font-weight:var(--script-wght,400)`, no override ever assigned to that var
+// anywhere in this codebase), applied via HarfBuzz's OWN variable-font axis call (hb_font_set_variations,
+// "wght") BEFORE shaping. Defaults to 400 when a caller passes nothing (every item-25 SMP-Brahmic call
+// site still omits this parameter entirely) — NOT "leave whatever axis position the font object last had"
+// any more: _getHBFont/_fetchFontBytes are keyed by (family,weight) now (see their own notes, above), so
+// every distinct weight this function is ever called with gets its OWN freshly-created font object, never
+// a shared one a DIFFERENT caller's own setVariations could have left pointed somewhere else — the exact
+// hazard this parameter's own OLD wording warned about is structurally gone, not just guarded against, so
+// calling setVariations unconditionally (rather than only `if(weight)`) is simpler and no less correct: a
+// documented no-op on an axis (or a whole font) that doesn't have one, safe on every family either way.
+// THE BUG THIS FIXES (Arabic case, item 28): even once app/fonts.py's own `fetch_raw` were pointed at the
+// CORRECT weight-matched file (see _fetchFontBytes' own note — Arabic's real bug was mostly THAT, a wrong-
+// weight FILE, not a missing axis call), a caller that never threaded this parameter at all would still
+// resolve to whatever this function's own default happens to be — now correctly 400, matching every one
+// of .tok-word/.node-lbl/.baseword/.mwt-form's own flat CSS target, but worth stating as the explicit
+// default rather than an accident of "undefined→no setVariations call→font's own fvar default", since
+// nothing then guarantees that font's OWN default is 400 (a font's fvar default is chosen by ITS
+// designer, not by this app's CSS) the way a stated, deliberate 400 here does.
 async function _shapeSMP(text,family,sizePx,features,letterSpacingPx,weight){
-  const {hb,font}=await _getHBFont(family);
+  const w=weight||400;
+  const {hb,font}=await _getHBFont(family,w);
   font.setScale(sizePx,sizePx);
-  if(weight) font.setVariations({wght:weight});   // hb_font_set_variations on an axis the font doesn't have is a documented no-op, not an error — safe to call unconditionally on non-variable families too
+  font.setVariations({wght:w});   // hb_font_set_variations on an axis the font doesn't have is a documented no-op, not an error — safe to call unconditionally on non-variable families too
   const buffer=hb.createBuffer();
   buffer.addText(text);
   buffer.guessSegmentProperties();   // script/direction/language from the text itself — every SMP script this module serves is a single-script run by construction (smpUnshaped gates on content, not on a caller-supplied script tag)

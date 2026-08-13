@@ -945,6 +945,50 @@ function smpSwapPath(el,shape){
   while(el.firstChild) path.appendChild(el.firstChild);   // the <title> tooltip child, if any (svgTip) — moved, not rebuilt
   if(el.parentNode) el.parentNode.replaceChild(path,el);
   return path; }
+/* item 28 — generalises smpSwapPath (above) to an element whose content is not ONE flat text node but
+   several independently-addressable <tspan> children: a GROUPED `.avm-val` row ("3.Sing.Masc" — one
+   <tspan data-subfeat> per UD subfeature, dot-joined by plain <tspan class="avm-val-sep">s — see
+   FFS_SHAPE_CLASSES' own note on why this case was originally left native, on report ("I hope that
+   grouped AVM rows are now being shaped with HarfBuzz!" — they were not, deliberately, for exactly the
+   reason that note gives). smpSwapPath itself swaps a WHOLE <text> for ONE <path> — fine for a flat
+   string, but one shared path has no way to carry N independently-clickable identities, and avmMenuAt
+   (context-menu.js) resolves a right-click to ONE subfeature by walking up to the nearest [data-subfeat]
+   ancestor — collapsing the row into a single path would silently widen every click to "the whole
+   group", regressing the exact per-subfeature menu this tier exists for.
+   THE FIX: shape each child's OWN text as its OWN small HarfBuzz run (the caller already did this —
+   `shapes` is `[{node,shape}]` in DOM order, one entry per original <tspan>) and paint N sibling
+   <path>s inside ONE <g>, CURSOR-CHAINED left to right — run i's start-x is run i−1's own shaped
+   advance (`shape.w`) accumulated onward, exactly the position HarfBuzz's own internal glyph cursor
+   would have reached had the whole string been shaped as one buffer — so the combined run reads
+   identically to one continuous shape even though it is N separate elements underneath (no cross-run
+   kerning/contextual shaping between adjacent runs, since each is its own HarfBuzz buffer — an accepted
+   approximation for plain Latin digits/letters/periods with no contextual substitution to lose).
+   Anchor handling mirrors smpSwapPath's own (start/middle/end resolve against the TOTAL width across
+   every run, not each run's own), so a future caller with a different text-anchor than `.avm-val`'s own
+   "start" still lands correctly. Every child's OWN attributes (class — "avm-subval"/"avm-val-sep" — and
+   data-subfeat) copy onto its own <path> verbatim, so avmMenuAt's `[data-subfeat]` walk-up finds the
+   SAME element it always did, now a <path> instead of a <tspan>; the parent's own attributes
+   (class="avm-val", direction="ltr", data-s/data-tok if present, …) copy onto the wrapping <g> the same
+   way smpSwapPath copies them onto its <path> — fill/stroke/paint-order are inheritable SVG presentation
+   properties, so painting them on the <g> reaches every child <path> exactly as the original <text>'s
+   styling reached every child <tspan>, with no per-path class duplication needed for that part. */
+function smpSwapPathGroup(el,shapes){
+  const anchor=el.getAttribute("text-anchor")||"middle";
+  const x=parseFloat(el.getAttribute("x"))||0, y=parseFloat(el.getAttribute("y"))||0;
+  const total=shapes.reduce((sum,p)=>sum+p.shape.w,0);
+  let cursor=anchor==="middle"?x-total/2:anchor==="end"?x-total:x;
+  const g=document.createElementNS(SVGNS,"g");
+  for(const a of el.attributes) if(a.name!=="x"&&a.name!=="y"&&a.name!=="text-anchor") g.setAttribute(a.name,a.value);
+  for(const {node,shape} of shapes){
+    const path=document.createElementNS(SVGNS,"path");
+    for(const a of node.attributes) path.setAttribute(a.name,a.value);
+    path.setAttribute("d",shape.d);
+    path.setAttribute("transform","translate("+cursor+","+y+")");
+    while(node.firstChild) path.appendChild(node.firstChild);   // a <title> tooltip child, if any — moved, not rebuilt (matches smpSwapPath's own convention)
+    g.appendChild(path);
+    cursor+=shape.w; }
+  if(el.parentNode) el.parentNode.replaceChild(g,el);
+  return g; }
 function smpReshape(root){
   if(!root||!root.querySelectorAll) return;
   const mounted=!root.isConnected;
@@ -991,13 +1035,20 @@ function smpReshape(root){
      <text> element gets swapped: a STANDALONE row (`r.vals` unset, drawAVM below) is one flat text node —
      shapes and swaps exactly like `.avm-attr`. A GROUPED row ("3.Sing.Masc") is `<tspan>` children with NO
      direct text node of the parent `<text>`'s own — `ownText()` (below) reads "" for it, so `ffsShapeClass`
-     never fires and it is left exactly as before: plain native text, `.avm-subval`/`.avm-val-sep` tspans
-     intact and individually addressable (context-menu.js's tokFromEl/`.avm-row` click handling walks up to
-     an ancestor with data-s/data-tok, never down into a tspan's own identity, so nothing there depends on
-     the val's OWN element surviving a swap either way — but a `<path>` has no tspans at all, so shaping a
-     group row here would have destroyed the per-subfeature hit-testing this tier's own right-click menu
-     relies on, for no reservation benefit `_measOne`'s own shaped measurement (avmLayout, below) doesn't
-     already provide). The MEASUREMENT side (attrW/valW, avmLayout) is not similarly limited — `r.val` is
+     never fires on `s`.
+     item 28 — SUPERSEDES the paragraph above's OWN prior conclusion ("it is left exactly as before: plain
+     native text"), on report ("Wait, I hope that grouped AVM rows are now being shaped with HarfBuzz!").
+     That WAS the deliberate, documented choice at the time: a `<path>` swap has no tspans at all, so
+     shaping the group row as ONE shared path would have destroyed the per-subfeature hit-testing
+     avmMenuAt's `[data-subfeat]` walk-up (context-menu.js) relies on. The fix is not to abandon that
+     protection but to generalise it: `hasGroupKids` (below) fires the SAME class test as `ffsClass` (so
+     any FFS_SHAPE_CLASSES member that groups its content into per-subfeature tspans is covered, not just
+     "avm-val" by name), but on an element with NO own text and REAL <tspan> children instead — each child
+     is shaped as its OWN small HarfBuzz run and the whole row swaps to a `<g>` of CURSOR-CHAINED sibling
+     `<path>`s (smpSwapPathGroup, above), one per tspan, each carrying that tspan's own class/data-subfeat
+     verbatim — so a right-click on "Sing" alone inside "3.Sing.Masc" still resolves to Number, not the
+     whole AGR group, exactly as it did on the native tspans this replaces. The MEASUREMENT side
+     (attrW/valW, avmLayout) is not similarly limited — `r.val` is
      always ONE flat string there regardless of grouping (the tspan split is drawAVM's own presentation
      choice, made from the SAME string after layout has already reserved for it as a whole) — so both a
      standalone and a grouped row's valW go through the identical HarfBuzz-shaped measurement path below;
@@ -1017,8 +1068,39 @@ function smpReshape(root){
   for(const el of texts){ if(smpUnshaped(ownText(el))){ hadSMP=true; break; } }
   for(const el of texts){ const s=ownText(el);
     const punctSatSMP=hadSMP&&isPunctSat(el);
-    const ffsClass=s&&ffsShapeClass(el);
-    if(!smpUnshaped(s) && !punctSatSMP && !SMP_RE.test(s||"") && !arabicUnshaped(s) && !ARABIC_RE.test(s||"") && !ffsClass) continue;
+    const ffsClassRaw=ffsShapeClass(el);
+    const ffsClass=s&&ffsClassRaw;
+    // item 28 — the group case: no own text (`s` is "" — see ownText's own note on why a tspan-carrying
+    // parent reads that way) but a real FFS_SHAPE_CLASSES class AND real element children (a GROUPED
+    // `.avm-val` row's `<tspan data-subfeat>`/`<tspan class="avm-val-sep">` set — see the big comment
+    // above FFS_SHAPE_CLASSES for the full reasoning). `el.children`, not `el.childNodes`: only ELEMENT
+    // children count as "tspans to shape independently" — a stray whitespace text node between them
+    // (there is none here, drawAVM appends tspans back to back with no text between, but this is the
+    // correct predicate regardless) would show up in childNodes and not children, and ownText() already
+    // established `s===""` means there ISN'T a meaningful direct text node here for THIS branch to worry
+    // about missing.
+    const hasGroupKids=!s && ffsClassRaw && el.children && el.children.length>0;
+    if(!smpUnshaped(s) && !punctSatSMP && !SMP_RE.test(s||"") && !arabicUnshaped(s) && !ARABIC_RE.test(s||"") && !ffsClass && !hasGroupKids) continue;
+    if(hasGroupKids){
+      const cs3=getComputedStyle(el);
+      const hbFeat3=cssFeatToHB(cs3.fontFeatureSettings);
+      const fam3=_firstFamily(cs3.fontFamily), sizePx3=parseFloat(cs3.fontSize)||0;
+      const track3=parseFloat(cs3.letterSpacing)||0;
+      const wght3=parseFloat(cs3.fontWeight)||0;
+      if(fam3&&sizePx3&&typeof smpShapeSync==="function"){
+        const kids=[...el.children];
+        const shapes=kids.map(k=>({node:k,shape:smpShapeSync(k.textContent||"",fam3,sizePx3,hbFeat3,track3,wght3)}));
+        // every run must be ready before ANY of them paints — a partial swap would leave some subfeatures
+        // shaped-and-positioned against the OTHERS' still-native advances, which is exactly the seam/
+        // discontinuity the cursor-chaining in smpSwapPathGroup exists to prevent; wait for the whole row.
+        if(shapes.every(p=>p.shape&&p.shape.d)){ smpSwapPathGroup(el,shapes); continue; }
+        if(typeof smpShapeEnsure==="function"&&typeof smpNotePending==="function"){
+          for(const k of kids){ const txt=k.textContent||"";
+            if(!smpShapeSync(txt,fam3,sizePx3,hbFeat3,track3,wght3)) smpNotePending(smpShapeEnsure(txt,fam3,sizePx3,hbFeat3,track3,wght3)); }
+        }
+      }
+      if(!smpUnshaped(s) && !punctSatSMP && !SMP_RE.test(s||"")) continue;   // not ready yet — leave the plain <text>/tspans exactly as they were (native paint), same fallback safety as the standalone ffsClass branch below
+    }
     if(ffsClass){
       const cs2=getComputedStyle(el);
       const hbFeat=cssFeatToHB(cs2.fontFeatureSettings);
@@ -1074,10 +1156,28 @@ function smpReshape(root){
       if(typeof fontScriptRes==="function"&&typeof fontStackName==="function"){
         for(const [name,re] of fontScriptRes()){ if(re.test(s)){ fam=fontStackName(name); break; } } }
       const sizePx=parseFloat(cs0.fontSize)||0;
+      // on report ("the Arabic tokens in the diagram look way too light... you need to explicitly set
+      // the weight"): this call never threaded `weight` at all (unlike the ffsClass/.avm-attr branch
+      // above, item 26's own regression fix) — HarfBuzz's `hb_font_set_variations` is never implicit, so
+      // an unset weight leaves the shared per-(family,weight) font object at whatever its OWN default
+      // happens to be (see _shapeSMP's note, smp-shape.js). `.tok-word`/`.node-lbl`/`.baseword`/
+      // `.mwt-form` all set `font-weight:var(--script-wght,400)` (app.css) and nothing in this codebase
+      // ever assigns `--script-wght`, so the live target here is always a flat 400 — read live off the
+      // element's own computed style anyway, not hard-coded, so a future weight-curve tier for this CSS
+      // var is picked up automatically rather than silently ignored the way the unset call was. This was
+      // ONE of two stacked bugs: the other, separate one — `fetch_raw()`/`font_face_raw` resolving a
+      // non-core family like "Noto Sans Arabic" to the WRONG static instance (Thin, weight 100) under an
+      // unauthenticated request — is fixed on the Python/bridge side (app/fonts.py, app/api.py) and in
+      // this file's own font-byte cache (js/lang/smp-shape.js, _getHBFont/_fetchFontBytes, now keyed by
+      // (family,weight) rather than family alone, matching the file selection now being weight-specific
+      // too); this parameter alone would have been shaping the RIGHT weight against the WRONG file
+      // without that other fix, and that fix alone would have shaped the right file at the font's own
+      // untouched default without this one — both were real, independent, and both needed.
+      const wght0=parseFloat(cs0.fontWeight)||0;
       if(fam&&sizePx){
-        const shape=(typeof smpShapeSync==="function")?smpShapeSync(s,fam,sizePx):null;
+        const shape=(typeof smpShapeSync==="function")?smpShapeSync(s,fam,sizePx,"",0,wght0):null;
         if(shape&&shape.d){ smpSwapPath(el,shape); continue; }   // shaped and ready — paint it, skip the HTML fallback below entirely
-        if(typeof smpShapeEnsure==="function"&&typeof smpNotePending==="function") smpNotePending(smpShapeEnsure(s,fam,sizePx));   // not ready yet — kick off shaping in the background; this render falls through to the fallback below exactly as it always has, and a later render picks up the native path once it lands
+        if(typeof smpShapeEnsure==="function"&&typeof smpNotePending==="function") smpNotePending(smpShapeEnsure(s,fam,sizePx,"",0,wght0));   // not ready yet — kick off shaping in the background; this render falls through to the fallback below exactly as it always has, and a later render picks up the native path once it lands
       } }
     if(!smpUnshaped(s) && !punctSatSMP) continue;   // no native shape yet, and this engine already shapes it fine natively (Chrome) — leave the plain <text> exactly as it was
     const cs=getComputedStyle(el), f=cs.font||((cs.fontWeight!=="400"?cs.fontWeight+" ":"")+cs.fontSize+" "+cs.fontFamily);

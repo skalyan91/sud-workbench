@@ -946,11 +946,14 @@ class Api:
         from . import fonts
         return fonts.fetch(family)
 
-    def font_face_raw(self, family: str) -> dict:
+    def font_face_raw(self, family: str, weight: int = 400) -> dict:
         """item 25: the SAME face, but the RAW .ttf js/lang/smp-shape.js's vendored HarfBuzz build
-        needs — see fonts.fetch_raw's own note for why this can't just reuse font_face's woff2."""
+        needs — see fonts.fetch_raw's own note for why this can't just reuse font_face's woff2.
+        `weight` (item 28): threaded straight through to fonts.fetch_raw — a non-core family that
+        Google Fonts serves as several STATIC per-weight files (not one variable one) needs the
+        RIGHT weight's file fetched in the first place; see that function's own note."""
         from . import fonts
-        return fonts.fetch_raw(family)
+        return fonts.fetch_raw(family, weight)
 
     def fonts_installed(self) -> dict:
         from . import fonts

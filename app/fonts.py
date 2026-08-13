@@ -32,6 +32,37 @@ CSS_API_STATIC = "https://fonts.googleapis.com/css2?family={fam}"   # families w
 _UA = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 "
        "(KHTML, like Gecko) Version/17.0 Safari/605.1.15")
 _SRC_RE = re.compile(r"src:\s*url\(([^)]+)\)")
+# item 28 — pairs each `@font-face` BLOCK's own `font-weight` with the `url()` in THAT SAME block, non-
+# greedy across the block boundary (Google's own CSS always writes weight before src within one block —
+# confirmed live, both the browser-UA and no-UA response shapes). Exists because _SRC_RE alone (the whole-
+# response single .search() above) silently assumes there is only ONE block to find — true for a variable
+# family requested WITH a browser UA (one block per unicode-range subset, but every one at the SAME
+# variable weight range), false for the SAME family requested WITHOUT one (see fetch_raw's own note): an
+# unauthenticated request for a family that HAS a real wght axis on Google Fonts gets back ONE STATIC
+# per-weight block for 100/200/…/900 each — nine separate non-variable .ttf files — and _SRC_RE.search()
+# on the raw response always took the FIRST, weight 100 (Thin), regardless of what any caller actually
+# wanted. Confirmed live (curl, no UA): "Noto Sans Arabic" resolves this way; "Noto Sans Kawi" (no real
+# weight axis at all) falls through the CSS_API→CSS_API_STATIC chain in _fetch_and_cache to a SINGLE
+# weight:400 block either way, so `_weighted_src` below degrades to picking the one block that exists —
+# the identical outcome _SRC_RE.search() already gave it, confirmed unregressed.
+_BLOCK_RE = re.compile(r"font-weight:\s*(\d+)\s*;.*?src:\s*url\(([^)]+)\)", re.S)
+
+
+def _weighted_src(css: str, weight: int | None) -> str | None:
+    """The url() this CSS response names for `weight` — among however many per-weight `@font-face`
+    blocks it contains, the one whose OWN weight is numerically closest (an exact match when the family
+    offers that weight, which every 100-step family here always does for a round weight; ties resolve to
+    the lower of the two, an arbitrary but deterministic choice that never actually arises for the
+    100-step families this API serves). `weight=None` (fetch()'s own browser-UA request, which already
+    gets back exactly one relevant, variable-capable block per subset) or a response with no weight-
+    tagged block at all (CSS_API_STATIC's own single, weight-unlabelled-by-this-caller case) both fall
+    back to the OLD plain first-match behaviour — unchanged from before this function existed."""
+    blocks = _BLOCK_RE.findall(css)
+    if not blocks or weight is None:
+        m = _SRC_RE.search(css)
+        return m.group(1).strip("'\"") if m else None
+    best = min(blocks, key=lambda b: abs(int(b[0]) - weight))
+    return best[1].strip("'\"")
 
 
 def _slug(family: str) -> str:
@@ -86,7 +117,8 @@ def cached_path(family: str) -> str | None:
     return None
 
 
-def _fetch_and_cache(family: str, path_finder, cache_ext: str, ua: dict) -> tuple[str | None, bool, str]:
+def _fetch_and_cache(family: str, path_finder, cache_ext: str, ua: dict,
+                      weight: int | None = None) -> tuple[str | None, bool, str]:
     """Shared fetch-and-cache dance behind both fetch() and fetch_raw(): find `family` already on
     disk under `path_finder`, or ask the Google Fonts CSS API for it — with whichever request
     headers `ua` supplies, since that (not the family name) is what decides which file format the
@@ -94,7 +126,9 @@ def _fetch_and_cache(family: str, path_finder, cache_ext: str, ua: dict) -> tupl
     `path` is None only on total failure. Cached under `cache_ext` — a SEPARATE suffix per caller,
     since fetch() and fetch_raw() deliberately want DIFFERENT formats for the SAME family and must
     not silently hand each other's cached file back (fetch()'s woff2 is exactly the file HarfBuzz's
-    WASM build cannot decompress — see fetch_raw()'s own note)."""
+    WASM build cannot decompress — see fetch_raw()'s own note). `weight`, item 28: which per-weight
+    block to pick when the response turns out to hold several (see _weighted_src's own note) — None
+    for fetch()'s own browser-UA call, which never needs it."""
     os.makedirs(FONT_DIR, exist_ok=True)
     path = path_finder(family)
     if path:
@@ -107,11 +141,10 @@ def _fetch_and_cache(family: str, path_finder, cache_ext: str, ua: dict) -> tupl
         except Exception as exc:  # noqa: BLE001 — offline, blocked, or no such family
             err = str(exc)
             continue
-        m = _SRC_RE.search(css)
-        if not m:
+        url = _weighted_src(css, weight)
+        if not url:
             err = "no font file in the API response"
             continue
-        url = m.group(1).strip("'\"")
         try:
             data = _get(url, timeout=60, headers=ua)
         except Exception as exc:  # noqa: BLE001
@@ -179,12 +212,17 @@ def fetch(family: str) -> dict:
             "uri": "data:%s;base64,%s" % (mime, base64.b64encode(blob).decode("ascii"))}
 
 
-def _cached_raw_path(family: str) -> str | None:
-    p = os.path.join(FONT_DIR, _slug(family) + ".raw.ttf")
+def _cached_raw_path(family: str, weight: int = 400) -> str | None:
+    # item 28: filename now carries `weight` — see fetch_raw's own note for why a request for the same
+    # family at a different weight is a genuinely different file now, not just a different axis position
+    # on a shared one, AND for why this also naturally busts any STALE cache a pre-fix session already
+    # wrote under the old, weight-less filename (that file is simply never looked up again, exactly the
+    # same "bypass rather than hand-invalidate" move 4d38780 already made for the two core faces).
+    p = os.path.join(FONT_DIR, _slug(family) + "." + str(weight) + ".raw.ttf")
     return p if os.path.exists(p) and os.path.getsize(p) > 1024 else None
 
 
-def fetch_raw(family: str) -> dict:
+def fetch_raw(family: str, weight: int = 400) -> dict:
     """item 25: the SAME family, but the RAW, uncompressed .ttf the Google Fonts CSS API answers with
     when asked WITHOUT a browser User-Agent (see this module's own docstring: "A browser UA is what
     makes the API answer with woff2 … the default urllib one gets ttf") — a completely separate fetch
@@ -203,18 +241,35 @@ def fetch_raw(family: str) -> dict:
     @font-face was never serving in the first place.
 
     ⚠ CORE bundled faces (Noto Sans, Noto Sans Mono — see _CORE_BUNDLED's own note) skip this whole
-    network dance and read the SAME file @font-face already paints from, straight off disk. This is
-    the fix for the "AVM labels no longer small-caps and way too light" regression: an unauthenticated
-    (no browser UA) request for "Noto Sans" resolves to a DIFFERENT, degraded font than the bundled
-    one — a set of static per-weight legacy .ttf files, the first of which (what _SRC_RE.search()
-    above grabs) is weight 100 (Thin, nowhere near this app's own weight-571 AVM/gloss labels) and
-    carries no "c2sc" GSUB feature at all, so HarfBuzz could shape against it all day and never
-    produce a small-caps substitution — measured directly with fontTools against both files.
+    network dance and read the SAME file @font-face already paints from, straight off disk — `weight`
+    is accepted but unused on that branch (`_bundled_path` always answers with the one on-disk variable
+    font regardless; the JS side still applies `weight` to it afterwards, via HarfBuzz's own
+    `setVariations`). This IS the fix for the "AVM labels no longer small-caps and way too light"
+    regression (4d38780): an unauthenticated (no browser UA) request for "Noto Sans" resolves to a
+    DIFFERENT, degraded font than the bundled one — a set of static per-weight legacy .ttf files —
+    and carries no "c2sc" GSUB feature at all, so HarfBuzz could shape against it all day and never
+    produce a small-caps substitution.
+
+    ⚠ item 28 — a SEPARATE, independent instance of the SAME class of bug, for every family that ISN'T
+    core-bundled: on report ("Arabic tokens... look way too light... falling back to Noto Sans Arabic
+    Light"), live-curled the exact response this function's own network path gets for "Noto Sans
+    Arabic" — NINE separate `@font-face` blocks, one static (non-variable — no `fvar` table at all) TTF
+    per weight 100..900, and the OLD code (`_SRC_RE.search()`, whole-response, first match) always took
+    the FIRST one: weight 100, Thin, even lighter than the user's own "Light" guess. No amount of the
+    JS side's own `setVariations` call can fix that on its own — a static instance has no weight axis
+    to move. The real fix is choosing the RIGHT block in the first place: `_weighted_src` (above) picks
+    whichever `@font-face` block's own `font-weight` is closest to `weight` (default 400 — the flat
+    target `.tok-word`/`.node-lbl`/`.baseword`/`.mwt-form` all specify, `font-weight:
+    var(--script-wght,400)` with nothing anywhere overriding that CSS var), landing on the CORRECT
+    (Regular) static instance directly. `weight` is threaded all the way from the JS shape call (read
+    live off the element's own computed style) through the bridge (app/api.py) to here, so a future
+    caller wanting a different weight for a different family gets the right file too, not just Arabic.
     """
     path = _bundled_path(family)
     cached = True
     if not path:
-        path, cached, err = _fetch_and_cache(family, _cached_raw_path, "raw.ttf", {})
+        path, cached, err = _fetch_and_cache(family, lambda f: _cached_raw_path(f, weight), "raw.ttf", {},
+                                              weight=weight)
         if not path:
             return {"error": err}
     with open(path, "rb") as fh:
