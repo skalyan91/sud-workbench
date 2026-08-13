@@ -837,6 +837,37 @@ const SMP_RE=/[\uD800-\uDBFF][\uDC00-\uDFFF]/;
      "cannot be wrong about a case detection missed" posture the paragraph above already commits to. */
 function smpUnshaped(s){
   return (typeof IS_CHROMIUM==="undefined"||!IS_CHROMIUM) && SMP_RE.test(s||""); }
+/* ARABIC — a BMP complex script, not SMP, so SMP_RE/smpUnshaped (surrogate-pair-gated by construction —
+   see SMP_RE's own note) never fires for it and it has always fallen through to native SVG `<text>`. On
+   report ("Arabic token rendering in SVG diagrams has fallen by the wayside (it's not even RTL!)"):
+   live-verified (samples/arabic_rtl.conllu, real WKWebView screenshot) — sentence/token FLOW is already
+   correctly RTL (sentRTL()/RTL/mirror() already thread an Arabic sentence right-to-left throughout this
+   file and every editing/menu call site that reads sentRTL — this is established, working machinery, not
+   a regression) — but the diagram's OWN token glyphs (`.tok-word`/`.node-lbl`/`.mwt-form`/punctuation
+   satellites) paint as ISOLATED, unjoined letterforms with visible gaps between them, exactly the same
+   class of failure SMP_RE/smpUnshaped already exists to route around for Brahmic conjuncts — WebKit's SVG
+   `<text>` renderer does not reliably apply Arabic's own GSUB contextual-joining substitutions either, it
+   is simply a DIFFERENT codepoint range than the one SMP_RE tests. The SAME running-sentence HTML line
+   that motivates smpUnshaped's whole "HTML shapes it correctly" premise shapes this identical text
+   correctly too — confirmed in the same screenshot: joined ligatures at the top of the block, isolated
+   glyphs in every diagram token below it. Content-based, not content-verified (this file's own smpUnshaped
+   note explains why a content-based PASS/FAIL probe was tried and abandoned for SMP — the same reasoning
+   applies here: there is no cheap, reliable DOM signal for "did this join", so assume the failure for any
+   Arabic-script text, exactly as SMP_RE does for any supplementary-plane text) — but Arabic's fix path
+   below (SMP_RE.test(s||"")||ARABIC_RE.test(s||""), the "try HarfBuzz first" block) is the NEW, engine-
+   agnostic HarfBuzz shape-to-<path> route (item 25) — real GSUB joining computed once, painted as glyph
+   outlines identically on every engine — so ARABIC_RE itself is deliberately NOT engine-gated there. Only
+   arabicUnshaped() below (paralleling smpUnshaped exactly) is WebKit-only: it exists solely to correct
+   _measOneUncached's plain SVG-measurement fallback (getComputedTextLength(), which — like the paint —
+   reads the isolated-forms advance on WebKit) to the same live-DOM width the HTML running line already
+   proves correct, for the one render where a HarfBuzz shape is not cached yet. \p{Script=Arabic} covers
+   the core block, Arabic Supplement/Extended-A/-B/-C and the Presentation-Forms blocks in one Unicode
+   property escape — the same convention fontScriptRes()/docScripts() (fontload.js) already use, rather
+   than hand-listing code-point ranges the way RTL_RE (prefs.js, a DIFFERENT job — direction, not shaping)
+   does. */
+const ARABIC_RE=/\p{Script=Arabic}/u;
+function arabicUnshaped(s){
+  return (typeof IS_CHROMIUM==="undefined"||!IS_CHROMIUM) && ARABIC_RE.test(s||""); }
 /* ── …AND THE FORMS THAT CANNOT SHAPE ARE DRAWN AS HTML INSTEAD ─────────────────────────────────────
    A <foreignObject> carrying an ordinary HTML element shapes through the engine's normal text path,
    which handles these scripts correctly — it is the same path the running sentence uses, and the
@@ -987,7 +1018,7 @@ function smpReshape(root){
   for(const el of texts){ const s=ownText(el);
     const punctSatSMP=hadSMP&&isPunctSat(el);
     const ffsClass=s&&ffsShapeClass(el);
-    if(!smpUnshaped(s) && !punctSatSMP && !SMP_RE.test(s||"") && !ffsClass) continue;
+    if(!smpUnshaped(s) && !punctSatSMP && !SMP_RE.test(s||"") && !arabicUnshaped(s) && !ARABIC_RE.test(s||"") && !ffsClass) continue;
     if(ffsClass){
       const cs2=getComputedStyle(el);
       const hbFeat=cssFeatToHB(cs2.fontFeatureSettings);
@@ -1033,7 +1064,11 @@ function smpReshape(root){
        in the first place, so this asks the identical question fontload.js's own mechanism answers, instead
        of re-deriving it (wrongly) from computed style. fontStackName() (fontload.js) then names the family
        exactly as ensureScriptFont itself would — the two can never disagree about what a script is called. */
-    if(SMP_RE.test(s||"")){
+    if(SMP_RE.test(s||"")||ARABIC_RE.test(s||"")){
+      // ARABIC_RE joins SMP_RE on this same gate: Arabic's fix IS the item-25 "real fix" itself, not the
+      // engine-gated foreignObject fallback below (which Arabic never needs at all — see ARABIC_RE's own
+      // note) — fontScriptRes()/fontStackName() already resolve "Arabic" to "Noto Sans Arabic" exactly
+      // the same generic way they resolve any other script here, no separate lookup required.
       const cs0=getComputedStyle(el);
       let fam="";
       if(typeof fontScriptRes==="function"&&typeof fontStackName==="function"){
@@ -1506,8 +1541,14 @@ function _measOneUncached(s,f,extraCss){
   /* …and where the SVG cannot shape this string, its width describes a rendering nobody will see. A live
      DOM element is what the HTML fallback (foreignObject) paints — see _measDOM's own note on why this is
      no longer canvas — so it is the width to lay out against. No track/letter-spacing here: smpReshape
-     never applies either to the painted div (`font:`+f alone), so matching that means passing `f` as-is. */
-  if(smpUnshaped(s)){ const c=_measDOM(s,f); if(c>0) return c; }
+     never applies either to the painted div (`font:`+f alone), so matching that means passing `f` as-is.
+     arabicUnshaped(s): Arabic never gets a foreignObject paint (smpReshape's own item-25 HarfBuzz-shape-
+     to-<path> route always handles it instead — see ARABIC_RE's own note), but this SVG getComputedTextLength()
+     reading is the SAME isolated-forms advance the broken paint used to show, on the SAME engine, so it is
+     just as wrong a RESERVATION as it is a rendering — the live DOM measures the correctly-joined width
+     (the running sentence line's own proof that HTML shapes this script correctly), which is far closer to
+     what the HarfBuzz shape will actually paint than the unjoined SVG advance ever was. */
+  if(smpUnshaped(s)||arabicUnshaped(s)){ const c=_measDOM(s,f); if(c>0) return c; }
   return w; }
 function meas(s,f){ return _measOne(s,f); }
 // Gloss/MGloss-aware measurement: setGlossText wraps every Leipzig abbreviation run (glossAbbrSegments) in its own
@@ -3139,8 +3180,40 @@ function drawAVM(svg,cx,y0,t,si,tokId,boxes){ const L=avmLayout(t); if(!L) retur
     // real ink retreat further from the box's own outer edge, the hit target sitting at the OLD, slightly wider
     // nominal edge is the safer direction to be wrong in for a click target, so it is left alone deliberately.
     g.appendChild(E("rect",{class:"avm-hit",x:x0+AVM_BRK_W,y:y0+AVM_PAD_V+i*(L.lineH+AVM_ROW_GAP)-1,width:L.w-AVM_BRK_W*2,height:L.lineH+1}));
-    const ae=E("text",{class:"avm-attr",x:attrX,y:ry,"text-anchor":"end"}); ae.textContent=r.attr; g.appendChild(ae);
-    const ve=E("text",{class:"avm-val",x:valX,y:ry,"text-anchor":"start"});
+    /* direction:"ltr" on BOTH — on report ("why is the AGR attribute label not showing up in RTL AVMs?").
+       ROOT CAUSE, found live (samples/arabic_rtl.conllu, an AGR row, pywebview evaluate_js against the real
+       running app): NOT missing — every avm-attr/avm-val element IS in the DOM, attr/val text-anchor "end"/
+       "start" are LOGICAL (writing-mode-relative) per the SVG/CSS spec, not physical left/right, and they
+       resolve against the CSS `direction` of the element itself — which, unset here, INHERITS from the
+       sentence block's own `dir="rtl"` (sentRTL()/D.rtl, set on the whole block for a document like this
+       one — see prefs.js's sentRTL, document.js's `b.dir=sentRTL(s)?"rtl":"ltr"`). Under inherited
+       direction:rtl, "end" flips to mean "anchor on the LEFT, text extends right" and "start" flips to
+       "anchor on the RIGHT, text extends LEFT" — the OPPOSITE of what attrX/valX (above) were computed
+       for, which assumes the ordinary LTR reading "end=right-anchored, start=left-anchored" AVM_PAD_L/
+       AVM_COL_GAP/AVM_PAD_R were all measured against.
+       ⚠ THIS DID NOT ALWAYS SURFACE VISIBLY, which is why it read as "AGR specifically" rather than every
+       row: `.avm-attr` is UNCONDITIONALLY routed through smpReshape's own HarfBuzz shape-to-<path> swap
+       (FFS_SHAPE_CLASSES, always includes "avm-attr") — and smpSwapPath (above) computes its own `<path>`
+       translate() straight off the RAW text-anchor ATTRIBUTE STRING in JS ("end"→x−shape.w), never asking
+       the browser to lay the text out at all, so a swapped attr paints at the CORRECT physical position
+       regardless of any inherited direction — the bug never had a chance to touch it. `.avm-val` swaps
+       the SAME way on a STANDALONE row (item 27), so it is equally immune there. The ONE case left on
+       native, un-swapped SVG `<text>` — and so the only case actually asking the browser to resolve
+       "start" itself — is a GROUP row's val (AGR/TAM's own combined "3.Sing.Masc"/"Perf.Ind" tspans;
+       ownText() reads "" for a tspan-carrying parent, so ffsShapeClass never fires — see FFS_SHAPE_CLASSES'
+       own note): live-measured, its rendered ink sat well to the LEFT of valX, overlapping the row's own
+       attr label rather than sitting to its right — legible as "not showing up", exactly the report.
+       THE FIX: an AVM's own attr/val columns are a fixed-order feature matrix (ATTR then val, HPSG/
+       interlinear convention) that does not itself flip with the SURROUNDING sentence's reading direction —
+       the very reason attrX/valX are computed as one fixed physical left-to-right pair in the first place,
+       independent of RTL/`cx`. `direction:"ltr"` on both text elements pins text-anchor's start/end back to
+       PHYSICAL left/right for this row, cancelling the inherited flip, so whichever path a given row takes
+       (swapped or native) reads the SAME position formula the same way. Harmless on the swapped case (the
+       attribute rides along into `<path>`'s own copy but a `<path>` has no text layout to resolve it
+       against) and on every LTR document (direction:ltr already matches the default, ambient direction, so
+       this is a no-op there — confirmed no visual change on english.conllu/french_mwt.conllu's own AVMs). */
+    const ae=E("text",{class:"avm-attr",x:attrX,y:ry,"text-anchor":"end",direction:"ltr"}); ae.textContent=r.attr; g.appendChild(ae);
+    const ve=E("text",{class:"avm-val",x:valX,y:ry,"text-anchor":"start",direction:"ltr"});
     // item 2 — a GROUP row's combined value ("3.Sing.Masc") splits into one <tspan data-subfeat> per member,
     // dot-separated by plain (unaddressable) tspans of their own: tspans lay out inline exactly like one flat
     // string (no dx/dy of their own), so the ink and spacing are UNCHANGED from before this split — only the
