@@ -804,16 +804,28 @@ function avmValueMenu(x,y,si,tokId,key){
 // fallback was quietly handing back the entire untethered UD_FEATS list for most candidates — the opposite of
 // what was asked. strictAttestedVals reads the SAME two sources, with no full-list fallback: a feature/value
 // with zero attestation is simply not offered.
-function strictAttestedVals(feat){ const full=UD_FEATS[feat]||[]; if(!full.length) return full;
-  const attested=new Set((typeof docPairVals==="function"?docPairVals("feats",feat):[]));
-  (typeof MODEL_FEATS_INVENTORY==="object"&&MODEL_FEATS_INVENTORY&&MODEL_FEATS_INVENTORY[feat]||[]).forEach(v=>attested.add(v));
+// on report ("filtered to only those… applicable to that token's UPOS"): docPairVals("feats",feat) scans the
+// WHOLE document regardless of word class — Case is "attested" the moment ANY token anywhere uses it, so a
+// NOUN's own flyout offered it even in a document where only PRON ever actually takes it. MODEL_FEATS_INVENTORY
+// (js/io/bridge.js) can't help narrow this either — its own docstring (app/parse.py:model_feats_inventory)
+// states it's "every Feat=Val pair the model's morphologizer can emit alongside ANY word class", i.e.
+// deliberately flat/UPOS-unaware — so it's dropped here rather than mixed in wrongly scoped. upos=null keeps
+// the original doc-wide behaviour for strictAttestedVals' other, non-UPOS-scoped use.
+function docPairValsForUpos(feat,upos){ const set=new Set();
+  try{ DOC.forEach(s=>s.tokens.forEach(t=>{ if(upos!=null&&t.upos!==upos) return;
+    const raw=t.feats; if(!raw||raw==="_") return;
+    raw.split("|").forEach(seg=>{ const eq=seg.indexOf("="); if(eq>0&&seg.slice(0,eq)===feat) set.add(seg.slice(eq+1)); }); })); }catch(_){}
+  return set; }
+function strictAttestedVals(feat,upos){ const full=UD_FEATS[feat]||[]; if(!full.length) return full;
+  const attested=upos!=null?docPairValsForUpos(feat,upos):new Set((typeof docPairVals==="function"?docPairVals("feats",feat):[]));
+  if(upos==null) (typeof MODEL_FEATS_INVENTORY==="object"&&MODEL_FEATS_INVENTORY&&MODEL_FEATS_INVENTORY[feat]||[]).forEach(v=>attested.add(v));
   return full.filter(v=>attested.has(v)); }
 function addFeatureItems(si,tokId){
   const s=DOC[si], t=s&&s.tokens[tokId-1]; if(!t) return [];
   const cands=Object.keys(UD_FEATS).filter(f=>!AVM_EXCLUDE.has(f)&&getFeat(t.feats,f)==null);
   const items=[];
   cands.forEach(f=>{
-    const vals=strictAttestedVals(f);
+    const vals=strictAttestedVals(f,t.upos);   // UPOS-scoped: a feature/value with no attestation on THIS word class anywhere in the doc is simply not offered — the same "skip if empty" guard right below already excludes the feature entirely once this narrows it to nothing
     if(!vals.length) return;
     const desc=(typeof FEATS_VDESC==="object"&&FEATS_VDESC&&FEATS_VDESC[f])||{};
     items.push({header:f});
