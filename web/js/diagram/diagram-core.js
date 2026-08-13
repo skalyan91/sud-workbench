@@ -2779,7 +2779,7 @@ function belowReserveH(hasTr,tierCount,hasPos,avmH){ const n=belowRows(hasTr,tie
    against it, so the spine is back on .mwt-tie-h and the serifs on .mwt-tie, restoring round 2's original
    pairing (and with it mwtTie's own unrotated one, and .mwt-grid-tie's) as the ONE convention every "this
    marks a multi-word/multi-part span" bracket in the app now shares. */
-const AVM_ROW_GAP=2, AVM_PAD_V=2, AVM_COL_GAP=6, AVM_PAD_L=5.25, AVM_PAD_R=7, AVM_BRK_W=3.5, AVM_BRK_EXT=0.5625;   // ONE PAD_H used to govern BOTH sides symmetrically — wrong, on report ("removed padding from the wrong side... now it's too tight on the right"): the zero-gap ask (previous round) was specifically about the LEFT side (.avm-hit's own edge vs the attr column's own ink), and dropping PAD_H to AVM_BRK_W to satisfy that ALSO shrank the right side (val column to the right bracket), which nobody asked to change. Split into AVM_PAD_L (originally =AVM_BRK_W, the left side's own zero-gap value) and AVM_PAD_R (=7, the ORIGINAL shared value, restored on the right where it was never meant to move) — the two sides are independent now, so a future request about one can never silently move the other again. PAD_V/COL_GAP tightened (from 4/9) in round 3 and left there — that report was about the bracket floating clear of the ink, which they still don't. AVM_BRK_W/AVM_BRK_EXT untouched.
+const AVM_ROW_GAP=2, AVM_PAD_V=2, AVM_COL_GAP=6, AVM_PAD_L=5.75, AVM_PAD_R=7, AVM_BRK_W=3.5, AVM_BRK_EXT=0.5625;   // ONE PAD_H used to govern BOTH sides symmetrically — wrong, on report ("removed padding from the wrong side... now it's too tight on the right"): the zero-gap ask (previous round) was specifically about the LEFT side (.avm-hit's own edge vs the attr column's own ink), and dropping PAD_H to AVM_BRK_W to satisfy that ALSO shrank the right side (val column to the right bracket), which nobody asked to change. Split into AVM_PAD_L (originally =AVM_BRK_W, the left side's own zero-gap value) and AVM_PAD_R (=7, the ORIGINAL shared value, restored on the right where it was never meant to move) — the two sides are independent now, so a future request about one can never silently move the other again. PAD_V/COL_GAP tightened (from 4/9) in round 3 and left there — that report was about the bracket floating clear of the ink, which they still don't. AVM_BRK_W/AVM_BRK_EXT untouched.
    // AVM_PAD_L round 2 (this session, post font-fix): the literal-zero clearance above was requested and
    // verified BEFORE 2e73d4f/4d38780 (this same session, later) fixed .avm-attr's rendering from a thin,
    // wrong-weight, non-small-caps glyph to its correct bold (571) c2sc small-caps HarfBuzz shape — i.e. the
@@ -2812,6 +2812,33 @@ const AVM_ROW_GAP=2, AVM_PAD_V=2, AVM_COL_GAP=6, AVM_PAD_L=5.25, AVM_PAD_R=7, AV
    // .mwt-tie-h's stroke-width at --arc-stroke:1.5px (.75×1.5/2), kept in step BY HAND with that rule — carried
    // by the SERIFS (see drawAVM), which overshoot the (thin) spine's own centreline exactly as mwtTie's own
    // pins overshoot its bar, regardless of how long the serif itself now is.
+   // AVM_PAD_L round 3 (this session, alongside the attr/val colour-unification report): "I want the attrs
+   // and values to have the same colour... And I need a bit more left padding — maybe that missing 0.5px."
+   // AVM_BRK_EXT was named as the specific suspect — CHECKED, not assumed, by reading drawAVM's own bracket-
+   // path block (the `[[x0,x0+AVM_BRK_W],[x1,x1-AVM_BRK_W]].forEach` loop below) line by line for the LEFT
+   // bracket (xEdge=x0, xIn=x0+AVM_BRK_W, the content-facing coordinate attrX is built from):
+   //   - .mwt-tie-cas/.mwt-tie-h both run (or sit) exactly at xIn/xEdge, no ext term at all.
+   //   - .mwt-tie (the serif that DOES carry ext): `M xIn,y0 L xEdge+ext,y0 …` — for the left side
+   //     ext=-AVM_BRK_EXT, so this path runs FROM xIn (content-facing, unmoved) TO xEdge-AVM_BRK_EXT
+   //     (EXTERIOR of the spine, away from the box interior). AVM_BRK_EXT never appears anywhere near xIn.
+   // attrX itself (below, `x0+AVM_BRK_W+avmBrkInkDx()+(AVM_PAD_L-AVM_BRK_W)+L.attrW`) is built purely from
+   // x0, AVM_BRK_W, avmBrkInkDx() and AVM_PAD_L — AVM_BRK_EXT is not, and geometrically cannot be, a term in
+   // it: it moves the serif's OTHER endpoint, on the far side of the spine from the attr column, and a butt
+   // cap (confirmed again below, avmBrkInkDx's own comment) adds no further overshoot past THAT endpoint
+   // either. CONCLUSION, honestly reported: the "AVM_BRK_EXT = the missing 0.5px" hypothesis does NOT hold —
+   // it is the bracket's own exterior overshoot (how far the serif reaches away from the box, a T-junction
+   // full-coverage trick against the spine, see the paragraph above), never the interior gap between the
+   // bracket's content-facing edge and the attr text. No other sibling constant here (AVM_ROW_GAP/AVM_PAD_V/
+   // AVM_COL_GAP/AVM_BRK_W) computes to an unaccounted ~0.5px against the interior gap either — re-derived
+   // avmBrkInkDx()'s own live-measured gaps below (fresh, post colour-fix): ~5.24px left / ~6.10px right at
+   // today's AVM_PAD_L=5.25/AVM_PAD_R=7, i.e. the reserve already tracks real ink to within ordinary glyph
+   // side-bearing noise, the same <1.5px slop 2e73d4f and 1f104a8 already accepted as fine — nothing sized
+   // ~0.5px was sitting unclaimed in that arithmetic waiting to be folded in. So this is a plain, honest "a
+   // bit more room" bump with no specific geometric quantity behind the exact number: AVM_PAD_L 5.25→5.75
+   // (+0.5, on the user's own estimate, genuinely MORE left clearance, never less — AVM_PAD_R=7 is
+   // deliberately untouched, the asymmetry stays). Re-measured live after the change: left gap ~5.74px,
+   // still visibly short of the right's ~6.10px — reads as a bit more room without now matching the right
+   // side's own larger margin, which is what was asked for.
 /* AVM_PAD_L/AVM_PAD_R above assume the bracket's own visible ink ends EXACTLY at its nominal path coordinate
    (x0+AVM_BRK_W / x1-AVM_BRK_W) — on report ("the AVM contents need to be placed relative to the bounding
    boxes of the brackets"): that assumption needed VERIFYING, not trusting, since an SVG stroke paints centred
