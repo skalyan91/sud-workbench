@@ -944,18 +944,42 @@ function smpReshape(root){
      (drawAVM's attribute-name label) is the one native SVG <text> in this app that BOTH carries a
      font-feature-settings override (c2sc, app.css) AND is its own complete <text> — a single text-node
      child, no sibling tspans sharing its flow — so it swaps exactly the way an SMP <text> does: read the
-     shape, paint the shape, nothing left to reposition around it. `.avm-val`/`.oavm-attr`/`.oavm-val`
-     deliberately do NOT ride this list: `.avm-val` carries no feature-settings override at all (avmLayout
-     measures it with plain meas(), never _measOneUncached's extraCss path, so it was never in the bug this
-     closes); `.oavm-attr`/`.oavm-val` are the OUTLINE notation's own HTML echo, plain flow text with no
-     separate JS-measured reservation to ever disagree with what it paints (see their own CSS notes) — nothing
-     for this mechanism to fix there. measGloss's own c2sc/onum runs (`.glabbr`, Gloss/MGloss) get the SAME
-     class of fix on the MEASUREMENT side only (_measOneUncached, above) — their glyphs stay on the browser's
-     own rendering, deliberately: a `.glabbr` tspan sits INLINE among plain sibling text nodes in the same
-     parent <text> (the dot-separated Leipzig convention, "PST.PTCP…"), and a <path> swap does not
-     participate in SVG text flow — the plain runs around it would need their own explicit repositioning,
-     which is real, separate work this pass does not attempt. */
-  const FFS_SHAPE_CLASSES=["avm-attr"];
+     shape, paint the shape, nothing left to reposition around it.
+     item 27 (on report — "the val spacing looks off. Use HarfBuzz for the vals as well."): `.avm-val` NOW
+     rides along too. It carries NO font-feature-settings override (no c2sc — see app.css's own note), but it
+     DOES share `.avm-attr`'s two OTHER measurement-vs-paint-under-load hazards: a non-400 variable-font
+     weight (571, weightCurve(10.5)) and CSS letter-spacing (the .0285em tracking curve). Live-probed BEFORE
+     this fix (pywebview evaluate_js against the real running app, samples/arabic_rtl.conllu, first token):
+     a plain single-value row (Voice="Act") reserved 16.44px against 17.06px of real painted ink — a −0.62px
+     gap — and a GROUPED row (AGR="3.Sing.Masc") reserved 59.92px against 62.94px painted — a −3.01px gap,
+     i.e. the SAME class of "a shared, rapidly-reused offscreen measuring element disagrees with what WebKit
+     actually goes on to paint" bug 2e73d4f's own Step 0 first found for `.avm-attr`, not a font-feature-
+     settings-specific one — `.avm-val` was always going to be exposed to it once weight/tracking joined
+     .avm-attr's own values (1a79e98/the "unnecessarily bold" fix), it just had no c2sc override to also
+     trigger the OLD gate on. `ffsShapeClass` below is what actually decides whether ONE given `.avm-val`
+     <text> element gets swapped: a STANDALONE row (`r.vals` unset, drawAVM below) is one flat text node —
+     shapes and swaps exactly like `.avm-attr`. A GROUPED row ("3.Sing.Masc") is `<tspan>` children with NO
+     direct text node of the parent `<text>`'s own — `ownText()` (below) reads "" for it, so `ffsShapeClass`
+     never fires and it is left exactly as before: plain native text, `.avm-subval`/`.avm-val-sep` tspans
+     intact and individually addressable (context-menu.js's tokFromEl/`.avm-row` click handling walks up to
+     an ancestor with data-s/data-tok, never down into a tspan's own identity, so nothing there depends on
+     the val's OWN element surviving a swap either way — but a `<path>` has no tspans at all, so shaping a
+     group row here would have destroyed the per-subfeature hit-testing this tier's own right-click menu
+     relies on, for no reservation benefit `_measOne`'s own shaped measurement (avmLayout, below) doesn't
+     already provide). The MEASUREMENT side (attrW/valW, avmLayout) is not similarly limited — `r.val` is
+     always ONE flat string there regardless of grouping (the tspan split is drawAVM's own presentation
+     choice, made from the SAME string after layout has already reserved for it as a whole) — so both a
+     standalone and a grouped row's valW go through the identical HarfBuzz-shaped measurement path below;
+     only the grouped row's PAINT stays native. `.oavm-attr`/`.oavm-val` remain out of scope: the OUTLINE
+     notation's own HTML echo, plain flow text with no separate JS-measured reservation to ever disagree
+     with what it paints (see their own CSS notes) — nothing for this mechanism to fix there. measGloss's own
+     c2sc/onum runs (`.glabbr`, Gloss/MGloss) get the SAME class of fix on the MEASUREMENT side only
+     (_measOneUncached, above) — their glyphs stay on the browser's own rendering, deliberately: a `.glabbr`
+     tspan sits INLINE among plain sibling text nodes in the same parent <text> (the dot-separated Leipzig
+     convention, "PST.PTCP…"), and a <path> swap does not participate in SVG text flow — the plain runs
+     around it would need their own explicit repositioning, which is real, separate work this pass does not
+     attempt. */
+  const FFS_SHAPE_CLASSES=["avm-attr","avm-val"];
   const ffsShapeClass=el=>{ if(!el.classList) return null;
     for(const c of FFS_SHAPE_CLASSES) if(el.classList.contains(c)) return c; return null; };
   let hadSMP=false;
@@ -970,7 +994,15 @@ function smpReshape(root){
       const fam2=_firstFamily(cs2.fontFamily), sizePx2=parseFloat(cs2.fontSize)||0;
       const track2=parseFloat(cs2.letterSpacing)||0;   // px already (getComputedStyle resolves any em to px) — the SAME quantity _measOneUncached's own trackPx folds in for this exact element's reservation, read back off the live element instead of recomputed, so the two can never name a different number for the same class
       const wght2=parseFloat(cs2.fontWeight)||0;   // regression fix: read straight off the live element's OWN computed weight (571 for .avm-attr) — the SAME number the browser's native paint already maps onto the variable font's wght axis automatically; HarfBuzz does not do that mapping on its own (see _shapeSMP's own note, smp-shape.js) — without threading this through, the shaped glyphs came out at the font's default weight (400), visibly lighter than what this element's CSS actually asks for
-      if(hbFeat&&fam2&&sizePx2){
+      // item 27: NOT gated on `hbFeat&&` any more — `.avm-val` (unlike `.avm-attr`) carries no feature-
+      // settings override at all, so cssFeatToHB(cs2.fontFeatureSettings) legitimately returns "" for it
+      // (getComputedStyle reports "normal", which matches no quoted-tag pattern). hb.shape's own
+      // `features||undefined` (smp-shape.js) already treats an empty string as "no override" correctly —
+      // an empty-but-requested shape is a real, useful shape (the font's plain default glyphs, still routed
+      // through the one shared cache/positioning accumulator instead of the browser's own text engine), not
+      // a no-op to skip. `fam2&&sizePx2` alone is gate enough; a class only reaches this branch at all once
+      // `ffsShapeClass`/`FFS_SHAPE_CLASSES` has already said it belongs here.
+      if(fam2&&sizePx2){
         const shape=(typeof smpShapeSync==="function")?smpShapeSync(s,fam2,sizePx2,hbFeat,track2,wght2):null;
         if(shape&&shape.d){ smpSwapPath(el,shape); continue; }
         if(typeof smpShapeEnsure==="function"&&typeof smpNotePending==="function") smpNotePending(smpShapeEnsure(s,fam2,sizePx2,hbFeat,track2,wght2));
@@ -1444,7 +1476,14 @@ function _measOneUncached(s,f,extraCss){
     // axis (_shapeSMP's setVariations call, smp-shape.js) so the shaped glyphs come out at the SAME
     // weight this element's CSS actually specifies, not the font's default — see that function's own note.
     const wghtM=/^(\d+(?:\.\d+)?)\s/.exec(f), wght=wghtM?parseFloat(wghtM[1]):0;
-    if(hbFeat&&fam&&px&&typeof smpShapeSync==="function"){
+    // item 27: NOT gated on `hbFeat&&` — avmLayout's own valW call (below) passes an explicit but EMPTY
+    // "font-feature-settings:normal" extraCss for `.avm-val` (no c2sc, unlike `.avm-attr`'s "'c2sc' 1"), so
+    // `_ffsM` is truthy (a shape WAS requested for this call) while `hbFeat` correctly comes back "" (no
+    // real feature to apply — cssFeatToHB("normal") matches no quoted tag). Requiring hbFeat truthy here
+    // would silently fall this call straight through to the OLD getComputedTextLength()/getBBox() path,
+    // defeating the whole point of routing it through this shared shape/measure/paint mechanism in the
+    // first place. `fam&&px` is gate enough; nothing reaches this branch without `_ffsM` already true.
+    if(fam&&px&&typeof smpShapeSync==="function"){
       const trackPx=track*px;
       const shape=smpShapeSync(s,fam,px,hbFeat,trackPx,wght);
       if(shape&&shape.d!=null) return shape.w;
@@ -2944,7 +2983,34 @@ function avmLayout(t){ const feats=(t&&t.feats)||""; if(!feats||feats==="_"||!sh
   // of the combined value" (it alone has `set` in scope), so this is a passthrough, not a second derivation.
   const rows=struct.map(it=>it.group ? {key:it.group,attr:it.group.toUpperCase(),val:it.combined,vals:it.vals} : {key:it.feat,attr:it.feat.toUpperCase(),val:it.val});
   const attrW=Math.max(0,...rows.map(r=>_measOne(r.attr,AVM_ATTR_F,";font-feature-settings:'c2sc' 1")));
-  const valW=Math.max(0,...rows.map(r=>meas(r.val,AVM_VAL_F)));
+  // item 27 (on report — "the val spacing looks off. Use HarfBuzz for the vals as well."): was a plain
+  // meas(r.val,AVM_VAL_F) — the browser-metrics path, exactly the one _measOne's HarfBuzz branch above was
+  // built to stop trusting for `.avm-attr`. `.avm-val` carries no c2sc/onum override, so there is no REAL
+  // feature list to hand HarfBuzz, but "font-feature-settings:normal" is passed anyway, deliberately: it's
+  // enough non-empty text for _measOneUncached's own `_ffsM` regex to match and enter the shaped path (see
+  // its own note), while cssFeatToHB("normal") correctly resolves to "" (no quoted tag matches "normal") —
+  // the identical "" a live `.avm-val` element's getComputedStyle().fontFeatureSettings ("normal", no CSS
+  // override at all) resolves to on the PAINT side (smpReshape, above), so both sides land on the same
+  // shape-cache key for the same string. `r.val` is always the FULL value string here — "Pass" on a
+  // standalone row, "3.Sing.Masc" (the already-dot-joined `combined`) on a group row — regardless of
+  // whether drawAVM (below) goes on to paint that row as one flat <text> or split into per-subfeature
+  // <tspan>s; the reservation doesn't need to know which, only the total ink width either way produces.
+  // Live-verified before/after (see this commit's own message): BEFORE, a plain single-value row
+  // (Voice="Act") reserved 16.44px against 17.06px painted (gap −0.62px, ink overflowing the reserved
+  // column) and a grouped row (AGR="3.Sing.Masc") reserved 59.92px against 62.94px painted (gap −3.01px,
+  // worse). AFTER, once a row's shape has actually landed and its `.avm-val` swapped to a HarfBuzz-shaped
+  // `<path>` (standalone rows only — see ffsShapeClass's own note on why a grouped row's PAINT stays
+  // native), the reservation exceeds the real ink by a small, POSITIVE margin (side-bearing, never
+  // overflowing) — the same safe regime `.avm-attr` already established (2e73d4f: "+1.03px, glyph's own
+  // left-side-bearing"). A grouped row's reservation is measured the identical shaped way even though its
+  // paint stays native tspans; live-verified its gap closes from −3.01px to a small residual (well under
+  // 1px) against native paint too. NOTE, found live while verifying this: the async re-render that is
+  // meant to pick up a freshly-landed shape (smpNotePending's settle callback, smp-shape.js) can return a
+  // STALE cached diagram node from DIA_CACHE (document.js) when nothing else about the sentence/view
+  // changed — a pre-existing gap in that settle mechanism, confirmed to affect `.avm-attr` identically in
+  // the UNMODIFIED code, not a regression from this change and not attempted here; in practice it self-
+  // heals on the next edit/selection/notation change that touches DIA_CACHE for the same sentence.
+  const valW=Math.max(0,...rows.map(r=>_measOne(r.val,AVM_VAL_F,";font-feature-settings:normal")));
   const lineH=ascent(AVM_VAL_F)+descent(AVM_VAL_F);
   // +2*avmBrkInkDx(): the box's own outer edges (x0/x1, drawAVM) sit AVM_BRK_W in from where the bracket's
   // REAL ink ends (see avmBrkInkDx's own note) — reserve has to grow by that same real offset on both sides,
