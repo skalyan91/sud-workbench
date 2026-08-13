@@ -289,12 +289,26 @@ function fanStep(){ const st=parseFloat(css("--arc-stroke"))||1.7; return ((st+3
 // as before. THE one routine every arc/bracket view calls. Each arc a carries head-key hk, dep-key dk,
 // head-x xh, dep-x xd and length len (any monotone-in-width measure); it is mutated with offH / offD, the
 // horizontal endpoint offsets.
-function fanArcs(arcs,spread){ const ep={}; const reg=(k,len,side,central,set)=>{(ep[k]=ep[k]||[]).push({len,side,central,set});};
+// item 7 (WRAPPED views — mirrors 84e7938's flat-view fix to arcs()/stemma(), js/diagram/diagram-render.js):
+// an OPTIONAL third arg, ghostArcs, registers ghost endpoints into this SAME per-node pool, BEFORE the one
+// sort/assign pass below runs, instead of a separate LATER pass (fanGhostArcs) unconditionally fanning every
+// ghost outside whatever the reals already claimed — which always lost to a real arc regardless of relative
+// length. Folded into the SAME pool, a real and a ghost sharing an endpoint are ranked by length together, on
+// equal footing, so whichever is actually longer lands closer to centre. A ghost is never `central` (never
+// itself eligible for the dead-centre slot) — but exactly as for two competing REAL edges, `central` only
+// GATES whether slot 0 is in play on a side at all; it does not reserve slot 0 for any one edge, so a
+// sufficiently long ghost can still land in slot 0 if nothing real on that side is longer. Ghost items need
+// the SAME {hk,dk,hkey?,dkey?,xh,xd} shape a real arc does; `len` defaults to |xd-xh| when absent (mirrors
+// fanGhostArcs' own convention — none of this file's ghost-fan call sites compute one explicitly).
+function fanArcs(arcs,spread,ghostArcs){ const ep={}; const reg=(k,len,side,central,set)=>{(ep[k]=ep[k]||[]).push({len,side,central,set});};
   arcs.forEach(a=>{ reg(a.hkey??a.hk,a.len,Math.sign(a.xd-a.xh)||1,false,o=>a.offH=o);   // this node is the head → outgoing edge fans. a.hkey/a.dkey override only the FAN-BUCKET key (not a.hk/a.dk, which are read downstream) so a cross-line arc's UPPER-line endpoint can bucket with the bottom-of-line endpoints instead of the top-side ones at the same token
                     reg(a.dkey??a.dk,a.len,Math.sign(a.xh-a.xd)||1,true, o=>a.offD=o); }); // this node is the dependent → incoming edge is eligible for the centre slot on ITS side (see above)
+  (ghostArcs||[]).forEach(a=>{ const len=a.len??Math.abs(a.xd-a.xh);   // a ghost registers on BOTH sides with central:false — never eligible for slot 0 itself, only ever ranked into it by length like any other pool member
+    reg(a.hkey??a.hk,len,Math.sign(a.xd-a.xh)||1,false,o=>a.offH=o);
+    reg(a.dkey??a.dk,len,Math.sign(a.xh-a.xd)||1,false,o=>a.offD=o); });
   Object.values(ep).forEach(arr=>{ arr.filter(e=>e.central&&e.side===0).forEach(e=>e.set(0));   // a side-0 sentinel (no caller currently registers one, but arcs() reserves it for the root stub) — always centre, never ranked
-    [-1,1].forEach(side=>{ const grp=arr.filter(e=>e.side===side).sort((p,q)=>q.len-p.len);   // this side's whole pool — head edge (if it fans this way) pooled with every dependent edge fanning this way, ranked by length alone
-      const hasCentral=grp.some(e=>e.central);   // only a side that actually hosts the head edge is ever eligible for the dead-centre slot — a side with no head edge still fans from one step out
+    [-1,1].forEach(side=>{ const grp=arr.filter(e=>e.side===side).sort((p,q)=>q.len-p.len);   // this side's whole pool — real AND ghost together — ranked by length alone
+      const hasCentral=grp.some(e=>e.central);   // only a side that actually hosts a REAL head edge is ever eligible for the dead-centre slot — a side with no head edge still fans from one step out
       grp.forEach((e,j)=>e.set(side*(hasCentral?j:j+1)*spread)); }); }); }
 // cubic control points for an arc bump from (x1,base) to (x2,base) of height h: each control sits at height h
 // above its endpoint and cot(θ)·h inward, so the take-off tangent makes θ with the baseline. Apex is 0.75·h.
@@ -654,7 +668,25 @@ function arcsWrapped(si){
     // always takes the opposite — fixed by ROLE, not measured off either token's accidental position.
     if(iUp===!RTL){ a.xh=1; a.xd=0; } else { a.xh=0; a.xd=1; }   // iUp: dep is the upper/forward endpoint → its registration (Math.sign(xh-xd)) must land on the forward side, so xh>xd (LTR) or xh<xd (RTL); !iUp mirrors it onto xd for the head's registration
     fanAll.push(a); });
-  fanArcs(fanAll,SPREAD);   // sets offH/offD on every within-line AND cross-line arc from the same per-token fan
+  // item 7: ghost endpoints (Shared=Yes AND Subject-raising) computed HERE, ahead of fanArcs, so they fold into
+  // the SAME per-token fan pool the reals resolve in — see fanArcs' own ghost-arg comment (mirrors 84e7938's
+  // flat-view fix) — instead of a separate later pass that always pushed a ghost outside every real arc at a
+  // shared endpoint regardless of relative length. ghostPairsFor gives [originIdx,targetIdx,rel] — here `i` is
+  // the ORIGIN (drawn as the ghost's dependent, matching data-dep below) and `oh` is the target (Shared: the
+  // other conjunct; Subj: the predicate). ghostPairs/ghostFan are used again further down, where the ghosts are
+  // actually drawn — by then fanArcs has already set offH/offD on every entry here, real and ghost alike.
+  const ghostPairs=ghostPairsFor(t).map(([o,tg,rel,kind])=>({i:o,oh:tg,rel,kind}));
+  // len: TOKEN-INDEX span, matching fanAll's own real-arc convention (a.len=Math.abs(a.dep-a.head)/Math.abs(i-h)
+  // just above) — NOT a pixel distance. Confirmed live (CDP) this matters, not just tidiness: with no len at all,
+  // fanArcs' own fallback (|xd-xh|, a PIXEL span) was being ranked directly against a real arc's TOKEN-INDEX span
+  // in the SAME pool — a one-token-wide real edge (len 1) against a many-pixel-wide ghost (len 30+) compares
+  // nothing like their true relative length, so the ghost won the centre slot unconditionally regardless of
+  // which was actually longer — the identical bug this whole fix exists to remove, reintroduced through a unit
+  // mismatch instead of a missing sort.
+  const ghostFan=ghostPairs.map(p=>{ const a={hk:p.oh,dk:p.i,xh:NX(p.oh),xd:NX(p.i),len:Math.abs(p.oh-p.i)};
+    if(rowOf(p.oh)!==rowOf(p.i)){ const iUp=rowOf(p.i).ord<rowOf(p.oh).ord; if(iUp) a.dkey="B"+a.dk; else a.hkey="B"+a.hk; }   // item 1's own cross-line bucket split, applied to ghosts too
+    return a; });
+  fanArcs(fanAll,SPREAD,ghostFan);   // sets offH/offD on every within-line AND cross-line arc AND every ghost, from the same per-token fan
   rows.forEach(r=>{ r.arcsIn.forEach(a=>{ a.h=arcHgt(Math.abs((r.LX(a.dep)+(a.offD||0))-(r.LX(a.head)+(a.offH||0))),ROW); });   // arc height (→ Hobby handle length) from the FANNED endpoints
     r.maxH=Math.max(24,...r.arcsIn.map(a=>a.h)); });
   const cOff={}; crossArcs.forEach(a=>{ cOff[a.dk]={offH:a.offH||0,offD:a.offD||0}; });
@@ -813,16 +845,11 @@ function arcsWrapped(si){
     mwtTie(svg, r.c.map(x=>x+r.offX), r.wform, rowTies(D,r.s,r.e), rowBelowBot, loBoxes(boxes), si);   // item 22: per-token rowBelowBot (already carries the DRAWN TOK_Y_LOWER+TOK_TR_GAP lowering, via wyD above), not r.stackBot's row-wide max — each tie seats off only the tokens it spans
   });
   // Ghost edges (Shared=Yes AND Subject-raising): dashed, dimmed — decorative, not a diagram element of their own,
-  // but still: (item 7) fan-shared with the real arcs at any token they land on (never the reverse), (item 2)
-  // counted toward fitTight's boxes, (item 3) highlighted when their dependent is selected, (item 6) their
-  // labels decollided against the real ones — only ghost labels ever move.
-  // ghostPairsFor gives [originIdx,targetIdx,rel] — here `i` is the ORIGIN (drawn as the ghost's dependent,
-  // matching data-dep below) and `oh` is the target (Shared: the other conjunct; Subj: the predicate).
-  const ghostPairs=ghostPairsFor(t).map(([o,tg,rel,kind])=>({i:o,oh:tg,rel,kind}));
-  const ghostFan=ghostPairs.map(p=>{ const a={hk:p.oh,dk:p.i,xh:NX(p.oh),xd:NX(p.i)};
-    if(rowOf(p.oh)!==rowOf(p.i)){ const iUp=rowOf(p.i).ord<rowOf(p.oh).ord; if(iUp) a.dkey="B"+a.dk; else a.hkey="B"+a.hk; }   // item 1's own cross-line bucket split, applied to ghosts too
-    return a; });
-  fanGhostArcs(fanAll,ghostFan,SPREAD);
+  // but still: (item 7) fanned into the SAME pool as the real arcs at any token they land on, by length, rather
+  // than unconditionally pushed outside them (see fanArcs(fanAll,SPREAD,ghostFan) above — ghostPairs/ghostFan
+  // are already computed and fanned there), (item 2) counted toward fitTight's boxes, (item 3) highlighted when
+  // their dependent is selected, (item 6) their labels decollided against the real ones — only ghost labels
+  // ever move.
   const ghostG=[];
   ghostPairs.forEach((p,gi)=>{ const {i,oh,rel,kind}=p, col=relColor(rel), fan=ghostFan[gi], rDep=rowOf(i), rOth=rowOf(oh);
     const [gtok,gother]=ghostTokOther(kind,OID(i),OID(oh));
@@ -1531,10 +1558,14 @@ function brackets(si){
   // fan the interrupter-arc endpoints with the shared routine (the SAME fan arc view uses): the arc into an
   // interrupter sits central, arcs out of a shared head fan out, shortest outermost, one step
   const npReal=np.filter(a=>a.h>=0&&a.h<n).map(a=>Object.assign(a,{hk:a.h,dk:a.d,xh:wx[a.h],xd:wx[a.d],len:Math.abs(a.d-a.h)}));
-  fanArcs(npReal,fanStep());
-  // item 7: ghost endpoints fan against the SAME buckets the reals just resolved, never the reverse
-  const ghostFan=ghostArcs.map(a=>({hk:a.h,dk:a.d,xh:wx[a.h],xd:wx[a.d]}));
-  fanGhostArcs(npReal,ghostFan,fanStep());
+  // item 7: ghost endpoints fold into the SAME fanArcs pass the reals resolve in — see fanArcs' own ghost-arg
+  // comment (mirrors 84e7938's flat-view fix) — instead of fanning in a separate later pass that always pushed
+  // a ghost outside every real arc at a shared endpoint regardless of relative length. len: TOKEN-INDEX span
+  // (a.h/a.d are token indices), matching npReal's own len convention just above — NOT a pixel distance; see
+  // arcsWrapped's identical fix (js/diagram/diagram-wrap.js, same file) for the live-measured bug this avoids —
+  // a ghost's pixel span otherwise dwarfs a real arc's token-index span regardless of true relative length.
+  const ghostFan=ghostArcs.map(a=>({hk:a.h,dk:a.d,xh:wx[a.h],xd:wx[a.d],len:Math.abs(a.h-a.d)}));
+  fanArcs(npReal,fanStep(),ghostFan);
   np.forEach(a=>{ if(a.h<0||a.h>=n)return; const col=relColor(a.rel), ink=arcInk(col);
     const XH=wx[a.h]+(a.offH||0), XD=wx[a.d]+(a.offD||0);   // fanned endpoints; crown ∝ arc width
     const lh=rep[a.h]||0, ld=rep[a.d]||0, ml=Math.max(lh,ld);   // item 6: each endpoint lifts by ITS token's reported-speech step

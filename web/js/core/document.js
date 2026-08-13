@@ -2092,7 +2092,19 @@ function reserveBracketArcRoom(){ document.querySelectorAll("#doc .bwrap").forEa
       cRec.push({dep,head,Hcx:Hr.cx,Dcx:Dr.cx,Ht:Hr.t,Dt:Dr.t,depUp, upTok:depUp?dep:head, loTok:depUp?head:dep, loIdx:depUp?lh:ld, rel}); });
     if(cRec.length){
       const cArcs=cRec.map(c=>({hk:c.head.dataset.tok, dk:c.dep.dataset.tok, xh:c.Hcx, xd:c.Dcx, len:Math.hypot(c.Dcx-c.Hcx,c.Dt-c.Ht), c}));
-      fanArcs(cArcs, fanStep());   // the VERY fan positionBracketAnnots applies → matching fanned midpoints → matching de-collision
+      // item 7: fold cross-line GHOST endpoints into this fan too — positionBracketAnnots now does the same (its
+      // own fanArcs call takes a ghostFan third arg, see that function's own item-7 comment), so a ghost sharing a
+      // cross-line bucket there can shift a real arc's offset; leaving ghosts out of THIS prediction would mispredict
+      // positionBracketAnnots' actual fanned midpoint and under-grow the gap. Built the same way positionBracketAnnots
+      // builds its own ghostFan, restricted to CROSS-line ghosts (|Dr.t-Hr.t|>=6, this pass's own within/cross split,
+      // line 2090 above) — the only ones that can ever land in one of cArcs' own buckets; a within-line ghost bump
+      // never shares a bucket with a cross-line real arc.
+      const ghostFan=ghostToks.flatMap(dep=>dep.dataset.ghostheads.split(",").map(pair=>{ const [ghOid]=pair.split(":");
+        const headTok=box.querySelector(`.bwtok[data-tok="${ghOid}"]`); if(!headTok) return null;
+        const Dr=rectOf(dep), Hr=rectOf(headTok); if(Math.abs(Dr.t-Hr.t)<6) return null;
+        const depUp=Dr.t<Hr.t, len=Math.hypot(Dr.cx-Hr.cx,Dr.t-Hr.t),   // matches cArcs' own hypot len just above — not fanArcs' bare |xd-xh| fallback, which omits the vertical term
+          a={hk:ghOid,dk:dep.dataset.tok,xh:Hr.cx,xd:Dr.cx,len}; if(depUp) a.dkey="B"+a.dk; else a.hkey="B"+a.hk; return a; })).filter(Boolean);
+      fanArcs(cArcs, fanStep(), ghostFan);   // the VERY fan positionBracketAnnots applies → matching fanned midpoints → matching de-collision
       for(let it=0; it<6; it++){
         const B=box.getBoundingClientRect();   // live: line boxes shift down as gaps grow, so re-measure each pass
         const rows=lines.map(ln=>{ const out=[]; ln.querySelectorAll(".bwform,.bwpos,.bwrel").forEach(e=>{ if(!e.textContent.trim())return;
@@ -2202,12 +2214,32 @@ function positionBracketAnnots(){ document.querySelectorAll("#doc .bwrap").forEa
   // reference to unrelated endpoints belonging to rows further above; only same-row neighbours ever share a bucket.
   const cArcs=cross.map(p=>{ const depUp=p.Dr.t<p.Hr.t, a={hk:p.headTok.dataset.tok,dk:p.dep.dataset.tok,xh:p.Hr.cx,xd:p.Dr.cx,len:Math.hypot(p.Dr.cx-p.Hr.cx,p.Dr.t-p.Hr.t),p};
     if(depUp) a.dkey="B"+a.dk; else a.hkey="B"+a.hk; return a; });
-  // FAN the shared-node endpoints for BOTH kinds of arc in ONE combined pass — a token with both a within-line bump
-  // AND a cross-line arc needs one consistent offset across both (Item 16), not two independent fans that don't
-  // know about each other and can offset both to the same spot. Without this every arc meeting one token would
-  // draw at the identical x (offset 0) → overlapping arcs; the offset also gives a near-column-aligned pair's
-  // chord real span, so drawCrossLine's own angle test (ARC_ANGLE) can tell straight from Hobby-spline.
-  fanArcs([...wArcs,...cArcs],fanStep());   // mutates each with offH (head/outgoing side) / offD (dependent side)
+  // Ghost arcs (Shared=Yes and Subject-raising), computed HERE — ahead of the fan below — so their endpoints fold
+  // into the SAME per-token pool the real within-line/cross-line arcs resolve in, instead of a separate later
+  // pass that always pushed a ghost outside every real arc at a shared endpoint regardless of relative length
+  // (see fanArcs' own ghost-arg comment, js/diagram/diagram-wrap.js — mirrors 84e7938's flat-view fix). Within-
+  // line → a plain bump; cross-line → the SAME straight-vs-Hobby-spline logic drawCrossLine gives the real
+  // cross-line arcs; data-ghostheads packs "oid:rel:kind" pairs, each ghost target carrying its own relation
+  // label. ghostPairs/ghostFan are used again further down, where the ghosts are actually drawn — by then
+  // fanArcs has already set offH/offD on every entry here, real and ghost alike.
+  const ghostPairs=[];
+  ghostToks.forEach(dep=>dep.dataset.ghostheads.split(",").forEach(pair=>{ const [ghOid,rel,kind]=pair.split(":"); ghostPairs.push({dep,ghOid,rel,kind}); }));
+  const ghostFan=ghostPairs.map(({dep,ghOid})=>{ const headTok=box.querySelector(`.bwtok[data-tok="${ghOid}"]`); if(!headTok) return null;
+    const Dr=rectOf(dep), Hr=rectOf(headTok), depUp=Dr.t<Hr.t, cross=Math.abs(Dr.t-Hr.t)>=6,
+      // len: the SAME pixel measure wArcs/cArcs use for a real arc at this within/cross-line split (just below) —
+      // NOT fanArcs' own bare |xd-xh| fallback, which for a CROSS-line ghost omits the vertical (Dr.t-Hr.t) term
+      // cArcs' hypot includes, mismatching against a real cross-line arc's own length there.
+      len=cross?Math.hypot(Dr.cx-Hr.cx,Dr.t-Hr.t):Math.abs(Dr.cx-Hr.cx),
+      a={hk:ghOid,dk:dep.dataset.tok,xh:Hr.cx,xd:Dr.cx,len};
+    if(cross){ if(depUp) a.dkey="B"+a.dk; else a.hkey="B"+a.hk; }
+    return a; });
+  // FAN the shared-node endpoints for BOTH kinds of REAL arc, AND every ghost, in ONE combined pass — a token with
+  // both a within-line bump AND a cross-line arc needs one consistent offset across both (Item 16), not two
+  // independent fans that don't know about each other and can offset both to the same spot. Without this every arc
+  // meeting one token would draw at the identical x (offset 0) → overlapping arcs; the offset also gives a near-
+  // column-aligned pair's chord real span, so drawCrossLine's own angle test (ARC_ANGLE) can tell straight from
+  // Hobby-spline.
+  fanArcs([...wArcs,...cArcs],fanStep(),ghostFan.filter(Boolean));   // mutates each with offH (head/outgoing side) / offD (dependent side)
   const wlabs=[], relpad=parseFloat(getComputedStyle(box).getPropertyValue("--relpad"))||0;   // reserved deprel-row height → seat the bump at that level so a no-label dependent attaches as far above the form as the arc view (matching the cross-line endpoints + the head's startY), not 2px above the form
   wArcs.forEach(a=>{ const p=a.p, base=Math.min(p.Hr.t,p.Dr.t)-relpad, h=arcHgt(Math.abs(p.Dr.cx-p.Hr.cx));
     const XH=p.Hr.cx+(a.offH||0), XD=p.Dr.cx+(a.offD||0), g=E("g",{});
@@ -2296,18 +2328,8 @@ function positionBracketAnnots(){ document.querySelectorAll("#doc .bwrap").forEa
     if(si0>=0&&m.fromTok!=null){ tg.setAttribute("data-s",si0); tg.setAttribute("data-mwtfrom",m.fromTok); tg.setAttribute("data-mwtto",m.toTok); }
     while(svg.childNodes.length>mark0) tg.appendChild(svg.childNodes[mark0]);   // index mark0 keeps naming the next node to move → order preserved
     svg.appendChild(tg); });
-  // Ghost arcs (Shared=Yes and Subject-raising): dashed, dimmed. Within-line → a plain bump; cross-line → the SAME
-  // straight-vs-Hobby-spline logic drawCrossLine gives the real cross-line arcs. data-ghostheads packs "oid:rel"
-  // pairs — each ghost target carries its OWN relation label (Shared=Yes ghosts show the dependent's own deprel;
-  // Subject-raising always "subj"). Item 7: fanned against the SAME buckets wArcs/cArcs just resolved (never the
-  // reverse). Item 6: labels decollided against wlabs/clabs (already finalized above) — only ghost labels move.
-  const ghostPairs=[];
-  ghostToks.forEach(dep=>dep.dataset.ghostheads.split(",").forEach(pair=>{ const [ghOid,rel,kind]=pair.split(":"); ghostPairs.push({dep,ghOid,rel,kind}); }));
-  const ghostFan=ghostPairs.map(({dep,ghOid})=>{ const headTok=box.querySelector(`.bwtok[data-tok="${ghOid}"]`); if(!headTok) return null;
-    const Dr=rectOf(dep), Hr=rectOf(headTok), depUp=Dr.t<Hr.t, a={hk:ghOid,dk:dep.dataset.tok,xh:Hr.cx,xd:Dr.cx};
-    if(Math.abs(Dr.t-Hr.t)>=6){ if(depUp) a.dkey="B"+a.dk; else a.hkey="B"+a.hk; }
-    return a; });
-  fanGhostArcs([...wArcs,...cArcs],ghostFan.filter(Boolean),fanStep());
+  // Ghost arcs, drawn now that they've been fanned above (item 7). Item 6: labels decollided against wlabs/clabs
+  // (already finalized above) — only ghost labels move.
   const ghostLabelObstacles=[...wlabs,...clabs].map(L=>({x:L.mx,y:L.fy!=null?L.fy:L.apex,hx:meas(L.text,POS_F)/2+3,hy:7}));   // every REAL label's FINAL position (post-decollide) — read, never altered
   ghostPairs.forEach(({dep,ghOid,rel,kind},gi)=>{ const headTok=box.querySelector(`.bwtok[data-tok="${ghOid}"]`); if(!headTok)return;
     const Dr=rectOf(dep), Hr=rectOf(headTok), col=relColor(rel), fan=ghostFan[gi]||{};
