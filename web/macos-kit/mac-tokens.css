@@ -75,15 +75,11 @@
     --sf-add:url("data:image/svg+xml;charset=utf-8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'><path d='M12 5.5v13M5.5 12h13'/></svg>");
     --sf-addtext:url("data:image/svg+xml;charset=utf-8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'><path d='M4 7h8'/><path d='M4 12h14'/><path d='M4 17h14'/><path d='M18 3.4v5.5M15.25 6.15h5.5'/></svg>");   /* SF text.badge.plus: text lines with a plus badge top-right (matches File ▸ Add Text) */
     --sf-warn:url("data:image/svg+xml;charset=utf-8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.9' stroke-linecap='round' stroke-linejoin='round'><path d='M12 3.6 22 20.4H2Z'/><path d='M12 9.6v4.6'/><path d='M12 17.4h.01'/></svg>");   /* SF exclamationmark.triangle → the running sentence's tokenisation-mismatch badge. Drawn as a mask like every other --sf-*, NOT as a text glyph: ⚠ U+26A0 carries an emoji presentation default, so it would render as a colour emoji in some contexts and as tofu wherever the pruned CORE_FONTS lack it — the same trap U+231C fell into for reported speech. A mask takes currentColor and is always present */
-    --sf-undo:url("data:image/svg+xml;charset=utf-8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'><path d='M9 5L5 9l4 4'/><path d='M5 9h8a5 5 0 0 1 0 10h-2.5'/></svg>");
-    --sf-redo:url("data:image/svg+xml;charset=utf-8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'><path d='M15 5l4 4-4 4'/><path d='M19 9h-8a5 5 0 0 0 0 10h2.5'/></svg>");
     --sf-cube:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 2.5 20 7 20 17 12 21.5 4 17 4 7Z'/%3E%3Cpath d='M4 7 12 11.5 20 7'/%3E%3Cpath d='M12 2.5 12 21.5'/%3E%3Cpath d='M8 9.4 16 9.4'/%3E%3C/svg%3E");   /* cube icon for the toolbar Manage-Models button, matching the menu's cube.box — SF shippingbox: box + packing tape over the top and down the front. Moved here from styles/app.css, which loaded after both kits and so overrode this line on BOTH platforms (leaving the Fluent kit's cube dead code); the ARTWORK kept is app.css's, since that is the drawing macOS has actually been rendering, not this kit's own slightly earlier trace of the same glyph. */
     --sf-gear:url("data:image/svg+xml;charset=utf-8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'><circle cx='12' cy='12' r='3.1'/><path d='M12 3.6v2.3M12 18.1v2.3M20.4 12h-2.3M5.9 12H3.6M18 6l-1.6 1.6M7.6 16.4L6 18M18 18l-1.6-1.6M7.6 7.6L6 6'/></svg>");
     --sf-guide:url("data:image/svg+xml;charset=utf-8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'><path d='M12 6.5C10 5.2 7.2 4.8 4 5.4v11.2c3.2-.6 6-.2 8 1.1 2-1.3 4.8-1.7 8-1.1V5.4c-3.2-.6-6-.2-8 1.1z'/><path d='M12 6.5v11.2'/></svg>");   /* SF book (open): matches File ▸ SUD Guidelines */
-    --sf-help:url("data:image/svg+xml;charset=utf-8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'><circle cx='12' cy='12' r='8'/><path d='M9.4 9.4a2.7 2.7 0 0 1 5.1 1.1c0 1.7-2.55 2.1-2.55 3.6'/><path d='M12 16.4h.01'/></svg>");   /* SF questionmark.circle: question mark inside a circle → in-app Help. r=8 (was 9) so its enclosed ink matches the zoom magnifier's weight; stroke stays 1.7 */
-    --sf-zoomin:url("data:image/svg+xml;charset=utf-8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'><circle cx='10.5' cy='10.5' r='6'/><path d='M15 15l5.2 5.2'/><path d='M10.5 8v5M8 10.5h5'/></svg>");
-    --sf-zoomout:url("data:image/svg+xml;charset=utf-8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'><circle cx='10.5' cy='10.5' r='6'/><path d='M15 15l5.2 5.2'/><path d='M8 10.5h5'/></svg>");
-    --sf-actualsize:url("data:image/svg+xml;charset=utf-8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'><circle cx='10.5' cy='10.5' r='6'/><path d='M15 15l5.2 5.2'/><path d='M9.4 9.3l1.5-1v4.9'/></svg>");   /* fix 8: SF 1.magnifyingglass — magnifier with a '1' inside → "Display at actual size" (1:1), 1.5 stroke to match the − / + magnifiers */
+    --sf-help:url("data:image/png;base64,REDACTED-SF-SYMBOL-PAYLOAD-PURGED-FROM-HISTORY");   /* real SF Symbol PNG (see this file's header + the --sf-grid comment for the technique); supersedes the hand-drawn fallback */
+    --sf-actualsize:url("data:image/png;base64,REDACTED-SF-SYMBOL-PAYLOAD-PURGED-FROM-HISTORY");   /* real SF Symbol PNG (see this file's header + the --sf-grid comment for the technique); supersedes the hand-drawn fallback */
     --sf-gloss:url("data:image/svg+xml;charset=utf-8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'><path d='M4 5h16v11H8l-4 4z'/><path d='M8 9.2h8'/><path d='M8 12.6h5'/></svg>");
     --sf-morphgloss:url("data:image/svg+xml;charset=utf-8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'><path d='M4 5h16v11H8l-4 4z'/><path d='M7.5 9.2h3M12.5 9.2h4'/><path d='M7.5 12.6h2M11.5 12.6h4.5'/></svg>");
     --sf-chevronright:url("data:image/svg+xml;charset=utf-8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.6' stroke-linecap='round' stroke-linejoin='round'><path d='M9 6l6 6-6 6'/></svg>");   /* SF chevron.right → the "Definitions of …" flyout disclosure indicator. Bold stroke (2.6, vs. the ~1.5 line-icon weight elsewhere) — a native NSMenu submenu chevron reads solid/bold, not a thin outline glyph */
@@ -97,16 +93,26 @@
        held this slot briefly before being swapped for the genuine glyph, on report.
        Weight fix (on report — "should match zoom/undo/redo"): the PNG actually spliced in here had drifted to
        MEDIUM (bbox 111×88, mode stroke 9px, stroke/bbox-height ≈0.102 measured on the raw asset) despite this
-       comment always having said "regular" — a mismatch between doc and asset, not a doc error. --sf-undo/
-       --sf-redo/--sf-zoomin/--sf-zoomout are NOT SF Symbols at all: this file's own :root redeclares each of
-       them further down (search "Mail-style THIN line glyphs") as a hand-drawn SVG, stroke-width 1.5 in a
-       24-unit viewBox — CSS custom properties take the LAST declaration in a block, so those later SVG rules
-       are what the titlebar actually renders, and the four PNG SF-Symbol versions of those same tokens up near
-       the top of this file are dead CSS. Rasterizing those SVGs and measuring the identical way (mode stroke
-       run / glyph bbox height) gives ≈0.092 — matching REGULAR (≈0.089, measured on a fresh render) far better
-       than MEDIUM (≈0.104, ~3.5× further off) or LIGHT (≈0.068). app.css's own `.tbtn.icon .sfi` comment
+       comment always having said "regular" — a mismatch between doc and asset, not a doc error. Rasterizing
+       the reference hand-drawn SVGs (below, at the time) and measuring the identical way (mode stroke run /
+       glyph bbox height) gave ≈0.092 — matching REGULAR (≈0.089, measured on a fresh render) far better than
+       MEDIUM (≈0.104, ~3.5× further off) or LIGHT (≈0.068). app.css's own `.tbtn.icon .sfi` comment
        ("strokes harmonised to a consistent 1.5 across every mask") independently confirms regular is the
-       intended target. Re-rendered at the same 96pt/regular configuration this comment already specified. */
+       intended target. Re-rendered at the same 96pt/regular configuration this comment already specified.
+       RESOLVED (on report — "the undo, redo, and zoom icons... should be SF Symbols PNGs"): --sf-undo/
+       --sf-redo/--sf-zoomin/--sf-zoomout used to have exactly this same problem — a genuine SF-Symbol PNG
+       declared here, then silently shadowed by a later hand-drawn "Mail-style THIN line glyphs" SVG
+       declaration further down this same :root block (CSS custom properties take the LAST declaration), so
+       the SVG was what the titlebar actually rendered and the PNG above was dead CSS. Rather than trust a
+       possibly-stale dead asset's weight, all four (plus --sf-actualsize/--sf-help, which had NEVER had a PNG
+       at all) were re-rendered fresh at this same 96pt/regular configuration — arrow.uturn.backward/-forward,
+       plus/minus.magnifyingglass, 1.magnifyingglass, questionmark.circle, the exact symbol names menu_spec.py
+       already uses for Undo/Redo/Zoom In/Zoom Out/Actual Size/Help — and the shadowing SVG declarations for
+       undo/redo/zoomin/zoomout were deleted outright (not left dead a second time). The five notation-diagram
+       glyphs below and the notation-picker's own trigger glyph (--sf-notationmenu) are NOT part of this fix:
+       they were checked and confirmed to never have had an SF-Symbol PNG at all — stemma/hierarchy/arcs/
+       brackets/outline are bespoke diagram-type shapes with no Apple equivalent, and --sf-notationmenu is
+       deliberately original line art (its own comment explains why), not a traced/abandoned Apple glyph. */
     --sf-grid:url("data:image/png;base64,REDACTED-SF-SYMBOL-PAYLOAD-PURGED-FROM-HISTORY");
     /* ── notation diagram glyphs (one per diagram type) ── */
     /* notation glyphs = Lucide icons (stroke-width 1.6 to match the other titlebar icons): stemma→network,
@@ -120,7 +126,7 @@
        visual idea as Finder's "view options" toolbar button (a fixed icon that never changes with the
        current selection, unlike the five glyphs above). Hand-drawn ORIGINAL line art in this file's own
        stroke convention (24×24, width 1.6, round caps/joins) rather than a traced copy of Apple's own
-       glyph or a named third-party icon — safe to reuse verbatim in the Fluent kit too, unlike the 12
+       glyph or a named third-party icon — safe to reuse verbatim in the Fluent kit too, unlike the
        real SF Symbols elsewhere in this file (see this file's own header on why those stay Apple-only). */
     --sf-notationmenu:url("data:image/svg+xml;charset=utf-8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'><path d='M3 6h8'/><path d='M3 12h8'/><path d='M3 18h8'/><path d='m15 9 3-3 3 3'/><path d='m15 15 3 3 3-3'/></svg>");
     /* ── the page-layout pill (items 3 + 7) ──
