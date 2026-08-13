@@ -138,9 +138,19 @@ function openSub(btn,items,fit,colSize){ _subLoadToken++; const myToken=_subLoad
     ctx2.style.minWidth="";   // clear any previous call's floor before re-measuring — a later render (e.g. "Loading…" → real senses) must never be held to an EARLIER row's width
     liftFootLink();   // BEFORE the header measurement below, which reads ctx2.offsetWidth — the lift restructures the flyout into a flex column, so measuring first would size the floor against the pre-lift box
     const hdrs=[...ctx2.querySelectorAll(".hdr")].map(h=>h.textContent);   // .hdr rows (gender groupings, "Loading…"/"Nothing found"/"Couldn't load") are position:sticky with a negative margin for their full-bleed background (see .ctx-sub.defctx .hdr) — some engines under-count that combination's contribution to a shrink-to-fit ancestor's width, clipping the header TEXT even though the identical string in a plain (non-sticky) row would fit fine. Sidestep it with a direct floor from the SAME canvas measurement technique acPos() already uses for the autocomplete menu, rather than fight the engine-dependent shrink-to-fit interaction itself.
-    if(hdrs.length){ const need=Math.max(0,...hdrs.map(t=>meas(t,'700 10px '+uiFont())))+26;   // uiFont() (js/core/platform.js) resolves --ui-font to a plain family list — a measurement font string cannot carry a var(), and the hard-coded SF Pro stack this replaced measured the macOS face on Windows, where .hdr actually renders in Segoe   // +26: the container's 12px×2 padding, plus a couple px slack
+    // on report ("Add features flyout… make sure there is enough space for the labels to not wrap"): the floor
+    // below only ever measured .hdr text, never a row's own .mlbl label — fine for every PRIOR subFit flyout
+    // (Wiktionary senses, "Mark as…"), whose rows are short fixed strings, but "Add feature…" is the first
+    // subFit flyout with many groups' worth of real content values (UD value names run longer than any header
+    // here — "SubjRaising", "Bantu12", …), so the floor a .hdr-only measurement computed could sit narrower
+    // than the widest LABEL actually rendered, and nothing here stopped that label wrapping inside its own row.
+    const lbls=[...ctx2.querySelectorAll(".mlbl")].map(h=>h.textContent);
+    if(hdrs.length||lbls.length){
+      const hdrNeed=Math.max(0,...hdrs.map(t=>meas(t,'700 10px '+uiFont())))+26;   // uiFont() (js/core/platform.js) resolves --ui-font to a plain family list — a measurement font string cannot carry a var(), and the hard-coded SF Pro stack this replaced measured the macOS face on Windows, where .hdr actually renders in Segoe   // +26: the container's 12px×2 padding, plus a couple px slack
+      const lblNeed=Math.max(0,...lbls.map(t=>meas(t,'510 13px '+uiFont())))+40;   // same technique, the row BUTTON's own font (.ctx button, mac-chrome.css) — +40: the container's 12px×2 inset plus the button's own 7px×2 padding plus its 7px past-inset widening (see .ctx button's own comment) plus a couple px slack
+      const need=Math.max(hdrNeed,lblNeed);
       const cap=parseFloat(getComputedStyle(ctx2).maxWidth);   // the .defctx ceiling — now the parent menu's own width, set inline a few lines up (the 320px reading measure in .ctx-sub.defctx is only the fallback); NaN here for any flyout that isn't .defctx, since maxWidth computes to "none"
-      if(need>ctx2.offsetWidth) ctx2.style.minWidth=Math.min(need,cap||Infinity)+"px"; }   // CLAMP the floor to that ceiling: min-width beats max-width in CSS, so a header long enough to demand more than the cap would silently win and the flyout would grow past the measure the senses themselves are held to. Today's headers (gender names, "Loading…") are ~110px at 700 10px and nowhere near it — the clamp is here so the two can never fight if either number moves
+      if(need>ctx2.offsetWidth) ctx2.style.minWidth=Math.min(need,cap||Infinity)+"px"; }   // CLAMP the floor to that ceiling: min-width beats max-width in CSS, so a header/label long enough to demand more than the cap would silently win and the flyout would grow past the measure the senses themselves are held to. Today's headers (gender names, "Loading…") are ~110px at 700 10px and nowhere near it — the clamp is here so the two can never fight if either number moves
     fitWholeRows(ctx2);   // …then pull the height back to a ROW BOUNDARY (see below). LAST, so it measures the final layout: after the width ceiling, the header floor and the footer lift, all of which change where the rows wrap and therefore how tall they are
     positionSub(); };
   if(typeof items==="function"){   // a submenu built on demand: a SYNC result (a relation's deep features) renders at once; a PROMISE (e.g. Wiktionary) shows a placeholder, then swaps in the fetched rows
@@ -784,16 +794,38 @@ function avmValueMenu(x,y,si,tokId,key){
    not a chained "pick the feature, THEN pick the value" pair of flyouts: the context-menu system supports only
    one nested flyout (openSub's singleton ctx2), so a `sub` row rendered INSIDE that flyout has nowhere further
    to open. */
+// on report ("only list features and values that exist in the document/morphologiser output"): attestedFeatVals
+// (grid.js) is the wrong helper to reuse verbatim here, even though its inputs — docPairVals("feats",feat) ∪
+// MODEL_FEATS_INVENTORY[feat], i.e. exactly "document/morphologiser output" — are the right ones. Its own LAST
+// line, `return out.length?out:full`, is a deliberate fallback to the FULL UD inventory whenever nothing is
+// attested — correct for its own callers (an ALREADY-SET feature's alternate-value picker, where showing
+// something beats showing nothing), wrong here: this flyout only ever offers a feature the token DOESN'T have
+// yet, so "nothing attested anywhere in the doc or model" is the common case, not the exception, and the
+// fallback was quietly handing back the entire untethered UD_FEATS list for most candidates — the opposite of
+// what was asked. strictAttestedVals reads the SAME two sources, with no full-list fallback: a feature/value
+// with zero attestation is simply not offered.
+function strictAttestedVals(feat){ const full=UD_FEATS[feat]||[]; if(!full.length) return full;
+  const attested=new Set((typeof docPairVals==="function"?docPairVals("feats",feat):[]));
+  (typeof MODEL_FEATS_INVENTORY==="object"&&MODEL_FEATS_INVENTORY&&MODEL_FEATS_INVENTORY[feat]||[]).forEach(v=>attested.add(v));
+  return full.filter(v=>attested.has(v)); }
 function addFeatureItems(si,tokId){
   const s=DOC[si], t=s&&s.tokens[tokId-1]; if(!t) return [];
   const cands=Object.keys(UD_FEATS).filter(f=>!AVM_EXCLUDE.has(f)&&getFeat(t.feats,f)==null);
   const items=[];
   cands.forEach(f=>{
-    const vals=(typeof attestedFeatVals==="function"?attestedFeatVals(f):null)||UD_FEATS[f]||[];
+    const vals=strictAttestedVals(f);
     if(!vals.length) return;
     const desc=(typeof FEATS_VDESC==="object"&&FEATS_VDESC&&FEATS_VDESC[f])||{};
     items.push({header:f});
-    vals.forEach(v=>items.push({label:v, expand:desc[v]||"", fn:()=>avmSetFeat(si,tokId,f,v)})); });
+    // on report ("not enough space for the labels to not wrap"): the real cause wasn't the FLYOUT's own width —
+    // it was this row's raw, un-truncated FEATS_VDESC entry as `expand`. posSubItems (above, the pattern this
+    // whole flyout mirrors) already solved exactly this with shortVDesc() — "a SHORT expansion that can't cross
+    // the one-column midline" — but this call used the raw description directly. A long one (NounClass's own
+    // entries run to a full sentence, e.g. "Bantu class 12 (singular: small things, diminutives)") squeezed the
+    // row's own .mlbl flex column down to near-zero width, wrapping the LABEL character-by-character (measured
+    // live: "Bantu12"'s own .mlbl rendered at width:0, height:112px — one character per line) — not a container
+    // sizing problem at all, a per-row internal layout one.
+    vals.forEach(v=>items.push({label:v, expand:shortVDesc(desc[v]||""), fn:()=>avmSetFeat(si,tokId,f,v)})); });
   return items; }
 // the nodeTokenMenu row itself — omitted entirely when every standard feature is already set (same guard
 // shape as markFeatRow just above it), so the menu never grows for a token with nothing left to add.
