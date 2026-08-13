@@ -940,11 +940,42 @@ function smpReshape(root){
      content anywhere in the row (plain Devanagari, Tibetan, Khmer, Burmese, an English document, …) sees
      its daṇḍa exactly as before: plain SVG `<text>`, untouched. */
   const isPunctSat=el=>{ const p=el.parentNode; return !!(p&&p.classList&&p.classList.contains("punct-sat")); };
+  /* item 26 — the SAME shape-to-<path> technique, triggered by STYLE instead of by codepoint. `.avm-attr`
+     (drawAVM's attribute-name label) is the one native SVG <text> in this app that BOTH carries a
+     font-feature-settings override (c2sc, app.css) AND is its own complete <text> — a single text-node
+     child, no sibling tspans sharing its flow — so it swaps exactly the way an SMP <text> does: read the
+     shape, paint the shape, nothing left to reposition around it. `.avm-val`/`.oavm-attr`/`.oavm-val`
+     deliberately do NOT ride this list: `.avm-val` carries no feature-settings override at all (avmLayout
+     measures it with plain meas(), never _measOneUncached's extraCss path, so it was never in the bug this
+     closes); `.oavm-attr`/`.oavm-val` are the OUTLINE notation's own HTML echo, plain flow text with no
+     separate JS-measured reservation to ever disagree with what it paints (see their own CSS notes) — nothing
+     for this mechanism to fix there. measGloss's own c2sc/onum runs (`.glabbr`, Gloss/MGloss) get the SAME
+     class of fix on the MEASUREMENT side only (_measOneUncached, above) — their glyphs stay on the browser's
+     own rendering, deliberately: a `.glabbr` tspan sits INLINE among plain sibling text nodes in the same
+     parent <text> (the dot-separated Leipzig convention, "PST.PTCP…"), and a <path> swap does not
+     participate in SVG text flow — the plain runs around it would need their own explicit repositioning,
+     which is real, separate work this pass does not attempt. */
+  const FFS_SHAPE_CLASSES=["avm-attr"];
+  const ffsShapeClass=el=>{ if(!el.classList) return null;
+    for(const c of FFS_SHAPE_CLASSES) if(el.classList.contains(c)) return c; return null; };
   let hadSMP=false;
   for(const el of texts){ if(smpUnshaped(ownText(el))){ hadSMP=true; break; } }
   for(const el of texts){ const s=ownText(el);
     const punctSatSMP=hadSMP&&isPunctSat(el);
-    if(!smpUnshaped(s) && !punctSatSMP && !SMP_RE.test(s||"")) continue;
+    const ffsClass=s&&ffsShapeClass(el);
+    if(!smpUnshaped(s) && !punctSatSMP && !SMP_RE.test(s||"") && !ffsClass) continue;
+    if(ffsClass){
+      const cs2=getComputedStyle(el);
+      const hbFeat=cssFeatToHB(cs2.fontFeatureSettings);
+      const fam2=_firstFamily(cs2.fontFamily), sizePx2=parseFloat(cs2.fontSize)||0;
+      const track2=parseFloat(cs2.letterSpacing)||0;   // px already (getComputedStyle resolves any em to px) — the SAME quantity _measOneUncached's own trackPx folds in for this exact element's reservation, read back off the live element instead of recomputed, so the two can never name a different number for the same class
+      if(hbFeat&&fam2&&sizePx2){
+        const shape=(typeof smpShapeSync==="function")?smpShapeSync(s,fam2,sizePx2,hbFeat,track2):null;
+        if(shape&&shape.d){ smpSwapPath(el,shape); continue; }
+        if(typeof smpShapeEnsure==="function"&&typeof smpNotePending==="function") smpNotePending(smpShapeEnsure(s,fam2,sizePx2,hbFeat,track2));
+      }
+      if(!smpUnshaped(s) && !punctSatSMP && !SMP_RE.test(s||"")) continue;   // not ready yet, and nothing ELSE about this element needs the SMP/HTML-fallback machinery below — leave the plain <text> exactly as it was (native c2sc paint), matching what avmLayout's own getBBox() fallback just reserved for it
+    }
     /* item 25: try the REAL fix first, on every engine — smpSwapPath (below) paints HarfBuzz-shaped glyph
        outlines as a plain SVG <path>, which shapes identically wherever it runs, so unlike the
        foreignObject fallback further down (which specifically exploits WebKit's OWN native HTML text
@@ -1294,6 +1325,42 @@ function smpReshape(root){
     for(const ch of el.children) if(ch.tagName==="title") fo.appendChild(ch.cloneNode(true));   // the hover tooltip belongs to the token, not to the <text> we are discarding
     el.parentNode&&el.parentNode.replaceChild(fo,el); }
   } finally { if(mounted&&root.parentNode===_mmount) _mmount.removeChild(root); } }
+/* item 26 — TWO SYNTAXES FOR THE SAME OPENTYPE FEATURE LIST. `extraCss` (avmLayout's c2sc attr-label
+   override, measGloss's c2sc/onum abbreviation-run override — see _measOneUncached's own note on both)
+   speaks CSS's font-feature-settings VALUE grammar, `'tag' value[,'tag' value…]` (quoted 4-char tag, a
+   space, an integer). js/lang/smp-shape.js's HarfBuzz call speaks hb_feature_from_string's own grammar
+   instead, `tag[=value][,tag[=value]…]` (hbjs's shape() already `.split(",")`s on exactly this). The two
+   describe the identical OpenType feature list; this is the syntax bridge between them, matched loosely
+   enough to take either the JS-string CSS form ('c2sc' 1) or getComputedStyle's own normalised echo of it
+   ("c2sc" 1, double-quoted) — smpReshape's paint-side caller reads the feature list off getComputedStyle,
+   not off the literal extraCss string avmLayout/measGloss wrote, so both quoting styles have to parse. */
+// ⚠ THE VALUE IS ALWAYS SPELLED OUT, EVEN WHEN THE SOURCE OMITTED IT (a bare "c2sc" and an explicit
+// "c2sc" 1 both normalise to "c2sc=1"). getComputedStyle(el).fontFeatureSettings serialises a value-1
+// feature WITHOUT the value (confirmed live: avmLayout's own literal "'c2sc' 1" reads back from a real
+// element as `"c2sc"`, no "1"), while avmLayout/measGloss's own extraCss strings always spell it out — two
+// call sites of this same converter (_measOneUncached's measurement, smpReshape's paint-side swap) that
+// otherwise land on two DIFFERENT cache keys for the IDENTICAL feature list, doubling the shaping work (and,
+// briefly, having measurement and paint each wait on their OWN async shape to land rather than sharing one).
+function cssFeatToHB(v){
+  if(!v) return "";
+  const out=[]; const re=/['"]([a-zA-Z0-9]{1,4})['"]\s*(-?\d+)?/g; let m;
+  while((m=re.exec(v))) out.push(m[1]+"="+(m[2]!==undefined?m[2]:"1"));
+  return out.join(","); }
+// item 26 — the first family off EITHER a full font shorthand ("571 10.5px \"Noto Sans\", …", AVM_ATTR_F/
+// GLOSS_F's own shape — strip up through the required <size> token first) OR a bare family list
+// (getComputedStyle(el).fontFamily has no size token at all, so the strip is a no-op and the same regex
+// reads its first entry directly) — the one family HarfBuzz should shape THIS run against. Every string
+// this function ever receives here names Latin ASCII text only (AVM attribute names, Leipzig gloss
+// abbreviations are always plain [A-Z0-9]+ — see GLOSS_ABBR_RE/avmLayout's own .toUpperCase()), so unlike
+// the SMP case (fontScriptRes, keyed on the RUN's own script) there is no per-script family to resolve:
+// the font stack's FIRST entry (LIVE_TOKEN_STACK's own "Noto Sans", always bundled — see app/fonts.py's own
+// note on the CORE faces) is what every one of these strings actually resolves to and is shaped against.
+function _firstFamily(f){
+  if(!f) return null;
+  const afterSize=f.replace(/^[\s\S]*?\d+(?:\.\d+)?px\s*/,"");
+  const m=/^"([^"]+)"|^'([^']+)'/.exec(afterSize);
+  if(m) return m[1]||m[2];
+  const c=afterSize.split(",")[0]; return c?c.trim():null; }
 function _measOneUncached(s,f,extraCss){
   // Mirror CSS letter-spacing for sizes that carry the tracking curve (.node-lbl/.baseword at 14px → .0055em,
   // etc.). Canvas measureText ignored it; SVG getComputedTextLength honours style.letterSpacing. Sizes at the
@@ -1323,6 +1390,33 @@ function _measOneUncached(s,f,extraCss){
   // style string either way, so this never showed up under CDP. A SEPARATE property assignment, applied
   // strictly after the shorthand (not concatenated into the same string), is what actually takes in both engines.
   const _ffsM=extraCss&&/font-feature-settings\s*:\s*([^;]+)/.exec(extraCss);
+  /* item 26 — TRY HARFBUZZ FIRST, on every engine, whenever a feature-settings override is in play. The
+     getBBox() fallback just below is d6e82f6's own fix, and it IS correct in isolation (a fresh, cache-
+     cleared, isolated call reproduces real paint to the pixel — reverified live for this change, see the
+     PR notes) — but it reads a SHARED, rapidly-reused offscreen element (_mtxt), and a live re-probe of the
+     real running app after that fix landed still caught avmLayout's own CACHED reservation for "DEFINITE"
+     at 47.83px against a same-session, same-code, freshly-recomputed 41.25px — i.e. getBBox() answered
+     DIFFERENTLY for the identical text/font/feature depending on what ELSE had just run through the same
+     element, under real render load. That is a browser text-engine inconsistency no amount of correcting
+     THIS call site's own CSS/property order can close off — the fix is to stop asking the browser's text
+     engine at all. HarfBuzz shapes the SAME text/family/size/feature list deterministically, cached on
+     exactly that key (smpShapeSync, js/lang/smp-shape.js) — same synchronous-read/async-prepare contract
+     smpUnshaped's own SMP case already established (see its call below): a cache hit returns the shaped
+     advance directly (no browser measurement involved at all); a miss kicks off shaping in the background
+     and this ONE render falls through to the getBBox() fallback exactly as before, unchanged, so nothing
+     regresses while a shape is still in flight. letterSpacingPx folds trackCurve's own em value (computed
+     just above, `track`) into the SAME accumulator HarfBuzz positions glyphs with, so the number returned
+     here and the geometry smpReshape's own paint-side swap (below) produces can never drift apart — one
+     shaping pass, one source of truth, exactly the point of moving this text off the browser's engine. */
+  if(_ffsM){
+    const hbFeat=cssFeatToHB(_ffsM[1]), fam=_firstFamily(f);
+    if(hbFeat&&fam&&px&&typeof smpShapeSync==="function"){
+      const trackPx=track*px;
+      const shape=smpShapeSync(s,fam,px,hbFeat,trackPx);
+      if(shape&&shape.d!=null) return shape.w;
+      if(typeof smpShapeEnsure==="function"&&typeof smpNotePending==="function")
+        smpNotePending(smpShapeEnsure(s,fam,px,hbFeat,trackPx));
+    } }
   if(_ffsM) _mtxt.style.setProperty("font-feature-settings",_ffsM[1]); else _mtxt.style.removeProperty("font-feature-settings");
   _mtxt.textContent=s||"";
   let w=0;
