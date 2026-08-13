@@ -2755,7 +2755,23 @@ function belowReserveH(hasTr,tierCount,hasPos,avmH){ const n=belowRows(hasTr,tie
    against it, so the spine is back on .mwt-tie-h and the serifs on .mwt-tie, restoring round 2's original
    pairing (and with it mwtTie's own unrotated one, and .mwt-grid-tie's) as the ONE convention every "this
    marks a multi-word/multi-part span" bracket in the app now shares. */
-const AVM_ROW_GAP=2, AVM_PAD_V=2, AVM_COL_GAP=6, AVM_PAD_L=3.5, AVM_PAD_R=7, AVM_BRK_W=3.5, AVM_BRK_EXT=0.5625;   // ONE PAD_H used to govern BOTH sides symmetrically — wrong, on report ("removed padding from the wrong side... now it's too tight on the right"): the zero-gap ask (previous round) was specifically about the LEFT side (.avm-hit's own edge vs the attr column's own ink), and dropping PAD_H to AVM_BRK_W to satisfy that ALSO shrank the right side (val column to the right bracket), which nobody asked to change. Split into AVM_PAD_L (=AVM_BRK_W, the left side's own zero-gap value, unchanged from that fix) and AVM_PAD_R (=7, the ORIGINAL shared value, restored on the right where it was never meant to move) — the two sides are independent now, so a future request about one can never silently move the other again. PAD_V/COL_GAP tightened (from 4/9) in round 3 and left there — that report was about the bracket floating clear of the ink, which they still don't. AVM_BRK_W/AVM_BRK_EXT untouched.
+const AVM_ROW_GAP=2, AVM_PAD_V=2, AVM_COL_GAP=6, AVM_PAD_L=5.25, AVM_PAD_R=7, AVM_BRK_W=3.5, AVM_BRK_EXT=0.5625;   // ONE PAD_H used to govern BOTH sides symmetrically — wrong, on report ("removed padding from the wrong side... now it's too tight on the right"): the zero-gap ask (previous round) was specifically about the LEFT side (.avm-hit's own edge vs the attr column's own ink), and dropping PAD_H to AVM_BRK_W to satisfy that ALSO shrank the right side (val column to the right bracket), which nobody asked to change. Split into AVM_PAD_L (originally =AVM_BRK_W, the left side's own zero-gap value) and AVM_PAD_R (=7, the ORIGINAL shared value, restored on the right where it was never meant to move) — the two sides are independent now, so a future request about one can never silently move the other again. PAD_V/COL_GAP tightened (from 4/9) in round 3 and left there — that report was about the bracket floating clear of the ink, which they still don't. AVM_BRK_W/AVM_BRK_EXT untouched.
+   // AVM_PAD_L round 2 (this session, post font-fix): the literal-zero clearance above was requested and
+   // verified BEFORE 2e73d4f/4d38780 (this same session, later) fixed .avm-attr's rendering from a thin,
+   // wrong-weight, non-small-caps glyph to its correct bold (571) c2sc small-caps HarfBuzz shape — i.e. the
+   // "0" was tuned against ink that barely existed yet. Report, once the font was finally correct: "the left
+   // space is now much less than the space on the right of the values" — true, and newly visible for the
+   // first time, not a regression in the padding MATH (see avmBrkInkDx() below: measured live, both sides are
+   // already positioned exactly relative to the bracket's real rendered edge, to within a glyph's own normal
+   // side-bearing noise — VOICE/DEFINITE-class gaps, <1.5px, the same magnitude 2e73d4f's own verification
+   // already accepted as fine). The ASYMMETRY itself is what changed reading: 0px (touching) vs ~3.4px
+   // (clearly separated) is a much starker contrast against bold ink than it was against a hairline. Bumped
+   // to 1.5×AVM_BRK_W (was 1×) — real measured left gap ~2.4px, softer than a hard touch, still visibly
+   // TIGHTER than the right's ~2×AVM_BRK_W-derived clearance, keeping the "attr hugs its bracket, val gets
+   // more room" asymmetric design language the two constants have always encoded, just no longer at the
+   // knife-edge of 0. If this reads as too loose again, the next round should retune the multiplier, not
+   // re-collapse it to AVM_BRK_W — that value's own history (61e0fb3) is now known to have been judged
+   // against broken ink.
    // item 25/6: AVM_BRK_W tightened again, 5→3.5, on report ("AVM bracket ticks should be the same length as
    // MWT bracket ticks — right now they're too long"). Measured first, not guessed: an AVM bracket's serif and
    // an MWT tie's own PIN were ALREADY geometrically identical at 5px each (mwtTie's flat PIN=5, drawAVM's own
@@ -2772,6 +2788,52 @@ const AVM_ROW_GAP=2, AVM_PAD_V=2, AVM_COL_GAP=6, AVM_PAD_L=3.5, AVM_PAD_R=7, AVM
    // .mwt-tie-h's stroke-width at --arc-stroke:1.5px (.75×1.5/2), kept in step BY HAND with that rule — carried
    // by the SERIFS (see drawAVM), which overshoot the (thin) spine's own centreline exactly as mwtTie's own
    // pins overshoot its bar, regardless of how long the serif itself now is.
+/* AVM_PAD_L/AVM_PAD_R above assume the bracket's own visible ink ends EXACTLY at its nominal path coordinate
+   (x0+AVM_BRK_W / x1-AVM_BRK_W) — on report ("the AVM contents need to be placed relative to the bounding
+   boxes of the brackets"): that assumption needed VERIFYING, not trusting, since an SVG stroke paints centred
+   on its path and a rounded/squared line cap bleeds stroke-width/2 further in the direction of travel, past
+   the nominal endpoint — exactly the class of bug this file's own smpReshape/getComputedTextLength sagas keep
+   finding elsewhere in this codebase.
+   Checked properly before writing this: getBBox() — the tool the report named — CANNOT answer the question.
+   Verified empirically in BOTH engines (a from-scratch isolated stroked-path test page, headless Chrome 151
+   via CDP, AND a live pywebview/WKWebView probe against the real running app): a stroked-only <path>'s
+   getBBox() and getBoundingClientRect() both return the RAW PATH GEOMETRY ONLY, excluding stroke-width and
+   cap style entirely — even the SVG2 getBBox({stroke:true}) option is accepted without error and silently
+   ignored (Chrome 151 doesn't implement stroke-inclusive bboxes). No DOM geometry query can see a stroke's
+   real visual footprint in either engine; only the actual computed stroke-linecap/-width can answer it.
+   So: read those LIVE (not hardcoded) off a throwaway .mwt-tie-styled element, lazily, once — matching
+   _lazyFont's own convention — and cache the derived scalar (matching _avmCache/_measOne's own caching
+   discipline: this is a CSS-derived constant with no per-box variation, so one measurement serves every AVM
+   box in the document; no per-box getBBox()/reflow is ever introduced, which a naive per-box "measure the
+   real bracket" implementation would have reintroduced exactly the forced-synchronous-layout regression class
+   renderDoc is already known to be dominated by).
+   Today's real answer: 0. .mwt-tie carries no stroke-linecap override anywhere in app.css (grepped in full)
+   — the CSS initial value applies, which is `butt`: a butt cap terminates FLUSH at the path's own endpoint,
+   with zero overshoot in the direction of travel. So the bracket's real ink edge IS exactly the nominal
+   x0+AVM_BRK_W/x1-AVM_BRK_W coordinate today, confirmed both by this stroke-linecap fact and by the live
+   probe's own measured gaps (≈0.7–2.9px on the two sides, matching ordinary glyph side-bearing noise, not a
+   multi-pixel bracket-position error). AVM_PAD_L's own increase (above) is a separate, deliberate padding
+   change — this function's job is only to keep the ATTR/VAL anchor honest against whatever the bracket's
+   REAL cap style turns out to be, so a future stroke-linecap:round on .mwt-tie (unlikely, but this is exactly
+   how the last several rounds of this saga went for other properties) shifts this cached scalar automatically
+   instead of silently reopening the same "assumed nominal geometry" bug this comment exists to close out. */
+let _avmBrkInkDx=null;
+function avmBrkInkDx(){
+  if(_avmBrkInkDx!=null) return _avmBrkInkDx;
+  const doc=document.getElementById("doc"), host=doc||document.documentElement||document.body;
+  if(!host){ return 0; }   // nothing to mount against yet (matches _measMountRoot's own "fall through, re-check next call" contract) — 0 is also the analytically-correct answer for today's butt-capped .mwt-tie, so an early caller never sees a wrong number, only a potentially-stale one before #doc exists
+  const probe=document.createElementNS("http://www.w3.org/2000/svg","svg");
+  probe.style.cssText="position:absolute;left:-99999px;top:0;width:10px;height:10px;overflow:hidden;pointer-events:none";
+  probe.setAttribute("aria-hidden","true");
+  const tie=document.createElementNS("http://www.w3.org/2000/svg","path");
+  tie.setAttribute("class","mwt-tie"); tie.setAttribute("d","M0 0 L1 0");
+  probe.appendChild(tie); host.appendChild(probe);
+  const cs=getComputedStyle(tie);
+  const cap=cs.strokeLinecap||"butt", sw=parseFloat(cs.strokeWidth)||0;
+  probe.remove();
+  if(doc){ _avmBrkInkDx=(cap==="round"||cap==="square")?sw/2:0; }   // only CACHE once genuinely measured against #doc (matching _mmount's own "re-parenting into #doc the moment it exists corrects every call after" — a pre-#doc fallback reading is real CSS but from the wrong cascade root, so it's returned this once but never trusted as final)
+  return (cap==="round"||cap==="square")?sw/2:0;
+}
 // item 22: keyed on the FEATS string (not the token) — every token sharing FEATS (extremely common: every
 // 3rd-person singular present verb in a document, say) lays out identically, so this is a real cache, not a
 // one-shot memo, cleared on re-render (see renderDoc's own call) since a stale entry can only be as wrong as
@@ -2796,7 +2858,10 @@ function avmLayout(t){ const feats=(t&&t.feats)||""; if(!feats||feats==="_"||!sh
   const attrW=Math.max(0,...rows.map(r=>_measOne(r.attr,AVM_ATTR_F,";font-feature-settings:'c2sc' 1")));
   const valW=Math.max(0,...rows.map(r=>meas(r.val,AVM_VAL_F)));
   const lineH=ascent(AVM_VAL_F)+descent(AVM_VAL_F);
-  const w=AVM_PAD_L+AVM_PAD_R+attrW+AVM_COL_GAP+valW, h=AVM_PAD_V*2+rows.length*lineH+Math.max(0,rows.length-1)*AVM_ROW_GAP;
+  // +2*avmBrkInkDx(): the box's own outer edges (x0/x1, drawAVM) sit AVM_BRK_W in from where the bracket's
+  // REAL ink ends (see avmBrkInkDx's own note) — reserve has to grow by that same real offset on both sides,
+  // once each, or attrX/valX (below) would end up positioned past the box's own reserved width.
+  const w=AVM_PAD_L+AVM_PAD_R+attrW+AVM_COL_GAP+valW+2*avmBrkInkDx(), h=AVM_PAD_V*2+rows.length*lineH+Math.max(0,rows.length-1)*AVM_ROW_GAP;
   const box={rows,attrW,lineH,w,h};
   _avmCache.set(feats,box);
   return box; }
@@ -2850,10 +2915,21 @@ function drawAVM(svg,cx,y0,t,si,tokId,boxes){ const L=avmLayout(t); if(!L) retur
     svg.appendChild(E("path",{class:"mwt-tie-h",d:`M ${xEdge} ${y0} L ${xEdge} ${y1}`}));
     const ext=xIn>xEdge?-AVM_BRK_EXT:AVM_BRK_EXT;
     svg.appendChild(E("path",{class:"mwt-tie",d:`M ${xIn} ${y0} L ${xEdge+ext} ${y0} M ${xEdge+ext} ${y1} L ${xIn} ${y1}`})); });
-  const attrX=x0+AVM_PAD_L+L.attrW, valX=attrX+AVM_COL_GAP;
+  // attrX anchors against x0+AVM_BRK_W+avmBrkInkDx() — the bracket's REAL ink edge (see avmBrkInkDx's own
+  // note), not the bare nominal x0+AVM_BRK_W a stroke's own cap style could in principle bleed past. Today
+  // dx=0 (butt caps), so this is arithmetically identical to the old x0+AVM_PAD_L formula; it stops being a
+  // silent assumption either way. valX rides along on attrX+AVM_COL_GAP as before — the RIGHT bracket's own
+  // dx is absorbed automatically through avmLayout's w (already +2*dx), so it doesn't need a second explicit
+  // term here without double-counting.
+  const attrX=x0+AVM_BRK_W+avmBrkInkDx()+(AVM_PAD_L-AVM_BRK_W)+L.attrW, valX=attrX+AVM_COL_GAP;
   L.rows.forEach((r,i)=>{ const ry=y0+AVM_PAD_V+ascent(AVM_VAL_F)+i*(L.lineH+AVM_ROW_GAP);
     const g=E("g",{class:"avm-row","data-feat":r.key,tabindex:"0"});
     if(si!=null&&tokId!=null){ g.setAttribute("data-s",si); g.setAttribute("data-tok",tokId); }
+    // avm-hit stays on the NOMINAL x0+AVM_BRK_W, not the ink-relative attrX/valX above: it's the row's
+    // click/right-click target (see this rect's own class), not visible ink, so it can only ever grow (never
+    // shrink) by tracking dx too — today dx=0 makes the question moot, but if a future dx>0 makes the bracket's
+    // real ink retreat further from the box's own outer edge, the hit target sitting at the OLD, slightly wider
+    // nominal edge is the safer direction to be wrong in for a click target, so it is left alone deliberately.
     g.appendChild(E("rect",{class:"avm-hit",x:x0+AVM_BRK_W,y:y0+AVM_PAD_V+i*(L.lineH+AVM_ROW_GAP)-1,width:L.w-AVM_BRK_W*2,height:L.lineH+1}));
     const ae=E("text",{class:"avm-attr",x:attrX,y:ry,"text-anchor":"end"}); ae.textContent=r.attr; g.appendChild(ae);
     const ve=E("text",{class:"avm-val",x:valX,y:ry,"text-anchor":"start"});
