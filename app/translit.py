@@ -2009,6 +2009,9 @@ def _scheme_available(base: str, sid: str) -> bool:
     if sid == "macron":                   # Latin vowel length: the model's own component + its fetched table
         from . import macron as _macron
         return _macron.available()
+    if sid == "vocalise":                 # Arabic/Persian short vowels: each model's own component + bundled table
+        from . import vocalise as _vocalise
+        return _vocalise.available(base)
     if sid == "iast" or (base == "sa"):   # IAST + all Indic scripts ride aksharamukha
         return _pkg("aksharamukha")
     eng = _ENGINES.get(sid)
@@ -2087,6 +2090,14 @@ _SCRIPT_SCHEMES: dict[str, list[tuple[str, str]]] = {
     # "Without macrons" (js/lang/translit.js's orthoOffLabel, which also suppresses the "None" row for
     # Latin), so "Latin (macronised)" beside it would have named the language rather than the choice.
     "la": [("macron", "With macrons")],
+    # ARABIC/PERSIAN: the same two-state SPELLING choice macrons are, not a script — the short vowels
+    # (tashkīl) classical/plain orthography leaves unwritten.  Unlike Latin, ar/fa keep an ordinary
+    # "Original"/"None" pair beside it (each has a displayed romanisation of its own to promote), so
+    # this needs none of `orthoOffLabel`'s Latin-only relabelling.  See `app/vocalise.py` for where
+    # the vowels come from, why the row lists unavailable for Persian in the current release, and why
+    # neither language's multi-word tokens are covered.
+    "ar": [("vocalise", "With vowels")],
+    "fa": [("vocalise", "With vowels")],
     **{c: list(_SERBIAN_CONV) for c in _SERB},
     **{c: [("mn-traditional", "Mongolian (traditional)")] for c in _MONG},
 }
@@ -2174,8 +2185,11 @@ _AKSHARA_IDS = {s[0] for s in _AKSHARA_SCRIPTS}
 def _is_latin_output(scheme: str) -> bool:
     """Does this scheme produce a Latin/romanised string?  True for every transliteration engine and
     the Latin-output orthographies (GR, General Chinese, Jyutping); False only for the native-script
-    orthographies (Zhuyin and the Indic scripts), whose script-native punctuation must be preserved."""
-    return scheme not in ("zhuyin", "simplified", "traditional", "latin", "cyrillic", "mn-traditional") and scheme not in _AKSHARA_IDS
+    orthographies (Zhuyin and the Indic scripts), whose script-native punctuation must be preserved.
+    ``vocalise`` joins that set for the same reason: Arabic/Persian short vowels are Arabic-script
+    output, not romanised, even though `macron` (Latin vowel length) rightly stays True."""
+    return (scheme not in ("zhuyin", "simplified", "traditional", "latin", "cyrillic", "mn-traditional", "vocalise")
+            and scheme not in _AKSHARA_IDS)
 
 
 # ── POS-conditioned reading selection (Chinese) ───────────────────────────────
@@ -2394,10 +2408,11 @@ def _hint_at(hint: _Hint, i: int) -> str:
     """The per-token hint for position ``i``: a LIST is read positionally (one value per form), a
     bare string applies to every form, and anything else — None, the default "" — means none at all.
 
-    Three hints ride this shape, because three engines want different things about the token beyond
+    Three hints ride this shape, because several engines want different things about the token beyond
     its surface: ``upos`` picks a Han graph's reading, and ``feats``/``lemma`` pick a Latin word's
-    vowel lengths (`macron`).  One helper rather than three, since the broadcast/positional question
-    is identical and only the payload differs."""
+    vowel lengths (`macron`) or an Arabic/Persian word's short vowels (`vocalise`).  One helper
+    rather than three, since the broadcast/positional question is identical and only the payload
+    differs."""
     if isinstance(hint, (list, tuple)):
         return (hint[i] or "") if 0 <= i < len(hint) else ""
     return hint or ""
@@ -2441,6 +2456,12 @@ def _render_one(text: str, lang: str, scheme: str, upos: str = "",
                 # no InflClass.  An `_ENGINES` entry is a bare (text) → str and cannot say that.
                 from . import macron as _macron
                 out = _macron.macronise(text, upos, feats, lemma)
+            elif scheme == "vocalise" and base in ("ar", "fa"):
+                # Arabic/Persian short vowels — the same reason macron is branched here rather than
+                # registered in `_ENGINES`: Arabic's lookup reads (form, upos, feats), Persian's reads
+                # (form, lemma, upos), and an `_ENGINES` entry is a bare (text) → str. See app/vocalise.py.
+                from . import vocalise as _vocalise
+                out = _vocalise.vocalise(base, text, upos, feats, lemma)
             elif scheme in _ENGINES:
                 out = _ENGINES[scheme][0](text)
             else:
@@ -2472,8 +2493,9 @@ def transliterate(forms: _Forms, lang: str, scheme: str = "", upos: _Upos = "") 
     `_pos_render`) it selects which reading of a one-graph token to render; everywhere else, and
     for every caller that omits it, nothing changes.
 
-    No ``feats``/``lemma`` here, deliberately: the only engine that reads them is `macron`, which is
-    a SCRIPT and never a romanisation — Latin has nothing to romanise from."""
+    No ``feats``/``lemma`` here, deliberately: the only engines that read them are `macron` and
+    `vocalise`, which are SCRIPTS and never a romanisation — Latin has nothing to romanise from, and
+    Arabic/Persian romanise from the bare (unvocalised) form regardless of vowel length."""
     if isinstance(forms, (list, tuple)):
         return [_render_one(f, lang, scheme, _hint_at(upos, i)) for i, f in enumerate(forms)]
     return _render_one(forms, lang, scheme, _hint_at(upos, 0))
@@ -2486,9 +2508,11 @@ def orthography(forms: _Forms, lang: str, scheme: str = "", upos: _Upos = "",
     `transliterate` — it reaches the Mandarin orthographies (Zhuyin, Gwoyeu Romatzyh), which are
     driven by the same numbered-pinyin syllables, and is inert for the rest.  Never raises.
 
-    ``feats``/``lemmas`` are the same shape as ``upos`` and reach the Latin `macron` scheme alone,
-    where they are what separate ``Gallia`` (Nom) from ``Galliā`` (Abl).  Every other scheme ignores
-    them, and a caller that sends only forms still gets the table's form-only levels."""
+    ``feats``/``lemmas`` are the same shape as ``upos`` and reach two schemes: Latin `macron`, where
+    they separate ``Gallia`` (Nom) from ``Galliā`` (Abl), and Arabic/Persian `vocalise`, where FEATS
+    picks Arabic's case-ending vowel and LEMMA extends Persian's lexicon over inflected forms.  Every
+    other scheme ignores them, and a caller that sends only forms still gets each table's
+    form-only/morphology-blind levels."""
     if isinstance(forms, (list, tuple)):
         return [_ortho_one(f, lang, scheme, _hint_at(upos, i), _hint_at(feats, i), _hint_at(lemmas, i))
                 for i, f in enumerate(forms)]

@@ -207,7 +207,19 @@ async function fillTranslit(){ if(!hasBridge()||!DOCLANG) return;   // translite
    Rather than teach each of the dozen-odd FEATS/lemma write sites to invalidate, the rendering
    carries the KEY IT WAS COMPUTED FOR (`t._orthoKey`) and fillOrtho refills whatever no longer
    matches. One mechanism, and a new write site cannot forget to use it. */
-function orthoNeedsMorph(){ return isLatinLang() && !!ORTHO_SCHEME && ORTHO_SCHEME!=="none"; }
+// Languages whose Script scheme reads FEATS/lemma beside UPOS, not just the surface + word class —
+// Latin `macron` (app/macron.py) and Arabic/Persian `vocalise` (app/vocalise.py). Kept as a name
+// check here rather than an `ORTHO_SCHEMES`-derived one: it drives the BATCH KEY and the staleness
+// stamp BEFORE either has been fetched, and both schemes are the only entry their language's Script
+// menu ever has, so "this language" and "this language's one morph-dependent scheme" coincide.
+const MORPH_ORTHO_LANGS=new Set(["la","ar","fa"]);
+function orthoLangNeedsMorph(lang){ return MORPH_ORTHO_LANGS.has(((lang!=null?lang:DOCLANG)||"").toLowerCase().split(/[-_]/)[0]); }
+function orthoNeedsMorph(){ return orthoLangNeedsMorph() && !!ORTHO_SCHEME && ORTHO_SCHEME!=="none"; }
+// The narrower, LATIN-ONLY form of the same question, for the two consumers below that are
+// genuinely Latin-specific machinery (fused-clitic composition and the MSeg vowel-length overlay) —
+// not just "morph-dependent" in general. Arabic/Persian MWTs and MSeg rows fall through to their
+// bare spelling instead (see app/vocalise.py's own note on why neither is covered yet).
+function laOrthoNeedsMorph(){ return isLatinLang() && !!ORTHO_SCHEME && ORTHO_SCHEME!=="none"; }
 function orthoLemOf(t){ return (t&&t.lemma&&t.lemma!=="_")?t.lemma:""; }
 function orthoKeyOf(t){ const base=trKey(t.form,trUpos(t));
   return orthoNeedsMorph() ? base+" "+(t.feats||"")+" "+orthoLemOf(t) : base; }
@@ -219,7 +231,7 @@ function orthoStale(t,k){ return !t.ortho || t._orthoKey!==k; }
    an inline field is open — fillOrtho ends in a full re-render, which would take the keyboard out
    from under the reader; the next markDirty (the commit's own) re-arms it. */
 let _orthoMorphT=null;
-function scheduleOrthoMorph(){ if(!orthoNeedsMorph()) return;   // one language, one scheme: every other document pays a boolean
+function scheduleOrthoMorph(){ if(!orthoNeedsMorph()) return;   // three languages, one scheme each (MORPH_ORTHO_LANGS): every other document pays a boolean
   clearTimeout(_orthoMorphT);
   _orthoMorphT=setTimeout(()=>{ if(typeof INLINE_EDIT_OPEN!=="undefined"&&INLINE_EDIT_OPEN){ scheduleOrthoMorph(); return; }
     fillOrtho(); },120); }   // fillOrtho is a no-op unless a token's stamp actually moved, and re-renders only if it filled something
@@ -262,7 +274,7 @@ async function fillOrtho(){ if(!hasBridge()||!DOCLANG) return false;
       const map={}; batch.forEach((x,i)=>{ const v=(r&&r.ortho&&r.ortho[i])||""; if(v)map[x[4]]=v; });   // x[4] = the key the entry was queued under, so the answer comes back to exactly the tokens that asked
       DOC.forEach(s=>{ s.tokens.forEach(t=>{ const k=orthoKeyOf(t), v=(t.form&&orthoStale(t,k))?map[k]:""; if(v){ t.ortho=v; t._orthoKey=k; } }); if(!skt)(s.mwt||[]).forEach(m=>{ const v=m.form&&!m.ortho?map[trKey(m.form,"")]:""; if(v) m.ortho=v; }); });   // the stamp rides WITH the value: a rendering and the analysis it was computed for can never be separated
       any=true; }
-    if(orthoNeedsMorph() && laMwtCompose()) any=true; }   // …and the multi-word tokens, whose surface no lexicon lists — see laMwtCompose
+    if(laOrthoNeedsMorph() && laMwtCompose()) any=true; }   // …and the multi-word tokens, whose surface no lexicon lists — see laMwtCompose. Latin only: Arabic/Persian MWTs fall through to their bare spelling (app/vocalise.py)
   if(skt){   // items 9/18: fuse each Sanskrit MWT's component forms by external sandhi — scheme="" gives the fused IAST
     const scheme=scriptOn?ORTHO_SCHEME:"";   // item 18: sandhi applies even with NO script (None/Original) → fused IAST as the surface form
     const lemOf=t=>((t.lemma&&t.lemma!=="_")?t.lemma:"");   // the CoNLL-U lemma is an r-stem signal for visarga sandhi (punar, antar, …)
@@ -378,7 +390,7 @@ const MSEG_SEP_RE=/[-꞊=⹀]/;   // what MSeg's own text may carry between piec
 // so this is the one place the two spellings of one letter have to count as one.
 function laLetters(s){ const out=[]; for(const c of Array.from(s||"")){ if(out.length&&/\p{M}/u.test(c)) out[out.length-1]+=c; else out.push(c); } return out; }
 function laMsegMacron(t,txt){
-  if(!txt||!orthoNeedsMorph()) return txt;   // one language, one scheme: every other document pays a boolean, exactly as scheduleOrthoMorph does
+  if(!txt||!laOrthoNeedsMorph()) return txt;   // Latin only, exactly as laMwtCompose's own call site — Arabic/Persian MSeg rows stay bare (app/vocalise.py)
   const o=(t&&t.ortho)||""; if(!o) return txt;   // the fill is asynchronous — no rendering yet means the bare text, which is what was on screen a moment ago in any case
   const O=laLetters(o), S=laLetters(txt);
   let k=0, out="";

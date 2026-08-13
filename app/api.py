@@ -1060,11 +1060,14 @@ class Api:
         that picks a reading is given the same evidence.  An MWT range sends nothing — its span covers
         several tokens and so has no one part of speech to report.
 
-        ``feats``/``lemmas`` are parallel too, and exist for Latin macronisation, which needs the whole
-        morphological analysis rather than just the class: the lookup is keyed on (form, upos, feats),
-        and the lemma's ending supplies the declension wherever FEATS carries no ``InflClass``.  Sending
-        the form alone reaches only the morphology-blind level of the table, which is how nominative
-        ``Gallia`` acquires an ablative macron.  Every other language ignores both."""
+        ``feats``/``lemmas`` are parallel too, and exist for Latin macronisation and Arabic/Persian
+        vocalisation, both of which need the whole morphological analysis rather than just the class:
+        Latin's lookup is keyed on (form, upos, feats), and the lemma's ending supplies the declension
+        wherever FEATS carries no ``InflClass`` — sending the form alone reaches only the
+        morphology-blind level of the table, which is how nominative ``Gallia`` acquires an ablative
+        macron. Arabic's is keyed on (form, upos, feats) the same way, FEATS supplying the case ending
+        that is usually the very vowel being restored; Persian's is keyed on (form, lemma, upos), the
+        lemma extending a lexicon hit over an inflected form. Every other language ignores all three."""
         from . import translit
         return {"ortho": translit.orthography_many(forms, lang, scheme, upos, feats, lemmas),
                 "lang": lang, "scheme": scheme}
