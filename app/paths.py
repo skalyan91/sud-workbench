@@ -51,6 +51,12 @@ EXTRAS_DIR = os.path.join(APP_DATA, "site-packages")      # on-demand heavy deps
 # unset there and GRAMMARS_DIR is just another APP_DATA subdirectory like STANZA_DIR/EXTRAS_DIR.
 GRAMMARS_DIR = os.environ.get("SUD_GRAMMARS_DIR") or os.path.join(APP_DATA, "grammars")
 
+# The Persian vocalisation lexicon (app/fa_vocab.py fetches it from KaamelDict; see that module's
+# header for why it's fetched rather than vendored — same GPL-restricts-distribution reasoning
+# GRAMMARS_DIR's own comment gives). No Nix escape hatch: unlike the grammars, nothing hermetically
+# pre-fetches this one yet, so it is always just another APP_DATA subdirectory.
+FA_VOCAB_DIR = os.path.join(APP_DATA, "fa_vocab")
+
 
 def ensure_dirs() -> None:
     os.makedirs(STANZA_DIR, exist_ok=True)
@@ -58,3 +64,4 @@ def ensure_dirs() -> None:
     os.makedirs(EXTRAS_DIR, exist_ok=True)
     if not os.environ.get("SUD_GRAMMARS_DIR"):   # a Nix build supplies its own — never create/touch it
         os.makedirs(GRAMMARS_DIR, exist_ok=True)
+    os.makedirs(FA_VOCAB_DIR, exist_ok=True)

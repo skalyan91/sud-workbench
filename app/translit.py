@@ -2028,6 +2028,12 @@ def _scheme_available(base: str, sid: str) -> bool:
 #   · the vendored data tables (Baxter–Sagart, General Chinese) ship in `app/data/`, same reasoning.
 # Checked against extras.TIERS at import (`_check_scheme_tiers`) so a renamed tier cannot silently
 # leave a dead link behind — the one failure mode this table can have.
+#   · `vocalise` is deliberately ABSENT here even though Persian's own reading of it needs a tier
+#     (`fa_vocab` — app/fa_vocab.py): this dict is keyed on the SCHEME ID alone, and `vocalise` is
+#     one id shared by two languages with different prerequisites (Arabic's table ships in the
+#     model wheel; Persian's is fetched separately), so a flat entry here would send an unavailable
+#     ARABIC row to a Persian-only tier that fixes nothing for it. `_scheme_needs` below special-
+#     cases the (base, sid) pair instead of extending this table's shape for one scheme.
 _SCHEME_TIER: dict[str, str] = {
     "macron": "la_macron",     # Morpheus vowel lengths, fetched not shipped (app/macron.py)
     "kunrei": "japanese",      # cutlet + its dictionaries
@@ -2052,6 +2058,8 @@ def _scheme_needs(base: str, sid: str) -> str:
     carries that engine, are both facts this module owns."""
     if _scheme_available(base, sid):
         return ""
+    if sid == "vocalise" and base == "fa":   # see _SCHEME_TIER's own note on why this isn't in the table
+        return "fa_vocab"
     return _SCHEME_TIER.get(sid, "")
 
 

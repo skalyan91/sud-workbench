@@ -15,12 +15,12 @@ component in their DEFAULT pipeline — ``ar_vocalise``/``fa_vocalise`` — the 
 ``la_sud_ittb_proiel_perseus`` ships ``la_macronise``.  Every vocalisation decision belongs to
 those components and is read from them: the lexicon lookup ladder, the UPOS/FEATS-conditioned
 disambiguation, the CAMeL Tools analyser fall-through Arabic's carries.  Nothing here reimplements
-any of it.  Unlike ``la_macronise``'s Morpheus table, both components' data ships INSIDE the model
-wheel itself (see each component's own module docstring for why: Arabic's table is harvested from
-SUD_Arabic-PADT's own gold ``Vform=``, correctly licensed CC BY-NC-SA 4.0 same as the wheel;
-Persian's is a set of ezāfe rules derived from the treebank's own dependency structure) — so unlike
-``la_macron``, there is no separate fetch step and no ``extras`` tier: installing the model is the
-whole prerequisite, exactly as it is for parsing the language at all.
+any of it.  Unlike ``la_macronise``'s Morpheus table, Arabic's OWN table ships INSIDE the model
+wheel itself (harvested from SUD_Arabic-PADT's own gold ``Vform=``, correctly licensed CC BY-NC-SA
+4.0 same as the wheel) — so for Arabic there is no separate fetch step and no ``extras`` tier:
+installing the model is the whole prerequisite, exactly as it is for parsing the language at all.
+Persian's wheel ships only a set of ezāfe rules (derived from the treebank's own dependency
+structure); its F/P lexicon is fetched separately — see :mod:`app.fa_vocab` and the note below.
 
 CONSTRUCTED DIRECTLY, NOT OFF A LOADED PIPELINE — same reasoning as ``app/macron.py``: turning the
 Script pill on must not load a ~100 MB parser for a reader who only wants to look at a file.  Both
@@ -28,28 +28,37 @@ components read no doc state beyond the one token's own (form, upos, feats)/(for
 a standalone instance with the packaged table loaded through ``from_disk`` is the same object the
 pipeline would use.
 
-TWO GENUINE ASYMMETRIES WITH LATIN, BOTH LEFT AS SCOPED GAPS RATHER THAN PAPERED OVER
----------------------------------------------------------------------------------------
-* **Persian's shipped lexicon is EMPTY in this release.**  ``fa_vocalise``'s own module docstring
-  says so: the table (Tihu-derived) is not bundled for licensing reasons the same way Morpheus
-  isn't, and until ``build_fa_vocalise_lut.py`` is run and repackaged, every Persian token's F/P/L
-  lookup rungs answer nothing.  What DOES ship, and DOES fire, is the ezāfe rule table — but
-  applying it needs the NEXT token's dependency relation (``next.head.i == tok.i``, ``next.dep_``),
-  which is doc-level context this module's per-token ``vocalise()`` does not have and the
-  ``orthography`` RPC's parallel (forms, upos, feats, lemmas) arrays were never built to carry —
-  adding it would mean threading deprel/head through a call that de-duplicates by (form, upos,
-  feats, lemma) KEY across a whole document, where two occurrences of one key can sit in different
-  syntactic contexts.  That is a real architecture change, not a bug fix, and is left undone here:
-  :func:`available` answers False for "fa" while the shipped lexicon is empty, so the Script row
-  stays correctly unavailable rather than presenting a toggle that visibly does nothing.  The row
-  starts working the moment a populated lexicon is packaged, with no app-side change at all.
-* **Neither component's MWT surface is vocalised.**  Latin's own gap here (``laMwtCompose``,
-  js/lang/translit-load.js) is bridged by composing the range from ITS COMPONENTS' own renderings,
-  because Morpheus lists words and a fused clitic form is simply absent from it.  The same is true
-  here — ``ar_sud_padt``'s CAMeL tokeniser publishes MWT ranges for clitic splits — but no
-  composition path is built for it: an Arabic/Persian multi-word token's surface falls through to
-  its bare spelling, which is always a legitimate spelling of the word, exactly as an unmacronised
-  Latin MWT was before ``laMwtCompose`` existed.
+PERSIAN'S LEXICON IS A SEPARATE, FETCHED DATA TIER — THE SAME SHAPE AS LATIN'S, FOR THE SAME REASON
+-----------------------------------------------------------------------------------------------------
+``fa_vocalise``'s own module docstring (inside the wheel) names its intended lexicon as Tihu/
+KaamelDict and ships neither: unlike Arabic, Persian's treebank carries no gold vocalisation to
+harvest, so the table has to come from an external pronunciation dictionary, aligned onto Persian
+spelling by `fa_align.align` — a second component the wheel ships alongside ``fa_vocalise``, doing
+for Persian what a straight lookup does for Arabic.  :mod:`app.fa_vocab` fetches KaamelDict and
+calls that aligner (never reimplementing it) into the ``fa_vocab`` extras tier, registered in
+``_SCHEME_TIER`` the same way ``la_macron`` is — see that module's own docstring for the full
+account, including what this app's own build code decides versus what the aligner and KaamelDict
+decide.  :func:`available` answers False for "fa" until that tier is installed, so the Script row
+stays correctly unavailable rather than presenting a toggle that (with only the wheel's own ezāfe
+rules to go on) would visibly do almost nothing.
+
+ONE GENUINE ASYMMETRY WITH LATIN REMAINS, LEFT AS A SCOPED GAP RATHER THAN PAPERED OVER
+-------------------------------------------------------------------------------------------
+Persian's ezāfe marker is not applied here even once the lexicon tier above is installed. Applying
+it needs the NEXT token's dependency relation (``next.head.i == tok.i``, ``next.dep_``), which is
+doc-level context this module's per-token ``vocalise()`` does not have and the ``orthography``
+RPC's parallel (forms, upos, feats, lemmas) arrays were never built to carry — adding it would mean
+threading deprel/head through a call that de-duplicates by (form, upos, feats, lemma) KEY across a
+whole document, where two occurrences of one key can sit in different syntactic contexts. That is a
+real architecture change, not a bug fix, and is left undone here.
+
+MULTI-WORD TOKENS ARE HANDLED — see ``vocaliseMwtCompose`` in js/lang/translit-load.js, the generic
+(any ``vocalise``-scheme language's) counterpart to Latin's own ``laMwtCompose``: unlike Latin's
+lexicon, which needs a real MORPHOLOGICAL composer (Morpheus lists words, and a fused clitic form
+is simply absent from it), an Arabic/Persian multi-word token IS its components' spellings with no
+join phonology at all — `للمدرسة` (comp:obl `ل` + comp:obj `لمدرسة`) is a literal concatenation, no
+different from how the FILE already spells it — so plain string-join over each component's OWN
+``t.ortho`` is exact, not an approximation, and needs no per-language engine to decide.
 """
 
 from __future__ import annotations
@@ -167,6 +176,13 @@ def _component(base: str):
         d = _pipe_dir(base)
         if d:
             comp.from_disk(d)
+        if base == "fa":
+            # Persian's own wheel ships only the ezāfe rules (loaded above, if present) — the F/P
+            # lexicon is fetched separately (app/fa_vocab.py, from KaamelDict) into its own
+            # directory. Each `from_disk` call only touches the ONE file it finds there (lut.json.gz
+            # here, no ezafe.json), so this can never overwrite what the wheel's own directory gave.
+            from .paths import FA_VOCAB_DIR
+            comp.from_disk(FA_VOCAB_DIR)
     except Exception:  # noqa: BLE001 — an unreadable cache is "no vocalisation", never an exception
         return None
     if _has_data(base, comp):

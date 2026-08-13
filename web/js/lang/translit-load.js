@@ -274,7 +274,8 @@ async function fillOrtho(){ if(!hasBridge()||!DOCLANG) return false;
       const map={}; batch.forEach((x,i)=>{ const v=(r&&r.ortho&&r.ortho[i])||""; if(v)map[x[4]]=v; });   // x[4] = the key the entry was queued under, so the answer comes back to exactly the tokens that asked
       DOC.forEach(s=>{ s.tokens.forEach(t=>{ const k=orthoKeyOf(t), v=(t.form&&orthoStale(t,k))?map[k]:""; if(v){ t.ortho=v; t._orthoKey=k; } }); if(!skt)(s.mwt||[]).forEach(m=>{ const v=m.form&&!m.ortho?map[trKey(m.form,"")]:""; if(v) m.ortho=v; }); });   // the stamp rides WITH the value: a rendering and the analysis it was computed for can never be separated
       any=true; }
-    if(laOrthoNeedsMorph() && laMwtCompose()) any=true; }   // …and the multi-word tokens, whose surface no lexicon lists — see laMwtCompose. Latin only: Arabic/Persian MWTs fall through to their bare spelling (app/vocalise.py)
+    if(laOrthoNeedsMorph() && laMwtCompose()) any=true;      // …and the multi-word tokens, whose surface no lexicon lists — see laMwtCompose. Latin only.
+    if(ORTHO_SCHEME==="vocalise" && vocaliseMwtCompose()) any=true; }   // Arabic/Persian's own, simpler composer — see vocaliseMwtCompose
   if(skt){   // items 9/18: fuse each Sanskrit MWT's component forms by external sandhi — scheme="" gives the fused IAST
     const scheme=scriptOn?ORTHO_SCHEME:"";   // item 18: sandhi applies even with NO script (None/Original) → fused IAST as the surface form
     const lemOf=t=>((t.lemma&&t.lemma!=="_")?t.lemma:"");   // the CoNLL-U lemma is an r-stem signal for visarga sandhi (punar, antar, …)
@@ -356,6 +357,37 @@ function laMwtCompose(){ let any=false;
     m._orthoKey=key;
     const joined=parts.join("");
     if(stripQuantity(joined).toLowerCase()!==stripQuantity(m.form).toLowerCase()) return;   // not a plain concatenation → this is not the composed form of that word
+    if(joined!==m.ortho){ m.ortho=joined; any=true; } }));
+  return any; }
+// Combining Arabic/Persian diacritics (tashkīl/harakat) — the SAME marks `ar_vocalise.py`'s DIAC and
+// `fa_align.py`'s FATHA/KASRA/DAMMA/SHADDA/SUKUN strip before comparing candidate readings, matched
+// here by Unicode range (U+064B–U+065F covers every mark either component ever writes) rather than
+// enumerated one by one, plus U+0670 (the dagger alif ar_vocalise's canon() also folds).
+const ARABIC_DIAC_RE=/[\u064B-\u065F\u0670]/g;
+function stripTashkil(s){ return (s||"").replace(ARABIC_DIAC_RE,""); }
+/* GENERIC MWT COMPOSITION FOR THE "vocalise" SCRIPT SCHEME (Arabic/Persian) — laMwtCompose's
+   counterpart, and simpler than it needs to be. Latin's lexicon needs a real MORPHOLOGICAL composer
+   because Morpheus lists WORDS: `armaque` is simply absent from it, and only assembling it from
+   `arma` and `que` — each already macronised on its own analysis — recovers the fused form. Arabic/
+   Persian have no such gap: an MWT there is one ORTHOGRAPHIC word the tokeniser split at a clitic
+   boundary with no join phonology at all — `للمدرسة` (samples/arabic_rtl.conllu's own MWT) IS
+   `ل` + `لمدرسة` glued exactly as the file already spells it — so plain string concatenation over
+   each component's OWN vocalised rendering is EXACT, not an approximation, and the one function below
+   covers every `vocalise`-scheme language rather than needing a per-language composer the way Latin's
+   lexicon-driven join does. See app/vocalise.py's own note on this for the fuller account.
+   THE JOIN IS STILL CHECKED BEFORE IT IS TRUSTED, the same discipline laMwtCompose applies for the
+   same reason: comparing both sides with their diacritics stripped is what would catch a genuinely
+   irregular MWT, should one exist, rather than silently gluing components that do not reconstruct the
+   word — a failed check leaves m.ortho exactly as it was, so the bare/legitimate spelling is never at
+   risk of being replaced by a wrong one. */
+function vocaliseMwtCompose(){ let any=false;
+  DOC.forEach(s=>(s.mwt||[]).forEach(m=>{ if(!m.form) return;
+    const cts=s.tokens.slice(m.from-1,m.to); if(!cts.length) return;
+    const parts=cts.map(t=>t.ortho||t.form||""), key=parts.join(" ");
+    if(m._orthoKey===key) return;                       // nothing beneath it moved
+    m._orthoKey=key;
+    const joined=parts.join("");
+    if(stripTashkil(joined)!==stripTashkil(m.form)) return;   // not a plain concatenation → this is not the composed form of that word
     if(joined!==m.ortho){ m.ortho=joined; any=true; } }));
   return any; }
 
