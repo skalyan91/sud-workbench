@@ -223,6 +223,7 @@
        about the macOS kit's own appearance and is not carried over: on Windows a 90 % divider would
        be a black rule through a grey window, which is not a thing Fluent draws anywhere. */
     --hairline:rgba(0,0,0,0.0588);          /* DividerStrokeColorDefault */
+    --page-border:rgba(0,0,0,0.0588);       /* hairline separators between sentence blocks, on request — mac-tokens.css's own equivalent token gave it --hairline's own value as a starting point too; matched here for the same reason */
     --hairline-strong:rgba(0,0,0,0.1608);   /* ControlStrokeColorSecondary — the heavier of the two control strokes */
     --sep-line:rgba(0,0,0,0.0588);          /* ControlStrokeColorDefault */
     /* Fluent's pull-down indicator: a SINGLE chevron-down (ChevronDown), not the up/down pair macOS uses on a
@@ -399,6 +400,7 @@
       --label-quaternary:rgba(255,255,255,0.0941);/* ControlStrokeColorSecondary #18FFFFFF */
       --label-quinary:rgba(255,255,255,0.0824);   /* DividerStrokeColorDefault   #15FFFFFF */
       --menu-sep:#343434;   /* the in-surface separator's dark counterpart, opaque — see the light declaration and the macOS kit's fuller note. APPROX: it is DividerStrokeColorDefault flattened over a dark menu fill rather than a value Microsoft publishes as a literal. */
+      --page-border:rgba(255,255,255,0.0824);     /* dark redeclaration — a :root-only value leaks into dark unchanged, doesn't fall back on its own. Matches --hairline's own dark value, as light did */
       --hairline:rgba(255,255,255,0.0824);        /* DividerStrokeColorDefault */
       --hairline-strong:rgba(255,255,255,0.0941); /* ControlStrokeColorSecondary. NOTE it is LOWER than light's .1608 — that is not a typo and not a flip: Fluent's dark strokes are white and a white stroke reads stronger on a dark ground at the same alpha, so the source specifies less of it. */
       --sep-line:rgba(255,255,255,0.0706);        /* ControlStrokeColorDefault */

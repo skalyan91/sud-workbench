@@ -147,12 +147,14 @@
      one) — --pill-shadow already varies per theme for the same reason, so no theme-handling is lost by aliasing. */
   :root{--page-shadow:var(--pill-shadow)}
   .doc.paged > .docsheet:first-child{margin-top:14px}   /* the doc's top padding stops exactly at the toolbar's bottom edge (the content scrolls UNDER it), so without this the first sheet would butt right up against the bar. A MARGIN, not padding: the sheet still scrolls up behind the bar, it just starts clear of it */
-  /* .docsheet .sblock.lastblock used to zero a border-bottom the sheet's own edge would otherwise double up on
-     (see renderDoc, js/core/document.js, for why it's a CLASS and not `> .sblock:last-child`) — moot now that
-     .sblock carries no border at all, but the class itself is left alone (harmless, unused by any rule here);
-     removing the JS that marks it is a separate change from removing the border it used to matter for. */
+  /* .docsheet .sblock.lastblock zeroes the border-bottom the sheet's own edge would otherwise double up on
+     (see renderDoc, js/core/document.js, for why it's a CLASS and not `> .sblock:last-child`) — RESTORED, on
+     request ("hairline separators between blocks"): this class was left in place, unused, when the border it
+     served was removed a round ago (see .sblock's own note below), so bringing the border back needed no new
+     JS, just this rule reading it again. */
   .doc:not(.paged) .docsheet{max-width:none; margin:0; background:none; box-shadow:none}   /* belt and braces: a stale sheet left by a mode flip mid-render must not cap the width (border-radius:0 dropped from this override — .docsheet itself no longer sets one to reset) */
-  .sblock{padding:10px 18px 14px; position:relative; zoom:var(--fs)}   /* NO border — see .docsheet's own note; a sentence is now set off from its neighbours by padding/whitespace alone */
+  .sblock{padding:10px 18px 14px; position:relative; zoom:var(--fs); border-bottom:.5px solid var(--page-border)}   /* RESTORED, on request — a dedicated --page-border token (mac-tokens.css/fluent-tokens.css), not --hairline directly, per that token's own note on why the split existed; was removed outright ("a sentence is now set off from its neighbours by padding/whitespace alone") a round ago, now asked back */
+  .sblock.lastblock{border-bottom:none}   /* the sheet's own bottom edge already reads as an edge via box-shadow — a hairline flush against it would double up */
   /* DOCUMENT / PARAGRAPH BOUNDARIES (`# newdoc` / `# newpar`) — A HEADING INSIDE THE BLOCK IT OPENS.
      Both are shown the same way in BOTH layouts, because the boundary is a fact about the annotation, not about
      how the reader has chosen to lay the file out. What paged mode adds on top is that a `# newdoc` also ENDS
