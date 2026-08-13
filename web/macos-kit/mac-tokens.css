@@ -94,7 +94,19 @@
        NSImage.imageWithSystemSymbolName_accessibilityDescription_ (PyObjC/AppKit, available in this repo's own
        .venv) at a 96pt regular-weight configuration and exported as PNG, the same technique the file's other
        "real SF Symbols" (see this file's own header) were produced with. A hand-drawn Lucide `table` approximation
-       held this slot briefly before being swapped for the genuine glyph, on report. */
+       held this slot briefly before being swapped for the genuine glyph, on report.
+       Weight fix (on report — "should match zoom/undo/redo"): the PNG actually spliced in here had drifted to
+       MEDIUM (bbox 111×88, mode stroke 9px, stroke/bbox-height ≈0.102 measured on the raw asset) despite this
+       comment always having said "regular" — a mismatch between doc and asset, not a doc error. --sf-undo/
+       --sf-redo/--sf-zoomin/--sf-zoomout are NOT SF Symbols at all: this file's own :root redeclares each of
+       them further down (search "Mail-style THIN line glyphs") as a hand-drawn SVG, stroke-width 1.5 in a
+       24-unit viewBox — CSS custom properties take the LAST declaration in a block, so those later SVG rules
+       are what the titlebar actually renders, and the four PNG SF-Symbol versions of those same tokens up near
+       the top of this file are dead CSS. Rasterizing those SVGs and measuring the identical way (mode stroke
+       run / glyph bbox height) gives ≈0.092 — matching REGULAR (≈0.089, measured on a fresh render) far better
+       than MEDIUM (≈0.104, ~3.5× further off) or LIGHT (≈0.068). app.css's own `.tbtn.icon .sfi` comment
+       ("strokes harmonised to a consistent 1.5 across every mask") independently confirms regular is the
+       intended target. Re-rendered at the same 96pt/regular configuration this comment already specified. */
     --sf-grid:url("data:image/png;base64,REDACTED-SF-SYMBOL-PAYLOAD-PURGED-FROM-HISTORY");
     /* ── notation diagram glyphs (one per diagram type) ── */
     /* notation glyphs = Lucide icons (stroke-width 1.6 to match the other titlebar icons): stemma→network,
