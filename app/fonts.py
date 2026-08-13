@@ -39,6 +39,38 @@ def _slug(family: str) -> str:
     return re.sub(r"[^a-z0-9]", "", family.lower())
 
 
+# The CORE bundled faces this module's own docstring describes (Noto Sans, Noto Sans Mono — shipped in
+# web/fonts/, loaded by web/styles/fonts.css's own @font-face rules) must NEVER go out to the Google Fonts
+# CSS API at all, for either fetch() or fetch_raw(): a request for "Noto Sans" WITH a browser UA (fetch())
+# already happens to resolve to the same file bundled here, but fetch_raw()'s request (deliberately made
+# WITHOUT a browser UA, see its own note) resolves to something else entirely — confirmed live, by fetching
+# both and inspecting them with fontTools: the UA-less response is a set of separate STATIC per-weight
+# legacy .ttf files (100/200/300/…), and _SRC_RE.search() above just grabs the FIRST url() in that CSS,
+# which is the 100 (Thin) weight — nowhere near .avm-attr's own weight:571 — and that file carries no
+# "c2sc" GSUB feature at all (verified: bundled notosans.ttf's own GSUB feature list has it; the fetched
+# legacy file's doesn't). That mismatch is the exact cause of the "AVM labels no longer small-caps and
+# way too light" regression (item 26, smp-shape.js's HarfBuzz shaping): _getHBFont shaped correctly, but
+# against the WRONG downloaded font — a thin, c2sc-less stand-in for the SAME family name the CSS asks
+# for and the browser already renders correctly from the bundled file. Reading the bundled file straight
+# off disk sidesteps the Google Fonts CSS API's own UA-sniffing entirely for these two names — no
+# network round-trip, no cache-under-APP_DATA needed (the file is already permanently on disk, shipped
+# with the app), and HarfBuzz now shapes against the IDENTICAL bytes @font-face already paints from.
+_BUNDLED_FONTS_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "web", "fonts")
+_CORE_BUNDLED = {"notosans": "notosans.ttf", "notosansmono": "notosansmono.ttf"}
+
+
+def _bundled_path(family: str) -> str | None:
+    """The on-disk path for `family` if it's one of the CORE bundled faces above and the file is
+    actually present (it always should be, shipped with the app) — else None, meaning "fall through
+    to the network path exactly as before" for every non-core family (Devanagari, Kawi, Siddham, …
+    the on-demand scripts this module's docstring already describes)."""
+    fn = _CORE_BUNDLED.get(_slug(family))
+    if not fn:
+        return None
+    p = os.path.join(_BUNDLED_FONTS_DIR, fn)
+    return p if os.path.exists(p) else None
+
+
 def _get(url: str, timeout: int = 20, headers: dict | None = None) -> bytes:
     req = urllib.request.Request(url, headers=headers if headers is not None else {"User-Agent": _UA})
     with urllib.request.urlopen(req, timeout=timeout) as resp:
@@ -129,9 +161,12 @@ def fetch(family: str) -> dict:
     """Get `family` on disk and hand it back as a data: URI the webview can drop straight into an
     @font-face. Returns {"uri", "family", "cached", "bytes"} or {"error"} — never raises, because a
     missing script font degrades to the system fallback rather than being worth interrupting anyone."""
-    path, cached, err = _fetch_and_cache(family, cached_path, "woff2", {"User-Agent": _UA})
+    path = _bundled_path(family)   # CORE face already on disk (see _CORE_BUNDLED's own note) — never hit the network for it
+    cached = True
     if not path:
-        return {"error": err}
+        path, cached, err = _fetch_and_cache(family, cached_path, "woff2", {"User-Agent": _UA})
+        if not path:
+            return {"error": err}
     # a family the API answered in .ttf (no weight axis — see CSS_API_STATIC) still caches under the
     # extension _get_and_cache was told, "woff2" — cached_path() itself checks BOTH extensions, so a
     # later call still finds it; only the ext on THIS write can be wrong, and the mime line below reads
@@ -166,10 +201,22 @@ def fetch_raw(family: str) -> dict:
     for the price of one fewer request header. fetch()'s own woff2 is far smaller and is exactly right
     for @font-face's own purpose; this is a second, DELIBERATELY less-compressed copy for a consumer
     @font-face was never serving in the first place.
+
+    ⚠ CORE bundled faces (Noto Sans, Noto Sans Mono — see _CORE_BUNDLED's own note) skip this whole
+    network dance and read the SAME file @font-face already paints from, straight off disk. This is
+    the fix for the "AVM labels no longer small-caps and way too light" regression: an unauthenticated
+    (no browser UA) request for "Noto Sans" resolves to a DIFFERENT, degraded font than the bundled
+    one — a set of static per-weight legacy .ttf files, the first of which (what _SRC_RE.search()
+    above grabs) is weight 100 (Thin, nowhere near this app's own weight-571 AVM/gloss labels) and
+    carries no "c2sc" GSUB feature at all, so HarfBuzz could shape against it all day and never
+    produce a small-caps substitution — measured directly with fontTools against both files.
     """
-    path, cached, err = _fetch_and_cache(family, _cached_raw_path, "raw.ttf", {})
+    path = _bundled_path(family)
+    cached = True
     if not path:
-        return {"error": err}
+        path, cached, err = _fetch_and_cache(family, _cached_raw_path, "raw.ttf", {})
+        if not path:
+            return {"error": err}
     with open(path, "rb") as fh:
         blob = fh.read()
     return {"family": family, "cached": cached, "bytes": len(blob),

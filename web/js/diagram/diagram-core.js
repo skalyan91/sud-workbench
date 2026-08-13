@@ -969,10 +969,11 @@ function smpReshape(root){
       const hbFeat=cssFeatToHB(cs2.fontFeatureSettings);
       const fam2=_firstFamily(cs2.fontFamily), sizePx2=parseFloat(cs2.fontSize)||0;
       const track2=parseFloat(cs2.letterSpacing)||0;   // px already (getComputedStyle resolves any em to px) — the SAME quantity _measOneUncached's own trackPx folds in for this exact element's reservation, read back off the live element instead of recomputed, so the two can never name a different number for the same class
+      const wght2=parseFloat(cs2.fontWeight)||0;   // regression fix: read straight off the live element's OWN computed weight (571 for .avm-attr) — the SAME number the browser's native paint already maps onto the variable font's wght axis automatically; HarfBuzz does not do that mapping on its own (see _shapeSMP's own note, smp-shape.js) — without threading this through, the shaped glyphs came out at the font's default weight (400), visibly lighter than what this element's CSS actually asks for
       if(hbFeat&&fam2&&sizePx2){
-        const shape=(typeof smpShapeSync==="function")?smpShapeSync(s,fam2,sizePx2,hbFeat,track2):null;
+        const shape=(typeof smpShapeSync==="function")?smpShapeSync(s,fam2,sizePx2,hbFeat,track2,wght2):null;
         if(shape&&shape.d){ smpSwapPath(el,shape); continue; }
-        if(typeof smpShapeEnsure==="function"&&typeof smpNotePending==="function") smpNotePending(smpShapeEnsure(s,fam2,sizePx2,hbFeat,track2));
+        if(typeof smpShapeEnsure==="function"&&typeof smpNotePending==="function") smpNotePending(smpShapeEnsure(s,fam2,sizePx2,hbFeat,track2,wght2));
       }
       if(!smpUnshaped(s) && !punctSatSMP && !SMP_RE.test(s||"")) continue;   // not ready yet, and nothing ELSE about this element needs the SMP/HTML-fallback machinery below — leave the plain <text> exactly as it was (native c2sc paint), matching what avmLayout's own getBBox() fallback just reserved for it
     }
@@ -1410,12 +1411,21 @@ function _measOneUncached(s,f,extraCss){
      shaping pass, one source of truth, exactly the point of moving this text off the browser's engine. */
   if(_ffsM){
     const hbFeat=cssFeatToHB(_ffsM[1]), fam=_firstFamily(f);
+    // regression fix: the SAME leading-number-before-the-size token the comment above (track's own note)
+    // already documents for AVM_ATTR_F/GLOSS_F-style shorthands ("571 10.5px …") — a font-weight, not a
+    // size. Only matches when a digit run is followed by WHITESPACE at the very start of the string
+    // ("571 10.5px" → "571"; "15px …" itself has no such leading token — "15" runs straight into "px"
+    // with no space, so this correctly stays 0 for every plain, unweighted font string, matching what
+    // HarfBuzz already did before this parameter existed). Threaded into HarfBuzz's own variable-font
+    // axis (_shapeSMP's setVariations call, smp-shape.js) so the shaped glyphs come out at the SAME
+    // weight this element's CSS actually specifies, not the font's default — see that function's own note.
+    const wghtM=/^(\d+(?:\.\d+)?)\s/.exec(f), wght=wghtM?parseFloat(wghtM[1]):0;
     if(hbFeat&&fam&&px&&typeof smpShapeSync==="function"){
       const trackPx=track*px;
-      const shape=smpShapeSync(s,fam,px,hbFeat,trackPx);
+      const shape=smpShapeSync(s,fam,px,hbFeat,trackPx,wght);
       if(shape&&shape.d!=null) return shape.w;
       if(typeof smpShapeEnsure==="function"&&typeof smpNotePending==="function")
-        smpNotePending(smpShapeEnsure(s,fam,px,hbFeat,trackPx));
+        smpNotePending(smpShapeEnsure(s,fam,px,hbFeat,trackPx,wght));
     } }
   if(_ffsM) _mtxt.style.setProperty("font-feature-settings",_ffsM[1]); else _mtxt.style.removeProperty("font-feature-settings");
   _mtxt.textContent=s||"";

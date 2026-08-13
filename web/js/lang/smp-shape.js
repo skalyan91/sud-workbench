@@ -128,9 +128,25 @@ function _glyphSVGPath(font,gid,gx,gy){ const segs=font.glyphToJson(gid); if(!se
 // shape() advance/position numbers AND glyphToPath's outline coordinates come out pre-scaled to sizePx,
 // with no separate upem-derived scale factor to apply by hand (the default scale, unset, is the font's own
 // upem — raw font units, which is not what any caller here wants).
-async function _shapeSMP(text,family,sizePx,features,letterSpacingPx){
+// ⚠ `weight` (item 26 regression fix, added after the font-file bug below was found and fixed): a plain
+// CSS font-weight NUMBER (e.g. 571 — AVM_ATTR_F's own weightCurve(10.5)), applied via HarfBuzz's OWN
+// variable-font axis call (hb_font_set_variations, "wght") BEFORE shaping. _getHBFont's font object is
+// shared/cached PER FAMILY, not per weight — every caller of THIS function that wants a specific weight
+// has to set it fresh, every call, or a later caller's setVariations would silently keep governing an
+// earlier caller's glyphs (there is no "reset to default" between calls otherwise). Left unset (undefined/
+// 0/NaN), the shared font simply keeps whatever axis position it last had — for the item-25 SMP scripts,
+// which never pass this parameter at all, that is always "whatever the font's own default happens to be"
+// (fvar's own default, e.g. wght=400), exactly as before this parameter existed. THE BUG THIS FIXES: even
+// once _getHBFont were pointed at the CORRECT (bundled, c2sc-carrying) font file, without this call
+// HarfBuzz would still shape every .avm-attr/.glabbr run at the variable font's DEFAULT weight (400) —
+// visibly lighter than the 571 the CSS actually asks for and the browser's own @font-face rendering
+// already honours automatically (browsers map a recognised "wght"-registered axis from font-weight
+// without being told to) — part of the live-reported "way too light" regression, on top of (and
+// independent from) the wrong-font-file bug _bundled_path (app/fonts.py) fixes.
+async function _shapeSMP(text,family,sizePx,features,letterSpacingPx,weight){
   const {hb,font}=await _getHBFont(family);
   font.setScale(sizePx,sizePx);
+  if(weight) font.setVariations({wght:weight});   // hb_font_set_variations on an axis the font doesn't have is a documented no-op, not an error — safe to call unconditionally on non-variable families too
   const buffer=hb.createBuffer();
   buffer.addText(text);
   buffer.guessSegmentProperties();   // script/direction/language from the text itself — every SMP script this module serves is a single-script run by construction (smpUnshaped gates on content, not on a caller-supplied script tag)
@@ -145,17 +161,17 @@ async function _shapeSMP(text,family,sizePx,features,letterSpacingPx){
   return {d:parts.join(" "),w:x}; }
 
 // item 25/26: the render-loop-facing pair — sync READ (never blocks, never does WASM/bridge work) and async
-// PREPARE (does all of it, then caches). Keyed on the QUINTUPLE that actually determines the shaped output —
-// two runs with the same text/family/size/features/letter-spacing shape identically, so this is a real
-// cache like every other measurement cache in this file, not a one-shot memo. `features`/`letterSpacingPx`
-// are item 26's own additions (the AVM/gloss small-caps case) — every item-25 (SMP) call site omits both,
-// which folds to the empty string/0 below exactly as it always implicitly did, so their own cache entries
-// keep the identical key they had before this pair grew two more parameters.
+// PREPARE (does all of it, then caches). Keyed on the SEXTUPLE that actually determines the shaped output —
+// two runs with the same text/family/size/features/letter-spacing/weight shape identically, so this is a
+// real cache like every other measurement cache in this file, not a one-shot memo. `features`/
+// `letterSpacingPx`/`weight` are item 26's own additions (the AVM/gloss small-caps case) — every item-25
+// (SMP) call site omits all three, which folds to the empty string/0/undefined below exactly as it always
+// implicitly did, so their own cache entries keep the identical key they had before this triple grew.
 const _shapeCache=new Map();
-function _shapeKey(text,family,sizePx,features,letterSpacingPx){
-  return family+"|"+sizePx+"|"+(features||"")+"|"+(letterSpacingPx||0)+"|"+text; }
-function smpShapeSync(text,family,sizePx,features,letterSpacingPx){
-  const v=_shapeCache.get(_shapeKey(text,family,sizePx,features,letterSpacingPx)); return v===undefined?null:v; }
+function _shapeKey(text,family,sizePx,features,letterSpacingPx,weight){
+  return family+"|"+sizePx+"|"+(features||"")+"|"+(letterSpacingPx||0)+"|"+(weight||"")+"|"+text; }
+function smpShapeSync(text,family,sizePx,features,letterSpacingPx,weight){
+  const v=_shapeCache.get(_shapeKey(text,family,sizePx,features,letterSpacingPx,weight)); return v===undefined?null:v; }
 // resolves once this ONE run is cached (hit or miss) — never rejects, so a caller can Promise.all a whole
 // document's worth without one failed font ruining the rest; a failure caches `null`, exactly like a miss.
 // ⚠ EXCEPT ONE FAILURE, DELIBERATELY LEFT UNCACHED: the bridge (window.pywebview.api) not being up YET.
@@ -173,12 +189,12 @@ function smpShapeSync(text,family,sizePx,features,letterSpacingPx){
 // shape) gets a genuine fresh attempt instead of replaying a stale verdict — self-healing once the bridge
 // comes up, at the cost of one more skipped attempt per render until then, which is cheap: this guard
 // returns before any WASM call or bridge round-trip is even made.
-async function smpShapeEnsure(text,family,sizePx,features,letterSpacingPx){
-  const key=_shapeKey(text,family,sizePx,features,letterSpacingPx);
+async function smpShapeEnsure(text,family,sizePx,features,letterSpacingPx,weight){
+  const key=_shapeKey(text,family,sizePx,features,letterSpacingPx,weight);
   if(_shapeCache.has(key)) return _shapeCache.get(key);
   if(!(window.pywebview&&window.pywebview.api&&window.pywebview.api.font_face_raw)) return null;
   let shape=null;
-  try{ shape=await _shapeSMP(text,family,sizePx,features,letterSpacingPx); }catch(e){ shape=null; }
+  try{ shape=await _shapeSMP(text,family,sizePx,features,letterSpacingPx,weight); }catch(e){ shape=null; }
   _shapeCache.set(key,shape);
   return shape; }
 
