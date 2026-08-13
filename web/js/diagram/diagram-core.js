@@ -2959,7 +2959,7 @@ function belowReserveH(hasTr,tierCount,hasPos,avmH){ const n=belowRows(hasTr,tie
    against it, so the spine is back on .mwt-tie-h and the serifs on .mwt-tie, restoring round 2's original
    pairing (and with it mwtTie's own unrotated one, and .mwt-grid-tie's) as the ONE convention every "this
    marks a multi-word/multi-part span" bracket in the app now shares. */
-const AVM_ROW_GAP=2, AVM_PAD_V=2, AVM_COL_GAP=4.014, AVM_PAD_L=6.1, AVM_PAD_R=7, AVM_BRK_W=3.5, AVM_BRK_EXT=0.5625;   // CURRENT STATE (round 4, this session — see its own paragraph below, after round 3): AVM_PAD_L and AVM_PAD_R are DELIBERATELY EQUAL-GAP now, on explicit report ("if the right gap is 6.10px, then I want the left gap to be the same!"). They are NOT the same NUMBER (6.1 vs 7) — that gap is what AVM_BRK_W being subtracted from a different reference (see attrX/valX in drawAVM) plus the bracket-casing geometry ends up costing each side differently — but the two RENDERED ink gaps this session's own live measurement produced from them (the "conceived"/Voice=Pass row, samples/english.conllu) came out equal to four decimal places (2.591px / 2.587px, Δ0.004px), which is what the report asked for. The rounds below (2/3) are kept as real history of how the two constants came to be independent AND of why round 3 still read as asymmetric — that reasoning is still correct as an account of ITS OWN moment, it is simply superseded now: do not read anything below saying "the left still reads tighter than the right" as describing today's code.
+const AVM_ROW_GAP=2, AVM_PAD_V=2, AVM_COL_GAP=4.014, AVM_PAD_L=6.1, AVM_PAD_R=5.283, AVM_BRK_W=3.5, AVM_BRK_EXT=0.5625;   // CURRENT STATE (round 6, this session — see its own paragraph below, after round 5's AVM_COL_GAP note): AVM_PAD_L/AVM_PAD_R are DELIBERATELY EQUAL-GAP, re-confirmed on report ("left looks smaller than right — did something regress?"). Round 4 (below) first equalised them at 6.1/7 (2.591px/2.587px on the "conceived"/Voice=Pass calibration row) — that pairing DRIFTED apart numerically since (to 2.600px/4.317px, a real ~1.72px gap, root-caused to a glyph-side-bearing effect on "Pass"'s own painted ink vs its reserved advance, NOT to the casing halo added in the interim, which round 6's own live ablation test disproved as a cause). AVM_PAD_R alone moved (7→5.283, isolated to the right gap only, same derivation round 4 used for AVM_PAD_L) to re-equalise: 2.5999755859375px/2.5999755859375px, exact bit-for-bit parity, stable across 15 repeat live reads. Round 4/5's own numbers below describe THEIR moment, not today's; do not read them as current.
    // ORIGIN of the split (this paragraph unchanged since round 1): ONE PAD_H used to govern BOTH sides symmetrically — wrong, on report ("removed padding from the wrong side... now it's too tight on the right"): the zero-gap ask (previous round) was specifically about the LEFT side (.avm-hit's own edge vs the attr column's own ink), and dropping PAD_H to AVM_BRK_W to satisfy that ALSO shrank the right side (val column to the right bracket), which nobody asked to change. Split into AVM_PAD_L (originally =AVM_BRK_W, the left side's own zero-gap value) and AVM_PAD_R (=7, the ORIGINAL shared value, restored on the right where it was never meant to move) — the two sides are independent NUMBERS now (this remains structurally correct and is why round 4, below, can equalise their RENDERED gaps without merging them back into one shared constant): a future request about one still can't silently move the other. PAD_V/COL_GAP tightened (from 4/9) in round 3 and left there — that report was about the bracket floating clear of the ink, which they still don't. AVM_BRK_W/AVM_BRK_EXT untouched.
    // AVM_PAD_L round 2 (this session, post font-fix): the literal-zero clearance above was requested and
    // verified BEFORE 2e73d4f/4d38780 (this same session, later) fixed .avm-attr's rendering from a thin,
@@ -3110,6 +3110,72 @@ const AVM_ROW_GAP=2, AVM_PAD_V=2, AVM_COL_GAP=4.014, AVM_PAD_L=6.1, AVM_PAD_R=7,
    // SMALLER live ink gap at the same AVM_COL_GAP, e.g. ~3.95px for an AGR row post-fix, comfortably clear
    // of overlap) exactly as AVM_PAD_L/R's own gaps already do per-row; this is the same acknowledged
    // limitation of a box-wide constant against per-row glyph variation, not a new one this round introduces.
+   // AVM_PAD_R round 6 (new session, on report "Wait, why does the AVM padding look more uneven than last
+   // time around? Left looks smaller than right. Did something regress?"): FOUR intervening changes since
+   // round 4's own 6.1/7 equalisation were investigated as candidates — casing halo (stroke:var(--casing);
+   // stroke-width:2.1px on .avm-attr/.avm-val, added AFTER round 4), the _getHBFont/_fetchFontBytes cache
+   // re-keying from (family) to (family,weight) (a shared HarfBuzz font-object cache change, not AVM-
+   // specific), grouped-row shaping (smpSwapPathGroup), and the AVM_COL_GAP shrink (round 5, above) — each
+   // ruled out or confirmed inert BEFORE reaching for a number, not assumed:
+   //   · Casing halo: DISPROVEN by live ablation, not by reasoning about it. A <style> override forcing
+   //     `.avm-attr,.avm-val{stroke-width:0px!important}` on the REAL running app (getComputedStyle
+   //     confirmed the override took: "2.1px"→"0px") produced BIT-IDENTICAL leftGap/rightGap across 11
+   //     repeat getBoundingClientRect() reads, stroke on or off. Whatever this thread's own EARLIER rounds
+   //     assumed about getBoundingClientRect() "seeing" stroke geometry (distinguishing it from getBBox()),
+   //     it does not manifest as a measurable ink-box difference for these swapped <path> elements in this
+   //     WebKit build — a real, surprising, directly-tested finding, not a theoretical ruling-out.
+   //   · _getHBFont/_fetchFontBytes re-keying: a NO-OP for AVM's own Latin/(family,weight) case, confirmed
+   //     by re-reading both the fetch (app/fonts.py's `_bundled_path` ignores its own `weight` argument
+   //     entirely for the two CORE-bundled families "Noto Sans"/"Noto Sans Mono" AVM uses — same bytes
+   //     regardless of key) and the shape call (JS is single-threaded and every `_getHBFont` continuation
+   //     runs `setVariations`+`shape()` synchronously with no intervening `await`, so two callers sharing
+   //     ONE font object per family, pre-rekey, could never actually interleave their own weight onto each
+   //     other's shape call — the hazard the rekey exists to prevent was structurally impossible for a
+   //     CORE-bundled family even before it).
+   //   · AVM_COL_GAP (round 5): algebraically re-derived that a δ change to it shifts x0/x1 (and so attrX/
+   //     valX) by ∓δ/2 each while ALSO shifting valX by +δ — net effect cancels to exactly 0 on BOTH
+   //     leftGap and rightGap. Confirmed not an oversight; genuinely inert on the outer bracket gaps.
+   //   · Grouped-row shaping (item 28, smpSwapPathGroup): the Voice=Pass row this whole saga calibrates
+   //     against is STANDALONE, not grouped, and was already fully HarfBuzz-measured+painted since 35b8572/
+   //     item 27, well before item 28 existed — unaffected by construction.
+   // THE ACTUAL DRIFT, found by live measurement (pywebview evaluate_js, real app, samples/english.conllu,
+   // "conceived", the SAME Voice=Pass row every prior round used): leftGap=2.600px (essentially unmoved
+   // from round 4's own 2.591px) but rightGap=4.317px (NOT round 4's 2.587px) — a real ~1.72px numeric
+   // drift, reproducible bit-for-bit across 15 repeat measurements including several forced extra
+   // renderDoc() cycles, i.e. NOT the shape-settle race this file's own item-27 note already documents (that
+   // race was independently observed too — see below — but it resolves to a STABLE wrong answer, not a
+   // transient one). ROOT-CAUSED to a genuine per-row-variance effect (the SAME "reservation is an ADVANCE,
+   // rendered ink is narrower by the glyph's own side-bearing" mechanism 2e73d4f/35b8572 already established
+   // for the reservation-vs-native-text case), now showing up between "Pass"'s own reserved ADVANCE
+   // (smpShapeSync('Pass',…).w = 23.197px, confirmed identical to avmLayout's own cached valW for this
+   // box) and "Pass"'s own PAINTED ink (getBoundingClientRect().width on the swapped <path> = 21.470px) —
+   // a 1.727px side-bearing gap on THIS specific glyph string that round 4's own calibration evidently
+   // did not carry (or carried on the opposite/attr side instead — unknowable in hindsight, only today's
+   // live numbers are trustworthy). leftGap stayed put because "VOICE" (this box's own widest attr string)
+   // defines attrW exactly, so attrW−attr_own_width=0 for this row regardless of any side-bearing question;
+   // rightGap moved because "Pass" (this box's own widest val string, confirmed: shape widths "Pass"=
+   // 23.197px vs "Past"=22.197px) sets valW too, but its OWN painted ink undershoots that same advance by
+   // 1.727px — a quantity no earlier round's algebra modelled, because no earlier round's target ROW
+   // happened to expose it this large. SEPARATELY OBSERVED, not the cause but worth recording: on a
+   // freshly-launched session, `.avm-val`'s HarfBuzz swap for a not-yet-shaped string can take 2-3 renderDoc()
+   // cycles (~2-3s) to land — during that window the element paints as plain native `<text>` and rightGap
+   // reads CLOSER to parity (3.504px) purely because native rendering happens to be wider (23.766px) than
+   // the eventual shaped ink (21.470px); this self-resolves to the STABLE 4.317px figure above and is a
+   // pre-existing settle-timing gap (item 27's own note already flags its cousin), not attempted here.
+   // FIX — same technique as every prior round: AVM_PAD_R's own effect is ISOLATED to rightGap (re-derived
+   // algebraically, mirroring round 4's own AVM_PAD_L derivation: a δ change to AVM_PAD_R shifts w by +δ,
+   // x0 by −δ/2, x1/rightBrk by +δ/2, but attrX/valX by −δ/2 only — net +δ on rightGap, exactly 0 on
+   // leftGap). AVM_PAD_R 7→5.283 (7 − (4.317−2.600), the live-measured Δ), reapplied and RE-measured live
+   // rather than trusted algebraically: leftGap=2.5999755859375px, rightGap=2.5999755859375px — EXACT
+   // bit-for-bit equality, stable across 15 repeat reads spanning several forced re-renders. Confirmed via
+   // a real zoomed WKWebView snapshot (WKSnapshotConfiguration, in-process — no OS Screen-Recording
+   // permission available in this session's environment) that the "left looks smaller than right" report
+   // is resolved on the calibration row; other rows in the same box (e.g. TAM/"Past", a narrower string)
+   // still show their own, expected, unequal-but-positive per-row-variance gaps, exactly as round 4 already
+   // documented that pattern — not a regression this round introduces. RTL (samples/arabic_rtl.conllu,
+   // the AGR="3.Masc.Sing" group row item 28 fixed) re-confirmed unregressed: rightGap=2.400px, comfortably
+   // positive, no overlap — AVM_PAD_R's own change reaches every box uniformly by construction, and nothing
+   // about item 28's own RTL fix depended on AVM_PAD_R's exact value.
 /* AVM_PAD_L/AVM_PAD_R above assume the bracket's own visible ink ends EXACTLY at its nominal path coordinate
    (x0+AVM_BRK_W / x1-AVM_BRK_W) — on report ("the AVM contents need to be placed relative to the bounding
    boxes of the brackets"): that assumption needed VERIFYING, not trusting, since an SVG stroke paints centred
