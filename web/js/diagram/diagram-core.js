@@ -2779,7 +2779,8 @@ function belowReserveH(hasTr,tierCount,hasPos,avmH){ const n=belowRows(hasTr,tie
    against it, so the spine is back on .mwt-tie-h and the serifs on .mwt-tie, restoring round 2's original
    pairing (and with it mwtTie's own unrotated one, and .mwt-grid-tie's) as the ONE convention every "this
    marks a multi-word/multi-part span" bracket in the app now shares. */
-const AVM_ROW_GAP=2, AVM_PAD_V=2, AVM_COL_GAP=6, AVM_PAD_L=5.75, AVM_PAD_R=7, AVM_BRK_W=3.5, AVM_BRK_EXT=0.5625;   // ONE PAD_H used to govern BOTH sides symmetrically — wrong, on report ("removed padding from the wrong side... now it's too tight on the right"): the zero-gap ask (previous round) was specifically about the LEFT side (.avm-hit's own edge vs the attr column's own ink), and dropping PAD_H to AVM_BRK_W to satisfy that ALSO shrank the right side (val column to the right bracket), which nobody asked to change. Split into AVM_PAD_L (originally =AVM_BRK_W, the left side's own zero-gap value) and AVM_PAD_R (=7, the ORIGINAL shared value, restored on the right where it was never meant to move) — the two sides are independent now, so a future request about one can never silently move the other again. PAD_V/COL_GAP tightened (from 4/9) in round 3 and left there — that report was about the bracket floating clear of the ink, which they still don't. AVM_BRK_W/AVM_BRK_EXT untouched.
+const AVM_ROW_GAP=2, AVM_PAD_V=2, AVM_COL_GAP=6, AVM_PAD_L=6.1, AVM_PAD_R=7, AVM_BRK_W=3.5, AVM_BRK_EXT=0.5625;   // CURRENT STATE (round 4, this session — see its own paragraph below, after round 3): AVM_PAD_L and AVM_PAD_R are DELIBERATELY EQUAL-GAP now, on explicit report ("if the right gap is 6.10px, then I want the left gap to be the same!"). They are NOT the same NUMBER (6.1 vs 7) — that gap is what AVM_BRK_W being subtracted from a different reference (see attrX/valX in drawAVM) plus the bracket-casing geometry ends up costing each side differently — but the two RENDERED ink gaps this session's own live measurement produced from them (the "conceived"/Voice=Pass row, samples/english.conllu) came out equal to four decimal places (2.591px / 2.587px, Δ0.004px), which is what the report asked for. The rounds below (2/3) are kept as real history of how the two constants came to be independent AND of why round 3 still read as asymmetric — that reasoning is still correct as an account of ITS OWN moment, it is simply superseded now: do not read anything below saying "the left still reads tighter than the right" as describing today's code.
+   // ORIGIN of the split (this paragraph unchanged since round 1): ONE PAD_H used to govern BOTH sides symmetrically — wrong, on report ("removed padding from the wrong side... now it's too tight on the right"): the zero-gap ask (previous round) was specifically about the LEFT side (.avm-hit's own edge vs the attr column's own ink), and dropping PAD_H to AVM_BRK_W to satisfy that ALSO shrank the right side (val column to the right bracket), which nobody asked to change. Split into AVM_PAD_L (originally =AVM_BRK_W, the left side's own zero-gap value) and AVM_PAD_R (=7, the ORIGINAL shared value, restored on the right where it was never meant to move) — the two sides are independent NUMBERS now (this remains structurally correct and is why round 4, below, can equalise their RENDERED gaps without merging them back into one shared constant): a future request about one still can't silently move the other. PAD_V/COL_GAP tightened (from 4/9) in round 3 and left there — that report was about the bracket floating clear of the ink, which they still don't. AVM_BRK_W/AVM_BRK_EXT untouched.
    // AVM_PAD_L round 2 (this session, post font-fix): the literal-zero clearance above was requested and
    // verified BEFORE 2e73d4f/4d38780 (this same session, later) fixed .avm-attr's rendering from a thin,
    // wrong-weight, non-small-caps glyph to its correct bold (571) c2sc small-caps HarfBuzz shape — i.e. the
@@ -2838,7 +2839,43 @@ const AVM_ROW_GAP=2, AVM_PAD_V=2, AVM_COL_GAP=6, AVM_PAD_L=5.75, AVM_PAD_R=7, AV
    // (+0.5, on the user's own estimate, genuinely MORE left clearance, never less — AVM_PAD_R=7 is
    // deliberately untouched, the asymmetry stays). Re-measured live after the change: left gap ~5.74px,
    // still visibly short of the right's ~6.10px — reads as a bit more room without now matching the right
-   // side's own larger margin, which is what was asked for.
+   // side's own larger margin, which was what was asked for AT THE TIME (round 3's own report was for "a
+   // bit more room", explicitly not full parity) — see round 4, directly below, for the follow-up that
+   // supersedes this.
+   // AVM_PAD_L round 4 (this session, immediate follow-up to round 3): "Wait a minute — if the right gap
+   // is 6.10px, then I want the left gap to be the same!" — an explicit numeric parity ask, not another
+   // estimate. Re-measured BOTH gaps live and fresh rather than trusting round 3's own 5.74/6.10 figures
+   // as still current (the task that produced this round said so explicitly, and it was the right call:
+   // re-measuring found the RIGHT gap itself hadn't drifted, but also that "the left gap" and "the right
+   // gap" are not single box-wide numbers — text-anchor="end" on .avm-attr and text-anchor="start" on
+   // .avm-val mean each ROW's own gap depends on how far that row's own attr/val STRING falls short of
+   // the box's shared column-width reserve (L.attrW/valW, the max over every row in the box), not only on
+   // AVM_PAD_L/AVM_PAD_R. A narrow row (e.g. this box's "TAM" attr label beside "VOICE") reads a much
+   // bigger left gap than a row whose own string fills the reserve. Measured the specific row the report
+   // named implicitly by naming the token — samples/english.conllu, "conceived", Voice=Pass, the row whose
+   // own strings are closest to their column's reserve in this box, hence the most representative single
+   // number for "the" gap on each side: at then-current AVM_PAD_L=5.75, leftGap=2.25px, rightGap=2.60px
+   // (getBoundingClientRect() on the live .avm-attr/.avm-val <text> elements and the live
+   // .mwt-tie-cas/.mwt-tie-h bracket <path> elements, exactly avmBrkInkDx()'s own established technique —
+   // NOT getBBox(), which 1f104a8 already proved blind to stroke geometry). Solved algebraically first,
+   // then confirmed live rather than trusting the algebra alone (this thread's own standing rule, after
+   // 1f104a8/2e73d4f found padding arithmetic and rendered ink don't always move in perfect lockstep):
+   // with the box centred on a fixed cx (x0=cx-w/2, x1=cx+w/2, drawAVM below) and w itself growing by
+   // whatever AVM_PAD_L grows by, a change of δ in AVM_PAD_L shifts x0 left by δ/2 and attrX right by
+   // δ/2 more than that (attrX=x0+AVM_PAD_L+dx+attrW), a net +δ on the LEFT gap — while x1 and valX both
+   // shift by the same +δ/2 as each other, cancelling to a net 0 on the RIGHT gap. So AVM_PAD_L alone can
+   // reach any target left gap without ever moving the right one, confirming the task's own instruction
+   // that only AVM_PAD_L was in scope held up structurally, not just by assumption. Target
+   // AVM_PAD_L=5.75+(2.60−2.25)≈6.10; set it, then RE-measured live (not just trusted the arithmetic):
+   // leftGap=2.591px, rightGap=2.587px on the same Voice=Pass row, Δ0.004px — inside the ~0.05px tolerance
+   // this thread has used throughout, and confirming the 1:1 relationship held exactly this round (it has
+   // not always, elsewhere in this saga — see round 3's own AVM_BRK_EXT investigation for a case where a
+   // constant's effect on rendered ink was NOT what a naive read of the formula would suggest). Other rows
+   // in the SAME box (TAM, whose own "TAM"/"Past" strings are narrower than "VOICE"/"Pass") do NOT come
+   // out equal (leftGap≈10.5px, rightGap≈3.6px at the new value) — this is not a bug or a miss, it is the
+   // same text-anchor-driven per-row spread described above, present before this round and unaffected by
+   // it: AVM_PAD_L/AVM_PAD_R are box-wide constants, so "equal gaps" can only ever be a property of the
+   // row that defines the column reserve (here, Voice), not a guarantee for every row in every box.
 /* AVM_PAD_L/AVM_PAD_R above assume the bracket's own visible ink ends EXACTLY at its nominal path coordinate
    (x0+AVM_BRK_W / x1-AVM_BRK_W) — on report ("the AVM contents need to be placed relative to the bounding
    boxes of the brackets"): that assumption needed VERIFYING, not trusting, since an SVG stroke paints centred
