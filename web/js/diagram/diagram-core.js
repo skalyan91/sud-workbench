@@ -1309,9 +1309,33 @@ function _measOneUncached(s,f,extraCss){
   const pxm=f.match(/(\d+(?:\.\d+)?)px/); let px=pxm?parseFloat(pxm[1]):TOK_REF_SIZE;
   if(TOK_MAG>1 && [15,14,26].some(b=>Math.abs(px-b*TOK_MAG)<0.01)) px/=TOK_MAG;
   const track=trackCurve(px)+italicTrackOf(f);   // the font SIZE, not just parseFloat(f)'s naive "first leading number in the whole shorthand" — that read the WEIGHT off GLOSS_F/MGLOSS_F ("455 13.2px …", a font-weight number ahead of the size) as if it were the size, feeding trackCurve(455) instead of trackCurve(13.2): a wildly wrong negative letter-spacing (~-0.27em) that compressed every MGloss/Gloss measurement to roughly half its actual rendered width — layout (stemmaLayout's lw, glossSlotW) reserved half the space these tiers actually need, and adjacent tokens' MGloss text visibly overlapped. MSEG_F/MSEG_UP_F/WORD_F-class strings never hit this: "italic 15px …" has no leading digit (parseFloat → NaN → the SAME 15px fallback the size actually is), and a bare "15px …" parses correctly by luck alone — only a WEIGHT-prefixed shorthand exposed the bug   // + italicTrackOf(f): the flat oblique-letterform bump, added on top of the size curve for any font string that opens with "italic " — see ITALIC_TRACK's own note
-  _mtxt.style.cssText="white-space:pre;font:"+f+(track?(";letter-spacing:"+track+"em"):"")+(extraCss||"");   // white-space FIRST so the font shorthand can't reset it; pairs with the xml:space attribute set above — see that note for why a bare " " otherwise measures 0
+  _mtxt.style.cssText="white-space:pre;font:"+f+(track?(";letter-spacing:"+track+"em"):"");   // white-space FIRST so the font shorthand can't reset it; pairs with the xml:space attribute set above — see that note for why a bare " " otherwise measures 0
+  // extraCss today is ALWAYS a font-feature-settings override (avmLayout's c2sc attr-label measurement,
+  // measGloss's c2sc/onum abbreviation runs — the only two call sites that pass a third argument at all).
+  // It USED to be folded into the cssText string above, after the `font` shorthand. On report ("too little
+  // space on the left of Voice" — WKWebView, not reproducible under headless Chrome): live-probed against
+  // the real app (pywebview's own evaluate_js, not CDP), _mtxt's OWN getComputedStyle came back with c2sc
+  // NOT active at all when applied that way — WebKit's cssText parser evidently applies the font
+  // shorthand's implicit "reset font-feature-settings to initial" AFTER the whole string is parsed,
+  // regardless of where in the string the explicit longhand sits (letter-spacing, set by the exact same
+  // shorthand-then-longhand pattern one line up, was never affected — this is specific to
+  // font-feature-settings/the font shorthand's own reset list). Chrome respects source order within one
+  // style string either way, so this never showed up under CDP. A SEPARATE property assignment, applied
+  // strictly after the shorthand (not concatenated into the same string), is what actually takes in both engines.
+  const _ffsM=extraCss&&/font-feature-settings\s*:\s*([^;]+)/.exec(extraCss);
+  if(_ffsM) _mtxt.style.setProperty("font-feature-settings",_ffsM[1]); else _mtxt.style.removeProperty("font-feature-settings");
   _mtxt.textContent=s||"";
-  let w=0; try{ w=_mtxt.getComputedTextLength(); }catch(_){ w=0; }
+  let w=0;
+  try{
+    // getComputedTextLength() is WebKit's own advance for cursor placement — measured live (same probe as
+    // above) it does NOT reflect the glyph substitution font-feature-settings triggers: with c2sc verified
+    // ACTIVE (getComputedStyle confirmed it), it still returned the plain-capitals advance, undercounting
+    // "VOICE" by ~1.2px against what WebKit itself went on to paint. getBBox() on the SAME shaped element
+    // matched the real painted ink to within a rounding pixel. Chrome-checked: the two numbers agree
+    // exactly there (getComputedTextLength===getBBox().width), so preferring getBBox() whenever a feature-
+    // settings override is in play is WebKit-only-corrective, not a behaviour change under Chrome.
+    w=_ffsM?_mtxt.getBBox().width:_mtxt.getComputedTextLength();
+  } catch(_){ w=0; }
   /* …and where the SVG cannot shape this string, its width describes a rendering nobody will see. A live
      DOM element is what the HTML fallback (foreignObject) paints — see _measDOM's own note on why this is
      no longer canvas — so it is the width to lay out against. No track/letter-spacing here: smpReshape
