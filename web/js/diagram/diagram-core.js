@@ -2627,7 +2627,7 @@ function belowReserveH(hasTr,tierCount,hasPos,avmH){ const n=belowRows(hasTr,tie
    against it, so the spine is back on .mwt-tie-h and the serifs on .mwt-tie, restoring round 2's original
    pairing (and with it mwtTie's own unrotated one, and .mwt-grid-tie's) as the ONE convention every "this
    marks a multi-word/multi-part span" bracket in the app now shares. */
-const AVM_ROW_GAP=2, AVM_PAD_V=2, AVM_COL_GAP=6, AVM_PAD_H=3.5, AVM_BRK_W=3.5, AVM_BRK_EXT=0.5625;   // PAD_H DROPPED TO EXACTLY AVM_BRK_W, on direct request ("I want it to be 0") — the ask was specifically that .avm-hit's own left edge (x0+AVM_BRK_W) and the widest row's own rendered ink (attrX-attrW, after the c2sc/tracking-curve fix made that measurement exact) land at the SAME x, i.e. zero clearance between the bracket's own drawn width and the text, not "a small gap" of any size. This REVERSES the round-4 reasoning below (kept for the record, not because it still governs): PAD_H had been raised 5→7 specifically because 5px of clearance read as cramped for "Voice"/"Polarity" against a short label in the same box. That tradeoff is deliberately overridden here — a live report on the CURRENT rendering (after several unrelated fixes since round 4: the weight-curve fix, the c2sc/tracking-curve fix) asked for zero explicitly, not a re-measurement of the old tightness target. PAD_V/COL_GAP tightened (from 4/9) in round 3 and left there — that report was about the bracket floating clear of the ink, which they still don't. AVM_BRK_W's own value is untouched — this only removes the EXTRA clearance PAD_H used to add past the bracket's own width, not the bracket itself. The shared-column effect (a narrower row in the same box shows more apparent gap than the widest one) is UNCHANGED by this — see avmLayout's own note; only the WIDEST row's own baseline clearance is what "0" describes.
+const AVM_ROW_GAP=2, AVM_PAD_V=2, AVM_COL_GAP=6, AVM_PAD_L=3.5, AVM_PAD_R=7, AVM_BRK_W=3.5, AVM_BRK_EXT=0.5625;   // ONE PAD_H used to govern BOTH sides symmetrically — wrong, on report ("removed padding from the wrong side... now it's too tight on the right"): the zero-gap ask (previous round) was specifically about the LEFT side (.avm-hit's own edge vs the attr column's own ink), and dropping PAD_H to AVM_BRK_W to satisfy that ALSO shrank the right side (val column to the right bracket), which nobody asked to change. Split into AVM_PAD_L (=AVM_BRK_W, the left side's own zero-gap value, unchanged from that fix) and AVM_PAD_R (=7, the ORIGINAL shared value, restored on the right where it was never meant to move) — the two sides are independent now, so a future request about one can never silently move the other again. PAD_V/COL_GAP tightened (from 4/9) in round 3 and left there — that report was about the bracket floating clear of the ink, which they still don't. AVM_BRK_W/AVM_BRK_EXT untouched.
    // item 25/6: AVM_BRK_W tightened again, 5→3.5, on report ("AVM bracket ticks should be the same length as
    // MWT bracket ticks — right now they're too long"). Measured first, not guessed: an AVM bracket's serif and
    // an MWT tie's own PIN were ALREADY geometrically identical at 5px each (mwtTie's flat PIN=5, drawAVM's own
@@ -2668,7 +2668,7 @@ function avmLayout(t){ const feats=(t&&t.feats)||""; if(!feats||feats==="_"||!sh
   const attrW=Math.max(0,...rows.map(r=>_measOne(r.attr,AVM_ATTR_F,";font-feature-settings:'c2sc' 1")));
   const valW=Math.max(0,...rows.map(r=>meas(r.val,AVM_VAL_F)));
   const lineH=ascent(AVM_VAL_F)+descent(AVM_VAL_F);
-  const w=AVM_PAD_H*2+attrW+AVM_COL_GAP+valW, h=AVM_PAD_V*2+rows.length*lineH+Math.max(0,rows.length-1)*AVM_ROW_GAP;
+  const w=AVM_PAD_L+AVM_PAD_R+attrW+AVM_COL_GAP+valW, h=AVM_PAD_V*2+rows.length*lineH+Math.max(0,rows.length-1)*AVM_ROW_GAP;
   const box={rows,attrW,lineH,w,h};
   _avmCache.set(feats,box);
   return box; }
@@ -2710,7 +2710,7 @@ function drawAVM(svg,cx,y0,t,si,tokId,boxes){ const L=avmLayout(t); if(!L) retur
   const x0=cx-L.w/2, x1=cx+L.w/2, y1=y0+L.h;
   // round 4 — the bracket: mwtTie's own 3-segment tie shape, once per side, turned 90° — casing (one combined
   // L path), spine (long, THIN — .mwt-tie-h) and two short serifs (FULL weight — .mwt-tie). Back to round 2's
-  // original pairing (see the box comment above const AVM_PAD_H for the measured, side-by-side reason): this
+  // original pairing (see the box comment above const AVM_PAD_L/AVM_PAD_R for the measured, side-by-side reason): this
   // is the SAME role split mwtTie's own unrotated bar/pins use, and the SAME one .mwt-grid-tie's own rotated
   // copy uses (.gtie-spine thin / .gtie-pin full) — one convention now, not two. The SERIFS overshoot the
   // spine's own x-centrelines (xEdge) by AVM_BRK_EXT, along their own (horizontal) length, so their thicker
@@ -2722,7 +2722,7 @@ function drawAVM(svg,cx,y0,t,si,tokId,boxes){ const L=avmLayout(t); if(!L) retur
     svg.appendChild(E("path",{class:"mwt-tie-h",d:`M ${xEdge} ${y0} L ${xEdge} ${y1}`}));
     const ext=xIn>xEdge?-AVM_BRK_EXT:AVM_BRK_EXT;
     svg.appendChild(E("path",{class:"mwt-tie",d:`M ${xIn} ${y0} L ${xEdge+ext} ${y0} M ${xEdge+ext} ${y1} L ${xIn} ${y1}`})); });
-  const attrX=x0+AVM_PAD_H+L.attrW, valX=attrX+AVM_COL_GAP;
+  const attrX=x0+AVM_PAD_L+L.attrW, valX=attrX+AVM_COL_GAP;
   L.rows.forEach((r,i)=>{ const ry=y0+AVM_PAD_V+ascent(AVM_VAL_F)+i*(L.lineH+AVM_ROW_GAP);
     const g=E("g",{class:"avm-row","data-feat":r.key,tabindex:"0"});
     if(si!=null&&tokId!=null){ g.setAttribute("data-s",si); g.setAttribute("data-tok",tokId); }
