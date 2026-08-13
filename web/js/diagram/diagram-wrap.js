@@ -107,7 +107,7 @@ function bracketsWrapped(si){
      not the mode, and this file's standing rule is that the wrapped variant of a notation must not drift from
      the flat one — the two were deliberately brought to one figure when the first descent landed. */
   box.style.setProperty("--relpad",(show.labels?(13.3+descent(WORD_F)+TOK_TR_GAP+2*TOK_DESC):0)+"px");             // reserved space above the form for the relation row. Copies projWrapped's deprel→form offset EXACTLY (20px + the form's descender depth): the HTML box model seats the form baseline ~6.7px lower inside its line box than the label's centre, so the flat "20" nominal maps to ~13.3, and +descent(WORD_F) adds the projWrapped descender fold on top — landing the relation centre the same distance above the form baseline as the wrapped stemma
-  box.style.setProperty("--undpad",(belowReserveH(hasTr(t),belowTierN(),show.pos,avmRowMaxH(t))+TOK_TR_GAP)+"px");            // reserved space below for the transliteration + gloss + POS rows (Item 1/8: EVERY below-row folds in descent(POS_F) — matching belowStack's descender-matched per-row step — via the .otrans/.gloss/.bwpos margin-top set below; the reserve grows to match so the stack bottom stays at the same depth as the flat/arc views) — belowGap() per row, matching the flat renderer's baseline step. hasTr (actual translit presence), NOT show.translit, so an English sentence reserves no phantom translit row — keeping the token's stack bottom at the SAME depth as the arc/flat views, so a cross-line arc's upper endpoint (tokBot + clearance) lands where arcsWrapped puts it (stackBot + clearance). item 22: +AVM, the tallest in the sentence — ONE shared --undpad cascades to every token here, so it has to cover all of them, not just one
+  box.style.setProperty("--undpad",(belowReserveH(hasTr(t),belowTierN(),show.pos,avmRowMaxH(t))+TOK_TR_GAP)+"px");            // reserved space below for the transliteration + gloss + POS rows (Item 1/8: EVERY below-row folds in descent(POS_F) — matching belowStack's descender-matched per-row step — via the .otrans/.gloss/.bwpos margin-top set below; the reserve grows to match so the stack bottom stays at the same depth as the flat/arc views) — belowGap() per row, matching the flat renderer's baseline step. hasTr (actual translit presence), NOT show.translit, so an English sentence reserves no phantom translit row — keeping the token's stack bottom at the SAME depth as the arc/flat views, so a cross-line arc's upper endpoint (tokBot + clearance) lands where arcsWrapped puts it (stackBot + clearance). item 22: +AVM, the SENTENCE-WIDE max — this box-level value is now only a FALLBACK (below, `lineToks`, every `.bwline2` gets its own tighter per-ROW override once the box is built; see that pass's own note for why): kept here so a `.bwtok` that somehow lands outside a tracked line still reserves *something* safe, and so `.bwrap.hasmwt`'s own padding-bottom (built from `box._ties`/htmlTieBottom below, unrelated to --undpad but read right after this box exists) never sees an unset custom property.
   /* ⚠ …PLUS STACKED_GAP, WHICH THE RESERVE ABOVE ALREADY CARRIED AND THIS OFFSET DID NOT. `belowReserveH`
      folds STACKED_GAP into `--undpad` for a STACKING_SCRIPTS document (Grantha, Javanese, Balinese, Kawi,
      Burmese, ZanabazarSquare — js/lang/translit.js), exactly as it does for every SVG notation; but a wrapped
@@ -231,8 +231,24 @@ function bracketsWrapped(si){
     const add=[...ln.children].slice(k); if(!add.length) return; const sl=formSlack(i,head).start;
     add[0].style.marginInlineStart=((parseFloat(add[0].style.marginInlineStart)||0)+sl)+"px";                     // mirror image: the leads end flush at the form's inline-START edge…
     const last=add[add.length-1]; last.style.marginInlineEnd=((parseFloat(last.style.marginInlineEnd)||0)-sl)+"px"; };   // …and the cell still starts where it did
+  // item 22 round 2 (on report — "in wrapped arcs and brackets, the inter-line gap should be set from the top of
+  // the bottom row to the bottom of the deepest AVM of the TOP row"): arcsWrapped already does this (r.stackBot
+  // takes avmRowMaxH of just that row's own tokens, js/diagram/diagram-wrap.js's own note on that line). Wrapped
+  // brackets did not: --undpad (above) was ONE value shared by the whole box, built from avmRowMaxH(t) — the
+  // tallest AVM ANYWHERE in the sentence — so a single deep-FEATS token on line 1 padded every OTHER line's
+  // tokens (even AVM-less ones on line 4) by that same amount, structurally, since --undpad is a real
+  // padding-bottom that sets each .bwtok's own box height and hence how far the block flow pushes the NEXT
+  // .bwline2 down. Never an overlap (a row's own reserve could only ever be ≥ what it needed), but every gap in
+  // the diagram was inflated to the sentence's single worst case instead of tracking its own row — the opposite
+  // deviation from what was asked. `lineToks` records which token indices land on each `.bwline2` div as the
+  // recursive layout below builds it (a whole constituent's subtree can share ONE line via flatInto's own
+  // recursion, or split across several via render()'s line-filling loop — this only cares which div a token's
+  // wordSpan(i) actually ended up in, not why), so a pass after the box is fully built (below, before `return
+  // box`) can give each line ITS OWN --undpad, keyed on avmRowMaxH of just that line's own tokens — the same
+  // "tallest AVM among the tokens sharing this row" avmRowMaxH already means for arcsWrapped's r.idx slices.
+  const lineToks=new Map(), trackTok=(ln,i)=>{ (lineToks.get(ln)||lineToks.set(ln,[]).get(ln)).push(i); };
   const flatInto=(i,ln)=>{ const col=relColor(t[i].deprel); ln.appendChild(brk("[",col,i));   // whole constituent inline, in surface order
-    [{pos:i,head:true}].concat(dchildren[i].map(c=>({pos:lo[c],c}))).sort((a,b)=>a.pos-b.pos).forEach(m=>{ m.head?(leadInto(i,ln),ln.appendChild(wordSpan(i)),hangInto(i,ln)):flatInto(m.c,ln); });
+    [{pos:i,head:true}].concat(dchildren[i].map(c=>({pos:lo[c],c}))).sort((a,b)=>a.pos-b.pos).forEach(m=>{ m.head?(leadInto(i,ln),ln.appendChild(wordSpan(i)),hangInto(i,ln),trackTok(ln,i)):flatInto(m.c,ln); });
     ln.appendChild(brk("]",col,i)); };
   // Lisp-indented, linearised deepest-first: a constituent is flat on one line iff it fits at its indent; else it
   // stays expanded. Within an expanded constituent the members (head + children, in SURFACE order — the head in
@@ -244,7 +260,7 @@ function bracketsWrapped(si){
     const cind=indent+IND;   // members (head + children) indent by exactly one parent-bracket width → they line up with the content just inside this constituent's own "[", not with a deeper sibling bracket
     let cur=line(indent); cur.appendChild(brk("[",col,i)); let curW=indent+brW;
     members.forEach(m=>{ if(m.head){ const w=leadW(t[i],WORD_F)+wordW(i)+hangWpx(i);
-        if(cur && curW+G+w<=AV){ leadInto(i,cur); cur.appendChild(wordSpan(i)); hangInto(i,cur); curW+=G+w; } else { cur=line(cind,1); leadInto(i,cur,true); const ws=wordSpan(i); ws.classList.add("leadhead"); cur.appendChild(ws); hangInto(i,cur,true); curW=cind+w; } }   // head alone on a wrapped line → left-align its form to the box start so it lines up with the sibling brackets (item 9(b): the satellites are re-anchored against THAT flush-start geometry, not the centred one — see formSlack). line(cind,1): a sibling flatInto'd child at this SAME cind prints its OWN real "[" before its cell; the leadhead has no such bracket, so without the +1 extra pad its cell lands one bracket-glyph-advance LEFT of that sibling's — pixel-measured via CDP (getBoundingClientRect diff = exactly meas("[")), not assumed. The leadhead cell's OWN normal padding-inline-start (app.css) then supplies the same bracket→word gap a real bracket's follower gets
+        if(cur && curW+G+w<=AV){ leadInto(i,cur); cur.appendChild(wordSpan(i)); hangInto(i,cur); trackTok(cur,i); curW+=G+w; } else { cur=line(cind,1); leadInto(i,cur,true); const ws=wordSpan(i); ws.classList.add("leadhead"); cur.appendChild(ws); hangInto(i,cur,true); trackTok(cur,i); curW=cind+w; } }   // head alone on a wrapped line → left-align its form to the box start so it lines up with the sibling brackets (item 9(b): the satellites are re-anchored against THAT flush-start geometry, not the centred one — see formSlack). line(cind,1): a sibling flatInto'd child at this SAME cind prints its OWN real "[" before its cell; the leadhead has no such bracket, so without the +1 extra pad its cell lands one bracket-glyph-advance LEFT of that sibling's — pixel-measured via CDP (getBoundingClientRect diff = exactly meas("[")), not assumed. The leadhead cell's OWN normal padding-inline-start (app.css) then supplies the same bracket→word gap a real bracket's follower gets
       else { const cw=flatW(m.c);
         if(cur && curW+G+cw<=AV){ flatInto(m.c,cur); curW+=G+cw; }                     // linearise the child inline
         else if(cind+cw<=AV){ cur=line(cind); flatInto(m.c,cur); curW=cind+cw; }        // …or on the next indented line
@@ -253,6 +269,16 @@ function bracketsWrapped(si){
     const lastLn = cur || (box.lastElementChild&&box.lastElementChild.classList.contains("bwline2") ? box.lastElementChild : line(indent));
     lastLn.appendChild(brk("]",col,i));
   })(root,0);
+  // item 22 round 2: give every line its OWN --undpad, tracking only ITS tokens' tallest AVM (lineToks, set
+  // above) — the row-local tightening arcsWrapped's r.stackBot already gets, now applied here too. hasTr(t)/
+  // belowTierN()/show.pos stay SENTENCE-WIDE inputs (unchanged from the box-level call above — a document either
+  // has a translit/gloss/POS tier or it doesn't, uniformly; only the AVM term, whose height genuinely varies
+  // token to token, is worth tightening per row). CSS custom properties cascade, so setting this on a `.bwline2`
+  // overrides the box-level fallback for every `.bwtok` inside it — WITHIN one row every token still shares the
+  // identical value (the alignment the original box-level comment cared about), only ACROSS rows can it now
+  // differ, matching what was actually asked.
+  lineToks.forEach((idxs,ln)=>{ const rowMax=avmRowMaxH(idxs.map(i=>t[i]));
+    ln.style.setProperty("--undpad",(belowReserveH(hasTr(t),belowTierN(),show.pos,rowMax)+TOK_TR_GAP)+"px"); });
   return box;
 }
 // Shallow Hobby bump. The take-off angle θ is fixed to the ARROWHEAD's half-angle, atan(AH_RATIO) ≈ 31°, so the
