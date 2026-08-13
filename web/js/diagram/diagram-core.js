@@ -1342,10 +1342,34 @@ function smpReshape(root){
 // call sites of this same converter (_measOneUncached's measurement, smpReshape's paint-side swap) that
 // otherwise land on two DIFFERENT cache keys for the IDENTICAL feature list, doubling the shaping work (and,
 // briefly, having measurement and paint each wait on their OWN async shape to land rather than sharing one).
+// ⚠ "R sticking out to the right, T to the left" (report, after item 26 shipped): hb.shape() applies its
+// OWN default-on GPOS features (kern/liga/clig/calt/ccmp/locl/mark/mkmk/rlig) IN ADDITION to whatever
+// `features` names, unless a feature is explicitly zeroed — so handing hb.shape() only "c2sc=1" does NOT
+// mean "c2sc and nothing else"; kern rides along implicitly. Investigated before touching anything: shaped
+// "AGR"/"TAM"/every AVM group label this app draws against the ACTUAL bundled notosans.ttf at the real
+// weight (571) via this exact WASM build, with and without an explicit "kern=0" — byte-identical glyph
+// IDs, advances (`ax`) AND per-glyph offsets (`dx`, HarfBuzz's own GPOS adjustment, confirmed 0 in BOTH
+// runs). Also confirmed the SAME relative gap pattern (a visibly tighter T→A than A→M in "TAM", by design)
+// already exists in the browser's OWN native rendering of the identical c2sc-substituted glyphs
+// (measGloss's `.glabbr`, avmInline's `.oavm-attr` — neither ever touched by the HarfBuzz swap) — so the
+// reported "sticking out" is the font's own small-caps R/T ink overshooting its advance box (an ordinary
+// glyph-design fact, unrelated to and unchanged by kern in THIS font), not a shaping bug. "kern=0" is added
+// below anyway, defensively: free (confirmed inert against the current bundled Noto Sans) and the
+// semantically correct ask for structural label text (an AVM attribute name, a Leipzig abbreviation) —
+// nothing reaching this converter is prose that ever wanted optical kerning — so a FUTURE font swap that
+// does carry real kern pairs for these glyphs can't silently reintroduce pair-specific drift no caller
+// asked for. mark/mkmk are deliberately left alone: every string here is plain Latin ASCII (AVM attribute
+// names, Leipzig gloss abbreviations — see _firstFamily's own note), which never carries a combining mark
+// for GPOS mark-attachment to act on, so there is nothing for those two features to do either way.
+// Appended only once a REAL feature matched (`out.length`), not unconditionally on entry: an empty match
+// must still fall through to "" (falsy), exactly as before, so a caller's `if(hbFeat&&…)` gate stays closed
+// for a font-feature-settings value this converter didn't recognise — "kern=0" alone must never be enough
+// to open the HarfBuzz path on its own.
 function cssFeatToHB(v){
   if(!v) return "";
   const out=[]; const re=/['"]([a-zA-Z0-9]{1,4})['"]\s*(-?\d+)?/g; let m;
   while((m=re.exec(v))) out.push(m[1]+"="+(m[2]!==undefined?m[2]:"1"));
+  if(out.length) out.push("kern=0");
   return out.join(","); }
 // item 26 — the first family off EITHER a full font shorthand ("571 10.5px \"Noto Sans\", …", AVM_ATTR_F/
 // GLOSS_F's own shape — strip up through the required <size> token first) OR a bare family list
