@@ -573,9 +573,26 @@ function isLzhLang(lang){ const b=((lang!=null?lang:DOCLANG)||"").toLowerCase().
    Chinese, Jyutping) put a romanisation on the main line instead, which is Latin annotation exactly
    like the rows this whole block already keeps unmagnified — TRANSFORM_ORTHO's simplified/traditional
    and the default "" (Original) both still draw Han, so those stay in. */
+/* ⚠ THE MAGNIFIED SCRIPT IS THE GLYPH'S, NOT JUST THE PICKER'S — on report ("Sanskrit scripts should be
+   enlarged in Devanagari-original files just like in IAST-original files"). Every check below used to read
+   ORTHO_SCHEME alone, which is right for the common case (a reader explicitly PICKS a script from the Script
+   menu — an IAST-stored file shown in Devanagari, say) but wrong for the one ORTHO_SCHEME cannot see: a
+   DEVANAGARI-STORED file under "Original" (ORTHO_SCHEME==="", the default — nothing picked) is ALREADY
+   drawing real Devanagari glyphs, read straight off DOCSCRIPT (js/lang/translit.js, this file, above), not off
+   any picker choice. ORTHO_SCHEME alone therefore answered "no script" for a document that plainly has one on
+   screen, and every one of INDIC_SCRIPTS' fine-detail scripts (conjunct stacking, vowel-sign placement,
+   subscript/superscript marks — the SAME reasoning INDIC_SCRIPTS' own note gives for magnifying at all) sat
+   at the unmagnified 1×, unlike the identical glyphs shown by explicitly picking "Devanagari" over an
+   IAST-stored file. `eff` is the script the MAIN GLYPH is actually drawn in — ORTHO_SCHEME where a reader chose
+   one (covers "none" too: a falsy-looking but real pick, so `||` does not fall through it), else DOCSCRIPT for
+   Sanskrit, the same fallback saGlyphScript() (below) already uses for every OTHER "what script is on screen"
+   question this file answers. "" for any non-Sanskrit language with nothing picked, exactly as before — DOCSCRIPT
+   is only ever populated by loadDocScript() when isSanskritLang(), so this changes nothing for lzh or any
+   language with its own Script menu but no digraphic storage. */
 function scriptMag(){
-  if(ORNAMENTAL_SCRIPTS.has(ORTHO_SCHEME)) return 2;   // checked BEFORE the 1.5× tier below — a subset of INDIC_SCRIPTS, so order matters
-  if(INDIC_SCRIPTS.has(ORTHO_SCHEME)) return 1.5;
+  const eff=ORTHO_SCHEME||(isSanskritLang()?DOCSCRIPT:"");
+  if(ORNAMENTAL_SCRIPTS.has(eff)) return 2;   // checked BEFORE the 1.5× tier below — a subset of INDIC_SCRIPTS, so order matters
+  if(INDIC_SCRIPTS.has(eff)) return 1.5;
   if(isLzhLang() && ORTHO_SCHEME!=="none" && !(typeof LATIN_ORTHO!=="undefined" && LATIN_ORTHO.has(ORTHO_SCHEME))) return 1.5;
   return 1; }
 function orSchemeLabel(id){ const s=ORTHO_SCHEMES.find(x=>x.id===id); return s?s.label:""; }
