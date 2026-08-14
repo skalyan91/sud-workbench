@@ -2077,6 +2077,12 @@ try{ new ResizeObserver(scheduleBottomSpacer).observe(document.getElementById("d
 //    arced lines exactly like the wrapped arc view (Item 3a). Gaps with no arc across them stay tight;
 //  • a wide within-line bump (+ its de-collided labels) can climb past that standard gap and collide with the line
 //    above → the gap then grows ONLY by that extra deficit, so one tall bump widens ONLY its own gap;
+//  • the gap is ALSO floored at arcsWrapped's own MINIMUM BAND (Item 3b, below) — 2·(this row's tallest bump's
+//    visible peak + the fan's own perpendicular clearance) — which the flat WRAP_ARC_STDGAP constant does NOT
+//    reproduce for a tall/fanned bump (that constant is only arcsWrapped's ORDINARY floor-height-arc gap, a
+//    fixed number calibrated to h=24; it stays a no-op for anything taller). Without this, a genuinely tall or
+//    widely-fanned interrupter arc could visibly crowd the line above even though item 3a's flat floor was
+//    already satisfied;
 //  • the FIRST line's bumps have no gap above, so the TOP PADDING is topped up on demand to clear them instead.
 // This is the SAME occupy-the-standard-gap-then-grow-the-deficit, per-gap logic the wrapped arc view uses.
 function reserveBracketArcRoom(){ document.querySelectorAll("#doc .bwrap").forEach(box=>{
@@ -2106,6 +2112,21 @@ function reserveBracketArcRoom(){ document.querySelectorAll("#doc .bwrap").forEa
       while(guard++<40 && placed.some(pp=>Math.abs(pp.x-L.mx)<pp.hx+half && Math.abs(pp.y-y)<pp.hy+hh)) y-=hh*2+3;
       placed.push({x:L.mx,y,hx:half,hy:hh}); top=Math.min(top,y-hh); });
     return top; };
+  // Item 3b (on report — "not convinced we have enough space between lines in wrapped arcs or brackets… isn't it
+  // supposed to be twice the height of the highest within-line arc on the bottom line, plus the fanning gap ×
+  // the arrowhead's half-angle trig?"). arcsWrapped already answers exactly this for ITS OWN inter-row gap
+  // (diagram-wrap.js, the `band<need` check, `need=2*(ARC_APEX*r.maxH+SPREAD*Math.sin(ARC_ANGLE))`) — verified
+  // geometrically sound there: ARC_APEX·h is the tallest bump's own visible peak above its row, SPREAD·sinθ is
+  // the perpendicular clearance the SAME fan (fanStep()) already keeps between two neighbouring arcs (casings
+  // included) — sin, not cos, of ARC_ANGLE, because ARC_ANGLE is the take-off angle off the HORIZONTAL baseline
+  // (equal to the arrowhead's own tip half-angle only by construction — see ARC_ANGLE's own comment above), and
+  // projecting a horizontal fan-offset onto that line's normal is a sine, not a cosine, of the angle from
+  // horizontal — and doubling the sum leaves as much room again ABOVE the bump for whatever else needs to run
+  // through the gap. Wrapped brackets never got the equivalent: its own within-line bumps (interrupters) are
+  // measured live (the arc/label crown, `lineTop` above) rather than laid out from `r.maxH` up front, so there
+  // is no `r` to hang a matching check on — `rowMaxH` below replays it from the SAME live rects `lineTop` reads.
+  const rowMaxH=li=>{ const ps=withinByLine.get(li); if(!ps) return 24;   // no within-line bump on this row → the SAME floor arcsWrapped's own r.maxH defaults to (Math.max(24,...), diagram-wrap.js) for a gap an arc merely (cross-line-)occupies without arching up from THIS row itself
+    return Math.max(24,...ps.map(({Dr,Hr})=>arcHgt(Math.abs(Dr.cx-Hr.cx)))); };
   const LINEPAD=7, GAPCLEAR=3, TOPCLEAR=8;   // LINEPAD: the .bwline2 top/bottom padding. GAPCLEAR/TOPCLEAR: min clearance a within-line bump keeps over the previous line's content / the box top.
   const formTopOf=li=>{ let m=Infinity; lines[li].querySelectorAll(".bwtok").forEach(tk=>{ const r=rectOf(tk); if(r.t<m)m=r.t; }); return m===Infinity?(lines[li].offsetTop+LINEPAD):m; };   // the line's word-row top (matches the arc view's word top)
   const grow=(ln,by)=>{ if(by>0.5) ln.style.marginTop=((parseFloat(getComputedStyle(ln).marginTop)||0)+by)+"px"; };   // read live → each grow is reflected in the next line's measurement (cumulative-correct)
@@ -2118,7 +2139,13 @@ function reserveBracketArcRoom(){ document.querySelectorAll("#doc .bwrap").forEa
     }
     // Item 3a — floor every arc-occupied gap at the arc view's standard inter-line gap (read live, i.e. after any
     // bump growth above), measured the SAME way the arc view is: previous line's stack bottom → this line's word top
-    if(li>0 && gapHasArc[li]){ const prevStackBot=lines[li-1].offsetTop+lines[li-1].offsetHeight-LINEPAD; grow(ln, WRAP_ARC_STDGAP-(formTopOf(li)-prevStackBot)); }
+    if(li>0 && gapHasArc[li]){ const prevStackBot=lines[li-1].offsetTop+lines[li-1].offsetHeight-LINEPAD; grow(ln, WRAP_ARC_STDGAP-(formTopOf(li)-prevStackBot));
+      // Item 3b — and ALSO floor it at arcsWrapped's own MINIMUM BAND for THIS row's tallest bump (rowMaxH's own
+      // note above): a no-op for an ordinary floor-height bump (2·(0.75·24+SPREAD·sinθ) ≈ 45, already under
+      // WRAP_ARC_STDGAP's 60 — Item 3a alone covers it), but a tall/widely-fanned interrupter's need grows
+      // ~1.5px per px of height while Item 3a's floor stays flat, so past roughly h≈50 this is the one that
+      // actually binds. Read live, after Item 3a's own growth, so the two floors compose (each only ever adds).
+      grow(ln, 2*(ARC_APEX*rowMaxH(li)+fanStep()*Math.sin(ARC_ANGLE))-(formTopOf(li)-prevStackBot)); }
   });
   // CROSS-LINE arcs: their de-collided relation labels ride the chord midpoint and, once lifted to clear each OTHER,
   // can climb onto the content of the arc's UPPER-endpoint line — or, on a multi-line span, an INTERMEDIATE line —
