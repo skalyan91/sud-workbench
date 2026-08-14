@@ -868,6 +868,46 @@ function smpUnshaped(s){
 const ARABIC_RE=/\p{Script=Arabic}/u;
 function arabicUnshaped(s){
   return (typeof IS_CHROMIUM==="undefined"||!IS_CHROMIUM) && ARABIC_RE.test(s||""); }
+/* RE-INVESTIGATED FROM SCRATCH, LIVE, ON REPORT ("diagram tokens in Arabic are still not showing proper
+   RTL rendering") ARRIVING AFTER THE ABOVE FIX (07f5c8e) AND AFTER SEVERAL LATER COMMITS TOUCHED THE
+   SHARED SHAPING PIPELINE THIS DEPENDS ON (4647a8f's font-cache re-keying, d10d9cf's Devanagari addition
+   to the same gate) — none of those trusted without re-checking. Real pywebview probe against a genuine
+   app.__main__.main() instance (not browser design mode), samples/arabic_rtl.conllu, DOM geometry read
+   with getBoundingClientRect — NOT screenshots (this session's execution environment has no attached
+   display; screencapture returns a black frame here, confirmed by inspecting the PNG, so evidence below
+   is coordinate-based, not visual):
+     · TOKEN ORDER, flat: every non-outline notation (stemma/arcs/tree/brackets) gives strictly DECREASING
+       cx as token index increases (token 1 rightmost) — confirmed with real numbers, all four notations.
+       outline's own per-row `cx` is NOT a reading-order signal (it is a vertical DFS-indented tree, one row
+       per token top-to-bottom regardless of direction) — its RTL correctness is the row's own right-edge
+       retreating by exactly one `marginInlineStart` step (22px) per depth level, confirmed exactly.
+     · TOKEN ORDER, wrapped (stemma/arcs/brackets — the only 3 that wrap): re-tested at the app's real
+       shipped minimum width (1240px, i.e. NOT an artificially-narrowed window) with a synthetic 17-token
+       RTL sentence. Every wrapped line individually reads right-to-left (decreasing cx with token index
+       within the line), and a new line starts back at the right margin — merging all lines back into token
+       order reproduces the sentence's 1..17 order exactly, for all three notations.
+     · ARC/TREE EDGE DIRECTION: not a separate RTL concern by construction — `arcs()`/stemma/tree/wrapped
+       equivalents all build their endpoint geometry off the SAME `c[]` array `mirror()` (prefs.js) already
+       flipped for the whole layout, and the arrowhead is always drawn at the DEPENDENT's endpoint
+       (`P[3]`/`X2`, keyed by `a.to`, never a hand-picked physical side) — there is no code path where arc
+       direction could regress independently of token position, and live geometry matches this.
+     · GLYPH SHAPING (this fix's own claim): RE-CONFIRMED STILL WORKING, live, in EVERY ONE of the 5
+       notations (`.baseword`/`.node-lbl`/`.tok-word`/`.mwt-form`/`.oform` all paint via HarfBuzz `<path>`
+       with correctly-joined text content, e.g. "ذهب" not "ذ ه ب") — NOT just spot-checked in one notation.
+       Not regressed by 4647a8f or d10d9cf.
+     · ONE REAL, MEASURED, DIRECTION-AGNOSTIC TIMING GLITCH FOUND (not fixed here — see its own note by
+       AVM_PAD_L/AVM_PAD_R below, which explains why it plausibly explains BOTH halves of the report at
+       once): `_loadHB()` (smp-shape.js) is a lazy, first-use WASM instantiation + a real Google-Fonts
+       network fetch (`_fetchFontBytes`) — for several seconds after a document with Arabic (or any
+       HarfBuzz-shaped script) first opens, EVERY shaped element (Arabic token glyphs included) paints via
+       its native/unshaped fallback and only swaps to the correct shaped `<path>` once that promise
+       resolves (smpNotePending's settle callback). A user judging "is this RTL/shaping correct" in the
+       first few seconds after opening an Arabic file — a very natural thing to do — would see isolated,
+       unjoined letterforms and conclude this fix regressed, when it is this same pre-existing async
+       design settling. Self-heals once the WASM/font fetch lands (and caches — see app/fonts.py — so it
+       is a once-per-cold-cache cost, not a per-render one), so NOT touched here; flagged so a future
+       report of "Arabic looks unshaped" gets checked against elapsed-time-since-open before this whole
+       investigation is redone a third time. */
 /* DEVANAGARI — a THIRD case of the identical WebKit weakness, on report ("token rendering of
    Devanagari-original documents in hierarchies seems to be broken"). Devanagari is BMP too (U+0900–097F),
    so SMP_RE never fires for it either, and — like Arabic — it had always fallen through to native SVG
@@ -2989,6 +3029,37 @@ function belowReserveH(hasTr,tierCount,hasPos,avmH){ const n=belowRows(hasTr,tie
    pairing (and with it mwtTie's own unrotated one, and .mwt-grid-tie's) as the ONE convention every "this
    marks a multi-word/multi-part span" bracket in the app now shares. */
 const AVM_ROW_GAP=2, AVM_PAD_V=2, AVM_COL_GAP=4.014, AVM_PAD_L=6.1, AVM_PAD_R=5.283, AVM_BRK_W=3.5, AVM_BRK_EXT=0.5625;   // CURRENT STATE (round 6, this session — see its own paragraph below, after round 5's AVM_COL_GAP note): AVM_PAD_L/AVM_PAD_R are DELIBERATELY EQUAL-GAP, re-confirmed on report ("left looks smaller than right — did something regress?"). Round 4 (below) first equalised them at 6.1/7 (2.591px/2.587px on the "conceived"/Voice=Pass calibration row) — that pairing DRIFTED apart numerically since (to 2.600px/4.317px, a real ~1.72px gap, root-caused to a glyph-side-bearing effect on "Pass"'s own painted ink vs its reserved advance, NOT to the casing halo added in the interim, which round 6's own live ablation test disproved as a cause). AVM_PAD_R alone moved (7→5.283, isolated to the right gap only, same derivation round 4 used for AVM_PAD_L) to re-equalise: 2.5999755859375px/2.5999755859375px, exact bit-for-bit parity, stable across 15 repeat live reads. Round 4/5's own numbers below describe THEIR moment, not today's; do not read them as current.
+/* RE-INVESTIGATED AGAIN, DEEPER THAN c6bca96, ON REPORT ("its AVM padding is not even like it is in LTR")
+   ARRIVING AFTER c6bca96's OWN "already correct, no code change" — that conclusion is REAFFIRMED here, but
+   only after finding the actual mechanism c6bca96 didn't test for, which is worth recording so a THIRD
+   round doesn't re-tune these two numbers chasing a script-dependent drift that isn't real:
+     · attrX/valX (drawAVM, below) are computed ONLY from L.attrW/L.valW and these two constants — there is
+       no direction/script term anywhere in the geometry. Confirmed live: an IDENTICAL value string
+       ("3.Sing.Masc", which happens to occur in both samples/english.conllu's own AGR row and
+       samples/arabic_rtl.conllu's) gives the identical right-bracket gap (2.4px) in both LTR and RTL, and
+       an identical attr LABEL ("TAM", present in both an English AGR+TAM box and an Arabic AGR+TAM+VOICE
+       box) gives the identical left-bracket gap (9.359px, to 3dp) in both — real numbers, not a coincidence
+       the formula would predict either way.
+     · THE ACTUAL SOURCE OF "uneven padding" (present in BOTH LTR and RTL, confirmed live on samples/
+       english.conllu, NOT RTL-specific): a box with several rows shares ONE column width, sized to its
+       WIDEST row's own attr/val ink — a SHORTER row's text is anchored at the SAME fixed edge (attrX/valX)
+       and simply doesn't reach as far as the box's own bracket, leaving a large, real, un-fixable-by-a-
+       constant gap on that row alone. Measured live: English "he" token's own AGR+Case box — AGR
+       ("3.Sing.Masc", the wide row) reads a tight 2.4px right gap, Case ("Nom", short) reads 38.675px on
+       the SAME box. Arabic's morphology packs MORE UD subfeatures per token on average (Aspect+Gender+
+       Number+Person+Voice routinely fills a 3-row AGR+TAM+VOICE box, against English's more often single-
+       feature boxes), so a real, size-mismatched multi-row box — and the loose-right-padding look that
+       comes with it — is simply a MUCH MORE COMMON sight in Arabic data. Not a bug and not scoped to fix
+       here (an English document with an equally mismatched multi-row box reads identically loose), but
+       very plausibly most of what "not even like LTR" is describing.
+     · A SECOND, GENUINELY TIMING-BASED CONTRIBUTOR, MEASURED LIVE (see ARABIC_RE's own note above for the
+       mechanism): for several seconds after a document first opens, `.avm-val`/`.avm-attr` sit on their
+       native (unshaped) paint, and the left/right gaps read asymmetric (measured: 2.594px/1.787px) —
+       exactly the "not even" shape of the report — before the HarfBuzz settle callback lands and both
+       sides converge to the same 2.6px this section's own numbers describe. Confirmed direction-agnostic
+       (reproduces identically on samples/english.conllu) and self-healing; not touched here for the same
+       reason as ARABIC_RE's own note.
+   No code change follows from this: AVM_PAD_L/AVM_PAD_R remain unconditional and correctly shared. */
    // ORIGIN of the split (this paragraph unchanged since round 1): ONE PAD_H used to govern BOTH sides symmetrically — wrong, on report ("removed padding from the wrong side... now it's too tight on the right"): the zero-gap ask (previous round) was specifically about the LEFT side (.avm-hit's own edge vs the attr column's own ink), and dropping PAD_H to AVM_BRK_W to satisfy that ALSO shrank the right side (val column to the right bracket), which nobody asked to change. Split into AVM_PAD_L (originally =AVM_BRK_W, the left side's own zero-gap value) and AVM_PAD_R (=7, the ORIGINAL shared value, restored on the right where it was never meant to move) — the two sides are independent NUMBERS now (this remains structurally correct and is why round 4, below, can equalise their RENDERED gaps without merging them back into one shared constant): a future request about one still can't silently move the other. PAD_V/COL_GAP tightened (from 4/9) in round 3 and left there — that report was about the bracket floating clear of the ink, which they still don't. AVM_BRK_W/AVM_BRK_EXT untouched.
    // AVM_PAD_L round 2 (this session, post font-fix): the literal-zero clearance above was requested and
    // verified BEFORE 2e73d4f/4d38780 (this same session, later) fixed .avm-attr's rendering from a thin,
