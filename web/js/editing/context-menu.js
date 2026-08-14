@@ -793,7 +793,7 @@ function avmValueMenu(x,y,si,tokId,key){
       items.push({label:"Other "+feat+"…", sub:()=>otherCands.map(v=>({label:v, expand:shortVDesc(desc[v]||""), fn:()=>avmSetFeat(si,tokId,feat,v)})), subFit:true}); }   // shortVDesc, not the raw gloss: this is a NESTED sub flyout same as addFeatureItems' own, and a long raw FEATS_VDESC entry wraps its row character-by-character there (see addFeatureItems' own comment on the exact same bug) — same fix applies here
     if(cur){ closeGrp(); items.push({label:"Clear "+feat, fn:()=>avmSetFeat(si,tokId,feat,null)}); } });
   if(!items.length) return false;
-  showCtx(x,y,items, items.length>12, sentRTL(s));
+  showCtx(x,y,items, items.length>12, sentRTL(s), true);   // fit → shrink to the widest row (.ctx.defctx, same mechanism the status-bar Format menu uses): AVM feature/value labels ("Sing"/"Plur"/"Fem"…) are short, and the shared 224px floor left visible empty space on the right of a typical few-row menu. Safe with the twoCol branch too — a >12-item combined AGR/TAM group's two columns are already sized off their own widest row (renderMenu's twocolwrap), so the floor was never doing useful work there either
   return true; }
 /* ── parity audit fix: the AVM tier's missing "create a NEW feature" gesture. avmValueMenu just above only
    ever EDITS a feature already present in FEATS — avmStruct (js/grid/grid.js) only ever emits a row for a
