@@ -1,0 +1,122 @@
+# Changelog
+
+All notable changes to SUD Workbench are documented in this file.
+
+## [0.2.0] — 2026-08-14
+
+A large batch of new features and fixes on top of the initial `0.1.0` release,
+centred on a new grammatical-feature notation, real Arabic/Persian vocalisation,
+and a native-glyph rendering pipeline that the rest of this release leans on.
+
+### New: Attribute-Value Matrix (AVM) tier
+
+- A new tier draws an HPSG-style attribute-value matrix of a token's morphological
+  features (FEATS) as a real bracketed matrix below its POS tag, on by default.
+  Composite features (agreement, TAM) group into their own sub-matrix. Right-click
+  a whole AVM or a single value for feature-editing menus, including an "Other…"
+  flyout for values that are valid for a POS but not yet attested in the file.
+- The Outline notation gets matching real brackets (one per matrix, not one per
+  pair), and every wrapping notation (brackets, arcs) accounts for the AVM's own
+  height when laying out multi-line diagrams.
+- Sub-part-of-speech features (e.g. pronoun type) now render on the POS tag
+  itself rather than duplicating into the AVM; a handful of features that are
+  already notated elsewhere (ExtPos, Shared, Foreign, Typo, Reported, Poss) are
+  excluded from the AVM outright.
+
+### New: native glyph shaping (HarfBuzz)
+
+- Every text element the diagram draws — tokens, AVM attributes/values, glosses,
+  small caps — is now shaped with a vendored HarfBuzz-WASM engine and drawn as
+  native SVG paths, instead of relying on the browser's own text layout.
+  This closes a whole class of bugs where a label's *measured* width (used for
+  layout) and its *painted* width (what the browser actually rendered, after
+  font features like small caps or Brahmic glyph substitution) disagreed —
+  previously visible as jittering labels, clipped brackets, and mis-centred
+  arcs. It also fixes Devanagari and other Indic-script token rendering in the
+  hierarchy notation, which previously used a native-SVG text path that HarfBuzz
+  shaping now replaces properly.
+
+### Arabic and Persian
+
+- Arabic and Persian text in every diagram (SVG) and the AVM tier now shapes
+  through HarfBuzz for correct joining and RTL layout, instead of the browser's
+  own (occasionally inconsistent) Arabic-script text engine.
+- **Vocalisation** — Arabic and Persian now get a real, editable vocalised
+  (diacritic-marked) form, mirroring the existing Latin macronisation feature:
+  a dedicated transliteration row shows the vocalised form, which is
+  click-to-edit when the automatic vocaliser gets it wrong. Persian vocalisation
+  is sourced from KaamelDict; multi-word tokens are vocalised by concatenating
+  their components. The transliteration row always reads the vocalised form
+  rather than tracking whatever script is currently selected.
+- Fixed the AGR (agreement) label vanishing in right-to-left AVMs, and
+  re-verified RTL padding and layout end to end.
+
+### Script and transliteration
+
+- A new, genuinely-ornamental 2× script tier now covers Rañjanā, Soyombo,
+  Bhaiksuki and Siddhaṃ — hands whose ornamentation doesn't resolve at the
+  regular 1.5× size the other Brahmic scripts get. Balinese moved back to the
+  regular 1.5× tier.
+- **Brahmi** is now a selectable Script, previously missing entirely.
+- The Script menu auto-scrolls the current selection into view on open, and
+  sizes itself against the real available space above the pill instead of a
+  fixed cap.
+- Tibetan is now treated as a stacking script (its leading separator is
+  stripped before a daṇḍa, matching the other Brahmic scripts), and Tibetan
+  text now renders in Noto Serif Tibetan rather than Noto Sans Tibetan, whose
+  Sanskrit-stacking bug is a decade old.
+- Sanskrit stored in Devanagari now enlarges correctly, matching the existing
+  behaviour for IAST-stored files.
+- Chinese/Literary Chinese: 不's tone sandhi (4th → 2nd tone) now applies
+  across a token boundary, not just within one.
+
+### Titlebar and window chrome
+
+- Reordered the titlebar controls (Grid / Options / Zoom / Paged) and
+  calibrated their translucency — both active and inactive — against real
+  screenshots rather than guesswork; pill backgrounds are now 50% opacity with
+  a blur.
+- Titlebar icons went through three rounds of sizing fixes and are now a
+  uniform 20px everywhere, grounded in the actual UI-kit reference rather than
+  another model's estimate; the grid icon's own capping bug and a genuinely
+  corrupted grid-icon PNG are both fixed.
+- Fixed the seam between the titlebar and the view bar to share one backdrop
+  filter instead of two independently-tuned ones that drifted apart.
+- The notation picker is now a single Finder-style dropdown (was five separate
+  buttons), with a real disclosure chevron, ⌘1–⌘5 shown in its menu, and a
+  chevron that dims correctly on window blur.
+- The Options bar's own padding and the gap between its dropdowns are now
+  simple, explicitly-related values instead of derived arithmetic that drifted.
+
+### Diagram editing and layout
+
+- Wrapped brackets and arcs: fixed cross-line arc centring, MWT-bracket height,
+  inter-row spacing, and left-edge clipping on lead tokens — all now seated off
+  the actual tokens/rows they touch rather than a sentence-wide maximum.
+- Hierarchy notation: a parent's own AVM box now correctly re-seats the whole
+  subtree when it outgrows the room its descendants reserved, and an edge's
+  parent endpoint now rises to the node's own AVM bottom rather than a
+  sentence-wide one.
+- Ghost (ambiguous/ghost-relation) arcs now fan together with real arcs by
+  length, consistently across flat, wrapped and stemma layouts.
+- Multi-word tokens can now be drag-reordered as a whole group in the diagram,
+  matching the grid's existing reorder gesture.
+- Diagram-driven feature editing reaches parity with the grid: adding a FEATS
+  value from the diagram, a Clear-button fix, per-value right-click on
+  composite features, and a new "Paragraph starts here" (MISC `NewPar`) row.
+- Subject raising can now be recorded by dropping a predicate and one of its
+  arguments onto each other in either direction, and `CorrectForm` can be set
+  independently of `Typo` state.
+- New free-text authoring of a relation from the diagram's own relation menu.
+
+### Fixes
+
+- CoNLL-U parse errors now report a line number and a plain-language message.
+- The daṇḍa's leading gap is now stripped in diagrams, matching the running
+  sentence (previously only the running sentence had the fix).
+- A false "delete morphemic gloss?" warning no longer fires when a gloss is
+  enabled and immediately disabled again.
+- The UD↔SUD conversion grammars are fetched on demand at install time rather
+  than vendored.
+
+## [0.1.0] — initial release

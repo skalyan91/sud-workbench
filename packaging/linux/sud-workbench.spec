@@ -33,7 +33,7 @@
 # (an ImportError three menus deep, not a `dnf install` error), which is worse than getting it wrong
 # at build time.
 
-%global app_version 0.1.0
+%global app_version 0.2.0
 
 Name:           sud-workbench
 Version:        %{app_version}
@@ -211,5 +211,8 @@ update-desktop-database %{_datadir}/applications &>/dev/null || :
 gtk-update-icon-cache %{_datadir}/icons/hicolor &>/dev/null || :
 
 %changelog
+* Fri Aug 14 2026 Siva Kalyan <siva@sunflowerai.io> - 0.2.0-1
+- AVM (attribute-value matrix) tier, HarfBuzz native glyph shaping, Arabic/Persian
+  vocalisation, titlebar/chrome overhaul, wrapped-diagram layout fixes. See CHANGELOG.md.
 * Tue Aug 11 2026 Siva Kalyan <siva@sunflowerai.io> - 0.1.0-1
 - Initial RPM packaging: bootstrap-venv distribution model, matching macOS/Windows.

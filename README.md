@@ -9,6 +9,8 @@ watch the diagram update instantly, and save back to a `.conllu` file.
 All-Python **pywebview** shell wrapping a framework-free SVG + CSS frontend — no
 bundler, no npm, no build step.
 
+See [CHANGELOG.md](CHANGELOG.md) for what's new in each release.
+
 ## Run
 
 The app runs on **Python 3.12** (spaCy/stanza/torch wheels are unreliable on 3.14):
@@ -69,6 +71,11 @@ than vendored — see `app/grammars.py`.
   arcs (with wide-diagram line wrapping), brackets (with wrapping, interrupter arcs
   and MWT ties), outline — with relation colouring, the Show/Hide drawer, Merge
   punctuation, semantic arrows, extended (ghost) relations, RTL.
+- **Attribute-Value Matrix (AVM)** — an HPSG-style bracketed matrix of a token's
+  morphological features (FEATS), drawn below its POS tag, on by default in every
+  notation. Composite features (agreement, TAM) group into their own sub-matrix;
+  right-click a matrix or a single value to edit it, with an "Other…" flyout for
+  values valid for the token's POS but not yet used in the file.
 - **Diagram editing** — drag a node to reorder tokens, drag an edge onto a node to
   re-attach it; an attachment the SUD validator rejects outright won't stick. Dropping
   onto an **edge** rather than a node annotates instead of rewiring: onto a `conj` edge
@@ -203,11 +210,12 @@ than vendored — see `app/grammars.py`.
   macroniser plus Morpheus data downloaded on first use (~4 MB) rather than bundled; the
   Script menu's own row takes you to Manage Models when it isn't there yet, and the option
   becomes usable the moment the download finishes.
-  The four **ornamental** Sanskrit scripts — Rañjanā, Soyombo, Siddhaṃ and Balinese — are drawn at
-  1.5× size, since their decoration is not resolvable at the size an everyday script reads at, and
-  the running line then meets the sentence number at the top of the letters rather than at the
-  baseline. A script line also joins a consonant-final word to the next one, as a Brahmic script does:
-  `tad api` is drawn तदपि even though the romanisation beneath it keeps the space.
+  The four **ornamental** scripts — Rañjanā, Soyombo, Bhaiksuki and Siddhaṃ — are drawn at 2×
+  size (every other Brahmic script gets a uniform 1.5×), since their decoration is denser again
+  and isn't resolvable at the size an everyday script reads at, and the running line then meets
+  the sentence number at the top of the letters rather than at the baseline. A script line also
+  joins a consonant-final word to the next one, as a Brahmic script does: `tad api` is drawn
+  तदपि even though the romanisation beneath it keeps the space.
 - **Correcting a stored transliteration** — where the romanisation is genuinely
   non-deterministic (Han heteronyms, Japanese kanji readings, and the unvocalised
   scripts such as Arabic and Hebrew, whose short vowels are not written), clicking the
@@ -218,6 +226,10 @@ than vendored — see `app/grammars.py`.
   菩薩 reads `bu sat` rather than nothing — about 19,500 characters answer instead of 4,300. The CJK readings flyout writes
   the same value, and a correction survives a re-parse, a change of displayed scheme,
   and a save-and-reopen.
+- **Arabic/Persian vocalisation** works the same way as Latin macronisation: a dedicated
+  transliteration row shows the vocalised (diacritic-marked) form — sourced from KaamelDict
+  for Persian — and is click-to-edit when the automatic vocaliser gets it wrong. Multi-word
+  tokens vocalise from their components, the same way Latin multi-word tokens macronise.
 - **Glossing** — lexical (MISC `Gloss`) and morphemic (`MSeg`/`MGloss`) tiers render
   under the tokens, with an editor for the Feature=Value → Leipzig-abbreviation
   mapping. The two morphemic rows are one sequence read twice, and they stay in step:
