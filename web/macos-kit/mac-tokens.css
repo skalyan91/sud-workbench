@@ -112,7 +112,20 @@
        glyphs below and the notation-picker's own trigger glyph (--sf-notationmenu) are NOT part of this fix:
        they were checked and confirmed to never have had an SF-Symbol PNG at all — stemma/hierarchy/arcs/
        brackets/outline are bespoke diagram-type shapes with no Apple equivalent, and --sf-notationmenu is
-       deliberately original line art (its own comment explains why), not a traced/abandoned Apple glyph. */
+       deliberately original line art (its own comment explains why), not a traced/abandoned Apple glyph.
+       INVESTIGATED (on report — "the grid icon looks too heavy" — filed alongside the Model Manager "too
+       thin" report, after d5dca24 un-squished #btnGrids from a forced 1:1 box to its natural 135×100 aspect):
+       pixel-measured (mode contiguous-ink-run length / ink-bbox height) this asset at 0.093, INSIDE the
+       zoom/undo/redo/help/actual-size family's own 0.093-0.103 band and actually the LOWEST of the seven —
+       not baked heavier than its neighbours. What differs is ink DENSITY (ink px / bbox area): 0.50 here vs
+       0.26-0.32 for the six single-glyph icons, because tablecells draws an outer frame plus internal row/
+       column dividers — several parallel strokes inside one bbox — where the others draw one arrow or one
+       magnifying glass. Confirmed this is that glyph's own geometry, not a weight regression: a fresh Light-
+       weight render drops the ratio further, to 0.071 — BELOW the whole family band, i.e. it would make grid
+       the one inconsistently-thin icon rather than fix anything. Un-squishing (d5dca24) simply let this
+       already-correct asset paint at its true, larger size for the first time, which reads as "heavier" only
+       because more ink is now visibly on screen — a real optical effect of a multi-line glyph, not a bug.
+       PNG left untouched. */
     --sf-grid:url("data:image/png;base64,REDACTED-SF-SYMBOL-PAYLOAD-PURGED-FROM-HISTORY");
     /* ── notation diagram glyphs (one per diagram type) ── */
     /* notation glyphs = Lucide icons (stroke-width 1.6 to match the other titlebar icons): stemma→network,

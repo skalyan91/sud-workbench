@@ -459,7 +459,9 @@ def _compute_folder_icons(AppKit):
 def _compute_symbol_icon(AppKit, name):
     """Render a real SF Symbol (``name``) to a thin, black-on-transparent PNG data-URI, for use as a CSS
     -webkit-mask so the titlebar glyph is pixel-for-pixel the SAME symbol the native menu uses (recolours
-    via the mask's alpha). A Light symbol weight matches the harmonised ~1.7-stroke of the other titlebar icons."""
+    via the mask's alpha). A Medium symbol weight matches the ~0.093-0.103 stroke/bbox-height ratio the
+    zoom/undo/redo/help/actual-size/grid family bakes at regular weight (measured on the live PNGs, mode
+    contiguous-run length over ink bbox height)."""
     try:
         NSImage = AppKit.NSImage
         if not hasattr(NSImage, "imageWithSystemSymbolName_accessibilityDescription_"):
@@ -468,8 +470,16 @@ def _compute_symbol_icon(AppKit, name):
         if base is None:
             return None
         img = base
-        try:   # thin weight + a generous point size for a crisp mask
-            weight = getattr(AppKit, "NSFontWeightLight", -0.4)   # fix 2: Light (was Thin) → the real Add Text / Manage symbols now match the harmonised 1.7-stroke CSS glyphs beside them (Thin read too thin)
+        try:   # generous point size for a crisp mask
+            # fix 3 (on report — "Model Manager reads too thin"): Light measured at stroke/bbox-height
+            # ratio ~0.067 for cube.box, arrow.uturn/plus.magnifyingglass's own baked family sits at
+            # 0.093-0.103 (zoom itself 0.098) -- Light was ~30% thinner than every other titlebar icon,
+            # not "harmonised" as fix 2's comment assumed (never re-measured after that claim). Re-rendered
+            # every icon this function serves (addtext/manage/paged/unpaged/options) at Medium instead:
+            # Medium lands cube.box at 0.101, paged/unpaged at 0.096, addtext/options at ~0.108, all within
+            # or just outside the family band -- Regular left cube.box (0.088) and paged/unpaged (0.075)
+            # still measurably thinner than the rest of the titlebar, so Medium is the closer match.
+            weight = getattr(AppKit, "NSFontWeightMedium", 0.23)
             SymCfg = AppKit.NSImageSymbolConfiguration
             cfg = None
             if hasattr(SymCfg, "configurationWithPointSize_weight_scale_"):
