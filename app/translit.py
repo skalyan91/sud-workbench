@@ -2652,6 +2652,35 @@ _MAX_PER_CHAR = 6       # …and pypinyin/ToJyutping list rare dialectal reading
 #                         enumeration the derivation path keeps — never a cross-product over a word's graphs.
 _MANDARIN_JOIN = {"pinyin": _join_pinyin, "zhuyin": _join_zhuyin, "gr": _join_gr}   # the Mandarin schemes driven by numbered-pinyin syllables
 
+
+# ── 不's tone sandhi ACROSS A TOKEN BOUNDARY (item: lzh pinyin sandhi) ─────────────────────────────
+# `_mandarin_syllables`'s 不-sandhi correction (4th tone → 2nd before a following 4th-tone syllable) only
+# ever sees the syllable AFTER 不 when it rides in the SAME string handed to one `_render_one` call — the
+# ordinary case for a hand-typed phrase like "不去", but not for a token stored on its own. This app
+# tokenises Chinese and Literary Chinese one Han character per CoNLL-U FORM (see samples/chinese_msud.conllu,
+# samples/literary_chinese.conllu), so a standalone 不 token never carries the following syllable into the
+# same call, and the correction can never fire on its own — in EITHER language: the limitation is about
+# the TOKEN BOUNDARY the rendering pipeline draws, not about which language the character is read as, and
+# nothing here ever branches on `lang`. Scoped to the three schemes numbered-pinyin syllables actually
+# drive (`_MANDARIN_JOIN`); every other scheme has no such rule to miss.
+# Callers (js/lang/translit-load.js's buSandhiOverrides) supply the neighbouring TOKEN's own FORM as
+# ``next_form`` for exactly this one character; every other Han character keeps going through
+# `_render_one`/`_mandarin_syllables` exactly as before, unaffected.
+def mandarin_bu_tone(next_form: str, scheme: str = "pinyin") -> str:
+    """不 ALONE, correctly tone-sandhi'd against the token that follows it, rendered in ``scheme``.
+    ``next_form`` "" (no following token, e.g. sentence-final 不) ⇒ the ordinary citation tone, exactly
+    what `_mandarin_syllables` already gives a solitary 不 with nothing after it. Never raises."""
+    try:
+        pairs = _mandarin_syllables("不" + (next_form or ""))
+        return _MANDARIN_JOIN.get(scheme, _join_pinyin)([pairs[0]])
+    except Exception:  # noqa: BLE001
+        return ""
+
+
+def mandarin_bu_tone_many(next_forms: list[str], scheme: str = "pinyin") -> list[str]:
+    return [mandarin_bu_tone(f, scheme) for f in (next_forms or [])]
+
+
 # ⚠ THE WHOLE-TOKEN RULE.  A MULTI-CHARACTER token is offered alternatives only where the engine's own
 # dictionary holds more than one reading OF THAT WHOLE TOKEN — never because one of its constituent
 # characters happens to be heteronymic.  A cross-product over per-character readings is almost entirely

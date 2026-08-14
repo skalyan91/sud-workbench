@@ -182,6 +182,15 @@ async function fillTranslit(){ if(!hasBridge()||!DOCLANG) return;   // translite
         if(t.lemma&&t.lemma!=="_"&&!t.translitLemma&&map[trMorphKey(t.lemma,u,"",t.lemma)]){ t.translitLemma=map[trMorphKey(t.lemma,u,"",t.lemma)]; any=true; } });   // the lemma's transliteration comes from the lemma itself, never from a MISC Translit (which only governs the form) — and where lemma===form this reads back the form's own entry, which is why that case is not queued above
       (s.mwt||[]).forEach(m=>{ if(m.form&&!m.translit&&map[trKey(m.form,"")]){ m.translit=map[trKey(m.form,"")]; any=true; } }); });
   }
+  // 不's cross-token sandhi (see buSandhiOverrides, above) over the DISPLAYED row, not just the stored
+  // one: fromMisc already carries a correction annotateTranslitMisc wrote to MISC, but a document whose
+  // MISC never went through that pass (no re-parse since load) reaches this row through the automatic
+  // pass just above instead, which knows nothing of the token after 不 either. Idempotent over a value
+  // fromMisc already got right — same string in, `any` untouched — so running it unconditionally costs
+  // nothing beyond the one extra (and, for a non-Chinese document, entirely skipped — see the empty-set
+  // guard in buSandhiOverrides) bridge round trip.
+  { const buFix=await buSandhiOverrides(DOC, TRANSLIT_SCHEME||STORED_SCHEME||"pinyin");
+    buFix.forEach((v,t)=>{ if(!t._trPick && t.translit!==v){ t.translit=v; any=true; } }); }
   if(trNeedsMorph() && translitMwtCompose()) any=true;   // …and supersede the whole-surface MWT guess above wherever the range is its own components' plain concatenation — see translitMwtCompose
   // WHOLESALE, not per-touched-sentence: this pass runs over the whole DOC (not one si), has no pushUndo/snapSent
   // of its own (it's a derived re-fill, not a user edit — see this function's own module comment), and can land
@@ -484,6 +493,25 @@ function setMiscKV(misc,key,val){ const empty=(!misc||misc==="_"); let parts=emp
   parts=parts.map(p=>{ if(p.split("=",1)[0]===key){ done=true; return (val===""||val==null)?null:key+"="+val; } return p; }).filter(p=>p!==null&&p!=="");
   if(!done && val!==""&&val!=null) parts.push(key+"="+val);
   return parts.length?parts.join("|"):"_"; }
+// ── 不's tone sandhi ACROSS A TOKEN BOUNDARY (item: lzh pinyin sandhi) ────────────────────────────
+// app/translit.py's `_mandarin_syllables` already corrects 不 (4th tone → 2nd before a following
+// 4th-tone syllable), but only within the ONE string a single `transliterate` call renders — and this
+// app tokenises Chinese/Literary Chinese one Han character per FORM (samples/chinese_msud.conllu,
+// samples/literary_chinese.conllu), so a standalone 不 token never carries its neighbour's syllable into
+// that call. The gap is about the TOKEN BOUNDARY the batch above draws, not about which language the
+// character is read as — nothing below branches on DOCLANG — so this corrects 不 in `zh` and `lzh` alike,
+// wherever the scheme is one numbered-pinyin syllables drive. See app/translit.py's `mandarin_bu_tone`.
+const _MANDARIN_TONE_SCHEMES=new Set(["pinyin","zhuyin","gr"]);
+async function buSandhiOverrides(sents, scheme){
+  const fixes=new Map();   // token → its own corrected syllable in `scheme`
+  if(!_MANDARIN_TONE_SCHEMES.has(scheme)||!hasBridge()) return fixes;
+  const pairs=[];   // [token, next token's FORM ("" ⇒ nothing follows it)]
+  sents.forEach(s=>{ s.tokens.forEach((t,i)=>{ if(t.form==="不"&&!t._trPick){ const nxt=s.tokens[i+1]; pairs.push([t, nxt?(nxt.form||""):""]); } }); });
+  if(!pairs.length) return fixes;
+  let r; try{ r=await window.pywebview.api.mandarin_bu_tone(pairs.map(p=>p[1]),scheme); }catch(e){ return fixes; }
+  const vals=(r&&r.translit)||[];
+  pairs.forEach(([t],i)=>{ if(vals[i]) fixes.set(t,vals[i]); });
+  return fixes; }
 // Compute the selected TRANSLITERATION (romanisation — never the orthography) for a sentence's tokens
 // and write it to MISC Translit (form) / LTranslit (lemma). Gated on a parse pass by its callers.
 async function annotateTranslitMisc(si){ if(!hasBridge()||!DOCLANG||!STORED_SCHEME) return false;
@@ -497,9 +525,10 @@ async function annotateTranslitMisc(si){ if(!hasBridge()||!DOCLANG||!STORED_SCHE
   const batch=[...need.values()]; let r;
   try{ r=await window.pywebview.api.transliterate(batch.map(x=>x[0]),DOCLANG,STORED_SCHEME,batch.map(x=>x[1]),batch.map(x=>x[2]),batch.map(x=>x[3])); }catch(e){ return false; }   // item 1: MISC uses the STORED scheme (not the displayed one)
   const map={}; batch.forEach((x,i)=>{ map[trMorphKey(x[0],x[1],x[2],x[3])]=(r&&r.translit&&r.translit[i])||""; });
+  const buFix=await buSandhiOverrides(sents,STORED_SCHEME);   // token → its own cross-token-corrected syllable, where 不 needs one — see buSandhiOverrides
   let any=false;   // write MISC only; the display (t.translit) is the DISPLAYED scheme, filled separately by fillTranslit
   sents.forEach(s=>{ s.tokens.forEach(t=>{ const u=trUpos(t), fe=t.feats||"", le=orthoLemOf(t);
-    const tr=t._trPick?(miscTranslit(t.misc)||t.translit||""):(t.form?(map[trMorphKey(t.form,u,fe,le)]||""):""), lt=(t.lemma&&t.lemma!=="_")?(map[trMorphKey(t.lemma,u,"",t.lemma)]||""):"";   // _trPick: a hand correction stands (the parse pass re-derives every OTHER token's Translit, and the lemma's LTranslit either way). It is read back from MISC, NOT from t.translit: the two are different layers now — t.translit is the DISPLAYED scheme, in general a rendering DERIVED from the stored value, and writing it here would put the wrong scheme's string into MISC (a Zhuyin row over a Pinyin store). t.translit remains the fallback for a correction made before anything was written to MISC.
+    const tr=t._trPick?(miscTranslit(t.misc)||t.translit||""):(t.form?(buFix.get(t)||map[trMorphKey(t.form,u,fe,le)]||""):""), lt=(t.lemma&&t.lemma!=="_")?(map[trMorphKey(t.lemma,u,"",t.lemma)]||""):"";   // _trPick: a hand correction stands (the parse pass re-derives every OTHER token's Translit, and the lemma's LTranslit either way). It is read back from MISC, NOT from t.translit: the two are different layers now — t.translit is the DISPLAYED scheme, in general a rendering DERIVED from the stored value, and writing it here would put the wrong scheme's string into MISC (a Zhuyin row over a Pinyin store). t.translit remains the fallback for a correction made before anything was written to MISC.
     const nm=setMiscKV(setMiscKV(t.misc,"Translit",tr),"LTranslit",lt); if(nm!==t.misc){ t.misc=nm; any=true; } }); });
   return any; }
 

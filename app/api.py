@@ -981,6 +981,18 @@ class Api:
         return {"translit": translit.transliterate_many(forms, lang, scheme, upos, feats, lemmas),
                 "lang": lang, "scheme": scheme}
 
+    def mandarin_bu_tone(self, next_forms: list[str], scheme: str = "") -> dict:
+        """不's OWN tone-sandhi correction (4th tone → 2nd before a following 4th-tone syllable), for a
+        standalone 不 token whose neighbour is a SEPARATE CoNLL-U token and so never reaches
+        `translit._mandarin_syllables` in the same call as its own rendering. ``next_forms[i]`` is the
+        FORM of the token immediately after the i-th 不 (parallel list; "" ⇒ nothing follows it).
+        ``scheme`` is one of the three Mandarin schemes numbered-pinyin syllables drive (Hanyu Pinyin/
+        Zhuyin Fuhao/Gwoyeu Romatzyh — "" defaults to pinyin); every other scheme has no such rule.
+        Language-agnostic on purpose — see `translit.mandarin_bu_tone`'s own note — so the SAME call
+        corrects the negator whether the document is `zh` or `lzh`."""
+        from . import translit
+        return {"translit": translit.mandarin_bu_tone_many(next_forms, scheme or "pinyin")}
+
     def set_doc_language(self, lang: str = "") -> dict:
         """The frontend reports the document's language whenever it changes (js/lang/translit.js's
         loadTranslitSchemes, which setLang already calls on every change).  Recorded as the FALLBACK
