@@ -868,6 +868,35 @@ function smpUnshaped(s){
 const ARABIC_RE=/\p{Script=Arabic}/u;
 function arabicUnshaped(s){
   return (typeof IS_CHROMIUM==="undefined"||!IS_CHROMIUM) && ARABIC_RE.test(s||""); }
+/* DEVANAGARI — a THIRD case of the identical WebKit weakness, on report ("token rendering of
+   Devanagari-original documents in hierarchies seems to be broken"). Devanagari is BMP too (U+0900–097F),
+   so SMP_RE never fires for it either, and — like Arabic — it had always fallen through to native SVG
+   `<text>`. Live-verified (samples/brihat_jataka_devanagari.conllu, real WKWebView screenshot, the
+   hierarchy/"tree" notation): a pre-base reordering vowel sign (mātrā, e.g. U+093F ि, which visually
+   moves BEFORE the consonant it phonetically follows) painted as an orphaned dotted-circle placeholder
+   with its base consonant simply missing — the textbook symptom of a failed Indic reordering/conjunct
+   shape, not a data bug: the element's own `textContent` was verified correct (a live DOM dump — every
+   codepoint present, in order) and the SAME string in the SAME font at the SAME computed size painted
+   correctly moments later via `.baseword` (the stemma notation's equivalent class, byte-identical CSS to
+   `.node-lbl`) — so this is WebKit's *painter* disagreeing with its own DOM, exactly the class of bug
+   `smpUnshaped`/`arabicUnshaped` above already exist to route around, just surfacing in a THIRD script and,
+   this time, only in some renders/notations and not others (no reliable content-based PASS/FAIL signal
+   here either — see smpUnshaped's own note on why the SMP case gave up looking for one). Routed through the
+   SAME unconditional (every-engine) HarfBuzz shape-to-`<path>` fix Arabic already takes (the
+   `SMP_RE.test(s)||ARABIC_RE.test(s)` gate below): `fontScriptRes()`/`fontStackName()` (fontload.js) already
+   resolve "Devanagari" to its own family exactly as they do any other script, and `_shapeSMP`
+   (js/lang/smp-shape.js) shapes generically off `buffer.guessSegmentProperties()` — neither needed a single
+   Devanagari-specific line to shape it correctly once the trigger below hands it a Devanagari string.
+   No `devanagariUnshaped()` counterpart to `arabicUnshaped()`: that function corrects a MEASUREMENT
+   fallback (`_measOneUncached`'s `getComputedTextLength()`), and Devanagari's own canvas measurement is
+   not in question here — every notation (including the broken hierarchy render) already reserved the
+   RIGHT width for these tokens; only the PAINT was wrong. Scoped to Devanagari specifically, matching what
+   was reported — \p{Script=Devanagari} covers the block in one Unicode property escape, the same
+   convention ARABIC_RE/fontScriptRes()/docScripts() already use; another Brahmic BMP script hitting the
+   identical WebKit weakness would get the same one-line treatment if and when it's reported, exactly how
+   ARABIC_RE joined SMP_RE rather than either being generalised into a guess at scripts nobody has seen fail
+   yet. */
+const DEVANAGARI_RE=/\p{Script=Devanagari}/u;
 /* ── …AND THE FORMS THAT CANNOT SHAPE ARE DRAWN AS HTML INSTEAD ─────────────────────────────────────
    A <foreignObject> carrying an ordinary HTML element shapes through the engine's normal text path,
    which handles these scripts correctly — it is the same path the running sentence uses, and the
@@ -1080,7 +1109,7 @@ function smpReshape(root){
     // established `s===""` means there ISN'T a meaningful direct text node here for THIS branch to worry
     // about missing.
     const hasGroupKids=!s && ffsClassRaw && el.children && el.children.length>0;
-    if(!smpUnshaped(s) && !punctSatSMP && !SMP_RE.test(s||"") && !arabicUnshaped(s) && !ARABIC_RE.test(s||"") && !ffsClass && !hasGroupKids) continue;
+    if(!smpUnshaped(s) && !punctSatSMP && !SMP_RE.test(s||"") && !arabicUnshaped(s) && !ARABIC_RE.test(s||"") && !DEVANAGARI_RE.test(s||"") && !ffsClass && !hasGroupKids) continue;
     if(hasGroupKids){
       const cs3=getComputedStyle(el);
       const hbFeat3=cssFeatToHB(cs3.fontFeatureSettings);
@@ -1146,10 +1175,10 @@ function smpReshape(root){
        in the first place, so this asks the identical question fontload.js's own mechanism answers, instead
        of re-deriving it (wrongly) from computed style. fontStackName() (fontload.js) then names the family
        exactly as ensureScriptFont itself would — the two can never disagree about what a script is called. */
-    if(SMP_RE.test(s||"")||ARABIC_RE.test(s||"")){
-      // ARABIC_RE joins SMP_RE on this same gate: Arabic's fix IS the item-25 "real fix" itself, not the
-      // engine-gated foreignObject fallback below (which Arabic never needs at all — see ARABIC_RE's own
-      // note) — fontScriptRes()/fontStackName() already resolve "Arabic" to "Noto Sans Arabic" exactly
+    if(SMP_RE.test(s||"")||ARABIC_RE.test(s||"")||DEVANAGARI_RE.test(s||"")){
+      // ARABIC_RE/DEVANAGARI_RE join SMP_RE on this same gate: both scripts' fix IS the item-25 "real fix"
+      // itself, not the engine-gated foreignObject fallback below (which neither ever needs — see
+      // ARABIC_RE's/DEVANAGARI_RE's own notes) — fontScriptRes()/fontStackName() already resolve "Arabic" to "Noto Sans Arabic" exactly
       // the same generic way they resolve any other script here, no separate lookup required.
       const cs0=getComputedStyle(el);
       let fam="";
