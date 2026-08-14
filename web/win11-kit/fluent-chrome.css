@@ -523,7 +523,7 @@
   /* ── Drawers (a pull-down button + its flyout) ────────────────────────────────────────────────
      A Fluent DropDownButton: filled control, asymmetric stroke (applied in the block above), chevron
      that does NOT rotate — Windows leaves the glyph alone and shows the flyout instead. */
-  .drawers{display:inline-flex; align-items:center; gap:calc(var(--vb-pad-b,6px) * 2)}   /* the gap BETWEEN dropdown triggers, DERIVED as exactly twice the options bar's own bottom padding (--vb-pad-b, declared on `.viewbar` above), matching macOS's kit the same way (mac-chrome.css), on request — the calc() keeps the ratio true automatically if the bar's padding is ever retuned again, rather than trusting a hand-picked literal to keep agreeing with it. */
+  .drawers{display:inline-flex; align-items:center; gap:6px}   /* the gap BETWEEN dropdown triggers. Was briefly DERIVED via calc() as twice `.viewbar`'s own bottom padding, matching macOS's kit the same way — on a follow-up report ("I want the gap to be 6px as well"), reverted to a plain literal matching --vb-pad-b's own value (6px) directly, not double it. */
   .drawer{position:relative}
   .drawer-btn{display:inline-flex; align-items:center; gap:8px; height:32px; padding:0 11px;
     color:var(--label-primary); font:inherit; font-size:var(--fs-body); font-weight:var(--fw-normal); cursor:default; box-shadow:none}

@@ -531,7 +531,7 @@
      ══════════════════════════════════════════════════════════════════════════════════════════════ */
 
   /* ── Options-bar drawers: the pull-down button and its popover (Show/Hide, Glossing, Translations, Colours) ── */
-  .drawers{display:inline-flex; align-items:center; gap:calc(var(--vb-pad-b,6px) * 2)}   /* Show/Hide · Glossing · Translations · Colours — the gap BETWEEN dropdown triggers, DERIVED as exactly twice the options bar's own bottom padding (--vb-pad-b, declared on `.viewbar` above and inherited down to this child), on request. The calc() keeps the 2:1 ratio true automatically if `.viewbar`'s own bottom padding is ever retuned again, instead of relying on both numbers being hand-edited together. */
+  .drawers{display:inline-flex; align-items:center; gap:6px}   /* Show/Hide · Glossing · Translations · Colours — the gap BETWEEN dropdown triggers. Was briefly DERIVED via calc() as twice `.viewbar`'s own bottom padding (--vb-pad-b) — on a follow-up report ("I want the gap to be 6px as well"), reverted to a plain literal matching the bar's own --vb-pad-b value (6px) directly, not double it; the two happen to agree now but are no longer formula-linked. */
   .drawer{position:relative}
   /* native macOS 26 popup buttons + popovers — SHARED by every drawer (Show/Hide, and the new Glossing /
      Translations drawers inherit this automatically since they reuse .drawer-btn / .drawer-pop). */
