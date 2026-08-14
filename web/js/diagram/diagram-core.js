@@ -3176,6 +3176,41 @@ const AVM_ROW_GAP=2, AVM_PAD_V=2, AVM_COL_GAP=4.014, AVM_PAD_L=6.1, AVM_PAD_R=5.
    // the AGR="3.Masc.Sing" group row item 28 fixed) re-confirmed unregressed: rightGap=2.400px, comfortably
    // positive, no overlap — AVM_PAD_R's own change reaches every box uniformly by construction, and nothing
    // about item 28's own RTL fix depended on AVM_PAD_R's exact value.
+   // round 7 (new session, on report "whatever AVM padding fix you just did should be applied to RTL as
+   // well"): investigated as if round 6's own RTL re-check (immediately above) might have been too thin —
+   // ONE row, right side only — rather than trusting it at face value. drawAVM/avmLayout were re-read in
+   // full first: NEITHER takes a direction/RTL parameter at all, and the attr/val columns are pinned to a
+   // fixed physical left-to-right pair via `direction:"ltr"` on both text elements regardless of the
+   // surrounding sentence's own dir (07f5c8e) — so AVM_PAD_L/AVM_PAD_R structurally CANNOT apply to LTR
+   // boxes only; there is no code path left for a value change to "not reach" RTL. The open question was
+   // therefore purely empirical: does a REAL RTL val/attr string's own ink-vs-advance drift (the same
+   // mechanism round 6 found on "Pass") happen to be worse than what round 6 already calibrated for?
+   // Live-measured (pywebview evaluate_js, real running app, samples/arabic_rtl.conllu, this file's own
+   // methodology — bracket ink read off the CASING path's own quad, not the thin spine alone, which a first
+   // pass at this session's own probe got wrong and which cost ~AVM_BRK_W of spurious "gap" until caught)
+   // EVERY row of ALL THREE real AVM boxes in the sample (ذهب: AGR="3.Sing.Masc"/TAM="Perf"/VOICE="Act" —
+   // the fully-grouped multi-row box item 28 itself calibrated against; الولد and لمدرسة: AGR/CASE/DEFINITE,
+   // single-member AGR groups plus standalone rows). Per box, the ROW that actually defines that box's own
+   // reserved attrW/valW (the same "widest string in this box" methodology round 6 used to justify treating
+   // Voice=Pass as calibration-quality) gives the gap that isolates AVM_PAD_L/AVM_PAD_R's own real effect
+   // from ordinary per-row slack: ذهب box leftGap(VOICE)=2.600px [bit-identical to round 6's own LTR
+   // figure], rightGap(AGR)=2.400px; الولد box leftGap(DEFINITE)=3.290px, rightGap(CASE)=3.281px; لمدرسة
+   // box leftGap(DEFINITE)=3.290px, rightGap(DEFINITE, same row — "Cons" defines both this box's attrW AND
+   // valW)=2.600px. Cross-checked against LTR's OWN natural spread on the same metric, samples/
+   // english.conllu, all 20 real AVM boxes (not just the one calibration row): tightest-left ranges
+   // 2.600–3.290px (mean 2.762), tightest-right ranges 1.910–2.631px (mean 2.411px). RTL's own 2.400–
+   // 3.290px sits INSIDE that same band on both sides — no negative/overlapping gap anywhere, no consistent
+   // left>right or right>left skew (the three boxes' own left-minus-right delta is -0.200/-0.009/+0.690px —
+   // signs disagree, which is what per-string noise looks like, not what a directional/structural bug
+   // looks like). CONCLUSION: RTL was never exempt from round 6's fix (AVM_PAD_L/AVM_PAD_R are unconditional
+   // globals, applied identically regardless of dir), and today's real ink is already indistinguishable from
+   // LTR's own accepted per-row variance — this is the SAME "acknowledged limitation of a box-wide constant
+   // against per-row glyph variation" the AVM_COL_GAP note (above) already names, not a new asymmetry. NO
+   // CODE CHANGE MADE: re-tuning AVM_PAD_L/AVM_PAD_R again here would have had nothing real to correct, and
+   // risked re-breaking the LTR calibration round 6 just finished (re-verified UNCHANGED this round:
+   // leftGap=rightGap=2.600006103515625px on "conceived"/Voice=Pass, samples/english.conllu). Confirmed
+   // visually too: a real WKSnapshotConfiguration capture of samples/arabic_rtl.conllu's rendered AVM boxes
+   // shows both brackets sitting clear and even around their own content, matching the numbers above. */
 /* AVM_PAD_L/AVM_PAD_R above assume the bracket's own visible ink ends EXACTLY at its nominal path coordinate
    (x0+AVM_BRK_W / x1-AVM_BRK_W) — on report ("the AVM contents need to be placed relative to the bounding
    boxes of the brackets"): that assumption needed VERIFYING, not trusting, since an SVG stroke paints centred
