@@ -83,16 +83,26 @@
   .titlebar > .tb-blur > i{position:absolute; inset:0; display:block;
     -webkit-backdrop-filter:saturate(180%) blur(var(--tb-b)); backdrop-filter:saturate(180%) blur(var(--tb-b));
     -webkit-mask-image:var(--tb-m); mask-image:var(--tb-m)}
-  .titlebar > .tb-blur > i:nth-child(1){--tb-b:0.25px; --tb-m:linear-gradient(to bottom,#000 0%,#000 38.46%,transparent 53.85%)}
-  .titlebar > .tb-blur > i:nth-child(2){--tb-b:0.5px; --tb-m:linear-gradient(to bottom,#000 0%,#000 38.46%,transparent 69.23%)}
-  .titlebar > .tb-blur > i:nth-child(3){--tb-b:0.75px; --tb-m:linear-gradient(to bottom,#000 0%,#000 38.46%,transparent 84.62%)}
-  .titlebar > .tb-blur > i:nth-child(4){--tb-b:1px; --tb-m:linear-gradient(to bottom,#000 0%,#000 38.46%,transparent 100%)}
+  .titlebar > .tb-blur > i:nth-child(1){--tb-b:1px; --tb-m:linear-gradient(to bottom,#000 0%,#000 38.46%,transparent 53.85%)}
+  .titlebar > .tb-blur > i:nth-child(2){--tb-b:2px; --tb-m:linear-gradient(to bottom,#000 0%,#000 38.46%,transparent 69.23%)}
+  .titlebar > .tb-blur > i:nth-child(3){--tb-b:3px; --tb-m:linear-gradient(to bottom,#000 0%,#000 38.46%,transparent 84.62%)}
+  .titlebar > .tb-blur > i:nth-child(4){--tb-b:4px; --tb-m:linear-gradient(to bottom,#000 0%,#000 38.46%,transparent 100%)}
   /* BLUR AMOUNT: the 1/2.5/5/8px shipped radii read too strong live, cut in successive passes (~35%, then
      two further ~15% cuts, then an explicit "max blur = 0.5px" ceiling) down to 0.125/0.25/0.375/0.5 —
-     see the file's own edit history for the intermediate numbers. Most recently raised back up on request
-     ("increase the max blur to 1px"): the strongest layer is now exactly 1px, and the other three simply
-     DOUBLE alongside it (0.25/0.5/0.75/1 — still a clean even n×0.25 progression), not re-derived from any
-     ratio. */
+     see the file's own edit history for the intermediate numbers. Raised back up on request ("increase the
+     max blur to 1px") to a strongest layer of exactly 1px, doubling the other three alongside it
+     (0.25/0.5/0.75/1). RAISED AGAIN this session (0.25/0.5/0.75/1px → 1/2/3/4px, a clean 4× scale keeping
+     the same n×1px progression) on the "more translucent than it currently is" clarification, re-scoped to
+     BOTH titlebar states — see --tb-ramp-tint's own comment (mac-tokens.css) for why the closed-ramp's peak
+     tint also needed a real cut, not just the merged/options-open state a prior pass had already addressed.
+     DELIBERATELY NOT pushed toward the merged state's 22px, or even back toward the 8px this exact comment
+     records as "too strong" when it shipped: this is a FOUR-LAYER stack whose masks overlap near the top
+     (all four layers co-composite across that shared 0-38.46% band), so the visible blur there is the
+     STACKED result of all four radii compositing together, not any single layer's own number in isolation —
+     the same nominal "peak" radius reads meaningfully stronger here than an equal radius would on a single
+     flat surface (--tb-merged-blur). 4px keeps a comfortable margin under the 8px this file's own history
+     already flagged as overshooting once compounded, while still being 4× the previous 1px ceiling — a real,
+     live-tested increase rather than a guess extrapolated from the merged state's flat-surface number. */
   /* Options bar OPEN: progressive stack OFF — the titlebar must be ONE flat surface matching `.viewbar`
      (same tint + blur, single layer). Pseudo-element does that; `.tb-blur` is hidden so it can't stack.
      BOTH states carry a tint (background:var(--tb-tint)) — a scroll-edge with no tint at all previously read
@@ -480,7 +490,7 @@
      (each 34px = the round icon buttons), the pill provides the material; a hairline separator sits between
      them (see .tbmodel > .tbtn). The segment outer corners are half-capsule to nest in the pill. */
   .tbmodel{gap:4px}   /* fix 5: MORE room on each side of the divider. item 1: kept in step with the shared .tbpill gap (8px). Redundant — .tbmodel is always ALSO a .tbpill — but stated, as it was at 4px, so this pill's spacing is legible where its other overrides are; it must never be left behind at the old value, which would silently un-centre the divider the rule below insets by −4.5px */
-  .tbmodel #modelSel{height:30px; border:none; box-shadow:none; background-color:transparent; border-radius:15px; padding:0 26px 0 12px; font-size:12.5px; background-position:right 8px center}   /* fix 4/11: fully-rounded on BOTH ends so its hover/selection fill is a capsule, not squared on the separator side */   /* height + radius follow .tbtn's 28→30px: the select and the Manage button are the model pill's two segments and must be the same height, or the shorter one floats inside the pill and its capsule fill stops short of the taller one's */
+  .tbmodel #modelSel{height:30px; border:none; box-shadow:none; background-color:transparent; border-radius:15px; padding:0 26px 0 12px; font-size:12.5px; background-position:right 8px center; background-image:var(--sf-updown-fg)}   /* fix 4/11: fully-rounded on BOTH ends so its hover/selection fill is a capsule, not squared on the separator side */   /* height + radius follow .tbtn's 28→30px: the select and the Manage button are the model pill's two segments and must be the same height, or the shorter one floats inside the pill and its capsule fill stops short of the taller one's */   /* CHEVRON INK, on request: base select.sel draws --sf-updown (a secondary-grey stroke, since a <select> background-image can't resolve currentColor — see that token's own comment). This toolbar instance sits right beside .chevupdown, the notation picker's mask-based chevron painted at full-strength currentColor/opacity:1, and is asked to match it rather than read as a dimmer afterthought — so it overrides to --sf-updown-fg, the same glyph baked at --text's own value (redefined for dark in mac-tokens.css) instead of the muted grey. */
   .tbmodel #modelSel:hover{background-color:var(--tbtn-hover)}
   .tbmodel #modelSel:focus{outline:none; border:none; box-shadow:none}
   .tbmodel .tbtn.icon{border-radius:15px; width:38px}   /* fix 4/11: fully-rounded on BOTH ends (capsule hover fill, not squared on the separator side); widened so its cube glyph clears the divider — and widened again by the same +1px/side as every other icon button (36 → 38), so the extra room around the glyph is not the one place the request skips. Radius = half the new 30px height, keeping the capsule exact */
