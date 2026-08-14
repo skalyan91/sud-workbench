@@ -3834,6 +3834,26 @@ function tidyLayout(size,root,childrenOf,{lw,hgw,ldw,elw,SPW,NGAP}){
     x[i]=(x[ks[0]]+x[ks[ks.length-1]])/2;
     lext[i]=Math.min(x[i]-lw(i)/2-ldw(i), ...ks.map(c=>lext[c])); rext[i]=Math.max(x[i]+lw(i)/2+hgw(i), ...ks.map(c=>rext[c]));   // this node's own reach is the union of its own box and everything now settled beneath it — what the NEXT layer up compares against
     })(root);
+  /* ⚠ WHOLE-TREE LEFTMOST RE-SEAT — the mirror of spreadForLabels' own closing re-seat (js/diagram/diagram-core.js,
+     stemma's leftEdge/mn fix) for THIS packer: `cur` above only ever advances at a LEAF placement or a sibling
+     separation, so an ANCESTOR whose own slot (lw(i), which already folds in avmSlotW(t) — item 22, same
+     reasoning as every other lw() in this file) is wider than whatever its descendants already reserved can
+     still reach left of the nominal margin without anything above ever noticing. A straight dependency CHAIN —
+     every node exactly one child — is the starkest case: `ks.length===1` centres each parent exactly ON its
+     child (x[i]=(x[ks[0]]+x[ks[0]])/2=x[ks[0]]), so cur is bumped ONCE, by the single real leaf at the bottom of
+     the chain, and every ancestor above it — however wide its own AVM box — inherits that leaf's x untouched.
+     `lext[root]` already carries the answer: it is the min, over EVERY node in the tree (not just leaves), of
+     that node's own x[i]-lw(i)/2-ldw(i), propagated up through every `shift()` this function made — so it is
+     the tree's TRUE leftmost reach, the same quantity stemma's fix recomputes by re-scanning `x`/`lw`/`ldw`
+     after the fact. Re-seat the WHOLE tree by the shortfall against `cur`'s own starting margin (6, same
+     literal) if any node reaches past it — a no-op on ordinary branching content, where `lext[root]` is already
+     ⩾6 because packing derived it from leaves-first cur advances the ordinary way (verified live: a branching
+     stemma-shaped tree with the same wide-AVM tokens shows mn⩾6 here and this block never fires). Measured
+     before this fix: a synthetic 18-token straight chain, token 3's AVM the widest box in the tree, drew its
+     AVM 28.2px left of screen x=0 while fitTight's own clamp (aFit=Math.max(0,a)) had already given up trying
+     to grow the viewBox to cover it — genuinely clipped, in both tree() and treeGeomW() (this function is
+     shared — #5 above — so fixing it once fixes the wrapped hierarchy the same way). */
+  const mn=lext[root]; if(mn<6) for(let i=0;i<size;i++) x[i]+=(6-mn);
   return x;
 }
 /* The stemma's own nominal left margin — the x this layout seats the FIRST thing it draws at. Named rather
