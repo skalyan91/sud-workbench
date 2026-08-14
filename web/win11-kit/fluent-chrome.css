@@ -308,8 +308,8 @@
   .tbmodel{gap:2px}
   .tbmodel #modelSel{height:28px; border-color:transparent; background-image:none; background-color:transparent;
     padding:0 28px 0 10px; font-size:var(--fs-body);
-    background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'><path d='M2.5 4.5L6 8l3.5-3.5' fill='none' stroke='%23666' stroke-width='1.1' stroke-linecap='round' stroke-linejoin='round'/></svg>");
-    background-repeat:no-repeat; background-position:right 8px center; background-clip:border-box}   /* inside the toolbar the picker is transparent at rest like every other command-bar item, so it loses the stroke entirely rather than keeping a ghost of it */
+    background-image:var(--fluent-chevron-down-fg);
+    background-repeat:no-repeat; background-position:right 8px center; background-clip:border-box}   /* inside the toolbar the picker is transparent at rest like every other command-bar item, so it loses the stroke entirely rather than keeping a ghost of it. CHEVRON INK, on request: was a literal '%23666' stroke baked here (a <select> background-image can't resolve currentColor, same limit --fluent-chevron-down's own comment describes) — dimmer than .chevupdown, the notation picker's mask-based chevron at full-strength currentColor/opacity:1 beside it. Now --fluent-chevron-down-fg, the same glyph baked at --text's own value (redefined for dark in fluent-tokens.css) instead of the muted grey. */
   .tbmodel #modelSel:hover{background-color:var(--subtle-hover)}
   .tbmodel #modelSel:focus{outline:none; box-shadow:0 0 0 1px var(--focus-inner), 0 0 0 3px var(--focus-outer)}
   .tbmodel .tbtn.icon{border-radius:var(--r-control); width:32px}

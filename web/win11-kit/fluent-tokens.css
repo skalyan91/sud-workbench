@@ -231,6 +231,7 @@
        <select> can render no pseudo-element, so it must bake an ink) and the Save As "Where" button as a MASK,
        which reads alpha only and so ignores the baked stroke colour. One path, no drift. */
     --fluent-chevron-down:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'><path d='M2.5 4.5L6 8l3.5-3.5' fill='none' stroke='%23666' stroke-width='1.1' stroke-linecap='round' stroke-linejoin='round'/></svg>");
+    --fluent-chevron-down-fg:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'><path d='M2.5 4.5L6 8l3.5-3.5' fill='none' stroke='%231b1b1b' stroke-width='1.1' stroke-linecap='round' stroke-linejoin='round'/></svg>");   /* SAME glyph as --fluent-chevron-down, baked at --text's LIGHT value (#1b1b1b) instead of the secondary grey — for `.tbmodel #modelSel`'s own background-image override (fluent-chrome.css), on request that it match `.chevupdown` (the notation picker's chevron, a mask painted with currentColor at opacity:1) rather than read dimmer beside it. Redefined for dark below, the same way --text itself is. */
     --menu-sep:#e6e6e6;   /* the in-surface separator, opaque — see the macOS kit's note. Sits within a pixel of Fluent's own DividerStrokeColorDefault composited over a light menu fill, so it is the same rule, stated as a literal. */
     --viewbar-border:var(--hairline);
     --sheet-border:rgba(117,117,117,0.4000);   /* SurfaceStrokeColorDefault #66757575 — the stroke WinUI puts around a window-level surface (a dialog), as opposed to the lighter flyout stroke below */
@@ -390,6 +391,7 @@
       --casing-lift:black;
       /* text ramp, flattened over the dark --content-bg #282828 */
       --text:#ffffff; --text-2:#ffffff;    /* TextFillColorPrimary is literally #FFFFFF in dark — not an alpha, unlike every other level */
+      --fluent-chevron-down-fg:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'><path d='M2.5 4.5L6 8l3.5-3.5' fill='none' stroke='%23ffffff' stroke-width='1.1' stroke-linecap='round' stroke-linejoin='round'/></svg>");   /* dark counterpart of the light :root's --fluent-chevron-down-fg above — baked at dark's own --text (#ffffff), not carried over from light (a custom property set only in the light :root leaks through unchanged otherwise). */
       --muted:#cecece;                     /* TextFillColorSecondary, white 77.25 % */
       --faint:#9a9a9a;                     /* TextFillColorTertiary,  white 52.94 % */
       --dia-muted:#cecece; --dia-2:#f0f0f0;
