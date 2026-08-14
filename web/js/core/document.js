@@ -2445,7 +2445,18 @@ function positionBracketAnnots(){ document.querySelectorAll("#doc .bwrap").forEa
       if(!t||!avmLayout(t)) return;
       const f=tok.querySelector(".bwform")||tok, u=tok.querySelector(".bwund"), fTop=tok.offsetTop+(f===tok?0:f.offsetTop);
       const bot=u?fTop+u.offsetTop+u.offsetHeight:fTop+(f===tok?tok.offsetHeight:f.offsetHeight);
-      const ox=(f===tok?0:tok.offsetLeft), cx=ox+f.offsetLeft+f.offsetWidth/2;
+      // cx anchors on the CELL (tok), not the form (f): bracketsWrapped's own wordW(i) (js/diagram/diagram-wrap.js)
+      // already reserves avmSlotW(t) worth of room in tok's own width — exactly the same Math.max(...) that folds
+      // in POS/translit/gloss width — so centring on the cell is what actually cashes that reservation in. Centring
+      // on the form instead (the old `ox+f.offsetLeft+f.offsetWidth/2`) agrees with the cell's own centre for an
+      // ordinary token (.bwtok{text-align:center} keeps the form centred in the cell), but NOT for a "leadhead"
+      // (.bwtok.leadhead{text-align:start}, app.css — a token forced to open its own new wrapped row): there the
+      // form sits flush at the cell's own START edge and ALL of wordW's slack lands on the far side, none before
+      // it — so an AVM box centred on the form's own (now near-left) centre could reach left of the cell's own
+      // left edge, past the very margin its width was reserved to protect, and get clipped by .text-conv.bwrap's
+      // overflow-x:hidden. tok.offsetLeft is already the SAME .bwrap-relative coordinate space `ox` used above
+      // (see rectOf's identical convention, ~line 2096) — just without adding the form's own now-uncentred offset.
+      const cx=tok.offsetLeft+tok.offsetWidth/2;
       drawAVM(svg,cx,bot+avmTopGap(),t,si0,oid,null); }); }   // item 25/4 round 2: avmTopGap() — see belowStack's own note. `bot` here is a live DOM edge, not a baseline, so this is a slightly looser match to "the space above POS" than the other two call sites (which measure from a real baseline) — but avmTopGap()'s own VALUE is a plain small clearance number either way, and matching the other two sites exactly means one formula to keep in sync rather than a fourth, untested one for this context alone
   box.appendChild(svg);
   // On report ("space between a MWT tie and its form... displays differently [from arcs] despite identical
