@@ -114,31 +114,26 @@
         </div>
         <span class="pilllabel">View</span>
       </div>
-      <div class="tbgroup">
-        <div class="tbpill">
-          <button class="tbtn icon" id="btnOptions" title="Show the options bar" aria-pressed="false"><span class="sfi" style="--m:var(--sf-options)"></span><span class="tblabel">Options</span></button>
-        </div>
-        <span class="pilllabel">Options</span>
-      </div>
       <!-- grid off by default, on request — the diagram itself now closes the gaps (FEATS add/clear, DEPREL
            free-text, MWT group drag, NewPar, CorrectForm) that used to make the grid load-bearing, so it's an
-           opt-in panel instead of always-on chrome. Same simple on/off toggle shape as #btnOptions above —
+           opt-in panel instead of always-on chrome. Same simple on/off toggle shape as #btnOptions below —
            toggleGrids() (js/ui/wiring.js) already existed (⌃⌘G / the native View-menu row already called it),
-           this button is a new trigger for it, not new toggle logic. -->
+           this button is a new trigger for it, not new toggle logic.
+           Reordered before #btnOptions, on request ("the grid toggle button should come before the options
+           button") — was after it; no CSS keyed to the old position (.tbright > .tbgroup carries no
+           :nth-child/order rule, and .tbg-wide's margin is class-scoped, not position-scoped), so the swap is
+           DOM order only. -->
       <div class="tbgroup">
         <div class="tbpill">
           <button class="tbtn icon" id="btnGrids" title="Show all annotation grids (⌃⌘G)" aria-pressed="false"><span class="sfi" style="--m:var(--sf-grid)"></span><span class="tblabel">Grids</span></button>
         </div>
         <span class="pilllabel">Grids</span>
       </div>
-      <!-- item 3: page-like layout — Paged caps the document to a fixed measure on a wide screen and lays it on
-           sheets (a `# newdoc` ends one and starts the next); Unpaged uses the full window width. -->
-      <div class="tbgroup tbg-wide">
-        <div class="tbpill" id="pagePill" role="group" aria-label="Page layout">
-          <button class="tbtn icon" data-paged="1" title="Paged (⌃⌘P)"><span class="sfi" style="--m:var(--sf-paged)"></span><span class="tblabel">Paged</span></button>
-          <button class="tbtn icon" data-paged="0" title="Unpaged (⌃⌘P)"><span class="sfi" style="--m:var(--sf-unpaged)"></span><span class="tblabel">Unpaged</span></button>
+      <div class="tbgroup">
+        <div class="tbpill">
+          <button class="tbtn icon" id="btnOptions" title="Show the options bar" aria-pressed="false"><span class="sfi" style="--m:var(--sf-options)"></span><span class="tblabel">Options</span></button>
         </div>
-        <span class="pilllabel">Layout</span>
+        <span class="pilllabel">Options</span>
       </div>
       <div class="tbgroup">
         <div class="tbpill tbzoom" title="Font size">
@@ -147,6 +142,17 @@
           <button class="tbtn icon" id="fsUp" aria-label="Zoom in" title="Zoom in (⌘+)"><span class="sfi" style="--m:var(--sf-zoomin)"></span></button>
         </div>
         <span class="pilllabel">Zoom</span>
+      </div>
+      <!-- item 3: page-like layout — Paged caps the document to a fixed measure on a wide screen and lays it on
+           sheets (a `# newdoc` ends one and starts the next); Unpaged uses the full window width.
+           Reordered after the zoom pill, on request ("the paged/unpaged controls should come after the zoom
+           controls") — was between Grids and Zoom; same no-CSS-depends-on-position note as Grids/Options above. -->
+      <div class="tbgroup tbg-wide">
+        <div class="tbpill" id="pagePill" role="group" aria-label="Page layout">
+          <button class="tbtn icon" data-paged="1" title="Paged (⌃⌘P)"><span class="sfi" style="--m:var(--sf-paged)"></span><span class="tblabel">Paged</span></button>
+          <button class="tbtn icon" data-paged="0" title="Unpaged (⌃⌘P)"><span class="sfi" style="--m:var(--sf-unpaged)"></span><span class="tblabel">Unpaged</span></button>
+        </div>
+        <span class="pilllabel">Layout</span>
       </div>
       <div class="tbgroup tbg-wide">
         <div class="tbpill tbmodel">
