@@ -492,10 +492,12 @@
      entirely now that macOS doesn't offer window tabbing either — see macos-kit/mac-chrome.css's own
      `.viewbar` block, and the module-level note near the top of app/__main__.py. */
   .viewbar{position:absolute; left:0; right:0; top:var(--tbH,32px); z-index:20; display:flex; align-items:center; gap:10px;
-    padding:6px 16px 3px; background:var(--toolbar-bg); border-bottom:1px solid var(--hairline); flex-wrap:wrap}
+    padding:6px 16px var(--vb-pad-b,3px); background:var(--toolbar-bg); border-bottom:1px solid var(--hairline); flex-wrap:wrap; --vb-pad-b:3px}
   /* 6px top, matching the macOS bar; bottom cut to 3px on request. Cut to 4px/4px once (32px control + 4 + 4
      + 1px border = a 41px bar rather than 45px) and put back: the taller bar is the wanted look — this bottom
-     trim is a smaller, deliberate cut, not a return to that rejected 4px-all-round version. */
+     trim is a smaller, deliberate cut, not a return to that rejected 4px-all-round version. Bottom value is
+     also named --vb-pad-b, matching macOS's own token name (mac-chrome.css), so `.drawers`' gap below can
+     derive off it the same way rather than carrying its own independently-typed literal. */
   .viewbar.hidden{display:none}
   .viewbar .lbl{font-size:var(--fs-caption); color:var(--label-secondary); font-weight:var(--fw-semibold); letter-spacing:normal; text-transform:none}
   .viewbar .vsep{width:1px; height:20px; background:var(--sep-line); flex:none; align-self:center; margin:0 4px}
@@ -519,7 +521,7 @@
   /* ── Drawers (a pull-down button + its flyout) ────────────────────────────────────────────────
      A Fluent DropDownButton: filled control, asymmetric stroke (applied in the block above), chevron
      that does NOT rotate — Windows leaves the glyph alone and shows the flyout instead. */
-  .drawers{display:inline-flex; align-items:center; gap:6px}   /* the gap BETWEEN dropdown triggers, cut from 8px on request */
+  .drawers{display:inline-flex; align-items:center; gap:calc(var(--vb-pad-b,3px) * 2)}   /* the gap BETWEEN dropdown triggers, cut from 8px on request. Now DERIVED as exactly twice the options bar's own bottom padding (--vb-pad-b, declared on `.viewbar` above), matching macOS's kit the same way (mac-chrome.css) — the calc() keeps the ratio true automatically if the bar's padding is ever retuned again, rather than trusting a hand-picked literal to keep agreeing with it. */
   .drawer{position:relative}
   .drawer-btn{display:inline-flex; align-items:center; gap:8px; height:32px; padding:0 11px;
     color:var(--label-primary); font:inherit; font-size:var(--fs-body); font-weight:var(--fw-normal); cursor:default; box-shadow:none}
