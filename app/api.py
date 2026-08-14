@@ -964,14 +964,21 @@ class Api:
         return fonts.clear()
 
     def transliterate(self, forms: list[str], lang: str, scheme: str = "",
-                      upos: list[str] | None = None) -> dict:
+                      upos: list[str] | None = None, feats: list[str] | None = None,
+                      lemmas: list[str] | None = None) -> dict:
         """``upos`` is OPTIONAL and PARALLEL to ``forms`` — the CoNLL-U tag each form was seen under, so a
         heteronym is romanised as the part of speech it actually is (行 = háng as a NOUN, xíng as a VERB).
         The frontend keys its own de-duplication on (form, upos) for the same reason — one entry per
         distinct SURFACE would let whichever 行 was reached first decide the reading for all of them; a
-        batch that names no tags at all is the call this endpoint has always taken."""
+        batch that names no tags at all is the call this endpoint has always taken.
+
+        ``feats``/``lemmas`` are the same shape, parallel to ``forms``, and reach Arabic/Persian only:
+        the romanisation is now always built from the VOCALISED form (`translit._legacy`), and these are
+        what `vocalise.vocalise` disambiguates that lookup with — Arabic's final case-ending vowel
+        (FEATS) and Persian's lemma-transfer (LEMMA). Omitted ⇒ the same call this endpoint has always
+        taken, still vocalised at whatever the form-only lookup level gives it."""
         from . import translit
-        return {"translit": translit.transliterate_many(forms, lang, scheme, upos),
+        return {"translit": translit.transliterate_many(forms, lang, scheme, upos, feats, lemmas),
                 "lang": lang, "scheme": scheme}
 
     def set_doc_language(self, lang: str = "") -> dict:

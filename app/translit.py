@@ -1908,15 +1908,79 @@ _AR_DIN = {
     "َ": "a", "ُ": "u", "ِ": "i", "ّ": "", "ْ": "", "ً": "an", "ٌ": "un", "ٍ": "in", "ٰ": "ā",
     "٠": "0", "١": "1", "٢": "2", "٣": "3", "٤": "4", "٥": "5", "٦": "6", "٧": "7", "٨": "8", "٩": "9",
 }
+# A short-vowel diacritic immediately followed by ITS OWN long-vowel matres lectionis letter is ONE
+# long vowel, not the diacritic's short reading plus the letter's own -- fatha+ا, kasra+ي, damma+و
+# (plus the dagger-alif spelling of ā). Bare (unvocalised) text never exercised this: ا/ي/و on their
+# own, with no preceding harakah, only ever needed the plain per-letter table above. VOCALISED text
+# writes the harakah too, for readability, even though the matres letter alone already carries the
+# length -- so charmapping the two independently would double-vowel every long vowel a vocaliser
+# writes this way (ذَهَبَ's fatha "a" + ا "ā" -> "aā" instead of "ā"). See `_char_map_ar`.
+_AR_MATRES = {("َ", "ا"): "ā", ("َ", "ٰ"): "ā", ("ِ", "ي"): "ī", ("ُ", "و"): "ū"}
+
+
+_AR_DIAC_RE = re.compile(r"[\u064B-\u065F\u0670]")   # harakat/tashkil (U+064B-U+065F, U+0670 dagger alif) - same range translit-load.js stripTashkil strips
+
+
+def _ar_clusters(text: str) -> list[str]:
+    """``text`` split into letter clusters — each base character plus any combining diacritics that
+    immediately follow it, as ONE unit.  Needed because a VOCALISED definite article writes its short
+    vowel ON the alif itself (``اَل`` = ا + fatha + ل, `_vocalise.vocalise`'s own spelling of "al-"),
+    which lands the diacritic BETWEEN ``tok[0]`` and ``tok[1]`` — the two characters `_arabic_din`'s
+    ``ال`` prefix test used to compare against a bare (never-vocalised) token, where that could never
+    happen. Splitting into clusters first keeps the prefix test working on vocalised input too, instead
+    of silently missing it and double-vowelling the alif (ا→ā *and* the fatha on it→a)."""
+    out: list[str] = []
+    for ch in text:
+        if out and _AR_DIAC_RE.match(ch):
+            out[-1] += ch
+        else:
+            out.append(ch)
+    return out
+
+
+# ة (tāʾ marbūṭa) is "a" only in PAUSE (nothing voiced after it — which is the only position bare,
+# unvocalised text ever showed it in, since the script never wrote what came after a word boundary).
+# VOCALISED text can carry a case ending directly on it (اَلوِزَارَةِ "the ministry", genitive -i), and
+# there ة is pronounced/transliterated "t" (DIN 31635's construct-state ة), not "a" -- so "ةِ" is
+# "ti", never "ai". Bare "ة" alone (no harakah following) is unaffected and keeps its "a".
+_AR_TA_MARBUTA_HARAKAT = set("ًٌٍَُِّ")   # tanwin×3, fatha, damma, kasra, shadda
+
+
+def _char_map_ar(text: str) -> str:
+    """`_char_map(text, _AR_DIN)`, but aware of two things bare (never-vocalised) text never needed:
+    collapsing a short-vowel diacritic immediately followed by its OWN long-vowel matres lectionis
+    letter into one long vowel (`_AR_MATRES`), and reading a case-marked ة as "t" rather than "a"
+    (`_AR_TA_MARBUTA_HARAKAT`) -- see each table's own note. Falls through to the ordinary
+    per-character table everywhere else, byte-for-byte what `_char_map(text, _AR_DIN)` already did."""
+    out = []
+    i, n = 0, len(text)
+    while i < n:
+        pair = _AR_MATRES.get((text[i], text[i + 1])) if i + 1 < n else None
+        if pair:
+            out.append(pair)
+            i += 2
+            continue
+        ch = text[i]
+        if ch == "ة" and i + 1 < n and text[i + 1] in _AR_TA_MARBUTA_HARAKAT:
+            out.append("t")
+        elif ch in _AR_DIN:
+            out.append(_AR_DIN[ch])
+        elif ch.isascii() or ch.isspace() or ch in "-–—.,;:!?()[]«»\"'":
+            out.append(ch)
+        # else: drop stray combining marks / unmapped characters — same as `_char_map`
+        i += 1
+    return "".join(out)
 
 
 def _arabic_din(text: str) -> str:
     out = []
     for tok in re.split(r"(\s+)", text):
-        if tok.startswith("ال") and len(tok) > 2:   # definite article ال → al-
-            out.append("al-" + _char_map(tok[2:], _AR_DIN))
+        clusters = _ar_clusters(tok)
+        bare = "".join(c[0] for c in clusters)   # the definite article is judged on each cluster's BASE letter, vocalised or not
+        if bare.startswith("ال") and len(clusters) > 2:   # definite article ال(-) → al-, whatever vowel its own alif/lam carry
+            out.append("al-" + _char_map_ar("".join(clusters[2:])))
         else:
-            out.append(_char_map(tok, _AR_DIN))
+            out.append(_char_map_ar(tok))
     return "".join(out)
 
 
@@ -2161,8 +2225,25 @@ def _default_scheme(base: str) -> str:
     return "default"
 
 
-def _legacy(text: str, base: str, lang: str) -> str:
-    """The pre-scheme single-romanisation routing (Semitic/Korean/wiktra/uroman)."""
+def _legacy(text: str, base: str, lang: str, upos: str = "", feats: str = "", lemma: str = "") -> str:
+    """The pre-scheme single-romanisation routing (Semitic/Korean/wiktra/uroman).
+
+    ARABIC/PERSIAN ALWAYS ROMANISE THE VOCALISED FORM, regardless of whatever the Script-menu "With
+    vowels" toggle currently shows for this token's ORIGINAL-script display (a completely different
+    setting — that toggle only reaches `_render_one`'s OWN ``scheme == "vocalise"`` branch, a
+    different `scheme` value from the "default" one this function is reached under; nothing here
+    reads it). A romanisation that drops short vowels because the reader happens to be looking at
+    bare Arabic/Persian script is not a scholarly transliteration at all — DIN 31635/`_FA_MAP` both
+    already carry harakat/tashkīl → Latin-vowel mappings (they exist for Arabic/Persian TEXT that
+    already carries diacritics), so feeding them the vocalised form is simply using the table
+    correctly rather than starving it of the vowels it knows how to render.
+    `vocalise.vocalise` degrades to the bare form when unavailable (no model installed, no lexicon
+    tier, a lookup miss) or when `base` is neither "ar" nor "fa", so this substitution is always safe
+    to make unconditionally: on a miss `text` is simply unchanged and every following branch behaves
+    exactly as it did before this existed."""
+    if base in ("ar", "fa"):
+        from . import vocalise as _vocalise
+        text = _vocalise.vocalise(base, text, upos, feats, lemma)
     if base == "ar":
         out = _arabic_din(text)
     elif base in ("ja", "jpn"):
@@ -2473,7 +2554,7 @@ def _render_one(text: str, lang: str, scheme: str, upos: str = "",
             elif scheme in _ENGINES:
                 out = _ENGINES[scheme][0](text)
             else:
-                out = _legacy(text, base, lang)   # single-scheme / legacy backends ignore `scheme`
+                out = _legacy(text, base, lang, upos, feats, lemma)   # single-scheme / legacy backends; only ar/fa read upos/feats/lemma (vocalise-before-romanise — see _legacy)
         if out and _is_latin_output(scheme):
             out = _latinize_punct(out)   # a romanised output never keeps CJK/fullwidth punctuation
     except Exception:  # noqa: BLE001 — an engine hiccup must never surface as an exception
@@ -2492,7 +2573,8 @@ def _ortho_one(text: str, lang: str, scheme: str, upos: str,
     return _render_one(text, lang, scheme, upos, feats, lemma)
 
 
-def transliterate(forms: _Forms, lang: str, scheme: str = "", upos: _Upos = "") -> _Rendered:
+def transliterate(forms: _Forms, lang: str, scheme: str = "", upos: _Upos = "",
+                  feats: _Hint = "", lemmas: _Hint = "") -> _Rendered:
     """Transliterate (ROMANISE) ``forms`` for ``lang`` under ``scheme`` ("" ⇒ the language's default).
     Accepts a single string or a list; returns the same shape.  Never raises (failures → "").
 
@@ -2501,12 +2583,18 @@ def transliterate(forms: _Forms, lang: str, scheme: str = "", upos: _Upos = "") 
     `_pos_render`) it selects which reading of a one-graph token to render; everywhere else, and
     for every caller that omits it, nothing changes.
 
-    No ``feats``/``lemma`` here, deliberately: the only engines that read them are `macron` and
-    `vocalise`, which are SCRIPTS and never a romanisation — Latin has nothing to romanise from, and
-    Arabic/Persian romanise from the bare (unvocalised) form regardless of vowel length."""
+    ``feats``/``lemmas`` are the same shape and reach exactly one place: Arabic's ``_legacy`` reads
+    (upos, feats), Persian's reads (upos, lemma), to disambiguate the VOCALISED form the romanisation
+    is now always built from (see `_legacy`'s own note — a romanisation has to represent vowels to be
+    one at all, so Arabic/Persian no longer romanise the bare, unvocalised form the way this docstring
+    used to say). A caller that omits them still gets a real romanisation — `vocalise.vocalise`
+    degrades to a *form-only, still-vocalised-where-a-lexicon-entry-exists* lookup, never to an error —
+    just a less disambiguated one, exactly as an omitted ``upos`` gives Chinese a less disambiguated
+    reading. Every other language ignores both, unchanged."""
     if isinstance(forms, (list, tuple)):
-        return [_render_one(f, lang, scheme, _hint_at(upos, i)) for i, f in enumerate(forms)]
-    return _render_one(forms, lang, scheme, _hint_at(upos, 0))
+        return [_render_one(f, lang, scheme, _hint_at(upos, i), _hint_at(feats, i), _hint_at(lemmas, i))
+                for i, f in enumerate(forms)]
+    return _render_one(forms, lang, scheme, _hint_at(upos, 0), _hint_at(feats, 0), _hint_at(lemmas, 0))
 
 
 def orthography(forms: _Forms, lang: str, scheme: str = "", upos: _Upos = "",
@@ -2533,8 +2621,10 @@ def orthography(forms: _Forms, lang: str, scheme: str = "", upos: _Upos = "",
 # caller (api.py's `_with_upos`) gets a list without a cast, and a `list[str]` upos never has to be
 # passed through a parameter another overload might read as a single tag.
 def transliterate_many(forms: list[str], lang: str, scheme: str = "",
-                       upos: list[str] | None = None) -> list[str]:
-    return [_render_one(f, lang, scheme, _hint_at(upos, i)) for i, f in enumerate(forms or [])]
+                       upos: list[str] | None = None, feats: list[str] | None = None,
+                       lemmas: list[str] | None = None) -> list[str]:
+    return [_render_one(f, lang, scheme, _hint_at(upos, i), _hint_at(feats, i), _hint_at(lemmas, i))
+            for i, f in enumerate(forms or [])]
 
 
 def orthography_many(forms: list[str], lang: str, scheme: str = "",
