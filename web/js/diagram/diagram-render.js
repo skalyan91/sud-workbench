@@ -375,16 +375,31 @@ function arcs(si){
     [-1,1].forEach(side=>{ const grp=arr.filter(e=>e.side===side).sort((p,q)=>q.len-p.len);   // this side's whole pool — real AND ghost together — ranked by length alone
       const hasCentral=grp.some(e=>e.central);   // only a side that actually hosts a REAL head edge is ever eligible for the dead-centre slot (one centre per node, as before) — a side with no head edge still fans from one step out, never slot 0
       // mirrors fanArcs' own fix (js/diagram/diagram-wrap.js — see that function's note for the ORIGINAL report,
-      // the regression a first version of this rule caused, and the narrower condition that replaced it): a side
-      // with only ONE edge, real or ghost, unlocks the dead-centre slot ONLY when the OTHER side of the SAME node
-      // is equally uncontested (at most one edge there too) — see that note for the full reasoning; the short
-      // version is that centring BOTH sides of a node at once is only ever safe when there is truly nothing else
-      // going on at that node (a clean 1-in/1-out chain link, or a lone child with an empty far side) — the
-      // moment the far side is a real multi-edge fan (this node's own head edge ranked in among its OTHER
-      // dependents), forcing the lone edge on THIS side to that exact same point pinches two unrelated edges
-      // together instead of fanning them apart, which is what "solo" was written to prevent in the first place.
+      // the regression a first version of this rule caused, and the narrower condition that replaced it, AND a
+      // second regression on TOP of that fix, fixed here): a side with only ONE edge, real or ghost, unlocks the
+      // dead-centre slot ONLY when the OTHER side of the SAME node is EMPTY — see that note for the full history;
+      // the short version is that centring BOTH sides of a node at once is only safe when one side has nothing
+      // registered on it AT ALL — the moment the far side hosts even a single edge of its own, forcing THIS side's
+      // lone edge to the exact same point (x-offset 0, byte-identical to the far side's own centred edge) makes
+      // the two meet at one pixel — indistinguishable from a single continuous stroke through the node, which is
+      // "coincident", not "fanned". This used to tolerate the far side carrying up to one edge (opp.length<=1),
+      // which was written to describe "a clean 1-in/1-out chain link" as equally safe to centre-both — on report,
+      // "when arcs are joined head-to-tail, their endpoints should be fanned, not coincident": that IS exactly a
+      // 1-in/1-out chain link (this node is the DEPENDENT of one edge on one side, central:true, and separately
+      // the HEAD of another on the other side, central:false) — the incoming edge's arrowhead lands dead-centre
+      // via `hasCentral` regardless of this fix (nothing here changes that), but the outgoing edge used to ALSO
+      // claim offset 0 via `solo`, landing its tail on the exact same point the incoming arrowhead already
+      // occupies. The same shape recurs whenever a node has exactly two real edges split one per side with
+      // NEITHER central (a root with exactly two children, one fanning each way — root has no incoming edge at
+      // all, so hasCentral is false on both sides): both used to centre onto the root's own position, coincident
+      // with each other. Tightening opp to `===0` restores 29c3130's original, narrower case (a wrapped
+      // cross-line arc's own "B"+hk bucket, whose opposite side is always structurally empty — never shared with
+      // anything, so opp.length is 0 either way, unaffected) while declining to also centre a solo edge against
+      // ANY real neighbour, however uncontested that neighbour itself is — a side with a genuinely empty far side
+      // still centres (nothing to fan against); a side facing so much as one real edge on the other side now
+      // fans out by one step instead, exactly as a side facing multi-edge competition already did.
       const opp=arr.filter(e=>e.side===-side);
-      const solo=grp.length===1&&opp.length<=1;
+      const solo=grp.length===1&&opp.length===0;
       grp.forEach((e,j)=>e.set(side*((hasCentral||solo)?j:j+1)*SPREAD));               // longest first (j=0) → most central; shortest last → outermost
       usedSlot[node+"|"+side]=(hasCentral||solo)?grp.length:grp.length+1; }); });
   // endpoints sit directly on the fanned targets → measure arc width (and Hobby height) from THEM

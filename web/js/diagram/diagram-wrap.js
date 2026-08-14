@@ -366,19 +366,39 @@ function fanArcs(arcs,spread,ghostArcs){ const ep={}; const reg=(k,len,side,cent
       // concern (a different token's own row-boundary bucket, or simply empty). Centring never had anything
       // to collide WITH. Here, "nation"'s solo side has real competition sitting on the node's OTHER side —
       // three edges (comp:obj, det, mod-to-"new"), already ranked and centred by hasCentral — and forcing the
-      // lone edge on the far side to that SAME point is what creates the pinch. A node where BOTH sides are
-      // genuinely uncontested (a true 1-in/1-out chain link — every interior node of a plain chain sentence,
-      // the case 84e7938/this fix's own flat-view mirror was built and verified against) has no such
-      // collision: each side has at most one candidate, so centring both is simply "this arc, alone at this
-      // node, draws with no offset" — the correct, un-pinched reading. So the unlock needs BOTH sides
-      // uncontested, not just this one: `solo` now requires the OPPOSITE side of the SAME node to also carry
-      // at most one entry. Re-verified live: the ORIGINAL cross-line case (the opposite side of that bucket is
-      // always empty — a "B"+token bucket is never shared with anything else) still centres byte-exact; the
-      // 3-children-of-root/chain cases (every side involved has ≤1 entry) are unaffected; "nation"'s mod arc
-      // now fans back out by one step (~8.26px, matching the PRE-29c3130 gap) instead of collapsing onto
-      // comp:obj's landing point.
+      // lone edge on the far side to that SAME point is what creates the pinch. Fixed (at the time) by
+      // requiring BOTH sides uncontested: `solo` required the OPPOSITE side to carry AT MOST ONE entry, not
+      // just this one.
+      //
+      // ⚠ AND *THAT* CONDITION WAS ITSELF STILL TOO LOOSE, on a THIRD report — "when arcs are joined
+      // head-to-tail, their endpoints should be fanned, not coincident!" A node whose OTHER side carries
+      // EXACTLY one entry is precisely "a true 1-in/1-out chain link" — this node is the DEPENDENT of one real
+      // edge on one side (central:true, always centred anyway via `hasCentral`, untouched by any of this) and,
+      // on the OTHER side, the sole HEAD of a second real edge (central:false) — i.e. two arcs "joined
+      // head-to-tail" at exactly this node. `opp.length<=1` treated that far side's one real edge as
+      // uncontested enough to also unlock this side's centre slot — so the outgoing edge's TAIL landed on the
+      // exact same point the incoming edge's ARROWHEAD already occupies: byte-identical x AND y (same node,
+      // same baseline), which is not "un-pinched", it is the two edges literally touching at one pixel — read
+      // as one continuous stroke running through the node rather than two arcs that happen to meet there. The
+      // same shape recurs with no dependent at all: a root with exactly two children, one fanning each way
+      // (root has no incoming edge, so hasCentral is false on BOTH sides) — both children used to centre onto
+      // the root's own position and so onto EACH OTHER, e.g. samples/english.conllu s4 "The old man and woman
+      // died[root]": subj→"man" and punct→"." split one per side and collapsed onto the same point. Measured
+      // live (CDP) across samples/english.conllu, samples/la_virgil.conllu and samples/brihat_jataka.conllu: 43
+      // such exact-coincidence nodes (offset 0 shared by two unrelated real edges) across those three files
+      // alone, all either a plain chain link or a two-child root — this is not a rare shape, it's the ORDINARY
+      // shape of most interior nodes in most sentences. `solo` now requires the opposite side be genuinely
+      // EMPTY (no entry at all), not merely "at most one" — a side with truly nothing on the other side (the
+      // ORIGINAL cross-line case: a wrapped arc's own "B"+hk bucket is a key no other registration ever shares,
+      // so its opposite side is always 0, unaffected either way) still centres, since there is nothing to fan
+      // against; a side facing so much as ONE real edge on the other side now fans out by a step instead of
+      // colliding with it — exactly like a side already facing multi-edge competition. Re-verified live: the
+      // ORIGINAL cross-line case still centres byte-exact; "nation"'s mod arc (the e8bf96f regression case)
+      // still fans back out, unchanged (its opposite side has three entries, well past either threshold); the
+      // chain-link and two-child-root cases that used to collide now land one fanStep() apart, matching the
+      // spacing every OTHER kind of fan competition in this app already uses.
       const opp=arr.filter(e=>e.side===-side);
-      const solo=grp.length===1&&opp.length<=1;
+      const solo=grp.length===1&&opp.length===0;
       grp.forEach((e,j)=>e.set(side*((hasCentral||solo)?j:j+1)*spread)); }); }); }
 // cubic control points for an arc bump from (x1,base) to (x2,base) of height h: each control sits at height h
 // above its endpoint and cot(θ)·h inward, so the take-off tangent makes θ with the baseline. Apex is 0.75·h.
