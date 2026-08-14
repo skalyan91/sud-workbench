@@ -1480,6 +1480,31 @@ function buildBlock(i,ctx){ const s=DOC[i];
     // Otherwise, under a real script, it takes a row of its own beneath the glyph.
     const cslTop=(typeof saCslTop==="function") && saCslTop() && show.translit;
     const cslRow=isSanskritLang() && TRANSLIT_SCHEME==="csl" && show.translit && !cslTop;
+    /* ARABIC/PERSIAN (and any future non-Sanskrit language whose Script toggle is a same-script diacritic
+       swap rather than a real writing-system change) hit `scriptTop` too — "vocalise" is a genuine
+       `orthoScript()` scheme id (not in TRANSFORM_ORTHO, which only covers same-script glyph swaps with
+       no top-line displacement) — but unlike Sanskrit, where the stored FORM already IS the IAST and so
+       `tl` below (the editable original) doubles as "the transliteration", ar/fa's editable original is
+       the BARE ARABIC/PERSIAN TEXT and their transliteration is a wholly separate romanisation (DIN
+       31635 / _FA_MAP) that `tl` cannot stand in for. Without this, turning "With vowels" on replaced
+       the transliteration row with `tl` itself — the unvocalised original script, not a romanisation —
+       exactly the bug reported ("the running sentence should still have the transliteration below it,
+       rather than the unvocalised original"). `translitNeeded` (not `trLayer()`, which is only
+       `show.translit` and so is true for Latin too, where it is always a no-op — see the `else if
+       (trLayer())` branch's own line!==base guard) is what actually distinguishes "has a real separate
+       romanisation" (ar/fa) from "the script toggle is its only display axis" (la's `macron`, which never
+       reaches this branch with show.translit doing anything, since `tl` stays permanently hidden there —
+       Latin has no `_DISPLAY_SCHEMES`/`_SINGLE_LANGS` entry at all, so `show.translit` is never settable
+       true for it). Computed here, beside `cslRow`, for the same reason that one is: both halves of the
+       decision (the click-to-reveal wiring on the script line, and the rows themselves, below) must agree.
+       Split in two, mirroring how `cslTop`/`cslRow` above split "is this the language" from "is the row
+       actually shown": `arFaScriptTop` alone drives the CLICK-TO-REVEAL affordance (unconditional, exactly
+       like `isSanskritLang()` below — a reader with Displayed "None" still gets the bare original one
+       click away, never only when a translit row happens to be visible), `realTransRow` alone (folding in
+       `show.translit`) drives whether the real translit ROW is actually built. */
+    const arFaScriptTop=scriptTop && !isSanskritLang()
+      && typeof translitNeeded==="function" && translitNeeded(DOCLANG);
+    const realTransRow=arFaScriptTop && show.translit;
     let scriptTransLine=null, fieldHost=null;   // fieldHost: the row the sentence field opens on — see the click handler on the script line   // set below, IF scriptTop: the .strans-orig editable line this block's script .stext reveals+focuses when Displayed transliteration is "None" (assigned before either element's listeners can fire — both are wired synchronously within this same DOC.forEach iteration)
     // item 30's daṇḍa DISPLAY transform now lives at module level (dandaDisp, top of this file) so the
     // late stage-2 alignment repaint can reproduce exactly what this render drew.
@@ -1592,9 +1617,20 @@ function buildBlock(i,ctx){ const s=DOC[i];
       // Gated on the row being HIDDEN, not on the reason it is hidden. "None" was one reason; CSL is now
       // another (it takes the visible slot — see the scriptTransLine assignment below), and without this
       // the original text became uneditable inline for as long as CSL was displayed.
-      else if(isSanskritLang()){ txt.style.cursor="text"; txt.title+=" — click to edit the transliteration";
-        // …onto whichever row is HOSTING the field — the editable `# text` where it is shown, the CSL row
-        // where that has taken its place. `fieldHost` is assigned as each is built, below.
+      // ⚠ NOT GATED ON SANSKRIT ONLY (see the comment on `arFaScriptTop`, above): ar/fa's "With vowels"
+      // hides `tl` (the bare-original editable line) behind their OWN real transliteration row the exact
+      // same way CSL hides it behind its row — so the same click-to-reveal affordance has to reach it
+      // too, or a vocalised running sentence has no inline way at all to open the bare form for editing
+      // (the report's second half: "when the user clicks on the vocalised running sentence, the input
+      // field should show the unvocalised text — exactly like with Latin macrons"). `arFaScriptTop`, not
+      // `realTransRow`: unconditional on `show.translit`, exactly like `isSanskritLang()` beside it — a
+      // reader with Displayed "None" still gets the bare original one click away, not only when a real
+      // translit row happens to be on screen (`tl` is hidden either way, for its own reason, whenever
+      // `show.translit` is off — see `tl.hidden`'s own condition below).
+      else if(isSanskritLang() || arFaScriptTop){ txt.style.cursor="text";
+        txt.title+=arFaScriptTop?" — click to edit the original text":" — click to edit the transliteration";
+        // …onto whichever row is HOSTING the field — the editable `# text` where it is shown, the CSL/real
+        // translit row where that has taken its place. `fieldHost` is assigned as each is built, below.
         /* ⚠ ONLY WHEN THE ROW IS HIDDEN. This affordance exists because a collapsed row is the only inline
            surface for editing `# text` in script mode and there is otherwise no way to reach it — "click the
            shown row to get at the value that isn't shown". Once the row IS shown it can be clicked directly,
@@ -1682,13 +1718,13 @@ function buildBlock(i,ctx){ const s=DOC[i];
          editable original goes back to being collapsed-and-click-revealable, which is what it is for. */
       const tl=document.createElement("div"); tl.className="strans strans-orig"; tl.style.marginInlineStart=(idW+8)+"px"; wireStext(tl);
       // Collapsed whenever the visible line above is NOT this row's own value: Displayed "None"
-      // (nothing to show), CSL-in-a-row under a real script, and CSL-as-the-line under a Latin one.
-      // In that last case the sentence on screen IS the CSL, so a permanently open row beneath it
-      // would be the same sentence twice — the editable original belongs one click away, which is
-      // exactly what the .stext handler above provides (and what it opens is the IAST `# text`).
-      tl.hidden=!show.translit||cslRow||cslTop;
+      // (nothing to show), CSL-in-a-row under a real script, CSL-as-the-line under a Latin one, and now
+      // ar/fa's own real transliteration row (realTransRow) — same reasoning as CSL: the sentence on
+      // screen is something else, so the editable original belongs one click away (see the click
+      // handler on the script line above; realTransRow's own row is built below).
+      tl.hidden=!show.translit||cslRow||cslTop||realTransRow;
       tl.setAttribute("data-capw","1"); if(!tl.hidden) applyTransInset(tl);   // swept with the translations grid, synchronously, so the height the caps measure is the height that is drawn   // a hidden row is unmeasurable (0-width rect) — the reveal handler re-runs this itself once it's shown
-      tl.addEventListener("blur",()=>{ if(!show.translit||cslRow||cslTop) tl.hidden=true; });   // …and re-collapses on blur, still gated on Displayed:"None" — if the user changed the Displayed scheme away from None WHILE this row was open, show.translit is now true and the row stays, exactly as a fresh render would leave it
+      tl.addEventListener("blur",()=>{ if(!show.translit||cslRow||cslTop||realTransRow) tl.hidden=true; });   // …and re-collapses on blur, still gated on Displayed:"None" — if the user changed the Displayed scheme away from None WHILE this row was open, show.translit is now true and the row stays, exactly as a fresh render would leave it
       scriptTransLine=tl; if(!tl.hidden) fieldHost=tl; b.appendChild(tl);
       if(cslRow){ const cl=document.createElement("div"); cl.className="strans"; cl.style.marginInlineStart=(idW+8)+"px";
         const cslResting=runningLine(s,i,u=>u.mwt?(topTransTxt(u.mwt)||u.mwt.form):(topTransTxt(u.tok)||u.tok.form)," ");
@@ -1699,7 +1735,17 @@ function buildBlock(i,ctx){ const s=DOC[i];
         cl.addEventListener("blur",()=>{ cl.textContent=cslResting; });   // a commit re-renders and recomputes; this is the cancelled case
         cl.title="Sentence in "+trSchemeLabel(TRANSLIT_SCHEME)+" (display) — click to edit the text";
         cl.style.cursor="text"; fieldHost=cl;
-        capTransWidth(cl); b.appendChild(cl); } }
+        capTransWidth(cl); b.appendChild(cl); }
+      else if(realTransRow){   // ar/fa's OWN romanisation, not a respelling of the same script — READ-ONLY,
+        // exactly like the ordinary (non-scriptTop) transliteration row a few lines down: it is never the
+        // edit field itself (that stays `tl`, one click away on the script line above; see `realTransRow`'s
+        // own note on why `tl` cannot double as this row the way it does for Sanskrit). No fixedGap: ar/fa
+        // are not spaceless scripts, so `# text`'s own gaps (the same source the script line above and the
+        // ordinary translit row both read) are exactly right, unlike the spaceless-script gap function the
+        // plain trLayer() branch below needs.
+        const rl=document.createElement("div"); rl.className="strans"; rl.style.marginInlineStart=(idW+8)+"px";
+        const line=runningLine(s,i,u=>u.mwt?(topTransTxt(u.mwt)||u.mwt.form):(topTransTxt(u.tok)||u.tok.form));
+        if(line.trim()){ rl.textContent=line; rl.title="Transliteration"; capTransWidth(rl); b.appendChild(rl); } } }
     else if(trLayer()){   // romanisation OR a Latin-output orthography → a plain whole-sentence line under the text (no displacement)
       /* NO ROW WHERE IT WOULD ONLY REPEAT THE LINE ABOVE IT — an IAST romanisation of an IAST-stored
          Sanskrit file says nothing the running text has not already said, and neither does "Original"
