@@ -775,7 +775,23 @@ function avmValueMenu(x,y,si,tokId,key){
     // picker rows (nothing to switch a single-candidate feature TO — re-picking the one listed value was already
     // a no-op, avmSetFeat returns early when next===t.feats), while Clear is gated on `cur` alone.
     if(vals.length>1) vals.forEach(v=>items.push({label:v, expand:desc[v]||"", check:v===cur, opt:true, fn:()=>avmSetFeat(si,tokId,feat,v)}));
-    if(cur) items.push(null,{label:"Clear "+feat, fn:()=>avmSetFeat(si,tokId,feat,null)}); });   // item 1's own "clear this" convention (a leading `null` closes the checkmark group so this row sits flush, un-ticked, at the flyout's own level)
+    // "Other …" flyout — candidates are UD_FEATS[feat] MINUS whatever `vals` (just above) already offered as an
+    // alternate row, i.e. genuinely new-to-this-menu values only. Deliberately complementing `vals` itself rather
+    // than recomputing "attested" from scratch: `vals` already IS attestedFeatVals(feat), doc-wide (not UPOS-
+    // scoped) same as every other row in this feature's own block, so the complement is guaranteed disjoint from
+    // what's already listed — including the edge case where attestedFeatVals falls back to the FULL UD list
+    // (nothing attested anywhere yet): in that case every value is already offered above, so otherCands is
+    // correctly empty and no "Other" row appears, rather than uselessly re-listing the same values a second time.
+    // NOT UPOS-scoped like strictAttestedVals/addFeatureItems: those narrow which FEATURE applies to a word class
+    // at all (a distinction UD_FEATS has no data for at the VALUE level — it's a flat Feat→[Vals] table with no
+    // per-UPOS breakdown), a different question from "which values of a feature this token already carries are
+    // new to the document" — and this row lives in the SAME per-feat block as the doc-wide `vals` rows above it,
+    // so switching conventions mid-block would make the two lists inconsistent with each other for no reason.
+    const otherCands=(UD_FEATS[feat]||[]).filter(v=>!vals.includes(v));
+    let sep=false; const closeGrp=()=>{ if(!sep){ items.push(null); sep=true; } };   // one shared `null` before whichever of Other/Clear appears first — same "sits flush, un-ticked, at the flyout's own level" convention Clear alone used to open on its own
+    if(otherCands.length){ closeGrp();
+      items.push({label:"Other "+feat+"…", sub:()=>otherCands.map(v=>({label:v, expand:shortVDesc(desc[v]||""), fn:()=>avmSetFeat(si,tokId,feat,v)})), subFit:true}); }   // shortVDesc, not the raw gloss: this is a NESTED sub flyout same as addFeatureItems' own, and a long raw FEATS_VDESC entry wraps its row character-by-character there (see addFeatureItems' own comment on the exact same bug) — same fix applies here
+    if(cur){ closeGrp(); items.push({label:"Clear "+feat, fn:()=>avmSetFeat(si,tokId,feat,null)}); } });
   if(!items.length) return false;
   showCtx(x,y,items, items.length>12, sentRTL(s));
   return true; }
