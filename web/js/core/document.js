@@ -2000,7 +2000,7 @@ function renderDoc(){
   const _align=[];
   document.querySelectorAll("#doc .sblock").forEach(b=>{ const dg=b.querySelector(".diagram, .text-conv"); if(!dg) return;
     dg.style.paddingLeft="0px"; dg.style.paddingRight="0px";   // getBoundingClientRect is in scaled (zoomed) viewport px; padding is set in unscaled CSS px → divide by FS
-    const rtl=b.dir==="rtl", els=[...dg.querySelectorAll("svg text, .oline, .bwline2")];
+    const rtl=b.dir==="rtl", els=[...dg.querySelectorAll("svg text, .oline, .tok-wash:not(circle), .bwtok")];   // ⚠ ALIGN TO THE WASH, NOT THE INK, on report ("I just want the leftmost token wash in a diagram to be left-aligned with the running sentence"). A token's WASH — the hover/selection backlight rect every SVG renderer draws (.tok-wash: stemma/arcs/tree, flat and wrapped) or, for wrapped brackets, the .bwtok CELL itself (its own wash is a CSS ::before layer painted over exactly this box, app.css) — is deliberately WIDER than its own glyph ink: both are sized off the same avmSlotW(t)-folded slot reservation (wordW/lw, diagram-wrap.js) every renderer already uses to lay tokens out, so a token with a wide AVM box reserves — and its wash paints — that full width even though "svg text" alone (the OLD selector) only ever saw the narrower GLYPH ink inside it. Measured live (heavy-AVM fixture, wrapped): the old ink-only minLeft left the wash's own left edge 10–17px further left than the sentence's text-start after alignment — a visible, non-clipping misalignment, not the narrower clipping bugs e7672f1/fb823c5 already fixed (those stay in place; nothing here conflicts with them). Since a wash already encloses its own AVM box by construction (avmSlotW(t) <= the slot width both are sized from), aligning to the wash can never leave an AVM box overhanging past it either. ⚠ .bwline2 DROPPED, not kept alongside the new members: it's a plain full-width block (bracketsWrapped's own greedy-wrap row, app.css) with NO width:max-content of its own, so with padding zeroed its rect.left is always just the CONTAINER's edge — regardless of content, even a row that opens with a "[" bracket well before its first .bwtok. Kept in the union it would silently win as the minimum on every wrapped-brackets render (it's always <= any real content inside it), making the whole point of adding .bwtok a no-op — confirmed live: dgPaddingLeft was byte-identical before/after adding .bwtok until .bwline2 was also removed. .oline is UNCHANGED (kept): outline's own row genuinely IS width:max-content, so its rect.left already tracks real content — and outline has no wash at all, its AVM prints INLINE after the POS tag, never left of the row's own start, so ink is already the correct reference there.
     // What this padding measures must NOT depend on WHICH TOKEN IS SELECTED. A selected token renders its form,
     // its deprel label and its brackets BOLD, so its ink runs a fraction wider and a fraction further out — enough
     // to move minLeft/maxR across a rounding step and change this padding by a pixel or two. Since the padding is
@@ -2023,15 +2023,6 @@ function renderDoc(){
   _align.forEach(a=>{
     a.emph.forEach(({e,s,r})=>{ if(s)e.classList.add("sel"); if(r)e.classList.add("rng"); });   // emphasis back on before anything can paint
     if(a.prop) a.dg.style[a.prop]=a.val; });
-  // Item 6 (safety net): the wrapproj token strip is HARD-clipped at the diagram's right edge, and the alignment above
-  // shifts it right by the Form-column indent. projWrapped already bounds the strip width to the clip-safe port, but if
-  // an unusually wide indent (a long ID column, RTL, or a very wide row-edge token) would still push the strip past the
-  // clip box, pull the padding back just enough to keep every token in view. This only ever REDUCES the padding (never
-  // increases it), so ordinary alignment is untouched — it engages solely when a token would otherwise clip.
-  document.querySelectorAll("#doc .diagram.wrapproj").forEach(dg=>{ const toks=dg.querySelector(".wp-toks"); if(!toks) return;
-    const avail=dg.clientWidth, sw=toks.offsetWidth;   // both in STRIP (unzoomed) px; the child strip clips if padding + sw exceeds the padding box (clientWidth)
-    if(dg.dir==="rtl"){ const pr=parseFloat(dg.style.paddingRight)||0; if(pr+sw>avail) dg.style.paddingRight=Math.max(0,avail-sw)+"px"; }
-    else { const pl=parseFloat(dg.style.paddingLeft)||0; if(pl+sw>avail) dg.style.paddingLeft=Math.max(0,avail-sw)+"px"; } });
   // grow wrapped-brackets inter-line room (tall within-line interrupter arcs/labels + arc-occupied gaps) BEFORE the
   // height cap below, so a tall wrapped-brackets box is measured at its FULL natural height (diaNat) and gets the
   // same vertical-expansion / scroll budget the other notations get — otherwise the cap is set to the un-grown
@@ -2042,6 +2033,47 @@ function renderDoc(){
   // what remains after the sentence header, block padding, AND the gaps around/between the diagram and grid
   document.querySelectorAll("#doc .sblock").forEach(b=>{ capBlock(b,dh); observeBlockHeader(b); });
   document.querySelectorAll("#doc .diagram.wrapproj").forEach(wpDraw);   // draw the tree (+ projections) now the box has its final size
+  /* ⚠ WASH RE-ALIGNMENT, PASS 2 — wrapproj ONLY, and ONLY now, on the same report the .tok-wash/.bwtok
+     broadening above answers ("the leftmost token wash… left-aligned with the running sentence"). The main
+     _align pass (above) measures BEFORE wpDraw runs, because wpDraw's own node circles are SCALED to
+     `.wp-stem`'s live clientWidth (sx=bw/wp.natW — see wpDraw's own note) — a genuine chicken-and-egg, not
+     just an ordering nicety: wpDraw needs the box's final width, which the padding _align sets partly
+     determines, so wpDraw cannot run before that padding exists, and its circles (hence their .tok-wash)
+     cannot be measured before wpDraw runs. Measured live: this left wrapproj's own node wash 1–5px short of
+     the sentence's text-start even after the .tok-wash broadening above (a heavy-AVM node's wash grows only
+     once wpDraw actually places it). Safe to redo properly here, AFTER wpDraw, because wpDraw's circles are
+     now fixed absolute SVG coordinates — re-zeroing and re-measuring the outer CSS padding around them (the
+     same three-phase shape the main pass uses) shifts the whole box without touching what's already drawn
+     inside it, so there is no second circularity. Runs BEFORE the wp-toks clip-guard just below so that
+     guard gets the last, and correct, word against clipping — this pass can only ever WIDEN the padding
+     (wash >= the strip-text ink the first pass already cleared), never narrow it.
+     ⚠ :not(circle) — wpDraw's own `.wp-tree` is a COMPRESSED WHOLE-SENTENCE OVERVIEW (sx=bw/wp.natW squeezes
+     every node into one row's width; see wpDraw's own note), drawn as `circle.tok-wash` — the only circle
+     .tok-wash in the app (every other renderer's is a rect). It is NOT in reading-order correspondence with
+     the sentence's own token positions (a long sentence's whole tree gets squeezed sx<<1), so its own
+     leftmost node can land well clear of where token 1 actually sits — measured live, a real 21-word
+     DEV_FIXTURE sentence: the overview's own circle left edge sat 13px right of the token strip's real
+     token 1, a gap (not an overhang) that including it would have chased, moving the diagram away from the
+     sentence rather than under it. The REAL, reading-order content — the `.wp-row` strip's own per-token
+     rects, at real token positions — is what visually sits directly under the running sentence and is what
+     "the leftmost token wash" means here; excluding the overview's circle is what keeps this pass aligning
+     to that, not to the unrelated minimap floating above it. */
+  document.querySelectorAll("#doc .diagram.wrapproj").forEach(dg=>{ const b=dg.closest(".sblock"); if(!b) return;
+    const rtl=b.dir==="rtl", target=formTextTarget(b,rtl), washEls=[...dg.querySelectorAll(".tok-wash:not(circle)")]; if(!washEls.length) return;
+    if(rtl){ dg.style.paddingRight="0px"; let maxR=-Infinity; washEls.forEach(e=>{const r=e.getBoundingClientRect().right; if(r>maxR)maxR=r;});
+      if(maxR>-Infinity) dg.style.paddingRight=Math.max(0,Math.round((maxR-target)/FS))+"px"; }
+    else { dg.style.paddingLeft="0px"; let minLeft=Infinity; washEls.forEach(e=>{const r=e.getBoundingClientRect().left; if(r<minLeft)minLeft=r;});
+      if(minLeft<Infinity) dg.style.paddingLeft=Math.max(0,Math.round((target-minLeft)/FS))+"px"; } });
+  // Item 6 (safety net): the wrapproj token strip is HARD-clipped at the diagram's right edge, and the alignment above
+  // shifts it right by the Form-column indent. projWrapped already bounds the strip width to the clip-safe port, but if
+  // an unusually wide indent (a long ID column, RTL, or a very wide row-edge token) would still push the strip past the
+  // clip box, pull the padding back just enough to keep every token in view. This only ever REDUCES the padding (never
+  // increases it), so ordinary alignment is untouched — it engages solely when a token would otherwise clip. Runs
+  // LAST (after the wash re-alignment above, which can only ever widen the padding) so it always gets the final say.
+  document.querySelectorAll("#doc .diagram.wrapproj").forEach(dg=>{ const toks=dg.querySelector(".wp-toks"); if(!toks) return;
+    const avail=dg.clientWidth, sw=toks.offsetWidth;   // both in STRIP (unzoomed) px; the child strip clips if padding + sw exceeds the padding box (clientWidth)
+    if(dg.dir==="rtl"){ const pr=parseFloat(dg.style.paddingRight)||0; if(pr+sw>avail) dg.style.paddingRight=Math.max(0,avail-sw)+"px"; }
+    else { const pl=parseFloat(dg.style.paddingLeft)||0; if(pl+sw>avail) dg.style.paddingLeft=Math.max(0,avail-sw)+"px"; } });
   positionBracketWash();
   positionBracketAnnots();
   positionSeamMarks();      // slide every "belongs to neither token" seam mark to the middle of its gap, now that the rows it sits between are where they will finally be
