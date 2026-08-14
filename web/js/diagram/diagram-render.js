@@ -374,8 +374,15 @@ function arcs(si){
     arr.filter(e=>e.central&&e.side===0).forEach(e=>e.set(0));                        // the root stub only — always centre
     [-1,1].forEach(side=>{ const grp=arr.filter(e=>e.side===side).sort((p,q)=>q.len-p.len);   // this side's whole pool — real AND ghost together — ranked by length alone
       const hasCentral=grp.some(e=>e.central);   // only a side that actually hosts a REAL head edge is ever eligible for the dead-centre slot (one centre per node, as before) — a side with no head edge still fans from one step out, never slot 0
-      grp.forEach((e,j)=>e.set(side*(hasCentral?j:j+1)*SPREAD));               // longest first (j=0) → most central; shortest last → outermost
-      usedSlot[node+"|"+side]=hasCentral?grp.length:grp.length+1; }); });
+      // mirrors fanArcs' own fix (js/diagram/diagram-wrap.js — see that function's note for the report and the
+      // live measurement): a side with only ONE edge on it, real or ghost, has nothing to fan away from, so it
+      // belongs dead-centre regardless of whether that edge happens to be this node's own (central-ineligible)
+      // outgoing one — confirmed live here too (a chain sentence, flat/unwrapped view: a root's sole child, and
+      // every interior node's own outgoing edge, sat a full SPREAD off-centre with no other arc/ghost sharing
+      // the bucket). A side with genuine competition (grp.length>1) is unchanged.
+      const solo=grp.length===1;
+      grp.forEach((e,j)=>e.set(side*((hasCentral||solo)?j:j+1)*SPREAD));               // longest first (j=0) → most central; shortest last → outermost
+      usedSlot[node+"|"+side]=(hasCentral||solo)?grp.length:grp.length+1; }); });
   // endpoints sit directly on the fanned targets → measure arc width (and Hobby height) from THEM
   list.forEach(a=>{ a.X1=c[a.from-1]+(a.off1||0); a.X2=c[a.to-1]+(a.off2||0); a.mx=(a.X1+a.X2)/2;
     a.h=arcHgt(Math.abs(a.X2-a.X1),ROW); a.col=relColor(a.dep); });

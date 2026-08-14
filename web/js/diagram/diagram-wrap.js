@@ -335,7 +335,22 @@ function fanArcs(arcs,spread,ghostArcs){ const ep={}; const reg=(k,len,side,cent
   Object.values(ep).forEach(arr=>{ arr.filter(e=>e.central&&e.side===0).forEach(e=>e.set(0));   // a side-0 sentinel (no caller currently registers one, but arcs() reserves it for the root stub) — always centre, never ranked
     [-1,1].forEach(side=>{ const grp=arr.filter(e=>e.side===side).sort((p,q)=>q.len-p.len);   // this side's whole pool — real AND ghost together — ranked by length alone
       const hasCentral=grp.some(e=>e.central);   // only a side that actually hosts a REAL head edge is ever eligible for the dead-centre slot — a side with no head edge still fans from one step out
-      grp.forEach((e,j)=>e.set(side*(hasCentral?j:j+1)*spread)); }); }); }
+      // on report — "when the top endpoint of a cross-line arc is the only one at the bottom of a node, it
+      // should land in the centre, not to the left or right". Traced to HERE: hasCentral only ever turns true
+      // via a DEPENDENT-role registration (this node is on the receiving end of an edge, central:true) — a
+      // node whose ONLY edge on this side is its own OUTGOING one (central:false, e.g. a wrapped cross-line
+      // arc's UPPER/head endpoint, bucketed here via the "B"+hk key — see this function's own hkey/dkey note
+      // above) never gets hasCentral, so even the SOLE entry on the side was pushed a full fan-step off-centre
+      // by the `j+1` branch below — there being nothing else on that side for it to fan away from. Verified
+      // live (CDP): a projective chain sentence, wrapped narrow enough that every inter-token edge crosses a
+      // row boundary — the DEPENDENT (lower) endpoint of every such arc landed exactly on its token's centre
+      // (byte-identical x), while the HEAD (upper) endpoint sat a full fanStep() (~8.26px) to one side, on a
+      // node with no other arc/ghost sharing that bucket — reproduced identically in the FLAT (unwrapped) view
+      // too, since arcs()/stemma() (diagram-render.js) mirrors this same rule (a root's own sole child, or any
+      // chain node's sole outgoing edge, showed the identical ~8.26px offset). A side with genuine competition
+      // (grp.length>1) is untouched — length-ranking among real contenders still decides who gets slot 0.
+      const solo=grp.length===1;
+      grp.forEach((e,j)=>e.set(side*((hasCentral||solo)?j:j+1)*spread)); }); }); }
 // cubic control points for an arc bump from (x1,base) to (x2,base) of height h: each control sits at height h
 // above its endpoint and cot(θ)·h inward, so the take-off tangent makes θ with the baseline. Apex is 0.75·h.
 function arcCtrl(x1,x2,base,h){ const sgn=Math.sign(x2-x1)||1, dx=ARC_COT*h;
