@@ -1100,6 +1100,13 @@ def _unify_titlebar_on_show(window, api=None):
             checkable = menu_spec.CHECKABLE
             conditional = menu_spec.CONDITIONAL
             has_sym = hasattr(AppKit.NSImage, "imageWithSystemSymbolName_accessibilityDescription_")
+            # Counted, not assumed: `has_sym` only proves the SELECTOR exists on this PyObjC/AppKit
+            # build, which is true on any modern binding whether or not a single icon ever decodes —
+            # exactly the gap that let a genuinely broken run log "symbols=yes" once already (see the
+            # module docstring's crash.log note). These count every row this pass actually attached
+            # a key equivalent / image to, against how many the spec table asked for, so the summary
+            # line below reports what happened, not just what the API surface allows.
+            keys_wanted = keys_set = syms_wanted = syms_set = 0
             menu_map: dict = {}
             menus_by_title: dict = {}   # top-level title → submenu, for the native injection below
             for i in range(mainmenu.numberOfItems()):
@@ -1133,20 +1140,28 @@ def _unify_titlebar_on_show(window, api=None):
                         continue
                     key, symbol = spec["key"], spec["sf"]
                     if key:
+                        keys_wanted += 1
                         mask = 0
                         for m in spec["mods"]:
                             mask |= flag[m]
                         it.setKeyEquivalent_(key)
                         it.setKeyEquivalentModifierMask_(mask)
-                    if symbol and has_sym:
-                        img = AppKit.NSImage.imageWithSystemSymbolName_accessibilityDescription_(symbol, None)
-                        if img is not None:
-                            it.setImage_(img)
+                        if str(it.keyEquivalent()) == key:          # setter succeeded, not merely called
+                            keys_set += 1
+                    if symbol:
+                        syms_wanted += 1
+                        if has_sym:
+                            img = AppKit.NSImage.imageWithSystemSymbolName_accessibilityDescription_(symbol, None)
+                            if img is not None:
+                                it.setImage_(img)
+                                if it.image() is not None:          # setter succeeded, not merely called
+                                    syms_set += 1
             if not _menu_wired.get("logged"):
                 _menu_wired["logged"] = True
                 _shell_log(f"[menu] wired: {mainmenu.numberOfItems()} top-level, "
                            f"{len(menus_by_title)} submenus {sorted(menus_by_title)}, "
-                           f"symbols={'yes' if has_sym else 'no'}")
+                           f"shortcuts={keys_set}/{keys_wanted}, symbols={syms_set}/{syms_wanted}"
+                           + ("" if has_sym else " (imageWithSystemSymbolName_accessibilityDescription_ unavailable on this AppKit)"))
             # inject "About SUD Workbench" at the top of the application (program) menu, idempotently
             # (this whole function re-runs on every menu open, so guard against a duplicate insert)
             try:

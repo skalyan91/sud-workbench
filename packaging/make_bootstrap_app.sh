@@ -157,7 +157,51 @@ APPSUP="$HOME/Library/Application Support/SUD Workbench"
 VENV="$APPSUP/venv"
 export PATH="/opt/homebrew/bin:/usr/local/bin:$HOME/.opam/default/bin:$PATH"
 
-run_app() { export PYTHONPATH="$RES/appsrc"; cd "$RES/appsrc"; exec "$VENV/bin/python" -m app "$@"; }
+run_app() {
+  export PYTHONPATH="$RES/appsrc"; cd "$RES/appsrc"
+  # ── de-hijack the process's own bundle identity ("Python" in the Dock/⌘-Tab/menu bar) ──────────
+  # A Homebrew/python.org macOS FRAMEWORK build's bin/pythonX.Y does not run our code directly: it
+  # unconditionally re-execs ITSELF into <Framework>/Versions/X.Y/Resources/Python.app/Contents/
+  # MacOS/Python before a single line of app/__main__.py runs (confirmed live — even `python3 -c
+  # pass` does this; there is no env var that suppresses it). That relaunch target is a REAL,
+  # separate, already-installed .app bundle (org.python.python, CFBundleName "Python"), and macOS
+  # gives our WHOLE running process that bundle's identity: NSRunningApplication.bundleIdentifier
+  # reads "org.python.python" for the rest of the session, so the Dock, ⌘-Tab switcher, and Force
+  # Quit all read "Python" — no matter what app/mac/shell.py's setProcessName_ call and menu-title
+  # patch set, since those touch the process name string and OUR OWN NSMenu items, not the rival
+  # bundle LaunchServices actually associated with this PID at relaunch time.
+  #
+  # The fix does not fight the relaunch — it defuses it. The relaunch TARGET binary, copied
+  # elsewhere and run DIRECTLY, does not relaunch again (only the thin bin/pythonX.Y stub carries
+  # the trigger; Resources/Python.app/Contents/MacOS/Python is the real interpreter and has no
+  # further relaunch logic), and it still finds this venv correctly via ordinary pyvenv.cfg
+  # discovery relative to ITS OWN path (confirmed: sys.prefix, pyobjc, spacy all resolve fine from
+  # a copy sitting in $VENV/bin). Run that copy instead and the process stays genuinely UNBUNDLED —
+  # exactly the case app/__main__.py's setProcessName_ and app/mac/shell.py's Dock-icon/menu-title
+  # patches were always written to cover, before this relaunch quietly swapped it for a worse one.
+  #
+  # Built lazily HERE (not in setup_venv.sh) so an existing install self-heals on its very next
+  # launch with no re-install needed. A non-framework python3.12 (no such Resources/Python.app)
+  # leaves GUI_SRC empty and this falls straight back to today's plain exec — never a regression.
+  local GUI_SRC GUI_BIN
+  GUI_BIN="$VENV/bin/.python-gui"
+  if [ ! -x "$GUI_BIN" ]; then
+    GUI_SRC="$("$VENV/bin/python3.12" -c '
+import os, sys
+real = os.path.realpath(sys.executable)                 # …/Versions/X.Y/bin/pythonX.Y
+d = os.path.dirname(real)
+cand = os.path.realpath(os.path.join(d, "..", "Resources", "Python.app", "Contents", "MacOS", "Python"))
+print(cand if os.path.isfile(cand) and cand != real else "")
+' 2>/dev/null)"
+    if [ -n "$GUI_SRC" ]; then
+      cp "$GUI_SRC" "$GUI_BIN" 2>/dev/null && chmod +x "$GUI_BIN" 2>/dev/null
+    fi
+  fi
+  if [ -x "$GUI_BIN" ]; then
+    exec "$GUI_BIN" -m app "$@"
+  fi
+  exec "$VENV/bin/python" -m app "$@"
+}
 
 open_terminal_path() {
   osascript >/dev/null 2>&1 <<OSA
