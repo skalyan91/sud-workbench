@@ -103,60 +103,48 @@
      flat surface (--tb-merged-blur). 4px keeps a comfortable margin under the 8px this file's own history
      already flagged as overshooting once compounded, while still being 4× the previous 1px ceiling — a real,
      live-tested increase rather than a guess extrapolated from the merged state's flat-surface number. */
-  /* Options bar OPEN: progressive stack OFF — the titlebar must be ONE flat surface matching `.viewbar`
-     (same tint + blur, single layer). Pseudo-element does that; `.tb-blur` is hidden so it can't stack.
-     BOTH states carry a tint (background:var(--tb-tint)) — a scroll-edge with no tint at all previously read
-     as just a smear of whatever's underneath, not the frosted-glass wash a real macOS toolbar edge has. The
-     two states still differ in SHAPE (a 4-layer progressive ramp vs one flat surface), not in whether tint is
-     present. blur reads --tb-merged-blur (mac-tokens.css) — NOT tied to the progressive stack's own radii any
-     more (it used to be a fixed 5/8 ratio of the ramp's strongest layer, 0.625px, which read as no blur at
-     all: on report ("there should be a constant blur, at least to match native apps like Preview") that
-     ratio was exactly the problem — a value picked to match a FOUR-LAYER RAMP was governing a single flat
-     layer that has no ramp to match, and 0.625px is below where backdrop-filter blur reads as glass on
-     ordinary UI content. See --tb-merged-blur's own comment for the new, independent value; this rule and
-     `.viewbar` both read the one token, so they still can't drift apart from each other. */
-  .titlebar::after{content:none; position:absolute; left:0; right:0; top:0; bottom:0; pointer-events:none; z-index:-1}
-  .window:has(.viewbar:not(.hidden)) .titlebar{border-bottom-width:0}   /* border REMOVED (not just transparent): ::after stops at the padding box, so a transparent .5px border left a hairline of raw document between the two bars */
+  /* Options bar OPEN: progressive stack OFF — `.tb-blur` is hidden so it can't stack against the merged surface.
+     THE SEAM, FOUND FOR REAL (this pass): every earlier pass verified the recipe match via headless CHROMIUM
+     (CDP `Page.captureScreenshot`, pixel-sampled with PIL) and found no discontinuity — but that harness was
+     flagged, in its own comment, as unable to see a genuinely WebKit-specific compositing artefact. Tested this
+     time in the SHIPPING WKWebView itself (`WKWebView.takeSnapshot`, driven from a `webview.start(func=…)` probe,
+     no TCC screen-recording dependency): with `.titlebar::after` and `.viewbar` painting BYTE-IDENTICAL
+     `background`/`backdrop-filter` recipes on two SEPARATE elements, a real seam was visible at their shared
+     border in light mode (a visibly whiter titlebar band above a visibly greyer viewbar band, boundary exactly at
+     the measured `--tbH` row) — confirming the two independently-composited `backdrop-filter` regions DO blend
+     differently at their edge in WebKit even at identical values, exactly as the prior pass's caveat predicted.
+     THE FIX IS THE ARCHITECTURAL ONE, not another recipe tweak: there is now only ONE backdrop-filter for the
+     whole merged band. `.body::before` (below) is a single pseudo-element spanning `--tbH + --vbH` — the combined
+     titlebar+viewbar height — with the tint+blur recipe moved onto it alone. `.titlebar` and `.viewbar` in the
+     merged state carry NO background/backdrop-filter of their own any more; they are transparent pass-through
+     boxes for their own controls, which is why `.titlebar`'s direct `background` was already `transparent` (its
+     own comment, "the element itself paints nothing") — that was already true for the titlebar's OWN box, just
+     not yet for its merged-state `::after`. `.body` is the right host: it is the flex sibling `.titlebar` sits
+     in front of, its own top edge lands at y=0 the same as `.titlebar`'s (the titlebar is taken out of flow by
+     its own `position:absolute`, so `.body` — the only remaining flex item — fills the window from the top), and
+     `.titlebar` (`z-index:30`, explicitly positioned) unconditionally paints ABOVE `.body`'s entire subtree
+     regardless of `.body`'s own internal z-index values, so a transparent titlebar box correctly reveals
+     `.body::before`'s blur through itself while the titlebar's own icons/text (still inside its own z:30 box)
+     stay on top of it. Stacked at z:15 — the same "above ordinary document content, below the overlaid chrome"
+     level `.nodeedit` already uses (app.css) — so it sits above `#doc`'s scrolled content (backdrop-filter needs
+     to be the higher layer to sample what's beneath) and below `.viewbar`'s own z:20 content. NOT a new idea in
+     this file: a near-identical single shared surface used to exist for the (now-removed) native window-tab
+     band, `html.tabbed body:not(.fs-chrome-hidden) .body::after` — deleted only because window tabbing itself
+     was, not because the technique was wrong. `.titlebar`'s own `background` was already `transparent` (its
+     base rule, above) — nothing to change there. */
+  .window:has(.viewbar:not(.hidden)) .titlebar{border-bottom-width:0}   /* border REMOVED (not just transparent): a transparent .5px border left a hairline of raw document between the two bars */
   .window:has(.viewbar:not(.hidden)) .titlebar > .tb-blur{display:none}
-  /* ⚠ THIS RULE PAIR USED TO ALSO FIRE ON `html.tabbed` (a native window-tab bar up, set from
-     app/mac/shell.py) — gone with window tabbing itself (see the module-level note near the top of
-     app/__main__.py). Only the options-bar case survives: the scroll-edge ramp exists to fade the
-     toolbar into a document scrolling under it, and with the options bar's own opaque surface directly
-     beneath there is no such transition to make — flat merged surface instead. */
-  .window:has(.viewbar:not(.hidden)) .titlebar::after{content:"";
-    -webkit-mask-image:none; mask-image:none; backdrop-filter:saturate(180%) blur(var(--tb-merged-blur,12px)); -webkit-backdrop-filter:saturate(180%) blur(var(--tb-merged-blur,12px)); background:var(--tb-tint)}   /* ONE layer at the same recipe as .viewbar — not two stacked flats (that compounds alpha/blur and read more opaque than the bar below). background:var(--tb-tint) is the same token .viewbar uses (both now read --tb-merged-tint, mac-tokens.css), so the two surfaces paint byte-identical fills.
-     SEAM CHECK (asked for explicitly — two independently-composited backdrop-filter regions meeting at a shared
-     border CAN show a seam even at identical values): verified via CDP `Page.captureScreenshot`, a 4-12×-scaled
-     crop straddling the exact titlebar/viewbar border (getBoundingClientRect on both), then sampling pixel RGB
-     down a column in an empty gutter (no text/pill under it) across that row with PIL. Result: a smooth
-     250→251 step (a 1/255 change, imperceptible) with NO discontinuity AT the geometric border row itself — the
-     one visible edge in the crop was a nearby pill's rounded corner, unrelated to the bar seam. So once the two
-     layers' tint+blur recipe genuinely matches (this was already true before this change too — both read
-     --toolbar-bg identically — so the earlier concern was theoretical, not an observed regression), no further
-     seam-hiding trick (shared wrapper backdrop-filter, 1px overlap) was needed; the border-bottom removal two
-     rules up is what was actually preventing a seam (a stray hairline of raw, unblurred document showing
-     through a transparent border), not the independent-compositing question this comment is about.
-     RE-CHECKED after the blur-amount cut (5px→3.25px, two rules below, restated in `.viewbar`) since the user
-     reported a seam again in this same session even though the prior pass's pixel check (above) had already
-     cleared this exact rule pair: still byte-identical recipe on both sides (blur cut in lockstep in both
-     places), and a fresh CDP pixel-sample straddling the border again showed a smooth ramp with no discontinuity
-     at the border row, in both themes. The closed-state `.tb-blur` height/tint work in item 2 above is NOT a
-     candidate explanation for this seam either, despite landing in the same session — that stack is
-     `display:none` whenever `.viewbar` is showing (two rules up), so it never composites at the same time as
-     this merged surface at all.
-     CAVEAT worth recording rather than glossing over: this check, like the prior pass's, runs against
-     file://web/index.html in headless CHROMIUM (the CDP harness), not the shipping app's WKWebView — the two
-     engines can composite stacked `backdrop-filter` regions differently, so a seam that is a genuine WebKit-
-     specific compositing artefact would not necessarily reproduce here even with an identical recipe. If the
-     user still sees a seam in the real app after this build, that is the more likely remaining explanation (a
-     rendering-engine difference in how two adjacent independently-composited backdrop-filter layers blend at
-     their shared edge) rather than a CSS mismatch — and the fix at that point is the architectural one floated
-     alongside this item (merging `.titlebar`/`.viewbar` into one compositing pass so there is structurally only
-     one region), not another round of recipe-matching. */
-  /* ⚠ THE BAND A NATIVE WINDOW-TAB BAR SAT IN USED TO BE PAINTED HERE (a third copy of the merged-state
-     surface, `html.tabbed body:not(.fs-chrome-hidden) .body::after`) — deleted with window tabbing
-     itself (see the module-level note near the top of app/__main__.py). There is no such band any more:
-     `.viewbar` sits directly below the title bar with nothing native between them. */
+  /* ⚠ THIS RULE USED TO ALSO FIRE ON `html.tabbed` (a native window-tab bar up, set from app/mac/shell.py) —
+     gone with window tabbing itself (see the module-level note near the top of app/__main__.py). Only the
+     options-bar case survives: the scroll-edge ramp exists to fade the toolbar into a document scrolling under
+     it, and with the options bar's own surface directly beneath there is no such transition to make. */
+  /* `.body::before` below needs a positioned containing block — `.body{position:relative}` already exists
+     further down this file (its own rule, unrelated to this fix), so nothing to add here. */
+  .body::before{content:none; position:absolute; left:0; right:0; top:0; height:0; z-index:15; pointer-events:none}
+  .window:has(.viewbar:not(.hidden)) .body::before{content:"";
+    height:calc(var(--tbH,44px) + var(--vbH,0px));
+    background:var(--tb-tint);
+    backdrop-filter:saturate(180%) blur(var(--tb-merged-blur,12px)); -webkit-backdrop-filter:saturate(180%) blur(var(--tb-merged-blur,12px))}   /* THE ONE compositing pass for the whole merged band — see the comment above. `--tbH`/`--vbH` are published on `.body` itself (js/ui/wiring.js syncChrome), so this pseudo-element of `.body` reads them with no extra plumbing. */
   html.mockup .titlebar{padding:6px 12px}
   .lights i{width:12px; height:12px; border-radius:50%; display:block; border:.5px solid rgba(0,0,0,.14)}
   .lights .r{background:#ff5f57} .lights .y{background:#febc2e} .lights .g{background:#28c840}
@@ -510,11 +498,11 @@
      now that window tabbing is gone (see the module-level note near the top of app/__main__.py) — there
      is nothing native left to duck under, and every dropdown is ordinary DOM content that stacks
      correctly by construction. */
-  .viewbar{position:absolute; left:0; right:0; top:var(--tbH,44px); z-index:20; display:flex; align-items:center; gap:10px; padding:6px 16px; background:var(--tb-merged-tint,var(--toolbar-bg,rgba(246,246,248,.80))); -webkit-backdrop-filter:saturate(180%) blur(var(--tb-merged-blur,12px)); backdrop-filter:saturate(180%) blur(var(--tb-merged-blur,12px)); border-bottom:.5px solid var(--viewbar-border,var(--hairline)); flex-wrap:wrap}   /* fix 3: the options bar OVERLAYS the document too — pinned directly below the titlebar (top = the JS-measured --tbH), so the doc scrolls UNDER it and is blurred through; its drawer popovers stay above the document */   /* item 7: 20px → 5px (a much earlier pass, back when this bar had its OWN independent blur rather than matching the titlebar) — since folded into the shared merged-state recipe below, so that history is no longer this rule's own to explain. */   /* background NOW MATCHES `.titlebar::after`'s merged-state fill byte-for-byte (both read --tb-merged-tint, mac-tokens.css) rather than each independently reading --toolbar-bg — the two bars must merge into what reads as ONE surface with no seam at the shared border, so an identical recipe on both sides of that border is the baseline requirement (see the win-inactive override right below for the unfocused-window case, which the titlebar's own --tb-tint switches to the same way). */   /* Blur now reads --tb-merged-blur (mac-tokens.css) 1:1 with `.titlebar::after`, not a literal tracked by hand across sites — see that token's comment for why the old 0.625px (a fraction of the CLOSED ramp's own radius, inherited by a flat single-layer surface with no ramp to match) is gone, on report that the merged state read as no blur at all and should be a constant frosted one like Preview's toolbar. */
-  /* .viewbar's own win-inactive background swap (mirroring .titlebar.win-inactive's old --tb-tint
-     override) removed for the same reason — see that rule's own note above. .viewbar now keeps its
-     focused background:var(--tb-merged-tint,…) regardless of window focus, staying byte-identical to
-     .titlebar::after in both focus states rather than just in the focused one. */
+  .viewbar{position:absolute; left:0; right:0; top:var(--tbH,44px); z-index:20; display:flex; align-items:center; gap:10px; padding:6px 16px; border-bottom:.5px solid var(--viewbar-border,var(--hairline)); flex-wrap:wrap}   /* fix 3: the options bar OVERLAYS the document too — pinned directly below the titlebar (top = the JS-measured --tbH), so the doc scrolls UNDER it and is blurred through; its drawer popovers stay above the document */   /* NO OWN background/backdrop-filter any more — a real WKWebView seam check (mac-chrome.css, the "Options bar OPEN" comment near `.titlebar::after`/`.body::before`) found that two independently-composited backdrop-filter regions read as a visible seam at their shared border even with byte-identical recipes, which no amount of recipe-matching could close: it is the compositing boundary itself, not the numbers either side of it. `.viewbar` is now a transparent pass-through for its own controls; the ONE blur+tint pass for the whole merged band is `.body::before`, sized to `--tbH + --vbH` so it reaches exactly to this bar's own bottom edge. */
+  /* .viewbar's own win-inactive override was removed a session before this one (mirroring
+     .titlebar.win-inactive's old --tb-tint override, gone for the same reason — see that rule's own note
+     above): the merged band's tint stays at its focused value regardless of window focus. Still true here —
+     `.body::before` carries no win-inactive override either — just relocated to a different element now. */
   .viewbar.hidden{display:none}   /* fix 5: toolbar Options button toggles the whole options bar */
   .viewbar .lbl{font-size:11px; color:var(--muted); font-weight:600; letter-spacing:.3px; text-transform:uppercase}
   .viewbar .vsep{width:1px; height:20px; background:var(--sep-line); flex:none; align-self:center; margin:0 4px}   /* faint 1px×20px hairline (≈#d9d9d9 light) delimiting toolbar groups, theme-aware — like the titlebar pill separators */
