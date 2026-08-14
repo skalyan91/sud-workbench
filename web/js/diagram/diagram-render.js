@@ -374,13 +374,17 @@ function arcs(si){
     arr.filter(e=>e.central&&e.side===0).forEach(e=>e.set(0));                        // the root stub only — always centre
     [-1,1].forEach(side=>{ const grp=arr.filter(e=>e.side===side).sort((p,q)=>q.len-p.len);   // this side's whole pool — real AND ghost together — ranked by length alone
       const hasCentral=grp.some(e=>e.central);   // only a side that actually hosts a REAL head edge is ever eligible for the dead-centre slot (one centre per node, as before) — a side with no head edge still fans from one step out, never slot 0
-      // mirrors fanArcs' own fix (js/diagram/diagram-wrap.js — see that function's note for the report and the
-      // live measurement): a side with only ONE edge on it, real or ghost, has nothing to fan away from, so it
-      // belongs dead-centre regardless of whether that edge happens to be this node's own (central-ineligible)
-      // outgoing one — confirmed live here too (a chain sentence, flat/unwrapped view: a root's sole child, and
-      // every interior node's own outgoing edge, sat a full SPREAD off-centre with no other arc/ghost sharing
-      // the bucket). A side with genuine competition (grp.length>1) is unchanged.
-      const solo=grp.length===1;
+      // mirrors fanArcs' own fix (js/diagram/diagram-wrap.js — see that function's note for the ORIGINAL report,
+      // the regression a first version of this rule caused, and the narrower condition that replaced it): a side
+      // with only ONE edge, real or ghost, unlocks the dead-centre slot ONLY when the OTHER side of the SAME node
+      // is equally uncontested (at most one edge there too) — see that note for the full reasoning; the short
+      // version is that centring BOTH sides of a node at once is only ever safe when there is truly nothing else
+      // going on at that node (a clean 1-in/1-out chain link, or a lone child with an empty far side) — the
+      // moment the far side is a real multi-edge fan (this node's own head edge ranked in among its OTHER
+      // dependents), forcing the lone edge on THIS side to that exact same point pinches two unrelated edges
+      // together instead of fanning them apart, which is what "solo" was written to prevent in the first place.
+      const opp=arr.filter(e=>e.side===-side);
+      const solo=grp.length===1&&opp.length<=1;
       grp.forEach((e,j)=>e.set(side*((hasCentral||solo)?j:j+1)*SPREAD));               // longest first (j=0) → most central; shortest last → outermost
       usedSlot[node+"|"+side]=(hasCentral||solo)?grp.length:grp.length+1; }); });
   // endpoints sit directly on the fanned targets → measure arc width (and Hobby height) from THEM

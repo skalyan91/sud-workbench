@@ -346,10 +346,39 @@ function fanArcs(arcs,spread,ghostArcs){ const ep={}; const reg=(k,len,side,cent
       // row boundary — the DEPENDENT (lower) endpoint of every such arc landed exactly on its token's centre
       // (byte-identical x), while the HEAD (upper) endpoint sat a full fanStep() (~8.26px) to one side, on a
       // node with no other arc/ghost sharing that bucket — reproduced identically in the FLAT (unwrapped) view
-      // too, since arcs()/stemma() (diagram-render.js) mirrors this same rule (a root's own sole child, or any
-      // chain node's sole outgoing edge, showed the identical ~8.26px offset). A side with genuine competition
+      // too, since arcs() (diagram-render.js) mirrors this same rule (a root's own sole child, or any chain
+      // node's sole outgoing edge, showed the identical ~8.26px offset). A side with genuine competition
       // (grp.length>1) is untouched — length-ranking among real contenders still decides who gets slot 0.
-      const solo=grp.length===1;
+      //
+      // ⚠ THAT UNCONDITIONAL "solo → centre" RULE WAS ITSELF A REGRESSION, on a DIFFERENT report — "the
+      // 'brought → nation' edge doesn't fan with the 'nation → conceived' edge" (samples/english.conllu s3,
+      // wrapped arcs). Node "nation" is the DEPENDENT of a cross-line comp:obj arc from "brought" (its side
+      // already hasCentral, centred both before and after the fix above — untouched) AND, on its OTHER side,
+      // the sole HEAD of a within-line mod arc to "conceived" — exactly the "solo, nothing to fan away from"
+      // shape the rule above targets, so it now ALSO centres. Measured live (CDP), both before and after:
+      // comp:obj's arrowhead and mod's tail sit ~6.8px apart pre-fix (a visible gap — the two edges read as
+      // separate strokes meeting near, not AT, the node) and ~1.5px apart post-fix (the residual is only the
+      // arrowhead casing's own triangular shape — the two edges' true anchors are BYTE-IDENTICAL x). The two
+      // unrelated edges collapse onto the exact same point, which reads as the edges failing to fan APART
+      // rather than fanning correctly — the opposite of what "solo → centre" was written to produce.
+      // The distinguishing signal from the ORIGINAL bug: there, the solo side's own "nothing to fan away
+      // from" was the WHOLE story — the node's other side (if populated at all) was a separate, unrelated
+      // concern (a different token's own row-boundary bucket, or simply empty). Centring never had anything
+      // to collide WITH. Here, "nation"'s solo side has real competition sitting on the node's OTHER side —
+      // three edges (comp:obj, det, mod-to-"new"), already ranked and centred by hasCentral — and forcing the
+      // lone edge on the far side to that SAME point is what creates the pinch. A node where BOTH sides are
+      // genuinely uncontested (a true 1-in/1-out chain link — every interior node of a plain chain sentence,
+      // the case 84e7938/this fix's own flat-view mirror was built and verified against) has no such
+      // collision: each side has at most one candidate, so centring both is simply "this arc, alone at this
+      // node, draws with no offset" — the correct, un-pinched reading. So the unlock needs BOTH sides
+      // uncontested, not just this one: `solo` now requires the OPPOSITE side of the SAME node to also carry
+      // at most one entry. Re-verified live: the ORIGINAL cross-line case (the opposite side of that bucket is
+      // always empty — a "B"+token bucket is never shared with anything else) still centres byte-exact; the
+      // 3-children-of-root/chain cases (every side involved has ≤1 entry) are unaffected; "nation"'s mod arc
+      // now fans back out by one step (~8.26px, matching the PRE-29c3130 gap) instead of collapsing onto
+      // comp:obj's landing point.
+      const opp=arr.filter(e=>e.side===-side);
+      const solo=grp.length===1&&opp.length<=1;
       grp.forEach((e,j)=>e.set(side*((hasCentral||solo)?j:j+1)*spread)); }); }); }
 // cubic control points for an arc bump from (x1,base) to (x2,base) of height h: each control sits at height h
 // above its endpoint and cot(θ)·h inward, so the take-off tangent makes θ with the baseline. Apex is 0.75·h.
