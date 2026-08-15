@@ -1113,8 +1113,9 @@ def _sandhi_preprocess(pairs):
         while (i + 1 < n and "\n" not in cleaned[i + 1][0]
                and (_ends_in_consonant(w) or glue_after or cleaned[i + 1][3])):
             nw, lm, glue_after, _, nbd = cleaned[i + 1]   # item 6: adopt the newly-glued component's trailing marker
-            if w and w[-1] in _VOICE_FINAL and _starts_voiced(nw):
-                w = w[:-1] + _VOICE_FINAL[w[-1]] + nw   # item 15: word-final voiceless stop → voiced before a voiced onset (sat+ādi → sadādi) — and it fires at BOTH boundaries (sat+asat → sadasat inside a compound just as tat+eva does between words), so `bound` does not gate it
+            vc = _voice_final_char(w) if w else ""
+            if vc and _starts_voiced(nw):
+                w = w[:-1] + vc + nw   # item 15: word-final voiceless stop → voiced before a voiced onset (sat+ādi → sadādi), or its lexical exception (e.g. vāc → vāg) — and it fires at BOTH boundaries (sat+asat → sadasat inside a compound just as tat+eva does between words), so `bound` does not gate it
             elif (w and w[-1] == "n" and not bound   # ⚠ EXTERNAL ONLY. A word-final -n doubles before a vowel (asmin + eva → asminn eva), but a BOUND member's -n does not: an + anta is ananta, not annanta — and an-/a- before a vowel is the commonest -n-final bound member there is (an+ādi, an+eka). The vendored generator draws exactly this line and names only this rule as external-only (_sa_sandhi_vendor.join_pair's `internal`), so the two engines agree about where a compound differs from a phrase. `bound` is the flag of the word contributing that final -n — it rides the accumulator below, not cleaned[i], because a glue may have changed which component that is.
                   and _final_vowel(w[:-1]) in ("a", "i", "u", "ṛ", "ḷ") and _initial_vowel(nw) is not None):
                 w = w[:-1] + "nn" + nw                  # -n after a SHORT vowel + V → -nn V
@@ -1146,8 +1147,9 @@ def _glue_consonant_runs(text: str, sep: str) -> str:
         if not (cons_final and w and any(c.isalpha() for c in w)):   # not a true-consonant ender, or w is punctuation/daṇḍa
             out += sep + w
             continue
-        if last in _VOICE_FINAL and _starts_voiced(w):
-            out = out[:-1] + _VOICE_FINAL[last] + w          # voiceless stop → voiced
+        vc = _voice_final_char(out)
+        if vc and _starts_voiced(w):
+            out = out[:-1] + vc + w                          # voiceless stop → voiced (or its lexical exception, e.g. vāc → vāg)
         elif last == "n" and _final_vowel(out[:-1]) in ("a", "i", "u", "ṛ", "ḷ") and _initial_vowel(w) is not None:
             out = out[:-1] + "nn" + w                        # -n after a SHORT vowel + V → -nn V
         else:
@@ -1437,6 +1439,33 @@ def sandhi_to_script(forms, lang: str, scheme: str = "", lemmas=None, word_sep: 
 # member voices before a vowel or a voiced consonant (e.g. ``sat ādi`` → ``sadādi``); before a
 # voiceless sound or a pause it stays voiceless.  (Whitney §159; learnsanskrit.org consonant-sandhi.)
 _VOICE_FINAL = {"k": "g", "c": "j", "ṭ": "ḍ", "t": "d", "p": "b"}
+
+# On report: "vāc comes out as vāj in certain sandhi contexts. This form should never appear — it
+# should be vāg." _VOICE_FINAL's c→j is the REGULAR pattern (most -c nouns really do voice that
+# way — e.g. samrāj), but a small, closed set of stems are lexical exceptions: vāc (speech, √vac)
+# voices to vāg, not vāj, because the root's OWN final consonant patterns as a velar for sandhi
+# purposes across its whole paradigm (vāk / vāc / vāg — the alternation √vac itself shows, not the
+# ordinary c/j one every other -c stem has) — a fact about this one lexeme's phonological history,
+# not something a single-character voicing table can express. Not exhaustive: Sanskrit has a
+# further handful of roots/stems with the same kind of irregular final (this is the one reported,
+# and the one confirmed against Whitney/Monier-Williams) — add to this dict, not to _VOICE_FINAL,
+# if another one turns up. Keyed on the STEM (matched as a suffix of the word-so-far, longest
+# match first — see _voice_final_char below), so a compound ending in "…vāc" (e.g. a bahuvrīhi)
+# is caught exactly as the bare word is, not just an exact-string match.
+_VOICE_FINAL_EXCEPT = {"vāc": "g"}
+
+
+def _voice_final_char(w: str) -> str:
+    """The consonant a word-final voiceless stop in `w` should voice TO before a voiced onset —
+    `_VOICE_FINAL_EXCEPT`'s lexical exceptions checked first (longest stem match), the regular
+    `_VOICE_FINAL` single-character table otherwise. "" when `w` doesn't end in a voiceable stop,
+    which callers read as "no voicing rule applies here" exactly as a failed dict lookup would."""
+    if not w:
+        return ""
+    for stem, voiced in sorted(_VOICE_FINAL_EXCEPT.items(), key=lambda kv: -len(kv[0])):
+        if w.endswith(stem):
+            return voiced
+    return _VOICE_FINAL.get(w[-1], "")
 
 
 def _starts_voiced(w: str) -> bool:
