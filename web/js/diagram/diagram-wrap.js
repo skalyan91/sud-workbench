@@ -1205,7 +1205,16 @@ function wpDraw(box){ const wp=box._wp; if(!wp) return;
   // neighbour's own centre.
   const hitR=wp.nodes.map((_,i)=>{ let minD=Infinity;
     for(let j=0;j<wp.nodes.length;j++){ if(j===i)continue; const d=Math.hypot(NX(i)-NX(j),NY(i)-NY(j)); if(d<minD)minD=d; }
-    return Math.max(2,Math.min(10,minD/2)); });   // floored at 2px so a pathologically dense run (e.g. same-depth siblings stacked near-coincident) still leaves a real, if tiny, hit target rather than vanishing
+    // …AND CLAMPED AGAINST THE ROW'S OWN REAL EDGE, on report ("overflow without wrapping when AVMs turn on",
+    // stemma/tree — traced to specifically this circle: a row-edge node's wash reaching past the container by
+    // up to the fixed 10px cap below). layout()'s own row-edge margin (inkHalf/CASE, above in this file)
+    // reserves room in NATURAL (pre-scale) coordinate space, but this radius is a FIXED, POST-SCALE pixel
+    // value — once squeezed by sx (which routinely runs well under 1 for a long sentence packed into one row;
+    // see this function's own note just above), no natural-space margin reliably buys back a fixed 10 real px
+    // on the far side of that division. Clamping directly here, against NX(i)/bw-NX(i) (the svg's own viewBox
+    // is exactly [0,bw]), is correct regardless of how compressed sx turned out to be — the wash simply can't
+    // reach past a boundary it's measured against directly.
+    return Math.max(1,Math.min(10,minD/2,NX(i),bw-NX(i))); });   // floored at 1 (not the original 2) so this clamp can actually bind for a node flush against the edge — a floor of 2 would silently override a sub-2 clamp back up past the very boundary it exists to respect
   for(let i=0;i<wp.nodes.length;i++){ const g=E("g",{class:"node"+(sel.s===wp.si&&sel.t===wp.oid[i]?" sel":""),"data-s":wp.si,"data-tok":wp.oid[i]});
     g.appendChild(E("circle",{class:"tok-hit tok-wash",cx:NX(i),cy:NY(i),r:hitR[i]}));   // node point = its own wash region
     g.style.cursor="pointer"; g.addEventListener("click",()=>pick(wp.si,wp.oid[i])); svg.appendChild(g); }
