@@ -386,13 +386,21 @@ function arcs(si){
       // times the sine (not cosine) of the arrowhead's half-angle." "Head-to-tail arcs" is this same ordinary
       // (non-root) case in this session's own established vocabulary (arcs sharing a bucket, needing fanned
       // rather than coincident endpoints — the very first fix in this whole thread).
-      // CORRECTED, on report: a flat +AEXT overshot the mark — AEXT (js/diagram/diagram-core.js: "arrowheads
-      // overshoot the endpoint a touch so the visual tip reaches it") is measured ALONG the arc's own tangent,
-      // which departs at ARC_ANGLE from horizontal, but the anchor is a purely HORIZONTAL offset — so only the
-      // overshoot's horizontal PROJECTION belongs here: AEXT*cos(ARC_ANGLE), not the full AEXT. And the
-      // root-adjacent case reverts to its original cos(ARC_ANGLE) (the sin swap above was itself wrong) — the
-      // "endpoint gap the normal gap times the cosine of the takeoff angle" the report actually specified.
-      const anchor=hasRoot?SPREAD*Math.cos(ARC_ANGLE):SPREAD*Math.sin(ARC_ANGLE)/2+AEXT*Math.cos(ARC_ANGLE);
+      // CORRECTED TWICE, on report. First: a flat +AEXT overshot the mark — AEXT (js/diagram/diagram-core.js:
+      // "arrowheads overshoot the endpoint a touch so the visual tip reaches it") is measured ALONG the arc's
+      // own tangent, which departs at ARC_ANGLE from horizontal, but the anchor is a purely HORIZONTAL offset —
+      // so only the overshoot's horizontal PROJECTION belongs here: AEXT*cos(ARC_ANGLE). The root-adjacent case
+      // reverts to its original cos(ARC_ANGLE) (the sin swap earlier was itself wrong).
+      // Second, "check this against the actual diagrams": arrowPath()'s own math, run with concrete numbers,
+      // shows the overshoot shifts a head endpoint's DRAWN apex TOWARD centre by exactly AEXT*cos(ARC_ANGLE) —
+      // ux (the direction arriving at a dependent endpoint) is always cos(ARC_ANGLE) toward centre, independent
+      // of arc height h, confirmed numerically against arrowPath() itself, not re-derived by hand. So a head
+      // endpoint's real on-screen gap is ALREADY AEXT*cos(ARC_ANGLE) narrower than its nominal anchor before any
+      // correction — subtracting (as first suggested) would double that shrinkage; the anchor needs widening to
+      // compensate. Solving 2a-AEXT*cosθ=SPREAD*sinθ (only ONE side of a genuine head-to-tail pair shifts) for a
+      // gives +AEXT*cos(ARC_ANGLE)/2 per side, not the full AEXT*cos(ARC_ANGLE) — the earlier version doubled
+      // the correction by applying it to both sides' formula while only one side's endpoint actually shifts.
+      const anchor=hasRoot?SPREAD*Math.cos(ARC_ANGLE):SPREAD*Math.sin(ARC_ANGLE)/2+AEXT*Math.cos(ARC_ANGLE)/2;
       grp.forEach((e,j)=>e.set(side*(anchor+j*SPREAD)));               // longest first (j=0) lands half a fan step off centre; each later entry fans one more SPREAD beyond it
       usedSlot[node+"|"+side]=anchor+grp.length*SPREAD; }); });
   // endpoints sit directly on the fanned targets → measure arc width (and Hobby height) from THEM
@@ -408,7 +416,7 @@ function arcs(si){
   // fan/look up, so that endpoint is the pre-reserved gap centre directly; isEmpty flags it for the draw pass.
   genericToks.forEach(i=>{ const gapAmt=genericSubjGapW(t,i), emptyX0=c[i]-w[i]/2-gapAmt/2;
     const dSide=Math.sign(emptyX0-c[i])||1, dK=(i+1)+"|"+dSide;   // shares the SAME "to" bucket any other arc landing on this predicate uses
-    const nextOff=(usedSlot[dK]??(SPREAD*Math.sin(ARC_ANGLE)/2+AEXT*Math.cos(ARC_ANGLE)))+SPREAD;   // continue one step past whatever the main fan pass last used on this side — or, if it registered nothing there at all, one step past this node's own anchor (SPREAD*sin(ARC_ANGLE)/2+AEXT*cos(ARC_ANGLE), the SAME ordinary-case anchor the main pass would have used — kept in step with its own overshoot term above)
+    const nextOff=(usedSlot[dK]??(SPREAD*Math.sin(ARC_ANGLE)/2+AEXT*Math.cos(ARC_ANGLE)/2))+SPREAD;   // continue one step past whatever the main fan pass last used on this side — or, if it registered nothing there at all, one step past this node's own anchor (SPREAD*sin(ARC_ANGLE)/2+AEXT*cos(ARC_ANGLE)/2, the SAME ordinary-case anchor the main pass would have used — kept in step with its own overshoot term above)
     usedSlot[dK]=nextOff;
     const predX=c[i]+dSide*nextOff, h=arcHgt(Math.abs(emptyX0-predX),ROW);   // the predicate is the HEAD of this subj relation, the ∅ is its dependent — X1 (tail) sits at the predicate, X2 (arrowhead) at the ∅, matching a real subj arc's head→dependent direction
     ghostArcs.push({from:i+1,to:i+1,dep:"subj",X1:predX,X2:emptyX0,mx:(emptyX0+predX)/2,h,col:relColor("subj"),isEmpty:true}); });

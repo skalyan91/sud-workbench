@@ -366,12 +366,20 @@ function fanArcs(arcs,spread,ghostArcs,rootKeys){ const ep={}; const reg=(k,len,
       // (non-root) case in this session's own established vocabulary — its anchor gains a flat +AEXT
       // (diagram-core.js: "arrowheads overshoot the endpoint a touch so the visual tip reaches it"), on top of
       // the trig gap rather than folded into it.
-      // CORRECTED, on report: a flat +AEXT overshot the mark — AEXT is measured ALONG the arc's own tangent,
-      // which departs at ARC_ANGLE from horizontal, but the anchor is a purely HORIZONTAL offset — so only the
-      // overshoot's horizontal PROJECTION belongs here: AEXT*cos(ARC_ANGLE), not the full AEXT. And the
-      // root-adjacent case reverts to its original cos(ARC_ANGLE) (the sin swap above was itself wrong) — the
-      // "endpoint gap the normal gap times the cosine of the takeoff angle" the report actually specified.
-      const anchor=(hasRoot?spread*Math.cos(ARC_ANGLE):spread*Math.sin(ARC_ANGLE)/2+AEXT*Math.cos(ARC_ANGLE));
+      // CORRECTED TWICE, on report. First: a flat +AEXT overshot the mark — AEXT is measured ALONG the arc's
+      // own tangent, which departs at ARC_ANGLE from horizontal, but the anchor is a purely HORIZONTAL offset —
+      // so only the overshoot's horizontal PROJECTION belongs here: AEXT*cos(ARC_ANGLE). The root-adjacent case
+      // reverts to its original cos(ARC_ANGLE) (the sin swap earlier was itself wrong).
+      // Second, "check this against the actual diagrams": arrowPath()'s own math, run with concrete numbers,
+      // shows the overshoot shifts a head endpoint's DRAWN apex TOWARD centre by exactly AEXT*cos(ARC_ANGLE) —
+      // ux (the direction arriving at a dependent endpoint) is always cos(ARC_ANGLE) toward centre, independent
+      // of arc height h, confirmed numerically against arrowPath() itself, not re-derived by hand. So a head
+      // endpoint's real on-screen gap is ALREADY AEXT*cos(ARC_ANGLE) narrower than its nominal anchor before any
+      // correction — subtracting (as first suggested) would double that shrinkage; the anchor needs widening to
+      // compensate. Solving 2a-AEXT*cosθ=spread*sinθ (only ONE side of a genuine head-to-tail pair shifts) for a
+      // gives +AEXT*cos(ARC_ANGLE)/2 per side, not the full AEXT*cos(ARC_ANGLE) — the earlier version doubled
+      // the correction by applying it to both sides' formula while only one side's endpoint actually shifts.
+      const anchor=(hasRoot?spread*Math.cos(ARC_ANGLE):spread*Math.sin(ARC_ANGLE)/2+AEXT*Math.cos(ARC_ANGLE)/2);
       grp.forEach((e,j)=>e.set(side*(anchor+j*spread))); }); }); }
 // cubic control points for an arc bump from (x1,base) to (x2,base) of height h: each control sits at height h
 // above its endpoint and cot(θ)·h inward, so the take-off tangent makes θ with the baseline. Apex is 0.75·h.
