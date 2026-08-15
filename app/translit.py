@@ -1435,24 +1435,45 @@ def sandhi_to_script(forms, lang: str, scheme: str = "", lemmas=None, word_sep: 
 
 
 # Item 15: word-final voiceless stop → its voiced counterpart before a following voiced sound.
-# The five IAST voiceless stops and their voiced pairs: k→g, c→j, ṭ→ḍ, t→d, p→b.  A word-final
-# member voices before a vowel or a voiced consonant (e.g. ``sat ādi`` → ``sadādi``); before a
-# voiceless sound or a pause it stays voiceless.  (Whitney §159; learnsanskrit.org consonant-sandhi.)
-_VOICE_FINAL = {"k": "g", "c": "j", "ṭ": "ḍ", "t": "d", "p": "b"}
+# k→g, ṭ→ḍ, t→d, p→b directly; c is NOT a direct c→j (see the correction note right below) — its
+# entry maps to g, the same target k reaches, because a word-final c has ALREADY reduced to k
+# before this table is ever consulted (Whitney §142: "No palatal is allowed as final. The च् c
+# reverts to its original क् k" — e.g. vā́k from vāc) — voicing that k before a following voiced
+# sound is what actually produces g, not a direct c→j step that was never a real rule at all.
+# A word-final member voices before a vowel or a voiced consonant (e.g. ``sat ādi`` → ``sadādi``);
+# before a voiceless sound or a pause it stays voiceless. (Whitney §142/§159.)
+#
+# CORRECTED, not merely special-cased, on report ("vāc comes out as vāj... should be vāg"): the
+# first pass at this fix (still visible in git history) treated vāc as a LEXICAL EXCEPTION to an
+# otherwise-correct "c→j" general rule, on the assumption most -c nouns really do voice to j (the
+# "sanity check" then run, samrāc+iva → samrājiva, seemed to confirm this) — but that assumption
+# doesn't survive a check against Whitney's grammar. §142 states the c→k reversion as a BLANKET
+# rule for every word-final c, with no lexical exceptions given for c specifically (unlike j, see
+# below) — and "samrāc" was never itself a real Sanskrit word-form to test against in the first
+# place (the actual citation form is "samrāj", j-final, not c-final — see the note on that word
+# below). vāc was never an irregular lexeme; the TABLE's own general c→j entry was the error, and
+# fixing it here closes the gap for every -c stem at once, not just this one reported word.
+#
+# j-final stems are a GENUINELY separate, harder question this fix does NOT attempt. Whitney §142,
+# immediately following the c rule above: "The ज् j either reverts to its original guttural
+# [k/g — bhiṣáj → bhiṣak] or becomes ṭ [→ ḍ — virā́j → virāṭ]", and WHICH of the two depends on
+# each stem's own etymology (a bound, lexically-conditioned split, not a rule a phonological table
+# can express any more than the old c→j one could) — samrāj (sam+√rāj, the same root as virāj)
+# patterns with the ṭ/ḍ set, not the k/g one, on the same evidence. None of this is implemented:
+# _VOICE_FINAL only voices an ALREADY-UNVOICED final, and j is voiced already, so it was never in
+# scope for this table at all — a stored "…rāj"/"…vaṇij" form reaching a pause or a following
+# voiceless sound needs a REDUCTION step (kutva/ṭatva) this pipeline doesn't have anywhere, not a
+# voicing one. Flagged here rather than guessed at: a wrong per-word classification would be worse
+# than the current (silent, unreduced) behaviour, and correctly classifying more than the two
+# examples Whitney himself gives needs a real etymological dictionary, not general recall.
+_VOICE_FINAL = {"k": "g", "c": "g", "ṭ": "ḍ", "t": "d", "p": "b"}
 
-# On report: "vāc comes out as vāj in certain sandhi contexts. This form should never appear — it
-# should be vāg." _VOICE_FINAL's c→j is the REGULAR pattern (most -c nouns really do voice that
-# way — e.g. samrāj), but a small, closed set of stems are lexical exceptions: vāc (speech, √vac)
-# voices to vāg, not vāj, because the root's OWN final consonant patterns as a velar for sandhi
-# purposes across its whole paradigm (vāk / vāc / vāg — the alternation √vac itself shows, not the
-# ordinary c/j one every other -c stem has) — a fact about this one lexeme's phonological history,
-# not something a single-character voicing table can express. Not exhaustive: Sanskrit has a
-# further handful of roots/stems with the same kind of irregular final (this is the one reported,
-# and the one confirmed against Whitney/Monier-Williams) — add to this dict, not to _VOICE_FINAL,
-# if another one turns up. Keyed on the STEM (matched as a suffix of the word-so-far, longest
-# match first — see _voice_final_char below), so a compound ending in "…vāc" (e.g. a bahuvrīhi)
-# is caught exactly as the bare word is, not just an exact-string match.
-_VOICE_FINAL_EXCEPT = {"vāc": "g"}
+# Retained as general-purpose infrastructure (a longest-stem-suffix override ahead of the plain
+# per-character table) for whatever FUTURE single-lexeme irregularity gets reported and doesn't fit
+# _VOICE_FINAL's one-character shape — empty for now, since correcting the general c rule above
+# resolved the one case that lived here (vāc no longer needs a special entry: the corrected general
+# rule already gives it "g", the same as every other -c stem).
+_VOICE_FINAL_EXCEPT = {}
 
 
 def _voice_final_char(w: str) -> str:
