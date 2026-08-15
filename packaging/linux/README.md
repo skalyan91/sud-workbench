@@ -311,7 +311,7 @@ Status: install ok installed
 Priority: optional
 Section: editors
 Installed-Size: 21156
-Maintainer: Sunflower AI <packaging@sunflowerai.io>
+Maintainer: Siva Kalyan
 Architecture: all
 Version: 0.1.0
 Depends: python3 (>= 3.12), python3-venv, python3-gi, python3-gi-cairo, python3-cairo,

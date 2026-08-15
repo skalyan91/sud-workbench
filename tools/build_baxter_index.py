@@ -75,7 +75,7 @@ OUT = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
                    "app", "data", "baxter_sagart.tsv")
 
 # Wikimedia rejects the stdlib default UA outright, so a real one is required for the fetch.
-_UA = "sud-workbench build_baxter_index.py (https://github.com/SunflowerAI; siva@sunflowerai.io)"
+_UA = "sud-workbench build_baxter_index.py (https://github.com/skalyan91/sud-workbench)"
 
 _CELLS = 9   # TC SC PY MC MCI MCF MCT OC Gloss — a run of any other length is not an entry
 

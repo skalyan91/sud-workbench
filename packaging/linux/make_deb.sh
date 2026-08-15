@@ -42,11 +42,10 @@ LINUX_OUT="$OUT_DIR/linux"
 PKGROOT="$LINUX_OUT/$PKGDIR_NAME"
 DEBFILE="$LINUX_OUT/${PKGDIR_NAME}.deb"
 
-# The maintainer field is a placeholder — there is no dedicated packaging inbox for this project
-# yet. Namespaced the same way the bundle id is on the other two platforms
-# (io.sunflowerai.sudworkbench, see make_bootstrap_app.sh/make_win_app.py) so the three platforms'
-# package identities read as one project's, not three unrelated ones.
-MAINTAINER="Sunflower AI <packaging@sunflowerai.io>"
+# The maintainer field is a placeholder — there is no dedicated packaging inbox for this project,
+# and no email address is put here on request. A plain name is valid Debian policy (the angle-
+# bracket <email> is conventional, not mandatory — dpkg-deb doesn't reject its absence).
+MAINTAINER="Siva Kalyan"
 
 # ── system runtime deps, verified against real Ubuntu 24.04 (noble) package metadata — NOT guessed ──
 # See packaging/linux/README.md for the actual apt-cache/packages.ubuntu.com transcript this was
@@ -245,7 +244,7 @@ Installed-Size: $INSTALLED_SIZE
 Depends: $DEPENDS
 Recommends: $RECOMMENDS
 Maintainer: $MAINTAINER
-Homepage: https://github.com/SunflowerAI/sud-workbench
+Homepage: https://github.com/skalyan91/sud-workbench
 Description: Dependency treebank editor for CoNLL-U / SUD
  A native-feeling desktop app for viewing and editing dependency treebanks in
  CoNLL-U, speaking SUD (Surface-syntactic Universal

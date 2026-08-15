@@ -54,7 +54,7 @@ Summary:        Desktop editor for SUD/UD/mSUD dependency treebanks in CoNLL-U
 # vendored component actually named in THIRD-PARTY-NOTICES.md (Baxter-Sagart data, tshet-uinh data,
 # the fastText LID model, …) carries its own compatible-with-redistribution licence.
 License:        MIT
-URL:            https://github.com/SunflowerAI/sud-workbench
+URL:            https://github.com/skalyan91/sud-workbench
 # Group: is obsolete on Fedora (dropped from the packaging guidelines years ago) and unused by dnf,
 # but kept commented here for anyone rebuilding this spec against an older RPM-based distro that
 # still expects it (RHEL/CentOS 7-era tooling): Group: Applications/Education
@@ -211,23 +211,23 @@ update-desktop-database %{_datadir}/applications &>/dev/null || :
 gtk-update-icon-cache %{_datadir}/icons/hicolor &>/dev/null || :
 
 %changelog
-* Sat Aug 15 2026 Siva Kalyan <siva@sunflowerai.io> - 0.3.2-1
+* Sat Aug 15 2026 Siva Kalyan - 0.3.2-1
 - Arc-endpoint fan-anchor geometry re-derived so adjacent arc/arrowhead
   casings land exactly tangent, replacing several rounds of trig-factor
   tuning with a single closed-form solve shared by both diagram views.
   See CHANGELOG.md.
-* Sat Aug 15 2026 Siva Kalyan <siva@sunflowerai.io> - 0.3.1-1
+* Sat Aug 15 2026 Siva Kalyan - 0.3.1-1
 - Fix adwaita-kit/ (this package's own chrome) rendering completely unstyled: its
   two stylesheets @import'd macos-kit/, which this very package deliberately
   strips (SF-Symbols licensing). New web/chrome-shared/ gives both kits a base
   neither strips. See CHANGELOG.md.
-* Sat Aug 15 2026 Siva Kalyan <siva@sunflowerai.io> - 0.3.0-1
+* Sat Aug 15 2026 Siva Kalyan - 0.3.0-1
 - Full dependency licensing audit and disclosure, grew fetched on demand, CAMeL
   Tools removed, SF Symbol icons no longer committed as base64 (rendered at
   packaging time instead, purged from git history). Arc-endpoint trig retune,
   titlebar/editing polish. See CHANGELOG.md.
-* Fri Aug 14 2026 Siva Kalyan <siva@sunflowerai.io> - 0.2.0-1
+* Fri Aug 14 2026 Siva Kalyan - 0.2.0-1
 - AVM (attribute-value matrix) tier, HarfBuzz native glyph shaping, Arabic/Persian
   vocalisation, titlebar/chrome overhaul, wrapped-diagram layout fixes. See CHANGELOG.md.
-* Tue Aug 11 2026 Siva Kalyan <siva@sunflowerai.io> - 0.1.0-1
+* Tue Aug 11 2026 Siva Kalyan - 0.1.0-1
 - Initial RPM packaging: bootstrap-venv distribution model, matching macOS/Windows.

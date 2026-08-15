@@ -1,6 +1,6 @@
 Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
 Upstream-Name: sud-workbench
-Source: https://github.com/SunflowerAI/sud-workbench
+Source: https://github.com/skalyan91/sud-workbench
 
 Files: *
 Copyright: 2026 Siva Kalyan
