@@ -200,16 +200,21 @@ function stemma(si,{proj,catNodes}){
       const glbl=E("text",{class:"node-lbl",x:ge.emptyX,y:by+TOK_Y_LOWER+NODE_Y_EXTRA}); glbl.textContent="∅"; g.appendChild(glbl);   // the ∅ is a virtual TOKEN, so it lowers with every real one; its box stays on the layout baseline like theirs
       svg.appendChild(g); boxes.push({x:ge.emptyX,y:by-6,hx:8,hy:9}); });
     mwtTie(svg,c,bformW,D,belowBot,loBoxes(boxes),si); }   // item 22: per-token belowBot (not a sentence-wide max) — each tie seats off only the tokens it spans, so an AVM-heavy token elsewhere in the sentence can no longer push an unrelated tie down with it
-  // edges as ONE cased unit: pre-compute each stroke path + arrowhead, then draw ALL their casings first (a single
-  // layer behind every edge → the edge-set occludes the tokens/proj-lines behind it cleanly, but edges DON'T case
-  // against each OTHER), then the strokes + arrowheads on top (per-edge groups keep click/selection). Item 21.
+  // edges PER-EDGE cased, in their existing sorted z-order (subj, then comp, mod, other — see the `edges.sort`
+  // above): each edge's own casing draws directly behind ITS OWN stroke/arrowhead, in one group, so a LATER edge's
+  // casing halo cleanly occludes an EARLIER edge's stroke wherever the two cross — not just the tokens/proj-lines
+  // behind the edge set as a whole. On report ("in stemmas, decollision isn't happening when two edges cross
+  // over"): this used to draw ALL casings in one combined layer BEFORE any stroke ("edges as ONE cased unit" —
+  // deliberate at the time, explicitly documented as NOT casing edges against each other), so at a genuine
+  // mid-path crossing (as opposed to two edges merely converging on a shared node, which reads cleanly either
+  // way) neither edge's casing ever sat between the two strokes — they just overlapped as two bare crossing
+  // lines. Item 21.
   edges.forEach(e=>{ e._ink=arcInk(relColor(e.rel)); let a1=[c[e.d],e.y1], a2=[c[e.h],e.y2];
     if(show.arrows){const dir=arrowDir(e.rel); if(dir){const tip=dir==="dep"?a1:a2,frm=dir==="dep"?a2:a1;
       e._ah=arrowPath(frm,tip,5.25); e._ahc=e._ah; if(dir==="dep") a1=backoff(tip,frm,5.25); else a2=backoff(tip,frm,5.25);}}   // the casing head is the SAME head, same `d` as ._ah — the outward halo is now a round stroke (.ah-casing, styles/app.css) rather than a second, larger, hand-mitred polygon, so there is nothing left for a second arrowPath call to compute; see AH_MITRE's own comment for why the old approach (a bigger `s`, then a mitred outset) is now dead code kept for its math, not its call sites
     e._d=`M ${a1[0]} ${a1[1]} L ${a2[0]} ${a2[1]}`; });
-  { const cg=E("g",{class:"edge-cases"}); cg.setAttribute("aria-hidden","true");   // combined casing behind all edges + arrowheads
-    edges.forEach(e=>{ cg.appendChild(E("path",{class:"arc-casing",d:e._d})); if(e._ahc) cg.appendChild(E("path",{class:"ah-casing",d:e._ahc})); }); svg.appendChild(cg); }
   edges.forEach(e=>{ const g=E("g",{class:"edge-g","data-s":si,"data-dep":OID(e.d),"data-head":OID(e.h)});
+    g.appendChild(E("path",{class:"arc-casing",d:e._d})); if(e._ahc) g.appendChild(E("path",{class:"ah-casing",d:e._ahc}));   // this edge's OWN casing, immediately behind its OWN stroke/arrowhead below — not a shared earlier layer
     if(e._ah) g.appendChild(E("path",{class:"ah",d:e._ah,fill:e._ink}));
     g.appendChild(E("path",{class:"edge"+(isMorphRel(e.rel)?" morph-edge":""),d:e._d,stroke:e._ink}));
     g.style.cursor="pointer"; g.addEventListener("click",()=>pick(si,OID(e.d))); svg.appendChild(g);});
