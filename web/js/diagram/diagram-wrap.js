@@ -307,99 +307,61 @@ function arcHgt(width,ROW){ return Math.abs(width)*ARC_K; }
 // casing (half-width = (arc-stroke+3.5)/2) clear of a neighbour's body (half-width = arc-stroke/2, + 1px margin),
 // the horizontal step must be that gap divided by sinθ.
 function fanStep(){ const st=parseFloat(css("--arc-stroke"))||1.7; return ((st+3.5)/2 + st/2 + 1)/Math.sin(ARC_ANGLE); }
-// Fan the endpoints of arcs meeting at a shared node: LONGER spans sit more central than shorter ones
-// wherever two or more share a side (the incoming edge to this node's own head is not special-cased into
-// the centre slot any more — see the matching, more fully-commented block in arcs(), js/diagram/
-// diagram-render.js, which this mirrors so the fan can't drift between the flat and wrapped/bracket
-// views). A side with no edge eligible for the centre slot still fans outward from one step out, exactly
-// as before. THE one routine every arc/bracket view calls. Each arc a carries head-key hk, dep-key dk,
-// head-x xh, dep-x xd and length len (any monotone-in-width measure); it is mutated with offH / offD, the
-// horizontal endpoint offsets.
+// Fan the endpoints of arcs meeting at a shared node: LONGER spans sit further from the node's own edge
+// than shorter ones wherever two or more share a side. THE one routine every arc/bracket view calls. Each
+// arc a carries head-key hk, dep-key dk, head-x xh, dep-x xd, head-width wh, dep-width wd and length len
+// (any monotone-in-width measure); it is mutated with offH / offD, the horizontal endpoint offsets.
+//
+// ⚠️ SUPERSEDES 29c3130/e8bf96f/4147e31's OWN SHARED TARGET — not a bug-fix on top of them. All three
+// rounds tuned WHEN a solo or uncontested side was allowed to land at dead centre (offset 0, the node's own
+// x); none ever questioned WHETHER it should. On report: "arc endpoints should always be arranged such that
+// an incoming arc lands on the left if it comes in from the left, and lands on the right if it comes in from
+// the right; currently incoming edges always land in the centre … this also applies to endpoints (both
+// incoming and outgoing) of cross-line arcs, despite what I said earlier" — an EXPLICIT, ACKNOWLEDGED
+// reversal of the premise 29c3130 itself was built on (a cross-line arc's sole endpoint centring was that
+// commit's own original fix — see this function's git history for the exact prior text), not a bug in any of
+// the three rounds' own implementation of that premise.
+//
+// THE NEW ANCHOR: literally the node's own edge, not an arbitrary step off centre. Every registration now
+// carries `w`, the width of THE NODE THIS BUCKET BELONGS TO (not the arc's other endpoint — a caller passes
+// wh for a head-role registration, wd for a dependent-role one, mirroring how xh/xd already work) — arcs()'s
+// own `w[i]` (the SVG views' per-token SLOT reservation, already the figure genericSubjGapW's own layout
+// treats as "this token's real half-width") for arcsWrapped/brackets, or a DOM `.bwform`'s real offsetWidth
+// for the wrapped-bracket views (document.js). A side's innermost entry (j=0, the longest span in that
+// bucket) lands at `side*w/2` — literally that node's own left/right EDGE, the plain reading of "lands on the
+// left": AT the edge, not merely left-of-centre. Every later entry in the same bucket still fans a further
+// `spread` beyond that anchor (j=1,2,…) — e8bf96f/4147e31's own still-correct insight, that two arcs sharing
+// a bucket must never land on the exact same pixel, is UNCHANGED; only the point the whole bucket fans FROM
+// moved off centre.
+//
+// This also *subsumes* all three rounds' fixes rather than needing their own hasCentral/solo/opp bookkeeping
+// preserved: since neither side's own innermost slot is ever `0` (dead centre) any more — it's the node's
+// own half-width toward that side, strictly >0 for any real glyph — the two sides of one node can never
+// collide (they anchor at −w/2 and +w/2, a full node-width apart) and a solo side can never collide with an
+// unrelated neighbour on the far side either (nothing on the far side ever competes for a coordinate this
+// side no longer targets). `hasCentral`/`solo`/`opp` are gone: they existed only to gate access to the
+// offset-0 slot, and that slot no longer exists for a real ±1 side (only the explicit side-0 sentinel below
+// still uses it, and it was never gated by any of them).
+//
 // item 7 (WRAPPED views — mirrors 84e7938's flat-view fix to arcs()/stemma(), js/diagram/diagram-render.js):
 // an OPTIONAL third arg, ghostArcs, registers ghost endpoints into this SAME per-node pool, BEFORE the one
 // sort/assign pass below runs, instead of a separate LATER pass (fanGhostArcs) unconditionally fanning every
 // ghost outside whatever the reals already claimed — which always lost to a real arc regardless of relative
 // length. Folded into the SAME pool, a real and a ghost sharing an endpoint are ranked by length together, on
-// equal footing, so whichever is actually longer lands closer to centre. A ghost is never `central` (never
-// itself eligible for the dead-centre slot) — but exactly as for two competing REAL edges, `central` only
-// GATES whether slot 0 is in play on a side at all; it does not reserve slot 0 for any one edge, so a
-// sufficiently long ghost can still land in slot 0 if nothing real on that side is longer. Ghost items need
-// the SAME {hk,dk,hkey?,dkey?,xh,xd} shape a real arc does; `len` defaults to |xd-xh| when absent (mirrors
+// equal footing, so whichever is actually longer lands closer to the node's own edge. Ghost items need the
+// SAME {hk,dk,hkey?,dkey?,xh,xd,wh?,wd?} shape a real arc does; `len` defaults to |xd-xh| when absent (mirrors
 // fanGhostArcs' own convention — none of this file's ghost-fan call sites compute one explicitly).
-function fanArcs(arcs,spread,ghostArcs){ const ep={}; const reg=(k,len,side,central,set)=>{(ep[k]=ep[k]||[]).push({len,side,central,set});};
-  arcs.forEach(a=>{ reg(a.hkey??a.hk,a.len,Math.sign(a.xd-a.xh)||1,false,o=>a.offH=o);   // this node is the head → outgoing edge fans. a.hkey/a.dkey override only the FAN-BUCKET key (not a.hk/a.dk, which are read downstream) so a cross-line arc's UPPER-line endpoint can bucket with the bottom-of-line endpoints instead of the top-side ones at the same token
-                    reg(a.dkey??a.dk,a.len,Math.sign(a.xh-a.xd)||1,true, o=>a.offD=o); }); // this node is the dependent → incoming edge is eligible for the centre slot on ITS side (see above)
-  (ghostArcs||[]).forEach(a=>{ const len=a.len??Math.abs(a.xd-a.xh);   // a ghost registers on BOTH sides with central:false — never eligible for slot 0 itself, only ever ranked into it by length like any other pool member
-    reg(a.hkey??a.hk,len,Math.sign(a.xd-a.xh)||1,false,o=>a.offH=o);
-    reg(a.dkey??a.dk,len,Math.sign(a.xh-a.xd)||1,false,o=>a.offD=o); });
-  Object.values(ep).forEach(arr=>{ arr.filter(e=>e.central&&e.side===0).forEach(e=>e.set(0));   // a side-0 sentinel (no caller currently registers one, but arcs() reserves it for the root stub) — always centre, never ranked
-    [-1,1].forEach(side=>{ const grp=arr.filter(e=>e.side===side).sort((p,q)=>q.len-p.len);   // this side's whole pool — real AND ghost together — ranked by length alone
-      const hasCentral=grp.some(e=>e.central);   // only a side that actually hosts a REAL head edge is ever eligible for the dead-centre slot — a side with no head edge still fans from one step out
-      // on report — "when the top endpoint of a cross-line arc is the only one at the bottom of a node, it
-      // should land in the centre, not to the left or right". Traced to HERE: hasCentral only ever turns true
-      // via a DEPENDENT-role registration (this node is on the receiving end of an edge, central:true) — a
-      // node whose ONLY edge on this side is its own OUTGOING one (central:false, e.g. a wrapped cross-line
-      // arc's UPPER/head endpoint, bucketed here via the "B"+hk key — see this function's own hkey/dkey note
-      // above) never gets hasCentral, so even the SOLE entry on the side was pushed a full fan-step off-centre
-      // by the `j+1` branch below — there being nothing else on that side for it to fan away from. Verified
-      // live (CDP): a projective chain sentence, wrapped narrow enough that every inter-token edge crosses a
-      // row boundary — the DEPENDENT (lower) endpoint of every such arc landed exactly on its token's centre
-      // (byte-identical x), while the HEAD (upper) endpoint sat a full fanStep() (~8.26px) to one side, on a
-      // node with no other arc/ghost sharing that bucket — reproduced identically in the FLAT (unwrapped) view
-      // too, since arcs() (diagram-render.js) mirrors this same rule (a root's own sole child, or any chain
-      // node's sole outgoing edge, showed the identical ~8.26px offset). A side with genuine competition
-      // (grp.length>1) is untouched — length-ranking among real contenders still decides who gets slot 0.
-      //
-      // ⚠ THAT UNCONDITIONAL "solo → centre" RULE WAS ITSELF A REGRESSION, on a DIFFERENT report — "the
-      // 'brought → nation' edge doesn't fan with the 'nation → conceived' edge" (samples/english.conllu s3,
-      // wrapped arcs). Node "nation" is the DEPENDENT of a cross-line comp:obj arc from "brought" (its side
-      // already hasCentral, centred both before and after the fix above — untouched) AND, on its OTHER side,
-      // the sole HEAD of a within-line mod arc to "conceived" — exactly the "solo, nothing to fan away from"
-      // shape the rule above targets, so it now ALSO centres. Measured live (CDP), both before and after:
-      // comp:obj's arrowhead and mod's tail sit ~6.8px apart pre-fix (a visible gap — the two edges read as
-      // separate strokes meeting near, not AT, the node) and ~1.5px apart post-fix (the residual is only the
-      // arrowhead casing's own triangular shape — the two edges' true anchors are BYTE-IDENTICAL x). The two
-      // unrelated edges collapse onto the exact same point, which reads as the edges failing to fan APART
-      // rather than fanning correctly — the opposite of what "solo → centre" was written to produce.
-      // The distinguishing signal from the ORIGINAL bug: there, the solo side's own "nothing to fan away
-      // from" was the WHOLE story — the node's other side (if populated at all) was a separate, unrelated
-      // concern (a different token's own row-boundary bucket, or simply empty). Centring never had anything
-      // to collide WITH. Here, "nation"'s solo side has real competition sitting on the node's OTHER side —
-      // three edges (comp:obj, det, mod-to-"new"), already ranked and centred by hasCentral — and forcing the
-      // lone edge on the far side to that SAME point is what creates the pinch. Fixed (at the time) by
-      // requiring BOTH sides uncontested: `solo` required the OPPOSITE side to carry AT MOST ONE entry, not
-      // just this one.
-      //
-      // ⚠ AND *THAT* CONDITION WAS ITSELF STILL TOO LOOSE, on a THIRD report — "when arcs are joined
-      // head-to-tail, their endpoints should be fanned, not coincident!" A node whose OTHER side carries
-      // EXACTLY one entry is precisely "a true 1-in/1-out chain link" — this node is the DEPENDENT of one real
-      // edge on one side (central:true, always centred anyway via `hasCentral`, untouched by any of this) and,
-      // on the OTHER side, the sole HEAD of a second real edge (central:false) — i.e. two arcs "joined
-      // head-to-tail" at exactly this node. `opp.length<=1` treated that far side's one real edge as
-      // uncontested enough to also unlock this side's centre slot — so the outgoing edge's TAIL landed on the
-      // exact same point the incoming edge's ARROWHEAD already occupies: byte-identical x AND y (same node,
-      // same baseline), which is not "un-pinched", it is the two edges literally touching at one pixel — read
-      // as one continuous stroke running through the node rather than two arcs that happen to meet there. The
-      // same shape recurs with no dependent at all: a root with exactly two children, one fanning each way
-      // (root has no incoming edge, so hasCentral is false on BOTH sides) — both children used to centre onto
-      // the root's own position and so onto EACH OTHER, e.g. samples/english.conllu s4 "The old man and woman
-      // died[root]": subj→"man" and punct→"." split one per side and collapsed onto the same point. Measured
-      // live (CDP) across samples/english.conllu, samples/la_virgil.conllu and samples/brihat_jataka.conllu: 43
-      // such exact-coincidence nodes (offset 0 shared by two unrelated real edges) across those three files
-      // alone, all either a plain chain link or a two-child root — this is not a rare shape, it's the ORDINARY
-      // shape of most interior nodes in most sentences. `solo` now requires the opposite side be genuinely
-      // EMPTY (no entry at all), not merely "at most one" — a side with truly nothing on the other side (the
-      // ORIGINAL cross-line case: a wrapped arc's own "B"+hk bucket is a key no other registration ever shares,
-      // so its opposite side is always 0, unaffected either way) still centres, since there is nothing to fan
-      // against; a side facing so much as ONE real edge on the other side now fans out by a step instead of
-      // colliding with it — exactly like a side already facing multi-edge competition. Re-verified live: the
-      // ORIGINAL cross-line case still centres byte-exact; "nation"'s mod arc (the e8bf96f regression case)
-      // still fans back out, unchanged (its opposite side has three entries, well past either threshold); the
-      // chain-link and two-child-root cases that used to collide now land one fanStep() apart, matching the
-      // spacing every OTHER kind of fan competition in this app already uses.
-      const opp=arr.filter(e=>e.side===-side);
-      const solo=grp.length===1&&opp.length===0;
-      grp.forEach((e,j)=>e.set(side*((hasCentral||solo)?j:j+1)*spread)); }); }); }
+function fanArcs(arcs,spread,ghostArcs){ const ep={}; const reg=(k,len,side,w,set)=>{(ep[k]=ep[k]||[]).push({len,side,w,set});};
+  arcs.forEach(a=>{ reg(a.hkey??a.hk,a.len,Math.sign(a.xd-a.xh)||1,a.wh||0,o=>a.offH=o);   // this node is the head → outgoing edge fans, anchored at ITS OWN node's own edge. a.hkey/a.dkey override only the FAN-BUCKET key (not a.hk/a.dk, which are read downstream) so a cross-line arc's UPPER-line endpoint can bucket with the bottom-of-line endpoints instead of the top-side ones at the same token
+                    reg(a.dkey??a.dk,a.len,Math.sign(a.xh-a.xd)||1,a.wd||0,o=>a.offD=o); }); // this node is the dependent → incoming edge fans the same way, anchored at ITS OWN node's edge (no longer centre-eligible — see block comment)
+  (ghostArcs||[]).forEach(a=>{ const len=a.len??Math.abs(a.xd-a.xh);   // a ghost registers on BOTH sides — ranked into the pool by length like any other member, same anchor rule as a real edge
+    reg(a.hkey??a.hk,len,Math.sign(a.xd-a.xh)||1,a.wh||0,o=>a.offH=o);
+    reg(a.dkey??a.dk,len,Math.sign(a.xh-a.xd)||1,a.wd||0,o=>a.offD=o); });
+  Object.values(ep).forEach(arr=>{ arr.filter(e=>e.side===0).forEach(e=>e.set(0));   // a side-0 sentinel (no caller currently registers one, but arcs() reserves it for the root stub) — always centre, never ranked: it isn't "on a side" at all, so the edge-anchor rule below doesn't apply to it
+    [-1,1].forEach(side=>{ const grp=arr.filter(e=>e.side===side).sort((p,q)=>q.len-p.len);   // this side's whole pool — real AND ghost together — ranked by length alone; longest first (j=0) → nearest the node's own edge
+      if(!grp.length) return;
+      const anchor=Math.max(0,...grp.map(e=>e.w))/2;   // this bucket's own node's own half-width (every entry here shares the same underlying node, so the same anchor) — the node's own EDGE, toward `side`
+      grp.forEach((e,j)=>e.set(side*(anchor+j*spread))); }); }); }
 // cubic control points for an arc bump from (x1,base) to (x2,base) of height h: each control sits at height h
 // above its endpoint and cot(θ)·h inward, so the take-off tangent makes θ with the baseline. Apex is 0.75·h.
 function arcCtrl(x1,x2,base,h){ const sgn=Math.sign(x2-x1)||1, dx=ARC_COT*h;
@@ -727,14 +689,14 @@ function arcsWrapped(si){
   // Cross-line arcs (head + dependent on DIFFERENT wrapped rows, so the arc spans the inter-row gap).
   const crossArcs=[];
   for(let i=0;i<n;i++){ const h=heads[i]-1; if(h<0)continue; if(rowOf(i)===rowOf(h))continue;
-    crossArcs.push({dk:i,hk:h,len:Math.abs(i-h)}); }
+    crossArcs.push({dk:i,hk:h,len:Math.abs(i-h),wh:w[h],wd:w[i]}); }   // wh/wd: the fan anchor is each endpoint's OWN node width (w[], the sentence-wide slot array above — a token's width doesn't depend on which row it lands in) — see fanArcs' own note, diagram-wrap.js
   // Item 16: ONE combined endpoint fan per token across BOTH within-line and cross-line arcs. A token where a
   // cross-line arc lands (on line N+1) is ALSO shared by that line's within-line arcs; folding every arc — within-line
   // (from ALL rows) AND cross-line — into a SINGLE fanArcs pass keyed by GLOBAL token index means the shared token
   // gets ONE combined fan, so its cross-line and within-line endpoints don't overlap and their take-off angles stay
   // consistent. Uses each token's absolute x (NX); offsets are horizontal → placement-independent, computed once here.
   const fanAll=[];
-  rows.forEach(r=>r.arcsIn.forEach(a=>{ a.hk=a.head; a.dk=a.dep; a.xh=NX(a.head); a.xd=NX(a.dep); a.len=Math.abs(a.dep-a.head); fanAll.push(a); }));
+  rows.forEach(r=>r.arcsIn.forEach(a=>{ a.hk=a.head; a.dk=a.dep; a.xh=NX(a.head); a.xd=NX(a.dep); a.len=Math.abs(a.dep-a.head); a.wh=w[a.head]; a.wd=w[a.dep]; fanAll.push(a); }));
   crossArcs.forEach(a=>{
     const iUp=rowOf(a.dk).ord<rowOf(a.hk).ord;   // is the DEPENDENT the upper-line token?
     if(iUp) a.dkey="B"+a.dk; else a.hkey="B"+a.hk;   // Item 1: the cross-line arc's UPPER-line endpoint sits at the BOTTOM of that line (NBOT); give it a bottom-side fan bucket ("B"+token) so it fans ONLY against other cross-line bottom-endpoints there — never the within-line TOP-side endpoints sharing that token (Item 16's single combined fan wrongly spread it against them). The LOWER end keeps its plain token key → still fans with that line's within-line arcs (same, top side).
@@ -773,7 +735,7 @@ function arcsWrapped(si){
   // nothing like their true relative length, so the ghost won the centre slot unconditionally regardless of
   // which was actually longer — the identical bug this whole fix exists to remove, reintroduced through a unit
   // mismatch instead of a missing sort.
-  const ghostFan=ghostPairs.map(p=>{ const a={hk:p.oh,dk:p.i,xh:NX(p.oh),xd:NX(p.i),len:Math.abs(p.oh-p.i)};
+  const ghostFan=ghostPairs.map(p=>{ const a={hk:p.oh,dk:p.i,xh:NX(p.oh),xd:NX(p.i),len:Math.abs(p.oh-p.i),wh:w[p.oh],wd:w[p.i]};
     if(rowOf(p.oh)!==rowOf(p.i)){ const iUp=rowOf(p.i).ord<rowOf(p.oh).ord; if(iUp) a.dkey="B"+a.dk; else a.hkey="B"+a.hk; }   // item 1's own cross-line bucket split, applied to ghosts too
     return a; });
   fanArcs(fanAll,SPREAD,ghostFan);   // sets offH/offD on every within-line AND cross-line arc AND every ghost, from the same per-token fan
@@ -1645,16 +1607,16 @@ function brackets(si){
       holes.forEach(([hL,hR])=>{ if(hL>cur) segs.push([cur,hL]); cur=Math.max(cur,hR); });
       if(c2.x+4>cur) segs.push([cur,c2.x+4]);
       segs.forEach(([x0,x1])=> svg.appendChild(E("rect",{x:x0,y:wy+TOK_Y_LOWER-13,width:x1-x0,height:16,rx:5,fill:col,"fill-opacity":0.15,"pointer-events":"none"}))); } }   // the wash backlights the FORM/BRACKET row, both of which draw on the lowered baseline (see TOK_Y_LOWER, js/diagram/diagram-core.js), so it rides with them
-  // fan the interrupter-arc endpoints with the shared routine (the SAME fan arc view uses): the arc into an
-  // interrupter sits central, arcs out of a shared head fan out, shortest outermost, one step
-  const npReal=np.filter(a=>a.h>=0&&a.h<n).map(a=>Object.assign(a,{hk:a.h,dk:a.d,xh:wx[a.h],xd:wx[a.d],len:Math.abs(a.d-a.h)}));
+  // fan the interrupter-arc endpoints with the shared routine (the SAME fan arc view uses): longer spans sit
+  // further from each node's own edge than shorter ones, one fanStep() apart
+  const npReal=np.filter(a=>a.h>=0&&a.h<n).map(a=>Object.assign(a,{hk:a.h,dk:a.d,xh:wx[a.h],xd:wx[a.d],len:Math.abs(a.d-a.h),wh:whi[a.h]-wlo[a.h],wd:whi[a.d]-wlo[a.d]}));   // wh/wd: each endpoint's OWN node width, already computed above (wlo/whi) — the fan anchors AT that node's own edge, see fanArcs' own note
   // item 7: ghost endpoints fold into the SAME fanArcs pass the reals resolve in — see fanArcs' own ghost-arg
   // comment (mirrors 84e7938's flat-view fix) — instead of fanning in a separate later pass that always pushed
   // a ghost outside every real arc at a shared endpoint regardless of relative length. len: TOKEN-INDEX span
   // (a.h/a.d are token indices), matching npReal's own len convention just above — NOT a pixel distance; see
   // arcsWrapped's identical fix (js/diagram/diagram-wrap.js, same file) for the live-measured bug this avoids —
   // a ghost's pixel span otherwise dwarfs a real arc's token-index span regardless of true relative length.
-  const ghostFan=ghostArcs.map(a=>({hk:a.h,dk:a.d,xh:wx[a.h],xd:wx[a.d],len:Math.abs(a.h-a.d)}));
+  const ghostFan=ghostArcs.map(a=>({hk:a.h,dk:a.d,xh:wx[a.h],xd:wx[a.d],len:Math.abs(a.h-a.d),wh:whi[a.h]-wlo[a.h],wd:whi[a.d]-wlo[a.d]}));
   fanArcs(npReal,fanStep(),ghostFan);
   np.forEach(a=>{ if(a.h<0||a.h>=n)return; const col=relColor(a.rel), ink=arcInk(col);
     const XH=wx[a.h]+(a.offH||0), XD=wx[a.d]+(a.offD||0);   // fanned endpoints; crown ∝ arc width
