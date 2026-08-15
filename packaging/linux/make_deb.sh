@@ -247,9 +247,9 @@ Maintainer: $MAINTAINER
 Homepage: https://github.com/skalyan91/sud-workbench
 Description: Dependency treebank editor for CoNLL-U / SUD
  A native-feeling desktop app for viewing and editing dependency treebanks in
- CoNLL-U, speaking SUD (Surface-syntactic Universal
- Dependencies) relation set, plus UD import/export and mSUD. Import (or
- type-and-parse) sentences, see them as dependency diagrams in five
+ CoNLL-U, speaking SUD (Surface-syntactic Universal Dependencies) relation
+ set, plus UD import/export and mSUD. Import (or type-and-parse) sentences,
+ see them as dependency diagrams in five
  notations, edit the underlying CoNLL-U rows in a spreadsheet grid, and save
  back to a byte-stable .conllu file.
  .

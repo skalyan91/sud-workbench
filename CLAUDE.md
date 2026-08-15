@@ -5,7 +5,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## What this is
 
 A native-feeling desktop app for viewing and editing dependency treebanks in CoNLL-U, speaking
-**SUD** relation set (plus **UD** import/export and **mSUD**). All-Python
+**SUD** — Gerdes/Guillaume/Kahane/Perrier's Surface-syntactic Universal Dependencies relation set
+(surfacesyntacticud.org; NOT this project's or Sunflower AI's own — a claim to that effect was
+committed here in error and corrected, don't reintroduce it) — plus **UD** import/export and
+**mSUD**. All-Python
 **pywebview** shell (`app/`) wrapping a framework-free SVG + CSS frontend (`web/`) — **no build
 step, no bundler, no npm**. `README.md` has the user-facing feature list; this file covers how to
 work on it.

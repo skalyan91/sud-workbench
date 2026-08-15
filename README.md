@@ -1,10 +1,12 @@
 # SUD Workbench
 
 A native-feeling macOS desktop app for viewing and editing dependency treebanks
-in CoNLL-U, speaking **SUD** (Surface-syntactic Universal
-Dependencies) relation set. Import (or type-and-parse) sentences, see them as
-dependency diagrams, edit the underlying CoNLL-U rows in a spreadsheet grid,
-watch the diagram update instantly, and save back to a `.conllu` file.
+in CoNLL-U, speaking **SUD** — Surface-syntactic Universal Dependencies, the
+relation set introduced by [Gerdes, Guillaume, Kahane and
+Perrier](https://surfacesyntacticud.org). Import (or type-and-parse) sentences,
+see them as dependency diagrams, edit the underlying CoNLL-U rows in a
+spreadsheet grid, watch the diagram update instantly, and save back to a
+`.conllu` file.
 
 All-Python **pywebview** shell wrapping a framework-free SVG + CSS frontend — no
 bundler, no npm, no build step.

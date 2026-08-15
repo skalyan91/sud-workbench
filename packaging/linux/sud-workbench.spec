@@ -147,7 +147,7 @@ Requires(postun): desktop-file-utils
 
 %description
 SUD Workbench is a native-feeling desktop app for viewing and editing dependency treebanks in
-CoNLL-U, speaking SUD relation set (plus UD import/export and mSUD). It provides
+CoNLL-U, speaking the SUD relation set (plus UD import/export and mSUD). It provides
 five treebank notations (stemma, arcs, tree, brackets, outline), inline morphological glossing,
 transliteration for two dozen scripts, on-demand SUD/Stanza parsing models, and byte-stable
 CoNLL-U round-tripping.
