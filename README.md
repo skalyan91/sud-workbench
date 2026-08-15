@@ -1,7 +1,7 @@
 # SUD Workbench
 
-A native-feeling macOS desktop app for viewing and editing dependency treebanks
-in CoNLL-U, speaking **SUD** — Surface-syntactic Universal Dependencies, the
+A native-feeling desktop app (macOS, Windows, Linux) for viewing and editing dependency
+treebanks in CoNLL-U, speaking **SUD** — Surface-syntactic Universal Dependencies, the
 relation set introduced by [Gerdes, Guillaume, Kahane and
 Perrier](https://surfacesyntacticud.org). Import (or type-and-parse) sentences,
 see them as dependency diagrams, edit the underlying CoNLL-U rows in a
@@ -12,6 +12,27 @@ All-Python **pywebview** shell wrapping a framework-free SVG + CSS frontend — 
 bundler, no npm, no build step.
 
 See [CHANGELOG.md](CHANGELOG.md) for what's new in each release.
+
+## Install
+
+**macOS, via Homebrew** (recommended — builds from source on your own machine, so nothing
+gets Gatekeeper-quarantined):
+
+```sh
+brew tap skalyan91/sud-workbench
+brew install --build-from-source sud-workbench
+```
+
+Launch it with `sud-workbench`, or `ln -s "$(brew --prefix)/opt/sud-workbench/dist/SUD Workbench.app" /Applications/`
+to make it feel like a normal app — see [the tap's own
+README](https://github.com/skalyan91/homebrew-sud-workbench) for why that one step has to
+be manual. Requires `python@3.12`, installed automatically as a dependency.
+
+**macOS, Windows, or Linux, without Homebrew:** grab the platform build from the [latest
+release](https://github.com/skalyan91/sud-workbench/releases/latest) — a source-plus-
+first-launch-bootstrap bundle for each platform, the same shape `packaging/` (below)
+builds locally. Windows ships a payload directory rather than a signed installer (Inno
+Setup output isn't produced yet); Linux ships a `.deb` and a Fedora `.rpm`.
 
 ## Run
 
