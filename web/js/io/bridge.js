@@ -650,6 +650,9 @@ window.__insertPastedText=async function(text,index,opts){ opts=opts||{};
 window.__applyInsertPayload=async function(p){ p=p||{};
   const pars=(p.parallels||[]).filter(x=>x&&x.lang&&parParas(x).length);
   const main=p.main||{};
+  // set below, iff new sentences actually landed — read AFTER the finally, once the render hold this
+  // function opens has genuinely cleared (see the note down there for why it can't be read any earlier)
+  let insertedStart=null;
   /* THE WHOLE PAYLOAD IS ONE UNDO ENTRY — one press of ⌘Z takes back everything the Insert-text sheet did,
      main text and every parallel translation together, because that is what the user did: one dialog, one
      Insert. This is the OUTER batch; __insertPastedText opens one of its own inside it and applyParallelTexts
@@ -687,14 +690,29 @@ window.__applyInsertPayload=async function(p){ p=p||{};
     // Awaited HERE, still inside the render hold (beginRenderHold() above), so the deferred renderDoc()
     // endRenderHold() fires in the `finally` below picks up the corrected DOCSCRIPT on its first paint.
     if(typeof loadDocScript==="function") await loadDocScript();
-    return; }
+    insertedStart=r.start;
+  } else {
   // TRANSLATIONS-ONLY (item 7d): no new sentences — the supplied texts land on sentences that are already
   // there, starting just after the last one that already carries a translation in any of these languages.
   // The main text's paragraphs are read off the DOCUMENT here (docParaCounts): the blocks are already in
   // the file, so their `# newpar`/`# newdoc` marks ARE the paragraph structure the translation aligns to.
   const start=transStartIndex(pars.map(x=>x.lang));
   applyParallelTexts(pars,start,DOC.length-start,"",p.naive,docParaCounts(start,DOC.length-start));
-  } finally { endRenderHold(); endUndoBatch(); } };
+  }
+  } finally { endRenderHold(); endUndoBatch(); }
+  /* …AND ONLY NOW DOES THE VIEWPORT ACTUALLY MOVE. __insertPastedText's OWN scroll-to-first call
+     (js/io/bridge.js, alignBlockTop(start) at the end of that function) runs from INSIDE this function's
+     beginRenderHold() above — RENDER_HOLD is a depth counter (js/core/document.js), so at that point it is
+     still ≥1, and scrollToSentence's own renderDoc() fallback (called when the target block isn't built
+     yet, which after a paste into a scrolled-away or still-near-empty document it routinely isn't) sees
+     RENDER_HOLD>0 and defers instead of actually rendering — so the block that call was aiming at never
+     existed to scroll to, and it silently gave up, LEAVING THE VIEWPORT WHEREVER IT ALREADY WAS (the top,
+     on a document that had none or few sentences before this insert — exactly the report: "inserting a
+     sentence scrolls back to the top instead of to that sentence"). By here the finally above has already
+     run endRenderHold() for THIS function's own hold, dropping RENDER_HOLD to 0 and firing the real,
+     deferred renderDoc() — so the block genuinely exists now, and aligning to it actually works. */
+  if(insertedStart!=null && typeof alignBlockTop==="function") alignBlockTop(insertedStart);
+};
 
 /* ── PARAGRAPH-FIRST ALIGNMENT of a parallel text onto the main text's sentences ─────────────────────────
    The rule, and the only sane one for texts that no sentenciser will ever segment identically in two
