@@ -35,3 +35,9 @@ result-*
 # licence, so no longer committed here — app/grammars.py fetches it on demand (same shape as
 # vendor/ above, minus the compile step). Not source.
 grammars/
+
+# Real Apple SF Symbols, rendered to base64 PNG at packaging/first-dev-launch time by
+# app/mac/sf_symbols.py (packaging/render_sf_symbols.py is the packaging-time entry point). Apple
+# licenses SF Symbols for use in apps on Apple platforms, not for redistribution as standalone
+# assets sitting in a public git history — see mac-tokens.css's own header note. Not source.
+web/macos-kit/mac-tokens-sf.generated.css

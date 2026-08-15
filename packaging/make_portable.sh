@@ -45,6 +45,15 @@ echo "▶ installing CORE deps into the bundle (torch-free)…"
 "$RES/python/bin/python$PYVER" -m pip install --no-input --upgrade pip >/dev/null
 "$RES/python/bin/python$PYVER" -m pip install --no-input --target "$RES/applib" -r "$PROJECT/requirements-core.txt"
 
+# Render the titlebar's real SF-Symbol icons fresh into the SOURCE tree (git-ignored — see
+# app/mac/sf_symbols.py's own docstring for why they're never committed) BEFORE the source copy
+# below, so that copy picks the generated file up along with everything else in web/. Uses the
+# bundle's OWN just-installed Python + pyobjc (pulled in transitively by pywebview, per
+# requirements-core.txt) rather than the developer's .venv — this build is meant to be fully
+# self-contained, unlike make_bootstrap_app.sh.
+echo "▶ rendering SF-Symbol titlebar icons…"
+PYTHONPATH="$RES/applib" "$RES/python/bin/python$PYVER" "$PROJECT/packaging/render_sf_symbols.py"
+
 echo "▶ copying app source…"
 # samples/ is deliberately NOT bundled — it is repo-only test data (see README). Nothing in app/ or
 # web/ reads from it at runtime, so the shipped app carries no sample datasets.

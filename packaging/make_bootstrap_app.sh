@@ -20,6 +20,15 @@ WORK="$(mktemp -d)"; trap 'rm -rf "$WORK"' EXIT
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$RES/appsrc"
 
+# Render the titlebar's real SF-Symbol icons fresh into the SOURCE tree (git-ignored — see
+# app/mac/sf_symbols.py's own docstring for why they're never committed) BEFORE the source copy
+# below, so that copy picks the generated file up along with everything else in web/. Uses the
+# repo's OWN .venv (PyObjC), not the per-user venv this bootstrap app builds for itself on first
+# launch — this step runs at BUILD time, on the developer's machine.
+echo "▶ rendering SF-Symbol titlebar icons…"
+[ -x "$PROJECT/.venv/bin/python" ] || { echo "error: $PROJECT/.venv/bin/python not found — needed to render the titlebar's SF-Symbol icons (packaging/render_sf_symbols.py)" >&2; exit 1; }
+"$PROJECT/.venv/bin/python" "$PROJECT/packaging/render_sf_symbols.py"
+
 echo "▶ copying app source…"
 # samples/ is deliberately NOT bundled — it is repo-only test data (see README). Nothing in app/ or
 # web/ reads from it at runtime, so the shipped app carries no sample datasets.
