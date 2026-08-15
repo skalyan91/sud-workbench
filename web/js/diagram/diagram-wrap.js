@@ -336,16 +336,23 @@ function fanStep(){ const st=parseFloat(css("--arc-stroke"))||1.7; return ((st+3
 // equal footing, so whichever is actually longer lands closer to centre. Ghost items need the SAME
 // {hk,dk,hkey?,dkey?,xh,xd} shape a real arc does; `len` defaults to |xd-xh| when absent (mirrors
 // fanGhostArcs' own convention — none of this file's ghost-fan call sites compute one explicitly).
-function fanArcs(arcs,spread,ghostArcs){ const ep={}; const reg=(k,len,side,set)=>{(ep[k]=ep[k]||[]).push({len,side,set});};
+// `rootKeys` (item 2, on report: "when there is a root edge, it should not only land in the centre, but also
+// push the neighbouring endpoints outwards by half a fanning gap"): an optional list of fan-bucket keys whose
+// node hosts a root stub. Registered as its own side-0 sentinel (same as the flat arcs() view already does for
+// its OWN local bucket pass — see the mirrored anchor-selection just below), so a bucket with a root stub in it
+// is detectable at the point every OTHER member's own anchor is chosen.
+function fanArcs(arcs,spread,ghostArcs,rootKeys){ const ep={}; const reg=(k,len,side,set)=>{(ep[k]=ep[k]||[]).push({len,side,set});};
   arcs.forEach(a=>{ reg(a.hkey??a.hk,a.len,Math.sign(a.xd-a.xh)||1,o=>a.offH=o);   // this node is the head → outgoing edge fans. a.hkey/a.dkey override only the FAN-BUCKET key (not a.hk/a.dk, which are read downstream) so a cross-line arc's UPPER-line endpoint can bucket with the bottom-of-line endpoints instead of the top-side ones at the same token
                     reg(a.dkey??a.dk,a.len,Math.sign(a.xh-a.xd)||1,o=>a.offD=o); }); // this node is the dependent → incoming edge fans the same way (no longer centre-eligible — see block comment)
   (ghostArcs||[]).forEach(a=>{ const len=a.len??Math.abs(a.xd-a.xh);   // a ghost registers on BOTH sides — ranked into the pool by length like any other member, same anchor rule as a real edge
     reg(a.hkey??a.hk,len,Math.sign(a.xd-a.xh)||1,o=>a.offH=o);
     reg(a.dkey??a.dk,len,Math.sign(a.xh-a.xd)||1,o=>a.offD=o); });
-  Object.values(ep).forEach(arr=>{ arr.filter(e=>e.side===0).forEach(e=>e.set(0));   // a side-0 sentinel (no caller currently registers one, but arcs() reserves it for the root stub) — always centre, never ranked: it isn't "on a side" at all, so the edge-anchor rule below doesn't apply to it
+  (rootKeys||[]).forEach(k=>reg(k,Infinity,0,()=>{}));   // the root stub's own slot — no setter needed (its own draw call seats it at the node's x unconditionally, see arcsWrapped's root-stub loop), only its PRESENCE in this node's bucket matters below
+  Object.values(ep).forEach(arr=>{ const hasRoot=arr.some(e=>e.side===0);   // item 2: a root stub occupies this node's dead-centre slot → every OTHER (±1) member here anchors one more half-fan-step further out than it otherwise would
+    arr.filter(e=>e.side===0).forEach(e=>e.set(0));   // a side-0 sentinel (arcs() registers one for the root stub locally; rootKeys registers one here) — always centre, never ranked: it isn't "on a side" at all, so the edge-anchor rule below doesn't apply to it
     [-1,1].forEach(side=>{ const grp=arr.filter(e=>e.side===side).sort((p,q)=>q.len-p.len);   // this side's whole pool — real AND ghost together — ranked by length alone; longest first (j=0) → nearest centre
       if(!grp.length) return;
-      const anchor=spread/2;   // half a fanning gap off centre — NOT the node's own half-width (see the block comment above)
+      const anchor=(hasRoot?spread:spread/2);   // half a fanning gap off centre — NOT the node's own half-width (see the block comment above) — plus another half-step when a root stub shares this node's centre slot, so this side's whole pool clears the root's own edge-anchored casing (item 2)
       grp.forEach((e,j)=>e.set(side*(anchor+j*spread))); }); }); }
 // cubic control points for an arc bump from (x1,base) to (x2,base) of height h: each control sits at height h
 // above its endpoint and cot(θ)·h inward, so the take-off tangent makes θ with the baseline. Apex is 0.75·h.
@@ -685,25 +692,30 @@ function arcsWrapped(si){
   crossArcs.forEach(a=>{
     const iUp=rowOf(a.dk).ord<rowOf(a.hk).ord;   // is the DEPENDENT the upper-line token?
     if(iUp) a.dkey="B"+a.dk; else a.hkey="B"+a.hk;   // Item 1: the cross-line arc's UPPER-line endpoint sits at the BOTTOM of that line (NBOT); give it a bottom-side fan bucket ("B"+token) so it fans ONLY against other cross-line bottom-endpoints there — never the within-line TOP-side endpoints sharing that token (Item 16's single combined fan wrongly spread it against them). The LOWER end keeps its plain token key → still fans with that line's within-line arcs (same, top side).
-    // Item 20: a.xh/a.xd here feed ONLY fanArcs' fan-SIDE sign (Math.sign(xd-xh) / Math.sign(xh-xd)) below —
-    // never the real drawn geometry (crossEnds() further down re-derives x fresh via NX()+offset). Setting
-    // them to each token's real NX() — as this used to — compared ROW-LOCAL positions across TWO DIFFERENT
-    // rows: `r.LX=i=>r.c[i-r.s]+r.offX` lays every row out flush from its OWN x=0 (offX is 0 for every LTR
-    // row; RTL's own per-row offX doesn't fix this either, since it's still each row's own frame), so which
-    // one came out bigger was an ACCIDENT of the two tokens' unrelated positions within their own rows —
-    // not which way the arc actually continues. Confirmed on a constructed test case: the SAME cross-line
-    // arc's own endpoint flipped which side of its token it fanned toward depending purely on how far along
-    // its OTHER row happened to place its far endpoint — nothing about the arc's own direction changed, only
-    // an unrelated row's incidental layout did, which is the "not applied consistently" symptom, not a
-    // one-off — that accidental sign is what decides BOTH which other arcs a cross-line endpoint competes
-    // against for the long-inward/short-outward ranking AND which direction its own offset even points.
-    // The one thing that IS consistent, whichever token each row happens to place where: reading order
-    // only ever continues FORWARD — the upper endpoint (line N, exiting toward line N+1) is always the one
-    // still heading onward, the lower endpoint (line N+1, arrived from line N) is always the one arriving
-    // from before. So the upper endpoint's own registration always takes the "forward" side (LTR: +1,
-    // rightward — the direction reading order advances in; RTL mirrors, so -1) and the lower endpoint's
-    // always takes the opposite — fixed by ROLE, not measured off either token's accidental position.
-    if(iUp===!RTL){ a.xh=1; a.xd=0; } else { a.xh=0; a.xd=1; }   // iUp: dep is the upper/forward endpoint → its registration (Math.sign(xh-xd)) must land on the forward side, so xh>xd (LTR) or xh<xd (RTL); !iUp mirrors it onto xd for the head's registration
+    // ⚠ ITEM 20 (4f6615a) REVERTED — its role-based sentinel (upper endpoint always "forward"/right, lower
+    // endpoint always "backward"/left, regardless of either token's actual position) is not a bug fix on the
+    // premise below; it IS the bug, on report ("'brought → nation' lands to the left of nation's centre,
+    // despite coming in from the right"). Live-traced (samples/english.conllu s3, wrapped arcs, DEFAULT
+    // window size 1240×820, no forced narrowing — AVM being on by default is what's wide enough to force the
+    // wrap here, not a narrowed window): head="brought" (upper row, own NX≈596), dep="nation" (lower row, own
+    // NX≈204). Item 20's role rule gave "nation" offD=side −1 (left) unconditionally, purely because it's the
+    // lower-row token — even though "brought" sits well to the RIGHT of "nation" in real pixels, so the drawn
+    // chord actually descends from upper-RIGHT to lower-LEFT and visually enters "nation" from the right.
+    // Item 20's own justification was that comparing `r.LX=i=>r.c[i-r.s]+r.offX` across two DIFFERENT rows is
+    // "an accident of the two tokens' unrelated positions" — but `r.offX` is 0 for EVERY LTR row (RTL's is
+    // svgW-r.total, i.e. right-flush to the SAME svgW) precisely so every row shares one common x=0 origin,
+    // the same way lines of wrapped text do: NX(i) IS the token's true, comparable pixel position across
+    // rows, not a row-local abstraction. This is confirmed by the OTHER wrapped cross-line implementation in
+    // the codebase, positionBracketAnnots/reserveBracketArcRoom (js/core/document.js): its cArcs has ALWAYS
+    // used the real DOM-measured centres (Hcx/Dcx from getBoundingClientRect) for this exact sign, never a
+    // role-based rule, and 74f58fb's own 661-endpoint sweep verified the brackets notation was already
+    // correct — because it was never "fixed" into this bug in the first place. Restored to the SAME
+    // raw-coordinate rule the within-line arcs two lines above already use (`a.xh=NX(a.head); a.xd=NX(a.dep)`)
+    // and the bracket view has always used: the endpoint leans toward whichever side its counterpart's real
+    // pixel position is actually on — geometrically meaningful for a same-row arc AND for a cross-row one,
+    // since both share one coordinate frame. (a.xh/a.xd here still feed ONLY fanArcs' fan-SIDE sign — the
+    // real drawn geometry is re-derived fresh by crossEnds() further down via NX()+offset, unchanged.)
+    a.xh=NX(a.hk); a.xd=NX(a.dk);
     fanAll.push(a); });
   // item 7: ghost endpoints (Shared=Yes AND Subject-raising) computed HERE, ahead of fanArcs, so they fold into
   // the SAME per-token fan pool the reals resolve in — see fanArcs' own ghost-arg comment (mirrors 84e7938's
@@ -720,23 +732,25 @@ function arcsWrapped(si){
   // nothing like their true relative length, so the ghost won the centre slot unconditionally regardless of
   // which was actually longer — the identical bug this whole fix exists to remove, reintroduced through a unit
   // mismatch instead of a missing sort.
-  // ⚠ xh/xd for a CROSS-line ghost must NOT be the real NX() — that is exactly the "Item 20" bug crossArcs itself
-  // was fixed against just above (see that block's own comment): two tokens' row-LOCAL x's are only ever
-  // comparable when they share a row, since each row is independently laid out from x=0 with its own token
-  // subset. A cross-line ghost's real NX(p.oh)/NX(p.i) compare positions from TWO DIFFERENT rows' unrelated
-  // local layouts — an accident of what else that row happens to contain, not which side the ghost visually
-  // continues toward — so its fan side flipped depending on incidental row content, the identical symptom Item
-  // 20 fixed for real arcs, left unfixed here. Same role-based sentinel crossArcs uses (forward reading order
-  // is the one thing that stays consistent regardless of either row's own layout); left untouched for a
-  // WITHIN-line ghost, where the real positions genuinely share one row and the comparison is meaningful.
+  // ⚠ xh/xd for a CROSS-line ghost, like crossArcs' own just above, are the real NX() — the "Item 20" reasoning
+  // this comment used to cite (row-local x's are only comparable within one row) doesn't hold: `r.offX` is 0 for
+  // every LTR row and svgW-r.total (right-flush to the SAME svgW) for every RTL row, so NX(i) is one shared,
+  // comparable pixel coordinate across every row, exactly like lines of wrapped text sharing a left margin. A
+  // cross-line ghost's fan side is derived the SAME way a real cross-line arc's now is (see crossArcs' own
+  // block comment above for the live "brought → nation" case this was verified against): whichever endpoint's
+  // real position is further toward a side is what visually leans that way. The bucket split (Item 1's "B"+
+  // key) still applies to a CROSS ghost, unlike a within-line one, since that's a fact about which line the
+  // endpoint's node sits at the edge of, not about which coordinates are meaningful.
   const ghostFan=ghostPairs.map(p=>{ const cross=rowOf(p.oh)!==rowOf(p.i);
-    const a={hk:p.oh,dk:p.i,len:Math.abs(p.oh-p.i)};
+    const a={hk:p.oh,dk:p.i,len:Math.abs(p.oh-p.i),xh:NX(p.oh),xd:NX(p.i)};
     if(cross){ const iUp=rowOf(p.i).ord<rowOf(p.oh).ord;
-      if(iUp===!RTL){ a.xh=1; a.xd=0; } else { a.xh=0; a.xd=1; }   // mirrors crossArcs' own sentinel exactly (hk plays the head role, dk the dep role, same as there)
       if(iUp) a.dkey="B"+a.dk; else a.hkey="B"+a.hk; }   // item 1's own cross-line bucket split, applied to ghosts too
-    else { a.xh=NX(p.oh); a.xd=NX(p.i); }
     return a; });
-  fanArcs(fanAll,SPREAD,ghostFan);   // sets offH/offD on every within-line AND cross-line arc AND every ghost, from the same per-token fan
+  // item 2: the root token's own bucket key — plain (no "B" bucket-split: the root stub is always drawn in ITS
+  // OWN row, never as a cross-line endpoint) — so fanArcs can detect it sharing a node with other arcs and push
+  // them out (see fanArcs' own rootKeys comment). Mirrors the flat arc view's regEp(rootI+1,Infinity,0,…).
+  const rootKeys=[]; for(let i=0;i<n;i++) if(heads[i]-1<0) rootKeys.push(i);
+  fanArcs(fanAll,SPREAD,ghostFan,rootKeys);   // sets offH/offD on every within-line AND cross-line arc AND every ghost, from the same per-token fan
   rows.forEach(r=>{ r.arcsIn.forEach(a=>{ a.h=arcHgt(Math.abs((r.LX(a.dep)+(a.offD||0))-(r.LX(a.head)+(a.offH||0))),ROW); });   // arc height (→ Hobby handle length) from the FANNED endpoints
     r.maxH=Math.max(24,...r.arcsIn.map(a=>a.h)); });
   const cOff={}; crossArcs.forEach(a=>{ cOff[a.dk]={offH:a.offH||0,offD:a.offD||0}; });
@@ -896,7 +910,7 @@ function arcsWrapped(si){
   });
   // Ghost edges (Shared=Yes AND Subject-raising): dashed, dimmed — decorative, not a diagram element of their own,
   // but still: (item 7) fanned into the SAME pool as the real arcs at any token they land on, by length, rather
-  // than unconditionally pushed outside them (see fanArcs(fanAll,SPREAD,ghostFan) above — ghostPairs/ghostFan
+  // than unconditionally pushed outside them (see fanArcs(fanAll,SPREAD,ghostFan,rootKeys) above — ghostPairs/ghostFan
   // are already computed and fanned there), (item 2) counted toward fitTight's boxes, (item 3) highlighted when
   // their dependent is selected, (item 6) their labels decollided against the real ones — only ghost labels
   // ever move.

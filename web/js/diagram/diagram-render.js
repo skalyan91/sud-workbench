@@ -370,10 +370,11 @@ function arcs(si){
     regEp(p.to,  len,Math.sign(c[p.from-1]-c[p.to-1])||1,o=>p._dOff=o); });
   const usedSlot={};   // per node+side, the NEXT free offset (px, unsigned) this pass's own fan left available — Subject=Generic (below) shares these same buckets and continues from here rather than recomputing its own notion of "how far out the reals/ghosts already reach"
   Object.entries(epAt).forEach(([node,arr])=>{
+    const hasRoot=arr.some(e=>e.side===0);   // item 2, on report ("when there is a root edge… push the neighbouring endpoints outwards by half a fanning gap"): this node's root stub occupies its dead-centre slot → every OTHER (±1) member here anchors one more half-fan-step further out than it otherwise would (mirrors fanArcs' own rootKeys, js/diagram/diagram-wrap.js)
     arr.filter(e=>e.side===0).forEach(e=>e.set(0));                        // the root stub only — always centre; not "on a side" at all, so the edge-anchor rule below doesn't apply to it
     [-1,1].forEach(side=>{ const grp=arr.filter(e=>e.side===side).sort((p,q)=>q.len-p.len);   // this side's whole pool — real AND ghost together — ranked by length alone; longest first (j=0) → nearest centre
       if(!grp.length) return;
-      const anchor=SPREAD/2;   // half a fanning gap off centre — NOT the node's own half-width (see the block comment above)
+      const anchor=hasRoot?SPREAD:SPREAD/2;   // half a fanning gap off centre — NOT the node's own half-width (see the block comment above) — plus another half-step when a root stub shares this node's centre slot (item 2)
       grp.forEach((e,j)=>e.set(side*(anchor+j*SPREAD)));               // longest first (j=0) lands half a fan step off centre; each later entry fans one more SPREAD beyond it
       usedSlot[node+"|"+side]=anchor+grp.length*SPREAD; }); });
   // endpoints sit directly on the fanned targets → measure arc width (and Hobby height) from THEM
