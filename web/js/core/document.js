@@ -2000,6 +2000,7 @@ function renderDoc(){
   const _align=[];
   document.querySelectorAll("#doc .sblock").forEach(b=>{ const dg=b.querySelector(".diagram, .text-conv"); if(!dg) return;
     dg.style.paddingLeft="0px"; dg.style.paddingRight="0px";   // getBoundingClientRect is in scaled (zoomed) viewport px; padding is set in unscaled CSS px → divide by FS
+    dg.style.marginLeft="0px"; dg.style.marginRight="0px";   // ⚠ ZERO THE WASH-PAD MARGIN TOO, and THIS EARLY — not just on first render. `dg` is the SAME node a later render REUSES (this block does not rebuild it), so the negative margin the wash-pad pass sets at the very end of this function survives into the NEXT renderDoc() call and is still applied when THIS padding-zeroing line runs. Left unzeroed, the padding measurement below would then measure minLeft/maxR with that stale margin already shifting the box, "absorb" the margin's own shift into a padding grown by the same amount to compensate, and the wash-pad pass would apply its margin on TOP of that inflated padding — doubling the shift on every render after the first. Measured live (tree, RTL, AVM on, same settings re-rendered with no reload): delta went target-3.64 on the first render to a STABLE target-6.64 on the second and every one after, paddingRight climbing 34→37px in lock step — not unbounded growth (the compensation converges after one step), but wrong, and wrong in exactly the way a toggled AVM/wrap/notation pick — none of which reload the page — would trigger on every document already open. Zeroed here, at the same point padding already resets before any measurement, brings every later render back to the same clean margin:0 starting point the very first render had.
     const rtl=b.dir==="rtl", els=[...dg.querySelectorAll("svg text, .oline, .tok-wash:not(circle), .bwtok")];   // ⚠ ALIGN TO THE WASH, NOT THE INK, on report ("I just want the leftmost token wash in a diagram to be left-aligned with the running sentence"). A token's WASH — the hover/selection backlight rect every SVG renderer draws (.tok-wash: stemma/arcs/tree, flat and wrapped) or, for wrapped brackets, the .bwtok CELL itself (its own wash is a CSS ::before layer painted over exactly this box, app.css) — is deliberately WIDER than its own glyph ink: both are sized off the same avmSlotW(t)-folded slot reservation (wordW/lw, diagram-wrap.js) every renderer already uses to lay tokens out, so a token with a wide AVM box reserves — and its wash paints — that full width even though "svg text" alone (the OLD selector) only ever saw the narrower GLYPH ink inside it. Measured live (heavy-AVM fixture, wrapped): the old ink-only minLeft left the wash's own left edge 10–17px further left than the sentence's text-start after alignment — a visible, non-clipping misalignment, not the narrower clipping bugs e7672f1/fb823c5 already fixed (those stay in place; nothing here conflicts with them). Since a wash already encloses its own AVM box by construction (avmSlotW(t) <= the slot width both are sized from), aligning to the wash can never leave an AVM box overhanging past it either. ⚠ .bwline2 DROPPED, not kept alongside the new members: it's a plain full-width block (bracketsWrapped's own greedy-wrap row, app.css) with NO width:max-content of its own, so with padding zeroed its rect.left is always just the CONTAINER's edge — regardless of content, even a row that opens with a "[" bracket well before its first .bwtok. Kept in the union it would silently win as the minimum on every wrapped-brackets render (it's always <= any real content inside it), making the whole point of adding .bwtok a no-op — confirmed live: dgPaddingLeft was byte-identical before/after adding .bwtok until .bwline2 was also removed. .oline is UNCHANGED (kept): outline's own row genuinely IS width:max-content, so its rect.left already tracks real content — and outline has no wash at all, its AVM prints INLINE after the POS tag, never left of the row's own start, so ink is already the correct reference there.
     // What this padding measures must NOT depend on WHICH TOKEN IS SELECTED. A selected token renders its form,
     // its deprel label and its brackets BOLD, so its ink runs a fraction wider and a fraction further out — enough
@@ -2074,6 +2075,48 @@ function renderDoc(){
     const avail=dg.clientWidth, sw=toks.offsetWidth;   // both in STRIP (unzoomed) px; the child strip clips if padding + sw exceeds the padding box (clientWidth)
     if(dg.dir==="rtl"){ const pr=parseFloat(dg.style.paddingRight)||0; if(pr+sw>avail) dg.style.paddingRight=Math.max(0,avail-sw)+"px"; }
     else { const pl=parseFloat(dg.style.paddingLeft)||0; if(pl+sw>avail) dg.style.paddingLeft=Math.max(0,avail-sw)+"px"; } });
+  /* ⚠ NEGATIVE MARGIN = THE WASH'S OWN LEFT PADDING, on report ("diagrams should have a negative left margin
+     corresponding to the left padding of a token wash"). Every padding pass above (the main one, the wrapproj
+     re-pass, and the clip-safety net) aligns the diagram so a leftmost token WASH's own OUTER edge lines up
+     with the sentence's own text-start — but the wash is itself padded OUTWARD past the token's real content,
+     the same way a text field's own box sits outside its type. Measured LIVE (getComputedStyle, not just read
+     off app.css): a wrapped-brackets `.bwtok` — the wash IS the token cell there, painted by its own ::before
+     — reports `paddingLeft: "3px"`. Every SVG renderer's own word-row wash rect is built with the identical
+     inset baked into its geometry rather than expressed as CSS padding (an SVG rect has no padding property):
+     `x:c[i]-w[i]/2-3, width:w[i]+6` (arcs(), diagram-render.js) and the same `X-lw/2-3 … lw+6` shape in
+     bracketsWrapped/arcsWrapped (diagram-wrap.js) — 3px of wash on EACH side of the ink, matching .bwtok's
+     CSS exactly. So the wash's outer edge, which the passes above land ON the sentence's text-start, is itself
+     TOK_WASH_PAD px further out than where the token's own content actually begins — aligning to it alone
+     leaves the real content sitting TOK_WASH_PAD px right of the running sentence. Pull the whole diagram
+     TOK_WASH_PAD further by a MARGIN, not more padding, and only HERE, after every padding computation above:
+     the wrapproj re-pass (the wash-re-alignment block) zeroes and re-measures paddingLeft off the LIVE DOM, so
+     a margin applied before it would shift the very box that pass re-measures and get folded straight back
+     into a compensating padding, cancelling itself out — confirmed live (arcs, flat): margin-left:-3px alone
+     moved the wash's own minLeft from target+0 to target-3 cleanly, exactly the shift wanted, with nothing
+     downstream left to re-absorb it. RTL is the SAME property family the padding pass above already uses
+     (marginRight, not marginLeft) — confirmed live on the RTL fixture: marginRight:-3px (not +3 — this
+     diagram's own box is right-anchored in an RTL block, so shrinking its right margin is what extends its
+     right edge outward) moved maxR from target+0 to target+3, mirroring the LTR case exactly.
+     ⚠ GATED ON THE DIAGRAM ACTUALLY HAVING A WASH — two of the five notations don't. `outline` never draws
+     one (its own AVM prints inline, see the broadened-selector note above `_align`'s definition) and flat/
+     unwrapped `brackets()` (diagram-wrap.js) has NO `.tok-wash` at all: its selection backlight is a one-off
+     `<rect>` painted only over the SELECTED constituent's span with no `tok-wash` class, not a per-token
+     element every render leaves in the DOM — confirmed by a full-body grep of that function, zero matches.
+     Shifting either by this margin would pull the diagram left of a sentence it was already correctly
+     ink-aligned to, with no wash to justify it — so this checks for a REAL wash element on each diagram
+     before touching it, rather than assuming every notation has one the way 6f8e3c2's broadened selector
+     (which only ever WIDENS what it measures, never wrongly narrows it) safely could. ⚠ NOT EVERY WASH THIS
+     MATCHES USES EXACTLY 3px, and this is a DELIBERATE approximation, not a miss: a token-strip/word-row wash
+     (arcs, wrapped brackets, wrapproj's own row) is exactly 3px on each side, but a NODE wash — flat stemma's
+     catNodes variant (diagram-render.js:256) and flat `tree()`'s hierarchy nodes (diagram-wrap.js:1397) —
+     is built `Math.max(26,tw/2+4)…Math.max(52,tw+8)`, 4px not 3, and stemma's own unwrapped PROJ baseline
+     wash (hitW, diagram-render.js:181) is wider still whenever POS/translit/AVM (not the word) is what's
+     binding. One flat constant, not a per-notation re-derivation, is the same call 6f8e3c2 itself made
+     ("stop re-deriving AVM-overhang geometry per notation… just measure two real x-coordinates") — the 1px
+     a node wash is short by is the same order of residual that fix and cc9bd23 both already accepted. */
+  const TOK_WASH_PAD=3;
+  _align.forEach(a=>{ if(!a.dg.querySelector(".tok-wash:not(circle), .bwtok")) return;   // outline + flat brackets: no wash, nothing to correct for
+    a.dg.style[a.rtl?"marginRight":"marginLeft"]="-"+TOK_WASH_PAD+"px"; });
   positionBracketWash();
   positionBracketAnnots();
   positionSeamMarks();      // slide every "belongs to neither token" seam mark to the middle of its gap, now that the rows it sits between are where they will finally be
