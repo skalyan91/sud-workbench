@@ -13,6 +13,13 @@ All notable changes to SUD Workbench are documented in this file.
   shared functions (`diagram-core.js`) called from both the flat and wrapped diagram views, instead
   of being kept in sync by hand across two files.
 
+### Packaging metadata
+
+- Dropped the `sunflowerai.io` email address and the incorrect `SunflowerAI` GitHub-org homepage
+  URL from the Debian/RPM/Windows-installer maintainer and homepage fields — this project isn't a
+  Sunflower AI product, and no email address is used in these fields at all. Corrected to the
+  actual repository location, `github.com/skalyan91/sud-workbench`.
+
 ## [0.3.1] — 2026-08-15
 
 A same-day fix for a real bug in v0.3.0's own Linux packages: `adwaita-kit/` (the Linux GTK chrome)
