@@ -3548,7 +3548,8 @@ function drawAVM(svg,cx,y0,t,si,tokId,boxes){ const L=avmLayout(t); if(!L) retur
 // wrapping every item the loop below appends in ONE outer pair instead of several inner ones. The
 // typography match item 23 also made (.oavm-attr/.oavm-val now sized/weighted/coloured exactly like
 // .avm-attr/.avm-val) stays — that part of the report was correct and orthogonal to the bracket grouping.
-function avmInline(t){ const struct=(typeof avmStruct==="function")?avmStruct(t):[]; if(!struct.length) return null;
+function avmInline(t){ if(!show.avm) return null;   // gated the same way avmLayout() is (diagram-core.js) — every OTHER notation's AVM box goes through avmLayout, which early-returns on !show.avm; this one calls avmStruct directly (a plain data derivation, unaware of display state, and correctly so — the grid's own attribute editor uses it too) and had no gate of its own, so outline was the one notation whose AVM never actually hid when the toggle was switched off
+  const struct=(typeof avmStruct==="function")?avmStruct(t):[]; if(!struct.length) return null;
   const span=document.createElement("span"); span.className="oavm";
   struct.forEach((it,i)=>{ if(i) span.appendChild(document.createTextNode(" "));
     const item=document.createElement("span"); item.className="oavm-item avm-row"; item.dataset.feat=it.group||it.feat; item.tabIndex=0;
