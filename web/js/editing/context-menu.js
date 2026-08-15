@@ -192,7 +192,15 @@ addEventListener("click",closeCtx);
 // closeCtx is unconditional and idempotent, so a right-click that DOES land on a new menu trigger still opens
 // it correctly: this closes the old one first, then the matching branch below calls showCtx again and reopens
 // fresh at the new target. Global (not #doc-scoped), matching the click-outside rule just above it.
-addEventListener("contextmenu",closeCtx,true);
+// EXCLUDING a right-click that lands INSIDE the menu system itself (ctx or its ctx2 flyout): a `subRight` row
+// (posSubItems' POS-subtype flyout, relMenu's deep-feature flyout) has its OWN bubble-phase oncontextmenu
+// handler that opens a SECOND-level flyout off that row, without closing the parent menu. Left unfiltered, this
+// capture-phase closeCtx ran first on every such click too, hiding #ctx (display:none) before that handler ever
+// read the row's position — so openSub's positionSub() measured an already-collapsed (0×0×0×0) rect for the row
+// and the flyout landed at the (8,8) top-left clamp fallback instead of beside it, with the parent menu gone
+// entirely underneath it. A right-click that reaches an ordinary #doc target is never inside ctx/ctx2, so this
+// exclusion changes nothing for the "closes the stale menu, then reopens fresh" path the comment above describes.
+addEventListener("contextmenu",e=>{ if(ctx.contains(e.target)||ctx2.contains(e.target)) return; closeCtx(); },true);
 addEventListener("scroll",e=>{ if(e.target===ctx||ctx.contains(e.target)||e.target===ctx2||ctx2.contains(e.target)) return;   // a scroll INSIDE the menu itself (e.g. the Wiktionary "Definitions of …" flyout's own overflow-y:auto list) must not dismiss it — only a scroll of whatever's BEHIND the menu should
   if(ctx.classList.contains("show") && Date.now()-(ctx._openedAt||0)<250) return; closeCtx(); },true);   // ignore the programmatic scroll from the pick()/re-render that immediately precedes a menu open; a genuine later user-scroll still closes it
 addEventListener("keydown",e=>{ if(e.key!=="Escape")return;   // item 3: Escape dismisses an open flyout (e.g. a POS-subtype submenu) FIRST, keeping the parent menu; a second Escape closes the parent
