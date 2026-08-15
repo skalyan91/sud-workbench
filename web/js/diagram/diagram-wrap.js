@@ -352,7 +352,15 @@ function fanArcs(arcs,spread,ghostArcs,rootKeys){ const ep={}; const reg=(k,len,
     arr.filter(e=>e.side===0).forEach(e=>e.set(0));   // a side-0 sentinel (arcs() registers one for the root stub locally; rootKeys registers one here) — always centre, never ranked: it isn't "on a side" at all, so the edge-anchor rule below doesn't apply to it
     [-1,1].forEach(side=>{ const grp=arr.filter(e=>e.side===side).sort((p,q)=>q.len-p.len);   // this side's whole pool — real AND ghost together — ranked by length alone; longest first (j=0) → nearest centre
       if(!grp.length) return;
-      const anchor=(hasRoot?spread:spread/2);   // half a fanning gap off centre — NOT the node's own half-width (see the block comment above) — plus another half-step when a root stub shares this node's centre slot, so this side's whole pool clears the root's own edge-anchored casing (item 2)
+      // on report: "reduce the gap between the innermost leftward arc endpoint and the innermost rightward
+      // arc endpoint so that it is equal to the fanning gap times the sine of the arrowhead's half-angle, and
+      // reduce the gap between a root edge's endpoint and its neighbouring endpoints to the fanning gap times
+      // the sine of the complement of the arrowhead's half-angle" — ordinary case: each side's own innermost
+      // entry was spread/2 off centre (total left-right gap = spread); now spread*sin(ARC_ANGLE)/2 per side, so
+      // the total gap is spread*sin(ARC_ANGLE). Root-adjacent case: a neighbour was a full `spread` off centre;
+      // sin(90°−ARC_ANGLE) = cos(ARC_ANGLE), so it's now spread*cos(ARC_ANGLE). Both factors are <1 (ARC_ANGLE
+      // is an acute angle, ≈31°), so both are genuine reductions from the previous anchors.
+      const anchor=(hasRoot?spread*Math.cos(ARC_ANGLE):spread*Math.sin(ARC_ANGLE)/2);
       grp.forEach((e,j)=>e.set(side*(anchor+j*spread))); }); }); }
 // cubic control points for an arc bump from (x1,base) to (x2,base) of height h: each control sits at height h
 // above its endpoint and cot(θ)·h inward, so the take-off tangent makes θ with the baseline. Apex is 0.75·h.

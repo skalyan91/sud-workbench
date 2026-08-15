@@ -374,7 +374,14 @@ function arcs(si){
     arr.filter(e=>e.side===0).forEach(e=>e.set(0));                        // the root stub only — always centre; not "on a side" at all, so the edge-anchor rule below doesn't apply to it
     [-1,1].forEach(side=>{ const grp=arr.filter(e=>e.side===side).sort((p,q)=>q.len-p.len);   // this side's whole pool — real AND ghost together — ranked by length alone; longest first (j=0) → nearest centre
       if(!grp.length) return;
-      const anchor=hasRoot?SPREAD:SPREAD/2;   // half a fanning gap off centre — NOT the node's own half-width (see the block comment above) — plus another half-step when a root stub shares this node's centre slot (item 2)
+      // on report: "reduce the gap between the innermost leftward arc endpoint and the innermost rightward
+      // arc endpoint so that it is equal to the fanning gap times the sine of the arrowhead's half-angle, and
+      // reduce the gap between a root edge's endpoint and its neighbouring endpoints to the fanning gap times
+      // the sine of the complement of the arrowhead's half-angle" — mirrors fanArcs' own identical change
+      // (js/diagram/diagram-wrap.js): ordinary anchor SPREAD/2 -> SPREAD*sin(ARC_ANGLE)/2 (so the total gap
+      // between opposite sides' innermost entries goes from SPREAD to SPREAD*sin(ARC_ANGLE)); root-adjacent
+      // anchor SPREAD -> SPREAD*cos(ARC_ANGLE) (sin of the complement = cos). Both factors are <1.
+      const anchor=hasRoot?SPREAD*Math.cos(ARC_ANGLE):SPREAD*Math.sin(ARC_ANGLE)/2;
       grp.forEach((e,j)=>e.set(side*(anchor+j*SPREAD)));               // longest first (j=0) lands half a fan step off centre; each later entry fans one more SPREAD beyond it
       usedSlot[node+"|"+side]=anchor+grp.length*SPREAD; }); });
   // endpoints sit directly on the fanned targets → measure arc width (and Hobby height) from THEM
@@ -390,7 +397,7 @@ function arcs(si){
   // fan/look up, so that endpoint is the pre-reserved gap centre directly; isEmpty flags it for the draw pass.
   genericToks.forEach(i=>{ const gapAmt=genericSubjGapW(t,i), emptyX0=c[i]-w[i]/2-gapAmt/2;
     const dSide=Math.sign(emptyX0-c[i])||1, dK=(i+1)+"|"+dSide;   // shares the SAME "to" bucket any other arc landing on this predicate uses
-    const nextOff=(usedSlot[dK]??(SPREAD/2))+SPREAD;   // continue one step past whatever the main fan pass last used on this side — or, if it registered nothing there at all, one step past this node's own anchor (SPREAD/2, the SAME anchor the main pass would have used)
+    const nextOff=(usedSlot[dK]??(SPREAD*Math.sin(ARC_ANGLE)/2))+SPREAD;   // continue one step past whatever the main fan pass last used on this side — or, if it registered nothing there at all, one step past this node's own anchor (SPREAD*sin(ARC_ANGLE)/2, the SAME ordinary-case anchor the main pass would have used)
     usedSlot[dK]=nextOff;
     const predX=c[i]+dSide*nextOff, h=arcHgt(Math.abs(emptyX0-predX),ROW);   // the predicate is the HEAD of this subj relation, the ∅ is its dependent — X1 (tail) sits at the predicate, X2 (arrowhead) at the ∅, matching a real subj arc's head→dependent direction
     ghostArcs.push({from:i+1,to:i+1,dep:"subj",X1:predX,X2:emptyX0,mx:(emptyX0+predX)/2,h,col:relColor("subj"),isEmpty:true}); });
