@@ -33,7 +33,7 @@
 # (an ImportError three menus deep, not a `dnf install` error), which is worse than getting it wrong
 # at build time.
 
-%global app_version 0.2.0
+%global app_version 0.3.0
 
 Name:           sud-workbench
 Version:        %{app_version}
@@ -211,6 +211,11 @@ update-desktop-database %{_datadir}/applications &>/dev/null || :
 gtk-update-icon-cache %{_datadir}/icons/hicolor &>/dev/null || :
 
 %changelog
+* Sat Aug 15 2026 Siva Kalyan <siva@sunflowerai.io> - 0.3.0-1
+- Full dependency licensing audit and disclosure, grew fetched on demand, CAMeL
+  Tools removed, SF Symbol icons no longer committed as base64 (rendered at
+  packaging time instead, purged from git history). Arc-endpoint trig retune,
+  titlebar/editing polish. See CHANGELOG.md.
 * Fri Aug 14 2026 Siva Kalyan <siva@sunflowerai.io> - 0.2.0-1
 - AVM (attribute-value matrix) tier, HarfBuzz native glyph shaping, Arabic/Persian
   vocalisation, titlebar/chrome overhaul, wrapped-diagram layout fixes. See CHANGELOG.md.

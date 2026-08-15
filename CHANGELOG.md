@@ -2,6 +2,59 @@
 
 All notable changes to SUD Workbench are documented in this file.
 
+## [0.3.0] — 2026-08-15
+
+A licensing-and-hardening release: every dependency's licence is now disclosed or
+fetched on demand rather than bundled, several rounds of arc-endpoint tuning are
+settled on a single trigonometric formula, and a batch of titlebar/editing polish
+lands alongside it.
+
+### Licensing and packaging
+
+- **Full dependency licensing audit.** `en_sud_ewt`'s CC BY-SA 4.0 licence, and
+  three previously-undisclosed copyleft pip dependencies (`wiktra`, `grewpy`,
+  `aksharamukha`), are now stated in `THIRD-PARTY-NOTICES.md`. HarfBuzz's core
+  licence text and the OFL font licence are now bundled verbatim rather than
+  referenced.
+- `grew`'s OCaml conversion backend is now fetched on demand via `opam` at first
+  use, instead of being bundled into any build — matching the existing pattern
+  for grammars and macronisation data. UD↔SUD/mSUD conversion is unavailable
+  until it's fetched, surfaced as a toast rather than failing silently.
+- CAMeL Tools is removed entirely: its one import site had had zero real
+  callers since the initial commit.
+- Titlebar SF Symbol icons are no longer committed to source as base64 PNGs —
+  they're rendered at packaging time instead, and every historical payload has
+  been purged from git history. A handful of genuinely-unused icon tokens were
+  removed, and `--sf-open`'s icon was migrated off an unidentified legacy PNG
+  onto a real SF Symbol (`square.and.arrow.down.on.square`).
+
+### Diagram editing and layout
+
+- Arc endpoints — for ordinary arcs, root edges, and cross-line arcs alike —
+  now anchor by a single trigonometric formula off the arrowhead's own angle,
+  replacing several rounds of ad hoc offset tuning with one consistent rule.
+- Fixed the AVM tier's width never fully deflating out of the stemma
+  notation's baseline token wash after being hidden.
+- Diagrams now carry a negative left margin equal to the token wash's own
+  padding, instead of double-counting it.
+- Fixed second-level context-menu flyouts (POS subtypes, deep features)
+  landing in the window's top-left corner instead of at the cursor.
+
+### Titlebar and window chrome
+
+- Fixed the filetype icon's slide-in animation never actually animating in a
+  real WKWebView (it silently no-op'd), and made it snappier once it did.
+- Fixed a hover-flicker at the filetype icon's left edge; its hover area now
+  matches the title's own extent exactly when the icon is hidden.
+- A sentence block's bottom padding is now floored at the running-sentence-to-
+  diagram gap, so it never collapses tighter than the gap above it.
+- Fixed the bootstrap-packaged app showing "Python" in the Dock and menu bar
+  instead of its own name.
+
+### Fixes
+
+- Pressing Escape now cancels an in-progress token drag.
+
 ## [0.2.0] — 2026-08-14
 
 A large batch of new features and fixes on top of the initial `0.1.0` release,
