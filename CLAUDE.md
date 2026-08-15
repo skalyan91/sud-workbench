@@ -1422,11 +1422,25 @@ five do — follow that when adding another.
   first-launch scripts, now parse-checked (not run) with a real `pwsh` — see below;
   `sud-workbench.iss` is the Inno Setup installer (per-user, unsigned), still never compiled.
 
-⚠️ **Each bundle ships only its own chrome kit**, and both builds fail if the other survives. For
-macOS dropping `win11-kit/` is a size decision. For Windows dropping `macos-kit/` is a **licensing**
-one: 12 of `mac-tokens.css`'s `--sf-*` masks are real SF Symbols rendered to base64 PNG, and Apple
-licenses those for apps on *Apple* platforms. The Fluent kit supplies all 40 from MIT sources, so
-nothing is lost. See `THIRD-PARTY-NOTICES.md`.
+⚠️ **Each bundle ships only its own chrome kit**, and every build fails if another platform's
+survives. For macOS dropping `win11-kit/` is a size decision. For Windows *and Linux* dropping
+`macos-kit/` is a **licensing** one: eight of `mac-tokens.css`'s `--sf-*` masks are real SF Symbols
+(rendered at packaging time now, not committed — see `app/mac/sf_symbols.py`), and Apple licenses
+those for apps on *Apple* platforms. The Fluent kit supplies all 41 masks from MIT sources on
+Windows, so nothing is lost there. See `THIRD-PARTY-NOTICES.md`.
+
+⚠️ **UNRESOLVED: `web/adwaita-kit/`'s two stylesheets `@import url("../macos-kit/…")` wholesale**
+(see `web/adwaita-kit/README.md`) — which is exactly the directory `make_deb.sh`/`make_rpm.sh`
+strip for the licensing reason above. Confirmed by extracting a real built `.deb`: `macos-kit/` is
+genuinely absent, and `adwaita-kit/adwaita-tokens.css`/`adwaita-chrome.css` still contain those two
+`@import` lines unchanged. A failed CSS `@import` degrades silently (no thrown error, just zero
+rules contributed) — the 5/5 `xvfb-run` boot-checks below only confirm the *process* launches
+without crashing, not that the page renders styled, so this gap was never caught by them. Net
+effect: a real `.deb`/`.rpm` install almost certainly loads with none of `adwaita-kit`'s overrides
+*or* its inherited base (all 41 icon masks, `mac-chrome.css`'s rules) in effect. Not yet fixed —
+needs a design decision (duplicate the non-SF-Symbol subset of `macos-kit/` into something both
+kits can import, split a shared base out of `macos-kit/`, or something else) rather than a
+mechanical patch.
 
 ⚠️ **`wiktra` is a `git+` requirement and it is in `requirements-core.txt`** — so a first launch on
 a machine without git fails inside pip. macOS almost always has git; Windows never does out of the

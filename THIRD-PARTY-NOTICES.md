@@ -81,12 +81,26 @@ data-platform>`. Their icon sets are unrelated in provenance.
   `--sf-narcs` and `--sf-nbrackets` are Lucide in **both** kits: they draw a notation, not an OS
   affordance, so Fluent has no counterpart to swap in.
 
-**SF Symbols are Apple's, and are macOS-only on purpose.** Twelve masks in `mac-tokens.css` are
-real SF Symbols rendered to base64 PNG, and on macOS the native shell replaces several of them with
-symbols it renders at runtime. Apple licenses SF Symbols for use in apps **on Apple platforms**;
-reproducing the artwork inside a Windows application is not covered. So `packaging/windows/
-make_win_app.py` **excludes `web/macos-kit/` from the Windows payload** and fails the build if it
-survives — the Fluent kit supplies all 40 masks from MIT-licensed sources, so nothing is lost.
+**SF Symbols are Apple's, and are macOS-only on purpose.** Eight masks in `mac-tokens.css`
+(`--sf-undo/-redo/-zoomin/-zoomout/-actualsize/-help/-grid/-open`) are real SF Symbols, and the
+native shell renders a further handful (the model-manager and titlebar-proxy glyphs) fresh at every
+launch via the same API. Neither is committed as artwork any more: `app/mac/sf_symbols.py` renders
+the first group to a git-ignored, packaging-time-generated file (`mac-tokens.css` only `@import`s
+it), and `app/mac/shell.py`'s `_compute_symbol_icon` renders the second group at runtime on the
+user's own machine — both call `NSImage.imageWithSystemSymbolName_accessibilityDescription_`, never
+redistribute a rendered copy, and neither leaves a base64 payload in this repository or its history
+(the base64 PNGs earlier commits used to bake straight into `mac-tokens.css`, and one that predated
+this project's own history entirely, were purged; see `git log` on `web/macos-kit/mac-tokens.css`
+for the packaging-time-render migration).
+
+Apple licenses SF Symbols for use in apps **on Apple platforms**; reproducing the artwork inside a
+Windows or Linux build is not covered. So `packaging/windows/make_win_app.py` **excludes
+`web/macos-kit/` from the Windows payload**, and `packaging/linux/make_deb.sh`/`make_rpm.sh` do the
+same for Linux — both fail the build if it survives. The Fluent kit supplies all 41 masks from
+MIT-licensed sources for Windows, so nothing is lost there; Linux's `adwaita-kit/` inherits the same
+41 mask *names* from `macos-kit/` at the CSS level (see `web/adwaita-kit/README.md`), which is a
+separate, unresolved concern of its own — see the note in CLAUDE.md on `adwaita-kit`'s `@import`
+dependency on a directory the Linux build deliberately removes.
 `packaging/make_bootstrap_app.sh` drops `web/win11-kit/` from the macOS bundle symmetrically,
 though that one is for size alone: MIT would have travelled fine.
 
