@@ -1182,15 +1182,22 @@ function wpDraw(box){ const wp=box._wp; if(!wp) return;
     if(show.arrows){const dir=arrowDir(e.rel); if(dir){const tip=dir==="dep"?a1:a2,frm=dir==="dep"?a2:a1;
       e._ah=arrowPath(frm,tip,5.25); e._ahc=e._ah; if(dir==="dep")a1=backoff(tip,frm,5.25); else a2=backoff(tip,frm,5.25);} else {e._ah=null;e._ahc=null;}} else {e._ah=null;e._ahc=null;}   // ._ahc == ._ah: the round halo is a stroke now (.ah-casing, styles/app.css), not a second larger mitred polygon — see AH_MITRE's "SUPERSEDED" comment, diagram-core.js
     e._d=`M ${a1[0]} ${a1[1]} L ${a2[0]} ${a2[1]}`; });
-  // Item 21: each edge's own casing draws directly behind ITS OWN stroke/arrowhead (was: ALL casings in one
-  // combined layer before any stroke, so edges never cased against each OTHER at a crossing) — on report ("in
-  // stemmas, decollision isn't happening when two edges cross over"); see the flat stemma()'s own matching
-  // note (diagram-render.js) for the full story, unchanged here beyond adapting to this function's own class list.
-  wp.edges.forEach(e=>{ const g=E("g",{class:"edge-g"+(sel.s===wp.si&&sel.t===wp.oid[e.d]?" sel":""),"data-s":wp.si,"data-dep":wp.oid[e.d],"data-head":wp.oid[e.h]});
-    g.appendChild(E("path",{class:"arc-casing",d:e._d})); if(e._ahc) g.appendChild(E("path",{class:"ah-casing",d:e._ahc}));
-    if(e._ah) g.appendChild(E("path",{class:"ah",d:e._ah,fill:e._ink}));
-    g.appendChild(E("path",{class:"edge"+(isMorphRel(e.rel)?" morph-edge":""),d:e._d,stroke:e._ink}));
-    g.style.cursor="pointer"; g.addEventListener("click",()=>pick(wp.si,wp.oid[e.d])); svg.appendChild(g); });
+  // Item 21: edges cased PER HEAD-GROUP — every edge out of the same node shares ONE casing pass, immediately
+  // behind that group's own strokes/arrowheads (was: ALL casings in one combined layer before any stroke, so
+  // edges never cased against each OTHER at a crossing; a fully per-edge casing was tried next and reverted —
+  // sibling edges share a start point and never cross each other, so nothing was gained by casing them apart,
+  // and it read as a stack of individually-edged halos rather than one clean one at the shared point) — on
+  // report ("in stemmas, decollision isn't happening when two edges cross over" / "share casing across the
+  // outgoing edges of each node"); see the flat stemma()'s own matching note (diagram-render.js) for the full
+  // story, unchanged here beyond adapting to this function's own class list.
+  const wpEdgesByHead=new Map(); wp.edges.forEach(e=>{ if(!wpEdgesByHead.has(e.h)) wpEdgesByHead.set(e.h,[]); wpEdgesByHead.get(e.h).push(e); });
+  wpEdgesByHead.forEach(group=>{   // Map preserves insertion order → each group lands at its FIRST member's position in the sorted array
+    const cg=E("g",{class:"edge-casing-group"}); cg.setAttribute("aria-hidden","true");
+    group.forEach(e=>{ cg.appendChild(E("path",{class:"arc-casing",d:e._d})); if(e._ahc) cg.appendChild(E("path",{class:"ah-casing",d:e._ahc})); }); svg.appendChild(cg);
+    group.forEach(e=>{ const g=E("g",{class:"edge-g"+(sel.s===wp.si&&sel.t===wp.oid[e.d]?" sel":""),"data-s":wp.si,"data-dep":wp.oid[e.d],"data-head":wp.oid[e.h]});
+      if(e._ah) g.appendChild(E("path",{class:"ah",d:e._ah,fill:e._ink}));
+      g.appendChild(E("path",{class:"edge"+(isMorphRel(e.rel)?" morph-edge":""),d:e._d,stroke:e._ink}));
+      g.style.cursor="pointer"; g.addEventListener("click",()=>pick(wp.si,wp.oid[e.d])); svg.appendChild(g); }); });
   // node hit targets — no visible marker; edges already meet at the point, and selecting highlights the incoming edge.
   // sx=bw/wp.natW squeezes the WHOLE sentence's natural tree width into one row's width, so for anything past a
   // handful of tokens sx<<1 and neighbouring nodes can land closer together than the flat r:10 below reaches —
@@ -1399,19 +1406,26 @@ function tree(si){
   const maxD=Math.max(0,...depth),total=Math.max(2,...x.map((xx,i)=>xx+lw2(i)/2+hgw2(i)))+6,H=TOP+maxD*LV+16+belowReserveH(trLayer(),belowTierN(),false,avmRowMaxH(t));   // Item 8: the bottom tier tail folds in descent(POS_F) per row, matching belowStack. lw2/hgw2 (not nw/hgw) so a ∅ pushed to the canvas edge still gets cropped in — H kept on the newer belowReserveH() consolidation (post-dates the ghost-edge patch's own base); only kind/target:tg are this patch's real addition. item 22: +AVM — this is the diagram's OWN total height (H), so it must cover the bottom row's AVM box regardless of whether LV's own reserve (above) already double-counts it; see that call's note on the same hasPos=false question
   if(RTL) for(let i=0;i<N;i++) x[i]=total-x[i];   // mirror the tidy tree for right-to-left (N, not n — the ∅ mirrors too)
   const svg=E("svg",{class:"tree",width:total,height:H,viewBox:`0 0 ${total} ${H}`}); const boxes=[];
-  // edges PER-EDGE cased (Item 21): each edge's own casing draws directly behind ITS OWN stroke/arrowhead, in
-  // this sorted z-order — was: ALL casings in one combined layer before any stroke, so a crossing pair never
-  // got a clean occlusion between the two of them. On report ("in stemmas, decollision isn't happening when
-  // two edges cross over") — see stemma()'s own matching note (diagram-render.js) for the full story.
+  // edges cased PER HEAD-GROUP (Item 21): every edge out of the same node shares ONE casing pass, immediately
+  // behind that group's own strokes/arrowheads, in the edges' existing sorted z-order — was: ALL casings in one
+  // combined layer before any stroke, so a crossing pair never got a clean occlusion between the two of them; a
+  // fully per-edge casing was tried next and reverted (sibling edges share a start point and never cross each
+  // other, so casing them apart bought nothing and read as a stack of individually-edged halos rather than one
+  // clean one at the shared point). On report ("in stemmas, decollision isn't happening when two edges cross
+  // over" / "share casing across the outgoing edges of each node") — see stemma()'s own matching note
+  // (diagram-render.js) for the full story.
   edges.forEach(e=>{ e._ink=arcInk(relColor(e.rel)); let dEnd=[x[e.d],e.y1], hEnd=[x[e.h],e.y2];
     if(show.arrows){const dir=arrowDir(e.rel); if(dir){const tip=dir==="dep"?dEnd:hEnd,frm=dir==="dep"?hEnd:dEnd;
       e._ah=arrowPath(frm,tip,5.25); e._ahc=e._ah; if(dir==="dep") dEnd=backoff(tip,frm,5.25); else hEnd=backoff(tip,frm,5.25);} else {e._ah=null;e._ahc=null;}} else {e._ah=null;e._ahc=null;}   // ._ahc == ._ah: round halo is a stroke now (.ah-casing, styles/app.css), not a second larger mitred polygon — see AH_MITRE's "SUPERSEDED" comment, diagram-core.js
     e._d=`M ${hEnd[0]} ${hEnd[1]} L ${dEnd[0]} ${dEnd[1]}`; });
-  edges.forEach(e=>{ const g=E("g",{class:"edge-g","data-s":si,"data-dep":OID(e.d),"data-head":OID(e.h)});
-    g.appendChild(E("path",{class:"arc-casing",d:e._d})); if(e._ahc) g.appendChild(E("path",{class:"ah-casing",d:e._ahc}));
-    if(e._ah) g.appendChild(E("path",{class:"ah",d:e._ah,fill:e._ink}));
-    g.appendChild(E("path",{class:"edge"+(isMorphRel(e.rel)?" morph-edge":""),d:e._d,stroke:e._ink}));   // an mSUD "/m" edge dashes here exactly as it does in the stemma and the wrapped hierarchy
-    g.style.cursor="pointer"; g.addEventListener("click",()=>pick(si,OID(e.d))); svg.appendChild(g);});
+  const treeEdgesByHead=new Map(); edges.forEach(e=>{ if(!treeEdgesByHead.has(e.h)) treeEdgesByHead.set(e.h,[]); treeEdgesByHead.get(e.h).push(e); });
+  treeEdgesByHead.forEach(group=>{   // Map preserves insertion order → each group lands at its FIRST member's position in the sorted array
+    const cg=E("g",{class:"edge-casing-group"}); cg.setAttribute("aria-hidden","true");
+    group.forEach(e=>{ cg.appendChild(E("path",{class:"arc-casing",d:e._d})); if(e._ahc) cg.appendChild(E("path",{class:"ah-casing",d:e._ahc})); }); svg.appendChild(cg);
+    group.forEach(e=>{ const g=E("g",{class:"edge-g","data-s":si,"data-dep":OID(e.d),"data-head":OID(e.h)});
+      if(e._ah) g.appendChild(E("path",{class:"ah",d:e._ah,fill:e._ink}));
+      g.appendChild(E("path",{class:"edge"+(isMorphRel(e.rel)?" morph-edge":""),d:e._d,stroke:e._ink}));   // an mSUD "/m" edge dashes here exactly as it does in the stemma and the wrapped hierarchy
+      g.style.cursor="pointer"; g.addEventListener("click",()=>pick(si,OID(e.d))); svg.appendChild(g); }); });
   if(show.labels) edges.forEach(e=>{ const mx=(x[e.d]+x[e.h])/2, my=e.midY;   // pass 2: all labels in front of all edges
     const lg=E("g",{class:"edge-g","data-s":si,"data-dep":OID(e.d),"data-head":OID(e.h)}); drawLabel(lg,mx,my,e.rel,relColor(e.rel));
     lg.style.cursor="pointer"; lg.addEventListener("click",()=>pick(si,OID(e.d))); svg.appendChild(lg); boxes.push({x:mx,y:my,hx:meas(e.rel,POS_F)/2+2,hy:7}); });
@@ -1876,7 +1890,7 @@ function outline(si){const D=displaySent(DOC[si]), t=D.tokens, n=t.length, OID=k
    so nothing else in the stack shifts: the projection lines and baseline words a ghost already
    draws over stay behind it, and the token/node layer every renderer appends last stays in front. */
 const GHOST_LAYER=".ghost-g,.proj-ghost";
-const REAL_EDGE_LAYER=".arc,.edge-g";   // every notation's real dependency layer, and GROUPS only — an .arc/.edge-g <g> holds its own stroke, arrowhead, casing, label and leader, so this one selector covers all four things a ghost has to go behind. (The paths inside are .arc-path/.arc-casing/…, which `.arc` does not match: class selectors match whole tokens.) ".edge-cases" dropped: that was a separate, edges-don't-case-against-each-other combined casing layer stemma/hierarchy used to draw — gone now that every edge cases against its own stroke directly inside its own .edge-g (see the stemma()/wpDraw()/tree() fix, diagram-render.js/diagram-wrap.js, "decollision isn't happening when two edges cross over")
+const REAL_EDGE_LAYER=".arc,.edge-g,.edge-casing-group";   // every notation's real dependency layer, and GROUPS only — an .arc/.edge-g <g> holds its own stroke, arrowhead, casing, label and leader, so this one selector covers all four things a ghost has to go behind. (The paths inside are .arc-path/.arc-casing/…, which `.arc` does not match: class selectors match whole tokens.) ".edge-casing-group" (stemma/hierarchy's own per-head-group casing pass, drawn just BEFORE that group's own .edge-g's — see the stemma()/wpDraw()/tree() fix, "share casing across the outgoing edges of each node") has to be listed too, or ai below would land on the first GROUP's edge-g and skip the casing-group drawn just ahead of it, leaving a ghost that sits between that halo and its own stroke instead of behind both
 function ghostsBehind(svg){
   if(!svg||!svg.children) return;
   const kids=[...svg.children], ai=kids.findIndex(el=>el.matches(REAL_EDGE_LAYER));

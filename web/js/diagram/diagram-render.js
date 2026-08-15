@@ -200,24 +200,30 @@ function stemma(si,{proj,catNodes}){
       const glbl=E("text",{class:"node-lbl",x:ge.emptyX,y:by+TOK_Y_LOWER+NODE_Y_EXTRA}); glbl.textContent="∅"; g.appendChild(glbl);   // the ∅ is a virtual TOKEN, so it lowers with every real one; its box stays on the layout baseline like theirs
       svg.appendChild(g); boxes.push({x:ge.emptyX,y:by-6,hx:8,hy:9}); });
     mwtTie(svg,c,bformW,D,belowBot,loBoxes(boxes),si); }   // item 22: per-token belowBot (not a sentence-wide max) — each tie seats off only the tokens it spans, so an AVM-heavy token elsewhere in the sentence can no longer push an unrelated tie down with it
-  // edges PER-EDGE cased, in their existing sorted z-order (subj, then comp, mod, other — see the `edges.sort`
-  // above): each edge's own casing draws directly behind ITS OWN stroke/arrowhead, in one group, so a LATER edge's
-  // casing halo cleanly occludes an EARLIER edge's stroke wherever the two cross — not just the tokens/proj-lines
-  // behind the edge set as a whole. On report ("in stemmas, decollision isn't happening when two edges cross
-  // over"): this used to draw ALL casings in one combined layer BEFORE any stroke ("edges as ONE cased unit" —
-  // deliberate at the time, explicitly documented as NOT casing edges against each other), so at a genuine
-  // mid-path crossing (as opposed to two edges merely converging on a shared node, which reads cleanly either
-  // way) neither edge's casing ever sat between the two strokes — they just overlapped as two bare crossing
-  // lines. Item 21.
+  // edges cased PER HEAD-GROUP, in their existing sorted z-order (subj, then comp, mod, other — see the
+  // `edges.sort` above): every edge OUT of the same node shares ONE casing pass (drawn together, immediately
+  // behind that whole group's strokes/arrowheads), so a LATER group's casing halo cleanly occludes an EARLIER
+  // group's stroke wherever the two cross — not just the tokens/proj-lines behind the edge set as a whole.
+  // Grouped by head rather than fully per-edge: sibling edges (same head) start at the same point and never
+  // cross EACH OTHER, so nothing is gained by casing them apart — sharing one pass instead reads as a single
+  // clean halo at the shared point rather than a stack of individually-edged ones. On report ("in stemmas,
+  // decollision isn't happening when two edges cross over" / "share casing across the outgoing edges of each
+  // node"): this used to draw ALL casings in one combined layer BEFORE any stroke ("edges as ONE cased unit" —
+  // deliberate at the time, explicitly documented as NOT casing edges against each other) — this is the
+  // group-scoped middle ground between that (one shared layer, sentence-wide) and a fully separate casing per
+  // edge (tried first, reverted here). Item 21.
   edges.forEach(e=>{ e._ink=arcInk(relColor(e.rel)); let a1=[c[e.d],e.y1], a2=[c[e.h],e.y2];
     if(show.arrows){const dir=arrowDir(e.rel); if(dir){const tip=dir==="dep"?a1:a2,frm=dir==="dep"?a2:a1;
       e._ah=arrowPath(frm,tip,5.25); e._ahc=e._ah; if(dir==="dep") a1=backoff(tip,frm,5.25); else a2=backoff(tip,frm,5.25);}}   // the casing head is the SAME head, same `d` as ._ah — the outward halo is now a round stroke (.ah-casing, styles/app.css) rather than a second, larger, hand-mitred polygon, so there is nothing left for a second arrowPath call to compute; see AH_MITRE's own comment for why the old approach (a bigger `s`, then a mitred outset) is now dead code kept for its math, not its call sites
     e._d=`M ${a1[0]} ${a1[1]} L ${a2[0]} ${a2[1]}`; });
-  edges.forEach(e=>{ const g=E("g",{class:"edge-g","data-s":si,"data-dep":OID(e.d),"data-head":OID(e.h)});
-    g.appendChild(E("path",{class:"arc-casing",d:e._d})); if(e._ahc) g.appendChild(E("path",{class:"ah-casing",d:e._ahc}));   // this edge's OWN casing, immediately behind its OWN stroke/arrowhead below — not a shared earlier layer
-    if(e._ah) g.appendChild(E("path",{class:"ah",d:e._ah,fill:e._ink}));
-    g.appendChild(E("path",{class:"edge"+(isMorphRel(e.rel)?" morph-edge":""),d:e._d,stroke:e._ink}));
-    g.style.cursor="pointer"; g.addEventListener("click",()=>pick(si,OID(e.d))); svg.appendChild(g);});
+  const edgesByHead=new Map(); edges.forEach(e=>{ if(!edgesByHead.has(e.h)) edgesByHead.set(e.h,[]); edgesByHead.get(e.h).push(e); });
+  edgesByHead.forEach(group=>{   // Map preserves insertion order → each group lands at its FIRST member's position in the sorted array
+    const cg=E("g",{class:"edge-casing-group"}); cg.setAttribute("aria-hidden","true");
+    group.forEach(e=>{ cg.appendChild(E("path",{class:"arc-casing",d:e._d})); if(e._ahc) cg.appendChild(E("path",{class:"ah-casing",d:e._ahc})); }); svg.appendChild(cg);
+    group.forEach(e=>{ const g=E("g",{class:"edge-g","data-s":si,"data-dep":OID(e.d),"data-head":OID(e.h)});
+      if(e._ah) g.appendChild(E("path",{class:"ah",d:e._ah,fill:e._ink}));
+      g.appendChild(E("path",{class:"edge"+(isMorphRel(e.rel)?" morph-edge":""),d:e._d,stroke:e._ink}));
+      g.style.cursor="pointer"; g.addEventListener("click",()=>pick(si,OID(e.d))); svg.appendChild(g); }); });
   if(show.labels){   // pass 2: all labels in front of all edges (so their casing occludes crossing edges)
     // HORIZONTAL-ONLY de-collision: every stemma label sits at its NATURAL edge-midpoint y — no vertical lift, no
     // dashed leaders. Overlaps are resolved solely by spreadForLabels (run above), which widens node gaps so
