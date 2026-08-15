@@ -239,6 +239,11 @@ async function attachAsSharedConjunct(si,depId,conjDepId){ const s=DOC[si]; if(!
 (function(){ const docEl=document.getElementById("doc"); if(!docEl)return;
   const draggable=()=>conv==="stemma"||conv==="tree"||conv==="arcs"||conv==="brackets";
   let DLAST=null;   // last grabbed token, kept across a tap/cancel so a drag-lock ("double-tap to drag") gesture can be resurrected — see pointermove
+  // Escape-cancel guard: set for the remainder of the CURRENT physical press once Escape cancels a drag, so the
+  // drag-lock resurrection logic below (pointermove) can't silently re-arm a new DDRAG from whatever the pointer
+  // happens to be hovering while the button is still held after Escape. Cleared the moment that press actually
+  // releases (pointerup/pointercancel) — a fresh press is always free to drag again.
+  let DCANCELLED=false;
   // item 1 — marquee (drag-area) selection: a drag that STARTS on empty diagram space sweeps out a rectangle and
   // selects every token whose box it touches, as the contiguous min–max range (token ids ARE reading order).
   let MARQ=null;
@@ -293,7 +298,7 @@ async function attachAsSharedConjunct(si,depId,conjDepId){ const s=DOC[si]; if(!
     // Drag-lock ("double-tap to drag"): the held second tap moves the pointer, but WebKit often delivers no fresh
     // pointerdown for it (the first tap's pointerup already cleared DDRAG) — so resurrect the drag from the last grab
     // while the primary button is held (e.buttons&1 rules out plain hover-after-tap).  Harmless when pointerdown did fire.
-    if(!DDRAG && (e.buttons&1) && draggable()){
+    if(!DDRAG && !DCANCELLED && (e.buttons&1) && draggable()){
       if(DLAST && Date.now()-DLAST.t<1500){
         DDRAG={kind:DLAST.kind,si:DLAST.si,tok:DLAST.tok,dep:DLAST.dep,gfrom:DLAST.gfrom,gto:DLAST.gto,x0:DLAST.x0,y0:DLAST.y0,moved:false}; }
       else {   // FIRST-LOAD: WebKit swallows the very first pointerdown after a fresh load, so the grab's pointerdown never ran and DLAST is still null — reconstruct the grab from the node/edge/tie under the pointer so the first double-tap-drag reorders too
@@ -303,7 +308,7 @@ async function attachAsSharedConjunct(si,depId,conjDepId){ const s=DOC[si]; if(!
         else if(node){ DDRAG={kind:"node",si:+node.getAttribute("data-s"),tok:+node.getAttribute("data-tok"),x0:e.clientX,y0:e.clientY,moved:false}; }   // …and no pick() here either, for the stronger version of the reason above: this branch only ever runs from a pointermove with the button held, i.e. a gesture already known to be a DRAG
         if(DDRAG) DLAST={kind:DDRAG.kind,si:DDRAG.si,tok:DDRAG.tok,dep:DDRAG.dep,gfrom:DDRAG.gfrom,gto:DDRAG.gto,x0:e.clientX,y0:e.clientY,t:Date.now()}; } }
     if(!DDRAG)return;
-    if(!DDRAG.moved && Math.hypot(e.clientX-DDRAG.x0,e.clientY-DDRAG.y0)>4){ DDRAG.moved=true; document.body.classList.add("dg-drag"); try{docEl.setPointerCapture(e.pointerId);}catch(_){} dragGhost(DDRAG,e); if(DDRAG.kind!=="mwtgroup") paintHeadCandidates(DDRAG); }   // a group drag never offers "become the head of X" — there is no single dependent/head to redirect, so the parser-candidate wash is skipped outright rather than relying on paintHeadCandidates' own d.tok===undefined no-op
+    if(!DDRAG.moved && Math.hypot(e.clientX-DDRAG.x0,e.clientY-DDRAG.y0)>4){ DDRAG.moved=true; DDRAG.pointerId=e.pointerId; document.body.classList.add("dg-drag"); try{docEl.setPointerCapture(e.pointerId);}catch(_){} dragGhost(DDRAG,e); if(DDRAG.kind!=="mwtgroup") paintHeadCandidates(DDRAG); }   // a group drag never offers "become the head of X" — there is no single dependent/head to redirect, so the parser-candidate wash is skipped outright rather than relying on paintHeadCandidates' own d.tok===undefined no-op
     if(DDRAG.moved){ e.preventDefault(); DDRAG.lastX=e.clientX; DDRAG.lastY=e.clientY; moveGhost(e); document.querySelectorAll("#doc .dtarget").forEach(n=>n.classList.remove("dtarget"));   // remember the live drop point → a pointercancel can still commit there
       if(DDRAG.kind==="mwtgroup"){ const blk=document.querySelector(`.sblock[data-i="${DDRAG.si}"]`); if(blk) dropCaret(DDRAG.si,e.clientX,e.clientY,blk,{gfrom:DDRAG.gfrom,gto:DDRAG.gto}); }   // a group drag only ever reorders — no re-head, no shared-conjunct/raise attach — so it always shows the drop caret, exactly like kind:"node" hovering empty space below
       else {
@@ -406,7 +411,8 @@ async function attachAsSharedConjunct(si,depId,conjDepId){ const s=DOC[si]; if(!
         if(raiseMirror(d.si,fromId,edgeDepId)){ return attachAsRaisedSubj(d.si,edgeDepId,fromId); } } }   // …and the mirror: the PREDICATE dropped onto the argument's own edge. Same call, the two ids swapped — attachAsRaisedSubj's parameters are (argument, predicate) and the annotation it writes is identical either way. Second, so a drop that satisfies BOTH keeps the meaning it has today
     if(d.kind==="head") return;   // an edge drag that misses both a node and a valid attach target → no-op
     const blk=el&&el.closest&&el.closest(`.sblock[data-i="${d.si}"]`); if(blk) return reorderByX(d.si,d.tok,clientX,clientY,blk); }   // node into empty space → reorder to that x
-  docEl.addEventListener("pointerup",e=>{ if(!DDRAG)return; const d=DDRAG; DDRAG=null; endDrag(e);
+  docEl.addEventListener("pointerup",e=>{ DCANCELLED=false;   // this press is over — a fresh press may drag again
+    if(!DDRAG)return; const d=DDRAG; DDRAG=null; endDrag(e);
     // e.target is the actual element tapped (no pointer capture happened — that only kicks in once a drag starts
     // moving), which may be a .tr-edit/.gl-edit/goeswith part NESTED inside the node's group rather than the node
     // itself. Resolved HERE, before the pick() below: in brackets, pick() re-renders the whole block (see its own
@@ -445,12 +451,31 @@ async function attachAsSharedConjunct(si,depId,conjDepId){ const s=DOC[si]; if(!
     if(m.moved){ DSUPPRESS=true; setTimeout(()=>DSUPPRESS=false,0);   // swallow the click that would otherwise deselect
       if(m.hits){ setRange(m.si,m.hits.min,m.hits.max); sel={s:m.si,t:m.hits.max}; selGhost=null; UIZONE="diagram"; applyZone(); syncMenu(true); preserveScroll(renderDoc); }
       else { selRange=null; pick(m.si,0,false,false); } } },true);
-  docEl.addEventListener("pointercancel",e=>{ if(MARQ){ endMarquee(); return; }
+  docEl.addEventListener("pointercancel",e=>{ DCANCELLED=false;   // this press is over — a fresh press may drag again
+    if(MARQ){ endMarquee(); return; }
     if(!DDRAG)return; const d=DDRAG; DDRAG=null; endDrag(e);
     // A gesture the browser reclaimed. If it was a real drag (moved), still commit its drop at the last live point —
     // WebKit's drag-lock double-tap sends pointercancel in place of pointerup, and losing the reorder here is exactly
     // the "caret shows but the drop does nothing" bug. A cancelled plain tap (not moved) is dropped cleanly as before.
     if(d.moved) commitDrop(d, d.lastX!=null?d.lastX:e.clientX, d.lastY!=null?d.lastY:e.clientY); });
+  /* Escape cancels a genuinely in-progress drag OUTRIGHT: no commit (contrast pointercancel above, which still
+     drops at the last live point — that's WebKit's drag-lock reclaiming the gesture, not the user asking to abort
+     it). Scoped to DDRAG itself: with no drag active, Escape falls through untouched to whatever else wants it
+     (menu dismiss, sheet close, …), which is why this checks DDRAG first and never calls preventDefault otherwise.
+     document-level + capture, matching every other global Escape handler in this app (sheets.js, context-menu.js,
+     menubar.js) — a drag has no focused element of its own to dispatch a bubbling keydown through.
+     DLAST is cleared too: leaving it standing would let the very next pointermove (button still physically held)
+     resurrect this same cancelled drag via the drag-lock path above. DCANCELLED (cleared on the real pointerup/
+     pointercancel above) additionally blocks that path's OWN from-scratch reconstruction branch, which doesn't
+     consult DLAST at all — it re-arms a fresh DDRAG from whatever the pointer is hovering the moment DDRAG is
+     null and the button is down, exactly the state this cancel just created. Pointer capture is released via the
+     pointerId stashed on DDRAG when the drag started moving (endDrag's own release, reused here): if the physical
+     button is still down when Escape lands, the eventual real pointerup then finds DDRAG already null and no-ops
+     harmlessly instead of misfiring against a stale captured drag. */
+  document.addEventListener("keydown",e=>{ if(e.key!=="Escape"||!DDRAG)return;
+    e.preventDefault(); e.stopPropagation();
+    const d=DDRAG; DDRAG=null; DLAST=null; DCANCELLED=true;
+    endDrag({pointerId:d.pointerId}); },true);
   // stemma/arcs/tree: nearest insertion slot, minus the slot just AFTER the dragged token (redundant with the one
   // just before it). Returns {to} (the reorder target index), {cx} (caret x) and {lTop,lBot} (the cursor's row band,
   // used to size the caret) — all derived from the SAME chosen slot, so the caret and the reorder stay in sync.
