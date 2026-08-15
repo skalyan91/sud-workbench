@@ -33,7 +33,7 @@
 # (an ImportError three menus deep, not a `dnf install` error), which is worse than getting it wrong
 # at build time.
 
-%global app_version 0.3.2
+%global app_version 0.3.3
 
 Name:           sud-workbench
 Version:        %{app_version}
@@ -211,6 +211,11 @@ update-desktop-database %{_datadir}/applications &>/dev/null || :
 gtk-update-icon-cache %{_datadir}/icons/hicolor &>/dev/null || :
 
 %changelog
+* Sat Aug 15 2026 Siva Kalyan - 0.3.3-1
+- Fixed a false attribution (SUD is not Sunflower AI's own relation set),
+  documented the Homebrew tap and GitHub Releases in the main README (never
+  mentioned before), and relabelled the Show/Hide menu's "Attribute-value
+  matrix" to "Feature matrices". See CHANGELOG.md.
 * Sat Aug 15 2026 Siva Kalyan - 0.3.2-1
 - Arc-endpoint fan-anchor geometry re-derived so adjacent arc/arrowhead
   casings land exactly tangent, replacing several rounds of trig-factor

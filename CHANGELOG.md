@@ -2,6 +2,25 @@
 
 All notable changes to SUD Workbench are documented in this file.
 
+## [0.3.3] — 2026-08-15
+
+### Fixes
+
+- Corrected a false attribution: SUD (Surface-syntactic Universal Dependencies) is not
+  Sunflower AI's own relation set — it was introduced by Gerdes, Guillaume, Kahane and
+  Perrier (surfacesyntacticud.org), an independent academic project. Fixed everywhere this
+  was claimed (`README.md`, `CLAUDE.md`, and the Linux packaging descriptions), and purged
+  from git history.
+
+### Documentation
+
+- Added an Install section to `README.md` — the Homebrew tap and the GitHub Releases page
+  both existed already but were never actually mentioned anywhere in the main project docs.
+
+### UI
+
+- Relabelled the Show/Hide menu's "Attribute-value matrix" checkbox to "Feature matrices".
+
 ## [0.3.2] — 2026-08-15
 
 ### Diagram editing and layout
