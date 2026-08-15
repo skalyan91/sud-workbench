@@ -2,6 +2,35 @@
 
 All notable changes to SUD Workbench are documented in this file.
 
+## [0.3.4] — 2026-08-16
+
+### Fixes
+
+- The Show/Hide menu's "Feature matrices" (AVM) toggle now actually hides AVMs in outline view —
+  it never had the same `show.avm` gate every other notation's AVM box already respected.
+- Fixed a real bug in Sanskrit script handling: typing Devanagari into an otherwise-empty document
+  correctly stored it as Devanagari, but the app's own bookkeeping of which script the document is
+  stored in never learned about it — so every sentence after the first was wrongly refused with
+  "this document stores its text in IAST". Re-derived from the document's own forms after every
+  insert, matching the app's own "read off the forms, never off a preference" design.
+- Inserting a sentence now scrolls to it, instead of silently staying at the top of the document —
+  a scroll call was running before the render it depended on had actually happened.
+- Turning on Feature matrices (AVM) could push a diagram wider than its view without wrapping to
+  fit. Fully fixed in outline view (real horizontal overflow up to 247px, with a visible scrollbar,
+  is now zero); the wrapped stemma/tree views' own AVM-driven gap is closed too, along with a
+  second, unrelated overflow traced to a node's own hover-highlight circle exceeding its row.
+- Sanskrit MWT sandhi: a word ending in "c" no longer voices to an impossible form before a
+  voiced sound (e.g. vāc → vāj) — corrected the general word-final-consonant voicing rule itself
+  (c → g, not c → j; Whitney's Sanskrit Grammar §142), rather than special-casing the one reported
+  word, so every word ending in "c" is affected, not just vāc.
+- The options bar visibility toggle is now per-window — opening it in one window no longer opens
+  it in every other open window.
+- Stemma and hierarchy-tree diagrams now correctly show one edge crossing cleanly in front of
+  another wherever two edges from different nodes actually cross, instead of the two just
+  overlapping as bare intersecting lines. Edges from the SAME node share one casing halo, so a
+  node with several dependents reads as one clean bundle rather than several separately-outlined
+  ones.
+
 ## [0.3.3] — 2026-08-15
 
 ### Fixes

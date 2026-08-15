@@ -33,7 +33,7 @@
 # (an ImportError three menus deep, not a `dnf install` error), which is worse than getting it wrong
 # at build time.
 
-%global app_version 0.3.3
+%global app_version 0.3.4
 
 Name:           sud-workbench
 Version:        %{app_version}
@@ -211,6 +211,13 @@ update-desktop-database %{_datadir}/applications &>/dev/null || :
 gtk-update-icon-cache %{_datadir}/icons/hicolor &>/dev/null || :
 
 %changelog
+* Sun Aug 16 2026 Siva Kalyan - 0.3.4-1
+- Fixed the Feature matrices toggle not hiding AVMs in outline view, Devanagari being wrongly
+  refused after the first sentence in an empty Sanskrit document, inserting a sentence scrolling
+  to the top instead of to it, AVM causing overflow-without-wrap in several diagram views, a
+  Sanskrit MWT sandhi rule that could produce an impossible surface form, the options bar being
+  app-wide instead of per-window, and stemma/tree edges not de-colliding where they cross.
+  See CHANGELOG.md.
 * Sat Aug 15 2026 Siva Kalyan - 0.3.3-1
 - Fixed a false attribution (SUD is not Sunflower AI's own relation set),
   documented the Homebrew tap and GitHub Releases in the main README (never
