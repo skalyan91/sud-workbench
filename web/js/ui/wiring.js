@@ -428,22 +428,20 @@ function toggleOptionsBar(){ const vb=document.querySelector(".viewbar"), btn=do
     const hidden=vb.classList.toggle("hidden");
     if(btn){ btn.classList.toggle("active",!hidden); btn.setAttribute("aria-pressed",String(!hidden)); btn.title=hidden?"Show the options bar":"Hide the options bar"; }
     syncChrome();   // fix 3: recompute the doc top-padding for the now shown/hidden options bar
-    if(hasBridge()){ try{ window.pywebview.api.options_bar_state(!hidden); }catch(e){} }   // …and every other tab follows: the options bar is app-wide (Api.options_bar_state)
+    // On report ("enabling the options bar in one window should not enable it in others"): this used
+    // to also broadcast the new state to every other open window (Api.options_bar_state ->
+    // window.__setOptionsBar), on the deliberate premise that the options bar was APP-WIDE rather
+    // than per-document. That broadcast is gone — each window's viewbar visibility is now purely its
+    // own local UI state, exactly like every other per-window toggle (zoom, grid visibility, …).
     // Item 1: showing/hiding the options bar changed --vbH → the doc's top padding → the VISIBLE viewport height. The
     // per-block height cap is computed only inside renderDoc from that visible height, so re-render to re-tighten it —
     // otherwise a block sized to the taller/shorter old viewport overflows (bar shown) or wastes room (bar hidden).
     preserveScroll(renderDoc); };
   if(typeof withTopChrome==="function") withTopChrome(apply); else apply(); }
 document.getElementById("btnOptions").addEventListener("click",toggleOptionsBar);
-// …the same change arriving FROM another window. Everything toggleOptionsBar does except the
-// broadcast — which is what stops two windows from telling each other about it forever — and a no-op
-// when this window already agrees, so a round of broadcasts settles immediately.
-window.__setOptionsBar=function(on){ const vb=document.querySelector(".viewbar"), btn=document.getElementById("btnOptions"); if(!vb)return;
-  if(vb.classList.contains("hidden")!==!!on) return;   // already in the asked-for state
-  vb.classList.toggle("hidden",!on);
-  if(btn){ btn.classList.toggle("active",!!on); btn.setAttribute("aria-pressed",String(!!on)); btn.title=on?"Hide the options bar":"Show the options bar"; }
-  syncChrome();
-  if(typeof preserveScroll==="function"&&typeof renderDoc==="function") preserveScroll(renderDoc); };
+// __setOptionsBar (the cross-window broadcast RECEIVER) is gone along with the broadcast itself —
+// see toggleOptionsBar's own note, above, on report ("enabling the options bar in one window should
+// not enable it in others").
 // fix 3: keep the doc's top inset (--vbH/--tbH → .doc padding-top) and the options-bar's top edge synced to the
 // DYNAMIC titlebar + options-bar heights, so the document scrolls UNDER the translucent bars and their
 // backdrop-filter blurs the content through (previously the bars sat in flow over an opaque background → no blur).

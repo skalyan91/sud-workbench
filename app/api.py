@@ -758,19 +758,13 @@ class Api:
         from .win import dwm
         return {"ok": bool(dwm.caption_action(self.window, str(what or "")))}
 
-    def options_bar_state(self, shown: bool = False) -> dict:
-        """The options bar is APP-WIDE, not per document: opening it in one window opens it in every
-        other one. Broadcast rather than persisted-and-read-on-open, so the change is immediate in
-        windows that are already up; each receiving page applies it through window.__setOptionsBar,
-        which does NOT come back here (that would ping-pong between windows)."""
-        cb = getattr(self, "_broadcast", None)
-        if cb is None:
-            return {"ok": False}
-        try:
-            cb("window.__setOptionsBar && __setOptionsBar(%s)" % ("true" if shown else "false"))
-            return {"ok": True}
-        except Exception as exc:  # noqa: BLE001
-            return {"error": str(exc)}
+    # options_bar_state USED TO LIVE HERE and is gone with the cross-window broadcast it drove: the
+    # options bar was app-wide by design (opening it in one window opened it in every other one) until
+    # a report asked for the opposite ("enabling the options bar in one window should not enable it in
+    # others") — each window's viewbar visibility is now purely its own local UI state
+    # (js/ui/wiring.js's toggleOptionsBar, which no longer calls back here). `self._broadcast`
+    # (app/__main__.py) is general app-wide-UI-state plumbing, not specific to this feature, and stays
+    # in place for whatever else may want it.
 
     # ⚠ `titlebar_reserve` USED TO LIVE HERE and is gone with the geometry it served — it handed the
     # options bar's measured height to app.mac.shell.set_titlebar_reserve, which parked an empty
