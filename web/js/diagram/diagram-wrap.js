@@ -1045,6 +1045,7 @@ function projWrapped(si,kind){
       if(show.pos&&tk.upos) h=Math.max(h, meas(tk.upos,POS_F)/2 + tk.upos.length*LSpx + 1.7);   // POS ink half + full letter-spacing run + 3px halo
       if(trLayer()){const rt=trTxt(tk); if(rt) h=Math.max(h, meas(rt,trFont(tk))/2+1.7);}
       if(depW){ const dep=tk.deprel||(parseInt(tk.head,10)===0?"root":""); if(dep) h=Math.max(h, meas(dep,POS_F)/2+1.7); }   // item 4: the above-token relation label (.lbl, 3px paint-order halo). Its INK is folded into the slot width by linear(...,true), but its casing halo is not — so a row-edge deprel wider than the form/POS clips at the hard svg edge unless reserved here
+      if(show.avm){ const aw=avmSlotW(tk); if(aw) h=Math.max(h, aw/2+1.7); }   // on report ("overflow without wrapping when AVMs turn on", stemma/tree): avmSlotW(tk) is EVERY other term's own precedent here — linear()'s w[i] already takes the max with it, so a row-edge token with a wide AVM (several FEATS side by side routinely out-measures form/POS/translit) has its SLOT correctly widened, but nothing here ever widened the RESERVE past half that slot to match — every other term above does (POS/translit/deprel each got their own inkHalf branch when THEY turned out to be the thing overflowing); AVM was simply the one entry in linear()'s own Math.max() list that never got a matching one here. Same +1.7 halo clearance as POS/translit — avmSlotW is already the full painted box width (AVM_PAD_L/R baked in, diagram-core.js), so this is purely the casing-halo margin, not a second padding term
       const fw=mwtEdgeW(idx); if(fw) h=Math.max(h, fw/2+2);   // fused surface form, conservatively treated as centred on this edge token
       return h; };
     const ZPAD=Math.ceil(3*FS);   // item 4: right/left padding that GROWS with the block zoom (--fs). A sub-pixel ink overhang is magnified ×FS by zoom:var(--fs), so a token that just fits at 100% clips at 110% — scale the safety margin so the last token's glyphs never touch the hard-clipped svg edge at any zoom
@@ -1805,6 +1806,7 @@ function outline(si){const D=displaySent(DOC[si]), t=D.tokens, n=t.length, OID=k
     const myReps=isReported(t[i])?reps.concat(OID(i)):reps;   // item 7: the reported roots (outermost→innermost) that dominate this row — one drop-shadow box per root
     const row=document.createElement("div"); row.className="oline"+(inSel(i)?" sel":"")+(insub?" insub":"");
     row.dataset.s=si; row.dataset.tok=OID(i); row.dataset.anc=chain.join(" "); if(myReps.length)row.dataset.reproots=myReps.join(" "); row.style.marginInlineStart=(d*22)+"px";   // indent from the reading side (mirrors under RTL)
+    row.style.maxWidth="calc(100% - "+(d*22)+"px)";   // on report ("overflow without wrapping when AVMs turn on"): .oline's own width:max-content (app.css) never capped against the ROW'S OWN available width, only the outline BOX's — a deep row's indent (this margin) eats into that budget too, and nothing here ever subtracted it. AVM's own inline span (avmInline, below) is what usually pushes a row past whatever room it had left; app.css's matching flex-wrap:wrap is what actually lets it reflow onto a continuation line once this caps how much room it is allowed to claim
     if(show.labels){ const rel=document.createElement("span"); rel.className="orel"+(isMorphRel(t[i].deprel)?" morph-lbl":""); setRelLabel(rel,t[i].deprel); rel.title=relTitle(t[i].deprel);
       if(show.colour) rel.style.color=relColor(t[i].deprel); row.appendChild(rel); }
     appendLeadHTML(row,t[i],si,"punctsat opunct",OID(i));   // item 2: right-merging leads sit before the form (after the relation label)
@@ -1830,7 +1832,7 @@ function outline(si){const D=displaySent(DOC[si]), t=D.tokens, n=t.length, OID=k
     box.appendChild(row);   // MWTs are omitted from the outline — no good way to place them in a dependency tree
     kids[i].slice().sort((a,b)=>a-b).forEach(c=>w(c,d+1,chain,myReps));
     ghostsAt[i].forEach(({gi,rel,kind})=>{ const grow=document.createElement("div"); grow.className="oline oline-ghost"+(inSel(gi)?" sel":"");   // item 3: highlighted like a real row when ITS token is the current selection
-      grow.dataset.s=si; grow.dataset.tok=OID(gi); if(myReps.length)grow.dataset.reproots=myReps.join(" "); grow.style.marginInlineStart=((d+1)*22)+"px";
+      grow.dataset.s=si; grow.dataset.tok=OID(gi); if(myReps.length)grow.dataset.reproots=myReps.join(" "); grow.style.marginInlineStart=((d+1)*22)+"px"; grow.style.maxWidth="calc(100% - "+((d+1)*22)+"px)";   // same overflow-without-wrap fix as the real row above, same reason
       if(show.labels){ const relEl=document.createElement("span"); relEl.className="orel"+(isMorphRel(rel)?" morph-lbl":""); setRelLabel(relEl,rel); relEl.title=relTitle(rel);
         if(show.colour) relEl.style.color=relColor(rel); grow.appendChild(relEl); }
       const gform=document.createElement("span"); gform.className="oform"+formDeco(t[gi])+italDeco(t[gi]); gform.textContent=bform(t[gi]); grow.appendChild(gform);
@@ -1838,7 +1840,7 @@ function outline(si){const D=displaySent(DOC[si]), t=D.tokens, n=t.length, OID=k
       { const [gtok,gother]=ghostTokOther(kind,OID(gi),OID(i)); wireGhostClick(grow,si,kind,gtok,gother); }   // a click on this ghost row selects THIS ghost directly (distinct from the token-proxy .sel above) — same mechanism as every SVG ghost-g
       box.appendChild(grow); });
     if(hasGenericSubj(t,i)){ const grow=document.createElement("div"); grow.className="oline oline-ghost";   // item 2: Subject=Generic — a real ROW, like any other token, nested under its head; never selectable/editable (nothing real to click)
-      grow.style.marginInlineStart=((d+1)*22)+"px";
+      grow.style.marginInlineStart=((d+1)*22)+"px"; grow.style.maxWidth="calc(100% - "+((d+1)*22)+"px)";   // same overflow-without-wrap fix as the real row above, same reason
       if(show.labels){ const relEl=document.createElement("span"); relEl.className="orel"; setRelLabel(relEl,"subj"); relEl.title=relTitle("subj");
         if(show.colour) relEl.style.color=relColor("subj"); grow.appendChild(relEl); }
       const gform=document.createElement("span"); gform.className="oform"; gform.textContent="∅"; grow.appendChild(gform);
