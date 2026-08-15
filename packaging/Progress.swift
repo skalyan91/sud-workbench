@@ -30,7 +30,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     // MARK: - UI
 
     private func buildWindow() {
-        let width: CGFloat = 440, height: CGFloat = 168
+        let width: CGFloat = 560, height: CGFloat = 168
         window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: width, height: height),
                           styleMask: [.titled],
                           backing: .buffered, defer: false)

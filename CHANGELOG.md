@@ -11,6 +11,8 @@ All notable changes to SUD Workbench are documented in this file.
   Perrier (surfacesyntacticud.org), an independent academic project. Fixed everywhere this
   was claimed (`README.md`, `CLAUDE.md`, and the Linux packaging descriptions), and purged
   from git history.
+- Widened the macOS first-launch setup dialog (440px → 560px) — the longest status message,
+  "Installing dependencies (this can take a few minutes)…", was being truncated.
 
 ### Documentation
 
