@@ -1429,18 +1429,19 @@ survives. For macOS dropping `win11-kit/` is a size decision. For Windows *and L
 those for apps on *Apple* platforms. The Fluent kit supplies all 41 masks from MIT sources on
 Windows, so nothing is lost there. See `THIRD-PARTY-NOTICES.md`.
 
-⚠️ **UNRESOLVED: `web/adwaita-kit/`'s two stylesheets `@import url("../macos-kit/…")` wholesale**
-(see `web/adwaita-kit/README.md`) — which is exactly the directory `make_deb.sh`/`make_rpm.sh`
-strip for the licensing reason above. Confirmed by extracting a real built `.deb`: `macos-kit/` is
-genuinely absent, and `adwaita-kit/adwaita-tokens.css`/`adwaita-chrome.css` still contain those two
-`@import` lines unchanged. A failed CSS `@import` degrades silently (no thrown error, just zero
-rules contributed) — the 5/5 `xvfb-run` boot-checks below only confirm the *process* launches
-without crashing, not that the page renders styled, so this gap was never caught by them. Net
-effect: a real `.deb`/`.rpm` install almost certainly loads with none of `adwaita-kit`'s overrides
-*or* its inherited base (all 41 icon masks, `mac-chrome.css`'s rules) in effect. Not yet fixed —
-needs a design decision (duplicate the non-SF-Symbol subset of `macos-kit/` into something both
-kits can import, split a shared base out of `macos-kit/`, or something else) rather than a
-mechanical patch.
+⚠️ **RESOLVED: `web/adwaita-kit/`'s two stylesheets used to `@import url("../macos-kit/…")` wholesale**
+— which is exactly the directory `make_deb.sh`/`make_rpm.sh` strip for the licensing reason above.
+Confirmed by extracting a real built `.deb` (found during this session, before the fix): `macos-kit/`
+was genuinely absent, and `adwaita-kit/adwaita-tokens.css`/`adwaita-chrome.css` still contained
+those two `@import` lines unchanged. A failed CSS `@import` degrades silently (no thrown error, just
+zero rules contributed) — the 5/5 `xvfb-run` boot-checks below only confirm the *process* launches
+without crashing, not that the page renders styled, so this gap went uncaught until an actual
+extracted-`.deb` file check found it. **Fix:** `web/chrome-shared/` — everything `macos-kit/mac-
+tokens.css`/`mac-chrome.css` used to declare directly, minus the eight real SF Symbols (which get
+Fluent equivalents there instead, same MIT source `win11-kit/` uses), living somewhere no platform's
+build strips. `macos-kit/` itself now just `@import`s that shared base then layers the real SF
+Symbols on top; `adwaita-kit/` imports the same shared base directly. See `web/chrome-shared/
+README.md` for the full account.
 
 ⚠️ **`wiktra` is a `git+` requirement and it is in `requirements-core.txt`** — so a first launch on
 a machine without git fails inside pip. macOS almost always has git; Windows never does out of the

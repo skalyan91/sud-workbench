@@ -1,14 +1,22 @@
 /*@module adwaita-kit/adwaita-chrome.css*/
   /* GNOME/ADWAITA CHROME — PLACEHOLDER. See adwaita-tokens.css's header for what "placeholder" means
      here and why. This file takes the SAME shortcut that file does, for the same reason: it
-     `@import`s macos-kit/mac-chrome.css wholesale — every rule in that file is already
+     `@import`s chrome-shared/base-chrome.css wholesale — every rule in that file is already
      TOKEN-DRIVEN (var(--pill-bg), var(--r-control), var(--menu-bg), …), so once
-     adwaita-tokens.css's overrides are in effect, most of macos-kit's chrome already reads Adwaita
+     adwaita-tokens.css's overrides are in effect, most of that chrome already reads Adwaita
      colours/radii/shadows with ZERO rules duplicated here. What follows is only the handful of
      things macOS draws with hardcoded values or a mechanism GTK doesn't have at all — the
      scroll-edge blur ramp, the traffic-light reservation, and one literal dark-mode override
      mac-tokens.css bakes directly into a selector rather than a token (see the note beside
      `.titlebar .tbpill` below).
+
+     FIXED: used to `@import "../macos-kit/mac-chrome.css"` directly, which broke on every real
+     Linux build — packaging/linux/make_deb.sh/make_rpm.sh strip macos-kit/ entirely (SF-Symbols
+     licensing, same reason Windows drops it), so that target was simply absent and this whole
+     `@import` silently contributed nothing: no chrome rules, no icon masks, nothing. This file's
+     content never depended on macos-kit/ specifically (it's 100% token-driven, no Apple content of
+     its own) — it just lived there historically — so ../chrome-shared/base-chrome.css is the exact
+     same file, moved somewhere no platform's build strips.
 
      NO in-window menu-bar/caption-button CSS here (unlike win11-kit) — Linux gets a REAL native
      `Gtk.MenuBar` (built in `app/linux/shell.py` from `app/menu_spec.py`, the same table macOS's
@@ -17,7 +25,7 @@
      forward-compat for the in-window-JS-menubar-reuse approach; that approach was superseded before
      anything consumed them, so they were removed rather than left as dead weight styling DOM
      nothing ever builds. */
-  @import url("../macos-kit/mac-chrome.css");
+  @import url("../chrome-shared/base-chrome.css");
 
   /* `.lights` (macOS traffic lights) and `.tb-blur` (macOS's progressive scroll-edge blur ramp) are
      still emitted by index.html — hidden here rather than left to paint mac artwork, the same call

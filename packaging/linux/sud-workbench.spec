@@ -33,7 +33,7 @@
 # (an ImportError three menus deep, not a `dnf install` error), which is worse than getting it wrong
 # at build time.
 
-%global app_version 0.3.0
+%global app_version 0.3.1
 
 Name:           sud-workbench
 Version:        %{app_version}
@@ -211,6 +211,11 @@ update-desktop-database %{_datadir}/applications &>/dev/null || :
 gtk-update-icon-cache %{_datadir}/icons/hicolor &>/dev/null || :
 
 %changelog
+* Sat Aug 15 2026 Siva Kalyan <siva@sunflowerai.io> - 0.3.1-1
+- Fix adwaita-kit/ (this package's own chrome) rendering completely unstyled: its
+  two stylesheets @import'd macos-kit/, which this very package deliberately
+  strips (SF-Symbols licensing). New web/chrome-shared/ gives both kits a base
+  neither strips. See CHANGELOG.md.
 * Sat Aug 15 2026 Siva Kalyan <siva@sunflowerai.io> - 0.3.0-1
 - Full dependency licensing audit and disclosure, grew fetched on demand, CAMeL
   Tools removed, SF Symbol icons no longer committed as base64 (rendered at

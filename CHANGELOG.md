@@ -2,6 +2,26 @@
 
 All notable changes to SUD Workbench are documented in this file.
 
+## [0.3.1] — 2026-08-15
+
+A same-day fix for a real bug in v0.3.0's own Linux packages: `adwaita-kit/` (the Linux GTK chrome)
+rendered completely unstyled on a real `.deb`/`.rpm` install — no icons, no chrome colours at all.
+
+### Fixes
+
+- `adwaita-kit/adwaita-tokens.css` and `adwaita-chrome.css` `@import`ed `macos-kit/` directly to
+  inherit its tokens/chrome wholesale — but `packaging/linux/make_deb.sh`/`make_rpm.sh` deliberately
+  strip `macos-kit/` from every Linux build (SF-Symbols licensing, same reason the Windows build
+  drops it). The `@import` target was simply absent, and a failed CSS `@import` fails silently, so
+  this was never caught by a boot-check (the app still launched — it just rendered bare). New
+  `web/chrome-shared/` holds everything `macos-kit/` used to declare directly, minus the eight real
+  SF Symbols (which get Fluent UI System Icons equivalents there instead, MIT-licensed, matching
+  `win11-kit/`'s own sourcing for the same eight icons) — safe for every platform to import, since
+  it carries no Apple-restricted content to strip. `macos-kit/` itself now imports this shared base
+  and layers the real SF Symbols on top; `adwaita-kit/` imports it directly. Verified against a real
+  extracted `.deb` and a real headless-Chrome render of both platforms' resolved CSS custom
+  properties, not just that the packages install.
+
 ## [0.3.0] — 2026-08-15
 
 A licensing-and-hardening release: every dependency's licence is now disclosed or

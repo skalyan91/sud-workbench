@@ -11,9 +11,13 @@ Like the other two kits, it dresses the **same DOM** and declares the **same tok
 `styles/app.css`.
 
 Everything here is a **plain stylesheet** — no build step, no bundler, no `import`/`export`. Both
-files lean on CSS's own `@import` to inherit `macos-kit/`'s tokens and chrome wholesale, then
+files lean on CSS's own `@import` to inherit `../chrome-shared/`'s tokens and chrome wholesale, then
 override the subset that should look different — see each file's own header comment for exactly
-what that subset is and why the rest was left alone.
+what that subset is and why the rest was left alone. **Not `../macos-kit/` directly** — that
+directory is deliberately stripped from every real Linux build (`packaging/linux/make_deb.sh`/
+`make_rpm.sh`, SF-Symbols licensing, same reason Windows drops it too), so an `@import` pointed at
+it broke silently on every actual `.deb`/`.rpm` install until this was found and fixed. See
+`../chrome-shared/base-tokens.css`'s own header for the full story.
 
 ```html
 <link rel="stylesheet" href="adwaita-kit/adwaita-tokens.css">
@@ -48,20 +52,26 @@ system accent colour. This kit's sourced values are what a session gets when liv
 
 | File | What it provides |
 |---|---|
-| `adwaita-tokens.css` | `@import`s `../macos-kit/mac-tokens.css` (guaranteeing every token name resolves, including all 41 `--sf-*` icon masks, byte-identical, with zero transcription risk), then overrides accent/surface/text colours, radii, hairlines, shadows, and the "glass" specular tokens GTK has no equivalent of (set to fully transparent — see that file's own note). Everything NOT overridden — relation-category colours, layout metrics like `--arc-row`/`--grid-cell`, the mockup wallpaper — is deliberately left at macOS's tuned value. |
-| `adwaita-chrome.css` | `@import`s `../macos-kit/mac-chrome.css` (already entirely token-driven, so it reskins for free once the tokens above are in effect), then hides the two things GTK chrome doesn't have (`.lights`, the scroll-edge blur ramp `.tb-blur`), gives the title bar an opaque flat background + bottom seam instead of macOS's transparent-plus-blur trick, and restates one macOS **literal** (not token) dark-mode override that the import would otherwise leak through unchanged. |
+| `adwaita-tokens.css` | `@import`s `../chrome-shared/base-tokens.css` (guaranteeing every token name resolves, including all 41 `--sf-*` icon masks, with zero transcription risk for the 33 that are just carried over), then overrides accent/surface/text colours, radii, hairlines, shadows, and the "glass" specular tokens GTK has no equivalent of (set to fully transparent — see that file's own note). Everything NOT overridden — relation-category colours, layout metrics like `--arc-row`/`--grid-cell`, the mockup wallpaper — is deliberately left at the shared base's tuned value (macOS's own, since that base was split out of `macos-kit/mac-tokens.css` verbatim). |
+| `adwaita-chrome.css` | `@import`s `../chrome-shared/base-chrome.css` (already entirely token-driven, so it reskins for free once the tokens above are in effect), then hides the two things GTK chrome doesn't have (`.lights`, the scroll-edge blur ramp `.tb-blur`), gives the title bar an opaque flat background + bottom seam instead of macOS's transparent-plus-blur trick, and restates one macOS **literal** (not token) dark-mode override that the import would otherwise leak through unchanged. |
 
 Load order matters (cascade): **`adwaita-tokens.css` before `adwaita-chrome.css`**, and both before
 your app's own stylesheet, same as the other two kits.
 
 ## Icons
 
-All 41 `--sf-*` icon masks are macOS's own, inherited verbatim through the `@import` — none were
-redrawn for GNOME. `win11-kit/README.md` documents doing this deliberately for two glyphs (the
-notation icons, which draw the treebank's own vocabulary rather than an OS affordance); this kit
-does it for the whole set, as the placeholder shortcut it is. A real Adwaita icon pass would trade
-these for GNOME's own Symbolic icon set (`Adwaita`/`hicolor` icon themes, monochrome-mask SVGs,
-the same shape convention `--sf-*` already uses) — tracked as future work, not attempted here.
+33 of the 41 `--sf-*` icon masks are macOS's own hand-drawn (mostly Lucide) line art, inherited
+verbatim through the `@import` — none were redrawn for GNOME. The other eight (undo/redo/zoom in/
+zoom out/actual size/help/grid/open) are real SF Symbols on macOS specifically, which
+`../chrome-shared/base-tokens.css` does NOT carry (Apple licenses those for Apple platforms only)
+— this kit gets Fluent UI System Icons' equivalents for those eight instead, the same MIT-licensed
+source `win11-kit/` uses for its own copies of the same eight, copied verbatim rather than
+independently drawn. `win11-kit/README.md` documents redrawing two glyphs (the notation icons, which
+draw the treebank's own vocabulary rather than an OS affordance) rather than inheriting them; this
+kit inherits those two like everything else, as the placeholder shortcut it is. A real Adwaita icon
+pass would trade the whole set for GNOME's own Symbolic icon set (`Adwaita`/`hicolor` icon themes,
+monochrome-mask SVGs, the same shape convention `--sf-*` already uses) — tracked as future work, not
+attempted here.
 
 ## No in-window menu bar or caption buttons
 

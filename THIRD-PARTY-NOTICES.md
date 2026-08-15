@@ -97,10 +97,12 @@ Apple licenses SF Symbols for use in apps **on Apple platforms**; reproducing th
 Windows or Linux build is not covered. So `packaging/windows/make_win_app.py` **excludes
 `web/macos-kit/` from the Windows payload**, and `packaging/linux/make_deb.sh`/`make_rpm.sh` do the
 same for Linux — both fail the build if it survives. The Fluent kit supplies all 41 masks from
-MIT-licensed sources for Windows, so nothing is lost there; Linux's `adwaita-kit/` inherits the same
-41 mask *names* from `macos-kit/` at the CSS level (see `web/adwaita-kit/README.md`), which is a
-separate, unresolved concern of its own — see the note in CLAUDE.md on `adwaita-kit`'s `@import`
-dependency on a directory the Linux build deliberately removes.
+MIT-licensed sources for Windows, so nothing is lost there. Linux's `adwaita-kit/` needs the same 41
+mask *names* without depending on `macos-kit/` (which it can't reach once that directory is
+stripped) — `web/chrome-shared/` is the fix: it carries everything `macos-kit/mac-tokens.css`/
+`mac-chrome.css` used to declare directly except the eight real SF Symbols, which it replaces with
+Fluent equivalents (same MIT source as `win11-kit/`), and no platform's build strips it. See
+`web/chrome-shared/README.md`.
 `packaging/make_bootstrap_app.sh` drops `web/win11-kit/` from the macOS bundle symmetrically,
 though that one is for size alone: MIT would have travelled fine.
 
