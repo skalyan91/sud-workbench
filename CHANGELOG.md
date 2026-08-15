@@ -2,6 +2,17 @@
 
 All notable changes to SUD Workbench are documented in this file.
 
+## [0.3.2] — 2026-08-15
+
+### Diagram editing and layout
+
+- Re-derived where fanned arc endpoints land when two arcs meet at a shared node (the "head-to-tail"
+  case) or when a root edge's stub meets its nearest neighbour. Both are now solved directly from a
+  single geometric target — the two endpoints' own casing outlines land exactly tangent — rather than
+  matched to a proxy reference gap with a hand-tuned correction on top. The two formulas are now
+  shared functions (`diagram-core.js`) called from both the flat and wrapped diagram views, instead
+  of being kept in sync by hand across two files.
+
 ## [0.3.1] — 2026-08-15
 
 A same-day fix for a real bug in v0.3.0's own Linux packages: `adwaita-kit/` (the Linux GTK chrome)

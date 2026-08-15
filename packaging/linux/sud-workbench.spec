@@ -33,7 +33,7 @@
 # (an ImportError three menus deep, not a `dnf install` error), which is worse than getting it wrong
 # at build time.
 
-%global app_version 0.3.1
+%global app_version 0.3.2
 
 Name:           sud-workbench
 Version:        %{app_version}
@@ -211,6 +211,11 @@ update-desktop-database %{_datadir}/applications &>/dev/null || :
 gtk-update-icon-cache %{_datadir}/icons/hicolor &>/dev/null || :
 
 %changelog
+* Sat Aug 15 2026 Siva Kalyan <siva@sunflowerai.io> - 0.3.2-1
+- Arc-endpoint fan-anchor geometry re-derived so adjacent arc/arrowhead
+  casings land exactly tangent, replacing several rounds of trig-factor
+  tuning with a single closed-form solve shared by both diagram views.
+  See CHANGELOG.md.
 * Sat Aug 15 2026 Siva Kalyan <siva@sunflowerai.io> - 0.3.1-1
 - Fix adwaita-kit/ (this package's own chrome) rendering completely unstyled: its
   two stylesheets @import'd macos-kit/, which this very package deliberately
