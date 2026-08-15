@@ -672,6 +672,21 @@ window.__applyInsertPayload=async function(p){ p=p||{};
     if(p.adoptLang&&main.lang) adoptInsertLang(main.lang,main.model||"");
     const r=await __insertPastedText(main.text,p.index,{quiet:pars.length>0});
     if(pars.length) applyParallelTexts(pars,r.start,r.count,`Inserted ${r.count} sentence${r.count===1?"":"s"}`,p.naive,r.paraCounts);
+    // Re-derive DOCSCRIPT off the document's own forms (loadDocScript, js/lang/translit.js) now that the
+    // insert has actually landed them — the ONLY other call site is setLang, which last ran on an EMPTY
+    // document (DOCSCRIPT="" ⇒ "IAST" by convention) and never again. On report: typing Devanagari into an
+    // otherwise empty Sanskrit document stored it as Devanagari correctly (api.py's child_insert_text
+    // already special-cases an empty document) but DOCSCRIPT itself stayed "" (still meaning IAST) — so
+    // every SUBSEQUENT insert sent docScript:"" back to the backend, which then refused Devanagari with
+    // "this document stores its text in IAST", a real file property (api.py's own comment: "read off the
+    // forms, never off a preference") that had simply gone stale. DOCSCRIPT="" also very likely explains
+    // the FIRST symptom too — every OTHER DOCSCRIPT-gated read (trTxt, bform, saGlyphScript, …) inherits
+    // the same stale "IAST" answer, and one of those is where the raw Devanagari ended up in the IAST row —
+    // but that chain runs through fillOrtho's own backend round-trip, which this fix doesn't touch; if
+    // wrong text still shows there after this, it's a second, deeper bug in that chain, not this one.
+    // Awaited HERE, still inside the render hold (beginRenderHold() above), so the deferred renderDoc()
+    // endRenderHold() fires in the `finally` below picks up the corrected DOCSCRIPT on its first paint.
+    if(typeof loadDocScript==="function") await loadDocScript();
     return; }
   // TRANSLATIONS-ONLY (item 7d): no new sentences — the supplied texts land on sentences that are already
   // there, starting just after the last one that already carries a translation in any of these languages.
