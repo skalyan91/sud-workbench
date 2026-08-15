@@ -2239,7 +2239,15 @@ function reserveBracketArcRoom(){ document.querySelectorAll("#doc .bwrap").forEa
       const depUp=Dr.t<Hr.t;
       cRec.push({dep,head,Hcx:Hr.cx,Dcx:Dr.cx,Ht:Hr.t,Dt:Dr.t,depUp, upTok:depUp?dep:head, loTok:depUp?head:dep, loIdx:depUp?lh:ld, rel}); });
     if(cRec.length){
-      const cArcs=cRec.map(c=>({hk:c.head.dataset.tok, dk:c.dep.dataset.tok, xh:c.Hcx, xd:c.Dcx, len:Math.hypot(c.Dcx-c.Hcx,c.Dt-c.Ht), c}));
+      // ⚠ dkey/hkey "B"+ bucket split (Item 1's own cross-line isolation, mirrored by this SAME function's own
+      // ghostFan just below, and by positionBracketAnnots' real cArcs) was MISSING here — this prediction pass
+      // pooled a cross-line "up"/departing endpoint into the token's PLAIN bucket, sharing it with that token's
+      // own within-line bumps, instead of the isolated "B"+token bucket the real draw (positionBracketAnnots)
+      // uses. The two passes could therefore rank/offset the SAME endpoint differently whenever a token hosts
+      // both a cross-line departure AND other same-token arcs — this pass's predicted label midpoint (used only
+      // to grow inter-line gaps) drifting from what positionBracketAnnots actually draws, under-growing the gap.
+      const cArcs=cRec.map(c=>{ const a={hk:c.head.dataset.tok, dk:c.dep.dataset.tok, xh:c.Hcx, xd:c.Dcx, len:Math.hypot(c.Dcx-c.Hcx,c.Dt-c.Ht), c};
+        if(c.depUp) a.dkey="B"+a.dk; else a.hkey="B"+a.hk; return a; });
       // item 7: fold cross-line GHOST endpoints into this fan too — positionBracketAnnots now does the same (its
       // own fanArcs call takes a ghostFan third arg, see that function's own item-7 comment), so a ghost sharing a
       // cross-line bucket there can shift a real arc's offset; leaving ghosts out of THIS prediction would mispredict

@@ -720,8 +720,21 @@ function arcsWrapped(si){
   // nothing like their true relative length, so the ghost won the centre slot unconditionally regardless of
   // which was actually longer — the identical bug this whole fix exists to remove, reintroduced through a unit
   // mismatch instead of a missing sort.
-  const ghostFan=ghostPairs.map(p=>{ const a={hk:p.oh,dk:p.i,xh:NX(p.oh),xd:NX(p.i),len:Math.abs(p.oh-p.i)};
-    if(rowOf(p.oh)!==rowOf(p.i)){ const iUp=rowOf(p.i).ord<rowOf(p.oh).ord; if(iUp) a.dkey="B"+a.dk; else a.hkey="B"+a.hk; }   // item 1's own cross-line bucket split, applied to ghosts too
+  // ⚠ xh/xd for a CROSS-line ghost must NOT be the real NX() — that is exactly the "Item 20" bug crossArcs itself
+  // was fixed against just above (see that block's own comment): two tokens' row-LOCAL x's are only ever
+  // comparable when they share a row, since each row is independently laid out from x=0 with its own token
+  // subset. A cross-line ghost's real NX(p.oh)/NX(p.i) compare positions from TWO DIFFERENT rows' unrelated
+  // local layouts — an accident of what else that row happens to contain, not which side the ghost visually
+  // continues toward — so its fan side flipped depending on incidental row content, the identical symptom Item
+  // 20 fixed for real arcs, left unfixed here. Same role-based sentinel crossArcs uses (forward reading order
+  // is the one thing that stays consistent regardless of either row's own layout); left untouched for a
+  // WITHIN-line ghost, where the real positions genuinely share one row and the comparison is meaningful.
+  const ghostFan=ghostPairs.map(p=>{ const cross=rowOf(p.oh)!==rowOf(p.i);
+    const a={hk:p.oh,dk:p.i,len:Math.abs(p.oh-p.i)};
+    if(cross){ const iUp=rowOf(p.i).ord<rowOf(p.oh).ord;
+      if(iUp===!RTL){ a.xh=1; a.xd=0; } else { a.xh=0; a.xd=1; }   // mirrors crossArcs' own sentinel exactly (hk plays the head role, dk the dep role, same as there)
+      if(iUp) a.dkey="B"+a.dk; else a.hkey="B"+a.hk; }   // item 1's own cross-line bucket split, applied to ghosts too
+    else { a.xh=NX(p.oh); a.xd=NX(p.i); }
     return a; });
   fanArcs(fanAll,SPREAD,ghostFan);   // sets offH/offD on every within-line AND cross-line arc AND every ghost, from the same per-token fan
   rows.forEach(r=>{ r.arcsIn.forEach(a=>{ a.h=arcHgt(Math.abs((r.LX(a.dep)+(a.offD||0))-(r.LX(a.head)+(a.offH||0))),ROW); });   // arc height (→ Hobby handle length) from the FANNED endpoints
