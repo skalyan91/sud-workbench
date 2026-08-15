@@ -48,14 +48,17 @@ echo "▶ installing CORE deps into the bundle (torch-free)…"
 echo "▶ copying app source…"
 # samples/ is deliberately NOT bundled — it is repo-only test data (see README). Nothing in app/ or
 # web/ reads from it at runtime, so the shipped app carries no sample datasets.
-# `vendor/` rides along for the reason make_bootstrap_app.sh states at length: it carries the
-# self-contained grew backend, and without one every Stanza model is inert (Stanza emits UD, this app
-# stores SUD, so the conversion grammar runs on every Stanza parse). It matters MORE here than in the
-# bootstrap bundle — this build exists to need nothing from the user's machine, and an opam install is
-# the largest thing it was still quietly assuming.
+# vendor/ is deliberately NOT in this list any more. It used to carry a self-contained grew backend
+# (tools/bundle_grew.sh's bundled grewpy_backend + dylib closure) built and copied in at BUILD time —
+# but grewpy_backend is CeCILL v2.1 (GPL-family copyleft), so bundling it into a shipped .app was
+# republishing someone else's work without a grant to, same problem as the old vendored grammars/.
+# app/grew_backend.py now fetches it on demand instead — via opam, onto the END USER'S OWN machine —
+# the same on-demand shape app/grammars.py already uses for the conversion grammars themselves
+# (also dropped from this list below). A build with no opam-installed backend still builds and ships;
+# the app degrades exactly as it does when any other on-demand tier hasn't been installed yet.
 # grammars/ is deliberately NOT in this list — it's no longer vendored (unclear upstream licence);
 # app/grammars.py fetches it on demand at runtime instead, same on-demand shape as app/macron.py.
-for d in app web vendor; do
+for d in app web; do
   [ -e "$PROJECT/$d" ] && cp -R "$PROJECT/$d" "$RES/appsrc/$d"
 done
 # don't ship the caches

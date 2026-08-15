@@ -13,14 +13,19 @@ Tiers (each behind a lazy ``try: import`` in ``translit`` / ``parse``):
   * ``la_macron`` — Latin vowel lengths (a DATA tier, not a pip one — see below), ~4 MB
   * ``grammars`` — UD↔SUD conversion grammars (also a DATA tier), ~450 KB
   * ``fa_vocab`` — Persian vocalisation lexicon (also a DATA tier — see :mod:`app.fa_vocab`), ~10 MB
+  * ``grew``     — the grewpy_backend OCaml binary (also a DATA tier, installed via opam rather
+    than fetched — see :mod:`app.grew_backend`), size varies (opam build)
 
-NOT EVERY TIER IS A PIP INSTALL. ``la_macron``, ``grammars`` and ``fa_vocab`` each fetch a data file
-rather than install a package: the Morpheus vowel-length table can't be bundled with the Latin model
-for licensing reasons and isn't on PyPI in any form (see :mod:`app.macron`), the surfacesyntacticud/
-tools conversion grammars carry no declared licence at all, so shipping a copy — in this repo or in
-any built package — would republish someone else's work without a grant to (see :mod:`app.grammars`
-and ``THIRD-PARTY-NOTICES.md``), and KaamelDict is GPL, which restricts distribution rather than use
-(see :mod:`app.fa_vocab`). A tier therefore declares EITHER ``pip`` + ``probe`` or
+NOT EVERY TIER IS A PIP INSTALL. ``la_macron``, ``grammars``, ``fa_vocab`` and ``grew`` each fetch/
+install something other than a pip package: the Morpheus vowel-length table can't be bundled with
+the Latin model for licensing reasons and isn't on PyPI in any form (see :mod:`app.macron`), the
+surfacesyntacticud/tools conversion grammars carry no declared licence at all, so shipping a copy —
+in this repo or in any built package — would republish someone else's work without a grant to (see
+:mod:`app.grammars` and ``THIRD-PARTY-NOTICES.md``), KaamelDict is GPL, which restricts distribution
+rather than use (see :mod:`app.fa_vocab`), and grewpy_backend is CeCILL v2.1 licensed — same
+restricts-distribution-not-use shape, but with no PyPI wheel and no plain downloadable binary either,
+so its own on-demand path drives opam rather than downloading anything itself (see
+:mod:`app.grew_backend`). A tier therefore declares EITHER ``pip`` + ``probe`` or
 ``module`` — the name of a module supplying its own ``available()``/``install(progress)``/
 ``status()`` — and :func:`install` dispatches on which. The alternative was a second parallel
 install/progress/UI path for one row in the same list, which is how two ways to do the same thing
@@ -79,6 +84,12 @@ TIERS: dict[str, dict] = {
         "label": "Persian vocalisation lexicon",
         "module": "fa_vocab",   # a DATA tier: app/fa_vocab.py fetches KaamelDict and aligns it onto Persian spelling
         "note": "KaamelDict pronunciations, aligned onto Persian spelling (~10 MB) — needs the Persian model",
+    },
+    "grew": {
+        "label": "grew conversion backend",
+        "module": "grew_backend",   # a DATA tier: app/grew_backend.py drives `opam install grewpy_backend`
+        "note": "grewpy_backend (OCaml, via opam) — needed for UD import/export, format conversion, "
+                "and every Stanza parse",
     },
 }
 

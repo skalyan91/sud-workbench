@@ -52,16 +52,17 @@ APP_NAME = "SUD Workbench"
 # Source trees copied into appsrc/. samples/ is deliberately absent — it is repo-only test data and
 # nothing under app/ or web/ reads it at runtime, exactly as on macOS.
 #
-# ⚠ vendor/ IS ABSENT HERE AND THE MAC BUILDS SHIP IT, and the difference is not an oversight.
-# vendor/grew/bin/grewpy_backend is a Mach-O arm64 executable with a rewritten macOS dylib closure
-# (tools/bundle_grew.sh); copying it into a Windows bundle would ship dead weight that
-# app/convert.py would then find on PATH and fail to spawn — worse than finding nothing, which it
-# already degrades from cleanly. A Windows build needs a WINDOWS grewpy_backend, which nothing in
-# this repository produces yet, so until one exists this platform has no grew: UD import/export and
-# format conversion stay disabled, and — the consequence that is easy to miss — every STANZA model is
-# inert too, because Stanza emits UD and this app stores SUD. Manage Models says so at the top of the
-# Stanza group when the backend is missing (js/io/models.js), which is the same warning a macOS user
-# without one sees.
+# vendor/ is absent here, same as on every other platform now: it used to hold a self-contained
+# grewpy_backend (Mach-O arm64, tools/bundle_grew.sh) that only the macOS builds shipped, but
+# grewpy_backend is CeCILL v2.1 (GPL-family copyleft) and bundling it into any shipped build was
+# republishing someone else's work without a grant to. app/grew_backend.py now fetches it on demand
+# instead — via opam, onto the end user's own machine — the same on-demand shape app/grammars.py
+# uses for the conversion grammars. Windows has no opam story of its own yet (opam is a Unix-first
+# tool), so a Windows user's "grew conversion backend" row in Manage Models fails cleanly with an
+# actionable error rather than finding a binary that doesn't exist: UD import/export and format
+# conversion stay disabled, and — the consequence that is easy to miss — every STANZA model is inert
+# too, because Stanza emits UD and this app stores SUD. Manage Models says so at the top of the
+# Stanza group when the backend is missing (js/io/models.js).
 # grammars/ is NOT one of these: the UD↔SUD conversion grammars are licensing-unclear upstream
 # content, so they are no longer vendored at all — fetched on demand at runtime instead, same as
 # the macron data (see app/grammars.py, app/extras.py).

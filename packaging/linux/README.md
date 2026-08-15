@@ -146,13 +146,16 @@ exactly this file for "the apt/dnf/pacman lines once that phase lands"). Two way
 
 - **`samples/`** — repo-only test data on every platform; nothing under `app/`/`web/` reads it at
   runtime.
-- **`vendor/`** — holds the arm64 Mach-O `grewpy_backend` the macOS builds ship
-  (`tools/bundle_grew.sh`). There is no Linux build of it in this repository. Shipping the macOS
-  binary would be worse than shipping nothing (`app/convert.py` would find it on `PATH` and fail to
-  spawn); omitting it degrades exactly the way the Windows build already does — UD import/export and
-  format conversion disabled (surfaced as a toast), and every **Stanza** model inert too, since
+- **`vendor/`** — no longer exists on any platform's build, including macOS's. It used to hold a
+  self-contained `grewpy_backend` (arm64 Mach-O, `tools/bundle_grew.sh`) that only the macOS build
+  shipped, but `grewpy_backend` is CeCILL v2.1 (GPL-family copyleft), so bundling it into any shipped
+  build was republishing someone else's work without a grant to. `app/grew_backend.py` now fetches
+  it on demand instead — via opam, onto the end user's own machine — the same on-demand shape
+  `app/grammars.py` uses for the conversion grammars. A Linux user installs opam themselves, then
+  installs the "grew conversion backend" row from Manage Models; without it, UD import/export and
+  format conversion degrade cleanly to a toast, and every **Stanza** model is inert too, since
   Stanza emits UD and this app stores SUD (`parse._parse_stanza_ud_to_sud` needs the conversion
-  grammar on every parse). A real Linux `grewpy_backend` is future work, not attempted here.
+  grammar on every parse).
 - **`web/macos-kit/`** — 12 of `mac-tokens.css`'s `--sf-*` masks are real SF Symbols rendered to
   base64 PNG, licensed by Apple for apps on Apple platforms. Same reason the Windows build excludes
   it.

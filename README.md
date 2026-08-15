@@ -31,22 +31,25 @@ demand at runtime, into `~/Library/Application Support/SUD Workbench/site-packag
 ### grew (UD ↔ SUD ↔ mSUD conversion) — external prerequisite
 
 Format conversion and UD import/export use [grew](https://grew.fr) via `grewpy`,
-whose backend is an OCaml binary installed with opam:
+whose backend is an OCaml binary installed with opam. The app fetches it itself,
+on demand: Manage Models → "grew conversion backend" drives
 
 ```sh
-brew install opam && opam init -y
 opam remote add grew https://opam.grew.fr
 opam install -y grewpy_backend
 ```
 
-The app finds `grewpy_backend` under `~/.opam/*/bin` automatically, or uses a
-bundled copy at `vendor/grew/bin/` if `tools/bundle_grew.sh` has built one (which
-is how a packaged app runs conversions on a machine with no opam). Without either,
-the app still runs and edits SUD/mSUD; only UD import/export and format conversion
-are disabled (surfaced as a toast). The conversion grammars themselves come from
-[surfacesyntacticud/tools](https://github.com/surfacesyntacticud/tools), fetched
-on demand from inside the app (Manage Models → "UD conversion grammars") rather
-than vendored — see `app/grammars.py`.
+for you (bootstrapping `opam init` first if this machine has no opam root yet) —
+see `app/grew_backend.py`. That needs `opam` itself already present (`brew install
+opam` on macOS); nothing in this app installs opam for you. You can also run the
+commands above yourself ahead of time. Either way the app finds `grewpy_backend`
+under `~/.opam/*/bin` automatically. Without it, the app still runs and edits
+SUD/mSUD; only UD import/export and format conversion are disabled (surfaced as a
+toast) — and, since Stanza emits UD and this app stores SUD, every Stanza parser
+is inert too until the backend is installed. The conversion grammars themselves
+come from [surfacesyntacticud/tools](https://github.com/surfacesyntacticud/tools),
+fetched on demand from inside the app (Manage Models → "UD conversion grammars")
+rather than vendored — see `app/grammars.py`.
 
 ## What works now
 
@@ -277,6 +280,7 @@ app/  __main__.py       pywebview bootstrap, application menu, and the AppKit/Py
       model.py          id renumber + head/cycle/root validation
       detect.py         auto-detect UD / SUD / mSUD from the relation inventory
       convert.py        grew (grewpy) conversion: ud↔sud, msud→sud, msud→ud
+      grew_backend.py   fetches the grewpy_backend OCaml binary on demand (drives opam)
       sud_rules.py      relation↔POS constraints, read from the fetched grew validator
       grammars.py       fetches the UD↔SUD conversion grammars on demand (surfacesyntacticud/tools)
       parse.py          parser engines: SUD spaCy + Stanza UD→SUD (+ MWT), sentence split
@@ -293,7 +297,7 @@ app/  __main__.py       pywebview bootstrap, application menu, and the AppKit/Py
       paths.py          Application Support locations (models, caches, extras, grammars)
       data/             vendored data: lid.176.ftz, apte1957.tsv.xz, FEATS inventories,
                         romanisation tables
-tools/                  build-time helpers (grew bundling, Apte index generation)
+tools/                  build-time helpers (Apte index generation)
 web/  index.html        DOM skeleton; loads the modules below as ordered classic scripts
       js/core/          state, prefs, document render, undo, scroll, init (loads last)
       js/diagram/       the SVG renderers: core, render, wrapping, drag-editing
@@ -305,7 +309,6 @@ web/  index.html        DOM skeleton; loads the modules below as ordered classic
       macos-kit/        reusable macOS chrome (tokens, title bar/pills/menus CSS, toast)
       styles/           app.css, fonts.css        fonts/  bundled Noto script fonts
 packaging/              .app bundle builders + icon pipeline
-tools/bundle_grew.sh    bundle grewpy_backend + its dylib closure into vendor/grew/
 samples/                example SUD / mSUD .conllu — REPO ONLY, never bundled into the app
 ```
 

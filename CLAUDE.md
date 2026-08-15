@@ -882,27 +882,34 @@ explicit `"_"`/`" "` separator when concatenating the merged pieces' Translit/To
 fused word came out spelled as several), and the fetched files are verbatim upstream copies a
 re-fetch would revert anyway, so the fix lives in the table rather than in them.
 
-grew's OCaml backend is an **optional external prerequisite**: `app/convert.py` picks up
-`vendor/grew/bin/grewpy_backend` if bundled (built by `tools/bundle_grew.sh`), else `~/.opam/*/bin`.
-Without it the app still runs and edits SUD/mSUD — only UD import/export and conversion are
-disabled, surfaced as a toast. Keep new features degrading that way rather than hard-failing.
+grew's OCaml backend is an **optional external prerequisite, fetched on demand**: `app/convert.py`
+picks up `~/.opam/*/bin/grewpy_backend` if opam has installed one — never a copy bundled inside the
+app itself (`grewpy_backend` is CeCILL v2.1, GPL-family copyleft; bundling it would republish someone
+else's work without a grant to, same problem the old vendored `grammars/` had). `app/grew_backend.py`
+is the fetch: it drives `opam install grewpy_backend` (bootstrapping `opam init` first if this
+machine has no opam root, and adding grew's own opam remote), the same `module`-shaped on-demand
+extras tier `app/grammars.py`/`app/macron.py` use, wired into Manage Models as the "grew conversion
+backend" row (`app/extras.py`'s `TIERS["grew"]`). It needs `opam` itself already on the machine
+(`brew install opam` on macOS) — nothing here installs opam. Without a backend the app still runs
+and edits SUD/mSUD — only UD import/export and conversion are disabled, surfaced as a toast. Keep new
+features degrading that way rather than hard-failing.
 
 ⚠ **The backend is not optional to the STANZA ENGINE, and that is the consequence everyone misses.**
 Stanza emits UD and this app stores SUD, so `parse._parse_stanza_ud_to_sud` runs the conversion
 grammar on *every* Stanza parse — no backend, no grammar fetched (or both), no Stanza parsing at
-all, however cleanly the model downloaded. Both macOS builds therefore **ship `vendor/`** (`for d
-in app web vendor` — `grammars/` was dropped from this list entirely once it stopped being vendored;
-see the conversion section above), so the grew backend is present on first launch; the conversion
-grammar itself still has to be fetched once from Manage Models before Stanza's own SUD conversion
-step can run. Before `vendor/` shipped, macOS copied only `app web grammars`, so no user who had not
-built the app themselves had a grew backend and every Stanza model was inert — reported as "the
-Stanza models do nothing". The `vendor/` binary is arch-specific and `[ -e ]`-guarded, so a tree
-without it still builds and still degrades. The **Windows** build deliberately does NOT copy it (a
-Mach-O on `PATH` would be found and fail to spawn — worse than finding nothing); it has no grew
-until something in this repo produces a Windows `grewpy_backend`. Manage Models states the
-consequence at the top of the Stanza group whenever `conversion_available()` reports no backend
-(`js/io/models.js`), so a user is told *before* a 400 MB download rather than by a silent no-op
-after it.
+all, however cleanly the model downloaded. **No build ships `vendor/` any more** (macOS used to,
+copying `app web vendor`; that line is gone from both `make_portable.sh` and
+`make_bootstrap_app.sh` now) — every platform's first launch has no grew backend until a reader
+installs one, themselves, from Manage Models' "grew conversion backend" row (or the equivalent
+`opam install` commands by hand — see README.md). Before this, macOS quietly carried the backend on
+the user's behalf and every OTHER platform's user who had not built the app themselves had none and
+found every Stanza model inert — reported as "the Stanza models do nothing"; that symptom is now the
+same, and diagnosed the same way, on every platform, rather than macOS-only. The **Windows** build
+has an extra wrinkle worth remembering: opam is a Unix-first tool with no first-class Windows story,
+so a Windows user's own path to a working backend is less well trodden than macOS/Linux's. Manage
+Models states the Stanza consequence at the top of that group whenever `conversion_available()`
+reports no backend (`js/io/models.js`), so a user is told *before* a 400 MB download rather than by a
+silent no-op after it.
 
 **DEPS (enhanced dependencies) is not part of SUD and this app does not support it as a column an
 annotator works in.** A save-time auto-fill that used to derive it from FEATS `Shared=Yes`/MISC

@@ -130,13 +130,17 @@ mkdir -p "$PKGROOT/DEBIAN" \
 # samples/ and vendor/ are deliberately NOT shipped.
 #   samples/  — repo-only test data on every platform; nothing under app/ or web/ reads it at
 #               runtime (see make_bootstrap_app.sh's identical note).
-#   vendor/   — holds the arm64 Mach-O grewpy_backend the macOS builds ship (tools/bundle_grew.sh);
-#               there is no Linux build of it in this repository, and shipping the macOS binary
-#               would be dead weight app/convert.py would find on PATH and fail to spawn — WORSE
-#               than finding nothing, which degrades cleanly to a toast (UD import/export and format
-#               conversion disabled; every Stanza model inert too, since Stanza emits UD and this
-#               app stores SUD — see CLAUDE.md's own note on this). Exactly the Windows build's
-#               reasoning in make_win_app.py; a real Linux grewpy_backend is future work.
+#   vendor/   — no longer exists on ANY platform's build, including macOS's. It used to hold a
+#               self-contained grewpy_backend (arm64 Mach-O, tools/bundle_grew.sh) that only the
+#               macOS build shipped, but grewpy_backend is CeCILL v2.1 (GPL-family copyleft), so
+#               bundling it into any shipped build was republishing someone else's work without a
+#               grant to. app/grew_backend.py now fetches it on demand instead — via opam, onto the
+#               end user's own machine — same on-demand shape app/grammars.py uses for the conversion
+#               grammars. A Linux user installs opam themselves (their own distro's package manager,
+#               same self-install story README.md already documents) and then installs the "grew
+#               conversion backend" row from Manage Models; without it, UD import/export and format
+#               conversion degrade cleanly to a toast, and every Stanza model is inert too, since
+#               Stanza emits UD and this app stores SUD — see CLAUDE.md's own note on this.
 echo "▶ copying app source…"
 APPSRC="$PKGROOT/opt/sud-workbench/appsrc"
 mkdir -p "$APPSRC"

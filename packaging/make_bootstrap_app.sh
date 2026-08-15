@@ -23,23 +23,22 @@ mkdir -p "$APP/Contents/MacOS" "$RES/appsrc"
 echo "▶ copying app source…"
 # samples/ is deliberately NOT bundled — it is repo-only test data (see README). Nothing in app/ or
 # web/ reads from it at runtime, so the shipped app carries no sample datasets.
-# `vendor/` IS SHIPPED, and leaving it out was a silent feature amputation rather than a size saving.
-# It holds the self-contained grew backend (tools/bundle_grew.sh: the arm64 grewpy_backend plus its
-# rewritten dylib closure, ~12 MB), and app/convert.py looks for it at <appsrc>/vendor/grew/bin —
-# which is exactly where this line puts it, since `app` lands at <appsrc>/app and _VENDORED_BACKEND is
-# resolved two levels up from convert.py.
-# Without it the only grew on an end user's machine is an opam install, which nobody who did not build
-# this app has. That does not merely disable UD import/export and format conversion (which degrade to
-# a toast, by design) — it kills EVERY STANZA MODEL outright, because Stanza emits UD and this app
-# stores SUD, so `parse._parse_stanza_ud_to_sud` has to run the conversion grammar on every parse.
-# The reported symptom was "the Stanza models do nothing", on a machine that had downloaded them
-# successfully; see the ParserUnavailable message in that function, which says so and had no way to
-# be true on a machine that could not act on it.
-# The binary is architecture-specific, so a build on an Intel Mac ships an Intel one; `[ -e ]` means a
-# tree with no vendor/ still builds, and the app then degrades exactly as it does today.
+# `vendor/` IS NO LONGER SHIPPED. It used to carry a self-contained grew backend (tools/bundle_grew.sh:
+# the arm64 grewpy_backend plus its rewritten dylib closure, ~12 MB) that app/convert.py looked for at
+# <appsrc>/vendor/grew/bin. grewpy_backend is CeCILL v2.1 (GPL-family copyleft) — bundling it into a
+# shipped .app was republishing someone else's work without a grant to, the exact problem the old
+# vendored grammars/ directory had and was removed for (see THIRD-PARTY-NOTICES.md).
+# app/grew_backend.py now fetches it on demand instead — via opam, onto the END USER'S OWN machine —
+# the same on-demand shape app/grammars.py already uses below for the conversion grammars. This does
+# not relax the warning the previous comment here gave at length: without a grew backend, every Stanza
+# model is still inert (Stanza emits UD, this app stores SUD, so `parse._parse_stanza_ud_to_sud` runs
+# the conversion grammar on every parse) — the difference is that a reader now installs it themselves
+# from Manage Models' "grew conversion backend" row (app/extras.py) rather than the app quietly
+# carrying a copy on their behalf. A tree with no opam-installed backend still builds and ships; the
+# app degrades exactly as it does for any other not-yet-installed on-demand tier.
 # grammars/ is deliberately NOT in this list — it's no longer vendored (unclear upstream licence);
 # app/grammars.py fetches it on demand at runtime instead, same on-demand shape as app/macron.py.
-for d in app web vendor; do
+for d in app web; do
   [ -e "$PROJECT/$d" ] && cp -R "$PROJECT/$d" "$RES/appsrc/$d"
 done
 find "$RES/appsrc" -name '__pycache__' -type d -prune -exec rm -rf {} + 2>/dev/null || true

@@ -174,6 +174,43 @@ cascading it ahead of Morpheus for the words it covers, but it is never required
 | latin-macronizer (the route to it) | [Alatius/latin-macronizer](https://github.com/Alatius/latin-macronizer) | GPL-3.0 |
 | SUD_Latin-ITTB / PROIEL / Perseus (the harvest keys, if built) | Universal Dependencies | CC BY-NC-SA |
 
+## grew conversion backend — FETCHED AT RUNTIME (via opam), never shipped
+
+Nothing about the grew backend is vendored here any more, on any platform this app builds for. The
+Python side, `grewpy` (the client `app/convert.py` imports), is CeCILL v2.1 and is an ordinary
+`requirements-core.txt` pip dependency — see the "Bundled pip dependencies" table below. What used to
+be vendored, and no longer is, is `grewpy_backend`: the compiled **OCaml** process `grewpy` spawns to
+actually run a `.grs` rewrite — also CeCILL v2.1, a GPL-family copyleft licence.
+
+`grewpy_backend` has no PyPI wheel and no plain downloadable binary anywhere — opam, OCaml's own
+package manager, is the only distribution channel upstream offers (`opam remote add grew
+https://opam.grew.fr && opam install grewpy_backend`). `app/grew_backend.py` drives exactly that, on
+demand, onto the **end user's own machine** — bootstrapping `opam init` first if this machine has no
+opam root yet — wired into Manage Models as the "grew conversion backend" tier (`app/extras.py`), the
+same `module`-shaped on-demand extras tier `app/grammars.py`/`app/macron.py` already use for their
+own fetched content. `app/convert.py` finds the result under `~/.opam/*/bin`, same as it always could
+for a developer's own manual opam install; the only change is that the *app itself* can now drive
+that install, rather than requiring one already done by hand.
+
+This used to be genuinely vendored: `tools/bundle_grew.sh` built a self-contained, dylib-rewritten
+copy of `grewpy_backend` under a git-ignored `vendor/grew/`, and `packaging/make_portable.sh` /
+`packaging/make_bootstrap_app.sh` copied that tree straight into every macOS `.app` they built — at
+BUILD time, on the packager's own machine, which is genuine redistribution regardless of `vendor/`
+being git-ignored in the *repository*. That script and both copy steps are gone; a shipped `.app`
+from either build path now contains no `vendor/` directory and no grew binary at all, matching the
+Homebrew tap's own long-standing behaviour (its own install instructions already told a user to
+install grew themselves) and what the Windows/Linux builds already did (neither ever had a
+`grewpy_backend` of its own to bundle).
+
+**GPL-family copyleft (CeCILL is one) restricts distribution, not use.** A binary opam builds and
+installs on the user's own machine, which never enters a build of this app, is the same arrangement
+this file already documents for the Latin macron data above and the surfacesyntacticud/tools
+grammars — fetching is not redistribution, only shipping a copy would be.
+
+| Component | Origin | Licence |
+|---|---|---|
+| `grewpy_backend` | [grew.fr](https://grew.fr) / [opam.grew.fr](https://opam.grew.fr) | CeCILL v2.1 |
+
 ## Bundled pip dependencies — the exceptions to "pip deps aren't listed"
 
 Four `pip` dependencies break the "not vendored, not listed" rule stated at the top of this file.
@@ -193,7 +230,7 @@ these packages as part of the formula's own bottle.)
 |---|---|---|
 | `en_sud_ewt` | **CC BY-SA 4.0** | English SUD parser model wheel; `app/wiktionary.py` SUD-parses each Wiktionary definition to condense it into a glossable phrase |
 | `wiktra` | **GPL-2.0** | `app/translit.py`'s default Latin-transliteration backend — a Python port of Wiktionary's own Lua translit modules |
-| `grewpy` | **CeCILL v2.1** | `app/convert.py`'s UD↔SUD↔mSUD conversion — the Python client that talks to the separately-vendored `grewpy_backend` OCaml binary |
+| `grewpy` | **CeCILL v2.1** | `app/convert.py`'s UD↔SUD↔mSUD conversion — the Python client that talks to the separately-fetched `grewpy_backend` OCaml binary (see "grew conversion backend" above) |
 | `aksharamukha` | **AGPL-3.0** | Sanskrit/Indic-script conversion in `app/translit.py`, `app/apte.py` (Apte dictionary lookup), and `app/itrans.py` (ITRANS input) |
 
 - **`en_sud_ewt`** is a derivative of **SUD_English-EWT**, a Surface-Syntactic Universal
@@ -211,10 +248,10 @@ these packages as part of the formula's own bottle.)
   `_pre_scheme_translit` runs it first and falls back to `uroman` only where wiktra leaves the text
   unchanged.
 - **`grewpy`** (the pip package on [PyPI](https://pypi.org/project/grewpy/), CeCILL v2.1) is
-  distinct from `grewpy_backend`, the OCaml binary vendored under `vendor/grew/bin/` by
-  `tools/bundle_grew.sh` (see below) — `grewpy` is an ordinary `requirements-core.txt` entry,
-  imported as a normal Python module (`from grewpy import GRS, Graph, set_config`), that talks to
-  that binary to actually run the `.grs` UD↔SUD grammars.
+  distinct from `grewpy_backend`, the OCaml binary fetched on demand via opam (see "grew conversion
+  backend" above) — `grewpy` is an ordinary `requirements-core.txt` entry, imported as a normal
+  Python module (`from grewpy import GRS, Graph, set_config`), that talks to that binary to actually
+  run the `.grs` UD↔SUD grammars.
 - **`aksharamukha`** ([virtualvinodh/aksharamukha-python](https://github.com/virtualvinodh/aksharamukha-python),
   AGPL-3.0) converts between IAST/Sanskrit transliteration and Indic scripts (Devanagari, Grantha,
   Siddhaṃ, and more); `app/apte.py` also uses it to turn a lemma into the SLP1 the Apte dictionary
@@ -225,9 +262,6 @@ these packages as part of the formula's own bottle.)
 
 ## Not vendored, but worth naming
 
-- **grew** — the OCaml backend (`grewpy_backend`) is an optional external prerequisite, built by
-  `tools/bundle_grew.sh` or taken from `~/.opam`. `vendor/` is git-ignored, so no grew binary is
-  redistributed here.
 - **Stanza / spaCy models** — downloaded at runtime into the user's own application-support
   directory, under their own licences.
 - **pykakasi** (GPL-3.0) — kana → Hepburn romaji conversion for the on-demand Japanese extras tier

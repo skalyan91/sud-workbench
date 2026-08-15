@@ -13,6 +13,11 @@ process, which may be absent.  All entry points raise :class:`ConversionUnavaila
 (grewpy / backend / grammar missing) or :class:`ConversionError` (rewrite failed) so
 the caller can degrade gracefully.  Probe :func:`available` up front to disable UI.
 
+The backend binary itself is never bundled with this app (CeCILL v2.1 licensed — see
+:mod:`app.grew_backend`'s own header for why that means fetched, not shipped); it is
+installed on demand via opam, the same on-demand shape :mod:`app.grammars` uses for the
+conversion grammars below.
+
 Every public conversion also takes an optional ``lang`` (the document's detected/declared
 language, e.g. frontend ``DOCLANG``): when a vendored language-specific grammar covers that
 (language, direction) pair, it is preferred over the universal one — see :data:`_LANG_GRAMMARS`.
@@ -23,7 +28,6 @@ the universal grammar whenever the pair is absent from the table.
 
 from __future__ import annotations
 
-import glob
 import itertools
 import os
 import shutil
@@ -31,7 +35,7 @@ from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
 from typing import Any
 
-from . import io_conllu
+from . import grew_backend, io_conllu
 from .paths import GRAMMARS_DIR as _GRAMMARS_DIR_RAW
 
 GRAMMARS_DIR = Path(_GRAMMARS_DIR_RAW)   # app/grammars.py fetches this on demand — see its own header
@@ -95,22 +99,15 @@ _GREW = None          # cached (Graph, GRS) after a successful import + set_conf
 _GRS_CACHE: dict = {}  # grammar filename → loaded GRS
 
 
-_VENDORED_BACKEND = Path(__file__).resolve().parent.parent / "vendor" / "grew" / "bin" / "grewpy_backend"
-
-
 def _ensure_backend_on_path() -> None:
-    """grewpy spawns the ``grewpy_backend`` binary by name.  Prefer a copy bundled with
-    the app under ``vendor/grew/bin`` (see tools/bundle_grew.sh); otherwise fall back to
-    the opam install under ``~/.opam/<switch>/bin`` — neither is on the app's PATH by
-    default, so prepend whichever we find."""
+    """grewpy spawns the ``grewpy_backend`` binary by name.  It is never bundled with this app (see
+    :mod:`app.grew_backend`'s header for why) — only ever an opam install, on this machine's own
+    ``~/.opam/<switch>/bin``, which is not on the app's PATH by default, so prepend it when found."""
     if shutil.which("grewpy_backend"):
         return
-    if _VENDORED_BACKEND.exists():   # self-contained bundle → no opam needed at runtime
-        os.environ["PATH"] = str(_VENDORED_BACKEND.parent) + os.pathsep + os.environ.get("PATH", "")
-        return
-    for cand in glob.glob(os.path.expanduser("~/.opam/*/bin/grewpy_backend")):
-        os.environ["PATH"] = os.path.dirname(cand) + os.pathsep + os.environ.get("PATH", "")
-        return
+    d = grew_backend.find_backend()
+    if d:
+        os.environ["PATH"] = d + os.pathsep + os.environ.get("PATH", "")
 
 
 def _ensure_grew():
