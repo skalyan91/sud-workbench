@@ -3599,6 +3599,40 @@ const AH_RATIO=0.6;   // arrowhead half-width / length → its half-angle is ata
    so the halo either side of a cased LINE is 3.5/2 = 1.75px. The head now carries the same halo as the line it
    terminates. */
 const AH_OUTSET=1.75;
+/* FAN-ANCHOR GEOMETRY — the endpoint-fanning anchor (js/diagram-render.js and diagram-wrap.js's fanArcs,
+   which both call the two functions below rather than keep their own copies of this derivation in sync by
+   hand, the exact drift risk that produced two rounds of this-file/that-file mismatch before) for the two
+   special cases: two arcs meeting at centre (the "ordinary"/head-to-tail case) and a root stub meeting its
+   nearest neighbour. On report: "I want the casings to just touch" — not matched to some other reference
+   gap, but solved directly so the two shapes' own CASING outlines (the dilated halo every arc/arrowhead
+   draws on hover/selection — .arc-casing, .ah-casing, styles/app.css) are exactly tangent, zero overlap,
+   zero gap. Casing dilation is exact for a convex shape (a stroked line's casing is its centreline's own
+   Minkowski sum with a disk of radius (arc-stroke+3.5)/2; an arrowhead's casing is its plain triangle's
+   Minkowski sum with a disk of radius AH_OUTSET) — so "casings touch" reduces to "distance between the two
+   BARE shapes equals the sum of their two casing radii", R below.
+   Solved with arrowPath()'s own real math run at concrete numbers (not hand-derived trig alone), then
+   verified against a numeric binary search across several --arc-stroke values — see this session's own
+   scratch derivation for the full working. Both are h-independent: near either endpoint the relevant
+   geometry is the FIXED take-off-angle tangent, not the arc's overall bump shape, so neither formula needs
+   (or varies with) the arc's own height. */
+function fanCasingR(){ const st=parseFloat(css("--arc-stroke"))||1.7; return (st+3.5)/2+AH_OUTSET; }   // sum of the two casing radii a touching pair must clear: one line's ((arc-stroke+3.5)/2) plus one arrowhead's (AH_OUTSET)
+/* Ordinary (non-root) case, PER SIDE: two rays diverge from a shared baseline (one leaning left, one right,
+   both at ARC_ANGLE), so their closest approach is at the baseline itself — but only ONE side of a genuine
+   head-to-tail pair carries an arrowhead, and that side's overshoot (AEXT, "arrowheads overshoot the
+   endpoint a touch") shifts its drawn apex TOWARD centre by AEXT·cos(ARC_ANGLE) (verified: the direction
+   arriving at any dependent endpoint is always exactly (cos ARC_ANGLE, sin ARC_ANGLE) toward centre,
+   independent of arc height). Solving |(-a,0) − apex(a)| = R for a (apex is confirmed the closest point on
+   the triangle here, not an edge — checked directly, not assumed) gives the closed form below. */
+function ordinaryFanAnchor(){ const R=fanCasingR(), c=Math.cos(ARC_ANGLE), s=Math.sin(ARC_ANGLE);
+  return (AEXT*c+Math.sqrt(R*R-AEXT*AEXT*s*s))/2; }
+/* Root-adjacent case: the root stub is purely vertical, so its own arrowhead's apex has ZERO horizontal
+   shift from the overshoot (ux=0 exactly) — but the neighbour's closest approach lands on the arrowhead's
+   FLANK edge, not the apex (checked directly: the closest point sits partway along the apex-to-base-corner
+   segment, not at either endpoint, because the neighbour's own direction and the stub's vertical axis are
+   too far apart in angle for the apex itself to be nearest). Perpendicular distance from the neighbour's
+   point to that flank LINE, solved for the anchor that makes it exactly R, gives the closed form below. */
+function rootFanAnchor(){ const R=fanCasingR(), c=Math.cos(ARC_ANGLE), s=Math.sin(ARC_ANGLE);
+  return (R+AEXT*s)/c; }
 /* 1/sin(α), the mitre factor for the apex, where α = atan(AH_RATIO) is the head's half-angle at the tip.
    THE HEAD IS AN ISOSCELES TRIANGLE: apex at T, axial length s, half-width s·AH_RATIO — so tan α = AH_RATIO
    and sin α = AH_RATIO/√(1+AH_RATIO²), giving 1/sin α = √(1+AH_RATIO²)/AH_RATIO = 1.9437 at AH_RATIO = 0.6.

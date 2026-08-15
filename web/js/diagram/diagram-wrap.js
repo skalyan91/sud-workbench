@@ -352,34 +352,17 @@ function fanArcs(arcs,spread,ghostArcs,rootKeys){ const ep={}; const reg=(k,len,
     arr.filter(e=>e.side===0).forEach(e=>e.set(0));   // a side-0 sentinel (arcs() registers one for the root stub locally; rootKeys registers one here) — always centre, never ranked: it isn't "on a side" at all, so the edge-anchor rule below doesn't apply to it
     [-1,1].forEach(side=>{ const grp=arr.filter(e=>e.side===side).sort((p,q)=>q.len-p.len);   // this side's whole pool — real AND ghost together — ranked by length alone; longest first (j=0) → nearest centre
       if(!grp.length) return;
-      // on report: "reduce the gap between the innermost leftward arc endpoint and the innermost rightward
-      // arc endpoint so that it is equal to the fanning gap times the sine of the arrowhead's half-angle, and
-      // reduce the gap between a root edge's endpoint and its neighbouring endpoints to the fanning gap times
-      // the sine of the complement of the arrowhead's half-angle" — ordinary case: each side's own innermost
-      // entry was spread/2 off centre (total left-right gap = spread); now spread*sin(ARC_ANGLE)/2 per side, so
-      // the total gap is spread*sin(ARC_ANGLE). Root-adjacent case: a neighbour was a full `spread` off centre;
-      // sin(90°−ARC_ANGLE) = cos(ARC_ANGLE), so it's now spread*cos(ARC_ANGLE). Both factors are <1 (ARC_ANGLE
-      // is an acute angle, ≈31°), so both are genuine reductions from the previous anchors.
-      // FURTHER refined, on report: "For head-to-tail arcs, add to the gap the arrowhead's overshoot; but if
-      // the incoming edge is a root edge, don't do this, but instead make the endpoint gap the normal gap
-      // times the sine (not cosine) of the arrowhead's half-angle." "Head-to-tail arcs" is this same ordinary
-      // (non-root) case in this session's own established vocabulary — its anchor gains a flat +AEXT
-      // (diagram-core.js: "arrowheads overshoot the endpoint a touch so the visual tip reaches it"), on top of
-      // the trig gap rather than folded into it.
-      // CORRECTED TWICE, on report. First: a flat +AEXT overshot the mark — AEXT is measured ALONG the arc's
-      // own tangent, which departs at ARC_ANGLE from horizontal, but the anchor is a purely HORIZONTAL offset —
-      // so only the overshoot's horizontal PROJECTION belongs here: AEXT*cos(ARC_ANGLE). The root-adjacent case
-      // reverts to its original cos(ARC_ANGLE) (the sin swap earlier was itself wrong).
-      // Second, "check this against the actual diagrams": arrowPath()'s own math, run with concrete numbers,
-      // shows the overshoot shifts a head endpoint's DRAWN apex TOWARD centre by exactly AEXT*cos(ARC_ANGLE) —
-      // ux (the direction arriving at a dependent endpoint) is always cos(ARC_ANGLE) toward centre, independent
-      // of arc height h, confirmed numerically against arrowPath() itself, not re-derived by hand. So a head
-      // endpoint's real on-screen gap is ALREADY AEXT*cos(ARC_ANGLE) narrower than its nominal anchor before any
-      // correction — subtracting (as first suggested) would double that shrinkage; the anchor needs widening to
-      // compensate. Solving 2a-AEXT*cosθ=spread*sinθ (only ONE side of a genuine head-to-tail pair shifts) for a
-      // gives +AEXT*cos(ARC_ANGLE)/2 per side, not the full AEXT*cos(ARC_ANGLE) — the earlier version doubled
-      // the correction by applying it to both sides' formula while only one side's endpoint actually shifts.
-      const anchor=(hasRoot?spread*Math.cos(ARC_ANGLE):spread*Math.sin(ARC_ANGLE)/2+AEXT*Math.cos(ARC_ANGLE)/2);
+      // Several rounds of trig-factor tuning (see git log — matching a same-side reference gap, then patching
+      // in the arrowhead's overshoot two different ways, sign errors both times) all replaced, on report: "I
+      // want the casings to just touch." ordinaryFanAnchor()/rootFanAnchor() (js/diagram/diagram-core.js) solve
+      // that directly — the two shapes' own CASING outlines exactly tangent, not matched to any other proxy
+      // gap — and are the SINGLE shared source both this function and the flat arc view (js/diagram/
+      // diagram-render.js) call, rather than keeping the derivation as two independently-hand-edited copies
+      // (the exact drift risk that cost two correction rounds here). See that file's own comments for the
+      // full derivation. `spread` (this function's own arg, always fanStep()'s return value) plays no part in
+      // either formula any more — both are casing geometry alone, not spread-relative — but the param name
+      // stays for now since `grp.forEach` below still fans LATER entries by it.
+      const anchor=(hasRoot?rootFanAnchor():ordinaryFanAnchor());
       grp.forEach((e,j)=>e.set(side*(anchor+j*spread))); }); }); }
 // cubic control points for an arc bump from (x1,base) to (x2,base) of height h: each control sits at height h
 // above its endpoint and cot(θ)·h inward, so the take-off tangent makes θ with the baseline. Apex is 0.75·h.
