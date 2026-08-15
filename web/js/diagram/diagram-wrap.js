@@ -360,7 +360,15 @@ function fanArcs(arcs,spread,ghostArcs,rootKeys){ const ep={}; const reg=(k,len,
       // the total gap is spread*sin(ARC_ANGLE). Root-adjacent case: a neighbour was a full `spread` off centre;
       // sin(90°−ARC_ANGLE) = cos(ARC_ANGLE), so it's now spread*cos(ARC_ANGLE). Both factors are <1 (ARC_ANGLE
       // is an acute angle, ≈31°), so both are genuine reductions from the previous anchors.
-      const anchor=(hasRoot?spread*Math.cos(ARC_ANGLE):spread*Math.sin(ARC_ANGLE)/2);
+      // FURTHER refined, on report: "For head-to-tail arcs, add to the gap the arrowhead's overshoot; but if
+      // the incoming edge is a root edge, don't do this, but instead make the endpoint gap the normal gap
+      // times the sine (not cosine) of the arrowhead's half-angle." "Head-to-tail arcs" is this same ordinary
+      // (non-root) case in this session's own established vocabulary — its anchor gains a flat +AEXT
+      // (diagram-core.js: "arrowheads overshoot the endpoint a touch so the visual tip reaches it"), on top of
+      // the trig gap rather than folded into it. The root-adjacent case DROPS the overshoot term entirely and
+      // swaps cos for sin — spread*cos(ARC_ANGLE) -> spread*sin(ARC_ANGLE), no longer the complement, and
+      // un-halved same as before (a root's own anchor was never split across two sides to begin with).
+      const anchor=(hasRoot?spread*Math.sin(ARC_ANGLE):spread*Math.sin(ARC_ANGLE)/2+AEXT);
       grp.forEach((e,j)=>e.set(side*(anchor+j*spread))); }); }); }
 // cubic control points for an arc bump from (x1,base) to (x2,base) of height h: each control sits at height h
 // above its endpoint and cot(θ)·h inward, so the take-off tangent makes θ with the baseline. Apex is 0.75·h.

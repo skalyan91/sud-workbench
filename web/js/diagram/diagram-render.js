@@ -381,7 +381,17 @@ function arcs(si){
       // (js/diagram/diagram-wrap.js): ordinary anchor SPREAD/2 -> SPREAD*sin(ARC_ANGLE)/2 (so the total gap
       // between opposite sides' innermost entries goes from SPREAD to SPREAD*sin(ARC_ANGLE)); root-adjacent
       // anchor SPREAD -> SPREAD*cos(ARC_ANGLE) (sin of the complement = cos). Both factors are <1.
-      const anchor=hasRoot?SPREAD*Math.cos(ARC_ANGLE):SPREAD*Math.sin(ARC_ANGLE)/2;
+      // FURTHER refined, on report: "For head-to-tail arcs, add to the gap the arrowhead's overshoot; but if
+      // the incoming edge is a root edge, don't do this, but instead make the endpoint gap the normal gap
+      // times the sine (not cosine) of the arrowhead's half-angle." "Head-to-tail arcs" is this same ordinary
+      // (non-root) case in this session's own established vocabulary (arcs sharing a bucket, needing fanned
+      // rather than coincident endpoints — the very first fix in this whole thread) — its anchor gains a flat
+      // +AEXT (js/diagram/diagram-core.js: "arrowheads overshoot the endpoint a touch so the visual tip
+      // reaches it"), so the extra clearance an overshooting tip needs is added on top of the trig gap rather
+      // than folded into it. The root-adjacent case DROPS the overshoot term entirely and swaps cos for sin —
+      // SPREAD*cos(ARC_ANGLE) -> SPREAD*sin(ARC_ANGLE), no longer the complement, and un-halved same as before
+      // (a root's own anchor was never split across two sides to begin with).
+      const anchor=hasRoot?SPREAD*Math.sin(ARC_ANGLE):SPREAD*Math.sin(ARC_ANGLE)/2+AEXT;
       grp.forEach((e,j)=>e.set(side*(anchor+j*SPREAD)));               // longest first (j=0) lands half a fan step off centre; each later entry fans one more SPREAD beyond it
       usedSlot[node+"|"+side]=anchor+grp.length*SPREAD; }); });
   // endpoints sit directly on the fanned targets → measure arc width (and Hobby height) from THEM
@@ -397,7 +407,7 @@ function arcs(si){
   // fan/look up, so that endpoint is the pre-reserved gap centre directly; isEmpty flags it for the draw pass.
   genericToks.forEach(i=>{ const gapAmt=genericSubjGapW(t,i), emptyX0=c[i]-w[i]/2-gapAmt/2;
     const dSide=Math.sign(emptyX0-c[i])||1, dK=(i+1)+"|"+dSide;   // shares the SAME "to" bucket any other arc landing on this predicate uses
-    const nextOff=(usedSlot[dK]??(SPREAD*Math.sin(ARC_ANGLE)/2))+SPREAD;   // continue one step past whatever the main fan pass last used on this side — or, if it registered nothing there at all, one step past this node's own anchor (SPREAD*sin(ARC_ANGLE)/2, the SAME ordinary-case anchor the main pass would have used)
+    const nextOff=(usedSlot[dK]??(SPREAD*Math.sin(ARC_ANGLE)/2+AEXT))+SPREAD;   // continue one step past whatever the main fan pass last used on this side — or, if it registered nothing there at all, one step past this node's own anchor (SPREAD*sin(ARC_ANGLE)/2+AEXT, the SAME ordinary-case anchor the main pass would have used — kept in step with its +AEXT overshoot term above)
     usedSlot[dK]=nextOff;
     const predX=c[i]+dSide*nextOff, h=arcHgt(Math.abs(emptyX0-predX),ROW);   // the predicate is the HEAD of this subj relation, the ∅ is its dependent — X1 (tail) sits at the predicate, X2 (arrowhead) at the ∅, matching a real subj arc's head→dependent direction
     ghostArcs.push({from:i+1,to:i+1,dep:"subj",X1:predX,X2:emptyX0,mx:(emptyX0+predX)/2,h,col:relColor("subj"),isEmpty:true}); });
