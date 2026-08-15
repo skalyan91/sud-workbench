@@ -23,11 +23,15 @@ reproduces the exact payload that was, until this change, committed to mac-token
     by that fix and 3865de0 re-confirmed regular is still correct (measured stroke/bbox ratio
     0.093, inside the family band).
 
-NOT in this table -- deliberately: --sf-new/--sf-open/--sf-append/--sf-save are ALSO real
-SF-Symbol PNGs baked in mac-tokens.css, but they predate this session entirely (present already
-in the initial commit) and no commit ever recorded their symbol name/weight/size. Guessing one
-risks exactly the silent regression this module exists to prevent, so they are left exactly as
-they were -- still literal base64 in mac-tokens.css, out of scope for this pass. Likewise the model
+NOT in this table -- deliberately: --sf-open is ALSO a real SF-Symbol PNG baked in
+mac-tokens.css, but it predates this session entirely (present already in the initial commit)
+and no commit ever recorded its symbol name/weight/size. Guessing risks exactly the silent
+regression this module exists to prevent, so it is left exactly as it was -- still literal
+base64 in mac-tokens.css, out of scope for this pass. (Its three siblings --sf-new/--sf-append/
+--sf-save were in the same boat identity-wise, but a later pass found zero consumers of any of
+the three anywhere in the codebase -- unlike --sf-open, which is the real fallback folder glyph
+in the titlebar proxy menu and the Save-As sheet's Where popover -- so those three were removed
+outright as genuinely dead weight rather than left unidentified.) Likewise the model
 manager's cube.box (and addtext/paged/unpaged/options): those were NEVER baked into mac-tokens.css
 at all -- app/mac/shell.py's own ``_compute_symbol_icon`` already renders them fresh at every app
 launch (64pt/.medium/scale 2), so there is no committed payload to remove there in the first place.

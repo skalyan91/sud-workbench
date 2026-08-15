@@ -51,18 +51,20 @@
          10.5px -> 571   deep-lbl (11px, 2/3 of the 545 deprel-label weight, deliberately allowed below 400) -> 363
        Deliberate UI-chrome emphasis (selection/range bumps, column headers, the sentence number) is a SEPARATE
        register and stays hand-set, untouched by this. */
-    /* SF Symbol icon masks (uncropped / optical sizing; recoloured via currentColor). --sf-new/
-       --sf-open/--sf-append/--sf-save below are ALSO real SF-Symbol PNGs, same as the seven the
-       file header's @import note describes — but they predate this session entirely (already
-       present in the initial commit) and no commit has ever recorded which symbol/weight/size
-       produced them. Guessing one to move it into the same packaging-render pipeline risks
-       silently swapping in the wrong glyph, exactly the failure mode the @import move exists to
-       avoid elsewhere in this file — so these four stay put, out of scope, until someone can
-       confirm their real identity from something more solid than a visual guess. */
-    --sf-new:url("data:image/png;base64,REDACTED-SF-SYMBOL-PAYLOAD-PURGED-FROM-HISTORY");
+    /* SF Symbol icon mask (uncropped / optical sizing; recoloured via currentColor). --sf-open
+       below is ALSO a real SF-Symbol PNG, same as the seven the file header's @import note
+       describes -- but it predates this session entirely (already present in the initial commit)
+       and no commit has ever recorded which symbol/weight/size produced it. Guessing to move it
+       into the same packaging-render pipeline risks silently swapping in the wrong glyph, exactly
+       the failure mode the @import move exists to avoid elsewhere in this file -- so it stays put,
+       out of scope, until someone can confirm its real identity from something more solid than a
+       visual guess. (Its three siblings --sf-new/--sf-append/--sf-save, in the same boat
+       identity-wise, were removed instead: a repo-wide reference sweep found zero consumers of
+       any of the three -- no CSS rule, no JS var(--sf-...) setter -- so unlike --sf-open, which
+       is actively used as the fallback folder glyph in the titlebar proxy menu and the Save-As
+       sheet's Where popover, they were genuinely dead weight, not just unidentified. See
+       app/mac/sf_symbols.py's own docstring for the same note.) */
     --sf-open:url("data:image/png;base64,REDACTED-SF-SYMBOL-PAYLOAD-PURGED-FROM-HISTORY");
-    --sf-append:url("data:image/png;base64,REDACTED-SF-SYMBOL-PAYLOAD-PURGED-FROM-HISTORY");
-    --sf-save:url("data:image/png;base64,REDACTED-SF-SYMBOL-PAYLOAD-PURGED-FROM-HISTORY");
     --sf-insbefore:url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><path d='M5 3h14'/><path d='m18 13-6-6-6 6'/><path d='M12 7v14'/></svg>");
     --sf-insafter:url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><path d='M12 17V3'/><path d='m6 11 6 6 6-6'/><path d='M19 21H5'/></svg>");
     --sf-duplicate:url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><rect width='14' height='14' x='8' y='8' rx='2' ry='2'/><path d='M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2'/></svg>");
