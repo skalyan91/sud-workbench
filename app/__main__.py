@@ -383,9 +383,9 @@ def main(argv: list[str] | None = None):
         # Dev-convenience on-demand render (mirrors app/fonts.py's own cached-fetch shape): a packaged
         # build already carries web/macos-kit/mac-tokens-sf.generated.css (packaging/render_sf_symbols.py
         # ran at build time), but a plain `.venv/bin/python -m app` from source has never triggered that
-        # script, so the titlebar's undo/redo/zoom/actual-size/help/grid icons would otherwise be blank
-        # mask images. Must run BEFORE create_window below — mac-tokens.css's own @import resolves at
-        # first paint, and a file written afterward is too late for that load.
+        # script, so the titlebar's undo/redo/zoom/actual-size/help/grid/open icons would otherwise be
+        # blank mask images. Must run BEFORE create_window below — mac-tokens.css's own @import resolves
+        # at first paint, and a file written afterward is too late for that load.
         try:
             from .mac import sf_symbols
             sf_symbols.ensure()

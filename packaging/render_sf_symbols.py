@@ -28,7 +28,7 @@ if __name__ == "__main__":
         print(
             f"!! wrote an EMPTY {sf_symbols.OUT_PATH} -- AppKit/SF Symbols unavailable on this "
             "machine (not macOS, or PyObjC missing). The titlebar icons this file covers "
-            "(undo/redo/zoom/actual-size/help/grid) will be blank until this runs on a real Mac.",
+            "(undo/redo/zoom/actual-size/help/grid/open) will be blank until this runs on a real Mac.",
             file=sys.stderr,
         )
     sys.exit(0 if ok else 1)

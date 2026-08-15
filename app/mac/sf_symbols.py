@@ -5,10 +5,10 @@ redistribution as standalone assets. Earlier commits baked each symbol's render 
 web/macos-kit/mac-tokens.css as a literal ``data:image/png;base64,...`` custom property, which
 put Apple's rendered artwork in this repo's own git history on every tuning pass (weight/size
 fix -> full ~2-4 KB base64 blob re-committed). This module stops that going forward: the SAME
-seven symbols are rendered fresh, on demand, into a file this repo's .gitignore excludes, and
+eight symbols are rendered fresh, on demand, into a file this repo's .gitignore excludes, and
 mac-tokens.css merely ``@import``s it. Nothing about the on-screen result changes.
 
-THE SEVEN TOKENS + THEIR PARAMETERS. Every one of these went through a careful, measured
+THE EIGHT TOKENS + THEIR PARAMETERS. The first seven went through a careful, measured
 weight/size correction earlier this session (see ``git log --oneline -- web/macos-kit/mac-tokens.css``);
 the (symbol name, point size, weight) triples below are transcribed verbatim from those commits'
 own final, confirmed-correct state -- NOT re-derived -- and this module's own byte-for-byte replay
@@ -23,18 +23,24 @@ reproduces the exact payload that was, until this change, committed to mac-token
     by that fix and 3865de0 re-confirmed regular is still correct (measured stroke/bbox ratio
     0.093, inside the family band).
 
-NOT in this table -- deliberately: --sf-open is ALSO a real SF-Symbol PNG baked in
-mac-tokens.css, but it predates this session entirely (present already in the initial commit)
-and no commit ever recorded its symbol name/weight/size. Guessing risks exactly the silent
-regression this module exists to prevent, so it is left exactly as it was -- still literal
-base64 in mac-tokens.css, out of scope for this pass. (Its three siblings --sf-new/--sf-append/
---sf-save were in the same boat identity-wise, but a later pass found zero consumers of any of
-the three anywhere in the codebase -- unlike --sf-open, which is the real fallback folder glyph
-in the titlebar proxy menu and the Save-As sheet's Where popover -- so those three were removed
-outright as genuinely dead weight rather than left unidentified.) Likewise the model
-manager's cube.box (and addtext/paged/unpaged/options): those were NEVER baked into mac-tokens.css
-at all -- app/mac/shell.py's own ``_compute_symbol_icon`` already renders them fresh at every app
-launch (64pt/.medium/scale 2), so there is no committed payload to remove there in the first place.
+--sf-open: unlike the seven above, this one predated this session entirely (present already
+in the initial commit) with no commit ever recording its original symbol name/weight/size --
+guessing at THAT identity was rejected as too risky, so a later pass migrated it to a fresh,
+deliberately-chosen symbol instead: ``square.and.arrow.down.on.square`` at 96pt/.regular, the
+same point-size/weight convention as its seven siblings (chosen directly by the user, overriding
+an initial ``folder`` candidate). It renders as outline/line-art (open interior, stroked edges),
+matching tablecells/questionmark.circle above rather than standing out as a filled shape. It's
+the fallback folder glyph in the titlebar proxy menu (web/js/io/bridge.js) and the Save-As
+sheet's Where button/popover (web/js/ui/sheets.js) -- shown only when no native NSWorkspace icon
+is available yet (browser/design-mode).
+
+Likewise the model manager's cube.box (and addtext/paged/unpaged/options): those were NEVER baked
+into mac-tokens.css at all -- app/mac/shell.py's own ``_compute_symbol_icon`` already renders them
+fresh at every app launch (64pt/.medium/scale 2), so there is no committed payload to remove there
+in the first place. --sf-new/--sf-append/--sf-save were in the same "predates this session,
+identity unknown" boat as --sf-open originally was, but a repo-wide reference sweep found zero
+consumers of any of the three -- unlike --sf-open, which IS a real fallback glyph in active use --
+so those three were removed outright as genuinely dead weight rather than migrated.
 
 THE RENDER TECHNIQUE. ``NSImage.imageWithSystemSymbolName_accessibilityDescription_`` +
 ``NSImageSymbolConfiguration.configurationWithPointSize_weight_`` is the same call this session's
@@ -45,8 +51,8 @@ that is 2x, which renders every symbol at DOUBLE the previously-committed pixel 
 confirmed live in this session (a lockFocus render of tablecells at 96pt/.regular came out
 270x200 here, not the committed 135x100). The fix is to draw into an explicitly-sized
 ``NSBitmapImageRep`` bound to its own ``NSGraphicsContext`` instead, which is scale-machine-
-independent: verified byte-for-byte identical to the previously-committed payload for all seven
-tokens above, on this machine, before they were ever removed from mac-tokens.css.
+independent: verified byte-for-byte identical to the previously-committed payload for the first
+seven tokens above, on this machine, before they were ever removed from mac-tokens.css.
 """
 
 from __future__ import annotations
@@ -66,13 +72,14 @@ SYMBOLS: dict[str, tuple[str, float, str]] = {
     "--sf-actualsize": ("1.magnifyingglass",    96.0, "Regular"),
     "--sf-help":       ("questionmark.circle",  96.0, "Regular"),
     "--sf-grid":       ("tablecells",           96.0, "Regular"),
+    "--sf-open":       ("square.and.arrow.down.on.square", 96.0, "Regular"),
 }
 
 _HEADER = (
     "/* GENERATED by app/mac/sf_symbols.py (packaging/render_sf_symbols.py at package time) --\n"
     "   DO NOT EDIT, DO NOT COMMIT (see .gitignore). Regenerate with:\n"
     "     .venv/bin/python packaging/render_sf_symbols.py\n"
-    "   See app/mac/sf_symbols.py's own docstring for what these seven tokens are and why they\n"
+    "   See app/mac/sf_symbols.py's own docstring for what these eight tokens are and why they\n"
     "   live here instead of in mac-tokens.css. */\n"
 )
 
@@ -112,7 +119,7 @@ def _render_png_data_uri(AppKit, symbol_name: str, point_size: float, weight_nam
 
 
 def generate(out_path: str = OUT_PATH) -> bool:
-    """Render all seven tokens fresh and write ``out_path``. Returns True if every symbol rendered;
+    """Render all eight tokens fresh and write ``out_path``. Returns True if every symbol rendered;
     on any failure (non-mac, AppKit missing, a symbol name no longer resolving) writes an EMPTY-but-
     valid stylesheet instead, so mac-tokens.css's own ``@import`` never 404s, and returns False."""
     try:
