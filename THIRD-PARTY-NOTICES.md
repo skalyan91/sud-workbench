@@ -7,8 +7,13 @@ them alongside MIT code is aggregation, not relicensing: none of them becomes MI
 grant does not extend to them.
 
 Runtime dependencies installed by `pip` (`requirements.txt`, `requirements-core.txt`) are **not**
-vendored and are not listed here; they are obtained under their own licences at install time.
-The one exception worth naming is `en_sud_ewt`, pinned as a hard dependency rather than bundled.
+vendored and are not listed here; they are obtained under their own licences at install time. Four
+exceptions are worth naming up front, because `packaging/make_portable.sh` pip-installs them
+**straight into the shipped `.app`** rather than leaving them to an end-user install step —
+`en_sud_ewt` (pinned as a hard dependency rather than bundled the way every other model is), and
+three copyleft libraries, `wiktra`, `grewpy`, and `aksharamukha`. See "Bundled pip dependencies —
+the exceptions to 'pip deps aren't listed'" below for what each is, what it's used for, and under
+what licence.
 
 ---
 
@@ -45,7 +50,12 @@ Everything else below is properly licensed.
 - Noto Sans: Copyright The Noto Project Authors. <https://openfontlicense.org>
 - Nithya Ranjana DU: Copyright 2024 The Nithya Ranjana Project Authors. <https://scripts.sil.org/OFL>
 
-Both declare OFL 1.1 in their own `name` tables (IDs 13/14). The OFL permits bundling and
+Both declare OFL 1.1 in their own `name` tables (IDs 13/14) — confirmed against each font's own
+upstream `OFL.txt` (`notofonts`'s and `EkType/NithyaRanjana`'s), which are byte-identical outside
+their one differing copyright line, so a single bundled copy correctly covers both. The licence
+text itself is fetched from upstream and shipped alongside the fonts at `web/fonts/OFL.txt`, since
+OFL's own condition 2 expects "each copy" of the redistributed font to be accompanied by "the above
+copyright notice and this license" (rather than just a link to it). The OFL permits bundling and
 redistribution with software; it forbids selling the fonts on their own, and it requires that any
 **modified** version be renamed. Neither font is modified here.
 
@@ -116,7 +126,16 @@ it FORWARD, for display only.)
 
 | Component | Files | Upstream | Licence |
 |---|---|---|---|
-| HarfBuzz (WASM build) + harfbuzzjs | `harfbuzz/hb.js`, `harfbuzz/hbjs.js`, `harfbuzz/hb-wasm-data.js` (hb.wasm, base64-embedded) | [harfbuzz/harfbuzzjs](https://github.com/harfbuzz/harfbuzzjs) @ `0.4.6` | MIT (+ a small Apache-licensed subcomponent — see `harfbuzz/LICENSE-harfbuzzjs.txt`) |
+| HarfBuzz (WASM build) + harfbuzzjs | `harfbuzz/hb.js`, `harfbuzz/hbjs.js`, `harfbuzz/hb-wasm-data.js` (hb.wasm, base64-embedded) | [harfbuzz/harfbuzzjs](https://github.com/harfbuzz/harfbuzzjs) @ `0.4.6`, wrapping [harfbuzz/harfbuzz](https://github.com/harfbuzz/harfbuzz) | "Old MIT" (core) + MIT/Apache (wrapper) — see `harfbuzz/COPYING` and `harfbuzz/LICENSE-harfbuzzjs.txt` |
+
+Two separate licences are bundled here, and neither substitutes for the other. `harfbuzz/COPYING`
+is HarfBuzz **core**'s own licence, naming its real copyright holders (Google, Facebook, Mozilla,
+Nokia, Red Hat, Adobe, SIL International, and others, back to 1998) under the "Old MIT" terms — this
+is the text that actually governs the shaping engine `hb.wasm` compiles. `harfbuzz/
+LICENSE-harfbuzzjs.txt` is the **wrapper**'s own licence — Ebrahim Byagowi's `harfbuzzjs` glue code
+(`hb.js`/`hbjs.js`), MIT with a small Apache-licensed subcomponent (Zephyr's `zephyr-string.c`,
+emscripten's `emmalloc.cpp`) — and covers only that glue, not the engine it wraps. Both texts are
+fetched from each project's own current upstream (`harfbuzz/harfbuzz`'s `COPYING`, unmodified).
 
 Used by `js/lang/smp-shape.js` (item 25) to shape the SMP Brahmic scripts (Kawi, Grantha, Siddhaṃ,
 Soyombo, Sharada, Newa, Bhaiksuki, Modi, Tirhuta, Zanabazar Square) as native SVG `<path>` geometry,
@@ -155,6 +174,55 @@ cascading it ahead of Morpheus for the words it covers, but it is never required
 | latin-macronizer (the route to it) | [Alatius/latin-macronizer](https://github.com/Alatius/latin-macronizer) | GPL-3.0 |
 | SUD_Latin-ITTB / PROIEL / Perseus (the harvest keys, if built) | Universal Dependencies | CC BY-NC-SA |
 
+## Bundled pip dependencies — the exceptions to "pip deps aren't listed"
+
+Four `pip` dependencies break the "not vendored, not listed" rule stated at the top of this file.
+`packaging/make_portable.sh` pip-installs `requirements-core.txt` directly into the shipped `.app`
+(`pip install --target "$RES/applib" -r requirements-core.txt`) rather than leaving the install to
+the end user — that is genuine redistribution, not an install-time fetch, so each of these keeps
+its own upstream licence and is named here individually.
+
+(`packaging/make_bootstrap_app.sh` takes the other shape instead: it copies `requirements-core.txt`
+and a `setup_venv.sh` step into the bundle, and the actual `pip install` runs on the **end user's
+own machine** at first launch — closer to "fetch, don't redistribute," the same distinction this
+file already draws for the grew backend below. A future Homebrew formula is likely to follow that
+second shape too, installing into a user-writable venv at `brew install` time rather than shipping
+these packages as part of the formula's own bottle.)
+
+| Component | Licence | Real usage |
+|---|---|---|
+| `en_sud_ewt` | **CC BY-SA 4.0** | English SUD parser model wheel; `app/wiktionary.py` SUD-parses each Wiktionary definition to condense it into a glossable phrase |
+| `wiktra` | **GPL-2.0** | `app/translit.py`'s default Latin-transliteration backend — a Python port of Wiktionary's own Lua translit modules |
+| `grewpy` | **CeCILL v2.1** | `app/convert.py`'s UD↔SUD↔mSUD conversion — the Python client that talks to the separately-vendored `grewpy_backend` OCaml binary |
+| `aksharamukha` | **AGPL-3.0** | Sanskrit/Indic-script conversion in `app/translit.py`, `app/apte.py` (Apte dictionary lookup), and `app/itrans.py` (ITRANS input) |
+
+- **`en_sud_ewt`** is a derivative of **SUD_English-EWT**, a Surface-Syntactic Universal
+  Dependencies treebank itself derived from Universal Dependencies English-EWT. Per
+  [SunflowerAI/sud-spacy-parsers](https://github.com/SunflowerAI/sud-spacy-parsers)'s own
+  `NOTICE.md`: "The relabelled treebanks committed here (…), the per-language gold sets, and the
+  **released model wheels** are derivative works of [SUD] treebanks … distributed under Creative
+  Commons Attribution-ShareAlike 4.0 International (CC BY-SA 4.0)." CC BY-SA's own attribution
+  requirement runs to the treebank, not just to Sunflower AI: that same `NOTICE.md` instructs
+  readers to "cite the individual UD/SUD treebanks when using these models; their authors are
+  credited in each treebank's own `LICENSE.txt`" — here, SUD_English-EWT's.
+- **`wiktra`** ([twardoch/wiktra2](https://github.com/twardoch/wiktra2), GPL-2.0) is instantiated as
+  `wiktra.Transliterator()` and is the general-purpose romanizer for any language/script not routed
+  to a dedicated backend (Cyrillic, Greek, Devanagari, and others) — `translit.py`'s
+  `_pre_scheme_translit` runs it first and falls back to `uroman` only where wiktra leaves the text
+  unchanged.
+- **`grewpy`** (the pip package on [PyPI](https://pypi.org/project/grewpy/), CeCILL v2.1) is
+  distinct from `grewpy_backend`, the OCaml binary vendored under `vendor/grew/bin/` by
+  `tools/bundle_grew.sh` (see below) — `grewpy` is an ordinary `requirements-core.txt` entry,
+  imported as a normal Python module (`from grewpy import GRS, Graph, set_config`), that talks to
+  that binary to actually run the `.grs` UD↔SUD grammars.
+- **`aksharamukha`** ([virtualvinodh/aksharamukha-python](https://github.com/virtualvinodh/aksharamukha-python),
+  AGPL-3.0) converts between IAST/Sanskrit transliteration and Indic scripts (Devanagari, Grantha,
+  Siddhaṃ, and more); `app/apte.py` also uses it to turn a lemma into the SLP1 the Apte dictionary
+  index is keyed on. It is explicitly **not** used for the Sanskrit parser's own Devanagari→IAST
+  front end — that is `indic-transliteration` (MIT) instead, because upstream found aksharamukha
+  renders "।" as "." and that breaks the model's danda-based sentence splitting (see
+  `requirements.txt`'s own comment on the two packages).
+
 ## Not vendored, but worth naming
 
 - **grew** — the OCaml backend (`grewpy_backend`) is an optional external prerequisite, built by
@@ -162,3 +230,8 @@ cascading it ahead of Morpheus for the words it covers, but it is never required
   redistributed here.
 - **Stanza / spaCy models** — downloaded at runtime into the user's own application-support
   directory, under their own licences.
+- **pykakasi** (GPL-3.0) — kana → Hepburn romaji conversion for the on-demand Japanese extras tier
+  (`app/extras.py`'s `"japanese"` tier: `janome`, `pykakasi`, `cutlet`, `fugashi`, `unidic-lite`,
+  ~0.45 GB). Never in `requirements-core.txt`; fetched into the user's own extras directory
+  (`~/Library/Application Support/SUD Workbench/site-packages`) only when that tier is installed
+  from Manage Models, the same shape as the Stanza/spaCy models above.
