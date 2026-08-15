@@ -365,10 +365,13 @@ function fanArcs(arcs,spread,ghostArcs,rootKeys){ const ep={}; const reg=(k,len,
       // times the sine (not cosine) of the arrowhead's half-angle." "Head-to-tail arcs" is this same ordinary
       // (non-root) case in this session's own established vocabulary — its anchor gains a flat +AEXT
       // (diagram-core.js: "arrowheads overshoot the endpoint a touch so the visual tip reaches it"), on top of
-      // the trig gap rather than folded into it. The root-adjacent case DROPS the overshoot term entirely and
-      // swaps cos for sin — spread*cos(ARC_ANGLE) -> spread*sin(ARC_ANGLE), no longer the complement, and
-      // un-halved same as before (a root's own anchor was never split across two sides to begin with).
-      const anchor=(hasRoot?spread*Math.sin(ARC_ANGLE):spread*Math.sin(ARC_ANGLE)/2+AEXT);
+      // the trig gap rather than folded into it.
+      // CORRECTED, on report: a flat +AEXT overshot the mark — AEXT is measured ALONG the arc's own tangent,
+      // which departs at ARC_ANGLE from horizontal, but the anchor is a purely HORIZONTAL offset — so only the
+      // overshoot's horizontal PROJECTION belongs here: AEXT*cos(ARC_ANGLE), not the full AEXT. And the
+      // root-adjacent case reverts to its original cos(ARC_ANGLE) (the sin swap above was itself wrong) — the
+      // "endpoint gap the normal gap times the cosine of the takeoff angle" the report actually specified.
+      const anchor=(hasRoot?spread*Math.cos(ARC_ANGLE):spread*Math.sin(ARC_ANGLE)/2+AEXT*Math.cos(ARC_ANGLE));
       grp.forEach((e,j)=>e.set(side*(anchor+j*spread))); }); }); }
 // cubic control points for an arc bump from (x1,base) to (x2,base) of height h: each control sits at height h
 // above its endpoint and cot(θ)·h inward, so the take-off tangent makes θ with the baseline. Apex is 0.75·h.
