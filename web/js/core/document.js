@@ -2126,7 +2126,7 @@ function reserveBracketArcRoom(){ document.querySelectorAll("#doc .bwrap").forEa
   ghostToks.forEach(dep=>dep.dataset.ghostheads.split(",").forEach(pair=>{ const [headOid,rel]=pair.split(":"); intPairs.push({dep,headOid,rel}); }));
   if(!intPairs.length && !(box._ties||[]).length) return;   // Item 6: also run when the box has ties (MWT or item 1's ExtPos brackets) but no interrupter/ghost arcs, so the line-growth pass below still fires
   const rectOf=tok=>{ const f=tok.querySelector(".bwform")||tok, ox=(f===tok?0:tok.offsetLeft), oy=(f===tok?0:tok.offsetTop);
-    return {t:oy+f.offsetTop, cx:ox+f.offsetLeft+f.offsetWidth/2, w:f.offsetWidth}; };   // w: the node's own rendered width — the fan anchor (fanArcs, js/diagram/diagram-wrap.js) lands AT this node's own edge, so this PREDICTION pass needs the same figure positionBracketAnnots' own rectOf already carries, or it would under-grow the gap it's reserving room in
+    return {t:oy+f.offsetTop, cx:ox+f.offsetLeft+f.offsetWidth/2}; };
   const lines=[...box.querySelectorAll(".bwline2")], lineOf=el=>{ const ln=el&&el.closest(".bwline2"); return ln?lines.indexOf(ln):-1; };
   const relpad=parseFloat(getComputedStyle(box).getPropertyValue("--relpad"))||0;   // reserved deprel-row height above every form → the level bracket arcs attach at (matching the arc view), whether or not the token shows a label
   // classify each interrupter/ghost arc as a within-line bump (per line) or a cross-line edge, and record which
@@ -2194,9 +2194,9 @@ function reserveBracketArcRoom(){ document.querySelectorAll("#doc .bwrap").forEa
       const rel=dep.dataset.intrel||""; if(!rel)return; const ld=lineOf(dep), lh=lineOf(head); if(ld<0||lh<0||ld===lh)return;
       const Dr=rectOf(dep), Hr=rectOf(head); if(Math.abs(Dr.t-Hr.t)<6)return;   // within-line bump, handled above
       const depUp=Dr.t<Hr.t;
-      cRec.push({dep,head,Hcx:Hr.cx,Dcx:Dr.cx,Ht:Hr.t,Dt:Dr.t,Hw:Hr.w,Dw:Dr.w,depUp, upTok:depUp?dep:head, loTok:depUp?head:dep, loIdx:depUp?lh:ld, rel}); });
+      cRec.push({dep,head,Hcx:Hr.cx,Dcx:Dr.cx,Ht:Hr.t,Dt:Dr.t,depUp, upTok:depUp?dep:head, loTok:depUp?head:dep, loIdx:depUp?lh:ld, rel}); });
     if(cRec.length){
-      const cArcs=cRec.map(c=>({hk:c.head.dataset.tok, dk:c.dep.dataset.tok, xh:c.Hcx, xd:c.Dcx, wh:c.Hw, wd:c.Dw, len:Math.hypot(c.Dcx-c.Hcx,c.Dt-c.Ht), c}));
+      const cArcs=cRec.map(c=>({hk:c.head.dataset.tok, dk:c.dep.dataset.tok, xh:c.Hcx, xd:c.Dcx, len:Math.hypot(c.Dcx-c.Hcx,c.Dt-c.Ht), c}));
       // item 7: fold cross-line GHOST endpoints into this fan too — positionBracketAnnots now does the same (its
       // own fanArcs call takes a ghostFan third arg, see that function's own item-7 comment), so a ghost sharing a
       // cross-line bucket there can shift a real arc's offset; leaving ghosts out of THIS prediction would mispredict
@@ -2208,7 +2208,7 @@ function reserveBracketArcRoom(){ document.querySelectorAll("#doc .bwrap").forEa
         const headTok=box.querySelector(`.bwtok[data-tok="${ghOid}"]`); if(!headTok) return null;
         const Dr=rectOf(dep), Hr=rectOf(headTok); if(Math.abs(Dr.t-Hr.t)<6) return null;
         const depUp=Dr.t<Hr.t, len=Math.hypot(Dr.cx-Hr.cx,Dr.t-Hr.t),   // matches cArcs' own hypot len just above — not fanArcs' bare |xd-xh| fallback, which omits the vertical term
-          a={hk:ghOid,dk:dep.dataset.tok,xh:Hr.cx,xd:Dr.cx,wh:Hr.w,wd:Dr.w,len}; if(depUp) a.dkey="B"+a.dk; else a.hkey="B"+a.hk; return a; })).filter(Boolean);
+          a={hk:ghOid,dk:dep.dataset.tok,xh:Hr.cx,xd:Dr.cx,len}; if(depUp) a.dkey="B"+a.dk; else a.hkey="B"+a.hk; return a; })).filter(Boolean);
       fanArcs(cArcs, fanStep(), ghostFan);   // the VERY fan positionBracketAnnots applies → matching fanned midpoints → matching de-collision
       for(let it=0; it<6; it++){
         const B=box.getBoundingClientRect();   // live: line boxes shift down as gaps grow, so re-measure each pass
@@ -2309,7 +2309,7 @@ function positionBracketAnnots(){ document.querySelectorAll("#doc .bwrap").forEa
   // The fan itself is computed COMBINED with the cross-line arcs below (Item 16, mirroring the wrapped arc view):
   // a token with both a within-line bump AND a cross-line arc needs ONE consistent fan across both, not two
   // independent ones that don't know about each other and can offset both to the same spot.
-  const wArcs=within.map(p=>({hk:p.headTok.dataset.tok,dk:p.dep.dataset.tok,xh:p.Hr.cx,xd:p.Dr.cx,wh:p.Hr.w,wd:p.Dr.w,len:Math.abs(p.Dr.cx-p.Hr.cx),p}));
+  const wArcs=within.map(p=>({hk:p.headTok.dataset.tok,dk:p.dep.dataset.tok,xh:p.Hr.cx,xd:p.Dr.cx,len:Math.abs(p.Dr.cx-p.Hr.cx),p}));
   // CROSS-LINE edges: identical treatment to the wrapped ARC view's cross-line edges (a straight arrow when the chord
   // already meets the tokens at ≥ θ, else a Hobby spline lifting the endpoints to θ). The BOTTOM endpoint terminates
   // just ABOVE the lower token's .bwrel deprel label (Item 2), and the labels run through the SAME de-collision pass
@@ -2317,7 +2317,7 @@ function positionBracketAnnots(){ document.querySelectorAll("#doc .bwrap").forEa
   // hk/dk are bucketed with the SAME token id a within-line bump at that token uses — EXCEPT the endpoint that sits
   // on the line ABOVE, which gets its own "B"+id bucket (mirroring arcsWrapped's Item 16) so it never fans with
   // reference to unrelated endpoints belonging to rows further above; only same-row neighbours ever share a bucket.
-  const cArcs=cross.map(p=>{ const depUp=p.Dr.t<p.Hr.t, a={hk:p.headTok.dataset.tok,dk:p.dep.dataset.tok,xh:p.Hr.cx,xd:p.Dr.cx,wh:p.Hr.w,wd:p.Dr.w,len:Math.hypot(p.Dr.cx-p.Hr.cx,p.Dr.t-p.Hr.t),p};
+  const cArcs=cross.map(p=>{ const depUp=p.Dr.t<p.Hr.t, a={hk:p.headTok.dataset.tok,dk:p.dep.dataset.tok,xh:p.Hr.cx,xd:p.Dr.cx,len:Math.hypot(p.Dr.cx-p.Hr.cx,p.Dr.t-p.Hr.t),p};
     if(depUp) a.dkey="B"+a.dk; else a.hkey="B"+a.hk; return a; });
   // Ghost arcs (Shared=Yes and Subject-raising), computed HERE — ahead of the fan below — so their endpoints fold
   // into the SAME per-token pool the real within-line/cross-line arcs resolve in, instead of a separate later
@@ -2335,7 +2335,7 @@ function positionBracketAnnots(){ document.querySelectorAll("#doc .bwrap").forEa
       // NOT fanArcs' own bare |xd-xh| fallback, which for a CROSS-line ghost omits the vertical (Dr.t-Hr.t) term
       // cArcs' hypot includes, mismatching against a real cross-line arc's own length there.
       len=cross?Math.hypot(Dr.cx-Hr.cx,Dr.t-Hr.t):Math.abs(Dr.cx-Hr.cx),
-      a={hk:ghOid,dk:dep.dataset.tok,xh:Hr.cx,xd:Dr.cx,wh:Hr.w,wd:Dr.w,len};
+      a={hk:ghOid,dk:dep.dataset.tok,xh:Hr.cx,xd:Dr.cx,len};
     if(cross){ if(depUp) a.dkey="B"+a.dk; else a.hkey="B"+a.hk; }
     return a; });
   // FAN the shared-node endpoints for BOTH kinds of REAL arc, AND every ghost, in ONE combined pass — a token with

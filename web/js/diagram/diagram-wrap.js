@@ -307,60 +307,45 @@ function arcHgt(width,ROW){ return Math.abs(width)*ARC_K; }
 // casing (half-width = (arc-stroke+3.5)/2) clear of a neighbour's body (half-width = arc-stroke/2, + 1px margin),
 // the horizontal step must be that gap divided by sinθ.
 function fanStep(){ const st=parseFloat(css("--arc-stroke"))||1.7; return ((st+3.5)/2 + st/2 + 1)/Math.sin(ARC_ANGLE); }
-// Fan the endpoints of arcs meeting at a shared node: LONGER spans sit further from the node's own edge
-// than shorter ones wherever two or more share a side. THE one routine every arc/bracket view calls. Each
-// arc a carries head-key hk, dep-key dk, head-x xh, dep-x xd, head-width wh, dep-width wd and length len
-// (any monotone-in-width measure); it is mutated with offH / offD, the horizontal endpoint offsets.
+// Fan the endpoints of arcs meeting at a shared node: LONGER spans sit further out than shorter ones
+// wherever two or more share a side. THE one routine every arc/bracket view calls. Each arc a carries
+// head-key hk, dep-key dk, head-x xh, dep-x xd and length len (any monotone-in-width measure); it is
+// mutated with offH / offD, the horizontal endpoint offsets.
 //
-// ⚠️ SUPERSEDES 29c3130/e8bf96f/4147e31's OWN SHARED TARGET — not a bug-fix on top of them. All three
-// rounds tuned WHEN a solo or uncontested side was allowed to land at dead centre (offset 0, the node's own
-// x); none ever questioned WHETHER it should. On report: "arc endpoints should always be arranged such that
-// an incoming arc lands on the left if it comes in from the left, and lands on the right if it comes in from
-// the right; currently incoming edges always land in the centre … this also applies to endpoints (both
-// incoming and outgoing) of cross-line arcs, despite what I said earlier" — an EXPLICIT, ACKNOWLEDGED
-// reversal of the premise 29c3130 itself was built on (a cross-line arc's sole endpoint centring was that
-// commit's own original fix — see this function's git history for the exact prior text), not a bug in any of
-// the three rounds' own implementation of that premise.
-//
-// THE NEW ANCHOR: literally the node's own edge, not an arbitrary step off centre. Every registration now
-// carries `w`, the width of THE NODE THIS BUCKET BELONGS TO (not the arc's other endpoint — a caller passes
-// wh for a head-role registration, wd for a dependent-role one, mirroring how xh/xd already work) — arcs()'s
-// own `w[i]` (the SVG views' per-token SLOT reservation, already the figure genericSubjGapW's own layout
-// treats as "this token's real half-width") for arcsWrapped/brackets, or a DOM `.bwform`'s real offsetWidth
-// for the wrapped-bracket views (document.js). A side's innermost entry (j=0, the longest span in that
-// bucket) lands at `side*w/2` — literally that node's own left/right EDGE, the plain reading of "lands on the
-// left": AT the edge, not merely left-of-centre. Every later entry in the same bucket still fans a further
-// `spread` beyond that anchor (j=1,2,…) — e8bf96f/4147e31's own still-correct insight, that two arcs sharing
-// a bucket must never land on the exact same pixel, is UNCHANGED; only the point the whole bucket fans FROM
-// moved off centre.
-//
-// This also *subsumes* all three rounds' fixes rather than needing their own hasCentral/solo/opp bookkeeping
-// preserved: since neither side's own innermost slot is ever `0` (dead centre) any more — it's the node's
-// own half-width toward that side, strictly >0 for any real glyph — the two sides of one node can never
-// collide (they anchor at −w/2 and +w/2, a full node-width apart) and a solo side can never collide with an
-// unrelated neighbour on the far side either (nothing on the far side ever competes for a coordinate this
-// side no longer targets). `hasCentral`/`solo`/`opp` are gone: they existed only to gate access to the
-// offset-0 slot, and that slot no longer exists for a real ±1 side (only the explicit side-0 sentinel below
-// still uses it, and it was never gated by any of them).
+// ⚠️ CORRECTS 9544727's OWN OFFSET MAGNITUDE — that commit is not being re-superseded, its ARITHMETIC is
+// being fixed. 9544727 (superseding 29c3130/e8bf96f/4147e31's shared centring target) anchored a side's
+// innermost entry (j=0) at `side*w/2` — the width of THE NODE THIS BUCKET BELONGS TO, i.e. its own rendered
+// half-width/edge — on the report "an incoming arc lands on the left if it comes in from the left, and on
+// the right if it comes in from the right". On correction: "No, that's not what I meant!! Put it back! All
+// I meant is that the incoming arc should land half a fanning gap to the left of centre if it comes in from
+// the left, and half a fanning gap to the right of centre if it comes in from the right." The DIRECTION-based
+// side assignment (Math.sign(xd-xh)/Math.sign(xh-xd) below) was never the problem and stays exactly as
+// 9544727 left it; what was wrong was reading "lands on the left" as "AT the node's own edge" rather than
+// "a small, fixed distance left of centre". THE ANCHOR IS NOW `spread/2` — half of the SAME uniform fan step
+// (fanStep()) every later entry in a bucket already fans by — not a node-size-dependent quantity. A side's
+// innermost entry (j=0, the longest span) lands at `side*spread/2`; every later entry in the same bucket
+// still fans a further `spread` beyond that anchor (j=1,2,… — e8bf96f/4147e31's own still-correct insight,
+// that two arcs sharing a bucket must never land on the exact same pixel, is unchanged; only the point the
+// whole bucket fans FROM moved off centre, and by much less than 9544727 had it move).
 //
 // item 7 (WRAPPED views — mirrors 84e7938's flat-view fix to arcs()/stemma(), js/diagram/diagram-render.js):
 // an OPTIONAL third arg, ghostArcs, registers ghost endpoints into this SAME per-node pool, BEFORE the one
 // sort/assign pass below runs, instead of a separate LATER pass (fanGhostArcs) unconditionally fanning every
 // ghost outside whatever the reals already claimed — which always lost to a real arc regardless of relative
 // length. Folded into the SAME pool, a real and a ghost sharing an endpoint are ranked by length together, on
-// equal footing, so whichever is actually longer lands closer to the node's own edge. Ghost items need the
-// SAME {hk,dk,hkey?,dkey?,xh,xd,wh?,wd?} shape a real arc does; `len` defaults to |xd-xh| when absent (mirrors
+// equal footing, so whichever is actually longer lands closer to centre. Ghost items need the SAME
+// {hk,dk,hkey?,dkey?,xh,xd} shape a real arc does; `len` defaults to |xd-xh| when absent (mirrors
 // fanGhostArcs' own convention — none of this file's ghost-fan call sites compute one explicitly).
-function fanArcs(arcs,spread,ghostArcs){ const ep={}; const reg=(k,len,side,w,set)=>{(ep[k]=ep[k]||[]).push({len,side,w,set});};
-  arcs.forEach(a=>{ reg(a.hkey??a.hk,a.len,Math.sign(a.xd-a.xh)||1,a.wh||0,o=>a.offH=o);   // this node is the head → outgoing edge fans, anchored at ITS OWN node's own edge. a.hkey/a.dkey override only the FAN-BUCKET key (not a.hk/a.dk, which are read downstream) so a cross-line arc's UPPER-line endpoint can bucket with the bottom-of-line endpoints instead of the top-side ones at the same token
-                    reg(a.dkey??a.dk,a.len,Math.sign(a.xh-a.xd)||1,a.wd||0,o=>a.offD=o); }); // this node is the dependent → incoming edge fans the same way, anchored at ITS OWN node's edge (no longer centre-eligible — see block comment)
+function fanArcs(arcs,spread,ghostArcs){ const ep={}; const reg=(k,len,side,set)=>{(ep[k]=ep[k]||[]).push({len,side,set});};
+  arcs.forEach(a=>{ reg(a.hkey??a.hk,a.len,Math.sign(a.xd-a.xh)||1,o=>a.offH=o);   // this node is the head → outgoing edge fans. a.hkey/a.dkey override only the FAN-BUCKET key (not a.hk/a.dk, which are read downstream) so a cross-line arc's UPPER-line endpoint can bucket with the bottom-of-line endpoints instead of the top-side ones at the same token
+                    reg(a.dkey??a.dk,a.len,Math.sign(a.xh-a.xd)||1,o=>a.offD=o); }); // this node is the dependent → incoming edge fans the same way (no longer centre-eligible — see block comment)
   (ghostArcs||[]).forEach(a=>{ const len=a.len??Math.abs(a.xd-a.xh);   // a ghost registers on BOTH sides — ranked into the pool by length like any other member, same anchor rule as a real edge
-    reg(a.hkey??a.hk,len,Math.sign(a.xd-a.xh)||1,a.wh||0,o=>a.offH=o);
-    reg(a.dkey??a.dk,len,Math.sign(a.xh-a.xd)||1,a.wd||0,o=>a.offD=o); });
+    reg(a.hkey??a.hk,len,Math.sign(a.xd-a.xh)||1,o=>a.offH=o);
+    reg(a.dkey??a.dk,len,Math.sign(a.xh-a.xd)||1,o=>a.offD=o); });
   Object.values(ep).forEach(arr=>{ arr.filter(e=>e.side===0).forEach(e=>e.set(0));   // a side-0 sentinel (no caller currently registers one, but arcs() reserves it for the root stub) — always centre, never ranked: it isn't "on a side" at all, so the edge-anchor rule below doesn't apply to it
-    [-1,1].forEach(side=>{ const grp=arr.filter(e=>e.side===side).sort((p,q)=>q.len-p.len);   // this side's whole pool — real AND ghost together — ranked by length alone; longest first (j=0) → nearest the node's own edge
+    [-1,1].forEach(side=>{ const grp=arr.filter(e=>e.side===side).sort((p,q)=>q.len-p.len);   // this side's whole pool — real AND ghost together — ranked by length alone; longest first (j=0) → nearest centre
       if(!grp.length) return;
-      const anchor=Math.max(0,...grp.map(e=>e.w))/2;   // this bucket's own node's own half-width (every entry here shares the same underlying node, so the same anchor) — the node's own EDGE, toward `side`
+      const anchor=spread/2;   // half a fanning gap off centre — NOT the node's own half-width (see the block comment above)
       grp.forEach((e,j)=>e.set(side*(anchor+j*spread))); }); }); }
 // cubic control points for an arc bump from (x1,base) to (x2,base) of height h: each control sits at height h
 // above its endpoint and cot(θ)·h inward, so the take-off tangent makes θ with the baseline. Apex is 0.75·h.
@@ -689,14 +674,14 @@ function arcsWrapped(si){
   // Cross-line arcs (head + dependent on DIFFERENT wrapped rows, so the arc spans the inter-row gap).
   const crossArcs=[];
   for(let i=0;i<n;i++){ const h=heads[i]-1; if(h<0)continue; if(rowOf(i)===rowOf(h))continue;
-    crossArcs.push({dk:i,hk:h,len:Math.abs(i-h),wh:w[h],wd:w[i]}); }   // wh/wd: the fan anchor is each endpoint's OWN node width (w[], the sentence-wide slot array above — a token's width doesn't depend on which row it lands in) — see fanArcs' own note, diagram-wrap.js
+    crossArcs.push({dk:i,hk:h,len:Math.abs(i-h)}); }
   // Item 16: ONE combined endpoint fan per token across BOTH within-line and cross-line arcs. A token where a
   // cross-line arc lands (on line N+1) is ALSO shared by that line's within-line arcs; folding every arc — within-line
   // (from ALL rows) AND cross-line — into a SINGLE fanArcs pass keyed by GLOBAL token index means the shared token
   // gets ONE combined fan, so its cross-line and within-line endpoints don't overlap and their take-off angles stay
   // consistent. Uses each token's absolute x (NX); offsets are horizontal → placement-independent, computed once here.
   const fanAll=[];
-  rows.forEach(r=>r.arcsIn.forEach(a=>{ a.hk=a.head; a.dk=a.dep; a.xh=NX(a.head); a.xd=NX(a.dep); a.len=Math.abs(a.dep-a.head); a.wh=w[a.head]; a.wd=w[a.dep]; fanAll.push(a); }));
+  rows.forEach(r=>r.arcsIn.forEach(a=>{ a.hk=a.head; a.dk=a.dep; a.xh=NX(a.head); a.xd=NX(a.dep); a.len=Math.abs(a.dep-a.head); fanAll.push(a); }));
   crossArcs.forEach(a=>{
     const iUp=rowOf(a.dk).ord<rowOf(a.hk).ord;   // is the DEPENDENT the upper-line token?
     if(iUp) a.dkey="B"+a.dk; else a.hkey="B"+a.hk;   // Item 1: the cross-line arc's UPPER-line endpoint sits at the BOTTOM of that line (NBOT); give it a bottom-side fan bucket ("B"+token) so it fans ONLY against other cross-line bottom-endpoints there — never the within-line TOP-side endpoints sharing that token (Item 16's single combined fan wrongly spread it against them). The LOWER end keeps its plain token key → still fans with that line's within-line arcs (same, top side).
@@ -735,7 +720,7 @@ function arcsWrapped(si){
   // nothing like their true relative length, so the ghost won the centre slot unconditionally regardless of
   // which was actually longer — the identical bug this whole fix exists to remove, reintroduced through a unit
   // mismatch instead of a missing sort.
-  const ghostFan=ghostPairs.map(p=>{ const a={hk:p.oh,dk:p.i,xh:NX(p.oh),xd:NX(p.i),len:Math.abs(p.oh-p.i),wh:w[p.oh],wd:w[p.i]};
+  const ghostFan=ghostPairs.map(p=>{ const a={hk:p.oh,dk:p.i,xh:NX(p.oh),xd:NX(p.i),len:Math.abs(p.oh-p.i)};
     if(rowOf(p.oh)!==rowOf(p.i)){ const iUp=rowOf(p.i).ord<rowOf(p.oh).ord; if(iUp) a.dkey="B"+a.dk; else a.hkey="B"+a.hk; }   // item 1's own cross-line bucket split, applied to ghosts too
     return a; });
   fanArcs(fanAll,SPREAD,ghostFan);   // sets offH/offD on every within-line AND cross-line arc AND every ghost, from the same per-token fan
@@ -1608,15 +1593,15 @@ function brackets(si){
       if(c2.x+4>cur) segs.push([cur,c2.x+4]);
       segs.forEach(([x0,x1])=> svg.appendChild(E("rect",{x:x0,y:wy+TOK_Y_LOWER-13,width:x1-x0,height:16,rx:5,fill:col,"fill-opacity":0.15,"pointer-events":"none"}))); } }   // the wash backlights the FORM/BRACKET row, both of which draw on the lowered baseline (see TOK_Y_LOWER, js/diagram/diagram-core.js), so it rides with them
   // fan the interrupter-arc endpoints with the shared routine (the SAME fan arc view uses): longer spans sit
-  // further from each node's own edge than shorter ones, one fanStep() apart
-  const npReal=np.filter(a=>a.h>=0&&a.h<n).map(a=>Object.assign(a,{hk:a.h,dk:a.d,xh:wx[a.h],xd:wx[a.d],len:Math.abs(a.d-a.h),wh:whi[a.h]-wlo[a.h],wd:whi[a.d]-wlo[a.d]}));   // wh/wd: each endpoint's OWN node width, already computed above (wlo/whi) — the fan anchors AT that node's own edge, see fanArcs' own note
+  // further out than shorter ones, one fanStep() apart
+  const npReal=np.filter(a=>a.h>=0&&a.h<n).map(a=>Object.assign(a,{hk:a.h,dk:a.d,xh:wx[a.h],xd:wx[a.d],len:Math.abs(a.d-a.h)}));
   // item 7: ghost endpoints fold into the SAME fanArcs pass the reals resolve in — see fanArcs' own ghost-arg
   // comment (mirrors 84e7938's flat-view fix) — instead of fanning in a separate later pass that always pushed
   // a ghost outside every real arc at a shared endpoint regardless of relative length. len: TOKEN-INDEX span
   // (a.h/a.d are token indices), matching npReal's own len convention just above — NOT a pixel distance; see
   // arcsWrapped's identical fix (js/diagram/diagram-wrap.js, same file) for the live-measured bug this avoids —
   // a ghost's pixel span otherwise dwarfs a real arc's token-index span regardless of true relative length.
-  const ghostFan=ghostArcs.map(a=>({hk:a.h,dk:a.d,xh:wx[a.h],xd:wx[a.d],len:Math.abs(a.h-a.d),wh:whi[a.h]-wlo[a.h],wd:whi[a.d]-wlo[a.d]}));
+  const ghostFan=ghostArcs.map(a=>({hk:a.h,dk:a.d,xh:wx[a.h],xd:wx[a.d],len:Math.abs(a.h-a.d)}));
   fanArcs(npReal,fanStep(),ghostFan);
   np.forEach(a=>{ if(a.h<0||a.h>=n)return; const col=relColor(a.rel), ink=arcInk(col);
     const XH=wx[a.h]+(a.offH||0), XD=wx[a.d]+(a.offD||0);   // fanned endpoints; crown ∝ arc width
