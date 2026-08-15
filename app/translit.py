@@ -24,7 +24,6 @@ import os
 import re
 
 _TR = None
-_AR_MAP = None
 _JANOME = None
 _KKS = None
 _KO = None
@@ -83,17 +82,6 @@ def _tr():
         except Exception:  # noqa: BLE001
             pass
     return _TR
-
-
-def _camel_ar(text: str) -> str:
-    global _AR_MAP
-    try:
-        if _AR_MAP is None:
-            from camel_tools.utils.charmap import CharMapper
-            _AR_MAP = CharMapper.builtin_mapper("ar2hsb")
-        return _AR_MAP(text) or ""
-    except Exception:  # noqa: BLE001
-        return ""
 
 
 _HAN_RE = re.compile(r"[⺀-⻿㐀-䶿一-鿿豈-﫿]")

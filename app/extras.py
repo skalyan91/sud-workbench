@@ -9,7 +9,6 @@ download into Application Support.
 Tiers (each behind a lazy ``try: import`` in ``translit`` / ``parse``):
   * ``stanza``   — Stanza UD parsers (pulls torch + transformers), ~1.1 GB
   * ``japanese`` — cutlet/fugashi/unidic-lite romanisation dictionaries, ~0.45 GB
-  * ``arabic``   — CAMeL Tools Arabic morphology, ~0.3 GB
   * ``la_macron`` — Latin vowel lengths (a DATA tier, not a pip one — see below), ~4 MB
   * ``grammars`` — UD↔SUD conversion grammars (also a DATA tier), ~450 KB
   * ``fa_vocab`` — Persian vocalisation lexicon (also a DATA tier — see :mod:`app.fa_vocab`), ~10 MB
@@ -63,12 +62,6 @@ TIERS: dict[str, dict] = {
         "pip": ["janome", "pykakasi", "cutlet", "fugashi", "unidic-lite"],
         "probe": "cutlet",
         "note": "Japanese romanisation dictionaries (~0.45 GB)",
-    },
-    "arabic": {
-        "label": "Arabic transliteration",
-        "pip": ["camel-tools"],
-        "probe": "camel_tools",
-        "note": "CAMeL Tools Arabic morphology (~0.3 GB)",
     },
     "la_macron": {
         "label": "Latin macrons",

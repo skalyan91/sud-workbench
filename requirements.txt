@@ -71,7 +71,6 @@ ToJyutping            # Cantonese → Jyutping
 opencc-python-reimplemented   # simplified↔traditional Han conversion (Simplified/Traditional orthographies; folds simplified input for Chao's General Chinese)
 hangul-romanize       # Korean → romanisation (wiktra's Korean modules don't run on Lua 5.5)
 uroman                # ISI Universal Romanizer — vocalisation-aware fallback (Persian, Hebrew, … — scripts wiktra leaves unchanged)
-                      #   Arabic transliteration uses camel-tools, installed with the ar_sud_* model
 
 # ── automatic language identification (on-open DOCLANG auto-detect) ──────────
 fasttext-wheel==0.9.2 # Meta fastText lid.176 model runner (prebuilt-wheel distribution; plain "fasttext"

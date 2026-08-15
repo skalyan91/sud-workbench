@@ -4,7 +4,6 @@
 # user extras dir (~/Library/Application Support/SUD Workbench/site-packages):
 #   · stanza + spacy-stanza  → torch/transformers  (UD parsing tier)
 #   · janome/pykakasi/cutlet/fugashi/unidic-lite    (Japanese-romaji tier)
-#   · camel-tools                                    (Arabic tier, installed with the ar_sud_* model)
 # Everything here is thinc/CNN or pure-Python — no PyTorch. Used by packaging/make_portable.sh.
 
 # ── native shell ────────────────────────────────────────────────────────────
