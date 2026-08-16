@@ -9,6 +9,8 @@ All notable changes to SUD Workbench are documented in this file.
 - Japanese running transliteration no longer puts a space after an opening quotation mark (「/『)
   or before a closing one (」/』) — the romaniser was collapsing all four to the same plain ASCII
   `"`, which lost the open/close distinction the line's own spacing rule depends on.
+- The validity checker now flags a token whose dependency relation is "punct" but whose UPOS isn't
+  PUNCT, however that combination arose — a manual edit or an automatically-computed relation alike.
 
 ### Renamed
 

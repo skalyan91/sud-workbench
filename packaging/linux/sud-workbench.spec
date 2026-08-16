@@ -213,7 +213,8 @@ gtk-update-icon-cache %{_datadir}/icons/hicolor &>/dev/null || :
 %changelog
 * Sun Aug 16 2026 Siva Kalyan - 0.3.6-1
 - Fixed Japanese running transliteration putting a space after an opening quotation mark.
-  Renamed the "Modified Hepburn" transliteration scheme to "Hepburn". See CHANGELOG.md.
+  Renamed the "Modified Hepburn" transliteration scheme to "Hepburn". The validity checker now
+  flags a "punct" deprel on a token whose UPOS isn't PUNCT. See CHANGELOG.md.
 * Sun Aug 16 2026 Siva Kalyan - 0.3.5-1
 - Added update indicators (green Update button, dropdown marker) for parsers with a newer version
   available, and a progress bar built into the install/update button itself. Fixed the bundled

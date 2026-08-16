@@ -90,7 +90,17 @@ function computeIssues(){ ISSUES=[]; BAD=new Map();
       if(deprelEmpty&&h!==0){ flag(si,i+1,"deprel"); ISSUES.push({si,tok:i+1,msg:`Token ${i+1} (“${t[i].form||"?"}”) has no dependency relation`}); }   // a head-0 token's empty deprel is covered by the root-agreement check below
       if(h===0)roots++;
       if((dbase==="root")!==(h===0))   // deprel "root" and head 0 must agree (compare the relation, ignoring any @deep tail)
-        ISSUES.push({si,tok:i+1,msg:h===0?`Token ${i+1} has head 0 but deprel “${t[i].deprel}” (a root must be “root”)`:`Token ${i+1} has deprel “root” but head ${t[i].head} (a root must have head 0)`}); });
+        ISSUES.push({si,tok:i+1,msg:h===0?`Token ${i+1} has head 0 but deprel “${t[i].deprel}” (a root must be “root”)`:`Token ${i+1} has deprel “root” but head ${t[i].head} (a root must have head 0)`});
+      // deprel "punct" and UPOS PUNCT must agree the same way root/head-0 do — on request ("a token
+      // should not be allowed to have the punct deprel unless its UPOS is PUNCT. This applies even if
+      // its deprel is computed automatically"). Checked here rather than gated behind any particular
+      // edit path (the grid's DepRel cell, Find & Replace, headSyncDeprel adopting the parser's own
+      // suggestion, …) precisely BECAUSE computeIssues re-walks the whole live document on every
+      // render regardless of how a deprel got there, so an automatically-assigned "punct" is caught
+      // exactly as a manually-typed one is — no separate guard needed at each assignment site. Empty
+      // UPOS is its own, already-flagged issue above and not re-flagged here.
+      if(dbase==="punct"&&!uposEmpty&&t[i].upos!=="PUNCT")
+        ISSUES.push({si,tok:i+1,msg:`Token ${i+1} (“${t[i].form||"?"}”) has deprel “punct” but UPOS “${t[i].upos}” (must be PUNCT)`}); });
     if(roots!==1)ISSUES.push({si,tok:roots>1?(heads.indexOf(0)+1):0,msg:roots===0?"No root — exactly one token must have head 0":`${roots} roots — exactly one token may have head 0`});
     // dependency cycles: a head chain that loops back instead of reaching the root (head 0). Each cycle is
     // reported once (anchored at its lowest token id) with every member's head cell flagged.
