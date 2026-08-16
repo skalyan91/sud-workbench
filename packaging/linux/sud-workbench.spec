@@ -33,7 +33,7 @@
 # (an ImportError three menus deep, not a `dnf install` error), which is worse than getting it wrong
 # at build time.
 
-%global app_version 0.3.6
+%global app_version 0.3.7
 
 Name:           sud-workbench
 Version:        %{app_version}
@@ -211,6 +211,10 @@ update-desktop-database %{_datadir}/applications &>/dev/null || :
 gtk-update-icon-cache %{_datadir}/icons/hicolor &>/dev/null || :
 
 %changelog
+* Mon Aug 17 2026 Siva Kalyan - 0.3.7-1
+- A "punct" deprel on a non-PUNCT token is now strictly forbidden, not just flagged -- enforced
+  unconditionally, including the automatic relation the app computes for a re-headed token. See
+  CHANGELOG.md.
 * Sun Aug 16 2026 Siva Kalyan - 0.3.6-1
 - Fixed Japanese running transliteration putting a space after an opening quotation mark.
   Renamed the "Modified Hepburn" transliteration scheme to "Hepburn". The validity checker now

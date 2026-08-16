@@ -2,6 +2,19 @@
 
 All notable changes to SUD Workbench are documented in this file.
 
+## [0.3.7] — 2026-08-17
+
+### Fixes
+
+- A token can no longer end up with the "punct" dependency relation unless its UPOS is PUNCT —
+  strictly forbidden now, not just flagged. This previously depended on an optional, on-demand
+  grammars download; it's now enforced unconditionally, and blocks the drag-to-reattach gesture
+  (with a toast) in addition to the automatic relation the app computes for a re-headed token.
+- (Homebrew only) A bare launch could briefly flash an unrelated English sample sentence before
+  the real last-opened document appeared. The Homebrew Formula's own build step never stripped the
+  browser dev-mode fixture the way every other distribution channel already does; fixed in the tap
+  (`skalyan91/homebrew-sud-workbench`), no change needed in this repo.
+
 ## [0.3.6] — 2026-08-16
 
 ### Fixes

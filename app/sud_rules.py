@@ -66,6 +66,18 @@ def _rel_base(deprel: str) -> str:
 
 def is_valid(head_upos: str, dep_upos: str, deprel: str) -> bool:
     base = _rel_base(deprel)
+    # ALWAYS ENFORCED, independent of whether the optional validator grammars (relations.json,
+    # fetched on demand -- app/grammars.py) are installed: "punct ⇒ dependent must be PUNCT" is the
+    # very first example this module's own docstring cites from that grammar, but until now it only
+    # took effect once a reader had installed that extras tier -- _load_rules() silently returns an
+    # EMPTY rule set when relations.json isn't there yet (the try/except above), so every relation
+    # read as valid in the meantime. On report ("a token should not be allowed to have the punct
+    # deprel unless its UPOS is PUNCT... I'm still getting cases where if I drag a token to a new
+    # head, the recomputed deprel becomes punct even though the token is not PUNCT. This should be
+    # strictly forbidden"), this one constraint is hard-coded here so it holds with or without the
+    # download -- every OTHER grammar-sourced constraint is left exactly as before.
+    if base == "punct" and dep_upos and dep_upos != "PUNCT":
+        return False
     for rel, node, op, uposset in _load_rules():
         if base != rel:
             continue

@@ -29,7 +29,14 @@ async function setDiagramHead(si,depId,headId){ const s=DOC[si]; if(!s||depId<1|
   // see setAsRoot/stepHead (js/editing/edit-ops.js) and the deprel context-menu choosers (js/editing/context-menu.js).
   markDirty(); preserveScroll(renderDoc); pick(si,depId,false); toast(`Head of token ${depId} → ${headId}`); }
 // is (headPOS ⟵deprel⟶ depPOS) an error-level violation? (only hard constraints — warnings are allowed)
-async function depIsError(headUpos,depUpos,deprel){ if(!hasBridge()||!deprel||depBase(deprel)==="root")return false;
+async function depIsError(headUpos,depUpos,deprel){ if(!deprel||depBase(deprel)==="root")return false;
+  // ⚠ CHECKED HERE TOO, NOT JUST server-side (app/sud_rules.py's own hard-coded floor) — on report
+  // ("this should be strictly forbidden"): the bridge call below is skipped entirely with no bridge
+  // (browser dev mode) and silently treated as "not an error" if it throws (the catch below), so a
+  // client-side-only environment or a bridge hiccup must not be the one case this constraint lapses.
+  // punct ⇒ the dependent's own UPOS must be PUNCT, unconditionally.
+  if(depBase(deprel)==="punct"&&depUpos&&depUpos!=="_"&&depUpos!=="PUNCT")return true;
+  if(!hasBridge())return false;
   try{ const r=await window.pywebview.api.valid_deprels(headUpos||"",depUpos||"",[deprel]); return !!(r&&r.deprels&&!r.deprels.includes(deprel)); }catch(e){ return false; } }
 // is `tokId` the DEPENDENT of a conj relation (conj / conj:and / conj:appos / …)? — gates dropping a token
 // onto that conj edge (see attachAsSharedConjunct/commitDrop below)
