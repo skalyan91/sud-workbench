@@ -33,7 +33,7 @@
 # (an ImportError three menus deep, not a `dnf install` error), which is worse than getting it wrong
 # at build time.
 
-%global app_version 0.3.5
+%global app_version 0.3.6
 
 Name:           sud-workbench
 Version:        %{app_version}
@@ -211,6 +211,9 @@ update-desktop-database %{_datadir}/applications &>/dev/null || :
 gtk-update-icon-cache %{_datadir}/icons/hicolor &>/dev/null || :
 
 %changelog
+* Sun Aug 16 2026 Siva Kalyan - 0.3.6-1
+- Fixed Japanese running transliteration putting a space after an opening quotation mark.
+  Renamed the "Modified Hepburn" transliteration scheme to "Hepburn". See CHANGELOG.md.
 * Sun Aug 16 2026 Siva Kalyan - 0.3.5-1
 - Added update indicators (green Update button, dropdown marker) for parsers with a newer version
   available, and a progress bar built into the install/update button itself. Fixed the bundled

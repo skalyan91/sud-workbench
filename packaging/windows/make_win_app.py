@@ -46,7 +46,7 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 PROJECT = os.path.dirname(os.path.dirname(HERE))
 
-VERSION = "0.3.5"
+VERSION = "0.3.6"
 APP_NAME = "SUD Workbench"
 
 # Source trees copied into appsrc/. samples/ is deliberately absent — it is repo-only test data and

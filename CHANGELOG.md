@@ -2,6 +2,19 @@
 
 All notable changes to SUD Workbench are documented in this file.
 
+## [0.3.6] — 2026-08-16
+
+### Fixes
+
+- Japanese running transliteration no longer puts a space after an opening quotation mark (「/『)
+  or before a closing one (」/』) — the romaniser was collapsing all four to the same plain ASCII
+  `"`, which lost the open/close distinction the line's own spacing rule depends on.
+
+### Renamed
+
+- The Japanese "Modified Hepburn" transliteration scheme is now just "Hepburn" in the
+  transliteration menu.
+
 ## [0.3.5] — 2026-08-16
 
 ### New: parser update indicators
