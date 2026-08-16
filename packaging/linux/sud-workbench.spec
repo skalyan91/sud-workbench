@@ -33,7 +33,7 @@
 # (an ImportError three menus deep, not a `dnf install` error), which is worse than getting it wrong
 # at build time.
 
-%global app_version 0.3.4
+%global app_version 0.3.5
 
 Name:           sud-workbench
 Version:        %{app_version}
@@ -211,6 +211,13 @@ update-desktop-database %{_datadir}/applications &>/dev/null || :
 gtk-update-icon-cache %{_datadir}/icons/hicolor &>/dev/null || :
 
 %changelog
+* Sun Aug 16 2026 Siva Kalyan - 0.3.5-1
+- Added update indicators (green Update button, dropdown marker) for parsers with a newer version
+  available, and a progress bar built into the install/update button itself. Fixed the bundled
+  English parser failing to actually update, the Sanskrit parser's update appearing to have no
+  effect, the progress bar's text contrast and button width, wrapped stemma/tree edge casing, and
+  a document's last block capping shorter than the viewport when it had room to spare. Renamed
+  "Add sentence" to "Add text". See CHANGELOG.md.
 * Sun Aug 16 2026 Siva Kalyan - 0.3.4-1
 - Fixed the Feature matrices toggle not hiding AVMs in outline view, Devanagari being wrongly
   refused after the first sentence in an empty Sanskrit document, inserting a sentence scrolling

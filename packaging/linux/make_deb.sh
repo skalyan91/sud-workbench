@@ -34,7 +34,7 @@ set -euo pipefail
 PROJECT="$(cd "$(dirname "$0")/../.." && pwd)"
 HERE="$(cd "$(dirname "$0")" && pwd)"
 OUT_DIR="${1:-$PROJECT/dist}"
-VERSION="0.3.4"                       # kept in step with make_bootstrap_app.sh / make_win_app.py's own VERSION
+VERSION="0.3.5"                       # kept in step with make_bootstrap_app.sh / make_win_app.py's own VERSION
 PKG="sud-workbench"
 ARCH="all"                            # no compiled binaries ship on Linux — see "vendor/ is NOT shipped" below
 PKGDIR_NAME="${PKG}_${VERSION}_${ARCH}"

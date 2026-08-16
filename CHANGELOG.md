@@ -2,6 +2,36 @@
 
 All notable changes to SUD Workbench are documented in this file.
 
+## [0.3.5] — 2026-08-16
+
+### New: parser update indicators
+
+- The Manage Models install button turns into a green "Update" button, and the models dropdown
+  marks an entry with an up arrow, whenever a newer version of a parser is available than what's
+  installed.
+- Installing or updating a model now shows progress directly on the button itself — it fills in
+  left to right as an outlined bar, rather than growing the row with a separate progress element.
+
+### Fixes
+
+- The bundled English parser could not be updated: an update installed correctly, but the app's
+  own core copy of the package always shadowed it on Python's import path, so the old version kept
+  running. The shadowing core copy is now removed once an update to a bundled model succeeds.
+- Updating the Sanskrit parser appeared to have no effect: the newly-installed package was
+  re-imported under its old, already-cached module, and the "Update" button could keep reappearing
+  afterwards if the installed wheel's own internal version metadata didn't match its filename. Both
+  are now tracked correctly.
+- The install/update progress bar's text is now always the contrasting colour against the filled
+  portion, and the button no longer collapses to a sliver too narrow for its own label.
+- Wrapped stemma and hierarchy-tree diagrams' edge casing (the halo that lets one edge cleanly
+  cross in front of another) is back to one shared pass per diagram, reverting a change that had
+  split it per node — flat stemma and tree diagrams are unaffected and keep the per-node casing.
+- A document's last block could cap shorter than the viewport even with room to spare, forcing an
+  unnecessary internal scroll — it was reserving space for a next page that, being the true end of
+  the document, doesn't exist. Fixed; only a block genuinely followed by another page reserves that
+  space now.
+- The "Add sentence" button at the end of a document is now labelled "Add text".
+
 ## [0.3.4] — 2026-08-16
 
 ### Fixes
