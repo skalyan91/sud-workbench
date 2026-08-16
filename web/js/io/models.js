@@ -135,9 +135,22 @@ function extraRow(t){ const row=document.createElement("div"); row.className="mo
 function progressButton(btn,restLabel){
   const color=btn.classList.contains("success")?"var(--good)":"var(--accent-blue,#0088ff)";
   btn.classList.add("progress"); btn.style.border="1.5px solid "+color;
-  const setPct=pct=>{ btn.style.background=`linear-gradient(to right, ${color} ${pct}%, transparent ${pct}%)`; };
+  // Two identical, exactly-stacked text copies — .bg (the button's own accent colour, painted first,
+  // always fully visible) and .fg (white, painted on top, clip-path'd to the filled portion) — so the
+  // label always reads as whichever colour actually CONTRASTS with what's directly behind it, on
+  // report: "the button text should be white where the progress bar is filled in, and
+  // button-coloured where it's not... always the contrasting colour". A single text colour can't do
+  // this on its own — the fill boundary moves across the middle of the label, not around it — so
+  // wherever .fg is clipped away, .bg shows through underneath instead. See .tbtn.progress .plabel
+  // (app.css) for the stacking/clip mechanics.
+  const startText=btn.textContent;
+  const bg=document.createElement("span"); bg.className="plabel bg"; bg.style.color=color; bg.textContent=startText;
+  const fg=document.createElement("span"); fg.className="plabel fg"; fg.textContent=startText;
+  btn.textContent=""; btn.append(bg,fg);
+  const setText=t=>{ bg.textContent=t; fg.textContent=t; };
+  const setPct=pct=>{ btn.style.background=`linear-gradient(to right, ${color} ${pct}%, transparent ${pct}%)`; fg.style.clipPath=`inset(0 ${100-pct}% 0 0)`; };
   setPct(0);
-  return { setPct, reset(){ btn.classList.remove("progress"); btn.style.border=""; btn.style.background=""; btn.disabled=false; btn.textContent=restLabel; } };
+  return { setPct, setText, reset(){ btn.classList.remove("progress"); btn.style.border=""; btn.style.background=""; btn.disabled=false; btn.textContent=restLabel; } };
 }
 async function installExtra(t,row,btn){ btn.disabled=true; btn.textContent="Starting…";
   const p=progressButton(btn,"Install");
@@ -146,7 +159,7 @@ async function installExtra(t,row,btn){ btn.disabled=true; btn.textContent="Star
   const job=r.job_id;
   const tick=async()=>{ let st; try{ st=await window.pywebview.api.model_job_status(job); }catch(err){ return; }
     if(st.error){ p.reset(); return toast("Install failed: "+st.error); }
-    if(st.pct!=null) p.setPct(st.pct); if(st.note)btn.textContent=st.note;
+    if(st.pct!=null) p.setPct(st.pct); if(st.note) p.setText(st.note);
     if(st.done){ toast(st.warning||(esc(t.label||t.id)+" installed")); const h=row.parentElement; if(h)renderModelList(h,false); return; }
     setTimeout(tick,500); };
   tick(); }
@@ -166,11 +179,16 @@ function modelRow(e){ const row=document.createElement("div"); row.className="mo
   if(e.installed){ const tag=document.createElement("span"); tag.className="pill"; tag.textContent=e.bundled?"Bundled ✓":"Installed ✓"; right.appendChild(tag);
     // A bundled model (models_registry.BUNDLED_SUD — the English parser the Wiktionary definition
     // lookup itself runs on) gets no Remove button: it came with the app, so it isn't the user's to
-    // manage, and the bridge refuses the removal anyway.
+    // manage, and the bridge refuses the removal anyway. Update is NOT gated on !e.bundled though —
+    // on report ("I should be able to update the bundled English parser"): a newer release is still
+    // worth taking even for a model that ships pinned, and models_registry.download() now handles the
+    // one thing that made this actually work rather than silently do nothing (a BUNDLED package's
+    // core-venv copy otherwise always wins sys.path resolution over whatever Update installs — see
+    // its own note, "…AND CLEAR THE CORE VENV'S OWN SHADOW").
     // Update reuses downloadModel as-is: the bridge's download_model already purges the old install
     // and force-reinstalls (models_registry.download's own note), so there is no separate "upgrade"
     // call to make — only which button and label got the reader here differs.
-    if(!e.bundled&&e.update_available){ const u=document.createElement("button"); u.className="tbtn success"; u.textContent="Update"; u.onclick=()=>downloadModel(e,row,u,"Update"); right.appendChild(u); }
+    if(e.update_available){ const u=document.createElement("button"); u.className="tbtn success"; u.textContent="Update"; u.onclick=()=>downloadModel(e,row,u,"Update"); right.appendChild(u); }
     if(!e.bundled){ const b=document.createElement("button"); b.className="tbtn"; b.textContent="Remove"; b.onclick=()=>removeModel(e,row); right.appendChild(b); } }
   else { const b=document.createElement("button"); b.className="tbtn primary"; b.textContent="Download"; b.onclick=()=>downloadModel(e,row,b); right.appendChild(b); }
   row.appendChild(info); row.appendChild(right); return row; }
@@ -181,7 +199,7 @@ async function downloadModel(e,row,btn,label){ label=label||"Download"; btn.disa
   const job=r.job_id;
   const tick=async()=>{ let st; try{ st=await window.pywebview.api.model_job_status(job); }catch(err){ return; }
     if(st.error){ p.reset(); return toast(label+" failed: "+st.error); }
-    if(st.pct!=null) p.setPct(st.pct); if(st.note)btn.textContent=st.note;
+    if(st.pct!=null) p.setPct(st.pct); if(st.note) p.setText(st.note);
     if(st.done){ toast(st.warning||(esc(e.label||e.id)+(label==="Update"?" updated":" installed"))); populateModels(); const h=row.parentElement; if(h)renderModelList(h,false); return; }
     setTimeout(tick,500); };
   tick(); }

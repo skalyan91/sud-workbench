@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import difflib
 import os
+import sys
 
 from . import convert
 from .paths import STANZA_DIR
@@ -49,11 +50,28 @@ _STANZA_PIPES: dict[str, object] = {}
 _STANZA_TOK_PIPES: dict[str, object] = {}   # tokenise-only Stanza pipelines (the fast first step)
 
 
-def invalidate_cache() -> None:
-    """Drop loaded models — call after installing/removing a model package."""
+def invalidate_cache(pkg: str | None = None) -> None:
+    """Drop loaded models — call after installing/removing a model package.
+
+    ``pkg``, when given, ALSO purges ``sys.modules`` for that SPECIFIC Python package (and any of
+    its own submodules) — on report ("updating the Sanskrit parser seems to have no effect"):
+    clearing ``_SPACY_MODELS`` alone drops the WRAPPER ``nlp`` object this file caches, but
+    ``spacy.load(package)`` for a package-name model (every SUD model) re-imports ``package`` as an
+    ordinary Python module underneath — and Python's OWN import system (``sys.modules``,
+    process-wide, unrelated to the dicts above) does NOT re-read a module's files once it has
+    already been imported once in this process. So a genuinely-reinstalled model, already parsed
+    with once this session, kept running the STALE code already sitting in memory from before the
+    update, even though the files on disk (and this file's own wrapper cache) were both correctly
+    fresh. Only THIS ONE package's modules are dropped, not a blanket ``sys.modules`` sweep, so an
+    unrelated already-loaded model is undisturbed. Stanza models have no comparable exposure — they
+    are data files a shared library loads at runtime, not a separately-imported Python package per
+    model — so the two Stanza call sites below pass no ``pkg`` and behave exactly as before."""
     _SPACY_MODELS.clear()
     _STANZA_PIPES.clear()
     _STANZA_TOK_PIPES.clear()
+    if pkg:
+        for name in [n for n in sys.modules if n == pkg or n.startswith(pkg + ".")]:
+            del sys.modules[name]
 
 
 def _load_spacy(package: str):

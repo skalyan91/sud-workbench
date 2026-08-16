@@ -2095,16 +2095,24 @@ class Api:
        deliberate — --good is the same green the status-bar valid dot already uses. */
     button.success{background:var(--good);color:#fff;border:none}
     button.success:hover{filter:brightness(1.06)}
-    /* Download/Install/Update DOUBLING as its own progress bar (downloadModel/installExtra, below),
-       on report: "the install button should itself become a progress bar... starting out as an
-       outlined button, and then filling in from left to right... this way the row won't suddenly
-       become taller" — replacing a separate .prog bar that used to grow underneath the label (removed;
-       see that CSS's own note). `background` (the actual fill) is set inline per progress tick, not
-       here — inline always wins outright, so there is no specificity race against .success's own
-       `background` to referee. This only states what stays FIXED for the whole run: white text (matches
-       every one of this window's buttons' normal filled resting state) and a transition so each tick
-       reads as a fill sweeping across rather than a hard cut. */
-    button.progress{color:#fff;transition:background .2s linear}
+    /* Download/Install/Update DOUBLING as its own progress bar (progressButton(), below), on report:
+       "the install button should itself become a progress bar... starting out as an outlined button,
+       and then filling in from left to right... this way the row won't suddenly become taller" —
+       replacing a separate .prog bar that used to grow underneath the label (removed; see that CSS's
+       own note). `background` (the actual fill) is set inline per progress tick, not here — inline
+       always wins outright, so there is no specificity race against .success's own `background` to
+       referee.
+       Follow-up on report: "the button text should be white where the progress bar is filled in, and
+       button-coloured where it's not — it should always be the CONTRASTING colour." One text colour
+       can't do that (the fill boundary moves across the middle of the label, not around it), so the
+       label is TWO identical, exactly-stacked copies instead of one text node — .plabel.bg (the
+       button's own accent colour, painted first, always fully visible) and .plabel.fg (white, painted
+       on top, clip-path'd to show only the LEFT pct% — the filled portion). Wherever .fg is clipped
+       away, .bg shows through underneath it. */
+    button.progress{position:relative}
+    button.progress .plabel{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
+      pointer-events:none;white-space:nowrap;overflow:hidden;font:inherit}
+    button.progress .plabel.fg{color:#fff;transition:clip-path .2s linear}
     /* THE FORM ROW — Figma "Form" frame (file lECo5A8n2No81Jp7ymUbGp, node 2302:6358): a Form Group holds its Rows
        at a 10px inset, tiled contiguously at 42px each, with the Leading Accessories block flexible and vertically
        centred and the Right Accessory flush to the trailing edge, 16px clear of the leading block. A model row is
@@ -2261,9 +2269,15 @@ class Api:
         // (manageModels() → open_models_window), and it was offering the button and then failing on
         // the click; the in-page sheet in js/io/models.js had the pill from the start, which is what
         // made the gap easy to miss.
-        // Update reuses download_model as-is: it already purges the old install and force-reinstalls
-        // (see models_registry.download's own note), so there is no separate "upgrade" endpoint to call.
-        if(!e.bundled&&e.update_available){var u=document.createElement('button');u.className='success sm';u.textContent='Update';u.onclick=function(){downloadModel(e,row,u,'Update');};right.appendChild(u);}
+        // Update is NOT gated on !e.bundled though — on report ("I should be able to update the
+        // bundled English parser"): a newer release is still worth taking even for a model that
+        // ships pinned, and models_registry.download() now handles the one thing that made this
+        // actually work rather than silently do nothing (a BUNDLED package's core-venv copy
+        // otherwise always wins sys.path resolution over whatever Update installs — see its own
+        // note, "…AND CLEAR THE CORE VENV'S OWN SHADOW"). Reuses download_model as-is: it already
+        // purges the old EXTRAS_DIR install and force-reinstalls (models_registry.download's own
+        // note), so there is no separate "upgrade" endpoint to call.
+        if(e.update_available){var u=document.createElement('button');u.className='success sm';u.textContent='Update';u.onclick=function(){downloadModel(e,row,u,'Update');};right.appendChild(u);}
         if(!e.bundled){var b=document.createElement('button');b.className='danger sm';b.textContent='Remove';b.onclick=function(){removeModel(e,row);};right.appendChild(b);}}
       else{var d=document.createElement('button');d.className='sm';d.textContent='Download';d.onclick=function(){downloadModel(e,row,d);};right.appendChild(d);}
       row.appendChild(info);row.appendChild(right);return row;}
@@ -2278,9 +2292,20 @@ class Api:
     function progressButton(btn,restLabel){
       var color=btn.classList.contains('success')?'var(--good)':'var(--accent,#0a84ff)';
       btn.classList.add('progress'); btn.style.border='1.5px solid '+color;
-      var setPct=function(pct){ btn.style.background='linear-gradient(to right, '+color+' '+pct+'%, transparent '+pct+'%)'; };
+      // Two identical, exactly-stacked text copies — .bg (the button's own accent colour, painted
+      // first, always fully visible) and .fg (white, painted on top, clip-path'd to the filled
+      // portion) — so the label always reads as whichever colour actually CONTRASTS with what's
+      // directly behind it, on report: "the button text should be white where the progress bar is
+      // filled in, and button-coloured where it's not... always the contrasting colour". See
+      // button.progress .plabel (above) for the stacking/clip mechanics.
+      var startText=btn.textContent;
+      var bg=document.createElement('span'); bg.className='plabel bg'; bg.style.color=color; bg.textContent=startText;
+      var fg=document.createElement('span'); fg.className='plabel fg'; fg.textContent=startText;
+      btn.textContent=''; btn.appendChild(bg); btn.appendChild(fg);
+      var setText=function(t){ bg.textContent=t; fg.textContent=t; };
+      var setPct=function(pct){ btn.style.background='linear-gradient(to right, '+color+' '+pct+'%, transparent '+pct+'%)'; fg.style.clipPath='inset(0 '+(100-pct)+'% 0 0)'; };
       setPct(0);
-      return { setPct:setPct, reset:function(){ btn.classList.remove('progress'); btn.style.border=''; btn.style.background=''; btn.disabled=false; btn.textContent=restLabel; } };
+      return { setPct:setPct, setText:setText, reset:function(){ btn.classList.remove('progress'); btn.style.border=''; btn.style.background=''; btn.disabled=false; btn.textContent=restLabel; } };
     }
     async function downloadModel(e,row,btn,label){label=label||'Download';btn.disabled=true;btn.textContent='Starting…';
       var p=progressButton(btn,label);
@@ -2289,7 +2314,7 @@ class Api:
       var job=r.job_id;
       var tick=async function(){var st; try{st=await api().model_job_status(job);}catch(err){return;}
         if(st.error){p.reset();return;}
-        if(st.pct!=null)p.setPct(st.pct); if(st.note)btn.textContent=st.note;
+        if(st.pct!=null)p.setPct(st.pct); if(st.note)p.setText(st.note);
         if(st.done){try{api().child_refresh_models();}catch(_){} load(false);return;}
         setTimeout(tick,500);};
       tick();}
@@ -2311,7 +2336,7 @@ class Api:
       var job=r.job_id;
       var tick=async function(){var st; try{st=await api().model_job_status(job);}catch(err){return;}
         if(st.error){p.reset();return;}
-        if(st.pct!=null)p.setPct(st.pct); if(st.note)btn.textContent=st.note;
+        if(st.pct!=null)p.setPct(st.pct); if(st.note)p.setText(st.note);
         if(st.done){load(false);return;}
         setTimeout(tick,500);};
       tick();}

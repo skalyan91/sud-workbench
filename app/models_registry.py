@@ -1135,13 +1135,44 @@ def download(model_id: str, progress=None) -> dict:
                 os.remove(tmp)
             except OSError:
                 pass
-        _invalidate_parse_cache()
+        _invalidate_parse_cache(pkg)
         note(None, "Checking tokeniser…")   # install the model's raw-text tokeniser backend if it needs one
         dep = _ensure_tokenizer_deps(pkg, progress=progress, declared=declared)
+        core_warning = ""
+        if pkg in BUNDLED_SUD:
+            # …AND CLEAR THE CORE VENV'S OWN SHADOW, or the update above installs correctly and then
+            # does precisely nothing — on report ("I should be able to update the bundled English
+            # parser"). EXTRAS_DIR is APPENDED to sys.path (extras.activate(), site.addsitedir) —
+            # AFTER the core venv's own site-packages, already on sys.path at interpreter start (see
+            # extras.py's _stanza_platform_pins() docstring for the identical race, first found for
+            # numpy). A BUNDLED package's core-venv copy (requirements-core.txt) therefore always wins
+            # name resolution over whatever just landed in EXTRAS_DIR, however new. A different
+            # failure shape than the Sanskrit report just above (parse.invalidate_cache, which clears
+            # an ALREADY-IMPORTED stale module): this is about which FILE gets imported in the first
+            # place, before any import even happens. `pip uninstall` (not _remove_targeted, which only
+            # ever touches EXTRAS_DIR) removes the core copy pip itself installed, leaving the
+            # just-verified EXTRAS_DIR copy as the ONLY one on sys.path. Scoped to BUNDLED_SUD, not
+            # "any package with a copy outside EXTRAS_DIR" — a developer's own manually pip-installed
+            # copy of some unrelated model is never touched by this. Best-effort and run LAST, once
+            # everything above has already succeeded: a failure here (e.g. a genuinely read-only core
+            # venv) is reported as a warning, not an error — the extras half of the update did
+            # succeed, and the OLD but WORKING bundled copy is what keeps parsing rather than nothing.
+            try:
+                out = subprocess.run([sys.executable, "-m", "pip", "uninstall", "-y", pkg],
+                                     capture_output=True, text=True)
+                low = ((out.stdout or "") + (out.stderr or "")).lower()
+                if out.returncode != 0 and "not installed" not in low:
+                    core_warning = "the bundled copy could not be replaced: " + (out.stderr or out.stdout).strip()
+            except Exception as exc:  # noqa: BLE001
+                core_warning = f"the bundled copy could not be replaced: {exc}"
         note(100, "Installed")
         result = {"ok": True, "id": model_id}
-        if not dep.get("ok"):
-            result["warning"] = "Model installed, but its tokeniser dependency did not: " + dep.get("error", "")
+        warnings = [w for w in (
+            ("its tokeniser dependency did not: " + dep.get("error", "")) if not dep.get("ok") else "",
+            core_warning,
+        ) if w]
+        if warnings:
+            result["warning"] = "Model installed, but " + "; ".join(warnings)
         return result
 
     if engine == "stanza":
@@ -1275,7 +1306,7 @@ def remove(model_id: str) -> dict:
         _clear_model_md5(pkg)   # the recorded checksum means "this is what's on disk RIGHT NOW" —
                                  # false the instant the files it describes are gone (see download()'s
                                  # md5 short-circuit, which trusts this record to skip a real reinstall)
-        _invalidate_parse_cache()
+        _invalidate_parse_cache(pkg)
         return {"ok": True, "id": model_id}
     if engine == "stanza":
         lang, _, treebank = model_id.split(":", 1)[1].partition("#")
@@ -1300,9 +1331,14 @@ def remove(model_id: str) -> dict:
     return {"error": f"unknown engine for {model_id}"}
 
 
-def _invalidate_parse_cache() -> None:
+def _invalidate_parse_cache(pkg: str | None = None) -> None:
+    # `pkg`, forwarded to parse.invalidate_cache, is what actually purges sys.modules for a SUD
+    # model that was already loaded once this session — see that function's own note. Passed at
+    # both SUD call sites below (install AND remove both need it: a remove-then-reinstall must not
+    # keep running the removed copy's already-imported code either); the two Stanza call sites pass
+    # none, since a Stanza model has no comparable per-model Python import to go stale.
     try:
         from . import parse
-        parse.invalidate_cache()
+        parse.invalidate_cache(pkg)
     except Exception:  # noqa: BLE001
         pass
