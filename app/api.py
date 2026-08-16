@@ -1962,10 +1962,10 @@ class Api:
        divider). Restated here rather than shared: a child window is its OWN document and never loads
        web/macos-kit/mac-tokens.css, so the two copies have to be kept in step by hand — see that file's block
        for the dark-mode reasoning behind the .55 and .10 lifts. */
-    :root{--bg:#fbfbfd;--fg:#1d1d1f;--muted:#68686e;--accent:#0a84ff;--field:#fff;
+    :root{--bg:#fbfbfd;--fg:#1d1d1f;--muted:#68686e;--accent:#0a84ff;--field:#fff;--good:#248a3d;
           --line:rgba(0,0,0,.14);--hover:rgba(0,0,0,.05);--head:rgba(0,0,0,.55);
           --label-secondary:rgba(0,0,0,.50);--label-quinary:rgba(0,0,0,.05)}
-    @media (prefers-color-scheme:dark){:root{--bg:rgb(30,30,30);--fg:#e7e7ea;--muted:#9a9aa1;--accent:#3a9bff;
+    @media (prefers-color-scheme:dark){:root{--bg:rgb(30,30,30);--fg:#e7e7ea;--muted:#9a9aa1;--accent:#3a9bff;--good:#30d158;
           --field:#1c1c1f;--line:rgba(255,255,255,.15);--hover:rgba(255,255,255,.06);--head:rgba(255,255,255,.6);
           --label-secondary:rgba(255,255,255,.55);--label-quinary:rgba(255,255,255,.10)}}
     *{box-sizing:border-box}
@@ -2089,6 +2089,12 @@ class Api:
        destructive == --accent-red text on a subtle --destructive-fill), tuned for both themes */
     button.danger{background:rgba(255,56,60,.14);color:#ff383c;border:.5px solid rgba(255,56,60,.30)}
     @media (prefers-color-scheme:dark){button.danger{background:rgba(255,69,58,.20);color:#ff453a;border-color:rgba(255,69,58,.36)}}
+    /* "Update" button (row(), below) — a newer release than what's installed, on report ("the Install
+       button should become a green Update button"). Filled, not a subtle wash like .danger above: this
+       is a positive call to action (something to click), not a destructive one to keep low-key until
+       deliberate — --good is the same green the status-bar valid dot already uses. */
+    button.success{background:var(--good);color:#fff;border:none}
+    button.success:hover{filter:brightness(1.06)}
     /* THE FORM ROW — Figma "Form" frame (file lECo5A8n2No81Jp7ymUbGp, node 2302:6358): a Form Group holds its Rows
        at a 10px inset, tiled contiguously at 42px each, with the Leading Accessories block flexible and vertically
        centred and the Right Accessory flush to the trailing edge, 16px clear of the leading block. A model row is
@@ -2223,7 +2229,15 @@ class Api:
       el.classList.add('flash');}
     function row(e){var row=document.createElement('div');row.className='row';row.setAttribute('data-mid',e.id);
       var info=document.createElement('div');info.className='mi';
-      var meta=[e.version?('v'+e.version):null,e.size?(Math.round(e.size/1e6)+' MB'):null].filter(Boolean).join(' · ');
+      // On report ("whenever there is a newer version of a parser than what's installed, the Install
+      // button should become a green Update button"): update_available/installed_version come from
+      // models_registry.merge_installed, which now keeps the on-disk version distinct from `version`
+      // (the latest OFFERED one) rather than the latter silently overwriting it. Named both, rather
+      // than leaving the button alone to say it: a bare "Update" with no numbers still leaves "update
+      // to WHAT, from WHAT" unanswered.
+      var meta=(e.installed&&e.update_available&&e.installed_version)
+        ? ('v'+e.installed_version+' installed · v'+e.version+' available')
+        : [e.version?('v'+e.version):null,e.size?(Math.round(e.size/1e6)+' MB'):null].filter(Boolean).join(' · ');
       var sc=(e.uas!=null&&e.las!=null)?('<small class="sc">UAS <b>'+(+e.uas)+'</b> · LAS <b>'+(+e.las)+'</b></small>'):'';   // same " · " separator the version/size meta line uses
       info.innerHTML='<span class="nm">'+esc(e.label||e.id)+'</span>'+(meta?'<small>'+esc(meta)+'</small>':'')
         +'<small class="ts">'+trainHtml(e.id)+'</small>'+sc;
@@ -2235,16 +2249,19 @@ class Api:
         // (manageModels() → open_models_window), and it was offering the button and then failing on
         // the click; the in-page sheet in js/io/models.js had the pill from the start, which is what
         // made the gap easy to miss.
+        // Update reuses download_model as-is: it already purges the old install and force-reinstalls
+        // (see models_registry.download's own note), so there is no separate "upgrade" endpoint to call.
+        if(!e.bundled&&e.update_available){var u=document.createElement('button');u.className='success sm';u.textContent='Update';u.onclick=function(){downloadModel(e,row,u,'Update');};right.appendChild(u);}
         if(!e.bundled){var b=document.createElement('button');b.className='danger sm';b.textContent='Remove';b.onclick=function(){removeModel(e,row);};right.appendChild(b);}}
       else{var d=document.createElement('button');d.className='sm';d.textContent='Download';d.onclick=function(){downloadModel(e,row,d);};right.appendChild(d);}
       row.appendChild(info);row.appendChild(right);return row;}
-    async function downloadModel(e,row,btn){btn.disabled=true;btn.textContent='Starting…';
+    async function downloadModel(e,row,btn,label){label=label||'Download';btn.disabled=true;btn.textContent='Starting…';
       var prog=document.createElement('div');prog.className='prog';var bar=document.createElement('i');prog.appendChild(bar);row.querySelector('.mi').appendChild(prog);
-      var r; try{r=await api().download_model(e.id);}catch(err){btn.disabled=false;btn.textContent='Download';prog.remove();return;}
-      if(r.error){btn.disabled=false;btn.textContent='Download';prog.remove();return;}
+      var r; try{r=await api().download_model(e.id);}catch(err){btn.disabled=false;btn.textContent=label;prog.remove();return;}
+      if(r.error){btn.disabled=false;btn.textContent=label;prog.remove();return;}
       var job=r.job_id;
       var tick=async function(){var st; try{st=await api().model_job_status(job);}catch(err){return;}
-        if(st.error){btn.disabled=false;btn.textContent='Download';prog.remove();return;}
+        if(st.error){btn.disabled=false;btn.textContent=label;prog.remove();return;}
         if(st.pct!=null)bar.style.width=st.pct+'%'; if(st.note)btn.textContent=st.note;
         if(st.done){try{api().child_refresh_models();}catch(_){} load(false);return;}
         setTimeout(tick,500);};

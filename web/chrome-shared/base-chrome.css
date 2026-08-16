@@ -914,6 +914,8 @@
   .sheet .tbtn:active{filter:brightness(.92); transform:none}
   .sheet .tbtn.primary{background:var(--accent-blue,#0088ff); color:#fff}
   .sheet .tbtn.primary:hover{filter:brightness(1.06)}
+  .sheet .tbtn.success{background:var(--good); color:#fff}   /* Manage Models' "Update" button (modelRow, js/io/models.js) — a newer release than what's installed, mirroring .primary's own filled-pill treatment but on --good, the same green the status-bar valid dot already uses, rather than inventing a second green */
+  .sheet .tbtn.success:hover{filter:brightness(1.06)}
   .sheet .tbtn.destructive{background:var(--destructive-fill,rgba(255,56,60,.23)); color:var(--accent-red,#ff383c)}
   .sheet .tbtn.destructive:hover{filter:brightness(.97)}
   .sheet .tbtn::before,.sheet .tbtn::after{content:none}   /* no Liquid-Glass sheen/hotspot layers on dialog buttons */

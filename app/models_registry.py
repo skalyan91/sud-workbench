@@ -668,7 +668,21 @@ def merge_installed(available: list[dict], installed: list[dict]) -> list[dict]:
 
     Nothing is dropped and nothing is duplicated: each installed id is matched against ``available``
     ONCE (popped as it is consumed), so a model that IS offered gets its own row flagged rather than
-    a second one appended."""
+    a second one appended.
+
+    ``update_available`` / ``installed_version``, on report ("whenever there is a newer version of a
+    parser than what's installed, the Install button should become a green Update button"): before
+    this, an installed row's ``version`` was overwritten with the on-disk one ONLY when ``available``
+    had none at all — the ordinary case (both sides know a version) left the OFFERED version in
+    ``version`` and threw the actually-installed one away, so nothing downstream could ever tell "you
+    have vX, vY is out" apart from "you have vY already". ``installed_version`` now always carries
+    what's really on disk when a row is installed, kept distinct from ``version`` (which keeps meaning
+    "the latest release offered" — unchanged for every other reader of this list), and
+    ``update_available`` is set once real version numbers on both sides disagree (:func:`_version_gt`,
+    not a string compare — see its own note). Stanza rows never get either: :func:`list_installed`'s
+    Stanza scan has no reliable per-model version to compare (Stanza's own version signal is one
+    resources-index string shared by every download, not a per-model stamp), so claiming an update is
+    available there would be a guess, not a fact this registry actually has."""
     inst_by_id = {e["id"]: e for e in installed if e.get("id")}
     for e in available:
         rec = inst_by_id.pop(e.get("id") or "", None)
@@ -676,8 +690,14 @@ def merge_installed(available: list[dict], installed: list[dict]) -> list[dict]:
         if rec is not None:
             if rec.get("bundled"):
                 e["bundled"] = True    # ships with the app (BUNDLED_SUD) → the row offers no Remove
-            if rec.get("version") and not e.get("version"):
-                e["version"] = rec["version"]   # what is ON DISK, for a row the release list didn't date
+            inst_ver = rec.get("version")
+            if inst_ver:
+                e["installed_version"] = inst_ver
+                if e.get("version"):
+                    if _version_gt(e["version"], inst_ver):
+                        e["update_available"] = True
+                else:
+                    e["version"] = inst_ver   # nothing better to show (release list didn't date this row)
     if not inst_by_id:
         return available               # the ordinary online case: same list, same order, as before
     rows = list(available) + [dict(rec) for rec in inst_by_id.values()]

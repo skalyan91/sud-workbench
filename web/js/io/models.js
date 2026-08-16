@@ -7,14 +7,26 @@
 // package the metadata scan misses), so the menu always offers English however the fetch went.
 async function populateModels(){ if(!hasBridge())return;
   let r; try{ r=await window.pywebview.api.list_models(); }catch(e){ return; }
-  const inst=(r&&r.installed)||[]; MODELINFO={}; MODELLANG={};
+  // `r.available` (post models_registry.merge_installed, not the raw r.installed scan) — the merge is
+  // where update_available/installed_version actually get computed, and it still carries every
+  // installed row (merged into an offered one, or synthesised when offline/rate-limited — see that
+  // function's own note), so filtering it down to the installed ones loses nothing this dropdown
+  // used to show. On report ("this should be indicated somehow in the models dropdown").
+  const inst=((r&&r.available)||[]).filter(e=>e.installed); MODELINFO={}; MODELLANG={};
   const selEl=document.getElementById("modelSel"), cur=model;
   selEl.innerHTML='<option value="">None (manual)</option>';
   const groups={sud:[],stanza:[]};
   inst.forEach(e=>{ MODELINFO[e.id]=e.label||e.id; (groups[e.engine]||(groups[e.engine]=[])).push(e); });
   [...inst].sort((a,b)=>(a.engine==="sud"?0:1)-(b.engine==="sud"?0:1)).forEach(e=>{ if(e.lang&&!(e.lang in MODELLANG))MODELLANG[e.lang]=e.id; });   // prefer a SUD parser per language
   const addGroup=(label,arr)=>{ if(!arr||!arr.length)return; const og=document.createElement("optgroup"); og.label=label;
-    arr.forEach(e=>{ const o=document.createElement("option"); o.value=e.id; o.textContent=e.label||e.id; og.appendChild(o); }); selEl.appendChild(og); };
+    arr.forEach(e=>{ const o=document.createElement("option"); o.value=e.id;
+      // A plain text marker, not just a colour: three different native <select> popups render this
+      // (WKWebView/macOS, WebView2/Windows, WebKitGTK/Linux) and <option> style support is not
+      // guaranteed identical across them — the glyph is the part guaranteed to survive everywhere;
+      // the colour (matching the Manage Models "Update" button's own --good) is a bonus where it renders.
+      o.textContent=(e.update_available?"↑ ":"")+(e.label||e.id);
+      if(e.update_available){ o.style.color="var(--good)"; o.title=`Update available: v${e.installed_version} installed, v${e.version} available — Manage Models to update`; }
+      og.appendChild(o); }); selEl.appendChild(og); };
   addGroup("SUD · spaCy",groups.sud); addGroup("UD · Stanza",groups.stanza);
   if([...selEl.options].some(o=>o.value===cur)) selEl.value=cur; else { model=""; selEl.value=""; } }
 /* `focus` names an extras tier to scroll to and flash on arrival — how the Script and transliteration
@@ -124,25 +136,37 @@ async function installExtra(t,row,btn){ btn.disabled=true; btn.textContent="Star
   tick(); }
 function modelRow(e){ const row=document.createElement("div"); row.className="modelrow"; row.dataset.mid=e.id;
   const info=document.createElement("div"); info.className="mi";
-  const meta=[e.version?("v"+e.version):null, e.size?(Math.round(e.size/1e6)+" MB"):null].filter(Boolean).join(" · ");
+  // On report ("whenever there is a newer version of a parser than what's installed, the Install
+  // button should become a green Update button"): update_available/installed_version come from
+  // models_registry.merge_installed, which now keeps the on-disk version distinct from `version`
+  // (the latest OFFERED one) rather than the latter silently overwriting it. Named both, rather than
+  // leaving the button alone to say it: a bare "Update" with no numbers still leaves "update to WHAT,
+  // from WHAT" unanswered.
+  const meta=(e.installed&&e.update_available&&e.installed_version)
+    ? ("v"+e.installed_version+" installed · v"+e.version+" available")
+    : [e.version?("v"+e.version):null, e.size?(Math.round(e.size/1e6)+" MB"):null].filter(Boolean).join(" · ");
   info.innerHTML=`<span>${esc(e.label||e.id)}</span>${meta?`<small>${esc(meta)}</small>`:""}<small class="mts">${modelTrainHtml(e.id)}</small>`;
   const right=document.createElement("div"); right.style.display="flex"; right.style.alignItems="center"; right.style.gap="8px";
   if(e.installed){ const tag=document.createElement("span"); tag.className="pill"; tag.textContent=e.bundled?"Bundled ✓":"Installed ✓"; right.appendChild(tag);
     // A bundled model (models_registry.BUNDLED_SUD — the English parser the Wiktionary definition
     // lookup itself runs on) gets no Remove button: it came with the app, so it isn't the user's to
     // manage, and the bridge refuses the removal anyway.
+    // Update reuses downloadModel as-is: the bridge's download_model already purges the old install
+    // and force-reinstalls (models_registry.download's own note), so there is no separate "upgrade"
+    // call to make — only which button and label got the reader here differs.
+    if(!e.bundled&&e.update_available){ const u=document.createElement("button"); u.className="tbtn success"; u.textContent="Update"; u.onclick=()=>downloadModel(e,row,u,"Update"); right.appendChild(u); }
     if(!e.bundled){ const b=document.createElement("button"); b.className="tbtn"; b.textContent="Remove"; b.onclick=()=>removeModel(e,row); right.appendChild(b); } }
   else { const b=document.createElement("button"); b.className="tbtn primary"; b.textContent="Download"; b.onclick=()=>downloadModel(e,row,b); right.appendChild(b); }
   row.appendChild(info); row.appendChild(right); return row; }
-async function downloadModel(e,row,btn){ btn.disabled=true; btn.textContent="Starting…";
+async function downloadModel(e,row,btn,label){ label=label||"Download"; btn.disabled=true; btn.textContent="Starting…";
   const prog=document.createElement("div"); prog.className="mprog"; const bar=document.createElement("i"); prog.appendChild(bar); row.querySelector(".mi").appendChild(prog);
-  let r; try{ r=await window.pywebview.api.download_model(e.id); }catch(err){ btn.disabled=false; btn.textContent="Download"; prog.remove(); return toast("Download failed: "+err); }
-  if(r.error){ btn.disabled=false; btn.textContent="Download"; prog.remove(); return toast(r.error); }
+  let r; try{ r=await window.pywebview.api.download_model(e.id); }catch(err){ btn.disabled=false; btn.textContent=label; prog.remove(); return toast(label+" failed: "+err); }
+  if(r.error){ btn.disabled=false; btn.textContent=label; prog.remove(); return toast(r.error); }
   const job=r.job_id;
   const tick=async()=>{ let st; try{ st=await window.pywebview.api.model_job_status(job); }catch(err){ return; }
-    if(st.error){ btn.disabled=false; btn.textContent="Download"; prog.remove(); return toast("Download failed: "+st.error); }
+    if(st.error){ btn.disabled=false; btn.textContent=label; prog.remove(); return toast(label+" failed: "+st.error); }
     if(st.pct!=null) bar.style.width=st.pct+"%"; if(st.note)btn.textContent=st.note;
-    if(st.done){ toast(st.warning||(esc(e.label||e.id)+" installed")); populateModels(); const h=row.parentElement; if(h)renderModelList(h,false); return; }
+    if(st.done){ toast(st.warning||(esc(e.label||e.id)+(label==="Update"?" updated":" installed"))); populateModels(); const h=row.parentElement; if(h)renderModelList(h,false); return; }
     setTimeout(tick,500); };
   tick(); }
 async function removeModel(e,row){ if(!(await askConfirm(`Remove ${e.label||e.id}?`,{danger:true,okLabel:"Remove"}))) return;
