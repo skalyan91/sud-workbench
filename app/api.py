@@ -2095,6 +2095,16 @@ class Api:
        deliberate — --good is the same green the status-bar valid dot already uses. */
     button.success{background:var(--good);color:#fff;border:none}
     button.success:hover{filter:brightness(1.06)}
+    /* Download/Install/Update DOUBLING as its own progress bar (downloadModel/installExtra, below),
+       on report: "the install button should itself become a progress bar... starting out as an
+       outlined button, and then filling in from left to right... this way the row won't suddenly
+       become taller" — replacing a separate .prog bar that used to grow underneath the label (removed;
+       see that CSS's own note). `background` (the actual fill) is set inline per progress tick, not
+       here — inline always wins outright, so there is no specificity race against .success's own
+       `background` to referee. This only states what stays FIXED for the whole run: white text (matches
+       every one of this window's buttons' normal filled resting state) and a transition so each tick
+       reads as a fill sweeping across rather than a hard cut. */
+    button.progress{color:#fff;transition:background .2s linear}
     /* THE FORM ROW — Figma "Form" frame (file lECo5A8n2No81Jp7ymUbGp, node 2302:6358): a Form Group holds its Rows
        at a 10px inset, tiled contiguously at 42px each, with the Leading Accessories block flexible and vertically
        centred and the Right Accessory flush to the trailing edge, 16px clear of the leading block. A model row is
@@ -2130,8 +2140,10 @@ class Api:
     .right{display:flex;align-items:center;gap:8px;flex:0 0 auto;margin-inline-start:8px}   /* Right Accessory: 8 + the row's own 8px gap = the kit's 16px leading↔accessory gutter */
     .pill{font-size:11.5px;color:var(--muted);border:.5px solid var(--line);border-radius:999px;padding:2px 8px}
     button.sm{height:26px;min-width:0;padding:0 12px;font-size:12px}
-    .prog{height:4px;border-radius:2px;background:var(--line);overflow:hidden;margin-top:4px}
-    .prog i{display:block;height:100%;width:0;background:var(--accent);transition:width .25s}
+    /* .prog/.prog i (a separate progress bar appended under the row's label) removed on report:
+       "the install button should itself become a progress bar... this way the row won't suddenly
+       become taller" — that appended element was exactly what grew the row. See button.progress
+       above and downloadModel/installExtra, below. */
     .foot{display:flex;justify-content:space-between;align-items:center;gap:8px}
     /* The filter row: the search takes the space, the toggle only what its label needs. `.on` is the
        PRESSED state — an accent-tinted fill rather than a second colour of its own, so it reads as the
@@ -2255,14 +2267,29 @@ class Api:
         if(!e.bundled){var b=document.createElement('button');b.className='danger sm';b.textContent='Remove';b.onclick=function(){removeModel(e,row);};right.appendChild(b);}}
       else{var d=document.createElement('button');d.className='sm';d.textContent='Download';d.onclick=function(){downloadModel(e,row,d);};right.appendChild(d);}
       row.appendChild(info);row.appendChild(right);return row;}
+    // Turns `btn` into its OWN progress indicator — a left-to-right fill — instead of a separate bar
+    // appended under the row's label, which used to grow the row's own height. On report: "the install
+    // button should itself become a progress bar... starting out as an outlined button, and then
+    // filling in from left to right... this way the row won't suddenly become taller". `background` is
+    // set as an INLINE style (not via a CSS custom property some class rule reads) deliberately: inline
+    // always wins outright, so filling the button never has to referee a specificity race against
+    // .success's own `background`. Returns {setPct(pct), reset()}; reset() restores the button's resting
+    // look/label exactly as it was before progress started (this is also the failure path).
+    function progressButton(btn,restLabel){
+      var color=btn.classList.contains('success')?'var(--good)':'var(--accent,#0a84ff)';
+      btn.classList.add('progress'); btn.style.border='1.5px solid '+color;
+      var setPct=function(pct){ btn.style.background='linear-gradient(to right, '+color+' '+pct+'%, transparent '+pct+'%)'; };
+      setPct(0);
+      return { setPct:setPct, reset:function(){ btn.classList.remove('progress'); btn.style.border=''; btn.style.background=''; btn.disabled=false; btn.textContent=restLabel; } };
+    }
     async function downloadModel(e,row,btn,label){label=label||'Download';btn.disabled=true;btn.textContent='Starting…';
-      var prog=document.createElement('div');prog.className='prog';var bar=document.createElement('i');prog.appendChild(bar);row.querySelector('.mi').appendChild(prog);
-      var r; try{r=await api().download_model(e.id);}catch(err){btn.disabled=false;btn.textContent=label;prog.remove();return;}
-      if(r.error){btn.disabled=false;btn.textContent=label;prog.remove();return;}
+      var p=progressButton(btn,label);
+      var r; try{r=await api().download_model(e.id);}catch(err){p.reset();return;}
+      if(r.error){p.reset();return;}
       var job=r.job_id;
       var tick=async function(){var st; try{st=await api().model_job_status(job);}catch(err){return;}
-        if(st.error){btn.disabled=false;btn.textContent=label;prog.remove();return;}
-        if(st.pct!=null)bar.style.width=st.pct+'%'; if(st.note)btn.textContent=st.note;
+        if(st.error){p.reset();return;}
+        if(st.pct!=null)p.setPct(st.pct); if(st.note)btn.textContent=st.note;
         if(st.done){try{api().child_refresh_models();}catch(_){} load(false);return;}
         setTimeout(tick,500);};
       tick();}
@@ -2278,13 +2305,13 @@ class Api:
       else{var b=document.createElement('button');b.className='sm';b.textContent='Install';b.onclick=function(){installExtra(t,row,b);};right.appendChild(b);}
       row.appendChild(info);row.appendChild(right);return row;}
     async function installExtra(t,row,btn){btn.disabled=true;btn.textContent='Starting…';
-      var prog=document.createElement('div');prog.className='prog';var bar=document.createElement('i');prog.appendChild(bar);row.querySelector('.mi').appendChild(prog);
-      var r; try{r=await api().install_extra(t.id);}catch(err){btn.disabled=false;btn.textContent='Install';prog.remove();return;}
-      if(r.error){btn.disabled=false;btn.textContent='Install';prog.remove();return;}
+      var p=progressButton(btn,'Install');
+      var r; try{r=await api().install_extra(t.id);}catch(err){p.reset();return;}
+      if(r.error){p.reset();return;}
       var job=r.job_id;
       var tick=async function(){var st; try{st=await api().model_job_status(job);}catch(err){return;}
-        if(st.error){btn.disabled=false;btn.textContent='Install';prog.remove();return;}
-        if(st.pct!=null)bar.style.width=st.pct+'%'; if(st.note)btn.textContent=st.note;
+        if(st.error){p.reset();return;}
+        if(st.pct!=null)p.setPct(st.pct); if(st.note)btn.textContent=st.note;
         if(st.done){load(false);return;}
         setTimeout(tick,500);};
       tick();}

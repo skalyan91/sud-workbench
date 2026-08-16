@@ -918,6 +918,17 @@
   .sheet .tbtn.success:hover{filter:brightness(1.06)}
   .sheet .tbtn.destructive{background:var(--destructive-fill,rgba(255,56,60,.23)); color:var(--accent-red,#ff383c)}
   .sheet .tbtn.destructive:hover{filter:brightness(.97)}
+  /* Manage Models' own Download/Update button DOUBLING as its progress bar (downloadModel/installExtra,
+     js/io/models.js), on report: "the install button should itself become a progress bar... starting
+     out as an outlined button, and then filling in from left to right... this way the row won't
+     suddenly become taller" — replacing a separate .mprog bar that used to grow underneath the label
+     (removed; see that CSS's own note). `background` (the actual left-to-right fill) is set inline per
+     progress tick, not here — an inline style always wins outright, so there is no specificity race
+     against .primary/.success's own `background` to referee. This rule only states what stays FIXED
+     for the whole run: white text (matches the button's normal filled resting state, so the very END
+     of the fill — visually identical to "done" — doesn't itself look like a colour change) and a
+     transition so each tick's jump reads as a fill sweeping across rather than a hard cut. */
+  .sheet .tbtn.progress{color:#fff; transition:background .2s linear}
   .sheet .tbtn::before,.sheet .tbtn::after{content:none}   /* no Liquid-Glass sheen/hotspot layers on dialog buttons */
 
   /* ── Status-bar pull-down pill (Format / Language / Script / Transliteration) + its disclosure chevron ── */

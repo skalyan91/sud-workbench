@@ -123,14 +123,30 @@ function extraRow(t){ const row=document.createElement("div"); row.className="mo
   if(t.installed){ const tag=document.createElement("span"); tag.className="pill"; tag.textContent="Installed ✓"; right.appendChild(tag); }
   else { const b=document.createElement("button"); b.className="tbtn primary"; b.textContent="Install"; b.onclick=()=>installExtra(t,row,b); right.appendChild(b); }
   row.appendChild(info); row.appendChild(right); return row; }
+// Turns `btn` into its OWN progress indicator — a left-to-right fill — instead of a separate bar
+// appended under the row's label, which used to grow the row's own height. On report: "the install
+// button should itself become a progress bar... starting out as an outlined button, and then filling
+// in from left to right... this way the row won't suddenly become taller". `background` is set as an
+// INLINE style (not via a CSS custom property some class rule reads) deliberately: inline always wins
+// outright, so filling the button never has to referee a specificity race against .primary/.success's
+// own `background`. Returns {setPct(pct), reset()}; reset() restores the button's resting look/label
+// exactly as it was before progress started (this is also the failure path — a stalled/errored
+// install leaves the button looking like it never left its resting state, not stuck mid-fill).
+function progressButton(btn,restLabel){
+  const color=btn.classList.contains("success")?"var(--good)":"var(--accent-blue,#0088ff)";
+  btn.classList.add("progress"); btn.style.border="1.5px solid "+color;
+  const setPct=pct=>{ btn.style.background=`linear-gradient(to right, ${color} ${pct}%, transparent ${pct}%)`; };
+  setPct(0);
+  return { setPct, reset(){ btn.classList.remove("progress"); btn.style.border=""; btn.style.background=""; btn.disabled=false; btn.textContent=restLabel; } };
+}
 async function installExtra(t,row,btn){ btn.disabled=true; btn.textContent="Starting…";
-  const prog=document.createElement("div"); prog.className="mprog"; const bar=document.createElement("i"); prog.appendChild(bar); row.querySelector(".mi").appendChild(prog);
-  let r; try{ r=await window.pywebview.api.install_extra(t.id); }catch(err){ btn.disabled=false; btn.textContent="Install"; prog.remove(); return toast("Install failed: "+err); }
-  if(r.error){ btn.disabled=false; btn.textContent="Install"; prog.remove(); return toast(r.error); }
+  const p=progressButton(btn,"Install");
+  let r; try{ r=await window.pywebview.api.install_extra(t.id); }catch(err){ p.reset(); return toast("Install failed: "+err); }
+  if(r.error){ p.reset(); return toast(r.error); }
   const job=r.job_id;
   const tick=async()=>{ let st; try{ st=await window.pywebview.api.model_job_status(job); }catch(err){ return; }
-    if(st.error){ btn.disabled=false; btn.textContent="Install"; prog.remove(); return toast("Install failed: "+st.error); }
-    if(st.pct!=null) bar.style.width=st.pct+"%"; if(st.note)btn.textContent=st.note;
+    if(st.error){ p.reset(); return toast("Install failed: "+st.error); }
+    if(st.pct!=null) p.setPct(st.pct); if(st.note)btn.textContent=st.note;
     if(st.done){ toast(st.warning||(esc(t.label||t.id)+" installed")); const h=row.parentElement; if(h)renderModelList(h,false); return; }
     setTimeout(tick,500); };
   tick(); }
@@ -159,13 +175,13 @@ function modelRow(e){ const row=document.createElement("div"); row.className="mo
   else { const b=document.createElement("button"); b.className="tbtn primary"; b.textContent="Download"; b.onclick=()=>downloadModel(e,row,b); right.appendChild(b); }
   row.appendChild(info); row.appendChild(right); return row; }
 async function downloadModel(e,row,btn,label){ label=label||"Download"; btn.disabled=true; btn.textContent="Starting…";
-  const prog=document.createElement("div"); prog.className="mprog"; const bar=document.createElement("i"); prog.appendChild(bar); row.querySelector(".mi").appendChild(prog);
-  let r; try{ r=await window.pywebview.api.download_model(e.id); }catch(err){ btn.disabled=false; btn.textContent=label; prog.remove(); return toast(label+" failed: "+err); }
-  if(r.error){ btn.disabled=false; btn.textContent=label; prog.remove(); return toast(r.error); }
+  const p=progressButton(btn,label);
+  let r; try{ r=await window.pywebview.api.download_model(e.id); }catch(err){ p.reset(); return toast(label+" failed: "+err); }
+  if(r.error){ p.reset(); return toast(r.error); }
   const job=r.job_id;
   const tick=async()=>{ let st; try{ st=await window.pywebview.api.model_job_status(job); }catch(err){ return; }
-    if(st.error){ btn.disabled=false; btn.textContent=label; prog.remove(); return toast(label+" failed: "+st.error); }
-    if(st.pct!=null) bar.style.width=st.pct+"%"; if(st.note)btn.textContent=st.note;
+    if(st.error){ p.reset(); return toast(label+" failed: "+st.error); }
+    if(st.pct!=null) p.setPct(st.pct); if(st.note)btn.textContent=st.note;
     if(st.done){ toast(st.warning||(esc(e.label||e.id)+(label==="Update"?" updated":" installed"))); populateModels(); const h=row.parentElement; if(h)renderModelList(h,false); return; }
     setTimeout(tick,500); };
   tick(); }

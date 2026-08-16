@@ -1881,8 +1881,10 @@
      than a colour of its own, exactly as the find highlight below does. */
   .mnote{font-size:11.5px; line-height:1.45; color:var(--muted); margin:2px 0 6px; padding:7px 9px; border-radius:7px; background:var(--hairline)}
   .mnote.mwarn{color:var(--text); background:color-mix(in srgb, var(--warn) 15%, transparent)}
-  .mprog{height:4px; border-radius:3px; background:var(--hairline); overflow:hidden; margin-top:5px; width:120px}
-  .mprog>i{display:block; height:100%; width:0; background:var(--c-subj); transition:width .18s}
+  /* .mprog/.mprog>i (a separate progress bar appended under the row's label) removed on report:
+     "the install button should itself become a progress bar... this way the row won't suddenly
+     become taller" — that appended element was exactly what grew the row. See .tbtn.progress
+     (web/chrome-shared/base-chrome.css) and downloadModel/installExtra (js/io/models.js). */
   /* mSUD morph-internal (/m) relations render dashed + dimmer than syntactic relations */
   .morph-edge{stroke-dasharray:3 2; opacity:.72}
   .morph-lbl{opacity:.82; font-style:italic}
