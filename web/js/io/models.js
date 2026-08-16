@@ -135,22 +135,25 @@ function extraRow(t){ const row=document.createElement("div"); row.className="mo
 function progressButton(btn,restLabel){
   const color=btn.classList.contains("success")?"var(--good)":"var(--accent-blue,#0088ff)";
   btn.classList.add("progress"); btn.style.border="1.5px solid "+color;
-  // Two identical, exactly-stacked text copies — .bg (the button's own accent colour, painted first,
-  // always fully visible) and .fg (white, painted on top, clip-path'd to the filled portion) — so the
-  // label always reads as whichever colour actually CONTRASTS with what's directly behind it, on
-  // report: "the button text should be white where the progress bar is filled in, and
-  // button-coloured where it's not... always the contrasting colour". A single text colour can't do
-  // this on its own — the fill boundary moves across the middle of the label, not around it — so
-  // wherever .fg is clipped away, .bg shows through underneath instead. See .tbtn.progress .plabel
-  // (app.css) for the stacking/clip mechanics.
+  // The button's OWN text stays a PLAIN, ORDINARY text node — in normal flow, same as any resting
+  // button's label — recoloured via `color` rather than replaced by a span. On report: "the
+  // progress-bar button is absurdly narrow — too small to contain its text": the first version made
+  // BOTH copies position:absolute spans, so the button had NO in-flow content left to size itself
+  // against and collapsed to its bare padding. Only ONE extra layer is actually needed: .fg (white,
+  // absolutely positioned, clip-path'd to the filled portion) painted OVER this text — wherever it's
+  // clipped away, the button's own (now-coloured) text shows through underneath, so the label always
+  // reads as whichever colour actually CONTRASTS with what's directly behind it, on report: "the
+  // button text should be white where the progress bar is filled in, and button-coloured where it's
+  // not... always the contrasting colour". See .tbtn.progress .plabel.fg (app.css) for the overlay.
   const startText=btn.textContent;
-  const bg=document.createElement("span"); bg.className="plabel bg"; bg.style.color=color; bg.textContent=startText;
+  btn.style.color=color;
+  const bgText=document.createTextNode(startText);
   const fg=document.createElement("span"); fg.className="plabel fg"; fg.textContent=startText;
-  btn.textContent=""; btn.append(bg,fg);
-  const setText=t=>{ bg.textContent=t; fg.textContent=t; };
+  btn.textContent=""; btn.append(bgText,fg);
+  const setText=t=>{ bgText.textContent=t; fg.textContent=t; };
   const setPct=pct=>{ btn.style.background=`linear-gradient(to right, ${color} ${pct}%, transparent ${pct}%)`; fg.style.clipPath=`inset(0 ${100-pct}% 0 0)`; };
   setPct(0);
-  return { setPct, setText, reset(){ btn.classList.remove("progress"); btn.style.border=""; btn.style.background=""; btn.disabled=false; btn.textContent=restLabel; } };
+  return { setPct, setText, reset(){ btn.classList.remove("progress"); btn.style.border=""; btn.style.background=""; btn.style.color=""; btn.disabled=false; btn.textContent=restLabel; } };
 }
 async function installExtra(t,row,btn){ btn.disabled=true; btn.textContent="Starting…";
   const p=progressButton(btn,"Install");

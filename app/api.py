@@ -2104,15 +2104,18 @@ class Api:
        referee.
        Follow-up on report: "the button text should be white where the progress bar is filled in, and
        button-coloured where it's not — it should always be the CONTRASTING colour." One text colour
-       can't do that (the fill boundary moves across the middle of the label, not around it), so the
-       label is TWO identical, exactly-stacked copies instead of one text node — .plabel.bg (the
-       button's own accent colour, painted first, always fully visible) and .plabel.fg (white, painted
-       on top, clip-path'd to show only the LEFT pct% — the filled portion). Wherever .fg is clipped
-       away, .bg shows through underneath it. */
+       can't do that (the fill boundary moves across the middle of the label, not around it), so a
+       SECOND copy of the label is overlaid on top — white, clip-path'd to show only the LEFT pct%
+       (the filled portion) — on top of the button's own ORDINARY text (recoloured via `color`, on
+       the button itself, not a span: this is what the ORIGINAL "the progress-bar button is absurdly
+       narrow" regression traced to — the button had NO in-flow content left to size itself against
+       once BOTH copies were position:absolute spans, so it collapsed to its bare padding. The
+       button's own text stays exactly as plain, in-flow content as any other button always has been;
+       only the white overlay is absolutely positioned, and it never has to size anything, just paint
+       over what's already there). */
     button.progress{position:relative}
-    button.progress .plabel{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
-      pointer-events:none;white-space:nowrap;overflow:hidden;font:inherit}
-    button.progress .plabel.fg{color:#fff;transition:clip-path .2s linear}
+    button.progress .plabel.fg{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
+      pointer-events:none;white-space:nowrap;overflow:hidden;font:inherit;color:#fff;transition:clip-path .2s linear}
     /* THE FORM ROW — Figma "Form" frame (file lECo5A8n2No81Jp7ymUbGp, node 2302:6358): a Form Group holds its Rows
        at a 10px inset, tiled contiguously at 42px each, with the Leading Accessories block flexible and vertically
        centred and the Right Accessory flush to the trailing edge, 16px clear of the leading block. A model row is
@@ -2292,20 +2295,26 @@ class Api:
     function progressButton(btn,restLabel){
       var color=btn.classList.contains('success')?'var(--good)':'var(--accent,#0a84ff)';
       btn.classList.add('progress'); btn.style.border='1.5px solid '+color;
-      // Two identical, exactly-stacked text copies — .bg (the button's own accent colour, painted
-      // first, always fully visible) and .fg (white, painted on top, clip-path'd to the filled
-      // portion) — so the label always reads as whichever colour actually CONTRASTS with what's
-      // directly behind it, on report: "the button text should be white where the progress bar is
-      // filled in, and button-coloured where it's not... always the contrasting colour". See
-      // button.progress .plabel (above) for the stacking/clip mechanics.
+      // The button's OWN text stays a PLAIN, ORDINARY text node — in normal flow, same as any resting
+      // button's label — recoloured via `color` rather than replaced by a span. On report: "the
+      // progress-bar button is absurdly narrow — too small to contain its text": the first version
+      // made BOTH copies position:absolute spans, so the button had NO in-flow content left to size
+      // itself against and collapsed to its bare padding. Only ONE extra layer is actually needed:
+      // .fg (white, absolutely positioned, clip-path'd to the filled portion) painted OVER this text
+      // — wherever it's clipped away, the button's own (now-coloured) text shows through underneath,
+      // so the label always reads as whichever colour actually CONTRASTS with what's directly behind
+      // it, on report: "the button text should be white where the progress bar is filled in, and
+      // button-coloured where it's not... always the contrasting colour". See button.progress
+      // .plabel.fg (above) for the overlay.
       var startText=btn.textContent;
-      var bg=document.createElement('span'); bg.className='plabel bg'; bg.style.color=color; bg.textContent=startText;
+      btn.style.color=color;
+      var bgText=document.createTextNode(startText);
       var fg=document.createElement('span'); fg.className='plabel fg'; fg.textContent=startText;
-      btn.textContent=''; btn.appendChild(bg); btn.appendChild(fg);
-      var setText=function(t){ bg.textContent=t; fg.textContent=t; };
+      btn.textContent=''; btn.appendChild(bgText); btn.appendChild(fg);
+      var setText=function(t){ bgText.textContent=t; fg.textContent=t; };
       var setPct=function(pct){ btn.style.background='linear-gradient(to right, '+color+' '+pct+'%, transparent '+pct+'%)'; fg.style.clipPath='inset(0 '+(100-pct)+'% 0 0)'; };
       setPct(0);
-      return { setPct:setPct, setText:setText, reset:function(){ btn.classList.remove('progress'); btn.style.border=''; btn.style.background=''; btn.disabled=false; btn.textContent=restLabel; } };
+      return { setPct:setPct, setText:setText, reset:function(){ btn.classList.remove('progress'); btn.style.border=''; btn.style.background=''; btn.style.color=''; btn.disabled=false; btn.textContent=restLabel; } };
     }
     async function downloadModel(e,row,btn,label){label=label||'Download';btn.disabled=true;btn.textContent='Starting…';
       var p=progressButton(btn,label);

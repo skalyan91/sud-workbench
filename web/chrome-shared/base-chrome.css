@@ -927,17 +927,17 @@
      against .primary/.success's own `background` to referee.
      Follow-up on report: "the button text should be white where the progress bar is filled in, and
      button-coloured where it's not — it should always be the CONTRASTING colour." One text colour
-     can't do that (the fill boundary moves across the middle of the label, not around it), so the
-     label is TWO identical, exactly-stacked copies instead of one text node — .plabel.bg (the
-     button's own accent colour, painted first, always fully visible) and .plabel.fg (white, painted
-     on top, clip-path'd to show only the LEFT pct% — the filled portion). Wherever .fg is clipped
-     away, .bg shows through underneath it, so the label always reads as whichever colour actually
-     contrasts with what's directly behind it at that point, unbroken by the fill boundary passing
-     through a letter mid-glyph. */
+     can't do that (the fill boundary moves across the middle of the label, not around it), so a SECOND
+     copy of the label is overlaid on top — white, clip-path'd to show only the LEFT pct% (the filled
+     portion) — on top of the button's own ORDINARY text (coloured via `color`, on the button itself,
+     not a span: this is what the ORIGINAL "the progress-bar button is absurdly narrow" regression
+     traced to — the button had NO in-flow content left to size itself against once BOTH copies were
+     position:absolute spans, so it collapsed to its bare padding. The button's own text stays exactly
+     as plain, in-flow content as any other button always has been; only the white overlay is
+     absolutely positioned, and it never has to size anything, just paint over what's already there). */
   .sheet .tbtn.progress{position:relative}
-  .sheet .tbtn.progress .plabel{position:absolute; inset:0; display:flex; align-items:center; justify-content:center;
-    pointer-events:none; white-space:nowrap; overflow:hidden; font:inherit}
-  .sheet .tbtn.progress .plabel.fg{color:#fff; transition:clip-path .2s linear}
+  .sheet .tbtn.progress .plabel.fg{position:absolute; inset:0; display:flex; align-items:center; justify-content:center;
+    pointer-events:none; white-space:nowrap; overflow:hidden; font:inherit; color:#fff; transition:clip-path .2s linear}
   .sheet .tbtn::before,.sheet .tbtn::after{content:none}   /* no Liquid-Glass sheen/hotspot layers on dialog buttons */
 
   /* ── Status-bar pull-down pill (Format / Language / Script / Transliteration) + its disclosure chevron ── */

@@ -625,12 +625,30 @@ def list_installed() -> list[dict]:
         if pkg in SUPERSEDED_SUD:
             continue
         entry = parse_asset(pkg + "-0-py3-none-any.whl") or {"id": f"sud:{pkg}", "package": pkg}
-        try:
-            from importlib.metadata import version
-            entry["version"] = version(pkg)
-        except Exception:  # noqa: BLE001 — no distribution metadata (the BUNDLED find_spec path above
-            entry.pop("version", None)   # finds a package that has none): the "0" of the synthetic
-            #                              wheel name a line up is regex filler, not a version to show.
+        # PREFER download()'s own recorded version over importlib.metadata's, on report ("updating the
+        # Sanskrit parser seems to have no effect" — specifically: the row kept showing Update after a
+        # genuinely-completed reinstall). merge_installed's update_available compares THIS value
+        # against the release feed's own "latest offered" figure — both of which ultimately come from
+        # the ASSET FILENAME (parse_asset). importlib.metadata.version(pkg), by contrast, reads
+        # whatever the WHEEL'S OWN internal metadata claims about itself — a THIRD-PARTY release this
+        # app doesn't control the packaging of, so nothing guarantees the two agree. If they ever
+        # disagree, trusting metadata means the mismatch persists across every future reinstall of the
+        # identical wheel (reinstalling doesn't change what's written inside it) — exactly the "still
+        # shows Update, no matter how many times I click it" the report describes. The recorded version
+        # (_save_model_version, in download()) is the ONE thing this app can be SURE of: which filename
+        # it itself downloaded and installed. Falls back to metadata when no record exists — a BUNDLED
+        # package (never went through download()'s own save call under normal use) or one installed
+        # before this existed.
+        rec_version = _load_model_versions().get(pkg)
+        if rec_version:
+            entry["version"] = rec_version
+        else:
+            try:
+                from importlib.metadata import version
+                entry["version"] = version(pkg)
+            except Exception:  # noqa: BLE001 — no distribution metadata (the BUNDLED find_spec path above
+                entry.pop("version", None)   # finds a package that has none): the "0" of the synthetic
+                #                              wheel name a line up is regex filler, not a version to show.
         entry.update(engine="sud", installed=True)
         if pkg in BUNDLED_SUD:
             entry["bundled"] = True   # the Model Manager shows a "Bundled" pill in place of the Remove button
@@ -1045,6 +1063,39 @@ def _clear_model_md5(pkg: str) -> None:
             pass
 
 
+def _model_version_path() -> str:
+    return os.path.join(CACHE_DIR, "model_version.json")
+
+
+def _load_model_versions() -> dict:
+    try:
+        with open(_model_version_path(), "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:  # noqa: BLE001 — missing/corrupt cache file: treat as "nothing on record"
+        return {}
+
+
+def _save_model_version(pkg: str, version: str) -> None:
+    data = _load_model_versions()
+    data[pkg] = version
+    try:
+        with open(_model_version_path(), "w", encoding="utf-8") as f:
+            json.dump(data, f)
+    except OSError:
+        pass   # bookkeeping only
+
+
+def _clear_model_version(pkg: str) -> None:
+    data = _load_model_versions()
+    if pkg in data:
+        del data[pkg]
+        try:
+            with open(_model_version_path(), "w", encoding="utf-8") as f:
+                json.dump(data, f)
+        except OSError:
+            pass
+
+
 def download(model_id: str, progress=None) -> dict:
     """Install a model.  ``progress(pct:int|None, note:str)`` is called as it proceeds."""
     ensure_dirs()
@@ -1092,6 +1143,9 @@ def download(model_id: str, progress=None) -> dict:
             # installed (a stale record with nothing on disk — e.g. removed outside this app — must not
             # short-circuit a real install).
             if _load_model_md5s().get(pkg) == new_md5 and pkg in _installed_sud_packages():
+                _save_model_version(pkg, (parse_asset(filename) or {}).get("version") or "")  # see the
+                # save just below the real-reinstall branch for why this is recorded even here: this
+                # IS the moment the MD5 match confirms "what's on disk right now is THIS exact wheel"
                 note(100, "Already up to date")
                 return {"ok": True, "id": model_id, "unchanged": True}
 
@@ -1117,6 +1171,20 @@ def download(model_id: str, progress=None) -> dict:
                             "--no-deps", "--target", EXTRAS_DIR, tmp],
                            check=True, capture_output=True, text=True)
             _save_model_md5(pkg, new_md5)
+            # On report ("updating the Sanskrit parser seems to have no effect" — specifically: the row
+            # kept showing Update after a genuinely-completed reinstall): merge_installed's
+            # update_available compares THIS value against the release feed's own version — and until
+            # now, that value came straight from importlib.metadata.version(pkg), i.e. whatever the
+            # WHEEL'S OWN internal metadata claims about itself, not necessarily what its FILENAME (and
+            # therefore list_available's own "latest offered" figure) says. If a wheel's internal
+            # metadata and its filename ever disagree — a real possibility for a third-party release
+            # this app doesn't control the packaging of — the mismatch would persist across every
+            # future reinstall of the identical wheel, since reinstalling doesn't change what the
+            # metadata inside it claims. Recorded here instead: the ONE thing this app can be SURE of
+            # is which filename it just downloaded and installed, so list_installed() now prefers this
+            # over the metadata reading wherever a record exists (falling back to metadata for a
+            # BUNDLED package or one installed before this existed).
+            _save_model_version(pkg, (parse_asset(filename) or {}).get("version") or "")
             declared = _unsatisfied_requirements(tmp)
             if declared:
                 note(None, "Installing model requirements…")
@@ -1306,6 +1374,8 @@ def remove(model_id: str) -> dict:
         _clear_model_md5(pkg)   # the recorded checksum means "this is what's on disk RIGHT NOW" —
                                  # false the instant the files it describes are gone (see download()'s
                                  # md5 short-circuit, which trusts this record to skip a real reinstall)
+        _clear_model_version(pkg)   # same reasoning as the md5 above — list_installed()'s own version
+                                     # record means "this is what's on disk right now" just as much
         _invalidate_parse_cache(pkg)
         return {"ok": True, "id": model_id}
     if engine == "stanza":
