@@ -787,10 +787,30 @@ def _cutlet_obj(system: str):
     return k
 
 
+_CORNER_BRACKETS = frozenset("「」『』")   # kagi-kakko/double kagi-kakko — see the note below
+
+
 def _cutlet(text: str, system: str) -> str:
     """Japanese → romaji in the given cutlet system ("kunrei" or "hepburn").  cutlet capitalises the
     first letter (sentence/proper-noun casing); per-token output is lower-cased for a consistent
-    transliteration column, matching the all-lower-case pinyin/jyutping layers."""
+    transliteration column, matching the all-lower-case pinyin/jyutping layers.
+
+    ⚠ CORNER BRACKETS (「」『』) BYPASS CUTLET ENTIRELY, on report ("Japanese running transliteration
+    needs to handle quotation marks better; right now it puts a space after an opening quotation
+    mark"). cutlet's OWN romaji() collapses all four to the SAME plain ASCII '"' — an opening and a
+    closing bracket become indistinguishable, unlike every other punctuation mark it converts (｡→.,
+    、→, etc., which it gets right). `_FW_PUNCT`/`_latinize_punct` (below) already map these four
+    correctly and DIRECTIONALLY (「/』→“/’, 」/『→”/‘) — the whole reason the running-translit gap
+    function (document.js) can put no space after an opening mark and none before a closing one is
+    that it tests the Unicode category of the actual character (\\p{Ps}/\\p{Pi} for "just opened"),
+    and plain ASCII '"' carries neither category, so that test silently failed and fell through to
+    the ordinary space. Passing corner brackets through UNCHANGED here — rather than teaching cutlet
+    a rule it apparently can't express, or duplicating _FW_PUNCT's table a second time — lets that
+    existing, already-correct mapping run on them afterward (_render_one calls _latinize_punct on
+    every Latin-output scheme's result, kunrei/hepburn included), exactly as it already does for a
+    scheme that never ran the text through cutlet at all."""
+    if text in _CORNER_BRACKETS:
+        return text
     try:
         k = _cutlet_obj(system)
         out = k.romaji(text) or ""
@@ -2031,7 +2051,7 @@ def _arabic_din(text: str) -> str:
 # via the legacy single-romanisation backends) get a lone "default" scheme (_SINGLE_LABEL); genuinely
 # Latin-script languages get an empty list (⇒ no menu).  See app/data/ for the vendored CJK datasets.
 _TRANSLIT_SCHEMES: dict[str, list[tuple[str, str]]] = {
-    "ja": [("kunrei", "Kunrei"), ("hepburn", "Modified Hepburn")],
+    "ja": [("kunrei", "Kunrei"), ("hepburn", "Hepburn")],   # "Modified Hepburn" -> "Hepburn", on request
     "zh": [("pinyin", "Hanyu Pinyin")],
     "yue": [("jyutping", "Jyutping")],
     "lzh": [("pinyin", "Hanyu Pinyin"), ("mc", "Baxter Middle Chinese"), ("oc", "Baxter–Sagart OC")],
@@ -2223,7 +2243,7 @@ _DISPLAY_SCHEMES: dict[str, list[tuple[str, str, bool]]] = {
     # neighbour and MISC Translit — which is per token and context-free — could not hold it honestly.
     # It is also the one scheme `_render_one` never sees: see app/sa_notation.py.
     "sa": [("iast", "IAST", True), ("csl", "CSL", False)],
-    "ja": [("kunrei", "Kunrei", True), ("hepburn", "Modified Hepburn", True)],
+    "ja": [("kunrei", "Kunrei", True), ("hepburn", "Hepburn", True)],   # "Modified Hepburn" -> "Hepburn", on request
     **{c: [("latin", "Latin (Gajica)", True)] for c in _SERB},
 }
 
