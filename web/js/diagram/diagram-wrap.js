@@ -1182,22 +1182,18 @@ function wpDraw(box){ const wp=box._wp; if(!wp) return;
     if(show.arrows){const dir=arrowDir(e.rel); if(dir){const tip=dir==="dep"?a1:a2,frm=dir==="dep"?a2:a1;
       e._ah=arrowPath(frm,tip,5.25); e._ahc=e._ah; if(dir==="dep")a1=backoff(tip,frm,5.25); else a2=backoff(tip,frm,5.25);} else {e._ah=null;e._ahc=null;}} else {e._ah=null;e._ahc=null;}   // ._ahc == ._ah: the round halo is a stroke now (.ah-casing, styles/app.css), not a second larger mitred polygon — see AH_MITRE's "SUPERSEDED" comment, diagram-core.js
     e._d=`M ${a1[0]} ${a1[1]} L ${a2[0]} ${a2[1]}`; });
-  // Item 21: edges cased PER HEAD-GROUP — every edge out of the same node shares ONE casing pass, immediately
-  // behind that group's own strokes/arrowheads (was: ALL casings in one combined layer before any stroke, so
-  // edges never cased against each OTHER at a crossing; a fully per-edge casing was tried next and reverted —
-  // sibling edges share a start point and never cross each other, so nothing was gained by casing them apart,
-  // and it read as a stack of individually-edged halos rather than one clean one at the shared point) — on
-  // report ("in stemmas, decollision isn't happening when two edges cross over" / "share casing across the
-  // outgoing edges of each node"); see the flat stemma()'s own matching note (diagram-render.js) for the full
-  // story, unchanged here beyond adapting to this function's own class list.
-  const wpEdgesByHead=new Map(); wp.edges.forEach(e=>{ if(!wpEdgesByHead.has(e.h)) wpEdgesByHead.set(e.h,[]); wpEdgesByHead.get(e.h).push(e); });
-  wpEdgesByHead.forEach(group=>{   // Map preserves insertion order → each group lands at its FIRST member's position in the sorted array
-    const cg=E("g",{class:"edge-casing-group"}); cg.setAttribute("aria-hidden","true");
-    group.forEach(e=>{ cg.appendChild(E("path",{class:"arc-casing",d:e._d})); if(e._ahc) cg.appendChild(E("path",{class:"ah-casing",d:e._ahc})); }); svg.appendChild(cg);
-    group.forEach(e=>{ const g=E("g",{class:"edge-g"+(sel.s===wp.si&&sel.t===wp.oid[e.d]?" sel":""),"data-s":wp.si,"data-dep":wp.oid[e.d],"data-head":wp.oid[e.h]});
-      if(e._ah) g.appendChild(E("path",{class:"ah",d:e._ah,fill:e._ink}));
-      g.appendChild(E("path",{class:"edge"+(isMorphRel(e.rel)?" morph-edge":""),d:e._d,stroke:e._ink}));
-      g.style.cursor="pointer"; g.addEventListener("click",()=>pick(wp.si,wp.oid[e.d])); svg.appendChild(g); }); });
+  // Item 21, reverted back to UNIFIED casing for the wrapped renderer specifically: edges + arrowheads cased as
+  // ONE combined group behind all the strokes again (occludes proj-lines/tokens behind; edges don't case against
+  // each other at a crossing, but crossings are rare in this wrapped/linear layout and per-head-group grouping
+  // read worse here). Per-edge (607d0a0) then per-head-group (e237113) were both tried for crossing decollision;
+  // on follow-up ("for wrapped stemmas and hierarchies, revert to unified edge casing") this function goes back
+  // to the original single-layer form. The flat stemma()/tree() keep per-head-group — see their own notes.
+  { const cg=E("g",{class:"edge-cases"}); cg.setAttribute("aria-hidden","true");
+    wp.edges.forEach(e=>{ cg.appendChild(E("path",{class:"arc-casing",d:e._d})); if(e._ahc) cg.appendChild(E("path",{class:"ah-casing",d:e._ahc})); }); svg.appendChild(cg); }
+  wp.edges.forEach(e=>{ const g=E("g",{class:"edge-g"+(sel.s===wp.si&&sel.t===wp.oid[e.d]?" sel":""),"data-s":wp.si,"data-dep":wp.oid[e.d],"data-head":wp.oid[e.h]});
+    if(e._ah) g.appendChild(E("path",{class:"ah",d:e._ah,fill:e._ink}));
+    g.appendChild(E("path",{class:"edge"+(isMorphRel(e.rel)?" morph-edge":""),d:e._d,stroke:e._ink}));
+    g.style.cursor="pointer"; g.addEventListener("click",()=>pick(wp.si,wp.oid[e.d])); svg.appendChild(g); });
   // node hit targets — no visible marker; edges already meet at the point, and selecting highlights the incoming edge.
   // sx=bw/wp.natW squeezes the WHOLE sentence's natural tree width into one row's width, so for anything past a
   // handful of tokens sx<<1 and neighbouring nodes can land closer together than the flat r:10 below reaches —
@@ -1890,7 +1886,7 @@ function outline(si){const D=displaySent(DOC[si]), t=D.tokens, n=t.length, OID=k
    so nothing else in the stack shifts: the projection lines and baseline words a ghost already
    draws over stay behind it, and the token/node layer every renderer appends last stays in front. */
 const GHOST_LAYER=".ghost-g,.proj-ghost";
-const REAL_EDGE_LAYER=".arc,.edge-g,.edge-casing-group";   // every notation's real dependency layer, and GROUPS only — an .arc/.edge-g <g> holds its own stroke, arrowhead, casing, label and leader, so this one selector covers all four things a ghost has to go behind. (The paths inside are .arc-path/.arc-casing/…, which `.arc` does not match: class selectors match whole tokens.) ".edge-casing-group" (stemma/hierarchy's own per-head-group casing pass, drawn just BEFORE that group's own .edge-g's — see the stemma()/wpDraw()/tree() fix, "share casing across the outgoing edges of each node") has to be listed too, or ai below would land on the first GROUP's edge-g and skip the casing-group drawn just ahead of it, leaving a ghost that sits between that halo and its own stroke instead of behind both
+const REAL_EDGE_LAYER=".arc,.edge-g,.edge-casing-group,.edge-cases";   // every notation's real dependency layer, and GROUPS only — an .arc/.edge-g <g> holds its own stroke, arrowhead, casing, label and leader, so this one selector covers all four things a ghost has to go behind. (The paths inside are .arc-path/.arc-casing/…, which `.arc` does not match: class selectors match whole tokens.) Both casing-GROUP wrappers have to be listed too, or ai below would land on the first .edge-g and skip the casing group drawn just ahead of it, leaving a ghost that sits between that halo and its own stroke instead of behind both: ".edge-casing-group" is flat stemma()/tree()'s per-head-group casing pass (see that fix, "share casing across the outgoing edges of each node"); ".edge-cases" is wpDraw()'s own single combined-casing group, reverted back from per-head-group for the wrapped renderer specifically ("for wrapped stemmas and hierarchies, revert to unified edge casing") — the two notation families now draw their casing differently, so both selectors have to coexist here
 function ghostsBehind(svg){
   if(!svg||!svg.children) return;
   const kids=[...svg.children], ai=kids.findIndex(el=>el.matches(REAL_EDGE_LAYER));
