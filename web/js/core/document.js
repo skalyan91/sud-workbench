@@ -908,7 +908,17 @@ function sheetGapAbove(b){ const sh=sheetOf(b); if(!sh||b!==sh.querySelector(".s
   const mt=parseFloat(cs.marginTop)||0, pmb=prev?(parseFloat(getComputedStyle(prev).marginBottom)||0):0;
   return Math.max(mt,pmb)+(parseFloat(cs.borderTopWidth)||0); }
 function sheetGapBelow(b){ const sh=sheetOf(b); if(!sh) return 0;
-  const bs=sh.querySelectorAll(".sblock"); if(!bs.length||b!==bs[bs.length-1]) return 0;   // the LAST BLOCK, not the last child — the trailing sheet also holds the "Add sentence" button
+  const bs=sh.querySelectorAll(".sblock"); if(!bs.length||b!==bs[bs.length-1]) return 0;   // the LAST BLOCK, not the last child — the trailing sheet also holds the "Add text" button
+  // ⚠ NOT CHARGED when this sheet is the TRUE end of the whole document, on report ("the max block height is
+  // less than the viewport height... it's only an issue for the last block... we shouldn't be subtracting the
+  // page-to-page gap for the last block if it's the last block in the entire file, since there's always an
+  // 'Add sentence' [now "Add text"] button below"). The reservation below exists because a NEXT sheet's own
+  // page-ground band sits under this one — but the true last sheet has no next page, just the trailing
+  // Add-text row (renderDoc, appended as this sheet's own last child whenever winHi===DOC.length), which is
+  // ordinary in-flow content the reader scrolls to, not an occluded band to reserve against. Same test the
+  // .lastblock pass just below in renderDoc already uses, for the identical reason (that block's bottom
+  // hairline is the sheet's own edge there too, not something a next page's gap would double up on).
+  if(sh.lastElementChild&&sh.lastElementChild.classList.contains("addsent")) return 0;
   const cs=getComputedStyle(sh);
   return (parseFloat(cs.marginBottom)||0)+(parseFloat(cs.borderBottomWidth)||0); }
 /* ── THE STICKY BOUNDARY HEADINGS OVER A BLOCK, and what they cost it ───────────────────────────────────────────
@@ -1931,7 +1941,7 @@ function renderDoc(){
   topSpacer.style.height=Math.round(winLo*AVG_BLOCK_H)+"px";
   if(winHi===DOC.length){   // the window reaches the true end of the document → the reader can actually add a sentence after the last one
     const addWrap=document.createElement("div"); addWrap.className="addsent";
-    const addBtn=document.createElement("button"); addBtn.innerHTML='<span class="sfi" style="--m:var(--sf-add)"></span>Add sentence'; addBtn.onclick=()=>insertAt(DOC.length);
+    const addBtn=document.createElement("button"); addBtn.innerHTML='<span class="sfi" style="--m:var(--sf-add)"></span>Add text'; addBtn.onclick=()=>insertAt(DOC.length);   // "Add text", not "Add sentence" — on request
     addWrap.appendChild(addBtn); ctx.sheet.appendChild(addWrap);   // inside the LAST sheet (ctx.sheet, not the outer `sheet` — buildBlock may have reassigned it mid-loop on a `# newdoc`), so the button keeps the measure rather than straying into the page margin — and NOT inside a boundary section, which would hang the button off the last paragraph rather than off the page
   }
   // bottom spacer — stands in for [winHi,DOC.length); a plain sibling of the sheets (not appended inside the
@@ -1942,7 +1952,7 @@ function renderDoc(){
   // …and the one block per sheet whose bottom hairline the sheet's own edge replaces. Marked here rather than
   // matched in CSS because a block now sits inside its boundary SECTION: `.docsheet > .sblock:last-child` no
   // longer names anything, and the obvious rewrite (`.sblock:last-child`) would fire on the last block of every
-  // nested section too. Reproduces the old selector exactly, trailing "Add sentence" sheet included.
+  // nested section too. Reproduces the old selector exactly, trailing "Add text" sheet included.
   if(PAGED) host.querySelectorAll(":scope > .docsheet").forEach(sh=>{
     if(sh.lastElementChild&&sh.lastElementChild.classList.contains("addsent")) return;   // the button is the sheet's own bottom edge there, exactly as `:last-child` used to decide
     const bs=sh.querySelectorAll(".sblock"); if(bs.length) bs[bs.length-1].classList.add("lastblock"); });
