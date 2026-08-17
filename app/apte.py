@@ -62,8 +62,10 @@ is the fourth row, over the noun lemmas that got an answer at all, and it goes 9
 24 remaining empty lemmas are mostly inflected forms rather than lemmas ("śrutau", "lopāt",
 "rāśayo") and two dandas, and they miss in AP90 and in MW alike.  The sweep row is index work only:
 the file loads in ~0.2 s and 116 lookups then cost 0.1 s.  A COLD sweep measures ~15 s, essentially
-all of it the one-time ``en_sud_ewt`` load inside :func:`app.wiktionary._condense`, which is the
-same cost on either column and is not what this row is comparing.
+all of it the one-time English-model load inside :func:`app.wiktionary._condense` (``en_sud_ewt``
+when this was measured, ``en_sud_ewt_gum`` since — which model that is, is
+:func:`app.wiktionary._sud_en`'s answer and not a fact to restate here), which is the same cost on
+either column and is not what this row is comparing.
 
 (The vendored column has been re-measured several times as the shared condensation changed, and the
 history is worth keeping because it says which numbers a change can and cannot move.  It began at

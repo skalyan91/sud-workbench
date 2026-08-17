@@ -204,11 +204,20 @@ def _head_rank(head_upos: str, wanted: str) -> int:
     when nothing is known about that head; 1 when the two disagree.
 
     Ordering is all it does there, because rejecting on it tests an ENGLISH PARAPHRASE rather than
-    the word: 編程 is a Chinese noun whose one sense reads "programming", which `en_sud_ewt` tags
+    the word: 編程 is a Chinese noun whose one sense reads "programming", which `en_sud_ewt` tagged
     VERB, so a NOUN token was told its dictionary had nothing — the entry heading said "Noun" and
-    was overruled by a gerund. `run` under a SYM token went the same way. An unknown head (``""`` —
-    the unparsed fallback, when no English model is installed) ranks 0: no information is not a
-    disagreement."""
+    was overruled by a gerund. `run` under a SYM token went the same way.
+
+    ⚠️ THAT FIRST EXAMPLE NO LONGER REPRODUCES ON THE MODEL THIS APP NOW BUNDLES, and the rule is
+    kept regardless. Measured across the switch, on a bare token: `en_sud_ewt` tags "programming"
+    VERB and `en_sud_ewt_gum` tags it NOUN, while "run" is VERB in both. A better-trained model
+    moves WHICH paraphrases mislead, not whether a paraphrase can — the head of an English gloss is
+    evidence about the GLOSS, and rejecting on it would still discard a part-of-speech heading the
+    dictionary stated outright in favour of a guess about someone's wording. The example is left
+    standing as the record of what this ordering was built from.
+
+    An unknown head (``""`` — the unparsed fallback, when no English model is installed) ranks 0:
+    no information is not a disagreement."""
     if not wanted or not head_upos:
         return 0
     return 0 if head_upos in _ok_upos(wanted) else 1

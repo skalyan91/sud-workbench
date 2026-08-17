@@ -338,7 +338,10 @@ completed with no errors: `pip` reported `Requirement already satisfied: PyGObje
 every other CORE dependency (spaCy 3.8.14, `en_sud_ewt`, `wiktra` from its `git+` URL, `grewpy`,
 `aksharamukha`, `fasttext-wheel`'s `manylinux2014_aarch64` wheel, …) with no build failures, ending
 `Successfully installed … wiktra weasel indic-transliteration spacy en_sud_ewt` and writing the
-`.sud-core-ready` sentinel.
+`.sud-core-ready` sentinel. (That transcript is left exactly as it was recorded: this run predates
+the bundled English model changing from `en_sud_ewt` to `en_sud_ewt_gum`, so the same line reads
+`en_sud_ewt_gum` today. Nothing about the packaging changed with it — `setup_venv.sh` installs
+whatever `requirements-core.txt` names, and never a model by name.)
 
 ⚠ **This is the ONE thing that failed the first time** (see "Two real bugs" above for the two
 application-level ones) — a genuine PACKAGING gap, not an application bug: with `python3-cairo`
