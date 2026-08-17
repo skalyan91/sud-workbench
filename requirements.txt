@@ -32,15 +32,16 @@ numpy<2; sys_platform == "darwin" and platform_machine == "x86_64"
                       # alone) is required: Windows and Linux both report "x86_64"/"AMD64" too, and
                       # this must stay a no-op there, where torch keeps shipping numpy-2-safe builds.
 # ── parsing (SUD spaCy + Stanza UD) ─────────────────────────────────────────
-spacy==3.8.14         # loads the sud_<lang>_<treebank> parser packages. Was 3.8.7; the bundled en_sud_ewt
+spacy==3.8.14         # loads the sud_<lang>_<treebank> parser packages. Was 3.8.7; the bundled en_sud_ewt_gum
                       #   wheel below requires >=3.8.14,<3.9 and pip won't resolve it against the older pin
                       #   (3.8.14 is what this project's own .venv has been running on regardless)
 click>=8.0            # spaCy CLI needs it (not always pulled transitively by the resolver)
-# The one model that ships WITH the app (11 MB) instead of being a Model Manager download — the
+# The one model that ships WITH the app (23 MB) instead of being a Model Manager download — the
 # app itself needs it: app/wiktionary.py SUD-parses each Wiktionary definition to condense it into
 # a glossable phrase. Pinned to the GitHub Release asset (these packages aren't on PyPI); keep the
 # version in step with requirements-core.txt, which is what both shipping bundles install from.
-en_sud_ewt @ https://github.com/SunflowerAI/sud-spacy-parsers/releases/download/v0.1.0/en_sud_ewt-0.1.0-py3-none-any.whl
+# Was `en_sud_ewt` 0.1.0 (EWT alone) — see requirements-core.txt for what the switch buys.
+en_sud_ewt_gum @ https://github.com/SunflowerAI/sud-spacy-parsers/releases/download/v0.2.0/en_sud_ewt_gum-0.2.0-py3-none-any.whl
 stanza==1.10.1        # UD parsers; pulls torch (CPU/MPS wheel on Apple Silicon)
 spacy-stanza @ git+https://github.com/omri374/spacy-stanza.git   # Stanza→spaCy Doc bridge (fork relaxes the spaCy pin)
 

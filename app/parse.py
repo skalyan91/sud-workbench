@@ -2,7 +2,7 @@
 
 Model ids are engine-qualified, ``"<engine>:<name>"``:
 
-* ``sud:en_sud_ewt``   — a Sunflower SUD spaCy package, loaded by its full name.
+* ``sud:en_sud_ewt_gum`` — a Sunflower SUD spaCy package, loaded by its full name.
 * ``stanza:fr``        — a Stanza UD model (optionally ``stanza:fr#gsd`` for a
                          specific treebank); it emits UD, which is converted to
                          SUD via grew (:mod:`app.convert`) so the editor stays SUD.
@@ -847,8 +847,10 @@ def _force_upos(morphologizer, doc, upos) -> None:
     Run BETWEEN the morphologizer and the lemmatizer, so every later component sees the chosen class —
     which is the other half of the request.  ⚠️ It reaches a RULE-BASED lemmatiser (`Lemmatizer`, which
     keys on `token.pos_`) and not an `EditTreeLemmatizer`, whose model predicts an edit tree from the
-    token vector alone and is POS-blind by construction; `en_sud_ewt` ships the latter, so its lemma will
-    not move on a retag however the class is set. That is a property of the released wheel, not something
+    token vector alone and is POS-blind by construction; `en_sud_ewt_gum` ships the latter (a
+    `trainable_lemmatizer` in the shipped wheel's own config — as the retired `en_sud_ewt` did before
+    it, so the switch of bundled English model changes nothing here), so its lemma will not move on a
+    retag however the class is set. That is a property of the released wheel, not something
     this function can route around — and it is the reason the constraint is applied to the FEATS here
     rather than the whole answer being re-asked."""
     if not upos:

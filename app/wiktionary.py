@@ -25,7 +25,42 @@ _CONDENSE_CACHE: dict[str, list[dict]] = {}
 _API = "https://en.wiktionary.org/api/rest_v1/page/definition/{}"
 _HTML_API = "https://en.wiktionary.org/api/rest_v1/page/html/{}"
 _UA = "SUD-Workbench/1.0 (https://github.com/; contact via the app repository) requests"
-_SUD_EN = "sud:en_sud_ewt"          # Wiktionary's definition PROSE is always English, regardless of the headword's own language
+# Wiktionary's definition PROSE is always English, regardless of the headword's own language, so this
+# module always parses with an ENGLISH model — the one models_registry.BUNDLED_SUD names, which
+# requirements-core.txt pins so that every environment has it.
+_SUD_EN = "sud:en_sud_ewt_gum"
+# …but not unconditionally: an environment built before the switch from `en_sud_ewt` has the RETIRED
+# wheel and not this one (the first-launch venv is created once, behind `.sud-core-ready`, so a changed
+# requirements-core.txt never reaches it — see README's "Resetting an install"). Naming one package
+# outright would take the definition lookup down to its unparsed fallback on every such machine, for a
+# model that is right there. :func:`_sud_en` asks the registry which English package is actually
+# installed instead; the answer is cached because it is consulted once per condensed definition.
+_SUD_EN_RESOLVED = ""
+
+
+def _sud_en() -> str:
+    """The English SUD model id to condense definition prose with: the bundled one where it is
+    installed, the retired `en_sud_ewt` where a pre-switch environment still has only that, and the
+    bundled id regardless when neither can be seen (so ``parse.parse`` reports the honest "model not
+    installed" for the model this app actually ships).
+
+    Only a REAL answer is cached — an English model can be installed from Manage Models mid-session,
+    and caching "nothing is installed" would keep this module on the unparsed fallback for the life of
+    the process after the reader had just fixed exactly that."""
+    global _SUD_EN_RESOLVED
+    if _SUD_EN_RESOLVED:
+        return _SUD_EN_RESOLVED
+    try:
+        from . import models_registry
+        pkg = models_registry.resolve_default_package("en") or ""   # BUNDLED first, then any non-retired one
+    except Exception:  # noqa: BLE001 — a registry that won't import must not take the lookup with it
+        pkg = ""
+    if not pkg:
+        return _SUD_EN
+    _SUD_EN_RESOLVED = f"sud:{pkg}"
+    return _SUD_EN_RESOLVED
+
+
 _KEEP_FAMS = {"subj", "comp", "mod", "udep", "conj"}   # deprel families kept when condensing a segment (see _condense_segment)
 # …and the relations that START A CANDIDATE OF THEIR OWN rather than being kept in the head's (see
 # _clause_top).  Coordination only, and only the two relations that really are coordination: SUD's
@@ -172,7 +207,7 @@ def _head_rank(head_upos: str, wanted: str) -> int:
     the word: 編程 is a Chinese noun whose one sense reads "programming", which `en_sud_ewt` tags
     VERB, so a NOUN token was told its dictionary had nothing — the entry heading said "Noun" and
     was overruled by a gerund. `run` under a SYM token went the same way. An unknown head (``""`` —
-    the unparsed fallback, when `en_sud_ewt` isn't installed) ranks 0: no information is not a
+    the unparsed fallback, when no English model is installed) ranks 0: no information is not a
     disagreement."""
     if not wanted or not head_upos:
         return 0
@@ -279,7 +314,7 @@ def _condense_segment(text: str) -> list[dict]:
 
     On top of that, a modifier phrase is deleted — subtree and all — unless it BOTH attaches
     directly to the candidate's head AND sits immediately beside it. The test, in the relations this
-    parse actually produces (SUD, `en_sud_ewt`, families read by :func:`_famof` so
+    parse actually produces (SUD, `en_sud_ewt_gum`, families read by :func:`_famof` so
     `mod@relcl`/`mod:appos` count as `mod`): a token whose deprel family is exactly `mod` survives
     only if (a) its GOVERNOR is the candidate's head and (b) the position immediately before or
     immediately after that head falls inside its own subtree. Everything else is dropped together
@@ -312,7 +347,7 @@ def _condense_segment(text: str) -> list[dict]:
     Returns one ``{"text","upos"}`` per candidate (`upos` = that candidate's own head, what the
     dictionary part-of-speech should match), in surface order — empty if nothing survives pruning."""
     from . import parse
-    res = parse.parse(text, _SUD_EN)
+    res = parse.parse(text, _sud_en())
     if not res.get("parsed"):
         return [{"text": text, "upos": ""}]   # the English SUD model isn't installed → fall back to the whole clause, unpruned, POS unknown
     toks = res.get("tokens") or []

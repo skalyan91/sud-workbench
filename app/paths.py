@@ -57,6 +57,14 @@ GRAMMARS_DIR = os.environ.get("SUD_GRAMMARS_DIR") or os.path.join(APP_DATA, "gra
 # pre-fetches this one yet, so it is always just another APP_DATA subdirectory.
 FA_VOCAB_DIR = os.path.join(APP_DATA, "fa_vocab")
 
+# Vidyut's Sanskrit lexicon (app/vidyut_data.py fetches it; see that module's header for why the
+# DATA is fetched even though the `vidyut` package itself is an ordinary declared dependency of the
+# Sanskrit model wheel). The model reads $VIDYUT_DATA, which names the KOSHA subdirectory rather
+# than this bundle root — `vidyut_data.kosha_dir()` is the one place that level is spelt out, and
+# `vidyut_data.activate()` exports it. No Nix escape hatch, for the same reason FA_VOCAB_DIR has
+# none: nothing hermetically pre-fetches this one.
+VIDYUT_DIR = os.path.join(APP_DATA, "vidyut-data")
+
 
 def ensure_dirs() -> None:
     os.makedirs(STANZA_DIR, exist_ok=True)
@@ -65,3 +73,4 @@ def ensure_dirs() -> None:
     if not os.environ.get("SUD_GRAMMARS_DIR"):   # a Nix build supplies its own — never create/touch it
         os.makedirs(GRAMMARS_DIR, exist_ok=True)
     os.makedirs(FA_VOCAB_DIR, exist_ok=True)
+    os.makedirs(VIDYUT_DIR, exist_ok=True)

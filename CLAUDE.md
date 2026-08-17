@@ -963,7 +963,7 @@ doesn't.
 
 ### Parsing, models, and on-demand extras
 
-`app/parse.py` runs two engines in-process: **SUD spaCy** packages (`en_sud_ewt`, …) and **Stanza
+`app/parse.py` runs two engines in-process: **SUD spaCy** packages (`en_sud_ewt_gum`, …) and **Stanza
 UD** via `spacy-stanza`, post-converted UD → SUD with grew and with multi-word tokens reconstructed
 (`_reconstruct_mwt`). Model ids are engine-qualified — `sud:<package>` / `stanza:<lang>#<package>`.
 No model → whitespace tokenisation. `app/parse_sud.py` is only a back-compat shim.
@@ -1023,8 +1023,8 @@ restored by the `keep` list; only a FULL parse (`doInsert`/`insertParsed`/`repar
 which replace `s.tokens` wholesale together with the tree they belong to) takes them verbatim.
 
 ⚠ **THE WHEELS GAINED THIS WITHOUT A VERSION BUMP**, so an environment built before them never
-refreshes: `requirements-core.txt` pins `en_sud_ewt` by release URL at `0.1.0`, pip sees `0.1.0`
-installed and skips it, and the per-user venv is built once and gated behind `.sud-core-ready`
+refreshes: `requirements-core.txt` pins the English wheel by release URL at one version, pip sees
+that version installed and skips it, and the per-user venv is built once and gated behind `.sud-core-ready`
 anyway. A downloaded model has the same problem through Manage Models, which reports it installed.
 Symptom: a parse that marks nothing, on a build that plainly contains this code. The resets are in
 README's "Resetting an install" table — remove-and-redownload for a downloaded model, `rm -rf …/venv`
@@ -1035,12 +1035,36 @@ for the bundled one. **Check the pipeline, not the version**, when diagnosing:
 `SUD_REPO` (`SunflowerAI/sud-spacy-parsers`, overridable via `$SUD_MODELS_REPO`) pip-installed into
 the running venv, and Stanza models into `paths.STANZA_DIR`.
 
-**One model is not a download: `en_sud_ewt`.** It is pinned in `requirements-core.txt` (and
+**One model is not a download: `en_sud_ewt_gum`.** It is pinned in `requirements-core.txt` (and
 `requirements.txt`), so every environment that can run the app already has it — the app itself
 depends on it, since `app/wiktionary.py` parses English definition prose no matter what language the
 document is in. `models_registry.BUNDLED_SUD` names it; such a model still lists as installed but
 can't be removed (`remove()` refuses, and the Model Manager row shows a "Bundled" pill in place of
 its Remove button). Adding another bundled model means editing both requirements files AND that set.
+
+⚠ **IT REPLACED `en_sud_ewt`, AND THE OLD WHEEL IS RETIRED RATHER THAN DELETED FROM THE APP'S WORLD.**
+`RETIRED_SUD` is a THIRD listing set beside `DEPRECATED_SUD`/`SUPERSEDED_SUD`, and what distinguishes
+it is which listing each one leaves alone: a retired package is filtered out of `list_available()`
+(nothing new installs it) but is deliberately still shown by `list_installed()` — the venv is built
+ONCE behind `.sud-core-ready`, so every pre-switch machine still has `en_sud_ewt` sitting in its core
+site-packages, and hiding the row would strand a wheel on disk with nothing in the UI to say it is
+there or to remove it. It still PARSES (`_installed_sud_packages()` is untouched, exactly as for the
+other two sets) so nobody loses English to a requirements change that cannot reach them. What it does
+lose is every pick the app makes on the reader's behalf: `resolve_default_package` prefers a BUNDLED
+package and then any non-retired one (alphabetical order is the last word, not the first — `en_sud_ewt`
+sorts BEFORE `en_sud_ewt_gum` and would otherwise have gone on answering for English), and
+`_preference_key` ranks retired last within its engine, because its clause "prefer the SMALLER model"
+reads backwards across a retirement: the retired wheel is smaller precisely because it was trained on
+less. `app/wiktionary.py` asks `resolve_default_package("en")` rather than naming a package, so the
+definition lookup follows the same rule and does not drop to its unparsed fallback on a pre-switch
+machine.
+⚠️ **IT IS CC BY-SA 4.0, AND THAT IS WHAT MAKES IT SHIPPABLE.** GUM's five NonCommercial genres
+(essay, fiction, letter, podcast, whow) are excluded from the wheel upstream, so the merged model
+carries no NonCommercial term — ShareAlike and attribution only, exactly as the retired `en_sud_ewt`
+did. `make_portable.sh` pip-installs this file straight into the app it distributes, so an NC term
+here would attach to the whole bundle; `THIRD-PARTY-NOTICES.md` states the licence and the two
+attributions it obliges (SUD_English-EWT's own `LICENSE.txt`, and GUM's per-document credits at
+gucorpling.org/gum). Read the wheel's `meta.json` for the per-genre source terms.
 
 `app/extras.py` is the reason `requirements-core.txt` exists alongside `requirements.txt`: the
 portable bundle ships only the torch-free CORE set, and the heavy tiers (`stanza` ≈1.1 GB,
@@ -1055,6 +1079,24 @@ therefore declares EITHER `pip` + `probe` OR `module` — the name of a module s
 `available()`/`install(progress)`/`status()` — and `install()` dispatches on which. That `module`
 shape sat unused for a while and is the extension point for exactly this; use it rather than bolting a
 second install/progress/UI path beside the first. See `app/macron.py` under Language services.
+
+⚠ **AND A MODEL'S OWN DEPENDENCIES ARE INSTALLED FROM ITS OWN DECLARATION, NEVER FROM A LIST HERE.**
+Two mechanisms, and they answer different halves of one question. The PIP half is
+`_unsatisfied_requirements` (app/models_registry.py): a model wheel is installed `--no-deps` — or pip
+re-resolves spaCy into `EXTRAS_DIR`, where the copy would shadow the core venv's — so its own
+`Requires-Dist` is read back out of the wheel and whatever this environment does not already satisfy
+is installed deliberately. `sa_sud_vedic_ufal_dcs` 0.2.0 declares `vidyut>=0.4.0` beside
+`indic-transliteration>=2.3.0`, and gets both for free that way. The DATA half is
+`_ensure_side_data`, which asks the INSTALLED package what it declares (`_declares`, EXTRAS_DIR
+scanned explicitly first — an older copy of the same model in the core venv wins an ambient lookup
+and would answer for the wheel that was just replaced) and installs the matching extras tier. Neither
+is keyed on a language prefix: the wheel is what knows what it needs, so a second Sanskrit model — or
+a non-Sanskrit one that gains the same embedding layer — is covered without editing anything here.
+⚠️ **AND THE "ALREADY UP TO DATE" SHORT-CIRCUIT ANSWERS FOR THE SIDE DATA TOO.** `download`'s md5
+skip says "the model files here are already the ones this download would write" and says nothing
+about an 81 MB lexicon sitting outside the wheel — which is EXACTLY the state of a machine whose
+Sanskrit model was installed before this app fetched one. Returning "Already up to date" without
+looking sends the reader away with the one thing they came for still missing.
 
 ### Language services
 
@@ -1224,7 +1266,7 @@ second install/progress/UI path beside the first. See `app/macron.py` under Lang
   raw CoNLL-U, dependencies left unset.
 - `app/wiktionary.py` — MediaWiki REST *definition* endpoint (not HTML scraping), for the
   right-click "Definitions of …" → MGloss pre-fill. Definition prose becomes gloss units through
-  `_condense`, a real SUD parse of the English (which is why `en_sud_ewt` is a hard dependency):
+  `_condense`, a real SUD parse of the English (which is why an English wheel is a hard dependency):
   split at semicolons/commas, then keep the clause head plus its subj/comp/mod/udep/conj members and
   **delete any `mod` subtree that is not both one arc from the head and immediately beside it** —
   "directly modifies" means one `mod` arc, "immediately adjacent" means the phrase's span covers the
@@ -1307,6 +1349,36 @@ second install/progress/UI path beside the first. See `app/macron.py` under Lang
   `Śiva`, and there is no per-entry URL for the flyout's "Open …" row. The measurements are in that
   module's docstring — read them before reopening the question.
 
+- `app/vidyut_data.py` — **THE SANSKRIT PARSER READS A LEXICON AT INFERENCE, AND IT IS FETCHED, NOT
+  SHIPPED.** `sa_sud_vedic_ufal_dcs` 0.2.0's tok2vec embedding layer (`sud.AnalyserFeatsEmbed.v1`)
+  runs in `runtime = true` mode in the shipped config: rather than carrying a frozen extract of an
+  analyser — whose key set is whatever vocabulary happened to be probed, missing 6.5 % of Vedic
+  tokens, a vocabulary MISMATCH that widening the extract does not fix — it asks `vidyut.kosha` per
+  token for the SET of morphological analyses a form can have. The `vidyut` PACKAGE is an ordinary
+  declared dependency of the wheel (MIT, abi3 wheels on every platform this app builds for, no Rust
+  toolchain) and needs nothing from this module. Its DATA does: ~32 MB compressed, ~81 MB on disk,
+  published only as a GitHub release asset of ambuda-org/vidyut and deliberately not redistributed
+  upstream. So this is a `module`-shaped extras tier beside `la_macron`/`fa_vocab`/`grammars`, and
+  `models_registry._ensure_side_data` installs it with the model.
+  ⚠ **THE LAYER RAISES RATHER THAN DEGRADING**, in its own words: without the lexicon "every token
+  reads 'silent' and the model quietly parses worse instead of failing". So a Sanskrit model with no
+  lexicon parses NOTHING — this is not a feature that is merely weaker while the tier is absent, and
+  it is why the install is automatic rather than an offer.
+  ⚠ **AND `VIDYUT_DATA` MUST BE EXPORTED, OR A CORRECT FETCH IS FOUND ONLY BY ACCIDENT.** The model
+  resolves its data as `$VIDYUT_DATA` else the literal `"vidyut-data/kosha"` — relative to the
+  process's CWD, which for a LaunchServices/Explorer launch is arbitrary (`/` on macOS). The export
+  lives in `extras.activate()`, the one process-wide "make the on-demand things reachable" step every
+  entry point already calls before a model loads, rather than at a list of load sites someone has to
+  remember. ⚠️ Note the LEVEL: the variable names the `kosha` SUBDIRECTORY, not the bundle root that
+  `download_data` extracts into — `vidyut_data.kosha_dir()` is the one place that is spelt out. A
+  `VIDYUT_DATA` the reader set themselves is never overwritten; `available()` then reports on THEIR
+  copy.
+  ⚠️ **The URL is derived from the installed `vidyut.__version__`, not pinned here.** The kosha is an
+  FST plus a msgpack registry whose layout is the Rust crate's internal business, and upstream's own
+  `download_data` hard-codes its version in both halves of the same URL — pinning one here would be
+  inventing a second opinion about which data goes with which engine. Our own fetch is preferred for
+  its progress reporting (`download_data` reads 32 MB into memory with no hook at all); upstream's is
+  the fallback the moment the asset naming stops matching.
 - **Sanskrit is DIGRAPHIC IN STORAGE**, and that is the whole shape of its support.
   `sa_sud_vedic_ufal_dcs` takes raw **IAST or Devanagari** and puts back whichever it was given: its
   `sa_deva` component writes Devanagari into FORM/LEMMA with the IAST in `Token._.translit`/
@@ -1386,7 +1458,7 @@ second install/progress/UI path beside the first. See `app/macron.py` under Lang
   text rather than from `doc.text`, which is the tokeniser's own reconstruction and puts spaces
   where the input had none.
 Optional dependencies are always isolated behind a single module façade in `app/`, as those last
-five do — follow that when adding another.
+six do — follow that when adding another.
 
 ## Packaging (`packaging/`)
 
@@ -1482,6 +1554,32 @@ included, resolved by Nix itself.
   exit 0 for real inside the official `nixos/nix` container. Unlike the two distro packages this
   does **not** use the venv-bootstrap model — everything is resolved and built by Nix at
   package-build time, which is the point of packaging it this way at all.
+  ⚠ **`py.pip` IS IN THE CLOSURE ON PURPOSE, AND WITHOUT IT NO MODEL COULD EVER BE DOWNLOADED.**
+  "Hermetic" is a claim about standing the app UP, not a ban on pip: `models_registry.download`
+  shells out to `sys.executable -m pip install --target EXTRAS_DIR` for every model wheel, and
+  nixpkgs builds CPython `--without-ensurepip`, so the answer was `No module named pip` and the
+  only model a Nix install could ever parse with was the one in its own closure. It has to be in
+  the SAME python environment — `wrapPythonPrograms` puts `propagatedBuildInputs` on the
+  launcher's `PYTHONPATH`, which a separate `python312Packages.pip` in a `nix shell` does not do
+  (two store paths, only `bin/` merged). `runtimeTools` is its own list beside `coreDeps` because
+  nothing in `app/` imports it. Verified end-to-end in a `nixos/nix` container (aarch64-linux):
+  `nix build .#default -L` exit 0, `python3.12-pip` a DIRECT reference of the built package (so the
+  wrapper's `PYTHONPATH` carries it), then a real `download("sud:sa_sud_vedic_ufal_dcs")` — wheel
+  installed, its declared `indic-transliteration`/`vidyut` installed after it, the 32 MB lexicon
+  fetched by the new tier, `VIDYUT_DATA` exported — and a correct parse out the other end
+  (`kaṇṭhaḥ` Nom → `subj`).
+  ⚠️ **And a prebuilt manylinux wheel loads there as-is** — measured, against the folklore: `pip
+  install --target` of `vidyut` then `vidyut.lipi.transliterate` answers correctly with no
+  `LD_LIBRARY_PATH` prefix, no `nix-ld`, no `autoPatchelf`. Its `DT_NEEDED` is glibc-family plus
+  `libgcc_s.so.1`, all already mapped into the process by the closure's own CPython, so they
+  resolve by soname rather than by searching a path. A wheel needing a genuinely foreign library
+  (torch's CUDA stack) is a different question this does not answer.
+  ⚠️ **The one download that still cannot take effect there is the BUNDLED model**, and it now says
+  so rather than relaying a permission error: `_immutable_dist_dir` asks whether the shadowing copy's
+  directory is WRITABLE (so a read-only bundle or a root-owned site-packages answers the same as a
+  Nix store, which a `/nix/store` path test would not), and `download` reports that the package must
+  be updated instead. The wheel itself installed fine; it simply cannot win `sys.path` against an
+  immutable copy ahead of it.
 
 ## Windows: what has never executed
 

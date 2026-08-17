@@ -13,8 +13,8 @@ from .parse import ParserUnavailable, _tok, whitespace_tokens  # noqa: F401
 def sud_parse(text: str, model: str) -> list[dict]:
     """Legacy entry point: parse with a SUD spaCy model, returning just the tokens.
 
-    ``model`` may be a full package name (``en_sud_ewt``), an engine-qualified id
-    (``sud:en_sud_ewt``), or a bare language code (resolved via the registry)."""
+    ``model`` may be a full package name (``en_sud_ewt_gum``), an engine-qualified id
+    (``sud:en_sud_ewt_gum``), or a bare language code (resolved via the registry)."""
     from .parse import _parse_spacy_sud, parse
     if ":" in model:
         result = parse(text, model)

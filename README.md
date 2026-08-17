@@ -160,7 +160,7 @@ rather than vendored — see `app/grammars.py`.
   main field can also be switched off, so a submitted text supplies **translations only**,
   continuing after the last sentence already translated in one of those languages.
 - Pick a model in the toolbar; Insert Text then parses in-process:
-  - **SUD spaCy** models (`en_sud_ewt`, `zh_sud_gsdboth`, …) from Sunflower AI.
+  - **SUD spaCy** models (`en_sud_ewt_gum`, `zh_sud_gsd`, …) from Sunflower AI.
   - **Stanza UD** models via `spacy-stanza`, post-processed UD → SUD with grew;
     multi-word tokens (e.g. French *du* = de + le) are preserved.
   - No model → whitespace tokenisation.
@@ -205,9 +205,17 @@ rather than vendored — see `app/grammars.py`.
 
   A Stanza document is left alone: Stanza parses in UD and the app converts to SUD with grew, which
   moves heads, so its rankings describe a tree you are not looking at.
-- The **English SUD parser (`en_sud_ewt`) ships with the app** — every other model
+- The **English SUD parser (`en_sud_ewt_gum`) ships with the app** — every other model
   is a download. Beyond parsing English text, it is what condenses each Wiktionary
-  definition into a glossable phrase, whatever language the document is in.
+  definition into a glossable phrase, whatever language the document is in. (It replaced
+  `en_sud_ewt`, trained on EWT alone, which is no longer offered; an install that still
+  has the older wheel keeps parsing with it until the environment is rebuilt — see
+  "Resetting an install" — and can remove it from Manage Models.)
+- The **Sanskrit SUD parser reads a morphological lexicon**, not the word alone: its
+  embedding layer asks vidyut's `kosha` which analyses each form could carry, so the
+  lexicon is a prerequisite for parsing at all rather than an optional extra. Manage
+  Models fetches it (~32 MB) along with the model, and respects a `VIDYUT_DATA` you have
+  set yourself.
 - **Manage Models** dialog (toolbar cube button, or Format → Manage Models…) —
   lists SUD models from the GitHub release repo and a curated set of Stanza UD
   languages, with training-set sizes, background downloading with a progress bar,
@@ -309,10 +317,13 @@ app/  __main__.py       pywebview bootstrap, application menu, and the AppKit/Py
       parse.py          parser engines: SUD spaCy + Stanza UD→SUD (+ MWT), sentence split
       parse_sud.py      backwards-compat shim over app.parse
       models_registry.py  available/installed models, GitHub-release + Stanza download
-      extras.py         on-demand install of the optional tiers (Stanza/JP/Arabic/Latin macrons)
+      extras.py         on-demand install of the optional tiers (Stanza/JP/Arabic/Latin macrons/
+                        Persian vocalisation/Sanskrit lexicon)
       translit.py       Latin transliteration, routed to a backend per language
       macron.py         Latin vowel lengths (display only) — a façade over the Latin model's own
                         la_macronise component; fetches the Morpheus data on demand
+      vidyut_data.py    fetches vidyut's Sanskrit morphological lexicon on demand and points
+                        the Sanskrit model at it through VIDYUT_DATA
       langid.py         offline language identification (vendored fastText lid.176)
       wiktionary.py     Wiktionary definition lookup (MediaWiki REST API)
       apte.py           Apte Sanskrit-English dictionary lookup (vendored index; C-SALT fallback)
@@ -370,6 +381,7 @@ Everything the installed app keeps per user lives in one directory:
 ├── venv/               the per-user environment, built once on first launch
 ├── site-packages/      the heavy on-demand tiers (stanza/torch, japanese, arabic)
 ├── stanza_resources/   downloaded Stanza models
+├── vidyut-data/        the Sanskrit morphological lexicon the Sanskrit parser reads
 ├── cache/              release listings and similar
 └── state.json          recent files, preferences, the last document
 ```
@@ -380,11 +392,13 @@ almost anything is to delete the relevant subdirectory and relaunch. Quit the ap
 | symptom | reset |
 |---|---|
 | **Stanza models parse nothing.** Stanza emits UD and this app stores SUD, so every Stanza parse runs the grew conversion grammar. A build from before `vendor/` was shipped has no grew backend, and the models are inert however cleanly they downloaded. Manage Models now says so at the top of the Stanza group. | Replace the app itself — the backend rides inside the bundle, not in the venv: `rm -rf "/Applications/SUD Workbench.app" && cp -R "dist/SUD Workbench.app" /Applications/`. Then relaunch (parser pipelines are cached for the life of the process). |
-| **a parse never marks subject raising, reported speech or idioms.** Those come from components the SUD parsers only gained later, and the wheels kept their version number — so pip sees the one already installed as satisfying the pin and an environment built before them never refreshes. | For a downloaded model: **Remove** it in Manage Models, then download it again. For the bundled `en_sud_ewt` (which Manage Models won't remove): `rm -rf ~/Library/Application\ Support/SUD\ Workbench/venv` and relaunch. |
+| **a parse never marks subject raising, reported speech or idioms.** Those come from components the SUD parsers only gained later, and the wheels kept their version number — so pip sees the one already installed as satisfying the pin and an environment built before them never refreshes. | For a downloaded model: **Remove** it in Manage Models, then download it again. For the bundled `en_sud_ewt_gum` (which Manage Models won't remove): `rm -rf ~/Library/Application\ Support/SUD\ Workbench/venv` and relaunch. |
+| **English still parses with `en_sud_ewt`** (Manage Models shows it, and shows `en_sud_ewt_gum` as available to install). The bundled English model changed, and the per-user venv is built once — a changed `requirements-core.txt` never reaches an environment that already has one. | Either install `en_sud_ewt_gum` from Manage Models and **Remove** `en_sud_ewt` there, or rebuild the venv: `rm -rf ~/Library/Application\ Support/SUD\ Workbench/venv` and relaunch. |
 | the Stanza tier itself looks broken | `rm -rf ~/Library/Application\ Support/SUD\ Workbench/site-packages` → reinstall the tier from Manage Models |
 | **Stanza fails with `RuntimeError: Numpy is not available!` (or the model just does nothing), on an Intel Mac.** PyTorch's last macOS x86_64 build (2.2.2) predates the NumPy 2.0 ABI; a venv built before `requirements-core.txt` pinned `numpy<2` on Intel resolved a current, incompatible numpy instead — and reinstalling only the Stanza tier can't fix it, because that numpy is CORE's, loaded on every document open (`app/langid.py`'s language auto-detect), well before Stanza is ever touched. | `rm -rf ~/Library/Application\ Support/SUD\ Workbench/venv ~/Library/Application\ Support/SUD\ Workbench/site-packages` and relaunch, then reinstall the Stanza tier from Manage Models. (On Apple Silicon this pin is a no-op — current torch there is numpy-2-safe, so this specific failure shouldn't occur; a NumPy report on Apple Silicon has a different cause.) |
 | a Stanza model is corrupt | `rm -rf ~/Library/Application\ Support/SUD\ Workbench/stanza_resources` |
 | **the Latin “With macrons” row stays unavailable, or macronises nothing.** Two separate things have to be present: the Latin model (which *is* the macroniser) and the Morpheus vowel lengths it reads. The lengths live in the model's own cache, outside Application Support, so a clean slate there does not touch them. | Download `la_sud_ittb_proiel_perseus` in Manage Models, then install the **Latin macrons** tier in the same window. To force the data to be re-fetched: `rm -rf ~/.cache/sud-spacy` (or `$LA_MORPHEUS_TABLE`, if you set one). |
+| **Sanskrit parses nothing, or the Sanskrit model errors about vidyut data.** The Sanskrit model asks vidyut's morphological lexicon what analyses each form can have, as part of its own embedding layer — so unlike the Latin macrons, this is not a display extra the parser can do without: with no lexicon it raises rather than degrading. The `vidyut` package installs with the model; the ~32 MB of lexicon data is a separate download, because upstream publishes it as data rather than as a package. | Install the **Sanskrit lexicon (vidyut)** tier in Manage Models, or press Install/Update on the Sanskrit model there — that fetches a missing lexicon too, even when the model itself is already up to date. To force a re-fetch: `rm -rf ~/Library/Application\ Support/SUD\ Workbench/vidyut-data`. |
 | **the window's corners are not fully rounded** (and other native chrome looks a version behind). AppKit reads the `LC_BUILD_VERSION` of the binary the app runs *inside* — the interpreter — and holds an older-SDK app at the previous appearance. | Check what the venv was built from: `otool -l "$(readlink ~/Library/Application\ Support/SUD\ Workbench/venv/bin/python)" \| awk '/LC_BUILD_VERSION/{f=1} f&&$1=="sdk"{print "sdk",$2;exit}'`. If it is behind your macOS major version, `brew install python@3.12`, then force a rebuild (below). |
 | **forcing a different Python 3.12** | `rm -rf ~/Library/Application\ Support/SUD\ Workbench/venv` and relaunch. The first-launch setup runs again, and `find_py()` picks the newest-SDK interpreter it can find. To name one instead, run the bundle's own launcher from a terminal so the variable reaches it (`open -a` does not pass the environment): <br>`SUD_PYTHON=/opt/homebrew/bin/python3.12 "/Applications/SUD Workbench.app/Contents/MacOS/SUD Workbench"` |
 | a completely clean slate | `rm -rf ~/Library/Application\ Support/SUD\ Workbench` (this also forgets recent files and preferences) |

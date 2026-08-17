@@ -12,10 +12,12 @@ Tiers (each behind a lazy ``try: import`` in ``translit`` / ``parse``):
   * ``la_macron`` — Latin vowel lengths (a DATA tier, not a pip one — see below), ~4 MB
   * ``grammars`` — UD↔SUD conversion grammars (also a DATA tier), ~450 KB
   * ``fa_vocab`` — Persian vocalisation lexicon (also a DATA tier — see :mod:`app.fa_vocab`), ~10 MB
+  * ``vidyut``   — Vidyut's Sanskrit lexicon (also a DATA tier — see :mod:`app.vidyut_data`), ~32 MB
   * ``grew``     — the grewpy_backend OCaml binary (also a DATA tier, installed via opam rather
     than fetched — see :mod:`app.grew_backend`), size varies (opam build)
 
-NOT EVERY TIER IS A PIP INSTALL. ``la_macron``, ``grammars``, ``fa_vocab`` and ``grew`` each fetch/
+NOT EVERY TIER IS A PIP INSTALL. ``la_macron``, ``grammars``, ``fa_vocab``, ``vidyut`` and ``grew``
+each fetch/
 install something other than a pip package: the Morpheus vowel-length table can't be bundled with
 the Latin model for licensing reasons and isn't on PyPI in any form (see :mod:`app.macron`), the
 surfacesyntacticud/tools conversion grammars carry no declared licence at all, so shipping a copy —
@@ -78,6 +80,12 @@ TIERS: dict[str, dict] = {
         "module": "fa_vocab",   # a DATA tier: app/fa_vocab.py fetches KaamelDict and aligns it onto Persian spelling
         "note": "KaamelDict pronunciations, aligned onto Persian spelling (~10 MB) — needs the Persian model",
     },
+    "vidyut": {
+        "label": "Sanskrit lexicon (vidyut)",
+        "module": "vidyut_data",   # a DATA tier: app/vidyut_data.py fetches ambuda-org/vidyut's kosha bundle
+        "note": "vidyut's morphological lexicon, fetched from ambuda-org/vidyut (~32 MB download, "
+                "~81 MB on disk) — needed by the Sanskrit model",
+    },
     "grew": {
         "label": "grew conversion backend",
         "module": "grew_backend",   # a DATA tier: app/grew_backend.py drives `opam install grewpy_backend`
@@ -133,6 +141,17 @@ def activate() -> None:
         site.addsitedir(EXTRAS_DIR)
         if EXTRAS_DIR not in sys.path:      # very old site.py without addsitedir side effects
             sys.path.insert(0, EXTRAS_DIR)
+    # …and the environment half of the same job. The Sanskrit model reads its lexicon from
+    # $VIDYUT_DATA, falling back to a CWD-RELATIVE path that a GUI launch never lands on (see
+    # app/vidyut_data.py's header), so pointing the variable at the fetched copy belongs to exactly
+    # this step — the one every entry point already calls before a model is loaded, rather than a
+    # list of load sites someone has to remember. Idempotent, two stat calls, and it never
+    # overwrites a VIDYUT_DATA the reader set themselves.
+    try:
+        from . import vidyut_data
+        vidyut_data.activate()
+    except Exception:  # noqa: BLE001 — a trimmed build, or an unreadable APP_DATA: never block startup
+        pass
     _activated = True
 
 

@@ -55,9 +55,9 @@ conllu>=6.0
 numpy<2; sys_platform == "darwin" and platform_machine == "x86_64"
 
 # ── parsing (SUD spaCy only — thinc/CNN, no torch) ──────────────────────────
-spacy==3.8.14         # was 3.8.7 — the en_sud_ewt wheel below requires >=3.8.14,<3.9, and pip refuses to resolve the two together
+spacy==3.8.14         # was 3.8.7 — the en_sud_ewt_gum wheel below requires >=3.8.14,<3.9, and pip refuses to resolve the two together
 click>=8.0
-# The English SUD parser ships WITH the app (11 MB), unlike every other model in
+# The English SUD parser ships WITH the app (23 MB), unlike every other model in
 # app/models_registry.py — those stay on-demand downloads through the Model Manager. It is here
 # because the app itself needs it, not just the user: app/wiktionary.py SUD-parses each Wiktionary
 # definition to condense it down to a glossable phrase (the definition PROSE is English whatever
@@ -65,7 +65,20 @@ click>=8.0
 # definition text. Pinned to the release asset rather than a bare name — these packages are
 # published as GitHub Release assets, not on PyPI (see models_registry.SUD_REPO). Bump the two
 # versions together when a new release lands.
-en_sud_ewt @ https://github.com/SunflowerAI/sud-spacy-parsers/releases/download/v0.1.0/en_sud_ewt-0.1.0-py3-none-any.whl
+#
+# WAS `en_sud_ewt` 0.1.0 — English EWT alone — and the retirement is recorded in
+# models_registry.RETIRED_SUD, which is what stops the old wheel being offered or silently preferred
+# on a machine that still has it. `en_sud_ewt_gum` is the same pipeline (`tok2vec`, `parser`,
+# `morphologizer`, `lemmatizer`, `tagger`, plus SUD's own `sud_subject`/`sud_shared`/
+# `sud_reported_rule`/`sud_idiom` MISC layer) trained on EWT PLUS the ten GUM genres upstream ships:
+# +66 % training tokens, and 81.3 → 81.9 LAS on EWT's own test set per the release README's results
+# table. It is CC BY-SA 4.0, as `en_sud_ewt` was: the five NonCommercial GUM genres (essay, fiction,
+# letter, podcast, whow) are excluded from the wheel upstream, so nothing NonCommercial rides in with
+# the ten it does train on. That is not a detail here — packaging/make_portable.sh pip-installs this
+# file straight into the shipped app, making it one of the few dependencies genuinely REDISTRIBUTED
+# rather than fetched, so an NC term would attach to the bundle. See THIRD-PARTY-NOTICES.md, which
+# names it and the attributions the licence obliges.
+en_sud_ewt_gum @ https://github.com/SunflowerAI/sud-spacy-parsers/releases/download/v0.2.0/en_sud_ewt_gum-0.2.0-py3-none-any.whl
 
 # ── UD ↔ SUD ↔ mSUD conversion (python client; OCaml backend is an external opam prereq) ──
 grewpy>=0.7

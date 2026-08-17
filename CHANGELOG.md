@@ -4,6 +4,48 @@ All notable changes to SUD Workbench are documented in this file.
 
 ## [0.3.7] — 2026-08-17
 
+### Added: the Sanskrit parser's lexicon is installed for you
+
+- The Sanskrit model reads **vidyut's morphological lexicon** at parse time — its embedding layer
+  asks that lexicon, per token, for the set of analyses a form can have, rather than carrying a
+  frozen extract of one. Both halves of that now arrive with the model: the `vidyut` package comes
+  in as the wheel's own declared dependency, and Manage Models fetches the lexicon data (~32 MB
+  download, ~81 MB on disk) as part of the same install.
+- The lexicon is not optional in the way the Latin macrons are — the model **raises rather than
+  degrading** without it, so a Sanskrit model installed on its own parses nothing at all. Pressing
+  Install or Update on a Sanskrit model that is *already up to date* therefore fetches a missing
+  lexicon rather than reporting "Already up to date" and leaving it absent, which is the state every
+  machine whose Sanskrit model predates this is in.
+- It is also a row of its own in Manage Models — **Sanskrit lexicon (vidyut)** — beside the Latin
+  macrons, Persian vocalisation and grew backend rows, and it lands in `vidyut-data/` under
+  Application Support. A `VIDYUT_DATA` you have set yourself is respected and never overwritten.
+
+### Fixed: Nix installs can download parser models
+
+- A Nix build could list models and offer an Install button that could never work: nixpkgs builds
+  CPython `--without-ensurepip`, and the app installs every model wheel with
+  `sys.executable -m pip`, so the only parser a Nix install could ever use was the English one in
+  its own closure. `pip` is now part of the package, and downloaded models — and the on-demand
+  tiers — install exactly as they do on every other platform.
+- The one exception is the **bundled** English model, whose copy lives in the read-only Nix store
+  and keeps taking precedence over any download. Updating it now says so, and says to update the
+  package instead, rather than reporting a permission error about a store path. The same message
+  covers a read-only app bundle or a root-owned site-packages.
+
+### Changed: the bundled English parser
+
+- The English model that ships with the app is now **`en_sud_ewt_gum`**, trained on SUD_English-EWT
+  plus the ten GUM genres (+66 % training tokens, 81.3 → 81.9 LAS on EWT's own test set). It is what
+  parses English text and what condenses each Wiktionary definition into a glossable phrase, whatever
+  language the document is in.
+- **`en_sud_ewt` is retired**: Manage Models no longer offers it. An environment built before this
+  change keeps the older wheel — the per-user venv is created once, so a changed requirements file
+  never reaches it — and keeps parsing English with it rather than losing English altogether. Such an
+  install can now **Remove** it in Manage Models (it used to show as un-removable "Bundled"), and the
+  new model is one Install away there; README's "Resetting an install" table has both routes. Nothing
+  picks the retired wheel over the bundled one any more, in the Insert-text language picker or in the
+  definition lookup, on a machine that has both.
+
 ### Fixes
 
 - A token can no longer end up with the "punct" dependency relation unless its UPOS is PUNCT —

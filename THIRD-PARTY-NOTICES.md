@@ -10,7 +10,7 @@ Runtime dependencies installed by `pip` (`requirements.txt`, `requirements-core.
 vendored and are not listed here; they are obtained under their own licences at install time. Four
 exceptions are worth naming up front, because `packaging/make_portable.sh` pip-installs them
 **straight into the shipped `.app`** rather than leaving them to an end-user install step —
-`en_sud_ewt` (pinned as a hard dependency rather than bundled the way every other model is), and
+`en_sud_ewt_gum` (pinned as a hard dependency rather than bundled the way every other model is), and
 three copyleft libraries, `wiktra`, `grewpy`, and `aksharamukha`. See "Bundled pip dependencies —
 the exceptions to 'pip deps aren't listed'" below for what each is, what it's used for, and under
 what licence.
@@ -227,6 +227,55 @@ grammars — fetching is not redistribution, only shipping a copy would be.
 |---|---|---|
 | `grewpy_backend` | [grew.fr](https://grew.fr) / [opam.grew.fr](https://opam.grew.fr) | CeCILL v2.1 |
 
+## Sanskrit lexicon (vidyut) — FETCHED AT RUNTIME, never shipped
+
+The Sanskrit model, `sa_sud_vedic_ufal_dcs` 0.2.0, carries no morphological lexicon of its own. Its
+tok2vec embedding layer, `sud.AnalyserFeatsEmbed.v1`, runs in `runtime = true` mode in the shipped
+config — meaning it asks **vidyut**'s `kosha` per token for the SET of analyses a form can have,
+rather than reading a frozen extract baked into the wheel at training time. So the wheel declares
+`vidyut>=0.4.0` (and `indic-transliteration>=2.3.0`) in its `Requires-Dist`, and the lexicon has to
+be present on whichever machine actually parses.
+
+Two separate things have to arrive, and only one of them is a package. `vidyut` itself is on PyPI as
+prebuilt abi3 wheels (macOS x86_64/arm64, manylinux, musllinux, win32/win_amd64 — so no Rust
+toolchain is needed on the user's machine), **MIT**, © 2022 ambuda.org. It is in neither
+`requirements-core.txt` nor `requirements.txt`: it installs on demand into the user's own extras
+directory, either as the model wheel's own declared requirement (which
+`models_registry._unsatisfied_requirements` honours when that model is downloaded) or as the
+`vidyut` tier in `app/extras.py`. The linguistic DATA the `kosha` reads is **on PyPI in no form at
+all** — upstream publishes it only as a GitHub release asset of ambuda-org/vidyut,
+`data-<version>.zip` (v0.4.0: 31,752,769 bytes compressed, ~81 MB unpacked, of which the `kosha/`
+subtree is ~78.6 MB — `kosha/padas.fst` 46.3 MB plus `kosha/registry.msgpack` 32.3 MB).
+`app/vidyut_data.py` fetches that archive on demand onto the **end user's own machine**, into
+`~/Library/Application Support/SUD Workbench/vidyut-data/`, deriving the URL from the installed
+`vidyut.__version__` and falling back to upstream's own `vidyut.download_data(path)`.
+
+**Here the reason for fetching rather than shipping is not a licence restriction, and it would be
+misleading to read this section as though it were another of the two above.** vidyut is MIT
+throughout — no copyleft, no NonCommercial term, no unlicensed content — so this project could
+redistribute both the package and the data bundle if it chose to. It does not, for two plainly
+practical reasons: upstream does not publish that data as a package at all (a release asset is not a
+PyPI artefact, and the wheel deliberately carries none of it), and the bundle is ~81 MB on disk in
+service of one language, which is larger than everything else this app ships put together. The
+*mechanism* is the same on-demand arrangement this file already documents for the Latin macron data
+and the grew backend above, and that `app/grammars.py` and `app/fa_vocab.py` also use — it is only
+the reason for reaching for it that differs.
+
+Attribution still runs to the sources vidyut itself built that bundle from, per the READMEs inside
+the archive: the `prakriya/` data was sourced from **ashtadhyayi.com**, whose author "graciously
+agreed to share these files with us under an MIT license", and `chandas/meters.tsv` came from
+Shreevatsa Rajagopalan's **Sanskrit metres** project, itself working from a transcription of the
+*Vṛttaratnākara* prepared by Dr Dhaval Patel. This app reads neither of those subtrees — only
+`kosha/`, which is vidyut's own build — but both arrive in the same archive on the user's disk, so
+both are named here.
+
+| Component | Origin | Licence |
+|---|---|---|
+| `vidyut` (the pip package) | [ambuda-org/vidyut](https://github.com/ambuda-org/vidyut) / [PyPI](https://pypi.org/project/vidyut/) | MIT (© 2022 ambuda.org) |
+| `data-<version>.zip` — the `kosha/` FST + registry this app reads | ambuda-org/vidyut release assets | MIT |
+| `prakriya/` data, in that same archive (unused here) | [ashtadhyayi.com](https://ashtadhyayi.com) | MIT, by that author's own grant to vidyut |
+| `chandas/meters.tsv`, in that same archive (unused here) | Shreevatsa Rajagopalan's Sanskrit metres, from Dr Dhaval Patel's *Vṛttaratnākara* transcription | MIT, as redistributed by vidyut |
+
 ## Bundled pip dependencies — the exceptions to "pip deps aren't listed"
 
 Four `pip` dependencies break the "not vendored, not listed" rule stated at the top of this file.
@@ -244,20 +293,36 @@ these packages as part of the formula's own bottle.)
 
 | Component | Licence | Real usage |
 |---|---|---|
-| `en_sud_ewt` | **CC BY-SA 4.0** | English SUD parser model wheel; `app/wiktionary.py` SUD-parses each Wiktionary definition to condense it into a glossable phrase |
+| `en_sud_ewt_gum` | **CC BY-SA 4.0** | English SUD parser model wheel; `app/wiktionary.py` SUD-parses each Wiktionary definition to condense it into a glossable phrase |
 | `wiktra` | **GPL-2.0** | `app/translit.py`'s default Latin-transliteration backend — a Python port of Wiktionary's own Lua translit modules |
 | `grewpy` | **CeCILL v2.1** | `app/convert.py`'s UD↔SUD↔mSUD conversion — the Python client that talks to the separately-fetched `grewpy_backend` OCaml binary (see "grew conversion backend" above) |
 | `aksharamukha` | **AGPL-3.0** | Sanskrit/Indic-script conversion in `app/translit.py`, `app/apte.py` (Apte dictionary lookup), and `app/itrans.py` (ITRANS input) |
 
-- **`en_sud_ewt`** is a derivative of **SUD_English-EWT**, a Surface-Syntactic Universal
-  Dependencies treebank itself derived from Universal Dependencies English-EWT. Per
+- **`en_sud_ewt_gum`** is a derivative of **SUD_English-EWT** and of **GUM**, the Georgetown
+  University Multilayer Corpus — the first a Surface-Syntactic Universal Dependencies treebank itself
+  derived from Universal Dependencies English-EWT, the second contributing ten of its genres
+  (academic, bio, conversation, court, interview, news, speech, textbook, vlog, voyage). Per
   [SunflowerAI/sud-spacy-parsers](https://github.com/SunflowerAI/sud-spacy-parsers)'s own
   `NOTICE.md`: "The relabelled treebanks committed here (…), the per-language gold sets, and the
   **released model wheels** are derivative works of [SUD] treebanks … distributed under Creative
   Commons Attribution-ShareAlike 4.0 International (CC BY-SA 4.0)." CC BY-SA's own attribution
-  requirement runs to the treebank, not just to Sunflower AI: that same `NOTICE.md` instructs
+  requirement runs to the treebanks, not just to Sunflower AI: that same `NOTICE.md` instructs
   readers to "cite the individual UD/SUD treebanks when using these models; their authors are
-  credited in each treebank's own `LICENSE.txt`" — here, SUD_English-EWT's.
+  credited in each treebank's own `LICENSE.txt`" — here, SUD_English-EWT's — and the wheel's own
+  `meta.json` asks the same of GUM: "Georgetown University Multilayer Corpus, Amir Zeldes and 300+
+  student annotators, who are listed per document at https://gucorpling.org/gum/ — please cite the
+  corpus and that site."
+  **The GUM half carries no NonCommercial term, which is why this wheel is bundled at all.** GUM's
+  five NonCommercial genres (essay, fiction, letter, podcast, whow) are **excluded** from it
+  upstream; the ten it does train on are, per the wheel's own `meta.json`, "annotations CC BY 4.0;
+  texts CC BY 4.0 / CC BY-SA 3.0 / CC BY 2.5 / public domain per source". So the merged wheel is
+  **CC BY-SA 4.0**, exactly as its `METADATA` and `meta.json` both declare and as the retired
+  `en_sud_ewt` was before it — a ShareAlike obligation and an attribution one, and no restriction on
+  commercial use. That is what makes it shippable: `packaging/make_portable.sh` pip-installs this
+  file straight into the app it distributes, so a NonCommercial term would have attached to the
+  whole bundle.
+  (It replaced **`en_sud_ewt`** — EWT alone — which this project no longer ships or offers; see
+  `app/models_registry.py`'s `RETIRED_SUD`.)
 - **`wiktra`** ([twardoch/wiktra2](https://github.com/twardoch/wiktra2), GPL-2.0) is instantiated as
   `wiktra.Transliterator()` and is the general-purpose romanizer for any language/script not routed
   to a dedicated backend (Cyrillic, Greek, Devanagari, and others) — `translit.py`'s

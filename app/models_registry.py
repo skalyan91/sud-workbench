@@ -37,7 +37,25 @@ GITHUB_API = f"https://api.github.com/repos/{SUD_REPO}/releases"
 # one is re-downloadable, but it isn't a user model choice to make: it silently disables the
 # Wiktionary → MGloss lookup for every language, and nothing in that feature's UI would connect the
 # two, so it reads as the definition lookup having quietly broken.
-BUNDLED_SUD = {"en_sud_ewt"}
+BUNDLED_SUD = {"en_sud_ewt_gum"}
+# The English model this app ships was `en_sud_ewt` (EWT alone) until `en_sud_ewt_gum` took over: same
+# language, same pipeline, +66 % training tokens (EWT plus the ten GUM genres upstream ships) and a
+# better score on EWT's own test set, so there is no reason to offer a NEW installer the smaller one.
+# It is RETIRED rather than deprecated or superseded, and the difference is what each set does to the
+# listings — see both of their own comments below:
+#   · not offered      — filtered out of list_available(), so nothing new installs it;
+#   · still LISTED when installed — unlike SUPERSEDED_SUD, because a machine that has this one has it
+#     from the CORE VENV (it was pinned in requirements-core.txt), where it will sit until something
+#     removes it. It used to be BUNDLED_SUD, i.e. deliberately un-removable; now that it isn't, the
+#     Model Manager row IS the Remove button, and hiding the row would strand the wheel on disk with
+#     nothing in the UI to say it is there;
+#   · still PARSES     — _installed_sud_packages() is untouched, exactly as for the two sets below, so
+#     an environment built before the switch keeps parsing English with what it has rather than losing
+#     English until the venv is rebuilt (README's "Resetting an install" table says how to force that).
+# It is merely de-PREFERRED where the app picks a model for a language on the reader's behalf
+# (_preference_key, resolve_default_package) — the picks that would otherwise take it purely because
+# `en_sud_ewt` sorts before `en_sud_ewt_gum` alphabetically and is the smaller download of the two.
+RETIRED_SUD = {"en_sud_ewt"}
 # Models the release still carries but this app no longer supports, hidden from list_available() —
 # yet still shown by list_installed()/merge_installed() if a machine genuinely has one on disk. That
 # asymmetry is the point: `sa_sud_vedic_ufal_csl` reads and writes Clay-Sanskrit-Library notation — a
@@ -509,7 +527,8 @@ def list_available(refresh: bool | str = False) -> list[dict]:
     for rel in _fetch_releases(refresh):
         for asset in rel.get("assets", []):
             entry = parse_asset(asset.get("name", ""))
-            if not entry or entry["package"] in DEPRECATED_SUD or entry["package"] in SUPERSEDED_SUD:
+            if not entry or entry["package"] in DEPRECATED_SUD or entry["package"] in SUPERSEDED_SUD \
+                    or entry["package"] in RETIRED_SUD:
                 continue
             entry["asset_url"] = asset.get("browser_download_url")
             entry["size"] = asset.get("size")
@@ -584,7 +603,7 @@ def _installed_sud_packages() -> set[str]:
     # A BUNDLED model is present by construction (requirements-core.txt pins it), so a metadata scan
     # that misses one is a packaging accident rather than a user choice — and the cost is not
     # cosmetic: the model dropdown (populateModels in js/io/models.js) is built from the INSTALLED
-    # list alone, so an unseen en_sud_ewt takes English parsing out of the menu altogether. Ask the
+    # list alone, so an unseen en_sud_ewt_gum takes English parsing out of the menu altogether. Ask the
     # import system directly for whatever BUNDLED_SUD names the scan didn't find: find_spec locates
     # the package on sys.path WITHOUT importing it, so it costs nothing and can't execute a broken
     # model's __init__. Deliberately not the same fallback for every model: a non-bundled package
@@ -730,11 +749,23 @@ def merge_installed(available: list[dict], installed: list[dict]) -> list[dict]:
 
 
 def resolve_default_package(lang: str) -> str | None:
-    """Best-effort: an installed ``<lang>_sud_*`` package for a bare language code."""
-    for pkg in sorted(_installed_sud_packages()):
-        if pkg.startswith(f"{lang}_sud_"):
+    """Best-effort: an installed ``<lang>_sud_*`` package for a bare language code.
+
+    Alphabetical order is the LAST word here, not the first: it is stable and that is all it is —
+    ``en_sud_ewt`` sorts before ``en_sud_ewt_gum`` and would have quietly kept answering for English on
+    every machine that still has the retired wheel beside the bundled one. So a BUNDLED package wins
+    outright (it is the one the app ships and the one every other default is stated against), then any
+    package that is not RETIRED, and only then whatever is left — a retired wheel still answers when it
+    is genuinely all this machine has, which is the same "keep parsing with what you have" posture
+    :func:`_installed_sud_packages` takes for the other two sets."""
+    pkgs = sorted(p for p in _installed_sud_packages() if p.startswith(f"{lang}_sud_"))
+    if not pkgs:
+        return None
+    for pkg in pkgs:
+        if pkg in BUNDLED_SUD:
             return pkg
-    return None
+    live = [p for p in pkgs if p not in RETIRED_SUD]
+    return (live or pkgs)[0]
 
 
 # ── which ONE model parses a given language (the Insert-text dialog's language picker) ───────
@@ -744,24 +775,32 @@ def resolve_default_package(lang: str) -> str | None:
 #
 #   1. a SUD (spaCy) parser over a Stanza one — ``engine``, always known, and the app's own scheme
 #      (a Stanza model is UD and has to be grew-converted, which needs the optional OCaml backend).
-#   2. the SMALLER model — ``size``, the GitHub release asset's own byte length (list_available reads
+#   2. a model that is not RETIRED — the one clause that is about the registry's own bookkeeping rather
+#      than about the models. A retired package is one this app no longer offers (see RETIRED_SUD), and
+#      it is ranked here because clause 3 would otherwise actively prefer it: `en_sud_ewt` is the
+#      SMALLER download precisely because it is trained on less, so "smaller is better" — a sound rule
+#      for two live models — reads backwards across a retirement. Below the engine clause, not above
+#      it: a retired SUD wheel is still a working spaCy parser needing no grew backend, so it still
+#      beats a Stanza model, exactly as it did before it was retired.
+#   3. the SMALLER model — ``size``, the GitHub release asset's own byte length (list_available reads
 #      it off the asset record). This is the ONLY size signal that exists: Stanza's resources index
 #      publishes no per-model download size at all (see _stanza_models, where ``size`` is None by
 #      construction), so this clause can only ever order SUD against SUD — which is exactly where it
 #      is wanted, clause 1 having already separated the engines. An unknown size sorts LAST within its
 #      engine group (a model we can measure is preferred to one we can't).
-#   3. the model trained on MORE sentences — ``train_sents``, the summed train splits of the model's
+#   4. the model trained on MORE sentences — ``train_sents``, the summed train splits of the model's
 #      UD treebanks (annotate_train_sentences). Known only for what the treebank-size cache already
 #      holds, since this runs cache-only; unknown counts as 0, i.e. sorts last.
 #
-# Being a strict priority order, clause 3 only ever breaks a tie clause 2 left — which, comparing exact
+# Being a strict priority order, clause 4 only ever breaks a tie clause 3 left — which, comparing exact
 # byte counts, it almost never does. That is what "in order of decreasing priority" asks for; it is
-# recorded here so the near-deadness of clause 3 reads as intended rather than as a bug.
+# recorded here so the near-deadness of clause 4 reads as intended rather than as a bug.
 def _preference_key(entry: dict) -> tuple:
     """Sort key for the preference order above — ascending, so ``sorted(...)[0]`` is the best model."""
     size = entry.get("size")
     have_size = isinstance(size, (int, float)) and size > 0
     return (0 if entry.get("engine") == "sud" else 1,
+            1 if entry.get("package") in RETIRED_SUD else 0,
             0 if have_size else 1, int(size) if have_size else 0,
             -int(entry.get("train_sents") or 0),
             entry.get("id") or "")                    # last resort: stable, so the pick never flickers
@@ -960,6 +999,106 @@ def _unsatisfied_requirements(wheel: str) -> list[str]:
     return out
 
 
+def _declares(package: str, requirement: str) -> bool:
+    """Does the INSTALLED distribution ``package`` declare a dependency on ``requirement``?
+
+    Read off the installed metadata rather than off the wheel file, which :func:`download` deletes
+    in its own ``finally``; and by requirement NAME rather than by substring, so a package merely
+    mentioning one in an extra's marker text can't answer yes."""
+    import importlib
+    try:
+        import importlib.metadata as md
+        from packaging.requirements import InvalidRequirement, Requirement
+    except ImportError:      # packaging comes in with spaCy; without it, decline rather than guess
+        return False
+    importlib.invalidate_caches()   # the install this is asked about may have landed a moment ago
+    # EXTRAS_DIR FIRST, EXPLICITLY, for the reason _remove_targeted's own comment gives: EXTRAS_DIR is
+    # APPENDED to sys.path, so an older copy of the same model sitting in the core venv (a developer's
+    # own manual `pip install`, or an install predating the declaration being asked about) wins an
+    # ambient lookup and would answer for the wheel that was just replaced.
+    specs = None
+    for search in ([EXTRAS_DIR], None):
+        try:
+            dists = md.distributions(path=search) if search else md.distributions()
+            for d in dists:
+                if (d.metadata["Name"] or "").replace("-", "_") == package.replace("-", "_"):
+                    specs = d.requires or []
+                    break
+        except Exception:  # noqa: BLE001 — unreadable metadata: fall through to the next search path
+            continue
+        if specs is not None:
+            break
+    for spec in specs or []:
+        try:
+            if Requirement(spec).name.lower() == requirement.lower():
+                return True
+        except InvalidRequirement:
+            continue
+    return False
+
+
+def _immutable_dist_dir(package: str) -> str:
+    """The read-only directory holding ``package`` OUTSIDE :data:`EXTRAS_DIR`, or "".
+
+    "Outside EXTRAS_DIR" because a copy inside it is the one this app just wrote and can rewrite;
+    what matters here is a copy somewhere the app does not own, which — being earlier on
+    ``sys.path`` — is the one every ``import`` resolves to. A Nix store path is the case this was
+    written for, but the test is plain writability, so a read-only app bundle or a root-owned
+    system site-packages answers the same way."""
+    import importlib.metadata as md
+    root = os.path.realpath(EXTRAS_DIR)
+    try:
+        for d in md.distributions():
+            if (d.metadata["Name"] or "").replace("-", "_") != package.replace("-", "_"):
+                continue
+            loc = getattr(d, "_path", None) or getattr(d, "locate_file", lambda _: None)("")
+            if loc is None:
+                continue
+            p = os.path.realpath(str(loc))
+            p = p if os.path.isdir(p) else os.path.dirname(p)
+            if p.endswith(".dist-info"):
+                p = os.path.dirname(p)
+            if p == root or p.startswith(root + os.sep):
+                continue                      # our own extras copy — writable by construction
+            if not os.access(p, os.W_OK):
+                return p
+    except Exception:  # noqa: BLE001 — unreadable metadata: fall through to the pip attempt
+        return ""
+    return ""
+
+
+def _ensure_side_data(package: str, note, progress=None) -> str:
+    """Install the on-demand DATA a just-installed model needs, returning "" or a warning phrase.
+
+    Today that is the ``vidyut`` tier and nothing else. The PIP half of vidyut is already done by
+    the time this runs — it is in the Sanskrit wheel's own ``Requires-Dist``, which
+    :func:`_unsatisfied_requirements` honours — but its ~81 MB LEXICON is on PyPI in no form at all,
+    and it is what ``sud.AnalyserFeatsEmbed.v1`` reads PER TOKEN in the ``runtime = true`` mode the
+    shipped Sanskrit config uses. That layer RAISES rather than degrading when the lexicon is
+    absent (deliberately, in its own words: otherwise "every token reads 'silent' and the model
+    quietly parses worse instead of failing"), so a model installed without it parses NOTHING. Same
+    courtesy, for the same reason, as the Stanza branch in :func:`download` installing the Stanza
+    LIBRARY before a Stanza model: a model with nothing behind it downloads perfectly and then does
+    nothing at all, which is exactly how that fault gets reported.
+
+    Asked of the PACKAGE'S OWN DECLARATION rather than of a hard-coded ``sa_`` prefix — the wheel is
+    what knows whether it needs vidyut, so a second Sanskrit model (or a non-Sanskrit one that gains
+    the same embedding layer) is covered without editing a list here.
+
+    A failure is a WARNING, never an error: the wheel itself installed correctly, and reporting that
+    as a failed model install would send a reader to re-download 20 MB that is already on disk."""
+    if not _declares(package, "vidyut"):
+        return ""
+    from . import extras
+    if extras.available("vidyut"):
+        return ""
+    note(None, "Fetching the Sanskrit lexicon…")
+    r = extras.install("vidyut", progress=progress)
+    if r.get("error"):
+        return "its Sanskrit lexicon did not: " + r["error"]
+    return ""
+
+
 def _ensure_tokenizer_deps(package: str, progress=None, declared=()) -> dict:
     """After a SUD model is installed, make sure its raw-text tokeniser dependency is
     present by probing the model and running whatever install steps its ImportError
@@ -1146,8 +1285,20 @@ def download(model_id: str, progress=None) -> dict:
                 _save_model_version(pkg, (parse_asset(filename) or {}).get("version") or "")  # see the
                 # save just below the real-reinstall branch for why this is recorded even here: this
                 # IS the moment the MD5 match confirms "what's on disk right now is THIS exact wheel"
+                #
+                # …BUT STILL ANSWER FOR THE SIDE DATA, which is a separate fact about this machine
+                # from which wheel is on disk. The md5 match says "the model files here are already
+                # the ones this download would write" — it says nothing about the ~81 MB lexicon the
+                # model reads at inference, and an install that predates this app fetching that
+                # lexicon is EXACTLY the state a reader is in when they press Install/Update on a
+                # Sanskrit model that parses nothing. Returning "Already up to date" without looking
+                # would send them away with the one thing they came for still missing.
+                w = _ensure_side_data(pkg, note, progress)
                 note(100, "Already up to date")
-                return {"ok": True, "id": model_id, "unchanged": True}
+                out = {"ok": True, "id": model_id, "unchanged": True}
+                if w:
+                    out["warning"] = "The model is up to date, but " + w
+                return out
 
             note(None, "Installing…")
             # Install into the USER extras dir (like the on-demand tiers), never the app's own
@@ -1204,6 +1355,7 @@ def download(model_id: str, progress=None) -> dict:
             except OSError:
                 pass
         _invalidate_parse_cache(pkg)
+        vidyut_warning = _ensure_side_data(pkg, note, progress)
         note(None, "Checking tokeniser…")   # install the model's raw-text tokeniser backend if it needs one
         dep = _ensure_tokenizer_deps(pkg, progress=progress, declared=declared)
         core_warning = ""
@@ -1225,18 +1377,38 @@ def download(model_id: str, progress=None) -> dict:
             # everything above has already succeeded: a failure here (e.g. a genuinely read-only core
             # venv) is reported as a warning, not an error — the extras half of the update did
             # succeed, and the OLD but WORKING bundled copy is what keeps parsing rather than nothing.
-            try:
-                out = subprocess.run([sys.executable, "-m", "pip", "uninstall", "-y", pkg],
-                                     capture_output=True, text=True)
-                low = ((out.stdout or "") + (out.stderr or "")).lower()
-                if out.returncode != 0 and "not installed" not in low:
-                    core_warning = "the bundled copy could not be replaced: " + (out.stderr or out.stdout).strip()
-            except Exception as exc:  # noqa: BLE001
-                core_warning = f"the bundled copy could not be replaced: {exc}"
+            #
+            # ⚠ AND ON AN IMMUTABLE INSTALL THERE IS NOTHING TO UNINSTALL, so say that instead of
+            # relaying pip's own account of why it could not. A Nix build (default.nix) puts the
+            # bundled model in `/nix/store`, which is read-only BY DESIGN and not a fault to report
+            # as one — pip would answer with a permission error about a store path, which reads as
+            # a broken install rather than as "this build's model is part of the package". The
+            # download itself SUCCEEDED and is sitting in EXTRAS_DIR; it simply cannot win name
+            # resolution while the immutable copy is on sys.path ahead of it. Tested by asking
+            # whether the directory is WRITABLE rather than by looking for `/nix/store` — a
+            # read-only app bundle, a root-owned system site-packages and a Nix store are the same
+            # situation, and a path test would recognise only one of them.
+            frozen = _immutable_dist_dir(pkg)
+            if frozen:
+                core_warning = (
+                    f"this build's own copy is in a read-only directory ({frozen}) and cannot be "
+                    "replaced while the app is running, so it keeps taking precedence over the "
+                    "download. Update the package that provides it instead (on Nix, update the "
+                    "sud-workbench derivation).")
+            else:
+                try:
+                    out = subprocess.run([sys.executable, "-m", "pip", "uninstall", "-y", pkg],
+                                         capture_output=True, text=True)
+                    low = ((out.stdout or "") + (out.stderr or "")).lower()
+                    if out.returncode != 0 and "not installed" not in low:
+                        core_warning = "the bundled copy could not be replaced: " + (out.stderr or out.stdout).strip()
+                except Exception as exc:  # noqa: BLE001
+                    core_warning = f"the bundled copy could not be replaced: {exc}"
         note(100, "Installed")
         result = {"ok": True, "id": model_id}
         warnings = [w for w in (
             ("its tokeniser dependency did not: " + dep.get("error", "")) if not dep.get("ok") else "",
+            vidyut_warning,
             core_warning,
         ) if w]
         if warnings:

@@ -64,7 +64,7 @@
   already resolved to, not the exact revision this file was verified against. That matters here
   specifically because `python3Packages.spacy` must be in `[3.8.14, 3.9.0)` — see "NIXPKGS
   REVISION" below for why — so this file ASSERTS that range at eval time (a clear error naming
-  what's wrong, rather than a build that succeeds and then fails to load `en_sud_ewt` later, or
+  what's wrong, rather than a build that succeeds and then fails to load `en_sud_ewt_gum` later, or
   worse, silently loads it against a spaCy it wasn't validated against). If you hit that assertion,
   either pin your channel to (or newer than) the nixpkgs revision named below, or wait for your
   channel to catch up to a nixpkgs commit in that spaCy range. A flake user (`nix build`/`nix run`
@@ -78,7 +78,10 @@
   environment is not a variable to hedge against, it's an INPUT the derivation declares and Nix
   builds hermetically. So this derivation does the opposite of every other packaging/ script on
   purpose — every dependency (interpreter, every pip package, every system library) is built or
-  fetched by Nix itself, with no runtime `pip install` step anywhere. `app/mac/` (AppKit/PyObjC)
+  fetched by Nix itself, with no runtime `pip install` step needed to STAND THE APP UP. That is a
+  claim about the app's own closure, not a ban on pip: downloading a parser model is a thing the
+  USER does at runtime, on any platform, and `py.pip` is in `propagatedBuildInputs` precisely so
+  they can — see "MODELS ARE DOWNLOADABLE HERE" below. `app/mac/` (AppKit/PyObjC)
   and `app/win/` (WinForms/DWM/pythonnet) are native-shell code for platforms Nix doesn't target;
   this file never imports them (`app/__main__.py`'s own `sys.platform` dispatch already keeps
   them out of the Linux code path — see `IS_MAC`/`IS_WIN`/`IS_LINUX` there). `app/linux/shell.py`
@@ -93,17 +96,45 @@
   designed to run and degrade gracefully with all four absent (a toast, not a crash; see
   `app/extras.py`'s own docstring and CLAUDE.md's "Parsing, models, and on-demand extras"). Adding
   torch to a from-source Nix closure is a real, separate undertaking (CUDA/ROCm/CPU variant
-  matrix, multi-GB build) out of scope here too. A NixOS/Home-Manager user who wants Stanza can
-  still let `app/extras.py` pip-install it into `~/.local/share/SUD Workbench/site-packages` at
-  runtime exactly as any other Linux distro's user would — this derivation doesn't block that, it
-  just doesn't pre-build it.
+  matrix, multi-GB build) out of scope here too. A NixOS/Home-Manager user who wants one of those
+  tiers can still let `app/extras.py` pip-install it into `~/.local/share/SUD Workbench/
+  site-packages` at runtime exactly as any other Linux distro's user would — this derivation
+  doesn't block that, it just doesn't pre-build it.
+
+  MODELS ARE DOWNLOADABLE HERE, AND `py.pip` IS THE ONE LINE THAT MAKES THAT TRUE. The paragraph
+  above USED to make that same "a user can still pip-install it at runtime" claim while nothing in
+  this closure could run pip at all, so it was false — measured, not merely suspected: nixpkgs
+  builds CPython with `--without-ensurepip` (unconditional, in `pkgs/development/interpreters/
+  python/cpython/default.nix`), so `sys.executable -m pip` answers `No module named pip` unless pip
+  is a package IN THE SAME python environment. And `app/models_registry.py`'s `download()` shells
+  out to exactly that, for every SUD model wheel and for whatever a wheel's own `Requires-Dist`
+  turns out to need, as does every pip tier in `app/extras.py`. So a Nix install could offer a
+  model list, let a reader press Install, and fail — the ONLY model it could ever parse with was
+  the one bundled in this closure. `py.pip` in `propagatedBuildInputs` (below) is what fixes it:
+  `wrapPythonPrograms` puts propagated inputs on the launcher's `PYTHONPATH`, which is the same
+  thing `python312.withPackages (ps: [ ps.pip ])` does and the reason a bare `nix shell
+  nixpkgs#python312 nixpkgs#python312Packages.pip` does NOT work (two store paths, only `bin/` is
+  merged). Verified in a `nixos/nix` container on aarch64-linux, both halves.
+
+  ⚠ AND A PREBUILT MANYLINUX WHEEL LOADS HERE AS-IS — no `LD_LIBRARY_PATH` prefix, no `nix-ld`, no
+  `autoPatchelf`, which is the opposite of what the usual NixOS folklore about foreign binaries
+  would lead you to expect, so it was measured rather than assumed. `pip install --target` of
+  `vidyut` (the Sanskrit model's Rust-backed morphological lexicon — see `app/vidyut_data.py`)
+  followed by `import vidyut; vidyut.lipi.transliterate("rāma", Iast, Devanagari)` answers `राम` in
+  a plain `python312.withPackages` environment. Reading that `.so`'s dynamic section says why:
+  `DT_NEEDED` is `libgcc_s.so.1`, `librt`, `libpthread`, `libm`, `libdl`, `libc` and the loader —
+  all glibc-family, and all already mapped into the process by this closure's own CPython, so they
+  resolve by soname from the loaded set rather than by searching a path. There is no RUNPATH and it
+  does not need one. A wheel that pulls a genuinely FOREIGN library (torch's CUDA stack being the
+  obvious one) is a different question and is not answered by this; the `stanza` tier stays
+  out-of-scope exactly as the paragraph above says.
 
   NIXPKGS REVISION THIS WAS VERIFIED AGAINST: `NixOS/nixpkgs` commit
   `a769e26b6c0948d1b5b4e9f52533f49110a1e795` (`master`, 2026-08-11) — at this revision,
   `python312Packages.spacy` is version **3.8.14**, matching `requirements-core.txt`'s
   `spacy==3.8.14` pin EXACTLY (verified by reading `pkgs/development/python-modules/spacy/
-  default.nix` at this commit, not assumed) — which matters because the bundled `en_sud_ewt` model
-  wheel declares `Requires-Dist: spacy<3.9.0,>=3.8.14` and pip refuses to resolve a looser spaCy
+  default.nix` at this commit, not assumed) — which matters because the bundled `en_sud_ewt_gum`
+  model wheel declares `Requires-Dist: spacy<3.9.0,>=3.8.14` and pip refuses to resolve a looser spaCy
   against it (see requirements-core.txt's own comment on that exact pin). A flake user gets this
   exact revision via flake.lock; a non-flake caller is asserted against the same range (see above)
   rather than silently trusting their own channel.
@@ -156,7 +187,7 @@
     folklore.
   · Everything else requirements-core.txt names that nixpkgs does NOT package —
     conllu, aksharamukha, indic-transliteration, ToJyutping, opencc-python-reimplemented,
-    hangul-romanize, uroman, grewpy, en_sud_ewt, and wiktra's own two undeclared PyPI dependencies
+    hangul-romanize, uroman, grewpy, en_sud_ewt_gum, and wiktra's own two undeclared PyPI dependencies
     (pywikiapi, yaplon) plus TWO of yaplon/indic-transliteration's own further-transitive
     dependencies nixpkgs doesn't carry either (orderedattrdict, backports.functools_lru_cache),
     plus pywikiapi's own declared `responses` dependency — is hand-packaged below as a plain
@@ -261,7 +292,7 @@ let
   py = python3.pkgs;
 
   # A non-flake caller supplies THEIR OWN pkgs, so there is no flake.lock to guarantee the spaCy
-  # version en_sud_ewt was built against (see the file header's "ONE REAL TRADE-OFF" note) — fail
+  # version en_sud_ewt_gum was built against (see the file header's "ONE REAL TRADE-OFF" note) — fail
   # loudly and specifically here, at eval time, rather than let a mismatched spaCy build "succeed"
   # and only misbehave once the app actually tries to load the bundled model.
   spacyOk = lib.versionAtLeast py.spacy.version "3.8.14" && lib.versionOlder py.spacy.version "3.9.0";
@@ -390,25 +421,31 @@ let
     '';
   };
 
-  enSudEwt = py.buildPythonPackage {
-    pname = "en_sud_ewt";
-    version = "0.1.0";
+  enSudEwtGum = py.buildPythonPackage {
+    pname = "en_sud_ewt_gum";
+    version = "0.2.0";
     format = "wheel";
     src = pkgs.fetchurl {
-      url = "https://github.com/SunflowerAI/sud-spacy-parsers/releases/download/v0.1.0/en_sud_ewt-0.1.0-py3-none-any.whl";
+      url = "https://github.com/SunflowerAI/sud-spacy-parsers/releases/download/v0.2.0/en_sud_ewt_gum-0.2.0-py3-none-any.whl";
       # Not on PyPI (it's a GitHub Release asset — see requirements-core.txt's own comment
       # on why: SUD-spaCy model wheels are published there, not to PyPI).
-      sha256 = "15b79dc12ca36c5840f57c622bc80b5b815e3755aa4cff78be49788291072041";
+      sha256 = "bafc616fd75c74bb847d5b04cd6932525b715988a4efaf364627c54936b6d1c3";
     };
     propagatedBuildInputs = [ py.spacy ];
     doCheck = false;
-    pythonImportsCheck = [ "en_sud_ewt" ];
+    pythonImportsCheck = [ "en_sud_ewt_gum" ];
     meta.license = "CC-BY-SA-4.0";
     meta.longDescription = ''
       The one model this app ships WITH rather than downloads on demand — needed by
       app/wiktionary.py to SUD-parse Wiktionary definition prose regardless of the open
       document's own language. Requires spacy>=3.8.14,<3.9.0 per its own METADATA — see
       the file header's spaCy-range assertion, which this derivation depends on holding.
+
+      Was `en_sud_ewt` 0.1.0 until that wheel was retired (app/models_registry.py's
+      RETIRED_SUD): same pipeline, trained on SUD_English-EWT PLUS the ten GUM genres
+      whose sources upstream keeps free of the NonCommercial restriction, so this wheel
+      too declares CC BY-SA 4.0 in its own METADATA. The sha256 above is of the release
+      asset itself, taken with `shasum -a 256` over the downloaded wheel.
     '';
   };
 
@@ -582,7 +619,7 @@ let
   # ── the full CORE runtime closure, mirroring requirements-core.txt line for line ──────
   coreDeps = [
     pywebview py.pygobject3 py.pycairo conllu
-    py.spacy py.click enSudEwt
+    py.spacy py.click enSudEwtGum
     grewpy
     wiktra
     py.requests py.beautifulsoup4 py.pypinyin
@@ -590,6 +627,19 @@ let
     hangul-romanize uroman
     py.fasttext   # substitutes fasttext-wheel==0.9.2 — see file header
   ];
+
+  # RUNTIME TOOLING — deliberately a separate list from coreDeps, because nothing in `app/`
+  # imports it. `pip` is here so a Nix user can DOWNLOAD PARSER MODELS (Manage Models →
+  # `models_registry.download` → `sys.executable -m pip install --target $XDG_DATA_HOME/SUD
+  # Workbench/site-packages <wheel>`) and install the on-demand tiers, neither of which this
+  # closure pre-builds. See "MODELS ARE DOWNLOADABLE HERE" in the file header for the measurement
+  # behind it and for why a separate `python312Packages.pip` in a `nix shell` is not the same
+  # thing. Just `pip`, not `setuptools`/`wheel` alongside it: every model asset and every
+  # declared requirement this app installs is a WHEEL, which pip unpacks with no build backend at
+  # all, and pip's own build isolation fetches setuptools itself for the one `git+` spec in the
+  # `stanza` tier — so pinning build tools here would be adding closure for a case that is either
+  # already handled or already out of scope.
+  runtimeTools = [ py.pip ];
 
   sud-workbench = py.buildPythonApplication {
     pname = "sud-workbench";
@@ -617,7 +667,7 @@ let
       pkgs.gtk3 pkgs.webkitgtk_4_1 pkgs.glib-networking pkgs.gdk-pixbuf pkgs.adwaita-icon-theme
     ];
 
-    propagatedBuildInputs = coreDeps;
+    propagatedBuildInputs = coreDeps ++ runtimeTools;
 
     # Heredoc body below (the LAUNCHER block) is deliberately flush against the left margin,
     # not indented to match the surrounding Nix source — see the historical note on flake.nix
