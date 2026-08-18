@@ -1497,6 +1497,26 @@ six do — follow that when adding another.
   first-launch scripts, now parse-checked (not run) with a real `pwsh` — see below;
   `sud-workbench.iss` is the Inno Setup installer (per-user, unsigned), still never compiled.
 
+⚠️ **A RELEASE IS NOT FINISHED WHEN THE TAG IS PUSHED — THE HOMEBREW TAP IS A SEPARATE REPOSITORY.**
+macOS users install from `skalyan91/homebrew-sud-workbench`, which holds a **Formula** (not a Cask, on
+purpose: the app is unsigned, so a Cask would hand Gatekeeper a quarantined prebuilt binary, while a
+Formula builds from source on the installing machine and never picks up `com.apple.quarantine`). That
+formula pins the version by URL — `url ".../archive/refs/tags/vX.Y.Z.tar.gz"` plus that tarball's
+`sha256` — and publishing a release here touches neither, so `brew upgrade` goes on comparing the
+installed version against a formula still naming the previous tag and correctly does nothing.
+`.github/workflows/bump-homebrew-tap.yml` now rewrites those two lines on every `release: published`
+(and by hand via `workflow_dispatch` with a tag); it needs a repository secret **`HOMEBREW_TAP_TOKEN`**
+— a fine-grained PAT with Contents: write on the tap — because the default `GITHUB_TOKEN` cannot push
+to another repository. It fails loudly without one, which is the right failure: a release that
+silently never reached Homebrew users is what it exists to prevent.
+
+⚠️ **The four release assets are built by hand, and one of the scripts will eat the others.**
+`packaging/linux/make_rpm.sh` opens with `rm -rf "$OUT_DIR"`, so pointing it at the shared `dist/`
+deletes the `.deb`, the Windows payload and the macOS bundle already sitting there — give each build
+its own output directory, or run the RPM first. `make_deb.sh` additionally needs an ABSOLUTE output
+path: it passes `$OUT_DIR` straight to `docker run -v`, and a relative one is refused as an invalid
+volume name. Both Linux packages need Docker (`ubuntu:24.04` / `fedora:41`).
+
 ⚠️ **Each bundle ships only its own chrome kit**, and every build fails if another platform's
 survives. For macOS dropping `win11-kit/` is a size decision. For Windows *and Linux* dropping
 `macos-kit/` is a **licensing** one: eight of `mac-tokens.css`'s `--sf-*` masks are real SF Symbols

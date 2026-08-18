@@ -1,0 +1,105 @@
+# Point the Homebrew tap at each new release, the moment it is published.
+#
+# WHY THIS EXISTS AT ALL: the macOS distribution is a FORMULA in a separate repository
+# (skalyan91/homebrew-sud-workbench), and it pins the version by URL — `url ".../tags/vX.Y.Z.tar.gz"`
+# plus that tarball's sha256. Publishing a release here touches none of that, so `brew upgrade` went
+# on comparing the installed version against a formula still naming the previous tag and correctly
+# concluded there was nothing to do. Every release therefore needs the tap bumped too, and doing it
+# by hand is exactly the step that gets forgotten.
+#
+# A FORMULA, NOT A CASK, is the tap's own deliberate choice (see the comment at the top of the
+# formula): the app is unsigned, so a Cask would hand Gatekeeper a quarantined prebuilt binary,
+# while a Formula builds from source on the installing machine. That is why this workflow bumps a
+# source tarball's URL and hash rather than a release asset's.
+name: Bump the Homebrew tap
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to point the formula at (e.g. v0.3.8)"
+        required: true
+
+# The default GITHUB_TOKEN is scoped to THIS repository and cannot push to the tap, so this needs a
+# token that can: a fine-grained PAT with Contents: read and write on skalyan91/homebrew-sud-workbench,
+# stored here as the repository secret HOMEBREW_TAP_TOKEN. Without it the job fails loudly on the
+# checkout step, which is the right failure — a release that silently did not reach Homebrew users is
+# the very thing this workflow exists to prevent.
+env:
+  TAP_REPO: skalyan91/homebrew-sud-workbench
+  FORMULA: Formula/sud-workbench.rb
+
+jobs:
+  bump:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Resolve the tag
+        id: t
+        run: |
+          set -euo pipefail
+          TAG="${{ github.event.release.tag_name || inputs.tag }}"
+          [ -n "$TAG" ] || { echo "::error::no tag to bump to"; exit 1; }
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Hash the source tarball
+        id: h
+        run: |
+          set -euo pipefail
+          URL="https://github.com/${{ github.repository }}/archive/refs/tags/${{ steps.t.outputs.tag }}.tar.gz"
+          # -f so a missing tag is a failed job rather than a hash of an error page; this is the same
+          # artefact Homebrew itself will fetch later, so the hash is taken from the real thing.
+          curl -fsSL "$URL" -o src.tar.gz
+          echo "url=$URL" >> "$GITHUB_OUTPUT"
+          echo "sha=$(sha256sum src.tar.gz | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+
+      - name: Check out the tap
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.TAP_REPO }}
+          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          path: tap
+
+      - name: Rewrite the formula
+        id: w
+        working-directory: tap
+        run: |
+          set -euo pipefail
+          F="${{ env.FORMULA }}"
+          [ -f "$F" ] || { echo "::error::$F not found in ${{ env.TAP_REPO }}"; exit 1; }
+          # Anchored on the two lines that carry the version, and BOTH must match — a formula that has
+          # been restructured should stop this workflow rather than be edited on a guess.
+          grep -qE '^\s*url "https://github.com/[^"]+/archive/refs/tags/v[^"]+\.tar\.gz"' "$F" \
+            || { echo "::error::no tagged-tarball url line in $F"; exit 1; }
+          grep -qE '^\s*sha256 "[0-9a-f]{64}"' "$F" || { echo "::error::no sha256 line in $F"; exit 1; }
+          perl -0pi -e 's{^(\s*url ")https://github\.com/[^"]+/archive/refs/tags/v[^"]+\.tar\.gz(")}{$1${{ steps.h.outputs.url }}$2}m' "$F"
+          perl -0pi -e 's{^(\s*sha256 ")[0-9a-f]{64}(")}{${1}${{ steps.h.outputs.sha }}$2}m' "$F"
+          # A bad substitution that still parses is the dangerous one, so check both: the file is valid
+          # Ruby, and it really does now name this tag.
+          ruby -c "$F"
+          grep -q "${{ steps.h.outputs.url }}" "$F" || { echo "::error::url did not take"; exit 1; }
+          grep -q "${{ steps.h.outputs.sha }}" "$F" || { echo "::error::sha256 did not take"; exit 1; }
+          if git diff --quiet -- "$F"; then echo "changed=no" >> "$GITHUB_OUTPUT";
+          else echo "changed=yes" >> "$GITHUB_OUTPUT"; fi
+
+      - name: Commit and push
+        if: steps.w.outputs.changed == 'yes'
+        working-directory: tap
+        run: |
+          set -euo pipefail
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -qam "Bump sud-workbench to ${{ steps.t.outputs.tag }}"
+          git push
+
+      - name: Say what happened
+        run: |
+          if [ "${{ steps.w.outputs.changed }}" = "yes" ]; then
+            echo "### Tapped ${{ steps.t.outputs.tag }} :beer:" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "### Tap already at ${{ steps.t.outputs.tag }} — nothing to do" >> "$GITHUB_STEP_SUMMARY"
+          fi
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "\`${{ steps.h.outputs.sha }}\`" >> "$GITHUB_STEP_SUMMARY"
