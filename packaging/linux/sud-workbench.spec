@@ -33,7 +33,7 @@
 # (an ImportError three menus deep, not a `dnf install` error), which is worse than getting it wrong
 # at build time.
 
-%global app_version 0.3.7
+%global app_version 0.3.8
 
 Name:           sud-workbench
 Version:        %{app_version}
@@ -211,6 +211,10 @@ update-desktop-database %{_datadir}/applications &>/dev/null || :
 gtk-update-icon-cache %{_datadir}/icons/hicolor &>/dev/null || :
 
 %changelog
+* Wed Aug 19 2026 Siva Kalyan - 0.3.8-1
+- Rendering and scrolling fixes: complex-script shaping, diagram alignment, enlarged-script
+  geometry, stemma label de-collision, Sanskrit sandhi, and wheel ownership.
+
 * Mon Aug 17 2026 Siva Kalyan - 0.3.7-1
 - A "punct" deprel on a non-PUNCT token is now strictly forbidden, not just flagged -- enforced
   unconditionally, including the automatic relation the app computes for a re-headed token. See

@@ -2,6 +2,82 @@
 
 All notable changes to SUD Workbench are documented in this file.
 
+## [0.3.8] — 2026-08-19
+
+A rendering and scrolling fix release: complex scripts shape reliably, diagrams line up with the
+sentence above them, and the wheel always has somewhere to go.
+
+### Fixed: complex scripts shape on the first try
+
+- Picking a script the session had not used before left every glyph on the old HTML fallback until
+  you switched to another script and back. The re-render that follows a batch of freshly shaped
+  glyphs dropped the measurement cache but not the **diagram cache**, so the already-drawn sentence
+  was handed straight back, unchanged, on every later render.
+- **Rañjanā drew as Devanagari** in the arcs view. Rañjanā is written in Devanagari code points, so
+  asking what script a word is in gives the right answer and the wrong face; the shaping now follows
+  the same font override the rest of the app does. Two bugs sat on top of each other here — once the
+  right family was asked for, no font bytes arrived for it either, because Nithya Ranjana is not on
+  Google Fonts at all. It and the six bundled script faces are read straight off disk now.
+- **Punctuation beside a magnified script** — the daṇḍa in particular — was drawn by a different
+  rendering path than the words it stands with, and sat visibly higher than them. Both are seated on
+  one baseline again.
+
+### Fixed: diagrams line up with the running sentence
+
+- **Hierarchies** sat at a different left edge in almost every block: a node backlight was sized from
+  the word alone while the feature matrix under it is wider, so the bracket hung outside its own
+  node and outside the alignment with it. Measured across one document, the visible left edge varied
+  by 28 px block to block; it now varies by less than a pixel.
+- **Wrapped brackets** hung their opening bracket clear of the sentence, because the alignment bound
+  on the first token rather than on the bracket that opens the row.
+- A wrapped block whose content starts inside its own box could not be pulled left at all, and sat
+  up to 29 px right of the sentence while its neighbours sat on it.
+
+### Fixed: enlarged scripts (Sanskrit, Literary Chinese)
+
+- A hierarchy edge **ran down into the letters** of the node it arrives at — measured just under 4 px
+  of overlap at 1.5×, against a pixel of clearance at ordinary size.
+- **Multi-word tokens were drawn larger than the tokens they span** in stemmas and hierarchies, where
+  the node glyphs were a step smaller than every measurement about them assumed.
+- Hierarchy levels now grow with the glyphs, so an edge keeps its full height rather than being eaten
+  from both ends by a magnified face.
+
+### Fixed: stemmas
+
+- A stemma spread wide enough by its own label spacing now **wraps** instead of running off the right
+  edge — the wrap budget was measured against the window without allowing for the block indent.
+- Two labels on **crossing edges with different heads** were drawn on top of each other. They are now
+  lifted clear and tied back to their edge with a leader, the way the arcs view already does. Labels
+  on one shared head keep separating horizontally, as before.
+
+### Fixed: Sanskrit sandhi
+
+- The CSL transliteration row writes `vāg-vidāṃ`, not `vāc-vidāṃ`: a word-final palatal voices before
+  a voiced sound, which the display path was not doing even though the multi-word-token fusion beside
+  it already did.
+- A multi-word token that opens after a daṇḍa is no longer fused with the word on the other side of
+  it. `manobhuvā |` followed by `aṅkastha…` was losing that word's own initial vowel to a coalescence
+  across the verse break.
+
+### Fixed: scrolling
+
+- **The page would not scroll while the pointer rested on a diagram** that had no room to scroll of
+  its own — which is most diagrams, most of the time. Those panes suppress the browser's own scroll
+  chaining so the app can supply a better one, and a pane with nothing to scroll simply swallowed the
+  gesture instead.
+- Chaining now works with a **trackpad**, not only with a mouse: a pane that ran out of room part way
+  through one continuous gesture kept the wheel for the rest of it.
+- A pane can be scrolled even when the **page itself is at its end**, and the fixed tree overview of a
+  wrapped block drives the page rather than absorbing the gesture.
+
+### Also
+
+- Seam markers are no longer drawn on stemma or hierarchy nodes, or in the outline: they mark where a
+  word continues into the token beside it, which is a claim about a line of text, not about a node
+  placed by depth. The stemma keeps them on its baseline word row.
+- A seam marker stands off its word by one letter-space, and the inline editors carry the letter
+  spacing of the row they open over, instead of re-spacing the text the moment it is clicked into.
+
 ## [0.3.7] — 2026-08-17
 
 ### Added: the Sanskrit parser's lexicon is installed for you
