@@ -53,6 +53,46 @@ if(typeof ResizeObserver!=="undefined"){
 // its bound the next scroll in that direction chains to the document. The +1px tolerance also means a phantom-1px
 // scroller counts as fully scrolled → it never traps the wheel. Scrolling down toward a block whose top is still
 // below the viewport pulls the page to it first.
+/* ⚠ HAS THE PAGE ANYWHERE TO GO IN THIS DIRECTION? Chaining is only meaningful while it has: without this the
+   "the block is not on screen enough, so the page owns the gesture" rules below could hand the wheel to a
+   document already at its bound, leaving NOTHING scrolling at all. Measured with trusted wheels on a wrapped
+   hierarchy at the very bottom of a document: `#doc.scrollTop` 1945 of a 1945 maximum, its token strip holding
+   99px of unscrolled content, `blockFullyInView` false — the pane was ruled out, the chain drove a page that
+   could not move, and three further wheels left the strip at 0. The pane gets the wheel back in exactly that
+   case; it is the only owner left that can act on it.
+   ⚠️ DIRECTIONAL, not "the page is at either end": a document parked at its bottom must still chain UPWARD
+   normally, and does — `dy` picks the bound actually in the gesture's way. A zero/horizontal delta answers
+   false, leaving those gestures exactly as they were. */
+function pageAtBound(docEl,dy){
+  if(!(dy>0)&&!(dy<0)) return false;
+  return dy>0 ? docEl.scrollTop>=docEl.scrollHeight-docEl.clientHeight-1 : docEl.scrollTop<=0; }
+/* …and the SAME question of an inner scroller: has THIS pane run out of room in the direction the gesture is
+   going. Written out inline in the first-event branch since this mechanism was built; factored out because the
+   per-event re-check needs the identical test and a second copy would be one more thing to keep in step. Same
+   directional shape as pageAtBound: a zero/horizontal delta answers false. */
+function paneAtBound(sc,dy){
+  if(!(dy>0)&&!(dy<0)) return false;
+  return dy>0 ? sc.scrollTop+sc.clientHeight>=sc.scrollHeight-1 : sc.scrollTop<=0; }
+/* ⚠ AND "NO INNER SCROLLER" DOES NOT MEAN "LET THE BROWSER HANDLE IT" — over these panes it means NOBODY
+   HANDLES IT. `.diagram`, `.gwrap` and `.text-conv` all carry `overscroll-behavior:none`
+   (web/chrome-shared/base-chrome.css), which is what stops a pane that CAN scroll from bouncing or chaining
+   natively — this handler adds the useful chaining back itself. The same declaration on a pane that CANNOT
+   scroll has no such counterpart: the box still swallows the gesture and passes nothing to its ancestors, so
+   `scrollableUnder` correctly answers null, the mode is "native", and the wheel simply dies.
+   Measured in isolation with a TRUSTED wheel (CDP Input.dispatchMouseEvent — a synthetic event cannot drive
+   native scrolling at all, so nothing less will do): a `.diagram` with scrollHeight === clientHeight and a
+   computed `overscroll-behavior-y: none` took three wheels of 120px and left `#doc.scrollTop` at 0. Reported
+   as "still not able to scroll the page if my mouse is over a vertically-overflowing hierarchy… on the first
+   sentence of Ramayana": that block's hierarchy measures 410/410 in the real app — it does not overflow at
+   all, which is precisely why nothing could scroll. Not engine-specific and not notation-specific either; the
+   hierarchy is simply where a reader's pointer tends to rest.
+   The page is the only owner left, so it takes the gesture outright rather than being left to a browser that
+   will do nothing. This supersedes an earlier, narrower version of this rule scoped to `.diagram.wrapproj`
+   outside `.wp-toks` (the tree overview) — that was one instance of exactly this, and is covered here by its
+   `.diagram` ancestor. Consulted ONLY where `scrollableUnder` already found nothing to scroll, so a pane with
+   room of its own is untouched. */
+function wheelSwallowed(target){
+  return !!(target&&target.closest&&target.closest(".diagram,.gwrap,.text-conv")); }
 function scrollableUnder(target){ if(!target||!target.closest) return null;
   const tb=target.closest(".wp-toks"); if(tb && tb.scrollHeight>tb.clientHeight+1) return tb;   // a wrapped stemma scrolls via its token strip
   const sc=target.closest(".gwrap,.diagram,.text-conv");
@@ -156,7 +196,10 @@ document.getElementById("doc").addEventListener("wheel",e=>{ const docEl=documen
   if(wheelMode===null){   // decide ONCE, at the gesture's first event
     const sc=wheelSc=scrollableUnder(e.target);
     wheelDocTop=docEl.scrollTop;   // the page position this gesture starts from — see pageInFlight
-    if(!sc) wheelMode="native";
+    // …and where the browser would do nothing at all, the page takes it instead — see wheelSwallowed's own note.
+    // Vertical-dominant only, for the same reason the axis test below gives: the chain branch drives the page by
+    // e.deltaY alone, so a horizontal gesture has nowhere to chain to and is better left exactly as it was.
+    if(!sc) wheelMode=(wheelSwallowed(e.target)&&Math.abs(e.deltaY)>=Math.abs(e.deltaX))?"chain":"native";
     /* ⚠ A PAGE SCROLL IN FLIGHT TAKES THE WHEEL OUTRIGHT, ahead of every other test and WITHOUT
        consulting blockFullyInView. That last part is the point, and is why an earlier attempt at this
        fixed nothing: `blockFullyInView` reports TRUE for a block TALLER than the port whenever the
@@ -167,7 +210,7 @@ document.getElementById("doc").addEventListener("wheel",e=>{ const docEl=documen
        whole way down. Measured on the repro: block twice the port height, page moved 120px between
        events, and both wheels stayed `native` and unprevented.
        Two things scrolling at once is the fault; while the page is moving it is the owner. */
-    else if(pageInFlight(docEl)) wheelMode="chain";
+    else if(pageInFlight(docEl) && !pageAtBound(docEl,e.deltaY)) wheelMode="chain";
     // A VERTICAL gesture over a block that isn't fully on screen drives the page, whatever the inner scroller's own
     // position: the block scrolls into view first, and only then (the 120ms pause below re-decides the owner) can its
     // diagram/grid be scrolled. This QUALIFIES item 5 below — that note was about not tying the decision to the
@@ -181,12 +224,12 @@ document.getElementById("doc").addEventListener("wheel",e=>{ const docEl=documen
     // diagram pannable sideways when the page is at rest, since a horizontal delta has nowhere to
     // chain to. Mid-glide that reasoning does not apply: two things scrolling at once is the fault
     // being fixed, and the block is on its way somewhere, so the pane is not the owner of anything.
-    else if((Math.abs(e.deltaY)>Math.abs(e.deltaX)||pageMoving()) && !paneVisibleEnough(sc)) wheelMode="chain";
-    else { const atTop=sc.scrollTop<=0, atBot=sc.scrollTop+sc.clientHeight>=sc.scrollHeight-1;
+    else if((Math.abs(e.deltaY)>Math.abs(e.deltaX)||pageMoving()) && !paneVisibleEnough(sc) && !pageAtBound(docEl,e.deltaY)) wheelMode="chain";
+    else { 
       // item 5: chain to the page ONLY once the inner scroller is ALREADY at its bound in this direction — NO dependency on
       // where the block sits relative to the toolbar. The inner scroller (a wide diagram's horizontal scroll, or a wrapped
       // stemma's token-row/baseline scroll) is therefore ALWAYS scrollable, regardless of the block's scroll position.
-      wheelMode=((e.deltaY>0&&atBot)||(e.deltaY<0&&atTop))?"chain":"native"; } }
+      wheelMode=paneAtBound(sc,e.deltaY)?"chain":"native"; } }
   /* …AND THE "block isn't fully on screen" VETO IS RE-CHECKED ON EVERY EVENT, not just the first.
      It is a fact about where the block is NOW, and the block moves DURING the gesture — so deciding
      it once leaked exactly one way: start a gesture over a diagram or grid while the page is still
@@ -208,7 +251,22 @@ document.getElementById("doc").addEventListener("wheel",e=>{ const docEl=documen
      stayed `native` and unprevented, and ownership only moved when a vertical-dominant (3,0)
      arrived. That is exactly "they scroll in partially-visible blocks, but only while a page scroll
      is in progress" — the page scroll is what takes the block out of view mid-gesture. */
-  else if(wheelMode==="native" && wheelSc && (pageInFlight(docEl)||!paneVisibleEnough(wheelSc))) wheelMode="chain";
+  /* ⚠ …AND THE PANE'S OWN BOUND IS RE-CHECKED HERE TOO, which is the difference between chaining that works
+     with a trackpad and chaining that only works with a mouse. The first-event branch above already asks it —
+     a gesture that STARTS with the pane at its bound chains — but a gesture that starts mid-pane was decided
+     "native" once and nothing asked again, so when the pane ran out of room part way through, the rest of the
+     gesture had no owner at all: `.diagram`/`.gwrap`/`.text-conv` carry `overscroll-behavior:none`
+     (web/chrome-shared/base-chrome.css), so the browser will not chain either, by design — this handler is the
+     only thing that can. Measured with trusted wheels over a vertically-overflowing flat hierarchy: 14 wheels
+     40ms apart (ONE continuous gesture — the events a trackpad actually produces) scrolled the pane its full
+     33px and then left `#doc.scrollTop` at 0, while the identical 14 wheels 200ms apart (separate gestures, a
+     mouse's discrete clicks) chained 777px. That is the reported "I'm still not able to scroll the page if my
+     mouse is over a vertically-overflowing hierarchy" — the hierarchy being the notation whose deep trees
+     overflow vertically most readily. The pane keeps the one event that takes it TO its bound (the browser
+     applies that scroll after this handler returns) and the next one hands over, which is exactly how native
+     chaining paces itself. One-way as before: once the page owns the gesture it keeps it until the 120ms pause. */
+  else if(wheelMode==="native" && wheelSc && !pageAtBound(docEl,e.deltaY)
+          && (pageInFlight(docEl)||!paneVisibleEnough(wheelSc)||paneAtBound(wheelSc,e.deltaY))) wheelMode="chain";
   if(wheelMode==="chain"){ e.preventDefault(); docEl.scrollTop+=e.deltaY; } }, {passive:false});   // "native" → the browser scrolls the element under the cursor; overscroll-behavior:none stops any leak, even if it hits its bound mid-gesture
 let scrollRaf=false, lastST=null;
 // JS-driven block snapping: once scrolling settles, if the nearest block top is within a small threshold of the

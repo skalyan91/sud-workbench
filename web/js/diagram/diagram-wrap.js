@@ -1,7 +1,21 @@
 //@module js/diagram-wrap.js
 /* if a finished diagram is wider than the scroll port, re-render it as stacked wrapped rows instead */
 function wrapDiagram(svg,si){
-  if(show.wrap && si!=null && AVAILW>0){ const w=+svg.getAttribute("width");   // compare zoomed width to the port
+  /* ⚠ AND THE BUDGET IS THE PORT LESS THE BLOCK'S OWN INDENT, which AVAILW does not carry. Every diagram is
+     shifted right after the render by the alignment pass (js/core/document.js), which pads it until its
+     leftmost ink sits under the grid's Form column — so the width actually available to the drawing is
+     AVAILW minus that indent, and comparing against AVAILW alone let a diagram that is genuinely too wide
+     stay flat and then run off the right edge. projWrapped already reserves exactly this for its own token
+     strip and says why in its own note ("AVAILW is a CONSTANT rendered width meant for the SCROLLING views,
+     and it reserves nothing for that indent"); this is the same reservation one level up, at the decision
+     rather than at the layout, so the two cannot disagree about whether a row fits. Measured on
+     sa_ramayana.conllu at a 1470px window: a stemma whose edges spreadForLabels had pushed to 1410px stayed
+     flat against AVAILW 1418 and painted 23.9px past its port. `idW+12` is projWrapped's own estimate of
+     that indent (the ID column plus the gap) — an estimate because the real padding is measured only after
+     this render, which is the same reason projWrapped estimates it; it runs ~4px generous, and erring toward
+     wrapping a hair early is the side that cannot clip. In UNZOOMED px, like `w`, so the ×FS below scales
+     both together. */
+  if(show.wrap && si!=null && AVAILW>0){ const w=+svg.getAttribute("width")+((typeof idW==="number"?idW:0)+12);   // compare zoomed width to the port
     if(w*FS>AVAILW-6){ if(conv==="arcs"){ const x=arcsWrapped(si); if(x) return x; }
       if(conv==="brackets"){ const x=bracketsWrapped(si); if(x) return x; }
       if(conv==="stemma"){ const x=projWrapped(si,"stemma"); if(x) return x; }
@@ -1345,7 +1359,7 @@ function tree(si){
      Script:None, which puts a Latin romanisation on the glyph row, and scriptMag() (js/lang/translit.js)
      returns 1 for it, so TOK_MAG is 1, LZH_MAG false and every constant in this feature is already 0.
      Verified: lzh under Script:None lands its node baselines on English's, to the pixel. */
-  const {children,root,head}=structure(sent),belowTighten=trLayer()?TR_TIGHTEN:0,trDrop=trLayer()?TR_ROW_DESC:0,belowExtra=trLayer()?TR_ROW_EXTRA:0,aboveExtra=trLayer()?TR_ABOVE_EXTRA:0,belowReserve=belowReserveH(trLayer(),belowTierN(),false,avmRowMaxH(t))-belowTighten+2*trDrop+belowExtra+aboveExtra,LV=48+belowReserve,TOP=18,A=16,B=7;       // item 2: the level height = a CONSTANT 48 (the stemma's LV) + the below-stack reserve, and the outgoing edge attaches just below that reserve (parentEndY) — so an edge is always LV−belowReserve−A−B = 48−16−7 = 25 tall, EXACTLY the stemma's, no matter how many annotation tiers are shown. belowReserve uses the SAME belowGap() per-row step the tiers are drawn at, so it cancels cleanly (Item 8: each tier row folds in descent(POS_F)). TOP matches stemma()'s own (diagram-render.js) — raising it to "lower the tokens" was tried and reverted there, see its note; TOK_Y_LOWER (applied per token, at the draw site, never to this level math) is the fix that actually works. item 22: +AVM (sentence-wide max — this LV is ONE uniform level height, matching the "constant 48" framing) DESPITE hasPos staying false here: POS itself gets no explicit slot in this reserve (whatever slack absorbs its ~15px predates this feature and isn't investigated here), but an AVM box can run far taller than that, and reserving too little would show as real overlap with the next tree level — reserving it and finding the existing POS gap was already enough slack is the safer direction to be wrong in, if this turns out to be belt-and-braces
+  const {children,root,head}=structure(sent),belowTighten=trLayer()?TR_TIGHTEN:0,trDrop=trLayer()?TR_ROW_DESC:0,belowExtra=trLayer()?TR_ROW_EXTRA:0,aboveExtra=trLayer()?TR_ABOVE_EXTRA:0,belowReserve=belowReserveH(trLayer(),belowTierN(),false,avmRowMaxH(t))-belowTighten+2*trDrop+belowExtra+aboveExtra,LV=48+belowReserve+magAscExtra(NODE_F)+magDescExtra(NODE_F),TOP=18,A=16,B=7;   /* ⚠ …AND THE MAGNIFIED FACE'S OWN EXTRA REACH, on request ("increase the height of hierarchy edges to compensate for enlarged glyphs in Sanskrit and Literary Chinese"). The sentence just below states this notation's own invariant — an edge is always LV−belowReserve−A−B = 25 tall, the stemma's, whatever is shown — and magnification broke it from both ends: the arrival endpoint now backs off by the glyph's extra ascent (AA, below) and the departure endpoint by its extra descent (NODE_DESC_EXTRA), so at TOK_MAG 1.5 the 25 had become ~16 and the levels read as crowded exactly where the glyphs are biggest. Adding the same two terms to the level HEIGHT restores the 25 at every magnification instead of trading one overlap for another. Both are 0 at TOK_MAG 1, so an unmagnified hierarchy's levels do not move; the stemma's own LV is deliberately NOT changed, the request naming this notation. */       // item 2: the level height = a CONSTANT 48 (the stemma's LV) + the below-stack reserve, and the outgoing edge attaches just below that reserve (parentEndY) — so an edge is always LV−belowReserve−A−B = 48−16−7 = 25 tall, EXACTLY the stemma's, no matter how many annotation tiers are shown. belowReserve uses the SAME belowGap() per-row step the tiers are drawn at, so it cancels cleanly (Item 8: each tier row folds in descent(POS_F)). TOP matches stemma()'s own (diagram-render.js) — raising it to "lower the tokens" was tried and reverted there, see its note; TOK_Y_LOWER (applied per token, at the draw site, never to this level math) is the fix that actually works. item 22: +AVM (sentence-wide max — this LV is ONE uniform level height, matching the "constant 48" framing) DESPITE hasPos staying false here: POS itself gets no explicit slot in this reserve (whatever slack absorbs its ~15px predates this feature and isn't investigated here), but an AVM box can run far taller than that, and reserving too little would show as real overlap with the next tree level — reserving it and finding the existing POS gap was already enough slack is the safer direction to be wrong in, if this turns out to be belt-and-braces
   // THE ROOT's OWN CROP RESERVE, matching stemma()'s identical fix (diagram-render.js) for the identical reason:
   // the root sits at depth 0 — literally the topmost thing this notation draws — and fitTight(svg,boxes) crops
   // to the union of `boxes`, whose node box below reserved a flat 9px tuned for NODE_F at TOK_MAG 1. A magnified
@@ -1353,7 +1367,7 @@ function tree(si){
   // "how much MORE ascent a magnified face reaches than an unmagnified one would" term WORD_OFF/belowGap() already
   // use elsewhere: ascent(NODE_F) is already the MAGNIFIED font's own ascent, so subtracting the unmagnified
   // ascent it implies (÷TOK_MAG) isolates just the extra. Exactly 0 at TOK_MAG 1 — byte-identical crop then.
-  const NODE_ASC_EXTRA=TOK_MAG>1?ascent(NODE_F)*(1-1/TOK_MAG):0;
+  const NODE_ASC_EXTRA=magAscExtra(NODE_F);   // the shared closed form (js/diagram/diagram-core.js) — identical value, one expression
   const SPW=meas(" ",WORD_F), NGAP=SPW+4;                              // node gap matches the stemma column gap
   // tidy layout: leaves packed with the stemma's node gap; a parent is centred over its children. Adjacent
   // siblings are then pushed apart (whole subtree shifted) only as far as their nodes AND their incoming
@@ -1387,9 +1401,23 @@ function tree(si){
      UNMAGNIFIED face, and already cleared by belowReserveH's own STACKED_GAP/belowGap() terms — so reserving
      the glyph's magnified descent there would lengthen an edge that needs nothing. 0 at TOK_MAG 1 either way,
      so no unmagnified document has an edge endpoint anywhere but where it has always been. */
-  const NODE_DESC_EXTRA=(TOK_MAG>1&&!belowReserve)?descent(NODE_F)*(1-1/TOK_MAG):0;
+  const NODE_DESC_EXTRA=belowReserve?0:magDescExtra(NODE_F);
+  /* ⚠ AND THE MIRROR OF IT ON THE ARRIVAL SIDE, which the crop box already carried and the edge did not.
+     `A` is a flat 16px "above the node, clears ascenders", tuned when a node was an unmagnified 15px Latin
+     face; NODE_ASC_EXTRA above tells the CROP how much further a magnified face reaches and nothing told the
+     incoming EDGE, which went on ending at ny(depth)−A whatever the glyph below it grew to. Measured live
+     (real WKWebView, a Devanagari-stored Sanskrit sentence at 1.5×): the edge's foot landed 3.96px INSIDE
+     the node glyph's own ink, against 1.04px of clearance at TOK_MAG 1 — the reported "stacked and
+     ornamental scripts are placed too high in hierarchy nodes", which is that overlap read from the glyph's
+     side. Applied UNCONDITIONALLY, unlike NODE_DESC_EXTRA's own `!belowReserve` gate: what sits under a
+     departing edge's endpoint is the token's below-stack whenever there is one (drawn in an unmagnified
+     face, and already cleared), but what sits under an ARRIVING one is always the node glyph itself, so
+     there is no configuration in which this term is not the right one. Exactly 0 at TOK_MAG 1, so no
+     unmagnified document's edges move. The same term lands on stemma()'s own edges (diagram-render.js),
+     which share this constant and measured the identical overlap. */
+  const AA=A+NODE_ASC_EXTRA;
   const parentEndY=i=> ny(depth[i]) + belowReserveH(trLayer(),belowTierN(),false,avmHeight(t[i]))-belowTighten+2*trDrop+belowExtra+aboveExtra + B + NODE_DESC_EXTRA;   // item 7/2, revised: PER-NODE, not the sentence-wide `belowReserve` above — a parent's outgoing edge must reach its OWN below-stack bottom (and its OWN AVM box, when THIS node has one attested), not stretch down to clear some OTHER node's taller AVM elsewhere in the tree (or, worse, undershoot and cross behind its own box when belowReserve's headroom is spent on a level with no AVM at all). Same per-token correction arcs' tokStackH already applies (diagram-render.js: avmHeight(tk), not the row-wide avmRowMaxH(t)) for the identical reason — see that call site's own note. LV/H (above) deliberately KEEP the sentence-wide avmRowMaxH(t) reserve: the uniform vertical step between levels still has to clear the tallest AVM anywhere at that depth, or a short-AVM node's row would collide with the level below it — only the edge's own endpoint narrows back to this node's own content. Every edge is no longer a fixed 25px tall when AVM is on (that invariant only ever held with AVM off, where avmHeight is 0 everywhere and this is byte-identical to the old formula); the label midpoints below are computed FROM y1/y2 at edge-construction time, so they re-centre for free — no separate label fix needed.
-  const edges=[]; for(let i=0;i<n;i++) children[i].forEach(ci=>{ const y1=ny(depth[ci])-A, y2=parentEndY(i), midY=(y1+y2)/2;
+  const edges=[]; for(let i=0;i<n;i++) children[i].forEach(ci=>{ const y1=ny(depth[ci])-AA, y2=parentEndY(i), midY=(y1+y2)/2;
     edges.push({d:ci,h:i,rel:t[ci].deprel,y1,y2,midY,band:Math.round(midY/12),w:show.labels?meas(t[ci].deprel,POS_F)+SPW:0}); });
   edges.sort((p,q)=>catRank(p.rel)-catRank(q.rel));   // subj in front; no global spread (it would de-centre parents)
   // Shared=Yes / Subj: the real edge draws normally (to whichever conjunct/raising target the token is actually
@@ -1398,7 +1426,7 @@ function tree(si){
   // dependent (origin) always draws at the "d" role and the target at "h" — orientGhost is a defensive fallback only.
   const orientGhost=(origin,target)=>depth[origin]<depth[target]?{d:target,h:origin}:{d:origin,h:target};
   const ghostEdges=ghostPairs.map(([o,tg,rel,kind])=>{ const {d,h}=orientGhost(o,tg);
-    return {d,h,rel,kind,origin:o,target:tg,y1:ny(depth[d])-A,y2:parentEndY(h)}; });
+    return {d,h,rel,kind,origin:o,target:tg,y1:ny(depth[d])-AA,y2:parentEndY(h)}; });
   const maxD=Math.max(0,...depth),total=Math.max(2,...x.map((xx,i)=>xx+lw2(i)/2+hgw2(i)))+6,H=TOP+maxD*LV+16+belowReserveH(trLayer(),belowTierN(),false,avmRowMaxH(t));   // Item 8: the bottom tier tail folds in descent(POS_F) per row, matching belowStack. lw2/hgw2 (not nw/hgw) so a ∅ pushed to the canvas edge still gets cropped in — H kept on the newer belowReserveH() consolidation (post-dates the ghost-edge patch's own base); only kind/target:tg are this patch's real addition. item 22: +AVM — this is the diagram's OWN total height (H), so it must cover the bottom row's AVM box regardless of whether LV's own reserve (above) already double-counts it; see that call's note on the same hasPos=false question
   if(RTL) for(let i=0;i<N;i++) x[i]=total-x[i];   // mirror the tidy tree for right-to-left (N, not n — the ∅ mirrors too)
   const svg=E("svg",{class:"tree",width:total,height:H,viewBox:`0 0 ${total} ${H}`}); const boxes=[];
@@ -1428,7 +1456,7 @@ function tree(si){
   // Subject=Generic: computed here (positions only) so it can fold into the SAME horizontal label-decollision pass
   // as the real ghost edges below — a disconnected decollision pass is what let its label collide with a real one.
   const genericEntries=genericToks.map(i=>{ const vi=vOf[i], gx=x[vi], gy=ny(depth[vi]);
-    return {i,gx,gy,y1:gy-A,y2:parentEndY(i)}; });
+    return {i,gx,gy,y1:gy-AA,y2:parentEndY(i)}; });
   const ghostLabs=show.labels?[...ghostEdges.map(e=>({mx:(x[e.d]+x[e.h])/2,my:(e.y1+e.y2)/2,text:e.rel,e})),
     ...genericEntries.map(ge=>({mx:(ge.gx+x[ge.i])/2,my:(ge.y1+ge.y2)/2,text:"subj",e:ge}))]:[];   // item 6: HORIZONTAL-only decollision, only ghost labels move (see stemma()'s own comment)
   if(show.labels) decollideGhostsH(ghostLabs,boxes);
@@ -1456,7 +1484,21 @@ function tree(si){
   for(let i=0;i<n;i++){const g=E("g",{class:"node"+(sel.s===si&&sel.t===OID(i)?" sel":""),"data-s":si,"data-tok":OID(i)});
     const nyL=ny(depth[i]), nyD=nyL+TOK_Y_LOWER+NODE_Y_EXTRA+trDrop+aboveExtra, loB=loBoxes(boxes);   // …+aboveExtra, the flat 4px "extra space above the token" (TR_ABOVE_EXTRA, js/diagram/diagram-core.js) — same mechanism as trDrop beside it, and carried once in belowReserve so the stack below keeps its own spacing   // …+trDrop, an earlier round's "the space above a token needs to be increased by transliteration descender length" — a further drop of the glyph, the space above it being what the incoming edge (laid out from nyL, untouched) no longer fills. belowReserve above carries it back so the stack below does not overrun its own reserve; see its note   // …+NODE_Y_EXTRA: "in hierarchies, we need the same extra 1.5px drop". dropYD below is built from nyD, so the whole stack rides with the glyph and the token→transliteration gap is unchanged, exactly as the stemma's own caveat asks   // nyL = the LAYOUT level (every edge endpoint and every box in this block); nyD = where this node's glyph and its whole stack DRAW — see TOK_Y_LOWER (js/diagram/diagram-core.js). The edges above were laid out from nyL and are untouched
     const lbl=E("text",{class:"node-lbl"+italDeco(t[i]),x:x[i],y:nyD}); lbl.textContent=bform(t[i]); const tw=fmeas(t[i],NODE_F);   // host form only
-    const hit=E("rect",{class:"tok-hit tok-wash",x:x[i]-Math.max(26,tw/2+4),y:nyD-A,width:Math.max(52,tw+8),height:A+B});   // node box = its own wash region   // on the DRAW level, so the wash stays centred on the glyph it backlights
+    /* ⚠ SIZED ON THE NODE'S SLOT, NOT ON ITS FORM — every other notation's wash already is, and this one
+       silently was not. `lw(i)` is the widest row this node actually draws (form, transliteration, gloss tiers,
+       AVM box); `tw` is the FORM's ink alone. A node with a wide AVM therefore painted its bracket well outside
+       its own backlight, and — because the post-render alignment pass anchors a diagram by its leftmost WASH —
+       that overhang was invisible to the alignment and simply hung into the margin by however much the widest
+       edge node's AVM happened to exceed its form. Measured on samples/english.conllu in the hierarchy: the
+       leftmost drawn ink landed at +4, −8.6, +4, −11.6, −23.6, −22.6, −23.6, −22.6 px against the running
+       sentence's own text start — a 28px spread block to block, against 3.8px in arcs and 0 in the stemma,
+       which is the reported "hierarchies are not consistently left-aligned with the running sentence". The
+       washes themselves were dead consistent (0.0 ± 0.4) the whole time, which is why anchoring on them looked
+       correct and the ragged edge stayed. 451dfa7's own premise — "a wash already encloses its own AVM box by
+       construction (avmSlotW(t) <= the slot width both are sized from)" — is simply restored here; it was true
+       of every notation but this one. The hit target grows with it, which is the same box `.tok-hit` names and
+       what a reader aiming at a node's feature matrix would expect to hit. */
+    const hit=E("rect",{class:"tok-hit tok-wash",x:x[i]-Math.max(26,lw(i)/2+4),y:nyD-A,width:Math.max(52,lw(i)+8),height:A+B});   // node box = its own wash region   // on the DRAW level, so the wash stays centred on the glyph it backlights
     g.appendChild(hit);
     const dropYD=nyD+STACKED_GAP-belowTighten;   // seeds the ONE gap from the glyph (node-lbl) row down to whichever row is drawn first below it — STACKED_GAP (diagram-core.js), the flat replacement for the removed STACK_DROP   // ⚠ THE LAYOUT-LEVEL TWIN (`dropY=nyL+…`) IS GONE, and with it the "the boxes below are stated in it" rule this comment used to record: it is what clipped the lzh hierarchy's bottom row (see the note above the transliteration row below). There is now ONE seed, the drawn one, and the boxes are stated in it like every other renderer's
     /* ⚠ …LESS TR_TIGHTEN (js/diagram/diagram-core.js), the hierarchy's own `0.5em − 0.5ex` reduction of the
@@ -1492,9 +1534,9 @@ function tree(si){
        ⚠️ EXACTLY 0 FOR AN UNMAGNIFIED DOCUMENT, which is what keeps this from being churn: at TOK_MAG 1 all
        four terms are 0, nyD IS nyL and dropYD IS dropY, so every box lands byte-identically where it did.
        Only a magnified hierarchy's crop grows, and only by the ink it was cutting off. */
-    { const rt=trTxt(t[i]); if(rt){ const ty=dropYD+belowGap(); const e=E("text",{class:"translit"+frnUp(t[i]),x:x[i],y:ty,"text-anchor":"middle"}); e.textContent=rt; if(trRowEdit())e.classList.add("tr-edit"); g.appendChild(e); boxes.push({x:x[i],y:nyD+14,hx:meas(rt,trFont(t[i]))/2,hy:7}); svgSeamMark(g,t[i],x[i],ty,meas(rt,trFont(t[i]))/2,trFont(t[i]),loB,null,"translit"); } }   // Item 8: same descender-matched top gap (belowGap()) the other renderers give the translit row   // …and nyD+14, never nyL+14 — see the note just above
+    { const rt=trTxt(t[i]); if(rt){ const ty=dropYD+belowGap(); const e=E("text",{class:"translit"+frnUp(t[i]),x:x[i],y:ty,"text-anchor":"middle"}); e.textContent=rt; if(trRowEdit())e.classList.add("tr-edit"); g.appendChild(e); boxes.push({x:x[i],y:nyD+14,hx:meas(rt,trFont(t[i]))/2,hy:7}); }   /* no seam mark: this row hangs under a NODE, not under a word in reading order — see the node's own call below */ }   // Item 8: same descender-matched top gap (belowGap()) the other renderers give the translit row   // …and nyD+14, never nyL+14 — see the note just above
     belowTiers().forEach((tier,ti)=>{ const step=(trTxt(t[i])?belowGap():0)+(ti+1)*(belowGap()), gyD=dropYD+step, txt=tierDisp(t[i],tier), dtxt=txt||"…"; const e=E("text",{class:"gloss gl-edit"+(txt?"":" gl-empty")+frnUp(t[i]),x:x[i],y:gyD,"text-anchor":"middle","data-tier":tier,tabindex:"0"}); setGlossText(e,tier,dtxt); g.appendChild(e); boxes.push({x:x[i],y:gyD-4,hx:meas(dtxt,trFont(t[i]))/2,hy:7});   // gyD−4, not the old layout-level gy−4: the box states where this row is DRAWN, for the reason the note above the translit row gives
-      if(tier==="mseg"||tier==="mgloss") svgSeamMark(g,t[i],x[i],gyD,(tier==="mgloss"?measGloss(dtxt,tierFont(tier,t[i])):meas(dtxt,tierFont(tier,t[i])))/2,tierFont(tier,t[i]),loB,null,tier); });   // gloss / morphemic tiers under the node (hierarchy has no per-node POS row) — the segmentation AND morphemic-gloss rows carry the seam mark (both per-morpheme, drawn off the "…" placeholder's own width where this tier isn't annotated for this token — see the note beside diagram-core.js's belowStack); the lexical gloss row doesn't
+      });   /* …and no seam mark on the morphemic rows either, for the same reason as the transliteration row just above: they sit under a depth-placed NODE. (Wrapped brackets' identical pair of rows, which DO sit in reading order, keep theirs — see bracketsWrapped.) */   // gloss / morphemic tiers under the node (hierarchy has no per-node POS row) — the segmentation AND morphemic-gloss rows carry the seam mark (both per-morpheme, drawn off the "…" placeholder's own width where this tier isn't annotated for this token — see the note beside diagram-core.js's belowStack); the lexical gloss row doesn't
     // item 22: the AVM tier — hierarchy has no per-node POS row for it to sit under (the comment above), so it
     // seats under the LAST drawn row instead (translit, then gloss tiers) — nodeBot mirrors the goeswith slur's
     // own identical "this node's drawn stack bottom" computation a few lines down (STEP=belowGap(); dropYD
@@ -1507,7 +1549,7 @@ function tree(si){
       g.setAttribute("data-gw",ids.join(" "));
       const STEP=belowGap(), nodeBot=dropYD+(trTxt(t[i])?STEP:0)+belowTierN()*STEP;   // this node's OWN below-stack bottom — the hierarchy has no shared word row, so each node stacks its rows itself   // measured off the DRAWN stack, so the slur hangs the same distance under the (lowered) rows
       gwSlurSVG(svg,x[i]-tw/2,x[i]+tw/2,nodeBot+5+tieLead(),si,ids,loB); }   // the hierarchy draws no ties at all (an MWT has no place in a dependency tree), so the slur is seated here directly — by the SAME "+5, then tieLead()" rule mwtTie is handed in every other notation, just measured from this node's own stack bottom
-    svgMarks(g,x[i],nyD,t[i],NODE_F); svgFormSeamMark(g,t[i],x[i],nyD,NODE_F,loB);   // Item 11: node form appended LAST → paints on TOP of the translit/gloss stack; item 4: marks in front of it, then the seam mark off its inline end
+    svgMarks(g,x[i],nyD,t[i],NODE_F);   /* …and NO seam mark on a hierarchy node, nor on its transliteration/gloss rows above — see the two calls removed there. Every node here is placed by depth and this notation draws no reading-order word row at all, so there is no row on which a "the word continues into the next token" mark would mean anything. On request, with the stemma's own nodes (diagram-render.js) and the outline's rows (below). */   // Item 11: node form appended LAST → paints on TOP of the translit/gloss stack; item 4: marks in front of it, then the seam mark off its inline end
     g.style.cursor="pointer"; g.addEventListener("click",()=>pick(si,OID(i))); svg.appendChild(g);
     drawHangsSVG(svg,t[i],x[i],nyD,NODE_F,"node-lbl",si,loB,OID(i)); drawLeadsSVG(svg,t[i],x[i],nyD,NODE_F,"node-lbl",si,loB,OID(i));   // folded punctuation as separate selectable satellites beside the node
     boxes.push({x:x[i],y:nyL-5,hx:tw/2+2,hy:9+NODE_ASC_EXTRA});}   // …on the LAYOUT level: holding the root's crop here while its glyph draws lower is what opens the headroom above it   // tree() has no catNodes/POS-as-node mode — every node here is bform(), always at NODE_F — see NODE_ASC_EXTRA's own note
@@ -1834,7 +1876,7 @@ function outline(si){const D=displaySent(DOC[si]), t=D.tokens, n=t.length, OID=k
     if(show.labels){ const rel=document.createElement("span"); rel.className="orel"+(isMorphRel(t[i].deprel)?" morph-lbl":""); setRelLabel(rel,t[i].deprel); rel.title=relTitle(t[i].deprel);
       if(show.colour) rel.style.color=relColor(t[i].deprel); row.appendChild(rel); }
     appendLeadHTML(row,t[i],si,"punctsat opunct",OID(i));   // item 2: right-merging leads sit before the form (after the relation label)
-    const form=document.createElement("span"); form.className="oform"+formDeco(t[i])+italDeco(t[i]); form.textContent=bform(t[i]); htmlSeamMark(form,t[i],"form");
+    const form=document.createElement("span"); form.className="oform"+formDeco(t[i])+italDeco(t[i]); form.textContent=bform(t[i]);   /* …and no seam mark, on request, with the stemma/hierarchy NODES (see their own calls): the outline gives every token its own indented row in TREE order, so the token a word continues into is a line above or below and usually at a different indent — there is no inline end for the mark to hang off and nothing beside it to point at. */
     /* ⚠ AND THE FORM ITSELF DROPS — REVERTED FROM TR_TIGHTEN TO A FLAT 2px ("revert the latest lowering of
        outline tokens, and instead lower by 2px"). The previous round read "tokens need to be lowered by
        0.5em - 0.5ex" as reusing the hierarchy's own em/ex quantity (5.23px); this correction says that

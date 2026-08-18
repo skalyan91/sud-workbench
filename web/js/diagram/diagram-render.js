@@ -119,7 +119,7 @@ function stemma(si,{proj,catNodes}){
      MAGNIFIED font's own ascent (NODE_F=magFont(14)), so subtracting the unmagnified ascent it implies
      (÷TOK_MAG) isolates just the extra. Exactly 0 at TOK_MAG 1, so an unmagnified document's crop is
      byte-identical to before. */
-  const NODE_ASC_EXTRA=TOK_MAG>1?ascent(NODE_F)*(1-1/TOK_MAG):0;
+  const NODE_ASC_EXTRA=magAscExtra(NODE_F);   // the shared closed form (js/diagram/diagram-core.js) — identical value, one expression
   /* ⚠ AND THE SAME TERM ON THE DESCENDER SIDE, FOR THE EDGE THAT LEAVES A NODE'S UNDERSIDE. B is a flat 7px
      below the LAYOUT baseline, tuned when a node was an unmagnified 15px face; a magnified one (lzh, any
      INDIC_SCRIPTS/ORNAMENTAL_SCRIPTS member) descends further and was ALREADY grazing that endpoint before
@@ -132,7 +132,20 @@ function stemma(si,{proj,catNodes}){
      js/diagram/diagram-core.js) holds byte-for-byte in every unmagnified document — every document but the
      magnified-script ones — and the one place an endpoint DOES move is the one place the alternative was a
      glyph drawn through a line. Same closed form NODE_ASC_EXTRA above and belowGap() already use. */
-  const NODE_DESC_EXTRA=TOK_MAG>1?descent(NODE_F)*(1-1/TOK_MAG):0, BB=B+NODE_DESC_EXTRA;
+  const NODE_DESC_EXTRA=magDescExtra(NODE_F), BB=B+NODE_DESC_EXTRA;
+  /* ⚠ AND THE MIRROR OF THAT ON THE ARRIVAL SIDE, WHICH THE CROP BOX ALREADY CARRIED AND THE EDGE DID NOT.
+     `A` is a flat 16px "above the node, clears ascenders" (see its own note beside LV/TOP) tuned when a node
+     was an unmagnified 15px Latin face. NODE_ASC_EXTRA above already tells the CROP how much further a
+     magnified face reaches; nothing told the incoming EDGE, which goes on ending at ny(depth)−A whatever the
+     glyph below it grew to. Measured live (real WKWebView, a Devanagari-stored Sanskrit sentence at 1.5×,
+     flat hierarchy and flat stemma alike, which share this constant): the edge's foot landed 3.96px INSIDE
+     the node glyph's own ink, against 1.04px of clearance at TOK_MAG 1 — the reported "stacked and ornamental
+     scripts are placed too high in hierarchy nodes", which is the edge running down into the letters read
+     from the glyph's side. Same closed form and the same "exactly 0 at TOK_MAG 1" property as
+     NODE_DESC_EXTRA beside it, so no unmagnified document's edges move at all.
+     ⚠️ NOT under `catNodes`: a POS-as-node label is drawn in the unmagnified POS_F and reaches no higher than
+     it ever did — which is the same exclusion the crop box states as `hy:9+(catNodes?0:NODE_ASC_EXTRA)`. */
+  const AA=A+(catNodes?0:NODE_ASC_EXTRA);
   // Subject=Generic: the ∅ sits one level BELOW its predicate (ny(depth[i]+1), like any dependent) — if the predicate
   // is already at the deepest REAL level, that lands exactly where baseY/the bottom margin was sized for, with no
   // room of its own. Raise the whole figure's reserved depth by one extra level so the ∅ gets genuine space.
@@ -140,7 +153,7 @@ function stemma(si,{proj,catNodes}){
   const SPW=meas(" ",WORD_F);
   const edges=[];
   for(let i=0;i<n;i++){const h=head[i]; if(h<1||h>n||h===i+1) continue;
-    const y1=ny(depth[i])-A, y2=ny(depth[h-1])+BB, midY=(y1+y2)/2;
+    const y1=ny(depth[i])-AA, y2=ny(depth[h-1])+BB, midY=(y1+y2)/2;
     edges.push({d:i,h:h-1,rel:t[i].deprel,y1,y2,midY,band:Math.round(midY/12),w:show.labels?meas(t[i].deprel,POS_F)+SPW:0});}
   if(show.labels){ spreadForLabels(c,edges,lw,ldw); }   // widen node gaps until labels fit (in natural order). lw/ldw are for its CLOSING re-seat only (it never widens by them — that is ensureNodeGaps' job below): without them it pulls the leftmost node's CENTRE to x=2 and leaves that node's own slot at negative x, where fitTight's left clamp refuses to grow the viewBox and the SVG clips it — see spreadForLabels' own note
   ensureNodeGaps(c,lw);   // …then re-guarantee each node's OWN below-stack width — spreading for edge labels alone can leave that narrower than stemmaLayout reserved (see ensureNodeGaps' own note)
@@ -156,7 +169,7 @@ function stemma(si,{proj,catNodes}){
   // in applyGhostDepth couldn't fully resolve a pathological case.
   const orientGhost=(origin,target)=>depth[origin]<depth[target]?{d:target,h:origin}:{d:origin,h:target};
   const ghostEdges=ghostPairs.map(([o,tg,rel,kind])=>{ const {d,h}=orientGhost(o,tg);
-    return {d,h,rel,kind,origin:o,target:tg,y1:ny(depth[d])-A,y2:ny(depth[h])+BB}; });   // +BB not +B: the ghost-edge patch predates NODE_DESC_EXTRA/BB (Subject=Generic ∅ depth reserve) — kept for the real fix, the ghost agent's own +B was simply stale
+    return {d,h,rel,kind,origin:o,target:tg,y1:ny(depth[d])-AA,y2:ny(depth[h])+BB}; });   // +BB not +B: the ghost-edge patch predates NODE_DESC_EXTRA/BB (Subject=Generic ∅ depth reserve) — kept for the real fix, the ghost agent's own +B was simply stale
   const total=Math.max(2,...c.map((cx,i)=>cx+lw[i]/2))+2;
   mirror(c,total);                                          // NOW flip for RTL, after label spacing is settled
   const belowH=proj?belowReserveH(trLayer(),belowTierN(),show.pos,avmRowMaxH(t)):0, tieH=proj?mwtDepth(D):0;   // Item 1/8: every below-row (translit, each gloss, POS) folds in descent(POS_F), matching belowStack's descender-matched per-row step. item 22: +AVM, the tallest in the sentence — this is the whole diagram's own reserve, one row for every token alike
@@ -170,7 +183,7 @@ function stemma(si,{proj,catNodes}){
   // first use in the proj block → a temporal-dead-zone ReferenceError that blanked the whole diagram).
   const genericEntries=[]; for(let i=0;i<n;i++) if(hasGenericSubj(t,i)) genericEntries.push({i});
   genericEntries.forEach(ge=>{ const i=ge.i, gapAmt=genericSubjGapW(t,i,catNodes?POS_F:NODE_F);
-    ge.emptyX=c[i]-lw[i]/2-gapAmt/2; ge.gy=ny(depth[i]+1); ge.y1=ge.gy-A; ge.y2=ny(depth[i])+BB; });
+    ge.emptyX=c[i]-lw[i]/2-gapAmt/2; ge.gy=ny(depth[i]+1); ge.y1=ge.gy-(A+NODE_ASC_EXTRA); /* …and the ∅'s own incoming edge takes the arrival term too — UNCONDITIONALLY, not AA: the ∅ is drawn `.node-lbl` and so magnifies even under catNodes, which is exactly what its own crop box (`hy:9+NODE_ASC_EXTRA`, below) already says */ ge.y2=ny(depth[i])+BB; });
   if(proj){ const bformW=t.map(tk=>fmeas(tk,NODE_F));   // the baseline word's own ink-width alone — the tie hugs THIS, not `lw` (which is padded to fit the hierarchy NODE label/POS-below and shouldn't stretch a tie meant to visually group surface-form parts)
     for(let i=0;i<n;i++){ const by=baseY-rep[i], byD=by+TOK_Y_LOWER+NODE_Y_EXTRA, loB=loBoxes(boxes);   // …+NODE_Y_EXTRA, the extra 1.5 asked of "stemma nodes" — read as every token glyph this notation draws, node and baseline word alike, since a caveat about the TRANSLITERATION gap can only be about the row that has one (see the constant's own note)   // by = the LAYOUT baseline (what every `boxes` entry below records, and what the projection line above ends its clearance from); byD = the DRAW baseline the word and its whole stack actually render on — see TOK_Y_LOWER (js/diagram/diagram-core.js)
     svg.appendChild(E("line",{class:"proj",x1:c[i],y1:by-16,x2:c[i],y2:ny(depth[i])+BB}));   // the projection line follows its word down, so node and word stay tied together. Drawn baseline→node (bottom to top) so the dash pattern anchors at the baseline — a dot sits cleanly on the word end and any partial dash lands at the node, matching the icon   // an EDGE: both ends stay on the LAYOUT baselines, so the lowered word simply hangs 2.5px further below the line's foot
@@ -225,13 +238,33 @@ function stemma(si,{proj,catNodes}){
       g.appendChild(E("path",{class:"edge"+(isMorphRel(e.rel)?" morph-edge":""),d:e._d,stroke:e._ink}));
       g.style.cursor="pointer"; g.addEventListener("click",()=>pick(si,OID(e.d))); svg.appendChild(g); }); });
   if(show.labels){   // pass 2: all labels in front of all edges (so their casing occludes crossing edges)
-    // HORIZONTAL-ONLY de-collision: every stemma label sits at its NATURAL edge-midpoint y — no vertical lift, no
-    // dashed leaders. Overlaps are resolved solely by spreadForLabels (run above), which widens node gaps so
-    // converging labels separate horizontally while staying on their own edge baselines. (The flat ARC view keeps
-    // its vertical lift + leaders; stemma/hierarchy do not.)
-    edges.forEach(e=>{ const mx=(c[e.d]+c[e.h])/2, my=e.midY, lg=E("g",{class:"edge-g","data-s":si,"data-dep":OID(e.d),"data-head":OID(e.h)});
-      drawLabel(lg,mx,my,e.rel,relColor(e.rel));
-      lg.style.cursor="pointer"; lg.addEventListener("click",()=>pick(si,OID(e.d))); svg.appendChild(lg); boxes.push({x:mx,y:my,hx:meas(e.rel,POS_F)/2+2,hy:7}); }); }
+    /* ⚠ SAME-HEAD OVERLAPS ARE SPREAD HORIZONTALLY; CROSSING ONES ARE LIFTED, WITH A LEADER. spreadForLabels
+       (run above) widens node gaps so a head's own children separate on their own edge baselines, and that is
+       still the whole answer for siblings — it is the one case where moving the LAYOUT is possible, because
+       the two labels hang off one shared node. It can do nothing for two edges with DIFFERENT heads that
+       cross: their midpoints are fixed by four independent node positions, no gap widening brings them apart,
+       and this pass used to draw them straight on top of each other (measured on sa_ramayana.conllu s1,
+       `conj:appos` 11←4 over `mod` 7←9 — two labels, one box). On request, those are now de-collided the way
+       the flat ARC view already de-collides its own: lifted clear and tied back to their edge by a dashed
+       leader, which is what says the label still belongs to the line it has left.
+       LOWEST FIRST, so the lift is upward and minimal: the label already nearest the bottom keeps its natural
+       midpoint and the one above it moves, rather than the deeper label jumping past a shallower one. The
+       obstacle test is restricted to a DIFFERENT head (`p.e.h!==L.e.h`) so a sibling pair spreadForLabels has
+       already dealt with is never lifted as well — the two mechanisms answer disjoint cases and must not both
+       fire on one pair. `boxes` records the FINAL y, so fitTight's crop grows for a lifted label and
+       decollideGhostsH (below) reads it as the obstacle it now is. */
+    const LHH=7;
+    const labs=edges.map(e=>({e,mx:(c[e.d]+c[e.h])/2,my:e.midY,half:meas(e.rel,POS_F)/2+2}));
+    const placed=[];
+    labs.slice().sort((p,q)=>q.my-p.my||p.mx-q.mx).forEach(L=>{ let y=L.my, guard=0;
+      while(guard++<12 && placed.some(p=>p.e.h!==L.e.h && Math.abs(p.mx-L.mx)<p.half+L.half && Math.abs(p.y-y)<2*LHH)) y-=LHH*2+3;
+      L.fy=y; placed.push({mx:L.mx,y,half:L.half,e:L.e}); });
+    labs.forEach(L=>{ const e=L.e, lg=E("g",{class:"edge-g","data-s":si,"data-dep":OID(e.d),"data-head":OID(e.h)});
+      if(L.fy<L.my-0.5){ const y1=L.fy+LHH, col=relColor(e.rel);   // the tie back to the edge this label names — casing first, so the dashes read over whatever they cross
+        lg.appendChild(E("line",{class:"leader-casing",x1:L.mx,y1:y1,x2:L.mx,y2:L.my}));
+        lg.appendChild(E("line",{class:"leader",x1:L.mx,y1:y1,x2:L.mx,y2:L.my,stroke:arcInk(col)})); }
+      drawLabel(lg,L.mx,L.fy,e.rel,relColor(e.rel));
+      lg.style.cursor="pointer"; lg.addEventListener("click",()=>pick(si,OID(e.d))); svg.appendChild(lg); boxes.push({x:L.mx,y:L.fy,hx:L.half,hy:LHH}); }); }
   // Subject=Generic positions (genericEntries) are computed near the top of stemma() now, so they're available to the
   // proj baseline block above and to this decollision pass below (both need ge.emptyX/gy/y1/y2).
   // ghost label positions, decollided (HORIZONTAL-only, matching stemma's own real-label convention): ONLY ghost
@@ -265,7 +298,7 @@ function stemma(si,{proj,catNodes}){
     const nyL=ny(depth[i]), nyD=nyL+TOK_Y_LOWER+NODE_Y_EXTRA, loB=loBoxes(boxes);   // nyL = the LAYOUT level (every edge endpoint and every box below is stated in it); nyD = where this node's own glyph and satellites actually draw — see TOK_Y_LOWER (js/diagram/diagram-core.js)
     const lbl=E("text",{class:(catNodes?"node-cat":"node-lbl"+italDeco(t[i])),x:c[i],y:nyD}); lbl.textContent=txt; if(catNodes) svgTip(lbl,posTitle(t[i].upos));   // stemma POS-as-node → POS hover tooltip (Item 2)
     const hit=E("rect",{class:"tok-hit tok-wash",x:c[i]-Math.max(26,tw/2+4),y:nyD-A,width:Math.max(52,tw+8),height:A+B});   // node box = its own wash region (no arcs above a node)   // seated on the DRAW level: the wash exists to backlight the GLYPH, so it tracks it rather than the edge endpoints, and A+B is far wider than the glyph either way
-    g.appendChild(hit); g.appendChild(lbl); if(!catNodes){ gwFormSVG(g,lbl,t[i],c[i],nyD,NODE_F,"node-lbl",si,loB); svgMarks(g,c[i],nyD,t[i],NODE_F); svgFormSeamMark(g,t[i],c[i],nyD,NODE_F,loB); } g.style.cursor="pointer"; g.addEventListener("click",()=>pick(si,OID(i))); svg.appendChild(g);   // item 4: marks in front of the node label. A POS-as-node label is a TAG, not the word, so it takes no seam mark   // goeswith: a word node shows the whole word, so both parts are drawn here too (a POS-as-node label is not the word and takes none)
+    g.appendChild(hit); g.appendChild(lbl); if(!catNodes){ gwFormSVG(g,lbl,t[i],c[i],nyD,NODE_F,"node-lbl",si,loB); svgMarks(g,c[i],nyD,t[i],NODE_F); }   /* …and NO seam mark: a stemma NODE is placed by depth, not in reading order, so a mark hung off its inline end points at whatever the layout put there rather than at the token the word continues into. The baseline word row below (the `proj` block above) is this notation's reading-order rendering and is where the marks stay — see its own call. */ g.style.cursor="pointer"; g.addEventListener("click",()=>pick(si,OID(i))); svg.appendChild(g);   // item 4: marks in front of the node label. A POS-as-node label is a TAG, not the word, so it takes no seam mark   // goeswith: a word node shows the whole word, so both parts are drawn here too (a POS-as-node label is not the word and takes none)
     if(gwOf(t[i]).length){ g.setAttribute("data-gw",[OID(i)].concat(gwOf(t[i]).map(p=>p.oid)).join(" "));
       if(!proj&&!catNodes) gwSlurSVG(svg,c[i]-tw/2,c[i]+tw/2,nyD+descent(NODE_F)+tieLead(),si,[OID(i)].concat(gwOf(t[i]).map(p=>p.oid)),loB); }   // …and, with NO baseline row (proj off), the slur belongs to the node — seated by the SAME tieLead() rule the tie layer uses, just measured from the node's own descender line instead of a below-stack bottom. With proj ON the baseline row's tie layer draws it (mwtTie below), so exactly one slur is drawn per word either way
     if(!catNodes){ drawHangsSVG(svg,t[i],c[i],nyD,NODE_F,"node-lbl",si,loB,OID(i)); drawLeadsSVG(svg,t[i],c[i],nyD,NODE_F,"node-lbl",si,loB,OID(i)); }   // folded-punctuation satellites beside the word node (POS-as-node has no word to host them)

@@ -87,7 +87,35 @@ def _slug(family: str) -> str:
 # network round-trip, no cache-under-APP_DATA needed (the file is already permanently on disk, shipped
 # with the app), and HarfBuzz now shapes against the IDENTICAL bytes @font-face already paints from.
 _BUNDLED_FONTS_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "web", "fonts")
-_CORE_BUNDLED = {"notosans": "notosans.ttf", "notosansmono": "notosansmono.ttf"}
+# ⚠ AND THE SEVEN OTHER ALWAYS-BUNDLED FACES BELONG HERE FOR THE SAME REASON, one of them because the
+# network path cannot possibly answer for it: "Nithya Ranjana" IS NOT ON GOOGLE FONTS AT ALL (it is not a
+# Noto face — see packaging/make_bootstrap_app.sh's CORE_FONTS note, which bundles it unconditionally for
+# exactly that reason), so fetch_raw's request 404s and every HarfBuzz shape against it came back null.
+# Reported as Rañjanā showing as Devanagari in arcs: with the family resolution fixed (schemeShapeFamily,
+# js/lang/translit.js) the right family was finally ASKED for, and then no bytes ever arrived for it, so
+# smpReshape kept falling through to the unshaped native `<text>` — one bug hiding behind another. The
+# other six are the FONT_CORE_SCRIPTS faces web/styles/fonts.css declares locally: they are guaranteed
+# present in every build (make_bootstrap_app.sh hard-fails if one is missing) and, unlike the on-demand
+# script faces, are never fetched — so reading them off disk is not merely faster, it keeps HarfBuzz
+# shaping against the IDENTICAL bytes @font-face paints from, which is this whole branch's own point.
+# Deliberately NOT a generic "look for web/fonts/<slug>" probe: the SOURCE tree carries all 177 Noto
+# faces, the shipped bundle only these ten, so a directory probe would shape against the local file in
+# development and the (UA-sniffed, possibly degraded) network file in the shipped app — the very
+# discrepancy this branch exists to remove. notosans-italic.ttf is the one CORE_FONTS member with no
+# row of its own: it is a STYLE of "Noto Sans", not a family, and this map is keyed by family name —
+# nothing on the JS side ever asks for an italic face by name (HarfBuzz is handed the upright bytes and
+# a weight; no caller passes a style at all), so there is no key it could answer under.
+_CORE_BUNDLED = {
+    "notosans": "notosans.ttf",
+    "notosansmono": "notosansmono.ttf",
+    "nithyaranjana": "nithyaranjana.otf",
+    "notosansgrantha": "notosansgrantha.ttf",
+    "notosansjavanese": "notosansjavanese.ttf",
+    "notosansbalinese": "notosansbalinese.ttf",
+    "notosanskawi": "notosanskawi.ttf",
+    "notosanszanabazarsquare": "notosanszanabazarsquare.ttf",
+    "notoseriftibetan": "notoseriftibetan.ttf",
+}
 
 
 def _bundled_path(family: str) -> str | None:
@@ -207,7 +235,10 @@ def fetch(family: str) -> dict:
     # actually a ttf still serves with the correct font/ttf mime
     with open(path, "rb") as fh:
         blob = fh.read()
-    mime = "font/woff2" if path.endswith(".woff2") else "font/ttf"
+    # …and font/otf for the one bundled face that is CFF rather than TrueType (nithyaranjana.otf, now a
+    # _CORE_BUNDLED row): advisory either way for a data: URI with no format() hint — every engine sniffs
+    # the real table directory — but naming a CFF file "font/ttf" is simply untrue.
+    mime = "font/woff2" if path.endswith(".woff2") else ("font/otf" if path.endswith(".otf") else "font/ttf")
     return {"family": family, "cached": cached, "bytes": len(blob),
             "uri": "data:%s;base64,%s" % (mime, base64.b64encode(blob).decode("ascii"))}
 

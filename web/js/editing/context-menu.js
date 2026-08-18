@@ -1211,8 +1211,24 @@ function makeEditable(el,obj,key,after,rtl,relocate,nav,allowEmpty,caretHint){ i
     // family/size/weight/style above are copied rather than named. SVG text paints through `fill`, HTML through
     // `color`; "none"/transparent means the element is mid-edit-hidden already (hideOrig) and must not be copied.
     const ink=(e.namespaceURI===SVGNS)?cs.fill:cs.color;
-    if(ink && ink!=="none" && !/^(transparent|rgba\(0, 0, 0, 0\))$/.test(ink)) inp.style.color=ink; };
-  applyFont(el);   // letter-spacing is deliberately NOT copied: caretIndexForX hit-tests the click point with meas(), a canvas metric that carries no tracking, so a tracked field would drop the caret progressively further from the character actually clicked
+    if(ink && ink!=="none" && !/^(transparent|rgba\(0, 0, 0, 0\))$/.test(ink)) inp.style.color=ink;
+    /* ⚠ …AND THE ROW'S OWN LETTER-SPACING, REVERSING THE DELIBERATE OMISSION THE `applyFont(el)` LINE BELOW
+       USED TO DOCUMENT. That note ("letter-spacing is deliberately NOT copied: caretIndexForX hit-tests the
+       click point with meas(), a canvas metric that carries no tracking") stopped being true when meas()
+       moved off canvas onto an SVG element it sets `letter-spacing` on (see _measOneUncached,
+       js/diagram/diagram-core.js): every measurement about this field — its width in place(), the caret
+       hit-test in caretIndexForX — has been assuming the tracking all along while the field itself painted
+       without it, so a tracked row (the transliteration, an MSeg/MGloss tier, a hierarchy node label)
+       visibly re-spaced the moment it was clicked into. Reported together with the seam mark's own version
+       of the same omission. Taken from `trackEmOf(fontStr)` — the ONE expression meas() itself uses, applied
+       to the very font string the caret maths is driven by — rather than from `cs.letterSpacing`, which
+       reads back a px value against the element's AUTHORED size while this field is laid out at the VISUAL
+       (zoom-converted) size: those two agree only at zoom 1. In em, so it rides that conversion for free. At
+       zoom 1 it is exactly what the stylesheet states for the row (verified for every tracked class — see
+       trackEmOf's own note), which is the case that had to match. */
+    inp.style.letterSpacing=((typeof trackEmOf==="function")?trackEmOf(fontStr):0)+"em";
+    };
+  applyFont(el);
   const w0=Math.max(30,el.getBoundingClientRect().width+16);   // never shrink the field below the initial content width
   const place=()=>{ const r=el.getBoundingClientRect(), h=Math.max(16,r.height+2), cx=r.left+r.width/2, w=Math.max(w0, meas(inp.value,fontStr)+18);
     inp.style.width=w+"px"; inp.style.height=h+"px"; inp.style.left=(cx-w/2)+"px"; inp.style.top=(r.top+r.height/2-h/2)+"px";
@@ -1369,7 +1385,8 @@ function setCaretRange(el,anchorOff,focusOff){ const sel=window.getSelection(); 
 function makeGlossEditableSC(el,obj,key,after,rtl,relocate,nav,caretHint,mglossTok){ if(!el)return; const orig=obj[key]||"", pre=snap();
   const box=document.createElement("div"); box.className="nodeedit glabbrbox"; box.contentEditable="plaintext-only";
   let fontStr; const applyFont=e=>{ const cs=getComputedStyle(e); const sizePx=visualFontPx(e)+"px";   // see makeEditable's applyFont: the size is CONVERTED, not multiplied by FS — the two engines report an SVG length inside a zoomed subtree differently (cssLenScale, js/core/document.js)
-    box.style.fontFamily=cs.fontFamily; box.style.fontSize=sizePx; box.style.fontWeight=cs.fontWeight; box.style.fontStyle=cs.fontStyle; fontStr=cs.fontStyle+" "+cs.fontWeight+" "+sizePx+" "+cs.fontFamily; };
+    box.style.fontFamily=cs.fontFamily; box.style.fontSize=sizePx; box.style.fontWeight=cs.fontWeight; box.style.fontStyle=cs.fontStyle; fontStr=cs.fontStyle+" "+cs.fontWeight+" "+sizePx+" "+cs.fontFamily;
+    box.style.letterSpacing=((typeof trackEmOf==="function")?trackEmOf(fontStr):0)+"em"; };   // the row's own tracking, for exactly the reasons makeEditable's own applyFont states just above — this field measures itself with the same meas()/fontStr pair and so has the same obligation to paint what that measurement assumes
   applyFont(el);
   const render=text=>{ box.innerHTML=""; glossAbbrSegments(text).forEach(([t,abbr])=>{
     if(!abbr){ box.appendChild(document.createTextNode(t)); return; }

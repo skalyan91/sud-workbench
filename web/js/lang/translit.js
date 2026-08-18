@@ -361,8 +361,23 @@ function saMwtContext(s,m){
       if(SA_DANDA.indexOf(w)<0) return [w,pause];
       pause=true; k=(g?(step>0?g.to:g.from):k)+step; }
     return ["",pause]; };
-  const nx=walk(m.to+1,+1);
-  return {prev:walk(m.from-1,-1)[0], next:nx[0], pause:nx[1]}; }
+  const nx=walk(m.to+1,+1), pv=walk(m.from-1,-1);
+  /* ⚠ A PAUSE ON THE LEFT MEANS THERE IS NO LEFT NEIGHBOUR, and the walk has always known it —
+     `pv[1]` was computed and thrown away, so a range opening after a daṇḍa was fused as though the
+     word before that daṇḍa stood next to it. Reported on sa_ramayana.conllu: `…manobhuvā |⏎aṅkastha…`
+     came back as `ṅkasthapārvatīdṛṣṭipāśaiḥ`, the range's own initial `a` swallowed by a vowel
+     coalescence with `manobhuvā` across the verse break — and _boundary_sandhi cannot catch that from
+     its own side, since ā + a → ā leaves the left neighbour looking untouched (`manobhuvāṅka…` really
+     does start with `manobhuvā`), which is exactly the "did the neighbour survive whole" test it uses
+     to tell a coalescence from an edge effect.
+     ⚠️ THE RIGHT SIDE IS DELIBERATELY NOT SYMMETRIC. `next` keeps its word across a daṇḍa and passes
+     the flag on instead (`pause`), because a daṇḍa is transparent to VISARGA sandhi in this data —
+     `…vāsobhṛto |⏎bastir` takes its -o from `bastir` a verse break away — and _boundary_sandhi's own
+     note records the one rule the pause does block there (-m → ṃ). What a pause blocks on the LEFT is
+     coalescence and the avagraha, which is everything that edge could take from a previous word, so
+     "" says it exactly: the words either side of a daṇḍa stand in pausa (the same avasāna rule
+     `_is_word` states for CSL in app/sa_notation.py). */
+  return {prev:pv[1]?"":pv[0], next:nx[0], pause:nx[1]}; }
 /* ── ITRANS → the document's script, for typed Sanskrit (item 1) ──────────────────────────────────
    Neither storage script is typeable on an ordinary keyboard — IAST needs diacritics with no keys,
    Devanagari needs an IME — so what gets typed is ITRANS: kRiShNa, raamaayaNa, sha~Nkara. Every
@@ -427,6 +442,24 @@ async function loadOrthoSchemes(lang){ lang=lang||""; _orLangLoaded=lang; ORTHO_
 // mac-tokens.css's --token-font — string-built here rather than duplicated by hand in a CSS rule, so it
 // can't silently drift from the base stack as that list is edited. Called from both places ORTHO_SCHEME
 // is assigned (loadOrthoSchemes, orPick) so it can never go stale.
+/* ⚠ THE ONE SCHEME WHOSE FACE IS NOT NAMED AFTER ITS SCRIPT, and the codepoints it is WRITTEN IN, stated
+   once here so the two mechanisms that need it cannot answer differently. The `--token-font` override
+   below is one consumer; the OTHER is smpReshape's HarfBuzz family resolution (js/diagram/diagram-core.js),
+   which asks `fontScriptRes()` what script a string is in and then `fontStackName()` what that script's
+   family is called. For Rañjanā that chain is right about the script and wrong about the face: the text is
+   in DEVANAGARI codepoints (the cmap collision this whole override exists for), so it answered "Noto Sans
+   Devanagari" and HarfBuzz shaped — and painted — genuine Devanagari glyphs over a document the reader had
+   asked to see in Rañjanā. Reported as "in arcs, Rañjanā shows as Devanagari", and arcs alone because it is
+   the notation whose token forms are SVG <text> that smpReshape actually swaps: the wrapped stemma/tree and
+   the brackets draw theirs as HTML spans (.bwform/.oform), which inherit --token-font and so were right all
+   along. `script` is what a fontScriptRes() match is compared AGAINST, never re-derived from the text, so a
+   scheme override can only ever redirect the one script it is a rendering of. */
+const SCHEME_FONT_OVERRIDE={Ranjana:{family:"Nithya Ranjana", script:"Devanagari"}};
+// → the family that must paint `script` under the scheme now in force, or "" for the ordinary
+// fontStackName() resolution. Consulted by smpReshape; a document in a script the scheme says nothing
+// about (a stray Arabic or Han run) is left to the generic path exactly as before.
+function schemeShapeFamily(script){ const o=SCHEME_FONT_OVERRIDE[ORTHO_SCHEME];
+  return (o&&o.script===script)?o.family:""; }
 function syncSchemeAttr(){ const d=document.getElementById("doc"); if(!d) return;
   d.dataset.scheme=ORTHO_SCHEME||"";
   /* The --token-font override goes on <html> (document.documentElement), NOT on #doc: #doc is where the
@@ -439,7 +472,8 @@ function syncSchemeAttr(){ const d=document.getElementById("doc"); if(!d) return
      between <html> and #doc declares --token-font of its own, so #doc simply inherits it same as before)
      — this is a strict superset of the old scoping, not a behaviour change for the diagram itself. */
   const root=document.documentElement;
-  if(ORTHO_SCHEME==="Ranjana" && typeof TOKEN_STACK==="string") root.style.setProperty("--token-font",'"Nithya Ranjana", '+TOKEN_STACK);
+  const ov=SCHEME_FONT_OVERRIDE[ORTHO_SCHEME];   // …the same table smpReshape's HarfBuzz family resolution reads — see its note above
+  if(ov && typeof TOKEN_STACK==="string") root.style.setProperty("--token-font",'"'+ov.family+'", '+TOKEN_STACK);
   else root.style.removeProperty("--token-font");
   /* ⚠ THE SIZE IS NOT SET HERE — ONLY THE FONT IS. `--script-mag` used to be published on the line below
      this one, and that made the app do the two halves of a script switch in the wrong order: the FONT

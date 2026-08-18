@@ -73,6 +73,38 @@ def _rstem_visarga(word: str, lemma: str, nxt: str) -> str:
     return (word[:-1] + "r") if _is_rstem(word[:-1], lemma or "") else word
 
 
+# The word-final consonants :func:`_sa_sandhi_vendor.join_pair` has branches of its own for. Anything
+# else falls straight through it unchanged, which is the gap :func:`_final_stop_voice` fills.
+_JOIN_PAIR_FINALS = set("ḥsmntkṭp")
+
+
+def _final_stop_voice(word: str, nxt: str) -> str:
+    """``vāc`` → ``vāg`` before a voiced onset — the padānta voicing the vendored generator has no
+    branch for.
+
+    Its own final-stop rule reaches ``k``/``ṭ``/``p`` only; a stem written with a final palatal or
+    other non-padānta consonant (``vāc``, the pausa spelling this data stores) matches none of its
+    branches and comes back untouched, so ``vāc`` + ``vidām`` rendered ``vāc-vidāṃ`` where the text
+    reads ``vāg-vidāṃ``.
+
+    Answered from :func:`translit._voice_final_char`, NOT from a table here: that is the same rule
+    the multi-word-token fusion already applies at the same junction (``sandhi_join``), and the app
+    must not hold two opinions about what ``-c`` voices to — c→g, corrected there once already.
+    Substituted BEFORE the junction rather than forking the vendored file, exactly as
+    :func:`_rstem_visarga` is, and SCOPED to the finals that file ignores: pre-voicing one it does
+    handle would skip its own branch, and some of those do more than voice (``t`` + ``h`` is
+    ``d`` + ``dh``, a change on BOTH words, which a bare ``t``→``d`` here would throw away).
+    """
+    if not word or word[-1] in _JOIN_PAIR_FINALS:
+        return word
+    try:
+        from .translit import _voice_final_char, _starts_voiced
+    except Exception:  # noqa: BLE001
+        return word
+    v = _voice_final_char(word)
+    return (word[:-1] + v) if (v and _starts_voiced(nxt)) else word
+
+
 def csl_forms(forms, unsandhied=None, feats=None, mwt=None, lemmas=None) -> list[str]:
     """One sentence's tokens, spelt in CSL. Same length as ``forms``; "" only for an empty input.
 
@@ -116,6 +148,7 @@ def csl_forms(forms, unsandhied=None, feats=None, mwt=None, lemmas=None) -> list
         fl = str((feats[i] if feats and i < len(feats) else "") or "")
         lm = str((lemmas[i] if lemmas and i < len(lemmas) else "") or "")
         out[i] = _rstem_visarga(out[i], lm, out[i + 1])
+        out[i] = _final_stop_voice(out[i], out[i + 1])
         try:
             left, right = _V.join_pair(out[i], out[i + 1], fl, internal)
         except Exception:              # noqa: BLE001 — one odd junction must not sink the sentence

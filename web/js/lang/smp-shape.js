@@ -261,5 +261,22 @@ function smpNotePending(promise){
        note) for the identical reason: a cache keyed on inputs that don't change (text/font string) cannot
        know that something EXTERNAL it depends on (a face landing; now, a shape landing) just did. */
     if(typeof clearMeasCache==="function") clearMeasCache();
+    /* ⚠ AND DIA_CACHE (js/core/document.js) FOR EXACTLY THE SAME REASON — without which this whole
+       coalesced re-render paints nothing new and the SMP case never reached HarfBuzz at all. Root-caused
+       live (real WKWebView, samples/brihat_jataka.conllu, a script the session had never picked before, so
+       nothing was warm): picking Newa logged 204 token-branch shape asks, ALL misses, 204 kicked-off
+       shapes, then this settle firing with all 204 resolved and `preserveScroll(renderDoc)` genuinely
+       running — and the re-render produced NOT ONE further shape ask, leaving every glyph on the
+       foreignObject fallback indefinitely (measured unchanged 8s later). renderDoc does not rebuild a
+       sentence it has a cached node for: diaSentence keys DIA_CACHE on (si, conv) with a `diaSig` over the
+       sentence's own annotation, and a landed SHAPE moves none of that, so the stale, fallback-painted
+       node was handed straight back on every later render. That is the reported "HarfBuzz does not render
+       complex scripts properly unless I switch to a different script and then switch back": the round trip
+       works only because fillOrtho's own invalidateDiaCache() (js/lang/translit-load.js) drops the cache
+       on the way back in, by which time the shapes ARE warm. Same argument as clearMeasCache above, one
+       layer out — a cache keyed on inputs that did not change cannot know that something EXTERNAL it
+       depends on just landed — so the drop belongs beside it rather than in a caller that would have to
+       remember. Cheap: it costs a rebuild of the render window's own sentences, once per settled batch. */
+    if(typeof invalidateDiaCache==="function") invalidateDiaCache();
     if(typeof DOC!=="undefined"&&DOC.length&&typeof preserveScroll==="function"&&typeof renderDoc==="function") preserveScroll(renderDoc);
   },80); }

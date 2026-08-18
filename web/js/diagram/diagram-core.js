@@ -398,6 +398,31 @@ function trackCurve(px){ return +(TRACK_K*-Math.log(px/TOK_REF_SIZE)).toFixed(4)
    itself (not folded into TRACK_K) because most callers of trackCurve are upright and must not get it. */
 const ITALIC_TRACK=.02;
 function italicTrackOf(f){ return /(?:^|\s)italic(?:\s|$)/.test(f||"")?ITALIC_TRACK:0; }
+/* ── THE LETTER-SPACING A FONT STRING CARRIES, AS ONE EXPRESSION ────────────────────────────────────────────
+   `_measOneUncached` has always computed this inline to mirror the CSS on the row it is measuring; two other
+   consumers now want the SAME number and must not re-derive it (a third hand-kept copy of the tracking curve
+   is exactly what the "keep any new consumer's literal in sync by hand" note above is already asking too much
+   of): the seam mark, which stands off its word by one letter-space, and the inline editor, which paints the
+   row's own tracking into the field it lays over it. Verified to reproduce every literal the stylesheet
+   states — .tok-word 15px→0, .node-lbl 14px→.0055em, .translit italic 15px→.02em, .gloss 13px→.0114em,
+   .gloss[mseg] italic 15px→.02em — which is the point: those literals were written FROM this curve.
+   The TOK_MAG division is `_measOneUncached`'s own and is explained in full at its call site: the CSS states
+   the tracking for the UNMAGNIFIED size and deliberately does not re-derive it at 2×, so measuring at the
+   magnified size measures something the paint never does. */
+/* ── HOW MUCH FURTHER A MAGNIFIED FACE REACHES THAN AN UNMAGNIFIED ONE WOULD ─────────────────────────────
+   `ascent(f)`/`descent(f)` are already the MAGNIFIED font's own metrics (NODE_F/WORD_F are magFont()'d), so
+   dividing back out by TOK_MAG gives what the same face would reach unmagnified and the difference is the
+   extra. Exactly 0 at TOK_MAG 1 — which is the property every consumer relies on to leave an unmagnified
+   document byte-identical. Written out by hand at four sites (stemma()'s and tree()'s own NODE_ASC_EXTRA /
+   NODE_DESC_EXTRA) before the hierarchy's LEVEL HEIGHT wanted the same quantity and made it a fifth. */
+function magAscExtra(f){ return TOK_MAG>1?ascent(f)*(1-1/TOK_MAG):0; }
+function magDescExtra(f){ return TOK_MAG>1?descent(f)*(1-1/TOK_MAG):0; }
+function trackEmOf(f){ const pxm=(f||"").match(/(\d+(?:\.\d+)?)px/); let px=pxm?parseFloat(pxm[1]):TOK_REF_SIZE;
+  if(TOK_MAG>1 && [15,14,26].some(b=>Math.abs(px-b*TOK_MAG)<0.01)) px/=TOK_MAG;
+  return trackCurve(px)+italicTrackOf(f); }
+// …and the same quantity in px, at the size the string actually paints at (NOT the unmagnified size the curve
+// is read off: CSS applies an em letter-spacing against the element's own font-size, magnified and all).
+function trackPxOf(f){ return trackEmOf(f)*(fontPxOf(f)||TOK_REF_SIZE); }
 /* ── WHAT THE MAGNIFICATION DOES TO WEIGHT AND TRACKING ─────────────────────────────────────────────
    Magnified Indic-script text (up to 1.5×, TOK_MAG) is drawn at its face's ORDINARY weight — no lightening
    curve — which is a REVERSAL of an earlier design, not the original one, so it is worth stating why.
@@ -1079,10 +1104,11 @@ function smpReshape(root){
      (dandaGlyph()||p.form) is drawn ONLY by drawHangsSVG/drawLeadsSVG, and ONLY into a `<text>` wrapped in
      a `g.punct-sat` — that class is written NOWHERE else in this codebase (grep-verified) — so matching on
      the parent's class reaches exactly those marks and nothing in the POS/gloss/translit/relation-label
-     layers, which never nest inside one. Gated on THIS render call having produced at least one genuine
-     (SMP) reshape of its own — never on ORTHO_SCHEME/language in the abstract — so a script with no SMP
-     content anywhere in the row (plain Devanagari, Tibetan, Khmer, Burmese, an English document, …) sees
-     its daṇḍa exactly as before: plain SVG `<text>`, untouched. */
+     layers, which never nest inside one. Gated on THIS render call actually having FALLEN BACK somewhere
+     (`hadFO` below — no longer merely "the row contains SMP"; see that variable's own note for why the two
+     came apart), never on ORTHO_SCHEME/language in the abstract — so a row whose runs are all shaped, and
+     any script with no SMP content at all (plain Devanagari, Tibetan, Khmer, Burmese, an English
+     document, …), sees its daṇḍa exactly as before: plain SVG `<text>`, untouched. */
   const isPunctSat=el=>{ const p=el.parentNode; return !!(p&&p.classList&&p.classList.contains("punct-sat")); };
   /* item 26 — the SAME shape-to-<path> technique, triggered by STYLE instead of by codepoint. `.avm-attr`
      (drawAVM's attribute-name label) is the one native SVG <text> in this app that BOTH carries a
@@ -1133,10 +1159,30 @@ function smpReshape(root){
   const FFS_SHAPE_CLASSES=["avm-attr","avm-val"];
   const ffsShapeClass=el=>{ if(!el.classList) return null;
     for(const c of FFS_SHAPE_CLASSES) if(el.classList.contains(c)) return c; return null; };
-  let hadSMP=false;
-  for(const el of texts){ if(smpUnshaped(ownText(el))){ hadSMP=true; break; } }
+  /* ⚠ AND THE TEST IS "DID THE ROW ACTUALLY FALL BACK", NOT "DOES THE ROW CONTAIN SMP" — which is the same
+     rule as before (a satellite shares its neighbours' rendering technology) applied to the technology those
+     neighbours NOW get. When this mechanism was written, an SMP word always ended up as a foreignObject, so
+     "the row has SMP" and "the row is HTML-rendered" named one thing; item 25's HarfBuzz route broke that
+     apart, and the old test went on sending the daṇḍa to the HTML fallback while the words beside it had
+     become plain SVG <path>s — reinstating, from the other side, exactly the two-engines-in-one-row mixture
+     it exists to prevent. Root-caused live (real WKWebView, samples' Sanskrit under Grantha, flat hierarchy):
+     four node glyphs painted as <path>, the ।'s own element a <foreignObject>/<div> pair, seated by
+     foBaselineDrop's hand-calibrated HTML→SVG bridge rather than by the shared baseline — the reported
+     "punctuation marks for stacked and ornamental scripts are still too high". A plain SVG <text> daṇḍa
+     beside a shaped <path> word is measurably right where it should be (same probe, Devanagari and Rañjanā:
+     the mark's ink top sits 0.00–0.44px from the word's), because both are seated by the same `y`; it is only
+     the foreignObject that needs bridging. So the fallback now follows the words: if any SMP run in THIS root
+     has no shape ready and will itself paint as a foreignObject, the satellite joins it, exactly as before;
+     once the shapes land, both are SVG again and the satellite simply stays the <text> it already was. */
+  let hadFO=false;
+  for(const el of texts){ if(hadFO) break; const s0=ownText(el); if(!smpUnshaped(s0)) continue;
+    let fam0=""; if(typeof fontScriptRes==="function"&&typeof fontStackName==="function"){
+      for(const [name,re] of fontScriptRes()){ if(re.test(s0)){
+        fam0=((typeof schemeShapeFamily==="function")&&schemeShapeFamily(name))||fontStackName(name); break; } } }
+    const cs0f=getComputedStyle(el), px0=parseFloat(cs0f.fontSize)||0, w0f=parseFloat(cs0f.fontWeight)||0;
+    if(!(fam0&&px0&&typeof smpShapeSync==="function"&&smpShapeSync(s0,fam0,px0,"",0,w0f))) hadFO=true; }
   for(const el of texts){ const s=ownText(el);
-    const punctSatSMP=hadSMP&&isPunctSat(el);
+    const punctSatSMP=hadFO&&isPunctSat(el);
     const ffsClassRaw=ffsShapeClass(el);
     const ffsClass=s&&ffsClassRaw;
     // item 28 — the group case: no own text (`s` is "" — see ownText's own note on why a tspan-carrying
@@ -1223,7 +1269,14 @@ function smpReshape(root){
       const cs0=getComputedStyle(el);
       let fam="";
       if(typeof fontScriptRes==="function"&&typeof fontStackName==="function"){
-        for(const [name,re] of fontScriptRes()){ if(re.test(s)){ fam=fontStackName(name); break; } } }
+        // …and the SCHEME gets the last word on the face, because one of them is not named after its script:
+        // Rañjanā is written in Devanagari codepoints, so this loop matches "Devanagari" correctly and
+        // fontStackName then answers "Noto Sans Devanagari" — the wrong FACE for a document the reader asked
+        // to see in Rañjanā, and the reported "in arcs, Rañjanā shows as Devanagari". schemeShapeFamily
+        // (js/lang/translit.js) reads the same one-line table syncSchemeAttr's --token-font override does, so
+        // the glyphs HarfBuzz shapes and the glyphs the HTML rows inherit can never name two different faces.
+        for(const [name,re] of fontScriptRes()){ if(re.test(s)){
+          fam=((typeof schemeShapeFamily==="function")&&schemeShapeFamily(name))||fontStackName(name); break; } } }
       const sizePx=parseFloat(cs0.fontSize)||0;
       // on report ("the Arabic tokens in the diagram look way too light... you need to explicitly set
       // the weight"): this call never threaded `weight` at all (unlike the ffsClass/.avm-attr branch
@@ -1616,12 +1669,27 @@ function cssFeatToHB(v){
 // the SMP case (fontScriptRes, keyed on the RUN's own script) there is no per-script family to resolve:
 // the font stack's FIRST entry (LIVE_TOKEN_STACK's own "Noto Sans", always bundled — see app/fonts.py's own
 // note on the CORE faces) is what every one of these strings actually resolves to and is shaped against.
+/* ⚠ AND A SCHEME'S OWN FONT OVERRIDE IS STEPPED OVER, NOT TAKEN — the same "ask this of the BASE token
+   stack, never of a scheme override" rule centreBracketLift's x-height reading already states, for the
+   same reason and now with a harder consequence. Under the Rañjanā scheme syncSchemeAttr (js/lang/
+   translit.js) puts "Nithya Ranjana" at the HEAD of --token-font, so the live stack's first entry stops
+   being the Latin face these ASCII labels actually paint in — and Nithya Ranjana has no Latin at all
+   (verified against the bundled file with fontTools: 127 glyphs, no A/G/a), so HarfBuzz would shape every
+   one of them to .notdef. That fails SAFE for the paint (an empty outline set gives d==="", which
+   smpReshape's own `shape&&shape.d` gate correctly declines to swap) and NOT for the measurement, which
+   would go on to return the .notdef advance as the reserved width of "AGR"/"CASE". Invisible until
+   app/fonts.py started answering for that family at all — before it did, every such shape came back null
+   and fell through — which is why this guard lands with that change rather than before it. */
 function _firstFamily(f){
   if(!f) return null;
   const afterSize=f.replace(/^[\s\S]*?\d+(?:\.\d+)?px\s*/,"");
-  const m=/^"([^"]+)"|^'([^']+)'/.exec(afterSize);
-  if(m) return m[1]||m[2];
-  const c=afterSize.split(",")[0]; return c?c.trim():null; }
+  const ov=(typeof SCHEME_FONT_OVERRIDE!=="undefined"&&typeof ORTHO_SCHEME!=="undefined"&&SCHEME_FONT_OVERRIDE[ORTHO_SCHEME])||null;
+  for(const raw of afterSize.split(",")){
+    const name=raw.trim().replace(/^["']|["']$/g,"");
+    if(!name) continue;
+    if(ov&&name===ov.family) continue;   // the scheme's own script face — not what a Latin label resolves to
+    return name; }
+  return null; }
 function _measOneUncached(s,f,extraCss){
   // Mirror CSS letter-spacing for sizes that carry the tracking curve (.node-lbl/.baseword at 14px → .0055em,
   // etc.). Canvas measureText ignored it; SVG getComputedTextLength honours style.letterSpacing. Sizes at the
@@ -1636,7 +1704,7 @@ function _measOneUncached(s,f,extraCss){
      are magnified (15/14/26 × mag), and every other font string reaching this line is unmagnified. */
   const pxm=f.match(/(\d+(?:\.\d+)?)px/); let px=pxm?parseFloat(pxm[1]):TOK_REF_SIZE;
   if(TOK_MAG>1 && [15,14,26].some(b=>Math.abs(px-b*TOK_MAG)<0.01)) px/=TOK_MAG;
-  const track=trackCurve(px)+italicTrackOf(f);   // the font SIZE, not just parseFloat(f)'s naive "first leading number in the whole shorthand" — that read the WEIGHT off GLOSS_F/MGLOSS_F ("455 13.2px …", a font-weight number ahead of the size) as if it were the size, feeding trackCurve(455) instead of trackCurve(13.2): a wildly wrong negative letter-spacing (~-0.27em) that compressed every MGloss/Gloss measurement to roughly half its actual rendered width — layout (stemmaLayout's lw, glossSlotW) reserved half the space these tiers actually need, and adjacent tokens' MGloss text visibly overlapped. MSEG_F/MSEG_UP_F/WORD_F-class strings never hit this: "italic 15px …" has no leading digit (parseFloat → NaN → the SAME 15px fallback the size actually is), and a bare "15px …" parses correctly by luck alone — only a WEIGHT-prefixed shorthand exposed the bug   // + italicTrackOf(f): the flat oblique-letterform bump, added on top of the size curve for any font string that opens with "italic " — see ITALIC_TRACK's own note
+  const track=trackEmOf(f);   // the expression that used to be written out here, factored out (see trackEmOf's own note) now that the seam mark and the inline editor want the identical number; `px` above is still needed on its own, for the HarfBuzz branch's shape size   // the font SIZE, not just parseFloat(f)'s naive "first leading number in the whole shorthand" — that read the WEIGHT off GLOSS_F/MGLOSS_F ("455 13.2px …", a font-weight number ahead of the size) as if it were the size, feeding trackCurve(455) instead of trackCurve(13.2): a wildly wrong negative letter-spacing (~-0.27em) that compressed every MGloss/Gloss measurement to roughly half its actual rendered width — layout (stemmaLayout's lw, glossSlotW) reserved half the space these tiers actually need, and adjacent tokens' MGloss text visibly overlapped. MSEG_F/MSEG_UP_F/WORD_F-class strings never hit this: "italic 15px …" has no leading digit (parseFloat → NaN → the SAME 15px fallback the size actually is), and a bare "15px …" parses correctly by luck alone — only a WEIGHT-prefixed shorthand exposed the bug   // + italicTrackOf(f): the flat oblique-letterform bump, added on top of the size curve for any font string that opens with "italic " — see ITALIC_TRACK's own note
   _mtxt.style.cssText="white-space:pre;font:"+f+(track?(";letter-spacing:"+track+"em"):"");   // white-space FIRST so the font shorthand can't reset it; pairs with the xml:space attribute set above — see that note for why a bare " " otherwise measures 0
   // extraCss today is ALWAYS a font-feature-settings override (avmLayout's c2sc attr-label measurement,
   // measGloss's c2sc/onum abbreviation runs — the only two call sites that pass a third argument at all).
@@ -2373,9 +2441,21 @@ function svgSeamMark(parent,tk,cx,y,halfEnd,font,boxes,halfStart,row){ if(!paren
        x-height, which is a font-metric property that doesn't move just because the box around it grew. */
     markY=y-centreOnTokenLift(f,wordPx);   // the shared expression (above); identical to the `y − TOK_MID*wordPx + markMidPx(f)` written here before the bracket rows wanted the same answer
   }
+  /* ⚠ AND IT STANDS OFF THE WORD BY ONE LETTER-SPACE, on report ("seam placement seems not to take letter
+     spacing into account"). The mark reads as a continuation of the word it annotates — the "=" of a
+     multi-word token, the "-" of a morpheme seam — so the gap before it should be the gap between any two of
+     that row's own letters, not zero. Measured before this change (real WKWebView, an MWT in the arcs view):
+     the mark's ink began 0.02px past the form's, i.e. flush, on a row whose every other letter pair is
+     separated by its own tracking. `trackPxOf(font)` asks the ROW's font, not `f` — `f` has had the leading
+     "italic" stripped off it a few lines up (the mark is set upright even beside an italic row), and
+     ITALIC_TRACK is part of what an italic row spaces its letters by, so measuring the gap off the stripped
+     string would under-state it on exactly the rows that carry the most. 0 on any row at the tracking curve's
+     own reference size (.tok-word/.baseword at 15px), which is why this is a fraction of a pixel where it is
+     visible at all — it is a consistency fix, not a visible gap being opened. */
+  const lsp=(typeof trackPxOf==="function")?trackPxOf(font):0;
   [[seamPost(tk),1,halfEnd,"",seamPostToks(tk)],[seamPre(tk),-1,halfStart!=null?halfStart:halfEnd,"",seamPreToks(tk)],[seamMid(tk),1,halfEnd," seam-mid",seamMidToks(tk)]].forEach(([m,side,half,extra,toks])=>{
     if(!m) return;
-    const w=meas(m,f), x=cx+(RTL?-side:side)*(half+w/2);
+    const w=meas(m,f), x=cx+(RTL?-side:side)*(half+lsp+w/2);
     const e=E("text",{class:"seam-mark"+extra,x:x,y:markY,"text-anchor":"middle"});   // anchored on its own CENTRE, never start/end: those two are relative to the inline base direction, so under RTL they'd flip and hang the mark back over the very text it sits beside
     e.style.font=f; e.textContent=m; e.dataset.seamRow=row||"form"; if(toks)e.dataset.seamToks=toks; parent.appendChild(e);   // the row is what the centring pass measures BY (mid marks) and what the stylesheet colours by (all of them), so every mark carries it; data-seam-toks names the two tokens the seam joins, which is what applySel gives the accent from
     boxes&&boxes.push({x:x,y:markY-4,hx:w/2,hy:7}); }); }   // the mark reserves no SLOT width, but fitTight still has to see it, or a line-final one would crop off the diagram's own edge
@@ -2401,7 +2481,7 @@ function svgFormSeamMark(parent,tk,cx,y,f,boxes){ const half=fmeas(tk,f)/2;
   // …and, on the same inline-START edge, the mid-sentence paragraph break (MISC NewPar=Yes). Past the seam PRE
   // mark's own width where there is one, so the two satellites queue outward instead of landing on each other:
   // the pilcrow is a break BEFORE the word and the seam mark is part of the word, so the pilcrow goes further out.
-  svgNewParMark(parent,tk,cx,y,half+leadW(tk,f)+meas(seamPre(tk)||"",f.replace(/^italic\s+/,"")),f,boxes); }
+  svgNewParMark(parent,tk,cx,y,half+leadW(tk,f)+(seamPre(tk)?meas(seamPre(tk),f.replace(/^italic\s+/,""))+trackPxOf(f):0),f,boxes); }   // …including the letter-space svgSeamMark now stands that pre mark off by, so the two satellites still queue outward rather than closing up on each other
 // MISC NewPar=Yes — a paragraph that starts in the MIDDLE of a sentence, which is the one document-structure fact
 // the `# newpar` comment cannot express (universaldependencies.org/format.html). Drawn as a pilcrow hung off the
 // token's inline START in exactly the register the seam marks use: its own element, upright, reserving no slot
