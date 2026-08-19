@@ -2,6 +2,32 @@
 
 All notable changes to SUD Workbench are documented in this file.
 
+## [0.3.10] — 2026-08-19
+
+Two placement fixes, both in geometry that is only wrong under a condition the ordinary case never
+meets: an enlarged script, and a full-screen window whose native titlebar has just slid back in.
+
+### Fixed: cross-line arc endpoints join the fan of the arcs beside them
+
+- In wrapped arcs, a cross-line arc's lower endpoint sat **a few pixels below** the within-line
+  endpoints sharing the same token, so the two read as separate fans rather than one.
+- The fan itself was never at fault — the endpoints were already pooled together, and the fan cannot
+  place two of them at one offset. They were simply anchored at **two different heights**: a
+  within-line arc seats on its row's arc anchor, while the cross-line endpoint was seated a fixed gap
+  above the token. Those two expressions are **the same number at ordinary size**, which is why this
+  had never appeared in an unmagnified document; above it, only one of them accounts for the taller
+  glyph's extra ascent. Measured at 1.5×, the endpoints sat **5.25 px** low; they now land on the
+  anchor to within 0.05 px, and every arc in an unmagnified document renders byte-identically.
+
+### Fixed: in full screen, the revealed titlebar sits under the native one
+
+- Mousing to the top of the screen reveals two bars on one gesture — macOS slides the window's own
+  titlebar back over the content, and the app slides its titlebar and options bar in. Both wanted the
+  top of the screen, so the app's chrome drew **behind the native band**.
+- Nothing in the page can see that band: it overlays the content without resizing the viewport. The
+  height is now measured on the window itself and pushed to the page, and both revealed bars offset by
+  it. Non-macOS builds are unaffected.
+
 ## [0.3.9] — 2026-08-19
 
 Two corrections: dragging a token no longer drags a text selection along with it, and the two Middle
