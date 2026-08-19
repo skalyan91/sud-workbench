@@ -2,6 +2,38 @@
 
 All notable changes to SUD Workbench are documented in this file.
 
+## [0.3.9] — 2026-08-19
+
+Two corrections: dragging a token no longer drags a text selection along with it, and the two Middle
+Chinese tables now spell the 佳 rhyme the same way.
+
+### Fixed: dragging a token no longer highlights the text around it
+
+- The diagram itself is not selectable, so a drag could never highlight the tokens it was re-heading —
+  but a selection that *begins* in an unselectable area can still be **extended into the text around
+  it** as the pointer travels, and on the way to a drop target that is the running sentence, the
+  transliteration and translation rows, and the grid. Nothing is selectable now for exactly the life
+  of a drag, and any highlight that formed in the first few pixels is cleared; ordinary selection is
+  back the instant the pointer is released. The marquee — a rectangle dragged over empty diagram
+  space — is covered too.
+
+### Changed: Middle Chinese follows the 2014 readings, in 1992's characters
+
+- Baxter (1992) and Baxter & Sagart (2014) differ in **one reading rather than a spelling**: 1992
+  writes the 佳 rhyme `-ɛɨ`/`-wɛɨ`, and 2014 replaces those with `-ea`/`-wea` — the ordinary `ɛ`
+  vowel — so the rhyme stops having a notation of its own. Everything else between the editions is
+  ASCII encoding of the same sounds (`' ae ea +` for `ʔ æ ɛ ɨ`).
+- The Wiktionary-derived table is on the 2014 side of that; the Qieyun-derived one was built strictly
+  1992, so the two disagreed on **185 readings across 173 graphs** and a reader comparing 佳 with any
+  appendix-sourced graph saw two conventions in one column. The Qieyun table now follows the same
+  convention: 佳 `kɛ`, 蟹 `hɛX`. Nothing else moved — same graphs, same positions — and agreement
+  between the two tables rose from 94.3 % to 94.9 %.
+- The **checked tone is not affected**, and is not one of the differences between the editions: both
+  leave 入聲 unmarked and carry it on the `-p`/`-t`/`-k` coda alone.
+- `tools/build_tshet_uinh_baxter.py` can still emit either edition — `--version 1992` for that
+  edition's own `-ɛɨ`, `--version 2014` for the plain ASCII transcription — with the new
+  `2014-ipa` (2014 readings, 1992 characters) as the default.
+
 ## [0.3.8] — 2026-08-19
 
 A rendering and scrolling fix release: complex scripts shape reliably, diagrams line up with the

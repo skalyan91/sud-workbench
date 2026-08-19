@@ -33,7 +33,7 @@
 # (an ImportError three menus deep, not a `dnf install` error), which is worse than getting it wrong
 # at build time.
 
-%global app_version 0.3.8
+%global app_version 0.3.9
 
 Name:           sud-workbench
 Version:        %{app_version}
@@ -211,6 +211,10 @@ update-desktop-database %{_datadir}/applications &>/dev/null || :
 gtk-update-icon-cache %{_datadir}/icons/hicolor &>/dev/null || :
 
 %changelog
+* Wed Aug 19 2026 Siva Kalyan - 0.3.9-1
+- Drag no longer carries a text selection; Middle Chinese 佳 rhyme normalised to the
+  2014 reading in 1992's characters.
+
 * Wed Aug 19 2026 Siva Kalyan - 0.3.8-1
 - Rendering and scrolling fixes: complex-script shaping, diagram alignment, enlarged-script
   geometry, stemma label de-collision, Sanskrit sandhi, and wheel ownership.
