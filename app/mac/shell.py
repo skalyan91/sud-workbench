@@ -663,11 +663,13 @@ def _install_fullscreen_observer(AppKit, nswin, pywin):
         # pointer reaches the top edge — the same gesture that triggers the web layer's own `fs-reveal`. Both
         # then want the top of the screen, and ours drew straight underneath the native band.
         #
-        # `contentLayoutRect` is AppKit's own answer to "what part of the content is NOT covered by the
-        # titlebar", so the band's height is simply the frame less that. Measured on a real window rather than
-        # assumed: windowed, frame 700 / contentLayoutRect 668 → a 32px inset; full screen with the titlebar
-        # auto-hidden, 923 / 923 → 0, stable across repeated samples. So the property really does track the
-        # titlebar's presence, and 0 is what "hidden" reads as.
+        # ⚠ `contentLayoutRect` WAS THE FIRST ANSWER HERE AND IS THE WRONG ONE — kept on the record because it
+        # is the obvious choice and it measures plausibly right in every state you can reach WITHOUT hovering:
+        # windowed it reads frame 700 / content 668 (a 32px titlebar inset), full screen 923 / 923 (no inset),
+        # so it looks exactly like a property that tracks the titlebar. It does not track THIS titlebar. The
+        # full-screen band is not part of our window at all, and revealing it resizes nothing — see _band_px.
+        # The lesson worth keeping: both states that were measurable without a pointer at the screen edge
+        # agreed with the wrong theory, so only driving the actual hover could tell them apart.
         #
         # POLLED ON A MAIN-THREAD NSTimer RATHER THAN KVO, and only while full screen: NSWindow does not
         # promise KVO for this property, and a reveal that silently never fired would be indistinguishable
@@ -675,9 +677,31 @@ def _install_fullscreen_observer(AppKit, nswin, pywin):
         # windowed session pays nothing. Geometry is read on the main thread, where the timer fires — the same
         # rule _native_chrome above already follows.
         def _band_px():
-            f, c = nswin.frame(), nswin.contentLayoutRect()
-            px = float(f.size.height) - float(c.size.height)
-            return px if px > 0.5 else 0.0
+            # ⚠ THE BAND IS A SEPARATE WINDOW, AND contentLayoutRect NEVER SEES IT — which is what the first
+            # cut of this got wrong. In full screen AppKit hosts the titlebar/toolbar in its own
+            # NSToolbarFullScreenWindow, floating over ours, and the hover reveal FADES THAT WINDOW IN rather
+            # than resizing anything: our frame and contentLayoutRect both sit unchanged at 923 throughout.
+            # Measured on a real full-screen window with the cursor warped to the top edge (CGWarp +
+            # CGEventPost, sampled at 8Hz): idle → NSToolbarFullScreenWindow y=891 h=32 alpha=0.0; hovering →
+            # the same window at alpha=1.0; frame-less-contentLayoutRect 0.0 in BOTH, i.e. the old measurement
+            # could only ever answer 0. The menu bar needs no part in this: the full-screen window is 923 tall
+            # under a 956 screen, so it never extends beneath the 33px menu bar in the first place.
+            try:
+                for w in AppKit.NSApp.windows():
+                    if w.className() != "NSToolbarFullScreenWindow":
+                        continue
+                    a = float(w.alphaValue())
+                    if a <= 0.01:
+                        return 0.0                      # present but faded out = no band on screen
+                    bf, wf = w.frame(), nswin.frame()
+                    # how much of the band actually lies over OUR window: it is positioned a few px higher
+                    # while animating (y 891→897 observed), and only the overlap can hide our titlebar.
+                    over = (float(wf.origin.y) + float(wf.size.height)) - float(bf.origin.y)
+                    over = max(0.0, min(over, float(bf.size.height)))
+                    return round(over * a, 1)           # scaled by the fade, so ours slides in step with it
+            except Exception as exc:  # noqa: BLE001 — a measurement must never break full screen
+                _shell_log(f"[titlebar] fullscreen band: {exc}")
+            return 0.0
 
         def _publish_band(px):
             if _win_fullscreen.get("band") == px:
