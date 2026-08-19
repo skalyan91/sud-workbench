@@ -1251,10 +1251,23 @@ looking sends the reader away with the one thing they came for still missing.
   graph the rhyme book lists and Baxter's transcription is a NOTATION for that position, so 19,492 graphs answer
   here. ⚠️ **It is a fallback, not a replacement**: `_baxter_table`/`_baxter_all` consult it only where the
   appendix has no Middle Chinese for the graph — measured, **0 of 4,330** existing renderings move — and it
-  supplies **no Old Chinese**, because a Qieyun position says nothing about the reconstruction. ⚠️ **Built in
-  Baxter's 1992 notation, not 2014**, because that is what `baxter_sagart.tsv` is written in (`ʔ æ ɛ ɨ`, not
-  `' ae ea +`) and the two answer the same row; the port validates at **94.3 %** agreement with the appendix's
-  own first reading over the 3,364 graphs both hold, the residue being the appendix choosing a different 小韻.
+  supplies **no Old Chinese**, because a Qieyun position says nothing about the reconstruction. ⚠️ **"WHICH EDITION" AND
+  "WHICH CHARACTERS" ARE TWO QUESTIONS, and this file answers them differently: the 2014 READINGS in 1992's
+  CHARACTERS** (`--version 2014-ipa`, the build script's default). Everything separating the two editions is
+  pure ASCII encoding of the same sounds — `' ae ea +` for `ʔ æ ɛ ɨ` — with ONE exception, and it is a reading
+  rather than a spelling: Baxter (1992) writes the 佳 rhyme `-ɛɨ`/`-wɛɨ`, and Baxter & Sagart (2014) replace
+  those with `-ea`/`-wea`, i.e. the ordinary `ɛ` vowel, so the rhyme stops having a notation of its own.
+  `baxter_sagart.tsv` — the appendix beside it, answering the same Displayed row — is on the 2014 side of that
+  (佳 `kɛ`, 蟹 `hɛX`) while this file was built strictly 1992, so the two disagreed on **185 readings across
+  173 graphs** and a reader comparing 佳 with any appendix-sourced graph saw two conventions in one column.
+  Folded to the appendix's convention now; measured, exactly those 185 readings moved (`ɛɨ`→`ɛ`) and nothing
+  else — same rows, same 音韻地位 — and agreement with the appendix's own first reading over the 3,364 graphs
+  both hold went **94.3 % → 94.9 %**, the residue being the appendix choosing a different 小韻. `--version
+  1992` still gives that edition's own `-ɛɨ`, and `--version 2014` the plain ASCII transcription.
+  ⚠️ THE CHECKED TONE IS NOT ONE OF THE DIFFERENCES, on the question being asked: both editions leave 入聲
+  unmarked and carry it on the `-p`/`-t`/`-k` coda alone (level likewise unmarked, `X` rising, `H` departing).
+  Verified across both tables — no checked syllable in either also carries an `X` or `H`, and there is no graph
+  where one table writes the same segments checked and the other unchecked.
   Byte-reproducible, `--retrieved` required — don't hand-edit it, re-run the script.
 - `app/langid.py` — fastText `lid.176`, model **vendored** at `app/data/lid.176.ftz` so detection is
   fully offline. Drives the document language on open.

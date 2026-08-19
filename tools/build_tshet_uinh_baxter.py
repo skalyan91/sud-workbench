@@ -123,13 +123,14 @@ _HUI_HUN = set("灰魂")
 _DONG_GE_MA_GENG = set("東歌麻庚")
 
 
-def baxter(pos, version: str = "1992") -> str:
+def baxter(pos, version: str = "2014-ipa") -> str:
     """One 音韻地位 → Baxter's transcription, or "" where the tables do not cover it."""
     mu, hu, deng, lei, rhyme, tone = pos
     initial = _INITIAL.get(mu)
     if initial is None:
         return ""
-    if version == "1992" and initial == "'":
+    # The tables below are natively 2014/ASCII; every version but that one converts back from them.
+    if version != "2014" and initial == "'":
         initial = "ʔ"
     final = _RHYME.get(rhyme)
     if final is None:
@@ -138,9 +139,16 @@ def baxter(pos, version: str = "1992") -> str:
     # ("四等" here counts 端組 in, exactly as the source comment says).
     if rhyme in _DONG_GE_MA_GENG and deng in "三四":
         final = "j" + final
+    # ⚠ THE 佳 RHYME IS THE ONE PLACE THE TWO EDITIONS DISAGREE ABOUT A READING RATHER THAN A SPELLING.
+    # Baxter (1992) writes it -ɛɨ/-wɛɨ; Baxter & Sagart (2014) replace those with -ea/-wea, which in
+    # this transcription is the ordinary ɛ vowel — so the rhyme stops having a notation of its own.
+    # Everything else that separates the two editions is pure ASCII encoding of the SAME sounds
+    # (' ae ea + for ʔ æ ɛ ɨ), which is why "which edition" and "which characters" are two questions
+    # and this script now lets them be answered separately.
     if version == "1992":
         if final == "ea":
             final = "ɛɨ"
+    if version != "2014":
         final = final.replace("+", "ɨ").replace("ae", "æ").replace("ea", "ɛ")
     # 章組 and 日/以母 pair only with 三等韻, so the final's leading j is redundant
     if (mu in _ZHANG or mu in _RI_YI) and final.startswith("j"):
@@ -206,7 +214,10 @@ def build(src: str | None, retrieved: str, version: str) -> str:
         seen.add(key)
         rows.append((ch, mc, desc))
     out = io.StringIO()
-    out.write(f"# Baxter Middle Chinese derived from the 廣韻 音韻地位 (Baxter {version} transcription).\n")
+    label = {"2014-ipa": "Baxter & Sagart 2014 readings in Baxter 1992's characters",
+             "1992": "Baxter 1992 transcription",
+             "2014": "Baxter & Sagart 2014 transcription, ASCII"}[version]
+    out.write(f"# Baxter Middle Chinese derived from the 廣韻 音韻地位 ({label}).\n")
     out.write("# Positions: nk2028/tshet-uinh-data 韻書/廣韻.csv (CC0). Derivation: a Python port of\n")
     out.write("# nk2028/tshet-uinh-examples baxter.js (MIT). Built by tools/build_tshet_uinh_baxter.py;\n")
     out.write(f"# retrieved {retrieved}. Columns: graph, middle_chinese, 音韻地位. DO NOT HAND-EDIT.\n")
@@ -224,10 +235,12 @@ def main() -> int:
                     help="YYYY-MM-DD the source was fetched. Required: reading the clock here would "
                          "make two builds of one input differ.")
     ap.add_argument("--src", help="a saved copy of 廣韻.csv (default: fetch it)")
-    ap.add_argument("--version", default="1992", choices=["1992", "2014"],
-                    help="which Baxter transcription. Default 1992 — NOT 2014 — because that is the one\n"
-                         "app/data/baxter_sagart.tsv is written in (it spells ʔ, æ, ɛ, ɨ where 2014\n"
-                         "spells ', ae, ea, +), and the two tables answer the same Displayed row.")
+    ap.add_argument("--version", default="2014-ipa", choices=["2014-ipa", "1992", "2014"],
+                    help="which Baxter transcription. Default 2014-ipa: the 2014 READINGS written with\n"
+                         "1992's characters (ʔ æ ɛ ɨ, not ' ae ea +) — which is exactly what\n"
+                         "app/data/baxter_sagart.tsv holds, and the two tables answer the same Displayed\n"
+                         "row, so they must not disagree. `1992` restores that edition's own -ɛɨ/-wɛɨ for\n"
+                         "the 佳 rhyme; `2014` is the plain ASCII transcription, characters and all.")
     ap.add_argument("--out", default=OUT)
     a = ap.parse_args()
     text = build(a.src, a.retrieved, a.version)
