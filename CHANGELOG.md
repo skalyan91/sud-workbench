@@ -2,6 +2,31 @@
 
 All notable changes to SUD Workbench are documented in this file.
 
+## [0.3.11] — 2026-08-19
+
+Both fixes in 0.3.10 were aimed at real faults and neither landed; these are the corrected ones.
+
+### Fixed: cross-line arc endpoints take their place in the fan by where they actually reach
+
+- 0.3.10 put a cross-line arc's endpoint at the same **height** as the within-line endpoints beside it,
+  which was necessary but not sufficient: which **slot** it takes among them was still decided by how
+  many tokens the arc spans in the sentence, not by how far it reaches across the page. Those are the
+  same thing within one line and come apart the moment an arc crosses a wrap — an arc can span forty
+  tokens and travel almost no distance sideways. Measured, a cross-line arc reaching **35 px** was
+  taking the innermost slot from a within-line arc reaching **350 px**.
+- Every endpoint is now ordered by the distance it actually covers in the wrapped layout, the same
+  frame that already decides which side of a token it leaves from. Within-line arcs are provably
+  unaffected — over 53 such groups, the old and new orders never once disagree.
+
+### Fixed: in full screen, the revealed titlebar really does sit under the native one
+
+- The measurement 0.3.10 relied on reports the same value whether the native band is on screen or not,
+  so the titlebar never moved. The band is not part of the app's window at all — macOS floats it in a
+  window of its own and **fades it in**, resizing nothing.
+- That window is now what gets measured, and the app's titlebar follows the fade rather than a
+  resize that never happens. Confirmed by driving the whole gesture — full screen, pointer travelling
+  up to the top edge — and watching the titlebar settle 32 px down and return.
+
 ## [0.3.10] — 2026-08-19
 
 Two placement fixes, both in geometry that is only wrong under a condition the ordinary case never
