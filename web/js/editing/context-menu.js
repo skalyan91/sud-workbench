@@ -1045,6 +1045,13 @@ function editTier(si,tokId,tier,clickXY){ const s=DOC[si]; if(!s||tokId<1||tokId
   const proxy={ get v(){ return tierText(tk,tier); },
     set v(val){ const enc=glossEnc(val), prev=tier==="mseg"?tierText(tk,"mseg"):"";
       tk.misc=setMiscKV(tk.misc,key,tier==="mseg"?msegStrip(enc,!!seamPost(tk),!!seamPre(tk)):enc);
+      /* ⚠ A HAND-TYPED Gloss RETIRES THE ALIGNER'S LEMMA. `_glossLex` (js/io/bridge.js) is where the
+         translation aligner records the English LEMMA it put in MGloss's lexical slot, and mglossLexFor
+         prefers it over the Gloss tier for exactly as long as it stands. Typing in this cell is a new
+         statement about what the word MEANS, so a lemma derived from the previous gloss must not go on
+         outranking it — the next mglossRefill would otherwise restore a stem the reader has just
+         overruled. Gloss only: an MGloss or MSeg edit says nothing about which tier the stem came from. */
+      if(tier==="gloss") tk._glossLex="";
       // item 19: mglossSplitTypedHyphen is deliberately narrow (see its own note) — it ONLY reads a single newly-
       // typed hyphen that cuts a two-part gloss cleanly, and declines everything else, INCLUDING a hyphen being
       // REMOVED (a merge, its first condition `A.includes("-")` exits on that immediately) or several hyphens

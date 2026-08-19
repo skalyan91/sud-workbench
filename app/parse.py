@@ -18,6 +18,7 @@ from __future__ import annotations
 import difflib
 import os
 import sys
+import threading
 
 from . import convert
 from .paths import STANZA_DIR
@@ -74,9 +75,25 @@ def invalidate_cache(pkg: str | None = None) -> None:
             del sys.modules[name]
 
 
+# ⚠ ONE LOAD AT A TIME, because the warm-up below made this reentrant for the first time. Until it
+# existed, every `spacy.load` here ran on whichever single thread was parsing; now a background warm
+# and a reader's own first parse can arrive together, and without this both would call `spacy.load`
+# for the same package — transiently DOUBLE the model's memory, for one of the two to be thrown away
+# when it lost the dict assignment. Double-checked inside the lock so the warm path costs a lock
+# acquisition once and a dict hit for ever after.
+_LOAD_LOCK = threading.Lock()
+
+
 def _load_spacy(package: str):
     if package in _SPACY_MODELS:
         return _SPACY_MODELS[package]
+    with _LOAD_LOCK:
+        if package in _SPACY_MODELS:   # another thread loaded it while we waited
+            return _SPACY_MODELS[package]
+        return _load_spacy_locked(package)
+
+
+def _load_spacy_locked(package: str):
     try:
         import spacy
     except ImportError as exc:
@@ -95,6 +112,31 @@ def _load_spacy(package: str):
             f"model {package!r} could not be loaded (is it installed?) — {why}") from exc
     _SPACY_MODELS[package] = nlp
     return nlp
+
+
+def warm(model_id: str = "") -> bool:
+    """Load ``model_id``'s pipeline into this process's cache and answer whether it is there.
+
+    ⚠ EXISTS BECAUSE THE FIRST PARSE OF A SESSION IS THE EXPENSIVE ONE AND THE READER SHOULD NOT BE
+    THE ONE WAITING FOR IT. Measured: loading ``en_sud_ewt_gum`` is **8.4 s**, against 0.3 s for the
+    parse itself once it is loaded. Two features pay that toll on their FIRST use and both are
+    English-model features whatever language the document is in — the translation auto-gloss
+    (:mod:`app.gloss_align`) and the Wiktionary definition flyout (:mod:`app.wiktionary`, which
+    condenses English definition prose). Called from a background thread at launch, so the cost is
+    paid while the reader is reading rather than after they have asked for something.
+
+    Never raises and never reports a problem anywhere: a machine with no English model installed is
+    an ordinary state (the wheel is a declared dependency, but a trimmed or half-built environment
+    may lack it), and a warm-up is by definition something nobody asked for -- there is no one to
+    tell. The real call sites resolve the model themselves and report their own absence properly."""
+    try:
+        engine, _, name = (model_id or "").partition(":")
+        if engine != "sud" or not name:
+            return False
+        _load_spacy(name)
+        return True
+    except Exception:  # noqa: BLE001 — a warm-up must never be able to take the app down with it
+        return False
 
 
 def _spacy_doc_to_sud(doc) -> tuple[list[dict], list[dict]]:

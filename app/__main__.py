@@ -492,6 +492,37 @@ def main(argv: list[str] | None = None):
                 _ev += (lambda *_a, _n=_evname: _clog(f"=== window event: {_n} ==="))
             except Exception:  # noqa: BLE001
                 pass
+    # ── WARM THE ENGLISH PARSER, OFF THE READER'S CLOCK ──────────────────────────────────────
+    # ⚠ THE FIRST PARSE OF A SESSION COSTS ~8.4s AND IT IS ALL MODEL LOADING (measured; the parse
+    # itself is 0.3s once loaded). Two features pay it on first use, and BOTH are English-model
+    # features whatever language the document is in: the translation auto-gloss (app/gloss_align.py)
+    # and the Wiktionary definition flyout (app/wiktionary.py condenses English definition prose with
+    # a real SUD parse). Reported as a bug, and fairly — ticking a glossing tier showed a spinner for
+    # ten seconds with nothing to say why, which is indistinguishable from a feature that does not
+    # work. Loading it here moves that cost to where nobody is waiting on it.
+    #
+    # UNCONDITIONAL, on instruction, rather than gated on the document having translations or on a
+    # glossing tier being on: which of the two features a reader reaches for is not knowable at
+    # launch, the model is a declared dependency that every environment already has on disk, and a
+    # conditional warm-up would simply move the ten-second wait to whichever case the condition
+    # missed. The cost of being wrong is resident memory in a session that never glosses or looks a
+    # word up; the cost of the alternative is the bug this fixes.
+    #
+    # DAEMON THREAD, started BEFORE the run loop and outliving nothing: `webview.start()` blocks
+    # right below, so a plain call here would delay the window itself by those same seconds. The GIL
+    # makes this contend a little with the frontend's first paint, which is why it is not started any
+    # earlier — by the time spaCy's import work begins in earnest the window creation above has
+    # already been issued. Failure is silent BY DESIGN (see parse.warm): nobody asked for this, so
+    # there is nobody to report it to, and every real call site still resolves and reports for itself.
+    def _warm_english():
+        try:
+            from . import parse, wiktionary
+            parse.warm(wiktionary.english_model_id())
+        except Exception:  # noqa: BLE001 — a warm-up must never be able to take the app down with it
+            pass
+
+    threading.Thread(target=_warm_english, name="warm-english", daemon=True).start()
+
     _clog("=== webview.start(): entering native run loop ===")
     webview.start(http_server=True, menu=menu, debug=bool(os.environ.get("SUD_DEBUG")))
     _clog("=== webview.start(): RETURNED — run loop ended, window closed ===")

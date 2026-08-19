@@ -1473,6 +1473,174 @@ looking sends the reader away with the one thing they came for still missing.
 Optional dependencies are always isolated behind a single module façade in `app/`, as those last
 six do — follow that when adding another.
 
+## Glossing from the English translation (`app/gloss_align.py`, `js/io/bridge.js`)
+
+A sentence's `# text_en` is parsed with the bundled English model and its tree aligned with the
+sentence's own, so each word is glossed by the English word standing in its structural position. The
+matched **form** fills MISC `Gloss`; its **lemma** fills the lexical part of `MGloss`.
+
+⚠ **THE MATCH IS MADE IN UD, AND THAT IS WHY THE CONVERSION IS NOT OPTIONAL.** SUD promotes function
+words over their hosts and promotes *different* ones per language. Measured, on
+`samples/chinese_msud.conllu` and the bundled English wheel: `This puppy is really cute!` gets a SUD
+tree rooted on the AUXILIARY `is`, while 小狗真可爱 is rooted on 可 AUX — so aligning roots in SUD space
+pairs two function words and strands the content words. After conversion both sides root on the
+predicate (`cute` / 可爱) and the trees pair token for token. There is deliberately **no fallback to
+aligning the un-converted SUD trees**: that answers a different question, and a silently worse answer
+written into an annotator's document is worse than "install the grammars".
+
+⚠ **THE GRAMMATICAL HALF OF MGloss IS STILL THE SOURCE TOKEN'S OWN.** Only the *stem* is English:
+`composeMGlossPrefill(englishLemma, t.feats, t.upos, msegPrefillParts(t))`. That is what lets this
+reuse the whole existing MGloss apparatus — `MGLOSS_FEAT_ORDER`, the fused `3SG`, the infix case —
+without restating any of it. A closed class (`UPOS_LEIPZIG_ABBR`) takes the English word in `Gloss`
+alone, exactly as `applyWiktionaryDef` already does.
+
+⚠ **AND SO Gloss AND MGloss DELIBERATELY HOLD DIFFERENT ENGLISH WORDS** — `doubts` against `doubt`.
+Every builder used to derive MGloss's stem *from the Gloss tier* inline, in three places; that is now
+the one accessor `mglossLexFor(t)`, which prefers the aligner's recorded lemma (`t._glossLex`). Without
+it the next unforced `mglossRefill` — fired by any form or FEATS edit — silently put `doubts.` back.
+⚠️ `_glossLex` is in-memory, so `glossAdoptLexFromDoc` recovers it on open **by comparison** (a stored
+MGloss stem that is not the Gloss underscored was somebody's), the `adoptStoredPicks` idiom. **That
+recovery also closes a bug older than this feature**: a hand-written MGloss stem was, after a
+save-and-reopen, replaced by the Gloss on the next form edit.
+
+⚠ **THE ATTACHMENT MARK IS A SEPARATOR ONCE A STEM EXISTS, NOT A WRAPPER** (`composeMGlossPrefill`),
+and this was a bug OLDER than the aligner that the aligner made ordinary. `mglossMarks` brackets the
+whole string, which is right while the gloss is grammatical only — the suffix of `vir-um` glosses
+`-ACC.SG.M`, the leading hyphen meaning "attaches to my left". Put a lexical part beside it and the
+bracketing says something false twice: `-man.ACC.SG.M` marks the STEM as attaching leftward and joins
+stem to suffix-gloss with the dot that separates two categories of ONE morpheme. Leipzig writes
+`man-ACC.SG.M`. It survived because a lexical Gloss and a segmented form together used to require a
+hand-typed gloss or a picked dictionary sense; the aligner fills a Gloss on every matched token, so the
+pairing is now the common case and it was reported immediately. Every no-stem case is byte-identical,
+which is what makes the change safe under `morphPrefillSent`/`mglossRefill`.
+⚠️ **AND `mglossLexFor` MUST NOT REQUIRE `GLOSS_ON`.** The gate was inherited from the expression it
+replaced, where the stem was BORROWED from the Gloss tier so no tier meant nothing to borrow. The
+aligner's lemma is a second source and is on the token regardless — gating it meant the morphemic tier
+alone produced no stems at all, and (with the wrapper bug above) a bare `-ACC.SG.M` that read as a
+misplaced hyphen rather than as the missing word it was. Only the FALLBACK to the Gloss tier is gated.
+
+⚠ **THREE THINGS TRIGGER IT: A TRANSLATION COMMIT, A TIER TOGGLE, AND ANY EDIT THAT MOVES THE
+ANALYSIS** — the last one on instruction, and it reverses an earlier decision recorded here. The
+alignment is computed against the source tree (each token's UPOS, FEATS, head and relation), so a
+retag or a re-headed arc genuinely changes the answer and a gloss left standing describes a tree the
+reader has replaced. It hangs off `markDirty`, the one funnel every edit passes through, which is what
+makes that true of ANY attribute rather than of the edit sites someone remembered — the same reasoning
+`scheduleOrthoMorph` rests on.
+⚠️ **IT IS AFFORDABLE ONLY BECAUSE THE KEY IS PER SENTENCE AND SIGNS THE ANALYSIS ITSELF.** An edit
+anywhere costs one string build and one comparison per sentence; the bridge is asked only about
+sentences whose own answer could have moved. Measured: an edit that moves nothing the key signs makes
+no bridge call at all, while a retag and a re-heading each make exactly one. Without that, a pass
+costing ~9s cold and 0.26s warm, hung off every keystroke, would be unusable — which is precisely why
+this was NOT hung off `markDirty` when it was first built.
+⚠️ **AND IT CANNOT LOOP**, which is the obvious hazard of a pass that writes into the funnel that
+triggers it: the pass calls `markDirty` when it writes, re-arming the schedule — but it has by then
+stored the key it just answered, so the next run finds no work and returns without marking anything.
+One idle re-check per write, verified, not a cycle.
+⚠️ Debounce 500 ms, not `scheduleOrthoMorph`'s 120. `TRANS_EDIT` (raised on `.tg-text` focus),
+`INLINE_EDIT_OPEN` and `inInsertBatch()` all RE-ARM rather than running: a translation is prose being
+typed and every intermediate state is a different English sentence.
+⚠️ `setTier`'s "on" branch is what glosses a whole document (there is no menu command; asking for a
+gloss row on a translated file *is* that request).
+
+⚠ **`glossKeyOf` IS THE QUESTION, AND IT MEANS "WHAT ARE THIS SENTENCE'S GLOSSES THE ANSWER TO".**
+`glossSeedKeysFromDoc` therefore seeds it **only where the sentence already carries a gloss** — seeding
+every sentence made `setTier`'s call a silent no-op (every key matched, so the pass found no work and
+the tier came up empty), and seeding none re-glossed a whole file on the first translation edit
+anywhere in it. Empty tier filled, written one left to its own evidence — **within a session's ordinary
+editing**. Toggling a tier is the exception and overrides it (below): the rule that emerges is "editing
+one translation re-derives that sentence; changing which tiers exist re-derives everything". The key signs the tree and
+FEATS but **never MISC** — the pass writes MISC, so signing it would invalidate the key with the pass's
+own output and re-run for ever.
+⚠️ **AND REMOVING A TIER FORGETS THE KEY** (`glossForgetKeys`, in `setTier`'s off branch), or the tier
+cannot be put back: `clearTierData` has just deleted the glosses the key describes, so a key left
+standing claims data that no longer exists, `fillAutoGloss` finds the question unchanged, and the
+re-enabled tier comes up EMPTY — reported exactly that way. Cleared for every sentence and BOTH tiers,
+not just the one removed, because one pass fills whichever of Gloss and MGloss is on and so answers the
+same question either way. Deliberately **not** `glossSeedKeysFromDoc()`, which re-derives keys from
+whatever MISC still holds: removing only the lexical tier would leave it looking at the morphemic data,
+keeping the keys, and reproducing the bug.
+
+⚠ **THE WORD CLASSES MUST MATCH EXACTLY, ON INSTRUCTION, AND THAT MAKES UPOS A GATE RATHER THAN A
+SCORE.** It used to be graded — exact, then a NEAR-POS table of pairs where two languages routinely
+realise one meaning under different classes (`{ADJ,VERB}` for Chinese stative verbs against English
+adjectives, `{ADV,PART}` for 没 against *n't*), then bare open/closed agreement. The table and the
+grading are both gone: a class disagreement is now ineligible at any relation with any features.
+⚠️ **WHAT IT COSTS IS MEASURED**: over the three translated samples, **43 mapped pairs → 37**. The
+losses are real words — 没/*n't*, and Latin `căno`/*sing* because the English model tags "sing" as a
+NOUN in that verb-initial line. Nothing is glossed WRONGLY by the change; the answer is silence, which
+is this module's preferred failure everywhere else, and the rule is far more predictable.
+⚠️ **`nsubj` STILL DOES NOT SHARE A CLASS OR A SUPERTYPE WITH `obj`**, though UD files both as "core
+arguments": measured on `samples/la_virgil.conllu`, that conflation put Latin `Arma` (the OBJECT of
+`căno`) under English *I*. The two gates are now "same word class outright" and "relations relatable";
+neither is a score, and an ineligible pair is not a low-ranked one but no candidate at all.
+
+⚠ **THE WEIGHTS ARE THREE INEQUALITIES, ASSERTED AT IMPORT** (`_weight_invariants`), not literals. The
+first — an exact-relation pair must beat a base-relation one however good its features and position —
+**failed by a hundredth twice**: once under the original two-signal weights (0.80 against 0.81), and
+again when UPOS became a gate and the relation inherited its share (0.80 against 0.815). Neither would
+have been found by reading the table. With one structural signal left, the threshold now states one
+thing only: the relations must agree at least at CLASS level, since features and order can no longer
+be weighed against a second structural term.
+
+⚠ **THE ALIGNMENT IS A TREE EDIT DISTANCE (Zhang–Shasha), NOT A ROOT-DOWN DESCENT**, and the change was
+a simplification as much as a change of answer. The descent walked the two trees in step, solving an
+optimal assignment over each pair of sibling sets — but because it only ever compared children of an
+*already-matched* pair, one unmatched intervening node (an English auxiliary the source realises as a
+suffix) severed the whole subtree below it. That needed a bounded one-level "lift" to rescue, and a
+uniqueness sweep to rescue what the lift could not reach: two special cases with their own thresholds,
+patching one structural blind spot. An edit distance has no such blind spot — an intervening node the
+other tree lacks is simply a DELETION, and its children stay free to map at any depth. The lift, the
+sweep, `_THETA_LIFT` and the hand-written Hungarian solver they were built around are all gone.
+⚠️ **The threshold is enforced INSIDE the DP, not as a filter over its output**: a pair below θ (or
+failing the two-signal gate) is priced at `_BIG`, above delete+insert, so the optimisation cannot buy
+structure with a match this module would refuse to report.
+⚠️ **CHILDREN ARE SORTED CANONICALLY, NOT BY WORD ORDER, and that is what makes an ORDERED TED usable
+across languages.** Zhang–Shasha's mapping may not cross, so two siblings map only if they appear in
+the same relative order on both sides — and surface order is precisely what differs between languages
+(Latin puts its object first, English does not), so ordering by token index would forbid the very
+matches this exists to make. Children are ordered by relation class, then relation, then UPOS, with the
+token index only as a last resort to keep the order total: the no-crossing constraint then says
+something language-neutral (a subject may not take a complement's slot). Unordered TED is the obvious
+alternative and is NP-hard, so it was never on the table.
+⚠️ **Measured against the descent it replaced**, over the three translated samples: 43 mapped pairs
+against 45, i.e. slightly lower recall for better precision — TED corrects `ab`→*from*, `vi`→*power*
+and `superum`→*gods*, all three of which the descent got wrong, while losing `Italiam`, `urbem` and
+`dum`. Identity (a sentence aligned against itself) stays exact: 67/67 tokens, every one to itself.
+
+⚠ **mSUD→UD MERGES TOKENS, SO THE MAP BACK IS NOT POSITIONAL.** `convert.py` records that a grew rewrite
+never inserts or deletes a token, and that is true of SUD→UD and **false for mSUD**: measured,
+`samples/chinese_msud.conllu` goes 6 tokens in, 5 nodes out (问+题 → 问题). A MISC `SrcTok` stamp is the
+primary strategy — measured through a real conversion before being relied on, it survives intact, and a
+FUSED node comes back carrying exactly ONE stamp, its head morpheme's, which is precisely the
+representative wanted. Positional identity is the fallback; where neither answers, nothing is written.
+The stamp rides a **deep copy** and is never stripped, because it never reaches the document.
+
+⚠ **THE FIRST CALL OF A SESSION COSTS ~9 SECONDS, AND ALL OF IT IS DEPENDENCY LOADING.** Profiled on
+`samples/la_virgil.conllu`: loading the English spaCy model **8.44s**, spawning grew's OCaml backend
+**0.65s**, the whole pass once both are warm **0.26s**. `app/__main__.py` therefore **warms the English
+model in a daemon thread at launch** — unconditional, because which of the two English-model features a
+reader reaches for (this one, or `wiktionary`'s definition flyout) is not knowable then, and a
+conditional warm-up just moves the wait to whichever case the condition missed. grew is deliberately
+NOT warmed with it: 0.65s does not justify spawning an OCaml process at every launch. `parse.warm()`
+is silent by design and `_load_spacy` gained a lock, since that warm-up is the first thing in this app
+to load a model concurrently with a real parse. The busy label still hedges on the first run — a bare spinner for ten seconds and no other sign is indistinguishable from a
+broken feature, and was reported as exactly that ("I see 'Glossing from translation…' and then nothing
+happens"). ⚠️ **And the bridge call is raced against a clock**: `hideBusy()` lives in a `finally`, so a
+promise that never settles leaves the indicator up for the life of the session. Measured once on a
+loaded machine: no answer after 60s, and a `setTimeout` armed for 60s did not fire for **152s** — the
+whole web view starved, not just this call. On the timeout the pass gives up, says so, and leaves the
+sentence's key UNSET so the next trigger retries.
+
+⚠ **CONVERSIONS ARE SERIALISED BEHIND A MODULE LOCK.** pywebview dispatches every JS→Python call on its
+own thread without serialising them, while grewpy talks to ONE backend over ONE socket — two windows
+glossing at once would race on that connection. Same reasoning as `Api._dialog_lock`.
+
+⚠ **A HIDDEN-WINDOW WKWebView PROBE DEADLOCKS ON THIS PATH** and is not the way to test it: the pass
+holds the GIL inside grew for seconds while the probe thread needs the main run loop to service
+`evaluate_js`, so the poll starves. Drive the real frontend in headless Chrome against a **stubbed
+bridge serving the real `gloss_align` answers** (captured from a live run) — that keeps every frontend
+line under test and pairs with a Python-side end-to-end run.
+
 ## Packaging (`packaging/`)
 
 - **`make_bootstrap_app.sh`** — the canonical build (and what the Stop hook runs). Ships the app

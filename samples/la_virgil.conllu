@@ -1,5 +1,6 @@
 # sent_id = s1
 # text = Arma virumque căno, Troiae qui primus ab oris Italiam, fato profugus, Laviniaque venit litora.
+# text_en = I sing of arms and of the man who first came from the shores of Troy, an exile by fate, to Italy and the Lavinian shores.
 1	Arma	arma	NOUN	Nb	Case=Acc|Gender=Neut|Number=Plur	4	comp:obj	_	_
 2-3	virumque	_	_	_	_	_	_	_	_
 2	virum	vir	NOUN	NOUN	Case=Acc|Gender=Masc|Number=Sing	1	conj:coord	_	_
@@ -25,6 +26,7 @@
 
 # sent_id = s2
 # text = Multum ille et terris jactatus et alto, vi superum, saevae memorem Junonis ob iram.
+# text_en = He was tossed much on the lands and on the deep, by the power of the gods, on account of the mindful anger of cruel Juno.
 1	Multum	multus	ADV	A-	Degree=Pos	5	mod	_	_
 2	ille	ille	PRON	Pd	Case=Nom|Gender=Masc|Number=Sing	5	subj	_	_
 3	et	et	CCONJ	C-	_	4	cc	_	_
@@ -45,6 +47,7 @@
 
 # sent_id = s3
 # text = Multum ille et bello passus, dum conderet urbem, inferretque deos Latio, atque altae moenia Romae.
+# text_en = He suffered much in war also, until he might found a city and bring his gods to Latium, and the walls of lofty Rome.
 1	Multum	multus	ADV	A-	Degree=Pos	5	mod	_	_
 2	ille	ille	PRON	DET	Case=Nom|Gender=Masc|Number=Sing	5	subj	_	_
 3	et	et	CCONJ	CCONJ	_	4	cc	_	_

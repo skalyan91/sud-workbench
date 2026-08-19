@@ -1164,6 +1164,40 @@ class Api:
         from . import sa_notation
         return {"csl": sa_notation.csl_many(sents or [])}
 
+    def gloss_from_translation(self, sents: list, lang: str = "", src_format: str = "",
+                               trans_lang: str = "en") -> dict:
+        """Each sentence's English translation aligned to its own tree → the per-token gloss picks.
+
+        ``{"gloss": [{"pairs": [{src, en, form, lemma, upos, score}, …], "sents", "error"}, …]}``
+        — one entry per input sentence, parallel and the same length, holding only the tokens that
+        matched.  The frontend writes the matched FORM into MISC ``Gloss`` and the matched LEMMA into
+        ``MGloss``'s lexical part; a source token absent from ``pairs`` simply keeps no gloss, which is
+        the honest answer and a common one (English has articles most languages do not, and vice versa).
+
+        A SENTENCE at a time, like :meth:`sanskrit_csl` and unlike the per-form transliteration calls,
+        because the question is about a TREE — the same surface word glosses differently depending on
+        what it is attached to, which is the whole content of :mod:`app.gloss_align`.
+
+        ``src_format`` defaults to this window's own detected format, so the caller need not repeat it;
+        it decides only whether the document goes through ``sud_to_ud`` or ``msud_to_ud``.
+
+        ⚠ The UD conversion is optional equipment on a fresh install (grew's OCaml backend and the
+        fetched ``.grs`` grammars), so ``unavailable`` is an ORDINARY outcome here rather than an error
+        condition — the frontend turns it into one toast naming Manage Models and stops asking.  Same
+        two-clause handler as :meth:`convert_format`."""
+        from . import convert, gloss_align
+        try:
+            out = gloss_align.gloss_from_translation(list(sents or []), str(lang or ""),
+                                                     str(src_format or self.format or "SUD"),
+                                                     str(trans_lang or "en"))
+        except convert.ConversionUnavailable as exc:
+            return {"gloss": [], "error": str(exc), "unavailable": True}
+        except convert.ConversionError as exc:
+            return {"gloss": [], "error": f"conversion failed: {exc}"}
+        except Exception as exc:  # noqa: BLE001 — failure is data over this bridge, never an exception
+            return {"gloss": [], "error": str(exc)}
+        return {"gloss": out}
+
     def translit_available(self) -> dict:
         from . import translit
         return {"ok": translit.available()}

@@ -88,7 +88,14 @@ async function renderModelList(host,refresh){ if(!host)return;
   try{ const ex=await window.pywebview.api.list_extras(); EXTRAS_LIST=(ex&&ex.extras)||[]; }catch(e){ EXTRAS_LIST=[]; }   // optional heavy-dependency tiers
   // …and whether grew can run at all, which decides whether the Stanza group is usable (see drawModelList).
   // Probed here rather than per row: `conversion_available` spawns the OCaml backend on its first call.
-  try{ const g=await window.pywebview.api.conversion_available(); GREW_OK=!!(g&&g.grewpy&&g.backend); }catch(e){}
+  try{ const g=await window.pywebview.api.conversion_available(); GREW_OK=!!(g&&g.grewpy&&g.backend);
+    // …and the same probe re-arms the translation auto-gloss (js/io/bridge.js), which switches itself
+    // OFF after one refusal so it stops paying for a bridge call per translation commit on a machine
+    // that cannot convert. Opening this sheet is where a reader fixes that, so it is where the flag is
+    // cleared — one answer about whether grew is usable this session, taken from the probe that is
+    // already being made, rather than a second probe of the same thing on the other side.
+    if(typeof window.__autoGlossUnblock==="function") window.__autoGlossUnblock();
+  }catch(e){}
   const box=host.closest(".content"), sb=box&&box.querySelector("#msearch");
   drawModelList(host, sb?sb.value:""); pollModelTrain(!!refresh); }
 function drawModelList(host,query){ if(!host)return; const q=(query||"").trim().toLowerCase(); host.innerHTML="";

@@ -30,7 +30,12 @@ if(typeof DOC!=="undefined" && !DOC.length && typeof hasBridge==="function" && !
       tok("was","be","AUX","VBD","Tense=Past",4,"mod@relcl"),
       tok("tall","tall","ADJ","JJ","Degree=Pos",7,"comp:pred")]},
     // French — a multi-word token: "du" = de + le (range 3-4 in CoNLL-U)
-    {sid:"s3",newpar:true,text:"Il parle du chat.",mwt:[{from:3,to:4,form:"du"}],tokens:[
+    // …and the two NON-ENGLISH sentences carry a `# text_en`, which is what the translations grid draws
+    // (renderBlockTrans) and what the translation auto-gloss is derived from (glossKeyOf/fillAutoGloss,
+    // js/io/bridge.js). Design mode has no bridge, so the gloss pass itself is a deliberate no-op here —
+    // the point is that the .tgrid, its focus/blur wiring and the block height it costs are all on screen
+    // for the renderers to be worked against, and that the headless smoke test exercises that path.
+    {sid:"s3",newpar:true,text:"Il parle du chat.",translations:[{lang:"en",text:"He is talking about the cat."}],mwt:[{from:3,to:4,form:"du"}],tokens:[
       tok("Il","il","PRON","","Person=3",2,"subj"),
       tok("parle","parler","VERB","","VerbForm=Fin",0,"root"),
       tok("de","de","ADP","","",2,"mod"),
@@ -38,7 +43,7 @@ if(typeof DOC!=="undefined" && !DOC.length && typeof hasBridge==="function" && !
       tok("chat","chat","NOUN","","Gender=Masc|Number=Sing",3,"comp:obj"),
       tok(".",".","PUNCT","","",2,"punct")]},   // the `# text` ends in a full stop, so a token has to account for it: without one the units no longer reconstruct the line, the alignment rightly refuses the whole sentence, and every decoration + the running-sentence write-back go with it (samples/french_mwt.conllu has always had this token; the fixture had lost it)
     // Arabic — right-to-left, non-Latin script, with a multi-word token: "للمدرسة" = لـ + المدرسة (range 3-4)
-    {sid:"s4",text:"ذهب الولد للمدرسة",rtl:true,mwt:[{from:3,to:4,form:"للمدرسة",translit:"lil-madrasa"}],tokens:[
+    {sid:"s4",text:"ذهب الولد للمدرسة",rtl:true,translations:[{lang:"en",text:"The boy went to the school."}],mwt:[{from:3,to:4,form:"للمدرسة",translit:"lil-madrasa"}],tokens:[
       tok("ذهب","ذهب","VERB","","",0,"root","ḏahaba","ḏahaba"),
       tok("الولد","ولد","NOUN","","Definite=Def",1,"subj","al-walad","walad"),
       tok("لـ","ل","ADP","","",1,"mod","li","li"),

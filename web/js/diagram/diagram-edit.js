@@ -275,8 +275,29 @@ async function attachAsSharedConjunct(si,depId,conjDepId){ const s=DOC[si]; if(!
      cannot retract a selection that already exists. Called from both drag kinds; undone in endDrag and
      endMarquee, so a released pointer leaves ordinary selection exactly as it was. */
   const dragNoSelect=()=>{ document.body.classList.add("dg-noselect");
-    const sel=window.getSelection&&window.getSelection(); if(sel&&!sel.isCollapsed) try{ sel.removeAllRanges(); }catch(_){} };
-  const endMarquee=()=>{ document.body.classList.remove("dg-noselect"); if(MARQ&&MARQ.div)MARQ.div.remove(); MARQ=null; };
+    dropTextSel(); };
+  /* ⚠ AND `user-select:none` DOES NOT REACH AN EDITABLE REGION, WHICH IS THE HALF THE CSS ABOVE CANNOT
+     DO. A block carries several contenteditables OUTSIDE the diagram — the running sentence
+     (js/core/document.js's wireStext), the sentence id, and the translations grid's `.tg-text`
+     (js/io/bridge.js) — and an editable region stays selectable in WebKit however emphatically an
+     ancestor is declared `user-select:none`; the property governs ordinary content, not a region the
+     UA has been told the user may edit. So a marquee swept up out of the diagram highlighted the
+     translation or the running sentence behind it. Reported as "text outside the diagram gets
+     selected".
+     ⚠️ CHROME DOES NOT SHOW IT, so no headless test can: driven over CDP the identical drag across
+     `.tg-text` and `.stext` leaves `rangeCount: 0`. And the drag CANNOT be synthesised in the shipping
+     WKWebView either — mouse-driven selection needs trusted events. So this is fixed by a mechanism
+     that does not depend on which engine is reading `user-select` at all: a `selectstart` veto stops
+     the selection being CREATED while a drag is in flight, and the end of the gesture drops whatever
+     formed before the 4px threshold decided this press was a drag. Capture phase, so it runs before
+     anything that might stop propagation, and gated on the class so an ordinary click still places a
+     caret in every one of those fields exactly as before. */
+  const dropTextSel=()=>{ const sel=window.getSelection&&window.getSelection();
+    if(sel&&!sel.isCollapsed) try{ sel.removeAllRanges(); }catch(_){} };
+  document.addEventListener("selectstart",e=>{
+    if(document.body.classList.contains("dg-noselect")) e.preventDefault(); },true);
+  const endMarquee=()=>{ document.body.classList.remove("dg-noselect"); dropTextSel();   // …and nothing selected is LEFT BEHIND: see dragNoSelect for the editable regions the CSS cannot reach
+    if(MARQ&&MARQ.div)MARQ.div.remove(); MARQ=null; };
   docEl.addEventListener("pointerdown",e=>{ if(e.button!==0||!draggable())return;
     // an inline editor (makeEditable's floating .nodeedit input, appended to <body> — never inside #doc, so
     // clicking a DIFFERENT token always reaches here) is still focused from a PRIOR click: force its blur→
@@ -340,7 +361,7 @@ async function attachAsSharedConjunct(si,depId,conjDepId){ const s=DOC[si]; if(!
           if(cd!==fromId && (isConjDep(DDRAG.si,cd)||raiseMirror(DDRAG.si,fromId,cd))){ overEdge=true; edgeEl.classList.add("dtarget"); } } }   // isRaiseTargetDep is deliberately NOT a gate here — see raiseMirror's own note: the argument-onto-predicate direction was withdrawn, leaving the predicate-onto-argument one as the only raising drop   // …raiseMirror: dragging the PREDICATE onto an argument's edge highlights too, or the mirror gesture would give no sign it was going to work right up until the drop
       if(DDRAG.kind==="node"){ if(overNode||overEdge) clearCaret();   // hovering another node/conj edge → it becomes the head (no drop caret)
         else { const blk=document.querySelector(`.sblock[data-i="${DDRAG.si}"]`); if(blk)dropCaret(DDRAG.si,e.clientX,e.clientY,blk,DDRAG.tok); } } } } });   // empty space → reorder: show where it would land
-  function endDrag(e){ document.body.classList.remove("dg-drag"); document.body.classList.remove("dg-noselect"); clearGhost(); clearCaret();
+  function endDrag(e){ document.body.classList.remove("dg-drag"); document.body.classList.remove("dg-noselect"); dropTextSel(); clearGhost(); clearCaret();
     document.querySelectorAll("#doc .dtarget").forEach(n=>n.classList.remove("dtarget"));
     clearHeadCandidates();
     try{docEl.releasePointerCapture(e.pointerId);}catch(_){} }

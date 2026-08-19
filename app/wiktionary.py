@@ -33,12 +33,12 @@ _SUD_EN = "sud:en_sud_ewt_gum"
 # wheel and not this one (the first-launch venv is created once, behind `.sud-core-ready`, so a changed
 # requirements-core.txt never reaches it — see README's "Resetting an install"). Naming one package
 # outright would take the definition lookup down to its unparsed fallback on every such machine, for a
-# model that is right there. :func:`_sud_en` asks the registry which English package is actually
+# model that is right there. :func:`english_model_id` asks the registry which English package is actually
 # installed instead; the answer is cached because it is consulted once per condensed definition.
 _SUD_EN_RESOLVED = ""
 
 
-def _sud_en() -> str:
+def english_model_id() -> str:
     """The English SUD model id to condense definition prose with: the bundled one where it is
     installed, the retired `en_sud_ewt` where a pre-switch environment still has only that, and the
     bundled id regardless when neither can be seen (so ``parse.parse`` reports the honest "model not
@@ -46,7 +46,11 @@ def _sud_en() -> str:
 
     Only a REAL answer is cached — an English model can be installed from Manage Models mid-session,
     and caching "nothing is installed" would keep this module on the unparsed fallback for the life of
-    the process after the reader had just fixed exactly that."""
+    the process after the reader had just fixed exactly that.
+
+    PUBLIC because :mod:`app.gloss_align` needs the same answer for the same reason -- it parses a
+    sentence's English TRANSLATION whatever language the document is in.  One resolution shared, not
+    two that can drift apart the next time the bundled wheel is renamed."""
     global _SUD_EN_RESOLVED
     if _SUD_EN_RESOLVED:
         return _SUD_EN_RESOLVED
@@ -356,7 +360,7 @@ def _condense_segment(text: str) -> list[dict]:
     Returns one ``{"text","upos"}`` per candidate (`upos` = that candidate's own head, what the
     dictionary part-of-speech should match), in surface order — empty if nothing survives pruning."""
     from . import parse
-    res = parse.parse(text, _sud_en())
+    res = parse.parse(text, english_model_id())
     if not res.get("parsed"):
         return [{"text": text, "upos": ""}]   # the English SUD model isn't installed → fall back to the whole clause, unpruned, POS unknown
     toks = res.get("tokens") or []

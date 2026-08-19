@@ -276,6 +276,21 @@ rather than vendored — see `app/grammars.py`.
   for Sanskrit, in Apte's *Practical Sanskrit-English Dictionary* (revised ed. 1957,
   vendored from the Cologne digitisation, so it works offline) — and pre-fill the
   morphemic gloss from a chosen definition.
+- **Automatic glossing from the English translation** — where a sentence carries a
+  `# text_en`, both gloss tiers can be filled from it. The translation is parsed with the
+  bundled English model and the two dependency trees are matched by tree edit distance, so
+  each word is glossed by the English word standing in its own structural position: the matched form goes to
+  `Gloss` and its lemma to the lexical part of `MGloss`, whose grammatical abbreviations
+  still come from the source token's own features. Matching runs on the **UD** form of both
+  trees rather than the SUD form, which is what puts the two languages' content words in
+  comparable positions — SUD promotes function words over their hosts, and promotes
+  different ones in different languages. Two words are matched only where their word classes agree
+  exactly and their relations agree at least at class level. Turning a glossing tier on — or off and
+  back on — glosses every translated sentence in the document; afterwards, editing a translation,
+  retagging a word or moving an arc re-glosses the sentences whose analysis actually changed. Either
+  tier can be used on its own. A word the alignment cannot place is left unglossed rather than guessed at,
+  and one undo puts back both the translation and the glosses it produced. Needs the UD
+  conversion grammars (Manage Models); without them the feature says so and does nothing.
 - **Translations** — `# text_LANG` comments round-trip, and a drawer chooses which
   languages to show.
 

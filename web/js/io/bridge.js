@@ -132,7 +132,21 @@ function markDirty(v=true){ if(!v) DIRTY_BASE=false;
      refresh here is what makes it true of ANY attribute of any token rather than of the handful of edit
      sites someone thought to instrument. Debounced and self-gating; a no-op in every other language.
      Guarded because js/lang/translit-load.js loads AFTER this module. */
-  if(v && typeof scheduleOrthoMorph==="function") scheduleOrthoMorph(); }
+  if(v && typeof scheduleOrthoMorph==="function") scheduleOrthoMorph();
+  /* …AND THE TRANSLATION-DERIVED GLOSSES FOLLOW A CHANGE OF ANALYSIS, on instruction. The alignment
+     is computed against the source tree — each token's UPOS, FEATS, head and relation — so a retag or
+     a re-headed arc genuinely changes the answer, and a gloss left standing describes the tree the
+     reader has just replaced. markDirty is the one funnel every edit passes through, which is what
+     makes that true of ANY attribute of any token rather than of the handful of edit sites someone
+     remembered to instrument — the same reasoning the transliteration refresh above rests on.
+     ⚠ IT IS AFFORDABLE ONLY BECAUSE THE KEY IS PER SENTENCE AND SIGNS THE ANALYSIS ITSELF
+     (glossKeyOf): an edit anywhere costs one string build and one comparison per sentence, and the
+     bridge is asked only about sentences whose own answer could have moved. A pass that re-glossed
+     the document on every keystroke would be unusable at the ~9s cold / 0.26s warm this costs.
+     ⚠ AND IT CANNOT LOOP: the pass calls markDirty when it writes, which re-arms this — but by then
+     it has stored the key it just answered, so the next run finds no work and returns without
+     marking anything. One idle re-check per write, not a cycle. */
+  if(v) scheduleAutoGloss(); }
 function markDirtyBase(){ DIRTY_BASE=true; markDirty(); }   // an unsaved change with no undo entry to show for it
 // Stamp the one scheme a DOCUMENT owns onto its first sentence: the transliteration its MISC Translit/LTranslit
 // is written in. The script and the displayed romanisation are the READER's, kept per-language in PREFS, and
@@ -1555,10 +1569,36 @@ function mglossAddFeats(mg,featsStr,upos,feats){ const have=mglossFeatsPresent(m
    with no stem gloss at all where a fresh parse would have given it one.
    An existing lexical part is never rewritten — only supplied where the class now wants one and there
    is none, so an annotator's own wording survives a retag exactly as their abbreviations do. */
+/* ⚠ WHERE MGloss's LEXICAL PART COMES FROM, and the ONE place that question is answered.
+   Normally the Gloss tier — the cross-tier prefill that has always been here: a lexical gloss already
+   typed becomes the stem gloss of the morphemic row too, hyphens→underscores (Leipzig joins the several
+   words glossing ONE morpheme with "_", while the flat Gloss tier joins them with "-").
+   BUT THE TRANSLATION ALIGNER WRITES TWO DIFFERENT ENGLISH WORDS TO THE TWO TIERS, DELIBERATELY: the
+   matched English token's FORM to Gloss and its LEMMA to MGloss — a gloss row names the WORD ("walked"),
+   a morphemic gloss names the LEXEME with the categories spelt out beside it ("walk.PST"). So where it
+   has recorded a lemma (`_glossLex`), that is the answer and Gloss is not. Without this accessor the
+   next unforced mglossRefill — fired by any form or FEATS edit — would quietly put "walked.PST" back.
+   A closed class still gets NO stem here (its meaning IS its Leipzig abbreviation, and applyWiktionaryDef
+   sends such a token's word to the Gloss tier alone), which is why that test lives in here rather than
+   being restated at each of the three call sites.
+   ⚠ `_glossLex` is IN-MEMORY, like the `_msegPre`/`_mglossPre` markers beside it, and is recovered on
+   open by comparison — see glossAdoptLexFromDoc, and the pre-existing bug that recovery also closes. */
+function mglossLexFor(t){ if(!t||UPOS_LEIPZIG_ABBR[t.upos]) return "";
+  /* ⚠ THE ALIGNER'S LEMMA DOES NOT DEPEND ON THE LEXICAL TIER BEING ON, and gating it on GLOSS_ON was
+     a bug inherited from the expression this function replaced. That gate was right for the OLD rule —
+     the stem was BORROWED from the Gloss tier, so with no lexical tier there was nothing to borrow —
+     and wrong the moment a second source existed. `_glossLex` is the English lemma the translation
+     alignment recorded; it is on the token whether or not a lexical row is drawn. Reported as "the
+     morphemic gloss is only pre-populated once the lexical gloss has been enabled", and the same fault
+     is what made the hyphens look wrong: with no stem, `vir-um` glossed `-ACC.SG.M` — a bare
+     attachment mark where `man-ACC.SG.M` belonged, which reads as a misplaced hyphen rather than as
+     the missing word it actually was. */
+  if(t._glossLex) return t._glossLex;
+  return GLOSS_ON ? miscKV(t.misc,"Gloss").replace(/-/g,"_") : ""; }
 function mglossReglossLexical(tk,mg){
   if(UPOS_LEIPZIG_ABBR[tk.upos]) return keepGlossAbbrevs(mg);   // closed class → the stem belongs to the Gloss tier (rebuildGlossTokens keeps the attachment marks)
   if(mglossLexicalPart(mg)) return mg;
-  const lex=GLOSS_ON?miscKV(tk.misc,"Gloss").replace(/-/g,"_"):"";   // the same cross-tier prefill every other builder here uses
+  const lex=mglossLexFor(tk);   // the same cross-tier prefill every other builder here uses (its own closed-class test is the one on the line above, so this branch only ever sees an open class)
   return lex?(mg?lex+"."+mg:lex):mg; }
 function featsSyncGloss(tk,oldFeatsStr){ if(!MORPH_ON) return false;
   const mg=tierText(tk,"mgloss"); if(!mg) return false;
@@ -1594,7 +1634,8 @@ function tierNonEmpty(kind){ const keys=_tierKeys(kind); return DOC.some(s=>s.to
 // token carries MISC Gloss, a morphemic tier iff any carries MSeg/MGloss — never carried across files. Call this
 // after any operation that REPLACES the document (open, append-into-blank, format conversion).
 function syncGlossTiersFromDoc(){ GLOSS_ON=tierNonEmpty("gloss"); MORPH_ON=tierNonEmpty("morph"); GLOSS_VIS=true; MORPH_VIS=true;
-  if(MORPH_ON){ normaliseMsegMarks(); morphSeedBaselineFromDoc(); }   // this path turns the tier "on" WITHOUT ever calling morphPrefillSent (a loaded/converted file's own MISC already has the data — there is nothing to prefill), so without this the baseline stayed unset for every token and the tier read as "edited" the instant it was opened, before the reader had touched anything. AFTER normaliseMsegMarks: the baseline has to match what MSeg settles on, not what the file spelled before stripping was applied
+  if(MORPH_ON){ normaliseMsegMarks(); morphSeedBaselineFromDoc(); }
+  glossAdoptLexFromDoc(); glossSeedKeysFromDoc();   // …and the auto-gloss's own two baselines, on the same "integrate on open" footing: which MGloss stems were somebody's rather than derived from Gloss, and what question each sentence's glosses were the answer to. Unconditional, unlike the line above — glossAdoptLexFromDoc closes a bug that predates the morphemic tier being ON, and a key seeded for a tier that is off costs one string per sentence and is right the moment it is turned on   // this path turns the tier "on" WITHOUT ever calling morphPrefillSent (a loaded/converted file's own MISC already has the data — there is nothing to prefill), so without this the baseline stayed unset for every token and the tier read as "edited" the instant it was opened, before the reader had touched anything. AFTER normaliseMsegMarks: the baseline has to match what MSeg settles on, not what the file spelled before stripping was applied
   if(typeof syncGlossUI==="function")syncGlossUI(); }
 // Companion to morphPrefillSent for the one path that turns the morphemic tier "on" without deriving anything:
 // a file (or format conversion) arriving with its OWN MSeg/MGloss already in MISC. There is no prefill to run —
@@ -1603,6 +1644,207 @@ function syncGlossTiersFromDoc(){ GLOSS_ON=tierNonEmpty("gloss"); MORPH_ON=tierN
 function morphSeedBaselineFromDoc(){ DOC.forEach(s=>s.tokens.forEach(t=>{
   const ms=miscKV(t.misc,"MSeg"); if(ms) t._msegPre=ms;
   const mg=miscKV(t.misc,"MGloss"); if(mg) t._mglossPre=mg; })); }
+/* == AUTOMATIC GLOSSING FROM THE ENGLISH TRANSLATION =================================================
+   A sentence's `# text_en` says in English words what it means; a parse of it says how those words
+   relate. Where the two trees agree structurally, the English word standing in the source word's
+   structural position IS that word's gloss. app/gloss_align.py computes the correspondence (in UD —
+   see its header for the measurement that makes the conversion non-optional); this end writes it.
+
+   ⚠ THE FORM GOES TO Gloss AND THE LEMMA TO MGloss, and the two tiers diverge on purpose: a lexical
+   gloss names the WORD ("walked"), a morphemic gloss names the LEXEME with the source token's own
+   categories spelt out beside it ("walk.PST"). Note WHOSE categories those are — the grammatical half
+   of MGloss is composed from the SOURCE token's FEATS and UPOS and the source token's own MSeg
+   segmentation, by the same composeMGlossPrefill every other builder here uses. Only the stem is
+   English. That is what lets this feature reuse the whole existing MGloss apparatus — the
+   MGLOSS_FEAT_ORDER ranking, the fused 3SG, the infix case — without restating any of it.
+
+   ⚠ WHAT TRIGGERS IT IS A TRANSLATION COMMIT, AND NOT markDirty. Every other derived pass in this file
+   hangs off markDirty, deliberately, so that "any attribute of any token" is covered rather than a list
+   of edit sites someone remembered — and this one does not, which needs its reason. Two of them: the
+   work behind it is a bridge round-trip, an English spaCy parse and a grew conversion, orders of
+   magnitude past scheduleOrthoMorph's table lookup; and the pass OVERWRITES, so hanging it off the
+   universal funnel would mean re-heading one token silently destroyed every hand-corrected gloss in
+   its sentence. Restricting it to the translation is what keeps an overwriting pass tolerable: it runs
+   only when the reader has deliberately changed the one input it is derived from.
+   The cost is stated rather than hidden — the alignment reads the source tree too, so a re-headed token
+   can leave a gloss describing the previous analysis until the translation is next touched. glossKeyOf
+   signs the tree anyway, so that next touch corrects it.
+
+   ⚠ ENABLING A TIER IS THE OTHER TRIGGER, and it is the one that glosses a whole document: setTier's
+   "on" branch fires this, so a file that arrives with translations already in it is glossed the moment
+   the reader asks for a gloss row. There is no menu command; turning the tier on IS that gesture. */
+let TRANS_EDIT=0;             // >0 while a .tg-text field has focus — see scheduleAutoGloss
+let AUTOGLOSS_BLOCKED=false;  // the UD grammars/backend are absent; stop asking (cleared by the Model Manager)
+let _autoGlossToasted=false;  // …and say so exactly once per session, never once per commit
+let _autoGlossT=null;
+let AUTOGLOSS_WARM=false;                 // has a call ever come back? drives the busy label (see fillAutoGloss)
+const AUTOGLOSS_TIMEOUT=120000;           // generous: the cold path legitimately takes ~9s, and much longer on a loaded machine — this is the "never settled" backstop, not a performance budget
+const ALIGN_VERSION=2;        // bump when app/gloss_align.py's tables or weights move, so an upgrade re-glosses rather than leaving the previous version's answers cached against every file
+/* ⚠ KEYED ON THE QUESTION, NOT ON THE SENTENCE INDEX — the same rule scoresKey (js/io/scores.js)
+   follows, and for the same payoff: invalidation stops being a list of edit sites to remember and
+   becomes a property of the inputs. The question is "given this English sentence and this tree, what
+   aligns", so an edit that could change the answer changes the key and one that cannot keeps it warm.
+   ⚠ AND IT SIGNS NOTHING THE PASS ITSELF WRITES. MISC is deliberately absent: the pass writes MISC
+   Gloss/MGloss, so signing MISC would invalidate the key with the pass's own output and re-run for
+   ever. FEATS is signed WHOLE rather than filtered to the six subtype features the aligner reads — an
+   over-signed key costs an occasional needless recompute, an under-signed one costs a wrong gloss. */
+function glossKeyOf(s){ if(!s||!s.tokens) return "";
+  const tr=(sentTranslations(s)||[]).find(r=>(r.lang==="en"||r.lang==="eng")&&(r.text||"").trim());
+  if(!tr) return "";
+  const tree=s.tokens.map(t=>[t.upos||"",t.feats||"",t.head||"",t.deprel||""].join("\u0001")).join("\u0002");
+  return [ALIGN_VERSION,DOCLANG||"",DOCFORMAT||"",tr.text.trim(),tree].join("\u0000"); }
+/* ⚠ SEEDED ONLY WHERE THE SENTENCE ALREADY CARRIES A GLOSS, and getting this wrong breaks the feature
+   in one direction or the other. `_glossKey` means "the question THIS SENTENCE'S GLOSSES ARE THE ANSWER
+   TO", and on open there are exactly two cases:
+     · the sentence has glosses — whoever wrote them, they are the answer on offer, so record the current
+       question against them. The sentence is then re-glossed only when its OWN question moves (its
+       translation or its tree), never as collateral of a commit on some other sentence. Without this an
+       already-glossed file would be re-glossed wholesale by the first translation edit anywhere in it,
+       which under an overwriting pass means losing hand corrections the reader never went near.
+     · the sentence has NO glosses — there is no answer yet, so there is no question to record. It stays
+       unkeyed and is filled by the next pass, which is what makes "enable a glossing tier and a translated
+       document is glossed" true. ⚠ Seeding these too was the first cut, and it made setTier's call a
+       silent no-op: every key already matched, so the pass found no work and the tier came up empty.
+   The asymmetry is the whole rule: an empty tier is filled, a written one is left to its own evidence. */
+function glossSeedKeysFromDoc(){ DOC.forEach(s=>{
+  const has=(s.tokens||[]).some(t=>miscKV(t.misc,"Gloss")||miscKV(t.misc,"MGloss"));
+  s._glossKey=has?glossKeyOf(s):""; }); }
+/* ⚠ RECOVER `_glossLex` ON OPEN, AND CLOSE A BUG THAT PREDATES THIS FEATURE. `_glossLex` is in-memory,
+   so a save-and-reopen loses it — and morphSeedBaselineFromDoc above then sets `_mglossPre` to the
+   STORED MGloss, which is what licenses an unforced mglossRefill to run and recompute the stem from the
+   Gloss tier. That is already true WITHOUT this feature: hand-write an MGloss stem that differs from the
+   Gloss, save, reopen, then edit that token's FORM, and the stem is silently replaced by the Gloss.
+   A stored MGloss whose lexical part is NOT the Gloss underscored was put there by somebody — this
+   aligner's lemma, or the annotator's own wording — and CoNLL-U has no flag to say which, so it is
+   recovered by COMPARISON, exactly as adoptStoredPicks recovers a hand-corrected transliteration. */
+function glossAdoptLexFromDoc(){ DOC.forEach(s=>s.tokens.forEach(t=>{
+  const lex=mglossLexicalPart(tierText(t,"mgloss")); if(!lex) return;
+  if(lex!==miscKV(t.misc,"Gloss").replace(/-/g,"_")) t._glossLex=lex; })); }
+/* The debounce — scheduleOrthoMorph's shape (js/lang/translit-load.js), with its own gates.
+   ⚠ 500ms, not that one's 120: what is behind this is a parse and a grew conversion, not a lookup.
+   ⚠ EVERY GATE RE-ARMS RATHER THAN RUNNING, so nothing is dropped, only deferred:
+     · TRANS_EDIT — a translation is PROSE BEING TYPED. Every intermediate state is a different English
+       sentence, so glossing them would burn a parse per keystroke and paint half-typed English into the
+       document. The field's own blur is what calls this, which is the moment the question settles.
+     · INLINE_EDIT_OPEN — this ends in a render, which would take the keyboard from the reader.
+     · inInsertBatch() — a whole-document pass must not run per inserted sentence (see __insertPastedText);
+       the batch's tail marks the document dirty again, which re-arms this naturally. */
+function scheduleAutoGloss(){
+  if(AUTOGLOSS_BLOCKED||!hasBridge()||!(GLOSS_ON||MORPH_ON)) return;
+  if(isEnglishDoc()) return;   // glossing an English sentence with English words says nothing
+  clearTimeout(_autoGlossT);
+  _autoGlossT=setTimeout(()=>{
+    if(TRANS_EDIT>0||inInsertBatch()||(typeof INLINE_EDIT_OPEN!=="undefined"&&INLINE_EDIT_OPEN)){ scheduleAutoGloss(); return; }
+    fillAutoGloss();
+  },500); }
+function isEnglishDoc(){ return ((DOCLANG||"").toLowerCase().split(/[-_]/)[0])==="en"; }
+// One toast per session, not one per commit — and stop asking afterwards. js/io/models.js already
+// probes conversion_available() when the Model Manager opens; clearing the flag from there rather than
+// re-probing here keeps ONE answer about whether grew is usable in this session, not two.
+function autoGlossUnavailable(err){ AUTOGLOSS_BLOCKED=true;
+  if(_autoGlossToasted) return; _autoGlossToasted=true;
+  toast(err||"Glossing from the translation needs the UD conversion grammars — install them from Manage Models"); }
+window.__autoGlossUnblock=function(){ AUTOGLOSS_BLOCKED=false; _autoGlossToasted=false; };
+/* The pass. Computes only the sentences whose KEY MOVED, sends them in ONE bridge call, and re-checks
+   each sentence's key AFTER the await before writing anything.
+   ⚠ THAT PER-SENTENCE RE-CHECK IS THE WHOLE STALENESS DISCIPLINE, and it is fillOrtho's askedScheme/
+   superseded() rule applied per sentence because the key is per sentence. There is no in-flight guard:
+   a reader who edits one translation, then another 200ms later, really does run two passes at once, and
+   the older one's answer for the re-edited sentence describes a tree that is no longer there. It is
+   dropped rather than written; the pass that superseded it is still coming and will answer. */
+async function fillAutoGloss(){
+  if(!hasBridge()||!(GLOSS_ON||MORPH_ON)||AUTOGLOSS_BLOCKED) return false;
+  const jobs=[]; DOC.forEach((s,i)=>{ const k=glossKeyOf(s); if(k&&k!==s._glossKey) jobs.push({i,k}); });
+  if(!jobs.length) return false;
+  /* ⚠ THE FIRST CALL OF A SESSION CAN STILL BE THE SLOW ONE, AND IT SAYS SO. Profiled: loading the
+     English spaCy model is 8.44s, spawning grew's OCaml backend 0.65s, and the whole pass once both
+     are warm 0.26s — a one-off dependency load, and under machine load far worse. A bare "Glossing…"
+     spinner for ten seconds with nothing to explain it is indistinguishable from a feature that does
+     not work, which is exactly how this was reported ("I see 'Glossing from translation…' and then
+     nothing happens").
+     ⚠️ THE WORDING IS DELIBERATELY HEDGED rather than naming the parser load outright, because
+     app/__main__.py now warms that model in a background thread at launch: on a quiet machine it is
+     loaded long before anyone ticks a glossing tier, and announcing a load that already happened
+     would be its own small lie. "May take a moment" is true whichever way that race went. */
+  showBusy(AUTOGLOSS_WARM ? "Glossing from translation…"
+                          : "Glossing from translation… (first run may take a moment)");
+  let r=null, timedOut=false;
+  try{
+    const call=window.pywebview.api.gloss_from_translation(
+        jobs.map(j=>({tokens:DOC[j.i].tokens,translations:sentTranslations(DOC[j.i]),text:DOC[j.i].text||""})),
+        DOCLANG||"", DOCFORMAT||"", "en");
+    /* ⚠ AND IT IS RACED AGAINST A CLOCK, because an `await` on this bridge with no timeout is a
+       promise that can hang the indicator for the life of the session. hideBusy() lives in the
+       `finally`, so a call that never settles never clears it — measured once on a heavily loaded
+       machine: the answer had not arrived after 60s and a setTimeout armed for 60s did not fire for
+       152s, i.e. the whole web view was starved, not merely this call. Whatever the cause, the reader
+       must not be left with a spinner and no way to ask again: on the clock the pass gives up, says
+       so, and leaves the sentence's key UNSET so the next trigger simply retries. */
+    r=await Promise.race([call, new Promise(res=>setTimeout(()=>{ timedOut=true; res(null); },AUTOGLOSS_TIMEOUT))]);
+  }
+  catch(e){ return false; }
+  finally{ hideBusy(); }
+  if(timedOut){ toast("Glossing from the translation timed out — try again, or check Manage Models"); return false; }
+  if(!r) return false;
+  AUTOGLOSS_WARM=true;   // the dependencies are loaded now; every later call is the 0.26s one
+  if(r.unavailable){ autoGlossUnavailable(r.error); return false; }
+  const rows=r.gloss||[];
+  if(rows.length!==jobs.length) return false;   // an answer that doesn't line up is unusable, not merely worse
+  let any=false, done=0, glossed=0;
+  jobs.forEach((j,n)=>{
+    const s=DOC[j.i]; if(!s) return;
+    if(glossKeyOf(s)!==j.k) return;             // superseded while in flight — see the note above
+    const row=rows[n]; if(!row||row.error) return;
+    const n0=applyAutoGloss(j.i,row.pairs||[]);
+    if(n0){ any=true; done++; glossed+=n0; }
+    s._glossKey=j.k; });
+  // renderUnlessEditing, NOT preserveScroll(renderDoc): this lands asynchronously and may land while an
+  // inline field is open, and that helper syncs the open field rather than pulling the DOM from under it.
+  if(any){ markDirty(); renderUnlessEditing();
+    /* ⚠ AND IT SAYS SO, which every other derived pass in this file deliberately does NOT.
+       fillTranslit and fillOrtho are silent because their result is the very text the reader is looking
+       at — it appears, and that IS the feedback. This one lands SECONDS after the gesture that asked for
+       it (measured: ~4.6s on a cold parser and grew backend, ~0.2s warm), on rows that were empty when
+       the reader last looked, and the tier's own "Lexical gloss on" toast has long since gone. Silence
+       there is indistinguishable from the feature not working — which is exactly how it was first
+       reported. Shaped like applyParallelTexts' own summary, and only ever for a pass that WROTE. */
+    toast(`Glossed ${glossed} word${glossed===1?"":"s"} in ${done} sentence${done===1?"":"s"} from the translation`); }
+  return any; }
+/* THE SINGLE COMMIT POINT — the analogue of applyWiktionaryDef (js/editing/context-menu.js), and it
+   follows that function's conventions rather than inventing its own: glossEnc on the way in, spaces to
+   "-" for the flat Gloss tier and spaces to "_" for MGloss (Leipzig joins the several words glossing ONE
+   morpheme with an underscore), and a closed-class UPOS taking the English word in Gloss ALONE, its
+   MGloss stem staying the Leipzig abbreviation its meaning already is.
+   ⚠ NO UNDO ENTRY, deliberately — the rule every derived pass here follows (fillTranslit, fillOrtho,
+   annotateTranslitMisc, headSyncDeprel). It rides the translation edit's OWN snapshot, and that works
+   out exactly: renderBlockTrans takes `pre=snapSent(i)` on FOCUS — before any of this moved — and pushes
+   it on BLUR, before this pass has even been dispatched. One Undo therefore restores the translation and
+   the glosses it produced together. snap()/snapSent() are JSON clones, so `_glossKey`/`_glossLex` ride
+   the snapshot too and nothing is left describing a state that has been undone. */
+// Resolves to HOW MANY tokens it actually wrote, not merely whether it wrote — fillAutoGloss's toast
+// reports the count, and a caller that only wants the boolean gets it for free from a truthy number.
+function applyAutoGloss(si,pairs){
+  const s=DOC[si]; if(!s||!s.tokens) return 0;
+  let any=0;
+  (pairs||[]).forEach(p=>{
+    const t=s.tokens[p.src]; if(!t) return;
+    const form=(p.form||"").trim(), lemma=(p.lemma||"").trim();
+    if(!form) return;
+    let wrote=false;
+    if(GLOSS_ON){ const g=glossEnc(form.replace(/\s+/g,"-"));
+      if(miscKV(t.misc,"Gloss")!==g){ t.misc=setMiscKV(t.misc,"Gloss",g); wrote=true; } }
+    // The stem the morphemic row takes is the LEMMA, and it is recorded on the token so that a later
+    // unforced mglossRefill re-derives it rather than falling back to the Gloss tier's FORM — see
+    // mglossLexFor, which is the only reader of this field.
+    t._glossLex=UPOS_LEIPZIG_ABBR[t.upos]?"":glossEnc((lemma||form).replace(/\s+/g,"_"));
+    if(MORPH_ON){
+      const mg=glossEnc(composeMGlossPrefill(mglossLexFor(t),t.feats,t.upos,msegPrefillParts(t)));
+      if(mg&&miscKV(t.misc,"MGloss")!==mg){ t.misc=setMiscKV(t.misc,"MGloss",mg); wrote=true; }
+      // …and the baseline moves with it, or morphEdited() reads this pass's own output as the
+      // annotator's hand and raises the false tier-deletion warning on a tier nobody has touched.
+      if(mg) t._mglossPre=mg; }
+    if(wrote) any++; });
+  return any; }
 // The word-continuation mark is decoration and never belongs in MISC — but older files carry one in their stored
 // MSeg, from back when this app wrote it there (a plain "-" put on every FEATS Compound=Yes token; briefly "⹀").
 // Strip it on open so it can't read as a morpheme boundary, or come back out through an edit — the same "integrate
@@ -1684,11 +1926,28 @@ async function setTier(kind,on){ const flag=kind==="gloss"?GLOSS_ON:MORPH_ON; if
     else { MORPH_ON=true;
       DOC.forEach(morphPrefillSent); }   // item 11b/12b: seed both morphemic tiers wherever they're empty — part of THIS undoable snapshot
     markDirty(); syncGlossUI(); preserveScroll(renderDoc);
+    glossForgetKeys();     // ⚠ WHICH TIERS ARE ON IS PART OF THE QUESTION: one pass fills whichever of Gloss and MGloss is enabled, so an answer computed while only one of them was on does not describe the pair. Without this, turning the morphemic tier on AFTER the lexical one (or the reverse) found the question unchanged and left the newly-added row to whatever the cross-tier prefill could scrape together
+    scheduleAutoGloss();   // ⚠ THIS is how a document gets glossed in one go: there is no menu command, and asking for a gloss row on a file that already carries translations is exactly the request. Fires for BOTH tiers — the lexical row takes the English form, the morphemic row the English lemma, and each is worth filling on its own
     toast(kind==="gloss"?"Lexical gloss on — double-click or Enter on a gloss to edit":"Morphemic gloss on — MSeg seeded; double-click or Enter to edit"); return; }
   const label=kind==="gloss"?"lexical gloss":"morphemic gloss";
   const hasData=(kind==="gloss")?tierNonEmpty("gloss"):morphEdited();   // item 11c: warn on morphemic-tier deletion ONLY once the user has edited (an MSeg differs from its prefill, or any MGloss is set)
   if(hasData && !(await askConfirm(`Delete the ${label}? This removes its data from the document.`,{danger:true,okLabel:"Delete"}))){ syncGlossUI(); return; }   // cancel → restore the checkbox
-  pushUndo(); clearTierData(_tierKeys(kind)); if(kind==="gloss")GLOSS_ON=false; else MORPH_ON=false; markDirty(); syncGlossUI(); preserveScroll(renderDoc); toast("Tier removed"); }
+  pushUndo(); clearTierData(_tierKeys(kind)); if(kind==="gloss")GLOSS_ON=false; else MORPH_ON=false;
+  glossForgetKeys();   // …and the recorded question goes with the data it described — see glossForgetKeys
+  markDirty(); syncGlossUI(); preserveScroll(renderDoc); toast("Tier removed"); }
+/* ⚠ REMOVING A TIER FORGETS WHAT ITS GLOSSES WERE THE ANSWER TO, and without this the tier cannot be
+   put back. `_glossKey` means "the question THIS SENTENCE'S GLOSSES ARE THE ANSWER TO" (glossKeyOf),
+   and clearTierData has just deleted those glosses — so a key left standing is a claim about data that
+   no longer exists. fillAutoGloss compares the current question against it, finds them equal, decides
+   there is nothing to do, and the re-enabled tier comes up EMPTY. Reported exactly that way: disable
+   glossing, enable it again, no glosses.
+   Cleared for EVERY sentence and for BOTH tiers rather than only the one removed, because the pass is
+   not per-tier: one call fills whichever of Gloss and MGloss is on, so the question it answers is the
+   same question either way, and a key kept for the surviving tier would suppress the recompute the
+   removed one needs. Deliberately NOT glossSeedKeysFromDoc(), which re-derives keys from whatever
+   MISC still holds: after removing only the lexical tier that would find the morphemic data still
+   there, keep the keys, and reproduce the very bug this fixes. */
+function glossForgetKeys(){ DOC.forEach(s=>{ s._glossKey=""; }); }
 // ── MSeg prefill: segment the form against its LEMMA ────────────────────────────────────────────────────────
 // The lemma is a statement of which part of the form is the stem, so the shared PREFIX and shared SUFFIX of the
 // two are lemma material and whatever sits between them is affixal — that is the whole of the analysis here, and
@@ -1827,9 +2086,30 @@ function mglossMarks(mg,seg){ return mg?((seg.pre?"-":"")+mg+(seg.post?"-":"")):
    bare hyphens the template would otherwise leave behind — "" is how every call site here already spells
    "nothing to write". */
 function composeMGlossPrefill(lex,featsStr,upos,seg){
-  if(seg&&seg.kind==="in"){ const gram=featsToGloss(featsStr,upos);
-    return (gram||lex)?("-"+lex+"-"+gram):""; }
-  return mglossMarks(composeMGloss(lex,featsStr,upos),seg); }
+  const gram=featsToGloss(featsStr,upos);
+  if(seg&&seg.kind==="in"){ return (gram||lex)?("-"+lex+"-"+gram):""; }
+  /* ⚠ WITH A STEM PRESENT THE ATTACHMENT MARK IS A SEPARATOR, NOT A WRAPPER — and getting that wrong
+     is a bug that predates the translation aligner, surfaced by it. `mglossMarks` brackets the whole
+     string, which is exactly right while the gloss is grammatical ONLY: the gloss of the suffix in
+     `vir-um` is `-ACC.SG.M`, the leading hyphen saying "this attaches to something on my left", and
+     the stem is left for the annotator. But once a LEXICAL part exists the two pieces are both here,
+     and bracketing their DOT-joined pair says something false twice over — `-man.ACC.SG.M` marks the
+     STEM as attaching leftward and then joins stem to suffix-gloss with the separator used for two
+     categories of ONE morpheme. Leipzig writes it `man-ACC.SG.M`: the boundary the segmentation found
+     goes BETWEEN them, on the side the mark named.
+     It survived because the combination was rare — a lexical Gloss AND a segmented form together
+     needed a hand-typed gloss or a picked dictionary sense before the morphemic tier was turned on.
+     The aligner fills a Gloss on every matched token, so the pairing is now the ordinary case, and it
+     was reported at once ("the hyphen placement is all off").
+     Every no-stem case is untouched, which is what keeps this safe to change under the two callers
+     that are not the aligner's (morphPrefillSent, mglossRefill). */
+  if(lex){
+    if(!gram) return lex;                       // a stem is not an affix: no mark belongs on it alone
+    if(seg&&seg.pre)  return lex+"-"+gram;      // pre  ⇒ the gram gloss is a SUFFIX's ⇒ stem on its left
+    if(seg&&seg.post) return gram+"-"+lex;      // post ⇒ a PREFIX's ("NEG-")        ⇒ stem on its right
+    return composeMGloss(lex,featsStr,upos);    // no boundary found ⇒ one morpheme, categories dot-joined — and that IS composeMGloss's whole job, so it keeps it
+  }
+  return mglossMarks(gram,seg); }
 /* Item 3 — RE-DERIVE ONE TOKEN'S SEGMENTATION. MSeg is a function of the form AND the lemma, so it goes stale
    whenever EITHER moves: a hand-edited lemma, a lemma the background re-parse revised after a form edit, or the
    form itself. Every one of those paths funnels through here rather than re-deriving the value itself, so they
@@ -1875,7 +2155,7 @@ function mglossRefill(t,force){ if(!MORPH_ON||!t) return false;
   const cur=miscKV(t.misc,"MGloss");
   if(!force && cur && cur!==(t._mglossPre||"")) return false;   // hand-written → the annotator's, not ours
   const seg=msegPrefillParts(t);
-  const lex=(GLOSS_ON&&!UPOS_LEIPZIG_ABBR[t.upos])?miscKV(t.misc,"Gloss").replace(/-/g,"_"):"";   // the same cross-tier prefill morphPrefillSent applies
+  const lex=mglossLexFor(t);   // the same cross-tier prefill morphPrefillSent applies — and, where the translation aligner has recorded one, its English LEMMA instead of the Gloss tier's FORM
   const pv=glossEnc(composeMGlossPrefill(lex,t.feats,t.upos,seg));
   if(!pv||pv===cur) return false;
   t.misc=setMiscKV(t.misc,"MGloss",pv); t._mglossPre=pv; return true; }
@@ -1939,7 +2219,7 @@ function morphPrefillSent(s){ if(!s||!s.tokens) return;
     // enabled and immediately disabled without a single keystroke.
     if(!miscKV(t.misc,"MSeg")){ const pv=glossEnc(seg.seg); if(pv){ t.misc=setMiscKV(t.misc,"MSeg",pv); t._msegPre=pv; } }
     else t._msegPre=miscKV(t.misc,"MSeg");
-    if(!miscKV(t.misc,"MGloss")){ const lex=(GLOSS_ON&&!UPOS_LEIPZIG_ABBR[t.upos])?miscKV(t.misc,"Gloss").replace(/-/g,"_"):"";
+    if(!miscKV(t.misc,"MGloss")){ const lex=mglossLexFor(t);
       const mg=glossEnc(composeMGlossPrefill(lex,t.feats,t.upos,seg)); if(mg){ t.misc=setMiscKV(t.misc,"MGloss",mg); t._mglossPre=mg; } }
     else t._mglossPre=miscKV(t.misc,"MGloss"); }); }
 // item: a re-parse replaced this sentence's tokens outright, so both morphemic tiers came back empty — re-seed them
@@ -2040,8 +2320,17 @@ function renderBlockTrans(i){ const s=DOC[i], rows=sentTranslations(s);
        The field's real extent is the box you see on hover, which stops at the sentence text's right edge because
        renderBlockTrans insets the whole .tgrid to meet it (below). Gating anything inside that box only made the
        field feel dead across most of its own width. */
-    let pre=null,orig=null; text.addEventListener("focus",()=>{ pre=snapSent(i); orig=row.text||""; setCurBlock(i); });   // one undo per edit session; setCurBlock: clicking/tabbing into a translation field is arriving at its block (same as the running-sentence line — document.js's wireStext), and it has to happen here rather than rely on bubbling to .sblock's own click handler because .tgrid stops mousedown/click propagation outright (see box's own listeners above, added so a click inside the grid never falls through to token deselection)
-    text.addEventListener("blur",()=>{ if(pre&&(row.text||"")!==orig){ UNDO.push(pre); if(UNDO.length>80)UNDO.shift(); REDO.length=0; updateUndoUI(); } pre=null; });
+    let pre=null,orig=null; text.addEventListener("focus",()=>{ pre=snapSent(i); orig=row.text||""; setCurBlock(i); TRANS_EDIT++; });   // one undo per edit session; setCurBlock: clicking/tabbing into a translation field is arriving at its block (same as the running-sentence line — document.js's wireStext), and it has to happen here rather than rely on bubbling to .sblock's own click handler because .tgrid stops mousedown/click propagation outright (see box's own listeners above, added so a click inside the grid never falls through to token deselection)
+    text.addEventListener("blur",()=>{ if(pre&&(row.text||"")!==orig){ UNDO.push(pre); if(UNDO.length>80)UNDO.shift(); REDO.length=0; updateUndoUI(); } pre=null;
+      TRANS_EDIT=Math.max(0,TRANS_EDIT-1);
+      /* ⚠ THE COMMIT IS WHERE THE AUTO-GLOSS IS ASKED FOR, and it has to be here rather than in the
+         `input` handler above: that one fires per KEYSTROKE, and every intermediate state of a
+         translation is a different English sentence. Called unconditionally rather than under the
+         `orig` test the undo push uses — a blur with no text change still costs only a key comparison
+         (glossKeyOf), and gating it on the text alone would miss the case where the reader edited the
+         TREE and then merely tabbed through this field. Enter and Escape both blur(), so both commit
+         paths are covered without naming either. */
+      scheduleAutoGloss(); });
     text.addEventListener("input",()=>{ row.text=text.textContent||""; if(row.text)delete text.dataset.empty; else text.dataset.empty="1"; markDirty(); });
     text.addEventListener("keydown",e=>{ e.stopPropagation();   // Enter commits; Shift+Enter newline; keep keys off the doc nav handler
       if(e.key==="Enter"&&!e.shiftKey){ e.preventDefault(); text.blur(); return; }

@@ -64,7 +64,7 @@ is the fourth row, over the noun lemmas that got an answer at all, and it goes 9
 the file loads in ~0.2 s and 116 lookups then cost 0.1 s.  A COLD sweep measures ~15 s, essentially
 all of it the one-time English-model load inside :func:`app.wiktionary._condense` (``en_sud_ewt``
 when this was measured, ``en_sud_ewt_gum`` since — which model that is, is
-:func:`app.wiktionary._sud_en`'s answer and not a fact to restate here), which is the same cost on
+:func:`app.wiktionary.english_model_id`'s answer and not a fact to restate here), which is the same cost on
 either column and is not what this row is comparing.
 
 (The vendored column has been re-measured several times as the shared condensation changed, and the

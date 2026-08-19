@@ -2,6 +2,94 @@
 
 All notable changes to SUD Workbench are documented in this file.
 
+## [Unreleased]
+
+### Added: glosses derived from the sentence's English translation
+
+- A sentence's `# text_en` is parsed with the bundled English model and its dependency tree is
+  aligned with the sentence's own, so each word is glossed by the English word standing in its
+  structural position. The matched **form** fills MISC `Gloss`; its **lemma** fills the lexical part
+  of `MGloss`, whose grammatical abbreviations still come from the source token's own FEATS and UPOS
+  and whose attachment hyphens still come from its own `MSeg` — so `doubts` in the gloss row and
+  `doubt` in the morphemic one, off one alignment.
+- **Matching runs on the UD form of both trees.** SUD promotes function words over their hosts and
+  promotes different ones in different languages: measured on `samples/chinese_msud.conllu`, the
+  English *This puppy is really cute!* is rooted on the auxiliary `is` while 小狗真可爱 is rooted on
+  可 AUX, so aligning in SUD space pairs two function words and strands the content words. After
+  conversion both sides root on the predicate and the trees pair token for token.
+- Two things trigger it, and nothing else: **turning a glossing tier on**, which glosses every
+  translated sentence in the document, and **committing a translation**, which re-glosses that sentence
+  alone. Opening a file never re-glosses it. Either tier works on its own.
+- The two trees are matched by **tree edit distance**: the glosses are the *rename* operations of a
+  cheapest edit script turning one tree into the other, so a word one language has and the other does
+  not falls out as a deletion or an insertion rather than being forced onto a partner.
+- Two words are matched only if their **word classes are identical** and their relations agree at least
+  at class level, so a subject can never be glossed by a modifier and a determiner never by a verb. A
+  word the alignment cannot place is left unglossed rather than guessed at.
+- Glosses are recomputed whenever the analysis moves — **a retag or a re-headed arc**, not only a
+  changed translation — since the alignment is computed against the source tree. Only sentences whose
+  own answer could have changed are recomputed: an edit that touches nothing the alignment reads costs
+  a comparison and no more.
+- Children are ordered for the match by **relation, not word order** — word order is exactly what
+  differs between two languages, so imposing it would forbid the matches this exists to make.
+- Requiring the word classes to agree exactly is stricter than what came before, and it does gloss
+  less: over the sample treebanks it drops from 43 matched words to 37. What it loses are words the two
+  languages tag differently — Chinese 没 against English *n't* — and what it buys is that a match now
+  means the same word class on both sides, with no table of permitted near-misses to reason about.
+- Removing a glossing tier and adding it back **re-glosses**, rather than bringing the tier back empty.
+- Undo is unchanged and needs no new entry: the pass rides the translation edit's own snapshot, which
+  is taken when the field is focused and pushed when it is committed — so one undo puts back the
+  translation and the glosses it produced together.
+- Needs grew's backend and the UD conversion grammars. Without them the feature says so once, in a
+  toast naming Manage Models, and stops asking until that sheet is next opened.
+- The English parser is now **loaded in the background at launch**, so the first glossing of a session
+  no longer pays for it. It was measured at 8.4 seconds of a 9-second first pass, against a quarter of
+  a second once warm — and it is the same load the Wiktionary definition flyout pays on its first use,
+  whatever language the document is in, so both features get it. The status bar says a first run may
+  take a moment rather than showing a bare spinner, and the pass gives up and reports it rather than
+  leaving the indicator running for ever if an answer never comes.
+
+### Fixed: a rectangle selection no longer highlights text outside the diagram
+
+- Sweeping a selection rectangle out of the diagram left the running sentence, the sentence id or the
+  translation behind it highlighted. Those three are editable fields, and an editable region stays
+  selectable however emphatically an ancestor is marked unselectable — the `user-select` the drag
+  already set could never reach them.
+- The selection is now refused outright while a drag is in flight, and anything that formed before the
+  gesture was recognised as a drag is dropped when it ends. Clicking or selecting in any of those
+  fields is unchanged when no drag is happening.
+
+### Fixed: an attachment hyphen sits between the stem and its grammatical gloss, not in front of both
+
+- A morphemic gloss for a segmented word put the Leipzig attachment mark around the whole string:
+  `vir-um` glossed **`-man.ACC.SG.M`**, which says the *stem* attaches leftward and then joins stem to
+  suffix-gloss with the separator meant for two categories of one morpheme. It now reads
+  **`man-ACC.SG.M`** — the boundary the segmentation found goes between them, on the side the mark named.
+- The mark alone is still right when there is no stem to place (`-ACC.SG.M` for the suffix of a word
+  whose lexical gloss nobody has written), and a word with no boundary keeps its dot (`arm.ACC.PL.N`).
+- This predates automatic glossing: it needed a lexical gloss *and* a segmented form together, which
+  before meant hand-typing a gloss or picking a dictionary sense before turning the morphemic tier on.
+  Glossing from a translation makes that pairing the ordinary case, which is how it came to light.
+
+### Fixed: the morphemic gloss no longer waits for the lexical tier
+
+- With only the morphemic tier enabled, the stem was left out of every gloss — `vir-um` came back as
+  bare grammatical abbreviations and filled in only once the lexical tier was switched on too. The
+  stem is the English lemma the alignment recorded, which is on the token whether or not a lexical row
+  is drawn; only the older fallback (borrowing the stem from the lexical tier) ever needed that tier.
+- Enabling a second glossing tier now also re-glosses, rather than leaving the newly added row to
+  whatever could be scraped from the tier that was already on.
+
+### Fixed: a hand-written morphemic stem no longer reverts to the lexical gloss after a reopen
+
+- MGloss's lexical part is normally derived from the `Gloss` tier, and which values were so derived
+  was only ever known in memory. After a save and reopen that knowledge was gone, so a stem someone
+  had written by hand — anything not simply the Gloss underscored — was treated as derived, and the
+  next edit to that token's form silently replaced it with the Gloss.
+- On open, a stored MGloss whose lexical part is *not* the Gloss underscored is now recognised as
+  somebody's own wording and kept. CoNLL-U has no flag for this, so it is recovered by comparison —
+  the same way a hand-corrected transliteration already is.
+
 ## [0.3.11] — 2026-08-19
 
 Both fixes in 0.3.10 were aimed at real faults and neither landed; these are the corrected ones.
