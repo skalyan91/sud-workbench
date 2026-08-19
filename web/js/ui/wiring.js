@@ -535,7 +535,25 @@ function fsApplyChrome(){
   // have settled so --tbH/--vbH and the block cap are final for the full-screen viewport.
   clearTimeout(_fsChromeSettleT); _fsChromeSettleT=setTimeout(fsSyncAndRender,260);
 }
-window.__setFullscreen=function(on){ FS_ON=!!on; document.body.classList.toggle("fs-on",!!on); fsApplyChrome(); };   // item 10: fs-on lets the titlebar reclaim the empty traffic-light gutter on the left (see body.fs-on .titlebar)
+/* ⚠ THE REVEALED NATIVE BAND'S HEIGHT, pushed from AppKit (app/mac/shell.py's fullscreen observer), so the
+   web titlebar can sit UNDER it rather than behind it. In full screen macOS auto-hides the window's titlebar
+   and slides it back over the content on the SAME gesture that fires this file's own `fs-reveal` — the pointer
+   reaching the top edge — and both then want the top of the screen. There is nothing in the web layer that can
+   see the native band: it overlays the content without resizing the viewport, so no resize, no visualViewport
+   change, nothing measurable from here; only `contentLayoutRect` on the NSWindow knows, which is why this
+   arrives over the bridge. 0 while the band is hidden (measured: a full-screen window reads frame 923 /
+   contentLayoutRect 923), the band's real height while it is shown.
+   Stored as a CSS var rather than acted on here, because what it changes is one offset in one rule — see
+   `body.fs-chrome-hidden.fs-reveal .titlebar` in styles/app.css. A non-macOS build never calls this and the
+   var keeps its 0px default, so the rule is inert everywhere else. */
+window.__setFsNativeTop=function(px){
+  const v=Math.max(0,Math.round(+px||0));
+  document.body.style.setProperty("--fsNativeTbH",v+"px");
+  if(typeof syncChrome==="function") syncChrome();   // --top-chrome and the block anchor are derived from the bars' live geometry
+};
+window.__setFullscreen=function(on){ FS_ON=!!on; document.body.classList.toggle("fs-on",!!on);
+  if(!on) document.body.style.setProperty("--fsNativeTbH","0px");   // leaving full screen: no native band to duck under
+  fsApplyChrome(); };   // item 10: fs-on lets the titlebar reclaim the empty traffic-light gutter on the left (see body.fs-on .titlebar)
 window.__toggleFsAlwaysToolbar=function(){ PREFS.fsAlwaysToolbar=!PREFS.fsAlwaysToolbar; savePrefs(); fsApplyChrome(); return !!PREFS.fsAlwaysToolbar; };
 let _fsRevealT=null;
 addEventListener("mousemove",e=>{

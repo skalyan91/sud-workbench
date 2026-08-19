@@ -658,14 +658,62 @@ def _install_fullscreen_observer(AppKit, nswin, pywin):
             except Exception as exc:  # noqa: BLE001 — never crash over the full-screen bridge
                 _shell_log(f"[titlebar] fullscreen native toolbar: {exc}")
 
+        # ── THE REVEALED NATIVE BAND'S OWN HEIGHT, so the web titlebar can sit UNDER it ────────────────
+        # In full screen macOS auto-hides the window's titlebar and slides it back over the content when the
+        # pointer reaches the top edge — the same gesture that triggers the web layer's own `fs-reveal`. Both
+        # then want the top of the screen, and ours drew straight underneath the native band.
+        #
+        # `contentLayoutRect` is AppKit's own answer to "what part of the content is NOT covered by the
+        # titlebar", so the band's height is simply the frame less that. Measured on a real window rather than
+        # assumed: windowed, frame 700 / contentLayoutRect 668 → a 32px inset; full screen with the titlebar
+        # auto-hidden, 923 / 923 → 0, stable across repeated samples. So the property really does track the
+        # titlebar's presence, and 0 is what "hidden" reads as.
+        #
+        # POLLED ON A MAIN-THREAD NSTimer RATHER THAN KVO, and only while full screen: NSWindow does not
+        # promise KVO for this property, and a reveal that silently never fired would be indistinguishable
+        # from the bug this fixes. 8Hz, started on entering full screen and invalidated on leaving, so a
+        # windowed session pays nothing. Geometry is read on the main thread, where the timer fires — the same
+        # rule _native_chrome above already follows.
+        def _band_px():
+            f, c = nswin.frame(), nswin.contentLayoutRect()
+            px = float(f.size.height) - float(c.size.height)
+            return px if px > 0.5 else 0.0
+
+        def _publish_band(px):
+            if _win_fullscreen.get("band") == px:
+                return                                  # only on a real change — this runs 8× a second
+            _win_fullscreen["band"] = px
+            threading.Thread(
+                target=lambda: pywin.evaluate_js(
+                    "window.__setFsNativeTop && __setFsNativeTop(%.1f)" % px),
+                daemon=True).start()
+
         cls = _win_fullscreen.get("__cls__")
         if cls is None:
             class _SUDFullscreenObserver(NSObject):
                 def enteredFullScreen_(self, note):    # noqa: N802 — ObjC selector enteredFullScreen:
-                    _native_chrome(True); _push(True)
+                    _native_chrome(True); _push(True); self.startBandTimer()
 
                 def exitedFullScreen_(self, note):     # noqa: N802 — ObjC selector exitedFullScreen:
-                    _native_chrome(False); _push(False)
+                    self.stopBandTimer(); _publish_band(0.0); _native_chrome(False); _push(False)
+
+                def startBandTimer(self):              # noqa: N802 — plain ObjC-visible method
+                    self.stopBandTimer()
+                    t = AppKit.NSTimer.timerWithTimeInterval_target_selector_userInfo_repeats_(
+                        0.125, self, "bandTick:", None, True)
+                    AppKit.NSRunLoop.mainRunLoop().addTimer_forMode_(t, AppKit.NSRunLoopCommonModes)
+                    _win_fullscreen["timer"] = t       # retained here; NSRunLoop's own hold ends at invalidate
+
+                def stopBandTimer(self):               # noqa: N802
+                    t = _win_fullscreen.pop("timer", None)
+                    if t is not None:
+                        t.invalidate()
+
+                def bandTick_(self, timer):            # noqa: N802 — ObjC selector bandTick:
+                    try:
+                        _publish_band(_band_px())
+                    except Exception as exc:           # noqa: BLE001 — a bad sample must not kill the timer
+                        _shell_log(f"[titlebar] fullscreen band: {exc}")
             cls = _SUDFullscreenObserver
             _win_fullscreen["__cls__"] = cls
         obs = cls.alloc().init()
@@ -677,7 +725,7 @@ def _install_fullscreen_observer(AppKit, nswin, pywin):
         # seed the current state (in case the window is already full screen when this wires up)
         try:
             if nswin.styleMask() & AppKit.NSWindowStyleMaskFullScreen:
-                _native_chrome(True); _push(True)
+                _native_chrome(True); _push(True); obs.startBandTimer()
         except Exception:  # noqa: BLE001
             pass
     except Exception as exc:  # noqa: BLE001 — never crash over the full-screen bridge

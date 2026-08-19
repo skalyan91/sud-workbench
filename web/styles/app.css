@@ -96,8 +96,21 @@
      macos-kit/mac-chrome.css), and syncChrome zeroes --tbH in the same statement that adds this class,
      so this is free. The .fs-reveal rule below is more specific and still wins for the revealed case. */
   body.fs-chrome-hidden .viewbar{ top:0 }
+  /* ⚠ AND THE REVEALED BARS DUCK UNDER THE NATIVE TITLEBAR. The pointer reaching the top edge is ONE gesture
+     that reveals two things: macOS slides the full-screen window's own titlebar back over the content, and
+     this file's .fs-reveal slides ours in — both at the top of the screen, so ours drew behind the native
+     band. --fsNativeTbH is that band's live height, pushed from AppKit (app/mac/shell.py), 0 whenever it is
+     hidden and on every non-macOS build, so `translateY(0)` is exactly the old `transform:none` there and
+     nothing else moves. The options bar rides along by adding it to its own offset below our titlebar. */
   body.fs-chrome-hidden.fs-reveal .titlebar, body.fs-chrome-hidden.fs-reveal .viewbar{ transform:none; opacity:1; pointer-events:auto; }
-  body.fs-chrome-hidden.fs-reveal .viewbar{ top:var(--fsRevealTbH,44px); }   /* --tbH is 0 while collapsed → pin the revealed options bar below the revealed titlebar */
+  /* ⚠️ THE DUCK-UNDER IS `top`, NOT THE TRANSFORM ABOVE. Folding --fsNativeTbH into that translateY was the
+     obvious edit and it does not take: measured in the shipping WebKit, with the var confirmed at 28px on the
+     titlebar's own computed style and `transform:translateY(var(--x,0px))` proven to work on a synthetic
+     element in the same page, the titlebar's computed transform stayed the identity matrix. The transform on
+     this rule is also doing another job — it is the end state of the .2s slide the collapse animates — so the
+     offset is applied on `top` instead, which these bars are positioned by anyway (position:absolute, top:0). */
+  body.fs-chrome-hidden.fs-reveal .titlebar{ top:var(--fsNativeTbH,0px); }
+  body.fs-chrome-hidden.fs-reveal .viewbar{ top:calc(var(--fsRevealTbH,44px) + var(--fsNativeTbH,0px)); }   /* --tbH is 0 while collapsed → pin the revealed options bar below the revealed titlebar */
   body.fs-on .titlebar{ padding-inline-start:14px }   /* item 10: in full screen the native traffic lights are hidden, so the ~82px --lights-right gutter on the left sits EMPTY and shoves the heading right. Reclaim it — pull the heading/icons left to a normal 14px inset. (When the menu bar + lights briefly reveal at the top edge they may overlap; the trade-off removes the persistent empty space.) */
   #doc{font-family:var(--token-font)}   /* the WHOLE document view renders in the Noto token stack; grid DATA cells override to --mono-font below, and app UI/chrome lives OUTSIDE #doc so it keeps the system font */
   #doc.no-relcolour{--tie-hue:var(--ink)}   /* "Relation colours" off → POS tags/bracket ties go monochrome too, not just the deprel labels relColor() already gates */
