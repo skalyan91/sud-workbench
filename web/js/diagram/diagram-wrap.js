@@ -687,11 +687,25 @@ function arcsWrapped(si){
   rows.forEach(r=>{ r.offX = RTL ? (svgW-r.total) : 0; r.LX=i=>r.c[i-r.s]+r.offX;
     r.maxLift=Math.max(0,...r.idx.map(i=>rep[i]||0));   // item 11: the deepest reported step taken by any token in this row — how far this row's content (glyph tops, arc endpoints) reaches ABOVE its nominal line
     r.arcsIn=[]; for(let i=r.s;i<=r.e;i++){ const h=heads[i]-1; if(h>=r.s&&h<=r.e) r.arcsIn.push({dep:i,head:h}); } });
-  // NTOP: clear the lower token's top by the arc gap. NBOT: clear the UPPER token's POS/annotation stack by that same gap.
+  // NTOP: seat the lower token's endpoint on that row's own arc anchor (see the ⚠ below). NBOT: clear the UPPER token's POS/annotation stack by the arc gap.
   // item 11: both go through the SHARED repBase (js/diagram/diagram-core.js) first — a reported token's whole cell
   // (its word row AND the below-stack under it) steps up off the line, so the cross-line endpoints hanging above and
   // below that cell must step up with it, or the arc lands in the gap the token has just vacated.
-  const rowOf=i=>rows.find(r=>i>=r.s&&i<=r.e), NX=i=>rowOf(i).LX(i), NTOP=i=>repBase(rep,rowOf(i).wordY,i)-XGAP;
+  // ⚠ NTOP IS THE WITHIN-LINE ARCS' OWN ANCHOR, NOT AN INDEPENDENT "GAP ABOVE THE TOKEN" — and stating it as
+  // the latter was a bug that only appeared under MAGNIFICATION. A within-line bump is seated at r.arcZone
+  // (drawBump's own arg, below), and r.wordY===r.arcZone+WORD_OFF, so the arcZone a cross-line arc's LOWER
+  // endpoint must land on to share that token's fan is wordY−WORD_OFF. It was wordY−XGAP: identical while
+  // TOK_MAG===1 (XGAP=POSGAP+DESC and WORD_OFF collapses to exactly POSGAP+DESC there), which is why every
+  // unmagnified document drew correctly and the fault reproduced only in Sanskrit/Literary Chinese. Above 1×
+  // WORD_OFF carries the enlarged glyph's own ink-ascent term and XGAP does not, so the two drift apart by
+  // (TOK_INK_ASC−DESC)·(1−1/TOK_MAG) — measured 5.9px at TOK_MAG 1.5 — and the cross-line endpoints sat that
+  // far BELOW the within-line ones sharing the node. They are correctly bucketed into one fan already (see
+  // Item 16 / the plain-token-key half of Item 1's split); the fan was never the fault — the two levels were,
+  // which reads as exactly the reported "cross-line endpoints aren't fanned with the within-line ones".
+  // Stated as wordY−WORD_OFF rather than as r.arcZone directly because arcZone is not assigned until the
+  // layout loop below, while NTOP is defined (and repBase-corrected per token) here; the two are equal by
+  // that same identity, and repBase is a uniform shift so it commutes with the constant either way.
+  const rowOf=i=>rows.find(r=>i>=r.s&&i<=r.e), NX=i=>rowOf(i).LX(i), NTOP=i=>repBase(rep,rowOf(i).wordY,i)-WORD_OFF;
   // item 22: the BOTTOM endpoint used to clear rowOf(i).stackBot — the ROW's own tallest below-stack (already
   // tightened from the sentence-wide max to a per-row one, see r.stackBot's own note) — so a cross-line arc
   // landing on a short-AVM (or no-AVM) token still got pushed down to clear some OTHER, unrelated token's tall
