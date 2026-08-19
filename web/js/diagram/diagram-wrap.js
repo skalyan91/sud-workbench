@@ -726,7 +726,21 @@ function arcsWrapped(si){
   // gets ONE combined fan, so its cross-line and within-line endpoints don't overlap and their take-off angles stay
   // consistent. Uses each token's absolute x (NX); offsets are horizontal → placement-independent, computed once here.
   const fanAll=[];
-  rows.forEach(r=>r.arcsIn.forEach(a=>{ a.hk=a.head; a.dk=a.dep; a.xh=NX(a.head); a.xd=NX(a.dep); a.len=Math.abs(a.dep-a.head); fanAll.push(a); }));
+  /* ⚠ THE FAN RANK IS A WRAPPED-POSITION SPAN, NOT A TOKEN-INDEX ONE — the same rule the fan SIDE already
+     follows (see the Item 20 revert below: the endpoint leans toward wherever its counterpart really sits in
+     pixels, since every row shares one x origin). Ranking by |dep−head| is a fine proxy for width WITHIN a row,
+     where x is monotone in index, and it is exactly wrong once a CROSS-line arc joins the pool: its index span
+     counts every token to the end of its own row and back along the next, while its actual horizontal reach can
+     be almost nothing. Measured on samples/literary_chinese.conllu, a cross-line arc spanning 10 tokens but only
+     35px sideways took the centre slot off a within-line arc reaching 350px — 10 of the 14 buckets holding both
+     kinds ranked differently under the two rules. |xd−xh| is monotone in |dep−head| for a same-row pair, so
+     every within-line arc keeps the order it already had; only the cross-line arcs move, which is the report.
+     fanArcs' header asks for "any monotone-in-width measure" and this is the width itself. Applied at all THREE
+     push sites (here, the cross arcs, the ghosts) rather than inside fanArcs, whose other callers — the flat
+     views at the foot of this file — have one line and no wrap, so index and pixel order there coincide and a
+     shared-routine change would be blast radius for nothing. */
+  const fanLen=a=>Math.abs(a.xd-a.xh);   // ranked on the drawn frame, exactly as the fan side is
+  rows.forEach(r=>r.arcsIn.forEach(a=>{ a.hk=a.head; a.dk=a.dep; a.xh=NX(a.head); a.xd=NX(a.dep); a.len=fanLen(a); fanAll.push(a); }));
   crossArcs.forEach(a=>{
     const iUp=rowOf(a.dk).ord<rowOf(a.hk).ord;   // is the DEPENDENT the upper-line token?
     if(iUp) a.dkey="B"+a.dk; else a.hkey="B"+a.hk;   // Item 1: the cross-line arc's UPPER-line endpoint sits at the BOTTOM of that line (NBOT); give it a bottom-side fan bucket ("B"+token) so it fans ONLY against other cross-line bottom-endpoints there — never the within-line TOP-side endpoints sharing that token (Item 16's single combined fan wrongly spread it against them). The LOWER end keeps its plain token key → still fans with that line's within-line arcs (same, top side).
@@ -753,7 +767,7 @@ function arcsWrapped(si){
     // pixel position is actually on — geometrically meaningful for a same-row arc AND for a cross-row one,
     // since both share one coordinate frame. (a.xh/a.xd here still feed ONLY fanArcs' fan-SIDE sign — the
     // real drawn geometry is re-derived fresh by crossEnds() further down via NX()+offset, unchanged.)
-    a.xh=NX(a.hk); a.xd=NX(a.dk);
+    a.xh=NX(a.hk); a.xd=NX(a.dk); a.len=fanLen(a);   // supersedes the token-index span crossArcs was built with — see fanLen's own note above
     fanAll.push(a); });
   // item 7: ghost endpoints (Shared=Yes AND Subject-raising) computed HERE, ahead of fanArcs, so they fold into
   // the SAME per-token fan pool the reals resolve in — see fanArcs' own ghost-arg comment (mirrors 84e7938's
@@ -763,13 +777,14 @@ function arcsWrapped(si){
   // other conjunct; Subj: the predicate). ghostPairs/ghostFan are used again further down, where the ghosts are
   // actually drawn — by then fanArcs has already set offH/offD on every entry here, real and ghost alike.
   const ghostPairs=ghostPairsFor(t).map(([o,tg,rel,kind])=>({i:o,oh:tg,rel,kind}));
-  // len: TOKEN-INDEX span, matching fanAll's own real-arc convention (a.len=Math.abs(a.dep-a.head)/Math.abs(i-h)
-  // just above) — NOT a pixel distance. Confirmed live (CDP) this matters, not just tidiness: with no len at all,
-  // fanArcs' own fallback (|xd-xh|, a PIXEL span) was being ranked directly against a real arc's TOKEN-INDEX span
-  // in the SAME pool — a one-token-wide real edge (len 1) against a many-pixel-wide ghost (len 30+) compares
-  // nothing like their true relative length, so the ghost won the centre slot unconditionally regardless of
-  // which was actually longer — the identical bug this whole fix exists to remove, reintroduced through a unit
-  // mismatch instead of a missing sort.
+  // len: the WRAPPED-POSITION span fanLen() gives every member of this pool — see its note above, which moved
+  // the whole pool off token-index spans because a cross-line arc's index span says nothing about its real
+  // horizontal reach. What this comment used to require (a TOKEN-INDEX span here, to match the reals) is
+  // therefore inverted, and the reason it gave still stands and is why fanLen is applied here too: confirmed
+  // live (CDP) that a UNIT MISMATCH in this pool is not mere untidiness — with no len at all, fanArcs' own
+  // |xd-xh| fallback was ranked directly against the reals' index spans, and a one-token-wide real edge (len 1)
+  // lost the centre slot unconditionally to a many-pixel-wide ghost (len 30+). One measure for every member is
+  // what that demands; it is now the pixel one on both sides of the comparison rather than the index one.
   // ⚠ xh/xd for a CROSS-line ghost, like crossArcs' own just above, are the real NX() — the "Item 20" reasoning
   // this comment used to cite (row-local x's are only comparable within one row) doesn't hold: `r.offX` is 0 for
   // every LTR row and svgW-r.total (right-flush to the SAME svgW) for every RTL row, so NX(i) is one shared,
@@ -780,7 +795,7 @@ function arcsWrapped(si){
   // key) still applies to a CROSS ghost, unlike a within-line one, since that's a fact about which line the
   // endpoint's node sits at the edge of, not about which coordinates are meaningful.
   const ghostFan=ghostPairs.map(p=>{ const cross=rowOf(p.oh)!==rowOf(p.i);
-    const a={hk:p.oh,dk:p.i,len:Math.abs(p.oh-p.i),xh:NX(p.oh),xd:NX(p.i)};
+    const a={hk:p.oh,dk:p.i,xh:NX(p.oh),xd:NX(p.i)}; a.len=fanLen(a);   // the SAME measure the reals now carry — a ghost ranked in other units is the unit-mismatch bug the note below describes, just the other way round
     if(cross){ const iUp=rowOf(p.i).ord<rowOf(p.oh).ord;
       if(iUp) a.dkey="B"+a.dk; else a.hkey="B"+a.hk; }   // item 1's own cross-line bucket split, applied to ghosts too
     return a; });
