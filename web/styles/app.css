@@ -2007,6 +2007,29 @@
   /* diagrams aren't text to select — disable selection so click-drag edits work; show a drag cursor while dragging */
   #doc .diagram, #doc svg.tree{ user-select:none; -webkit-user-select:none }
   body.dg-drag, body.dg-drag *{ cursor:grabbing !important }
+  /* ⚠ AND NOTHING IS SELECTABLE WHILE A DRAG IS IN FLIGHT. The two rules above make the DIAGRAM itself
+     unselectable, which is what stops a drag from highlighting the very tokens it is re-heading — but a
+     selection that BEGINS in a user-select:none region can still be EXTENDED into selectable content as the
+     pointer travels. What the pointer crosses on its way to a drop target is the running sentence, the
+     transliteration and translation rows and the grid — all legitimately selectable the rest of the time, and
+     all of it lighting up mid-drag.
+     ⚠️ NOT REPRODUCIBLE UNDER HEADLESS CHROME, AND THE CONTROL IS WHY THAT PROVES NOTHING: a trusted
+     press-and-drag (CDP Input.dispatchMouseEvent) from a `.tok-word` to the running sentence leaves
+     getSelection() empty there — but so does the SAME drag across the running sentence's own text, which
+     plainly should select. That harness does not drive mouse selection at all, so it can neither reproduce
+     this nor disprove it; the report comes from the shipping WKWebView, and that is where the mechanism was
+     verified instead: driven through a real drag, `.stext` computes `text` before the press, still `text` at
+     2px (not yet a drag), `none` once the 4px threshold makes it one, and `text` again on release.
+     ⚠️ MEASURE THIS WITH `text_select=True` ON THE PROBE WINDOW, or the answer is a fiction: pywebview injects
+     its own blanket `user-select:none` unless a window asks for text selection, which app/__main__.py does and
+     a bare `webview.create_window` does not — under the default every element reads `none`, the surrounding
+     text looks unselectable, and the fault looks impossible.
+     A CLASS OF ITS OWN, not folded into `dg-drag` above: the token drag and the MARQUEE (a rectangle over
+     empty diagram space) both need this, and only the first wants a grabbing cursor. Both add it the moment
+     a press becomes a real drag (>4px) and drop it in endDrag/endMarquee, so ordinary selection is back the
+     instant the pointer is released. `!important` for the same reason the cursor needs it: it has to beat the
+     per-element `user-select` these rows carry themselves. */
+  body.dg-noselect, body.dg-noselect *{ user-select:none !important; -webkit-user-select:none !important }
   .dg-ghost{ position:fixed; z-index:9999; pointer-events:none; transform:translate(-50%,16px); padding:6px 9px; border-radius:6px;
     background:var(--content-bg); color:var(--text); font:600 14px var(--ui-font); white-space:nowrap;
     box-shadow:0 3px 10px rgba(0,0,0,.28); border:.5px solid var(--hairline); opacity:.95 }

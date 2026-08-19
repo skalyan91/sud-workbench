@@ -265,7 +265,18 @@ async function attachAsSharedConjunct(si,depId,conjDepId){ const s=DOC[si]; if(!
     const hits=marqueeHits(MARQ.si,{l:L,t:T,r:L+W,b:T+H}); MARQ.hits=hits;
     if(hits){ setRange(MARQ.si,hits.min,hits.max); sel={s:MARQ.si,t:hits.max}; selGhost=null; applySel(); }   // live range highlight WITHOUT a full re-render (applySel just toggles the .rng/.rangesel classes)
     else { selRange=null; applySel(); } };
-  const endMarquee=()=>{ if(MARQ&&MARQ.div)MARQ.div.remove(); MARQ=null; };
+  /* ⚠ A DRAG MUST NOT LEAVE A TEXT SELECTION BEHIND IT, and `user-select:none` alone does not deliver that.
+     The diagram is already unselectable, so a drag cannot highlight the tokens it is re-heading — but a
+     selection that BEGINS there can still be EXTENDED into whatever selectable content the pointer travels
+     over (the running sentence, the transliteration/translation rows, the grid). Two halves, because they
+     answer two different moments: `body.dg-noselect`
+     (styles/app.css) stops any FURTHER extension for the rest of the gesture, and removeAllRanges() clears
+     whatever formed in the few pixels BEFORE the 4px threshold decided this press was a drag at all — CSS
+     cannot retract a selection that already exists. Called from both drag kinds; undone in endDrag and
+     endMarquee, so a released pointer leaves ordinary selection exactly as it was. */
+  const dragNoSelect=()=>{ document.body.classList.add("dg-noselect");
+    const sel=window.getSelection&&window.getSelection(); if(sel&&!sel.isCollapsed) try{ sel.removeAllRanges(); }catch(_){} };
+  const endMarquee=()=>{ document.body.classList.remove("dg-noselect"); if(MARQ&&MARQ.div)MARQ.div.remove(); MARQ=null; };
   docEl.addEventListener("pointerdown",e=>{ if(e.button!==0||!draggable())return;
     // an inline editor (makeEditable's floating .nodeedit input, appended to <body> — never inside #doc, so
     // clicking a DIFFERENT token always reaches here) is still focused from a PRIOR click: force its blur→
@@ -299,7 +310,7 @@ async function attachAsSharedConjunct(si,depId,conjDepId){ const s=DOC[si]; if(!
     DLAST={kind:DDRAG.kind,si:DDRAG.si,tok:DDRAG.tok,dep:DDRAG.dep,gfrom:DDRAG.gfrom,gto:DDRAG.gto,x0:e.clientX,y0:e.clientY,t:Date.now()}; });   // snapshot the grab so a drag-lock second tap (whose own pointerdown WebKit may swallow) can still start a drag from a bare pointermove.  NB: no setPointerCapture here — capturing on pointerdown would retarget the follow-up click to #doc (WebKit), so plain clicks would stop selecting.  Capture on first move instead.
   docEl.addEventListener("pointermove",e=>{
     if(MARQ){ if(!(e.buttons&1)){ endMarquee(); return; }   // button released outside → abandon
-      if(!MARQ.moved && Math.hypot(e.clientX-MARQ.x0,e.clientY-MARQ.y0)>4){ MARQ.moved=true; try{docEl.setPointerCapture(e.pointerId);}catch(_){}
+      if(!MARQ.moved && Math.hypot(e.clientX-MARQ.x0,e.clientY-MARQ.y0)>4){ MARQ.moved=true; dragNoSelect(); try{docEl.setPointerCapture(e.pointerId);}catch(_){}
         MARQ.div=document.createElement("div"); MARQ.div.className="marquee"; document.body.appendChild(MARQ.div); }
       if(MARQ.moved){ e.preventDefault(); updateMarquee(e); } return; }
     // Drag-lock ("double-tap to drag"): the held second tap moves the pointer, but WebKit often delivers no fresh
@@ -315,7 +326,7 @@ async function attachAsSharedConjunct(si,depId,conjDepId){ const s=DOC[si]; if(!
         else if(node){ DDRAG={kind:"node",si:+node.getAttribute("data-s"),tok:+node.getAttribute("data-tok"),x0:e.clientX,y0:e.clientY,moved:false}; }   // …and no pick() here either, for the stronger version of the reason above: this branch only ever runs from a pointermove with the button held, i.e. a gesture already known to be a DRAG
         if(DDRAG) DLAST={kind:DDRAG.kind,si:DDRAG.si,tok:DDRAG.tok,dep:DDRAG.dep,gfrom:DDRAG.gfrom,gto:DDRAG.gto,x0:e.clientX,y0:e.clientY,t:Date.now()}; } }
     if(!DDRAG)return;
-    if(!DDRAG.moved && Math.hypot(e.clientX-DDRAG.x0,e.clientY-DDRAG.y0)>4){ DDRAG.moved=true; DDRAG.pointerId=e.pointerId; document.body.classList.add("dg-drag"); try{docEl.setPointerCapture(e.pointerId);}catch(_){} dragGhost(DDRAG,e); if(DDRAG.kind!=="mwtgroup") paintHeadCandidates(DDRAG); }   // a group drag never offers "become the head of X" — there is no single dependent/head to redirect, so the parser-candidate wash is skipped outright rather than relying on paintHeadCandidates' own d.tok===undefined no-op
+    if(!DDRAG.moved && Math.hypot(e.clientX-DDRAG.x0,e.clientY-DDRAG.y0)>4){ DDRAG.moved=true; DDRAG.pointerId=e.pointerId; document.body.classList.add("dg-drag"); dragNoSelect(); try{docEl.setPointerCapture(e.pointerId);}catch(_){} dragGhost(DDRAG,e); if(DDRAG.kind!=="mwtgroup") paintHeadCandidates(DDRAG); }   // a group drag never offers "become the head of X" — there is no single dependent/head to redirect, so the parser-candidate wash is skipped outright rather than relying on paintHeadCandidates' own d.tok===undefined no-op
     if(DDRAG.moved){ e.preventDefault(); DDRAG.lastX=e.clientX; DDRAG.lastY=e.clientY; moveGhost(e); document.querySelectorAll("#doc .dtarget").forEach(n=>n.classList.remove("dtarget"));   // remember the live drop point → a pointercancel can still commit there
       if(DDRAG.kind==="mwtgroup"){ const blk=document.querySelector(`.sblock[data-i="${DDRAG.si}"]`); if(blk) dropCaret(DDRAG.si,e.clientX,e.clientY,blk,{gfrom:DDRAG.gfrom,gto:DDRAG.gto}); }   // a group drag only ever reorders — no re-head, no shared-conjunct/raise attach — so it always shows the drop caret, exactly like kind:"node" hovering empty space below
       else {
@@ -329,7 +340,7 @@ async function attachAsSharedConjunct(si,depId,conjDepId){ const s=DOC[si]; if(!
           if(cd!==fromId && (isConjDep(DDRAG.si,cd)||raiseMirror(DDRAG.si,fromId,cd))){ overEdge=true; edgeEl.classList.add("dtarget"); } } }   // isRaiseTargetDep is deliberately NOT a gate here — see raiseMirror's own note: the argument-onto-predicate direction was withdrawn, leaving the predicate-onto-argument one as the only raising drop   // …raiseMirror: dragging the PREDICATE onto an argument's edge highlights too, or the mirror gesture would give no sign it was going to work right up until the drop
       if(DDRAG.kind==="node"){ if(overNode||overEdge) clearCaret();   // hovering another node/conj edge → it becomes the head (no drop caret)
         else { const blk=document.querySelector(`.sblock[data-i="${DDRAG.si}"]`); if(blk)dropCaret(DDRAG.si,e.clientX,e.clientY,blk,DDRAG.tok); } } } } });   // empty space → reorder: show where it would land
-  function endDrag(e){ document.body.classList.remove("dg-drag"); clearGhost(); clearCaret();
+  function endDrag(e){ document.body.classList.remove("dg-drag"); document.body.classList.remove("dg-noselect"); clearGhost(); clearCaret();
     document.querySelectorAll("#doc .dtarget").forEach(n=>n.classList.remove("dtarget"));
     clearHeadCandidates();
     try{docEl.releasePointerCapture(e.pointerId);}catch(_){} }
