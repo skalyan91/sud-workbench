@@ -711,8 +711,8 @@ function openPosRelMenu(hit,x,y,shift){ const tk=tokFromEl(hit.relEl||hit.posEl)
    abbreviation lands on the same reading the autocomplete and the FEATS back-sync give it.
    Values are NARROWED TO WHAT'S ATTESTED (attestedFeatVals, js/grid/grid.js) — already used somewhere
    in this document, or in the active model's own emitted-label inventory (MODEL_FEATS_INVENTORY) —
-   before being listed in UD's OWN ORDER (UD_FEATS) rather than alphabetically — Sing before Plur, Nom
-   before Acc — with anything only the custom map knows trailing after (never narrowed: a mapping the
+   before being listed in the CONVENTIONAL ORDER of the feature's own category (UD_FEATS, js/grid/grid.js)
+   rather than alphabetically — Sing before Plur, Nom before Acc — with anything only the custom map knows trailing after (never narrowed: a mapping the
    reader hand-added in Gloss Mappings is offered unconditionally, the whole point of adding one); each
    row shows the value's gloss (FEATS_VDESC) beside its abbreviation, and the current one carries the tick.
    MORPHEMIC TIER ONLY. The lexical Gloss tier renders abbreviation runs the same way, but a Gloss is a
