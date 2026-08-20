@@ -1121,6 +1121,29 @@
   #doc[data-hanfrn] .stx-frn{--frn-wght:700}
   #doc[data-hanfrn] .tok-ital{--frn-wght:400}   /* the diagram's five form rows and the grid's Form cell — see above */
   #doc[data-hanfrn] .tok-ital,#doc[data-hanfrn] .stx-frn{letter-spacing:var(--frn-track); font-weight:var(--frn-wght)}
+  /* ⚠ AND THE RUN'S TWO EDGES ARE CORRECTED BY HALF THAT TRACK EACH, BECAUSE letter-spacing CANNOT REACH
+     A JUNCTION IT ONLY HAS ONE SIDE OF. The tightening above equalises the gap BETWEEN TWO KAI CHARACTERS
+     with the sans's own; it says nothing about the gap between a Kai character and the non-Kai one next to
+     it, and it gets that gap wrong in both directions at once. Write s for the sans's side bearing and k
+     for the Kai's (per side, in the sans's em), and t = 2(k − s) for the track the block above derives:
+       · Kai↔Kai   k + k − t  =  2s      … the target, and what the tightening already produces
+       · sans→Kai  s + k      =  2s + t/2   … TOO WIDE by t/2: no letter-spacing precedes the run
+       · Kai→sans  k + s − t  =  2s − t/2   … TOO TIGHT by t/2: CSS puts a letter-space after the LAST
+                                             character too, and there is no second Kai glyph to spend it on
+     So the run is pulled in by t/2 at its start and pushed out by t/2 at its end — DERIVED, not tuned: the
+     correction is exactly half the track whatever the measured side bearings turn out to be, because the
+     track is defined as twice their difference (see the derivation above). `em` in a margin resolves
+     against the element's OWN font-size, which is the --frn-scale'd Kai size --frn-track is already
+     expressed in, so the two are on one basis and no conversion is needed.
+     ⚠️ TWO ADJACENT FOREIGN TOKENS STAY CORRECT BY CONSTRUCTION — 般若波羅蜜多 is two `.stx-frn` spans, and
+     the first's +t/2 end margin meets the second's −t/2 start margin for a net zero, leaving that junction
+     exactly the Kai↔Kai gap it already had. A first- or last-token foreign run shifts by t/2 (~0.5px at
+     19.5px) against the line edge, which is the same optical correction and not worth excepting.
+     ⚠️ RUNNING LINE ONLY. The five diagram form rows and the grid's Form cell carry `.tok-ital` and take no
+     margin: each of those draws its token ALONE in its own centred slot, with no neighbouring character for
+     a junction to exist between — the nearest thing to one there is the slot's own padding, which is
+     measured (meas()/fmeas()) and would have to move with it. */
+  #doc[data-hanfrn] .stx-frn{margin-inline-start:calc(var(--frn-track) / 2); margin-inline-end:calc(var(--frn-track) / -2)}
   /* The SCALE reaches the five form rows through the `* var(--frn-scale,1)` factor already threaded into
      each of their own font-size calcs, beside `var(--script-mag,1)` — the same list, the same shape, the
      same no-op default. These two rows have no font-size of their own to thread it into, so they take it
