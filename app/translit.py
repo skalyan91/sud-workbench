@@ -939,8 +939,10 @@ def _visarga_join(a: str, b: str, lemma=None, a_form=None, sep=""):
     ``sep`` is inserted at the boundary for the SEPARABLE outcomes: visarga sandhi transforms A's
     ending (-o / -ā / -r / sibilant) but leaves TWO distinct segments, so the running line keeps a
     WORD SEPARATION (``ahaḥ`` → o, ``bhṛtaḥ + vartmā`` → ``bhṛto vartmā`` — a space), while an MWT
-    passes ``sep=""`` and the two segments abut.  The genuine MERGES — the avagraha (``-aḥ + a →
-    -o'``) and the r-r coalescence (``-Vḥ + r- → -Vr-``) — never take ``sep`` (the words fuse).
+    passes ``sep=""`` and the two segments abut.  The avagraha (``-aḥ + a → -o \'``) takes ``sep`` too,
+    because IAST writes the mark detached from the word before it and attached to the one after it —
+    see the note at that branch.  The one genuine merge is the r-r coalescence (``-Vḥ + r- → -Vr-``),
+    which never takes ``sep`` (the words really do fuse into one spelling).
     ``lemma`` = the CoNLL-U lemma of the word contributing A's trailing visarga; ``a_form`` = that
     word's OWN surface form (so the r-stem lookup ignores any prefix already glued onto A, e.g. in
     "a"+"punaḥ" → "apunaḥ" the r-stem test still sees "punaḥ")."""
@@ -965,8 +967,17 @@ def _visarga_join(a: str, b: str, lemma=None, a_form=None, sep=""):
         # NB: before r- itself the r-stem restoration is SKIPPED (it would double the r, e.g. ahaḥ+rātra
         # → *aharrātra); the -aḥ/-āḥ visarga rules below instead give -o/-ā (ahaḥ + rātra → aho rātra).
     if fv == "a":                             # -aḥ …  (ordinary a-stem, non-r-stem)
-        if biv == "a":                        #   + a → -o' (a elided) — a genuine MERGE (avagraha), no sep   [8.3.17ff + 6.1.109]
-            return pre[:-1] + "o" + _AVAGRAHA + b[1:]
+        if biv == "a":                        #   + a → -o + sep + ' (a elided)  [8.3.17ff + 6.1.109]
+            # ⚠ THE SEPARATOR GOES IN, and it used to be withheld here on the reasoning that an avagraha
+            # is "a genuine MERGE".  Phonologically it is; ORTHOGRAPHICALLY it is not, and this function
+            # writes IAST.  Romanised Sanskrit puts the mark on the word it OPENS and keeps the space
+            # before it — `rāmo 'pi`, `namo 'stu` — which is exactly what `_vowel_join` a few lines up
+            # already does for the SAME rule reached from an e/o-final word (`tato 'ṅghridvayam`, via
+            # its `_SEP_AFTER` tuple).  One sandhi, one spelling: the two paths disagreed, and the
+            # visarga one was the odd spelling out.
+            # An MWT still abuts, because an MWT passes sep="" — its components make ONE orthographic
+            # word, which is the one place the mark genuinely has no word boundary to sit at.
+            return pre[:-1] + "o" + sep + _AVAGRAHA + b[1:]
         if biv is not None:                   #   + other vowel → hiatus (…a V), ambiguous → unfused
             return None
         return pre[:-1] + "o" + sep + b       #   + voiced consonant → -o C (separable: keeps the word boundary)
@@ -1698,6 +1709,62 @@ def _sa_join_final_consonant(text: str) -> str:
     return "".join(out)
 
 
+# The avagraha as each side spells it: the Latin apostrophes an IAST text may use for it, and the
+# Devanagari sign itself (a Devanagari-stored file passes through `_ak` unchanged, so a stray space in
+# ITS spelling has to be recognised in ITS characters).
+_AVAGRAHA_LATIN = "'’‘"
+_AVAGRAHA_ANY = _AVAGRAHA_LATIN + "ऽ"
+
+
+def _sa_avagraha_detach(text: str) -> str:
+    """IAST target: put back the space an avagraha is written AFTER.
+
+    ⚠ THE MIRROR OF :func:`_sa_join_final_consonant`, and orthography for the same reason.  Romanised
+    Sanskrit writes the elided initial ``a`` as an apostrophe belonging to the word it OPENS, detached
+    from the word before it — ``tato 'ṅghridvayam``, ``namo 'stu``, ``ko 'nasūyakaḥ`` — while
+    Devanagari writes ऽ flush against the preceding syllable, ततोऽङ्घ्रिद्वयम्, because there the
+    elision is inside one akṣara run.  So the space is a fact about the SCRIPT, exactly as its absence
+    before a virāma-joined word is, and each side has to be given the one it uses: a Devanagari-stored
+    file rendered in IAST came back ``tato'ṅghridvayam``, which no romanised edition writes.  (This
+    repository's own `samples/brihat_jataka.conllu` is stored in IAST and spells it with the space, in
+    both `# text` and the token forms — the evidence for the convention is the data.)
+
+    ⚠ ON THE OUTPUT, where :func:`_sa_join_final_consonant` is on the INPUT, and each is on the side its
+    own alphabet spells the mark in: the avagraha only becomes an apostrophe once the conversion has
+    run.  Nothing else is touched — a mark already carrying its space, and one that OPENS the string
+    (a token whose own form is ``'ṅghridvayam``, which is exactly how an MWT component is stored),
+    both pass through unchanged."""
+    out = []
+    for ch in text:
+        if ch in _AVAGRAHA_LATIN and out and not out[-1].isspace():
+            out.append(" ")
+        out.append(ch)
+    return "".join(out)
+
+
+def _sa_avagraha_attach(text: str) -> str:
+    """Brahmic target: take that space away again — the other half of `_sa_avagraha_detach`.
+
+    An IAST-stored file spells the mark detached, so without this the Devanagari of
+    ``tato 'ṅghridvayam`` came out ``ततो ऽङ्घ्रिद्वयम्`` — a space no Indic orthography puts there,
+    the same defect `_sa_join_final_consonant` removes at a virāma.  ON THE INPUT for that function's
+    own reason: the two akṣaras have to meet before aksharamukha shapes them.  A leading avagraha keeps
+    whatever precedes it when there is nothing (start of string), and a run of spaces goes whole."""
+    out, i, n = [], 0, len(text)
+    while i < n:
+        ch = text[i]
+        if ch == " " and out and not out[-1].isspace():
+            j = i
+            while j < n and text[j] == " ":
+                j += 1
+            if j < n and text[j] in _AVAGRAHA_ANY:
+                i = j                      # …the whole run of spaces goes, and the mark meets its syllable
+                continue
+        out.append(ch)
+        i += 1
+    return "".join(out)
+
+
 def _sanskrit(text: str, target: str) -> str:
     try:
         from aksharamukha import transliterate as ak
@@ -1747,8 +1814,10 @@ def _sanskrit(text: str, target: str) -> str:
                 out.append(d1)
             elif piece == "\n":
                 out.append("\n")   # item 20: keep the hard line break verbatim (multi-line verse stays multi-line)
+            elif target == "IAST":
+                out.append(_sa_avagraha_detach(_ak(piece)))   # …and the avagraha takes back the space IAST writes it after — AFTER the conversion, which is where the mark becomes an apostrophe (_sa_avagraha_detach)
             else:
-                out.append(_ak(_sa_join_final_consonant(piece) if target != "IAST" else piece))   # a consonant-final word joins the next — see _sa_join_final_consonant (BEFORE the conversion, so the akṣara forms)
+                out.append(_ak(_sa_avagraha_attach(_sa_join_final_consonant(piece))))   # a consonant-final word joins the next, and an avagraha joins the syllable before it — see _sa_join_final_consonant / _sa_avagraha_attach (BEFORE the conversion, so the akṣara forms)
         return "".join(out)
     except Exception:  # noqa: BLE001
         return ""

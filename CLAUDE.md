@@ -1445,6 +1445,22 @@ looking sends the reader away with the one thing they came for still missing.
   character; anusvāra and visarga are excluded, since neither leaves a consonant hanging. A file already stored in
   Devanagari passes through untouched, and should: `_ak` returns it unchanged, so the author's own spelling is
   what is drawn. It is ORTHOGRAPHY, not sandhi — `vāk iti` comes out वाकिति, not वागिति.
+  ⚠ **THE AVAGRAHA IS THE SAME RULE POINTING THE OTHER WAY, AND IT IS SPELT ON BOTH SIDES.** Romanised Sanskrit
+  writes the elided initial *a* as an apostrophe belonging to the word it OPENS, detached from the word before
+  it — `tato 'ṅghridvayam`, `namo 'stu`, `ko 'nasūyakaḥ` — while Devanagari writes ऽ flush against the preceding
+  syllable, ततोऽङ्घ्रिद्वयम्, because there the elision sits inside one akṣara run. So the space is a fact about
+  the SCRIPT exactly as its absence before a virāma-joined word is, and neither side had been given the one it
+  uses: a Devanagari-stored file rendered in IAST came back `tato'ṅghridvayam`, and an IAST-stored one rendered
+  in Devanagari came back `ततो ऽङ्घ्रिद्वयम्` — both live on this repository's own two `brihat_jataka` samples.
+  `_sa_avagraha_detach` (on the OUTPUT — the mark only becomes an apostrophe once the conversion has run) and
+  `_sa_avagraha_attach` (on the INPUT, for `_sa_join_final_consonant`'s own reason) are the pair, at the same
+  seam. A mark that OPENS its string is left alone: `'ṅghridvayam` is exactly how an MWT component is stored.
+  ⚠️ **And the SANDHI GENERATOR agrees with them now.** `_visarga_join`'s `-aḥ + a → -o'` branch withheld the
+  word separator on the reasoning that an avagraha is "a genuine merge" — phonologically true, orthographically
+  not, and `_vowel_join` already inserted it for the SAME rule reached from an e/o-final word. One sandhi had two
+  spellings (`rāmo'pi` against `tato 'ṅghridvayam`); it now takes `sep` like every other separable outcome. An
+  MWT is untouched, because an MWT passes `sep=""` — its components make one orthographic word, which is the one
+  place the mark genuinely has no boundary to sit at, so no range form in any existing file moves.
   ⚠ **The DCS representation is not the CSL one, and the difference is in the columns.** A token
   that is its own orthographic word keeps its **sandhied** surface in FORM, with the padapāṭha in
   MISC `Unsandhied=` (`kratuś` / `Unsandhied=kratuḥ`); only a token INSIDE a multi-word token is
