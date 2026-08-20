@@ -1058,6 +1058,25 @@ claim about a different sentence. They are cleared from the parser's MISC there 
 restored by the `keep` list; only a FULL parse (`doInsert`/`insertParsed`/`reparse`/`commitSentText`,
 which replace `s.tokens` wholesale together with the tree they belong to) takes them verbatim.
 
+⚠ **AND "RESET PARSE" (⌘R, and the block's own control) RE-ANALYSES THE TOKENS THAT ARE THERE — IT DOES
+NOT RE-TOKENISE.** It used to run `applySentText`, i.e. `commitSentText`'s body with the string held
+fixed, so it re-segmented `# text` from scratch and took the tokeniser's own MWT ranges with it. That
+is the wrong operation: SEGMENTATION IS THE ANNOTATOR'S, and asking for a fresh parse is not asking to
+revisit it — a reader who had split a compound, merged a clitic or grouped a multi-word token by hand
+had all of it silently reverted by the one control that says it is about the *parse*. `reparse` now
+holds the forms, `s.mwt`, `s.empties` and `# text` fixed and goes through `parse_pretokenized`
+(`Api.parse_tokens`) instead, alignment 1-to-1 by construction. **Only an edit to the running sentence
+or to the grid re-tokenises**, because those are the two gestures that change what the words are.
+Three consequences worth knowing. It sends **no `upos`** (unlike `reparseTokenFields`, which constrains
+the model to the reader's tags because it is refreshing the fields around an edit they just made — a
+RESET must not keep the classes it is being asked to reconsider). It **restores the spacing MISC
+verbatim** — `SPACING_MISC` = SpaceAfter/SpacesAfter/SpacesBefore/NewPar — because a Doc built from a
+word list has no running text to read spacing off and simply says nothing, and taking that answer would
+drop every `SpaceAfter=No` in the sentence, which in a spaceless script is the whole of the spacing and
+is also what an MWT range's re-fusion reads. And **with no model it says so and does nothing**, where
+the old body degraded to a whitespace re-tokenisation — precisely the thing this command may no longer
+do. `applySentText` lost its `force`/`scroll` options with their only caller.
+
 ⚠ **THE WHEELS GAINED THIS WITHOUT A VERSION BUMP**, so an environment built before them never
 refreshes: `requirements-core.txt` pins the English wheel by release URL at one version, pip sees
 that version installed and skips it, and the per-user venv is built once and gated behind `.sud-core-ready`

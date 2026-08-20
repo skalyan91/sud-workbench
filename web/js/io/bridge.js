@@ -826,30 +826,72 @@ function adoptInsertLang(lang,modelId){
   if(sel){ sel.value=modelId; if(sel.value!==modelId) return; }   // not in the picker → keep whatever applyLang settled on
   model=modelId; if(typeof syncMenu==="function")syncMenu(); }
 
-/* "Reset parse" / ⌘R — run the sentence through the parser again on its OWN text. Nothing about the text changes,
-   so this IS commitSentText's operation with the string held fixed, and it runs applySentText's body rather than a
-   second copy of it (which is how the two drifted: the copy here never re-seeded the morphemic tiers). It adds
-   exactly two things — it asks first, because a re-parse throws away hand annotation, and it FORCES the work,
-   because applySentText skips a text whose tokens are unchanged and a re-parse's text is unchanged by definition. */
-async function reparse(i){ const s=DOC[i]; if(!s)return;
-  const text=(s.text&&s.text.trim())||s.tokens.map(t=>t.form).join(" ");   // no `# text` (a hand-built sentence) → the forms themselves are the text
-  const willParse=hasBridge()&&model;   // …and the question names what will actually run: with no model, or no bridge to run one, this is a re-tokenisation and promising a "parse" would be a lie
-  if(s.tokens.some(t=>t.head&&t.head!=="0"&&t.deprel) && !(await askConfirm("Reset this sentence's parse? Its current tokens and annotations will be replaced by a fresh "+(willParse?"parse":"tokenisation")+".",{danger:true,okLabel:"Reset"}))) return;
-  await applySentText(i,text,{force:true,scroll:true}); }   // scroll: a re-parse is invoked from the menu/keyboard, so bring its sentence into view (commitSentText's caller is already looking at it)
+/* The MISC keys that describe the RUNNING TEXT rather than the analysis — where the spaces are, and where a
+   paragraph starts mid-sentence. Every one of them is a fact about the string the tokens were segmented from,
+   which is exactly what a re-parse is now forbidden to revisit, so they survive it verbatim. */
+const SPACING_MISC=["SpaceAfter","SpacesAfter","SpacesBefore","NewPar"];
+/* ── "Reset parse" / ⌘R — A FRESH ANALYSIS OF THE TOKENS THAT ARE THERE, NOT A FRESH TOKENISATION ──
+   ⚠ THIS COMMAND USED TO RUN applySentText, i.e. commitSentText's body with the text held fixed — so
+   it re-tokenised `# text` from scratch and took the tokeniser's own MWT ranges with it. That is the
+   wrong operation, on report: SEGMENTATION IS THE ANNOTATOR'S, and re-parsing is not a request to
+   revisit it. A reader who has split a compound, merged a clitic, grouped a multi-word token by hand
+   or corrected a segmenter's guess had all of it silently reverted by the one control that says it is
+   about the PARSE. Only an edit to the running sentence (commitSentText) or to the grid re-tokenises,
+   because those are the two gestures that actually change what the words are.
+   So the tokens' FORMS, `s.mwt`, `s.empties` and `# text` are all held fixed and the sentence is put
+   through `parse_pretokenized` (Api.parse_tokens) instead: one token per form, alignment 1-to-1 by
+   construction, and the lemma, word class, features, heads and relations all re-derived. What the
+   reader is warned about — and what still goes — is the ANNOTATION.
+   ⚠️ AND NO `upos` IS SENT, unlike `reparseTokenFields`. That call constrains the model to the
+   reader's own tags because it is refreshing the fields AROUND an edit the reader just made; this one
+   is a RESET, and asking the model to keep the word classes it is being asked to reconsider would
+   make it one in name only.
+   ⚠️ THE SPACING MISC IS PUT BACK VERBATIM — SpaceAfter, SpacesAfter, SpacesBefore, and NewPar with
+   them. `parse_pretokenized` builds its Doc from a word LIST, so it has no running text to read
+   spacing off and simply says nothing; taking its answer would drop every `SpaceAfter=No` in the
+   sentence, which in a spaceless script is the whole of the spacing and is also what an MWT range's
+   own re-fusion reads. Their ABSENCE is restored as much as their value, which is why this is a
+   per-token restore and not a "keep if present" list. Same reasoning `reparseTokenFields` states for
+   its own SpaceAfter line — and it is only now that this function needs it too, because it is only
+   now that this function goes through the pre-tokenised endpoint.
+   ⚠️ WITH NO MODEL THERE IS NOTHING TO RESET. The old body degraded to a whitespace re-tokenisation,
+   which is precisely the thing this command may no longer do — and re-splitting the sentence on
+   spaces is not a weaker version of re-parsing it, it is a different and destructive command wearing
+   its name. It says so instead. */
+async function reparse(i){ const s=DOC[i]; if(!s||!s.tokens||!s.tokens.length)return;
+  if(!(hasBridge()&&model)){ toast(hasBridge()?"No parser model selected — nothing to re-parse":"The parser runs in the desktop app"); return; }
+  const forms=s.tokens.map(t=>t.form||""); if(!forms.some(f=>f)) return;
+  if(s.tokens.some(t=>t.head&&t.head!=="0"&&t.deprel) && !(await askConfirm("Reset this sentence's parse? Its annotation will be replaced by a fresh parse. The tokens themselves are kept.",{danger:true,okLabel:"Reset"}))) return;
+  const marks=captureMarks(s);   // the three hand-placed marks no parser predicts (Foreign/Typo + CorrectForm, Reported) — same capture/restore pair applySentText uses, and exact here since the forms cannot move
+  const spacing=s.tokens.map(t=>SPACING_MISC.map(k=>miscKV(t.misc,k)));   // …and the spacing column, per token, absence included
+  const pre=snapSent(i);   // BEFORE anything is written, so a failed parse can leave the document exactly as it found it
+  showBusy("Parsing…"); let r;
+  try{ r=await window.pywebview.api.parse_tokens(forms,model); }catch(e){ toast("Parse failed: "+e); return; }finally{ hideBusy(); }
+  if(!r||!r.parsed||!r.tokens||r.tokens.length!==forms.length){ toast("Parse failed"+(r&&r.reason?": "+r.reason:"")); return; }   // a pipeline that rebuilt the Doc anyway must not be aligned against — nothing has been written yet, so there is nothing to roll back
+  if(DOC[i]!==s||s.tokens.length!==forms.length) return;   // the document may have moved while the call was out
+  s.tokens=r.tokens.map((t,k)=>{ const nt={...t,head:String(t.head)};
+    SPACING_MISC.forEach((key,c)=>{ nt.misc=setMiscKV(nt.misc,key,spacing[k][c]); });   // "" removes the key, so a token that had none keeps none
+    return nt; });
+  s.orthoLine="";   // the new token objects carry no cached t.ortho/t.translit → clear the running line so fillOrtho re-fetches the SCRIPT
+  restoreMarks(s,marks);
+  morphAfterReparse(s);   // the new tokens carry no MSeg/MGloss — re-seed both tiers from the FEATS this parse just produced (inside the same undo entry: it is part of the re-parse, not a second edit)
+  commitSnap(pre); markDirty();
+  renderDiagramIncremental(i);   // this sentence was just parsed → let the render below draw its tree breadth-first by depth rather than leaving the row blank for the whole layout pass
+  preserveScroll(renderDoc); clearSelToBlock(i,true);   // scroll: ⌘R and the block control are both invoked without necessarily looking at the sentence. The selection goes because the whole ANALYSIS under it has been replaced, exactly as before — what has not been replaced is the token it pointed at
+  toast(`Re-parsed · ${MODELINFO[model]||model}`);
+  if(show.translit)fillTranslit(); if((ORTHO_SCHEME&&ORTHO_SCHEME!=="none")||isSanskritLang())fillOrtho();
+  annotateTranslitMisc(i).then(ch=>{ if(ch)preserveScroll(renderDoc); }); }
 window.reparse=reparse;
 
-/* ── ONE path from "a sentence's text" to "the sentence's tokens" ────────────────────────────────────────────────
-   Item 4 (commit an edited `# text`) and ⌘R (reset the parse) are the same operation — replace a sentence's tokens
-   from a string — and they used to carry two copies of it that DRIFTED APART: the re-parse copy never called
-   morphAfterReparse, so re-parsing a sentence left MSeg/MGloss empty while re-typing the identical text through
-   commitSentText filled them. One body, two entry points:
-     · commitSentText(i,newText) — the user edited the text; the edit IS the intent to re-tokenise, so no confirm.
-     · reparse(i)                — the user asked for a fresh parse of the text already there; confirms, and forces.
-   `force` is the one thing that cannot be inferred from the arguments. This function skips the whole operation when
-   the new text's TOKENS are unchanged (only the line breaks differ — the branch below), and a re-parse's text is
-   unchanged BY DEFINITION, so without an explicit flag every re-parse would fall into that early-out and silently
-   do nothing at all. `scroll` is passed to pick(): a menu/keyboard-invoked re-parse brings its sentence into view;
-   a text edit does not, since the caller is already looking at it.
+/* ── THE path from "a sentence's text" to "the sentence's tokens" ────────────────────────────────────────────────
+   Editing `# text` IS the intent to re-tokenise, so this body needs no confirm and has exactly one entry point,
+   `commitSentText` below.
+   ⚠ ⌘R / "Reset parse" USED TO BE THE SECOND ONE, running this body with the string held fixed and a `force`
+   flag to defeat the unchanged-text early-out. It no longer re-tokenises at all (see `reparse` above, and the
+   report behind it), so the flag and the `scroll` that went with it are gone with their only caller rather than
+   left declared for nobody — the two commands are now genuinely different operations and no longer share a body.
+   What the sharing was originally FOR still holds and is not lost: the drift it fixed was `reparse` forgetting
+   morphAfterReparse, and `reparse` calls it directly.
    UNDO: exactly ONE entry for the whole operation, however many awaits it spans — the snapshot is taken before the
    first write and pushed with commitSnap once the document has actually changed, so a tokenise that fails leaves no
    entry at all and a parse that fails rolls its own tokenise back (see `rollback`). */
@@ -897,8 +939,8 @@ function restoreMarks(s,saved){ if(!saved||!saved.length) return 0;
   saved.forEach(m=>{ const t=byKey[m.form+"\u0001"+m.nth]; if(t){ apply(t,m); n++; } else left.push(m); });   // pass 1 — exact: form + which occurrence of it
   left.forEach(m=>{ const t=toks[m.idx]; if(!t||claimed.has(t)) return; apply(t,m); n++; });                   // pass 2 — same slot, for a word the edit re-spelled
   return n; }
-async function applySentText(i,newText,opts){ const s=DOC[i]; if(!s)return; opts=opts||{};
-  const force=!!opts.force, scroll=!!opts.scroll;
+async function applySentText(i,newText){ const s=DOC[i]; if(!s)return;
+  const scroll=false;   // …kept as a named constant rather than inlined: clearSelToBlock's second argument is what it means, and a future entry point that DOES want the sentence brought into view should re-introduce the parameter rather than rediscover the call site
   const marks=captureMarks(s);   // taken BEFORE any branch writes tokens; every path that replaces them restores from this
   // item 12: PRESERVE the user's line breaks for display (collapse only runs of horizontal whitespace, keep single \n);
   // the tokeniser splits on ALL whitespace incl. newlines, so tokens are unaffected. The stored s.text carries the \n
@@ -907,7 +949,7 @@ async function applySentText(i,newText,opts){ const s=DOC[i]; if(!s)return; opts
   const parseText=display.replace(/\s+/g," ").trim();   // …and the PARSER is handed the single-line form: a raw \n would glue itself to the next word (see the `src_text` gate in app/parse.py)
   const cur=(s.text!=null?s.text:s.tokens.map(t=>t.form).join(" ")).replace(/\s+/g," ").trim();
   if(!parseText){ preserveScroll(renderDoc); return; }
-  if(!force && parseText===cur){   // tokens unchanged — only the line breaks differ → update the display text, no re-parse
+  if(parseText===cur){   // tokens unchanged — only the line breaks differ → update the display text, no re-parse
     if(display!==s.text){ pushUndo(i); s.text=display; markDirty(); }
     preserveScroll(renderDoc); return; }
   if(hasBridge()&&model){
@@ -949,17 +991,18 @@ async function applySentText(i,newText,opts){ const s=DOC[i]; if(!s)return; opts
    conversion the grid's Form/Lemma cells already run on blur (itransCell in js/grid/grid.js). itransFix is a
    no-op for every other language and without a bridge, so this costs nothing for the 99 % of documents it
    cannot touch, and it returns what it was given on any failure — the input is never lost.
-   HERE AND NOT IN applySentText, which is the shared body ⌘R also runs: a re-parse hands that body the
-   sentence's OWN text, unedited, and running the ITRANS gate over it would rewrite a Sanskrit line nobody
-   typed in. That is exactly the hazard itransCell's `_edited` flag exists for — the same rule, applied at the
-   entry point that means "the user typed this" rather than to the body both entry points share.
+   HERE AND NOT IN applySentText: the gate belongs to the entry point that means "the user typed this", not to
+   the body, which is the same rule itransCell's `_edited` flag states. (It used to matter more directly — ⌘R
+   ran that same body on the sentence's OWN text, and an ITRANS pass there would have rewritten a Sanskrit line
+   nobody typed in. ⌘R no longer goes anywhere near this body, but the rule is unchanged and is what would
+   protect any future entry point that does.)
    THE WHOLE LINE GOES IN, unsplit: the per-word and per-compound-member splitting is the conversion's own
    business (see itransFix / Api.itrans_to_iast), and second-guessing it here would give a Sanskrit sentence
    two different word-splitting rules. */
 async function commitSentText(i,newText){
   let t=newText;
   if(typeof itransFix==="function"){ try{ t=await itransFix(newText); }catch(e){ t=newText; } }   // …and a throw is not a reason to lose the user's typing
-  return applySentText(i,(t==null?newText:t),{}); }
+  return applySentText(i,(t==null?newText:t)); }
 window.commitSentText=commitSentText;
 
 /* Item 6 — per-sentence translations grid. Translations round-trip as `# text_LANG = …` comments (the UD
