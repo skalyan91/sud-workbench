@@ -1,10 +1,349 @@
+# newdoc id = 般若波羅蜜多心經
+# newpar
 # sent_id = s1
-# text = 知命者不怨天。
-# translit_scheme = mc
-1	知	知	VERB	v,動詞,行為,動作	_	3	mod	_	Translit=trje|LTranslit=trje
-2	命	命	NOUN	n,名詞,可搬,伝達	_	1	comp:obj	_	Translit=mjængH|LTranslit=mjængH
-3	者	者	PART	p,助詞,提示,*	_	5	subj	_	Translit=tsyæX|LTranslit=tsyæX
-4	不	不	ADV	v,副詞,否定,無界	Polarity=Neg	5	mod	_	Translit=pjuw|LTranslit=pjuw
-5	怨	怨	VERB	v,動詞,行為,態度	_	0	root	_	Translit=ʔjwonH|LTranslit=ʔjwonH
-6	天	天	NOUN	n,名詞,制度,場	Case=Loc	5	comp:obj	_	Translit=then|LTranslit=then
-7	。	。	PUNCT	s,記号,句点,*	_	5	punct	_	Translit=.|LTranslit=.
+# text = 唐三藏法師玄奘譯
+# translit_scheme = pinyin
+1	唐	唐	PROPN	n,名詞,主体,国名	Case=Loc|NameType=Nat	2	mod	_	SpaceAfter=No|Translit=táng|LTranslit=táng
+2	三藏	三藏	PROPN	n,名詞,人,名	NameType=Giv	6	subj	_	SpaceAfter=No|Translit=sānzàng|LTranslit=sānzàng
+3	法	法	NOUN	n,名詞,制度,儀礼	_	4	mod	_	SpaceAfter=No|Translit=fǎ|LTranslit=fǎ
+4	師	師	NOUN	n,名詞,人,役割	_	2	conj:appos	_	SpaceAfter=No|Translit=shī|LTranslit=shī
+5	玄奘	玄奘	PROPN	n,名詞,人,名	NameType=Giv	4	conj:appos	_	SpaceAfter=No|Translit=xuánzàng|LTranslit=xuánzàng
+6	譯	譯	VERB	n,名詞,人,役割	_	0	root	_	Translit=yì|LTranslit=yì
+
+# newpar
+# sent_id = s2
+# text = 觀自在菩薩，行深般若波羅蜜多時，照見五蘊皆空，度一切苦厄。
+1	觀自在	觀自在	PROPN	n,名詞,固定物,地名	NameType=Geo	4	subj	_	SpaceAfter=No|Translit=guānzìzài|LTranslit=guānzìzài
+2	菩薩	菩薩	NOUN	n,名詞,主体,神仏	_	1	conj:appos	_	SpaceAfter=No|Translit=púsà|LTranslit=púsà
+3	，	，	PUNCT	s,記号,読点,*	_	1	punct	_	SpaceAfter=No|Translit=,|LTranslit=,
+4	行	行	VERB	v,動詞,行為,移動	_	8	mod	_	SpaceAfter=No|Translit=xíng|LTranslit=xíng
+5	深	深	VERB	v,動詞,描写,量	Degree=Pos|VerbForm=Part	4	flat@vv	_	SpaceAfter=No|Translit=shēn|LTranslit=shēn
+6	般若	般若	NOUN	n,名詞,可搬,成果物	Foreign=Yes	7	mod	_	SpaceAfter=No|Translit=bōrě|LTranslit=bōrě
+7	波羅蜜多	波羅蜜多	NOUN	n,名詞,描写,形質	Foreign=Yes	4	comp:obj	_	SpaceAfter=No|Translit=bōluómìduō|LTranslit=bōluómìduō
+8	時	時	NOUN	n,名詞,時,*	Case=Tem	10	mod@tmod	_	SpaceAfter=No|Translit=shí|LTranslit=shí
+9	，	，	PUNCT	s,記号,読点,*	_	8	punct	_	SpaceAfter=No|Translit=,|LTranslit=,
+10	照	照	VERB	v,動詞,行為,動作	_	0	root	_	SpaceAfter=No|Translit=zhào|LTranslit=zhào
+11	見	見	VERB	v,動詞,行為,動作	_	10	flat@vv	_	SpaceAfter=No|Translit=jiàn|LTranslit=jiàn
+12	五	五	NUM	n,数詞,数字,*	_	13	mod	_	SpaceAfter=No|Translit=wǔ|LTranslit=wǔ
+13	蘊	蘊	NOUN	n,名詞,可搬,道具	_	15	subj	_	SpaceAfter=No|Translit=yùn|LTranslit=yùn
+14	皆	皆	ADV	v,副詞,範囲,総括	_	15	mod	_	SpaceAfter=No|Translit=jiē|LTranslit=jiē
+15	空	空	ADJ	v,動詞,描写,形質	Degree=Pos	10	comp:pred	_	SpaceAfter=No|Translit=kōng|LTranslit=kōng
+16	，	，	PUNCT	s,記号,読点,*	_	10	punct	_	SpaceAfter=No|Translit=,|LTranslit=,
+17	度	度	VERB	v,動詞,行為,態度	_	10	parataxis	_	SpaceAfter=No|Translit=duó|LTranslit=duó
+18	一	一	NUM	n,数詞,数字,*	_	19	mod	_	SpaceAfter=No|Translit=yī|LTranslit=yī
+19	切	切	VERB	v,動詞,描写,態度	Degree=Pos	20	mod	_	SpaceAfter=No|Translit=qiè|LTranslit=qiè
+20	苦厄	苦厄	NOUN	n,名詞,固定物,地名	_	10	comp:obj	_	SpaceAfter=No|Translit=kǔè|LTranslit=kǔè
+21	。	。	PUNCT	s,記号,句点,*	_	10	punct	_	Translit=.|LTranslit=.
+
+# newpar
+# sent_id = s3
+# text = 「舍利子！
+1	「	「	PUNCT	s,記号,括弧開,*	_	2	punct	_	SpaceAfter=No|Translit=“|LTranslit=“
+2	舍利子	舍利子	PROPN	n,名詞,人,複合的人名	Case=Loc|NameType=Geo	0	root	_	SpaceAfter=No|Translit=shělìzi|LTranslit=shělìzi
+3	！	！	PUNCT	s,記号,句点,*	_	2	punct	_	Translit=!|LTranslit=!
+
+# sent_id = s4
+# text = 色不異空，空不異色，色即是空，空即是色；受、想、行、識，亦復如是。
+1	色	色	NOUN	n,名詞,描写,形質	_	3	subj	_	SpaceAfter=No|Translit=sè|LTranslit=sè
+2	不	不	ADV	v,副詞,否定,無界	Polarity=Neg	3	mod	_	SpaceAfter=No|Translit=bú|LTranslit=bù
+3	異	異	VERB	v,動詞,描写,形質	Degree=Pos	0	root	_	SpaceAfter=No|Translit=yì|LTranslit=yì
+4	空	空	NOUN	v,動詞,描写,形質	_	3	comp:obj	_	SpaceAfter=No|Translit=kōng|LTranslit=kōng
+5	，	，	PUNCT	s,記号,読点,*	_	3	punct	_	SpaceAfter=No|Translit=,|LTranslit=,
+6	空	空	NOUN	v,動詞,描写,形質	_	8	subj	_	SpaceAfter=No|Translit=kōng|LTranslit=kōng
+7	不	不	ADV	v,副詞,否定,無界	Polarity=Neg	8	mod	_	SpaceAfter=No|Translit=bú|LTranslit=bù
+8	異	異	VERB	v,動詞,描写,形質	Degree=Pos	3	conj:coord	_	SpaceAfter=No|Translit=yì|LTranslit=yì
+9	色	色	NOUN	n,名詞,描写,形質	_	8	comp:obj	_	SpaceAfter=No|Translit=sè|LTranslit=sè
+10	，	，	PUNCT	s,記号,読点,*	_	8	punct	_	SpaceAfter=No|Translit=,|LTranslit=,
+11	色	色	NOUN	n,名詞,描写,形質	_	13	subj	_	SpaceAfter=No|Translit=sè|LTranslit=sè
+12	即	即	VERB	v,副詞,時相,緊接	_	13	mod	_	SpaceAfter=No|Translit=jí|LTranslit=jí
+13	是	是	PRON	n,代名詞,指示,*	PronType=Dem	8	conj:coord	_	SpaceAfter=No|Translit=shì|LTranslit=shì
+14	空	空	NOUN	v,動詞,描写,形質	_	13	comp:obj	_	SpaceAfter=No|Translit=kōng|LTranslit=kōng
+15	，	，	PUNCT	s,記号,読点,*	_	14	punct	_	SpaceAfter=No|Translit=,|LTranslit=,
+16	空	空	NOUN	v,動詞,描写,形質	_	18	subj	_	SpaceAfter=No|Translit=kōng|LTranslit=kōng
+17	即	即	ADV	v,動詞,行為,動作	AdvType=Tim	18	mod	_	SpaceAfter=No|Translit=jí|LTranslit=jí
+18	是	是	PRON	n,代名詞,指示,*	PronType=Dem	13	conj:coord	_	SpaceAfter=No|Translit=shì|LTranslit=shì
+19	色	色	NOUN	n,名詞,描写,形質	_	18	conj:coord	_	SpaceAfter=No|Translit=sè|LTranslit=sè
+20	；	；	PUNCT	s,記号,読点,*	_	19	punct	_	SpaceAfter=No|Translit=;|LTranslit=;
+21	受	受	VERB	v,動詞,行為,得失	_	31	subj	_	SpaceAfter=No|Translit=shòu|LTranslit=shòu
+22	、	、	PUNCT	s,記号,読点,*	_	21	punct	_	SpaceAfter=No|Translit=,|LTranslit=,
+23	想	想	VERB	v,動詞,行為,動作	_	21	conj:coord	_	SpaceAfter=No|Translit=xiǎng|LTranslit=xiǎng
+24	、	、	PUNCT	s,記号,読点,*	_	23	punct	_	SpaceAfter=No|Translit=,|LTranslit=,
+25	行	行	VERB	n,名詞,行為,*	_	23	conj:coord	_	SpaceAfter=No|Translit=xíng|LTranslit=xíng
+26	、	、	PUNCT	s,記号,読点,*	_	25	punct	_	SpaceAfter=No|Translit=,|LTranslit=,
+27	識	識	VERB	v,動詞,行為,動作	_	25	conj:coord	_	SpaceAfter=No|Translit=shí|LTranslit=shí
+28	，	，	PUNCT	s,記号,読点,*	_	27	punct	_	SpaceAfter=No|Translit=,|LTranslit=,
+29	亦	亦	ADV	v,副詞,頻度,重複	_	30	mod	_	SpaceAfter=No|Translit=yì|LTranslit=yì
+30	復	復	ADV	v,副詞,頻度,重複	_	31	mod	_	SpaceAfter=No|Translit=fù|LTranslit=fù
+31	如	如	VERB	v,動詞,行為,分類	Degree=Equ	18	conj:coord	_	SpaceAfter=No|Translit=rú|LTranslit=rú
+32	是	是	PRON	n,代名詞,指示,*	PronType=Dem	31	comp:obj	_	SpaceAfter=No|Translit=shì|LTranslit=shì
+33	。	。	PUNCT	s,記号,句点,*	_	3	punct	_	Translit=.|LTranslit=.
+
+# newpar
+# sent_id = s5
+# text = 「舍利子！
+1	「	「	PUNCT	s,記号,括弧開,*	_	2	punct	_	SpaceAfter=No|Translit=“|LTranslit=“
+2	舍利子	舍利子	PROPN	n,名詞,人,複合的人名	NameType=Geo	0	root	_	SpaceAfter=No|Translit=shělìzi|LTranslit=shělìzi
+3	！	！	PUNCT	s,記号,句点,*	_	2	punct	_	Translit=!|LTranslit=!
+
+# sent_id = s6
+# text = 是諸法空相，不生不滅，不垢不淨，不增不減。
+1	是	是	PRON	n,代名詞,指示,*	PronType=Dem	3	det	_	SpaceAfter=No|Translit=shì|LTranslit=shì
+2	諸	諸	NOUN	n,名詞,数量,*	_	3	mod	_	SpaceAfter=No|Translit=zhū|LTranslit=zhū
+3	法	法	NOUN	n,名詞,制度,儀礼	_	4	subj	_	SpaceAfter=No|Translit=fǎ|LTranslit=fǎ
+4	空	空	VERB	v,動詞,描写,形質	Degree=Pos	0	root	_	SpaceAfter=No|Translit=kōng|LTranslit=kōng
+5	相	相	NOUN	n,名詞,不可譲,身体	_	4	comp:obj	_	SpaceAfter=No|Translit=xiāng|LTranslit=xiāng
+6	，	，	PUNCT	s,記号,読点,*	_	5	punct	_	SpaceAfter=No|Translit=,|LTranslit=,
+7	不	不	ADV	v,副詞,否定,無界	Polarity=Neg	8	mod	_	SpaceAfter=No|Translit=bù|LTranslit=bù
+8	生	生	VERB	v,動詞,変化,生物	_	4	conj:coord	_	SpaceAfter=No|Translit=shēng|LTranslit=shēng
+9	不	不	ADV	v,副詞,否定,無界	Polarity=Neg	10	mod	_	SpaceAfter=No|Translit=bú|LTranslit=bù
+10	滅	滅	VERB	v,動詞,変化,制度	_	8	conj:coord	_	SpaceAfter=No|Translit=miè|LTranslit=miè
+11	，	，	PUNCT	s,記号,読点,*	_	8	punct	_	SpaceAfter=No|Translit=,|LTranslit=,
+12	不	不	ADV	v,副詞,否定,無界	Polarity=Neg	13	mod	_	SpaceAfter=No|Translit=bú|LTranslit=bù
+13	垢	垢	VERB	v,動詞,行為,動作	_	10	conj:coord	_	SpaceAfter=No|Translit=gòu|LTranslit=gòu
+14	不	不	ADV	v,副詞,否定,無界	Polarity=Neg	15	mod	_	SpaceAfter=No|Translit=bú|LTranslit=bù
+15	淨	淨	VERB	v,動詞,行為,動作	_	13	conj:coord	_	SpaceAfter=No|Translit=jìng|LTranslit=jìng
+16	，	，	PUNCT	s,記号,読点,*	_	4	punct	_	SpaceAfter=No|Translit=,|LTranslit=,
+17	不	不	ADV	v,副詞,否定,無界	Polarity=Neg	18	mod	_	SpaceAfter=No|Translit=bù|LTranslit=bù
+18	增	增	VERB	v,動詞,行為,得失	_	15	flat	_	SpaceAfter=No|Translit=zēng|LTranslit=zēng
+19	不	不	ADV	v,副詞,否定,無界	Polarity=Neg	20	mod	_	SpaceAfter=No|Translit=bù|LTranslit=bù
+20	減	減	VERB	v,動詞,行為,動作	_	18	comp:obj	_	SpaceAfter=No|Translit=jiǎn|LTranslit=jiǎn
+21	。	。	PUNCT	s,記号,句点,*	_	4	punct	_	Translit=.|LTranslit=.
+
+# sent_id = s7
+# text = 是故，空中無色，無受、想、行、識；無眼、耳、鼻、舌、身、意；無色、聲、香、味、觸、法；無眼界，乃至無意識界；無無明，亦無無明盡，乃至無老死，亦無老死盡；無苦、集、滅、道；無智，亦無得，以無所得故。
+1	是	是	PRON	n,代名詞,指示,*	PronType=Dem	2	det	_	SpaceAfter=No|Translit=shì|LTranslit=shì
+2	故	故	NOUN	n,名詞,思考,思考	_	6	udep	_	SpaceAfter=No|Translit=gù|LTranslit=gù
+3	，	，	PUNCT	s,記号,読点,*	_	6	punct	_	SpaceAfter=No|Translit=,|LTranslit=,
+4	空	空	VERB	v,動詞,描写,形質	Degree=Pos|VerbForm=Part	5	mod	_	SpaceAfter=No|Translit=kōng|LTranslit=kōng
+5	中	中	NOUN	n,名詞,固定物,関係	Case=Loc	6	udep@lmod	_	SpaceAfter=No|Translit=zhōng|LTranslit=zhōng
+6	無	無	VERB	v,動詞,存在,存在	Polarity=Neg	9	subj	_	SpaceAfter=No|Translit=wú|LTranslit=wú
+7	色	色	NOUN	n,名詞,描写,形質	_	6	comp:obj	_	SpaceAfter=No|Translit=sè|LTranslit=sè
+8	，	，	PUNCT	s,記号,読点,*	_	6	punct	_	SpaceAfter=No|Translit=,|LTranslit=,
+9	無	無	VERB	v,動詞,存在,存在	Polarity=Neg	49	mod	_	SpaceAfter=No|Translit=wú|LTranslit=wú
+10	受	受	VERB	v,動詞,行為,得失	_	9	comp:obj	_	SpaceAfter=No|Translit=shòu|LTranslit=shòu
+11	、	、	PUNCT	s,記号,読点,*	_	9	punct	_	SpaceAfter=No|Translit=,|LTranslit=,
+12	想	想	NOUN	v,動詞,行為,動作	_	10	conj:coord	_	SpaceAfter=No|Translit=xiǎng|LTranslit=xiǎng
+13	、	、	PUNCT	s,記号,読点,*	_	12	punct	_	SpaceAfter=No|Translit=,|LTranslit=,
+14	行	行	NOUN	n,名詞,行為,*	_	12	conj:coord	_	SpaceAfter=No|Translit=háng|LTranslit=háng
+15	、	、	PUNCT	s,記号,読点,*	_	14	punct	_	SpaceAfter=No|Translit=,|LTranslit=,
+16	識	識	VERB	v,動詞,行為,動作	_	14	conj:coord	_	SpaceAfter=No|Translit=shí|LTranslit=shí
+17	；	；	PUNCT	s,記号,読点,*	_	16	punct	_	SpaceAfter=No|Translit=;|LTranslit=;
+18	無	無	VERB	v,動詞,存在,存在	Polarity=Neg	9	conj:coord	_	SpaceAfter=No|Translit=wú|LTranslit=wú
+19	眼	眼	NOUN	n,名詞,不可譲,身体	_	18	comp:obj	_	SpaceAfter=No|Translit=yǎn|LTranslit=yǎn
+20	、	、	PUNCT	s,記号,読点,*	_	18	punct	_	SpaceAfter=No|Translit=,|LTranslit=,
+21	耳	耳	NOUN	n,名詞,不可譲,身体	_	9	dep	_	SpaceAfter=No|Translit=ěr|LTranslit=ěr
+22	、	、	PUNCT	s,記号,読点,*	_	21	punct	_	SpaceAfter=No|Translit=,|LTranslit=,
+23	鼻	鼻	NOUN	n,名詞,不可譲,身体	_	21	conj:coord	_	SpaceAfter=No|Translit=bí|LTranslit=bí
+24	、	、	PUNCT	s,記号,読点,*	_	23	punct	_	SpaceAfter=No|Translit=,|LTranslit=,
+25	舌	舌	NOUN	n,名詞,不可譲,身体	_	23	conj:coord	_	SpaceAfter=No|Translit=shé|LTranslit=shé
+26	、	、	PUNCT	s,記号,読点,*	_	25	punct	_	SpaceAfter=No|Translit=,|LTranslit=,
+27	身	身	NOUN	n,名詞,不可譲,身体	_	25	conj:coord	_	SpaceAfter=No|Translit=shēn|LTranslit=shēn
+28	、	、	PUNCT	s,記号,読点,*	_	27	punct	_	SpaceAfter=No|Translit=,|LTranslit=,
+29	意	意	NOUN	v,動詞,行為,動作	_	25	conj:coord	_	SpaceAfter=No|Translit=yì|LTranslit=yì
+30	；	；	PUNCT	s,記号,読点,*	_	29	punct	_	SpaceAfter=No|Translit=;|LTranslit=;
+31	無	無	VERB	v,動詞,存在,存在	Polarity=Neg	34	mod	_	SpaceAfter=No|Translit=wú|LTranslit=wú
+32	色	色	NOUN	n,名詞,描写,形質	_	31	comp:obj	_	SpaceAfter=No|Translit=sè|LTranslit=sè
+33	、	、	PUNCT	s,記号,読点,*	_	31	punct	_	SpaceAfter=No|Translit=,|LTranslit=,
+34	聲	聲	NOUN	n,名詞,不可譲,身体	_	44	subj	_	SpaceAfter=No|Translit=shēng|LTranslit=shēng
+35	、	、	PUNCT	s,記号,読点,*	_	34	punct	_	SpaceAfter=No|Translit=,|LTranslit=,
+36	香	香	NOUN	n,名詞,描写,形質	_	34	conj:coord	_	SpaceAfter=No|Translit=xiāng|LTranslit=xiāng
+37	、	、	PUNCT	s,記号,読点,*	_	36	punct	_	SpaceAfter=No|Translit=,|LTranslit=,
+38	味	味	NOUN	n,名詞,描写,形質	_	36	conj:coord	_	SpaceAfter=No|Translit=wèi|LTranslit=wèi
+39	、	、	PUNCT	s,記号,読点,*	_	38	punct	_	SpaceAfter=No|Translit=,|LTranslit=,
+40	觸	觸	NOUN	n,名詞,行為,*	_	38	conj:coord	_	SpaceAfter=No|Translit=chù|LTranslit=chù
+41	、	、	PUNCT	s,記号,読点,*	_	40	punct	_	SpaceAfter=No|Translit=,|LTranslit=,
+42	法	法	NOUN	n,名詞,制度,儀礼	_	40	conj:coord	_	SpaceAfter=No|Translit=fǎ|LTranslit=fǎ
+43	；	；	PUNCT	s,記号,読点,*	_	42	punct	_	SpaceAfter=No|Translit=;|LTranslit=;
+44	無	無	VERB	v,動詞,存在,存在	Polarity=Neg	9	conj:coord	_	SpaceAfter=No|Translit=wú|LTranslit=wú
+45	眼	眼	NOUN	n,名詞,不可譲,身体	_	46	mod	_	SpaceAfter=No|Translit=yǎn|LTranslit=yǎn
+46	界	界	NOUN	n,名詞,固定物,関係	Case=Loc	44	comp:obj	_	SpaceAfter=No|Translit=jiè|LTranslit=jiè
+47	，	，	PUNCT	s,記号,読点,*	_	44	punct	_	SpaceAfter=No|Translit=,|LTranslit=,
+48	乃	乃	ADV	v,副詞,時相,緊接	AdvType=Tim	49	mod	_	SpaceAfter=No|Translit=nǎi|LTranslit=nǎi
+49	至	至	VERB	v,動詞,行為,移動	_	61	mod	_	SpaceAfter=No|Translit=zhì|LTranslit=zhì
+50	無	無	VERB	v,動詞,存在,存在	Polarity=Neg	49	comp:obj	_	SpaceAfter=No|Translit=wú|LTranslit=wú
+51	意	意	VERB	v,動詞,行為,動作	_	50	comp:obj	_	SpaceAfter=No|Translit=yì|LTranslit=yì
+52	識	識	VERB	v,動詞,行為,動作	_	50	parataxis	_	SpaceAfter=No|Translit=shí|LTranslit=shí
+53	界	界	NOUN	n,名詞,固定物,関係	Case=Loc	52	comp:obj	_	SpaceAfter=No|Translit=jiè|LTranslit=jiè
+54	；	；	PUNCT	s,記号,読点,*	_	49	punct	_	SpaceAfter=No|Translit=;|LTranslit=;
+55	無	無	ADV	v,動詞,存在,存在	Polarity=Neg|VerbForm=Conv	61	mod	_	SpaceAfter=No|Translit=wú|LTranslit=wú
+56	無	無	VERB	v,動詞,存在,存在	Polarity=Neg	55	comp:obj	_	SpaceAfter=No|Translit=wú|LTranslit=wú
+57	明	明	NOUN	n,名詞,描写,形質	_	56	comp:obj	_	SpaceAfter=No|Translit=míng|LTranslit=míng
+58	，	，	PUNCT	s,記号,読点,*	_	55	punct	_	SpaceAfter=No|Translit=,|LTranslit=,
+59	亦	亦	ADV	v,副詞,頻度,重複	_	61	mod	_	SpaceAfter=No|Translit=yì|LTranslit=yì
+60	無	無	ADV	v,動詞,存在,存在	Polarity=Neg|VerbForm=Conv	61	mod	_	SpaceAfter=No|Translit=wú|LTranslit=wú
+61	無	無	VERB	v,動詞,存在,存在	Polarity=Neg	67	mod	_	SpaceAfter=No|Translit=wú|LTranslit=wú
+62	明	明	VERB	v,動詞,描写,形質	Degree=Pos|VerbForm=Part	61	comp:obj	_	SpaceAfter=No|Translit=míng|LTranslit=míng
+63	盡	盡	VERB	v,動詞,行為,動作	_	62	flat@vv	_	SpaceAfter=No|Translit=jìn|LTranslit=jìn
+64	，	，	PUNCT	s,記号,読点,*	_	61	punct	_	SpaceAfter=No|Translit=,|LTranslit=,
+65	乃	乃	ADV	v,副詞,時相,緊接	AdvType=Tim	67	mod	_	SpaceAfter=No|Translit=nǎi|LTranslit=nǎi
+66	至	至	VERB	v,動詞,行為,移動	_	67	mod	_	SpaceAfter=No|Translit=zhì|LTranslit=zhì
+67	無	無	VERB	v,動詞,存在,存在	Polarity=Neg	72	mod	_	SpaceAfter=No|Translit=wú|LTranslit=wú
+68	老	老	VERB	v,動詞,変化,生物	_	69	mod	_	SpaceAfter=No|Translit=lǎo|LTranslit=lǎo
+69	死	死	VERB	v,動詞,変化,生物	_	67	comp:obj	_	SpaceAfter=No|Translit=sǐ|LTranslit=sǐ
+70	，	，	PUNCT	s,記号,読点,*	_	67	punct	_	SpaceAfter=No|Translit=,|LTranslit=,
+71	亦	亦	ADV	v,副詞,頻度,重複	_	72	mod	_	SpaceAfter=No|Translit=yì|LTranslit=yì
+72	無	無	VERB	v,動詞,存在,存在	Polarity=Neg	77	mod	_	SpaceAfter=No|Translit=wú|LTranslit=wú
+73	老	老	VERB	v,動詞,変化,生物	_	72	comp:obj	_	SpaceAfter=No|Translit=lǎo|LTranslit=lǎo
+74	死	死	VERB	n,名詞,行為,*	_	73	conj:coord	_	SpaceAfter=No|Translit=sǐ|LTranslit=sǐ
+75	盡	盡	VERB	v,動詞,行為,動作	_	72	conj:coord	_	SpaceAfter=No|Translit=jìn|LTranslit=jìn
+76	；	；	PUNCT	s,記号,読点,*	_	72	punct	_	SpaceAfter=No|Translit=;|LTranslit=;
+77	無	無	VERB	v,動詞,存在,存在	Polarity=Neg	0	root	_	SpaceAfter=No|Translit=wú|LTranslit=wú
+78	苦	苦	VERB	v,動詞,描写,態度	Degree=Pos	77	comp:obj	_	SpaceAfter=No|Translit=kǔ|LTranslit=kǔ
+79	、	、	PUNCT	s,記号,読点,*	_	77	punct	_	SpaceAfter=No|Translit=,|LTranslit=,
+80	集	集	VERB	v,動詞,行為,動作	_	77	conj:coord	_	SpaceAfter=No|Translit=jí|LTranslit=jí
+81	、	、	PUNCT	s,記号,読点,*	_	80	punct	_	SpaceAfter=No|Translit=,|LTranslit=,
+82	滅	滅	VERB	v,動詞,変化,制度	_	80	flat@vv	_	SpaceAfter=No|Translit=miè|LTranslit=miè
+83	、	、	PUNCT	s,記号,読点,*	_	82	punct	_	SpaceAfter=No|Translit=,|LTranslit=,
+84	道	道	NOUN	n,名詞,制度,儀礼	_	82	conj:coord	_	SpaceAfter=No|Translit=dào|LTranslit=dào
+85	；	；	PUNCT	s,記号,読点,*	_	84	punct	_	SpaceAfter=No|Translit=;|LTranslit=;
+86	無	無	VERB	v,動詞,存在,存在	Polarity=Neg	77	conj:coord	_	SpaceAfter=No|Translit=wú|LTranslit=wú
+87	智	智	NOUN	n,名詞,描写,形質	_	86	comp:obj	_	SpaceAfter=No|Translit=zhì|LTranslit=zhì
+88	，	，	PUNCT	s,記号,読点,*	_	86	punct	_	SpaceAfter=No|Translit=,|LTranslit=,
+89	亦	亦	ADV	v,副詞,頻度,重複	_	91	mod	_	SpaceAfter=No|Translit=yì|LTranslit=yì
+90	無	無	ADV	v,動詞,存在,存在	Polarity=Neg|VerbForm=Conv	91	mod	_	SpaceAfter=No|Translit=wú|LTranslit=wú
+91	得	得	VERB	v,動詞,行為,得失	_	86	parataxis	_	SpaceAfter=No|Translit=dé|LTranslit=dé
+92	，	，	PUNCT	s,記号,読点,*	_	91	punct	_	SpaceAfter=No|Translit=,|LTranslit=,
+93	以	以	ADV	v,動詞,行為,動作	VerbForm=Conv	94	mod	_	SpaceAfter=No|Translit=yǐ|LTranslit=yǐ
+94	無	無	VERB	v,動詞,存在,存在	Polarity=Neg	77	parataxis	_	SpaceAfter=No|Translit=wú|LTranslit=wú
+95	所	所	PART	p,助詞,接続,体言化	_	94	comp:obj	_	SpaceAfter=No|Translit=suǒ|LTranslit=suǒ
+96	得	得	VERB	v,動詞,行為,得失	_	95	comp:obj	_	SpaceAfter=No|Translit=dé|LTranslit=dé
+97	故	故	NOUN	n,名詞,思考,思考	_	94	comp:obj	_	SpaceAfter=No|Translit=gù|LTranslit=gù
+98	。	。	PUNCT	s,記号,句点,*	_	77	punct	_	Translit=.|LTranslit=.
+
+# newpar
+# sent_id = s8
+# text = 「菩提薩埵，依般若波羅蜜多故，心無罣礙；無罣礙故，無有恐怖，遠離顛倒夢想，究竟涅槃。
+1	「	「	PUNCT	s,記号,括弧開,*	_	4	punct	_	SpaceAfter=No|Translit=“|LTranslit=“
+2	菩提	菩提	NOUN	n,名詞,人,名	_	4	subj	_	SpaceAfter=No|Translit=pútí|LTranslit=pútí
+3	薩	薩	VERB	v,動詞,行為,設置	_	4	mod	_	SpaceAfter=No|Translit=sà|LTranslit=sà
+4	埵	埵	NOUN	n,名詞,可搬,道具	_	13	subj	_	SpaceAfter=No|Translit=duǒ|LTranslit=duǒ
+5	，	，	PUNCT	s,記号,読点,*	_	4	punct	_	SpaceAfter=No|Translit=,|LTranslit=,
+6	依	依	VERB	v,動詞,行為,姿勢	_	9	subj	_	SpaceAfter=No|Translit=yī|LTranslit=yī
+7	般若	般若	NOUN	n,名詞,可搬,成果物	_	6	comp:obj	_	SpaceAfter=No|Translit=bōrě|LTranslit=bōrě
+8	波羅蜜	波羅蜜	NOUN	n,名詞,描写,形質	_	7	flat	_	SpaceAfter=No|Translit=bōluómì|LTranslit=bōluómì
+9	多	多	VERB	v,動詞,描写,量	Degree=Pos	10	mod	_	SpaceAfter=No|Translit=duō|LTranslit=duō
+10	故	故	NOUN	n,名詞,思考,思考	_	13	udep	_	SpaceAfter=No|Translit=gù|LTranslit=gù
+11	，	，	PUNCT	s,記号,読点,*	_	3	punct	_	SpaceAfter=No|Translit=,|LTranslit=,
+12	心	心	NOUN	n,名詞,不可譲,身体	_	13	subj	_	SpaceAfter=No|Translit=xīn|LTranslit=xīn
+13	無	無	VERB	v,動詞,存在,存在	Polarity=Neg	0	root	_	SpaceAfter=No|Translit=wú|LTranslit=wú
+14	罣	罣	NOUN	n,名詞,不可譲,身体	_	15	mod	_	SpaceAfter=No|Translit=guà|LTranslit=guà
+15	礙	礙	NOUN	n,名詞,可搬,道具	_	13	comp:obj	_	SpaceAfter=No|Translit=ài|LTranslit=ài
+16	；	；	PUNCT	s,記号,読点,*	_	13	punct	_	SpaceAfter=No|Translit=;|LTranslit=;
+17	無	無	VERB	v,動詞,存在,存在	Polarity=Neg	13	comp:obj	_	SpaceAfter=No|Translit=wú|LTranslit=wú
+18	罣	罣	NOUN	n,名詞,不可譲,身体	_	17	comp:obj	_	SpaceAfter=No|Translit=guà|LTranslit=guà
+19	礙	礙	VERB	v,動詞,行為,交流	_	18	conj:coord	_	SpaceAfter=No|Translit=ài|LTranslit=ài
+20	故	故	NOUN	n,名詞,思考,思考	_	17	comp:obj	_	SpaceAfter=No|Translit=gù|LTranslit=gù
+21	，	，	PUNCT	s,記号,読点,*	_	17	punct	_	SpaceAfter=No|Translit=,|LTranslit=,
+22	無	無	ADV	v,動詞,存在,存在	Polarity=Neg|VerbForm=Conv	13	parataxis	_	SpaceAfter=No|Translit=wú|LTranslit=wú
+23	有	有	VERB	v,動詞,存在,存在	_	22	comp:obj	_	SpaceAfter=No|Translit=yǒu|LTranslit=yǒu
+24	恐	恐	VERB	v,動詞,行為,態度	_	23	comp:obj	_	SpaceAfter=No|Translit=kǒng|LTranslit=kǒng
+25	怖	怖	VERB	v,動詞,行為,態度	_	24	flat@vv	_	SpaceAfter=No|Translit=bù|LTranslit=bù
+26	，	，	PUNCT	s,記号,読点,*	_	22	punct	_	SpaceAfter=No|Translit=,|LTranslit=,
+27	遠	遠	ADV	v,動詞,描写,量	Degree=Pos|VerbForm=Conv	28	mod	_	SpaceAfter=No|Translit=yuǎn|LTranslit=yuǎn
+28	離	離	VERB	v,動詞,行為,移動	_	22	conj:coord	_	SpaceAfter=No|Translit=lí|LTranslit=lí
+29	顛	顚	VERB	v,動詞,行為,動作	_	28	compound@redup	_	SpaceAfter=No|Translit=diān|LTranslit=diān
+30	倒	倒	VERB	v,動詞,行為,動作	_	29	flat@vv	_	SpaceAfter=No|Translit=dǎo|LTranslit=dǎo
+31	夢	夢	NOUN	n,名詞,可搬,成果物	_	28	parataxis	_	SpaceAfter=No|Translit=mèng|LTranslit=mèng
+32	想	想	NOUN	v,動詞,行為,動作	_	31	flat	_	SpaceAfter=No|Translit=xiǎng|LTranslit=xiǎng
+33	，	，	PUNCT	s,記号,読点,*	_	28	punct	_	SpaceAfter=No|Translit=,|LTranslit=,
+34	究	究	NOUN	v,動詞,行為,動作	_	22	conj:coord	_	SpaceAfter=No|Translit=jiū|LTranslit=jiū
+35	竟	竟	ADV	v,動詞,行為,動作	AdvType=Tim	34	flat@vv	_	SpaceAfter=No|Translit=jìng|LTranslit=jìng
+36	涅槃	涅槃	NOUN	n,名詞,描写,形質	_	34	comp:obj	_	SpaceAfter=No|Translit=nièpán|LTranslit=nièpán
+37	。	。	PUNCT	s,記号,句点,*	_	13	punct	_	Translit=.|LTranslit=.
+
+# sent_id = s9
+# text = 三世諸佛，依般若波羅蜜多故，得阿耨多羅三藐三菩提。
+1	三	三	NUM	n,数詞,数字,*	_	2	mod	_	SpaceAfter=No|Translit=sān|LTranslit=sān
+2	世	世	NOUN	n,名詞,時,*	Case=Tem	4	mod	_	SpaceAfter=No|Translit=shì|LTranslit=shì
+3	諸	諸	NOUN	n,名詞,数量,*	_	4	mod	_	SpaceAfter=No|Translit=zhū|LTranslit=zhū
+4	佛	佛	NOUN	n,名詞,主体,神仏	_	12	subj	_	SpaceAfter=No|Translit=fú|LTranslit=fú
+5	，	，	PUNCT	s,記号,読点,*	_	4	punct	_	SpaceAfter=No|Translit=,|LTranslit=,
+6	依	依	VERB	v,動詞,行為,姿勢	_	12	mod	_	SpaceAfter=No|Translit=yī|LTranslit=yī
+7	般若	般若	NOUN	n,名詞,可搬,成果物	_	6	comp:obj	_	SpaceAfter=No|Translit=bōrě|LTranslit=bōrě
+8	波羅蜜	波羅蜜	NOUN	n,名詞,描写,形質	_	7	flat	_	SpaceAfter=No|Translit=bōluómì|LTranslit=bōluómì
+9	多	多	VERB	v,動詞,描写,量	Degree=Pos	10	mod	_	SpaceAfter=No|Translit=duō|LTranslit=duō
+10	故	故	NOUN	n,名詞,思考,思考	_	12	udep	_	SpaceAfter=No|Translit=gù|LTranslit=gù
+11	，	，	PUNCT	s,記号,読点,*	_	4	punct	_	SpaceAfter=No|Translit=,|LTranslit=,
+12	得	得	VERB	v,動詞,行為,得失	_	0	root	_	SpaceAfter=No|Translit=dé|LTranslit=dé
+13	阿耨多羅	阿耨多羅	NOUN	n,名詞,描写,形質	_	12	comp:obj	_	SpaceAfter=No|Translit=ānòuduōluó|LTranslit=ānòuduōluó
+14	三藐	三藐	NOUN	n,名詞,描写,形質	_	13	flat@foreign	_	SpaceAfter=No|Translit=sānmiǎo|LTranslit=sānmiǎo
+15	三菩提	三菩提	NOUN	n,名詞,描写,形質	_	14	flat@foreign	_	SpaceAfter=No|Translit=sānpútí|LTranslit=sānpútí
+16	。	。	PUNCT	s,記号,句点,*	_	12	punct	_	Translit=.|LTranslit=.
+
+# newpar
+# sent_id = s10
+# text = 「故知般若波羅蜜多，是大神咒，是大明咒，是無上咒，是無等等咒，能除一切苦，真實不虛。」
+1	「	「	PUNCT	s,記号,括弧開,*	_	3	punct	_	SpaceAfter=No|Translit=“|LTranslit=“
+2	故	故	ADV	v,副詞,判断,確定	_	3	mod	_	SpaceAfter=No|Translit=gù|LTranslit=gù
+3	知	知	VERB	v,動詞,行為,動作	_	11	mod	_	SpaceAfter=No|Translit=zhī|LTranslit=zhī
+4	般若	般若	NOUN	n,名詞,可搬,成果物	_	6	subj	_	SpaceAfter=No|Translit=bōrě|LTranslit=bōrě
+5	波羅蜜	波羅蜜	NOUN	n,名詞,描写,形質	_	4	flat	_	SpaceAfter=No|Translit=bōluómì|LTranslit=bōluómì
+6	多	多	VERB	v,動詞,描写,量	Degree=Pos	3	comp:obj	_	SpaceAfter=No|Translit=duō|LTranslit=duō
+7	，	，	PUNCT	s,記号,読点,*	_	3	punct	_	SpaceAfter=No|Translit=,|LTranslit=,
+8	是	是	PRON	n,代名詞,指示,*	PronType=Dem	11	subj	_	SpaceAfter=No|Translit=shì|LTranslit=shì
+9	大	大	VERB	v,動詞,描写,量	Degree=Pos|VerbForm=Part	10	mod	_	SpaceAfter=No|Translit=dà|LTranslit=dà
+10	神	神	NOUN	n,名詞,人,役割	_	11	subj	_	SpaceAfter=No|Translit=shén|LTranslit=shén
+11	咒	咒	NOUN	n,名詞,可搬,道具	_	19	mod	_	SpaceAfter=No|Translit=zhòu|LTranslit=zhòu
+12	，	，	PUNCT	s,記号,読点,*	_	11	punct	_	SpaceAfter=No|Translit=,|LTranslit=,
+13	是	是	PRON	n,代名詞,指示,*	PronType=Dem	16	subj	_	SpaceAfter=No|Translit=shì|LTranslit=shì
+14	大	大	VERB	v,動詞,描写,量	Degree=Pos|VerbForm=Part	15	mod	_	SpaceAfter=No|Translit=dà|LTranslit=dà
+15	明	明	VERB	n,名詞,描写,形質	Degree=Pos	16	mod	_	SpaceAfter=No|Translit=míng|LTranslit=míng
+16	咒	咒	VERB	n,名詞,可搬,道具	Degree=Pos	19	mod	_	SpaceAfter=No|Translit=zhòu|LTranslit=zhòu
+17	，	，	PUNCT	s,記号,読点,*	_	16	punct	_	SpaceAfter=No|Translit=,|LTranslit=,
+18	是	是	PRON	n,代名詞,指示,*	PronType=Dem	19	subj	_	SpaceAfter=No|Translit=shì|LTranslit=shì
+19	無	無	VERB	v,動詞,存在,存在	Polarity=Neg	27	mod	_	SpaceAfter=No|Translit=wú|LTranslit=wú
+20	上	上	NOUN	n,名詞,固定物,関係	Case=Loc	21	mod	_	SpaceAfter=No|Translit=shàng|LTranslit=shàng
+21	咒	咒	NOUN	n,名詞,可搬,道具	Case=Loc	19	comp:obj	_	SpaceAfter=No|Translit=zhòu|LTranslit=zhòu
+22	，	，	PUNCT	s,記号,読点,*	_	19	punct	_	SpaceAfter=No|Translit=,|LTranslit=,
+23	是	是	PRON	n,代名詞,指示,*	PronType=Dem	24	subj	_	SpaceAfter=No|Translit=shì|LTranslit=shì
+24	無	無	VERB	v,動詞,存在,存在	Polarity=Neg	27	mod	_	SpaceAfter=No|Translit=wú|LTranslit=wú
+25	等	等	NOUN	n,名詞,数量,*	_	24	comp:obj	_	SpaceAfter=No|Translit=děng|LTranslit=děng
+26	等	等	NOUN	n,名詞,数量,*	_	27	mod	_	SpaceAfter=No|Translit=děng|LTranslit=děng
+27	咒	咒	VERB	n,名詞,可搬,道具	Degree=Pos	0	root	_	SpaceAfter=No|Translit=zhòu|LTranslit=zhòu
+28	，	，	PUNCT	s,記号,読点,*	_	27	punct	_	SpaceAfter=No|Translit=,|LTranslit=,
+29	能	能	AUX	v,助動詞,可能,*	Mood=Pot	38	subj	_	SpaceAfter=No|Translit=néng|LTranslit=néng
+30	除	除	VERB	v,動詞,行為,動作	_	29	comp:aux	_	SpaceAfter=No|Translit=chú|LTranslit=chú
+31	一	一	NUM	n,数詞,数字,*	_	32	mod	_	SpaceAfter=No|Translit=yī|LTranslit=yī
+32	切	切	VERB	v,動詞,行為,動作	Degree=Pos	33	mod	_	SpaceAfter=No|Translit=qiè|LTranslit=qiè
+33	苦	苦	VERB	v,動詞,描写,態度	Degree=Pos	30	comp:obj	_	SpaceAfter=No|Translit=kǔ|LTranslit=kǔ
+34	，	，	PUNCT	s,記号,読点,*	_	29	punct	_	SpaceAfter=No|Translit=,|LTranslit=,
+35	真	真	VERB	v,動詞,描写,形質	Degree=Pos|VerbForm=Part	36	mod	_	SpaceAfter=No|Translit=zhēn|LTranslit=zhēn
+36	實	實	ADV	n,名詞,可搬,成果物	AdvType=Deg|Degree=Sup	38	subj	_	SpaceAfter=No|Translit=shí|LTranslit=shí
+37	不	不	ADV	v,副詞,否定,無界	Polarity=Neg	38	mod	_	SpaceAfter=No|Translit=bù|LTranslit=bù
+38	虛	虛	VERB	v,動詞,描写,形質	Degree=Pos	27	comp:obj	_	SpaceAfter=No|Translit=xū|LTranslit=xū
+39	。	。	PUNCT	s,記号,句点,*	_	27	punct	_	SpaceAfter=No|Translit=.|LTranslit=.
+40	」	」	PUNCT	s,記号,括弧閉,*	_	27	punct	_	Translit=”|LTranslit=”
+
+# newpar
+# sent_id = s11
+# text = 故說般若波羅蜜多咒，即說咒曰：
+1	故	故	ADV	v,副詞,判断,確定	_	2	mod	_	SpaceAfter=No|Translit=gù|LTranslit=gù
+2	說	說	VERB	v,動詞,行為,伝達	_	5	subj	_	SpaceAfter=No|Translit=shuō|LTranslit=shuō
+3	般若	般若	NOUN	n,名詞,可搬,成果物	_	2	comp:obj	_	SpaceAfter=No|Translit=bōrě|LTranslit=bōrě
+4	波羅蜜	波羅蜜	NOUN	n,名詞,描写,形質	_	3	flat	_	SpaceAfter=No|Translit=bōluómì|LTranslit=bōluómì
+5	多	多	VERB	v,動詞,描写,量	Degree=Pos	9	mod	_	SpaceAfter=No|Translit=duō|LTranslit=duō
+6	咒	咒	NOUN	n,名詞,可搬,道具	Case=Loc	5	comp:obj	_	SpaceAfter=No|Translit=zhòu|LTranslit=zhòu
+7	，	，	PUNCT	s,記号,読点,*	_	5	punct	_	SpaceAfter=No|Translit=,|LTranslit=,
+8	即	即	ADV	v,副詞,時相,緊接	AdvType=Tim	9	mod	_	SpaceAfter=No|Translit=jí|LTranslit=jí
+9	說	說	VERB	v,動詞,行為,伝達	_	0	root	_	SpaceAfter=No|Translit=shuō|LTranslit=shuō
+10	咒	咒	VERB	n,名詞,可搬,道具	_	9	comp:obj	_	SpaceAfter=No|Translit=zhòu|LTranslit=zhòu
+11	曰	曰	VERB	v,動詞,行為,伝達	_	9	parataxis	_	SpaceAfter=No|Translit=yuē|LTranslit=yuē
+12	：	：	PUNCT	s,記号,読点,*	_	11	punct	_	Translit=:|LTranslit=:
+
+# newpar
+# sent_id = s12
+# text = 「揭諦 揭諦 波羅揭諦 波羅僧揭諦 菩提薩婆訶」
+1	「	「	PUNCT	s,記号,括弧開,*	_	2	punct	_	SpaceAfter=No|Translit=“|LTranslit=“
+2	揭	揭	VERB	v,動詞,行為,動作	_	4	mod	_	SpaceAfter=No|Translit=jiē|LTranslit=jiē
+3	諦	諦	NOUN	v,動詞,描写,態度	_	4	mod	_	Translit=dì|LTranslit=dì
+4	揭	揭	VERB	v,動詞,行為,動作	_	0	root	_	SpaceAfter=No|Translit=jiē|LTranslit=jiē
+5	諦	諦	NOUN	v,動詞,描写,態度	_	4	flat@vv	_	Translit=dì|LTranslit=dì
+6	波羅	波羅	NOUN	n,名詞,固定物,樹木	_	7	subj	_	SpaceAfter=No|Translit=bōluó|LTranslit=bōluó
+7	揭	揭	VERB	v,動詞,行為,動作	_	4	comp:obj	_	SpaceAfter=No|Translit=jiē|LTranslit=jiē
+8	諦	諦	VERB	v,動詞,描写,態度	Degree=Pos	7	flat@vv	_	Translit=dì|LTranslit=dì
+9	波羅僧揭	波羅僧揭	SCONJ	n,名詞,固定物,地名	_	11	mod	_	SpaceAfter=No|Translit=bōluósēngjiē|LTranslit=bōluósēngjiē
+10	諦	諦	NOUN	v,動詞,描写,態度	_	11	mod	_	Translit=dì|LTranslit=dì
+11	菩提	菩提	NOUN	n,名詞,主体,神仏	_	12	subj	_	SpaceAfter=No|Translit=pútí|LTranslit=pútí
+12	薩	薩	VERB	v,動詞,行為,設置	_	4	comp:obj	_	SpaceAfter=No|Translit=sà|LTranslit=sà
+13	婆訶	婆訶	PROPN	n,名詞,人,名	NameType=Giv	12	comp:obj	_	SpaceAfter=No|Translit=póhē|LTranslit=póhē
+14	」	」	PUNCT	s,記号,括弧閉,*	_	4	punct	_	Translit=”|LTranslit=”
