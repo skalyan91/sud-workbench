@@ -2293,7 +2293,7 @@ function reserveBracketArcRoom(){ document.querySelectorAll("#doc .bwrap").forEa
       // uses. The two passes could therefore rank/offset the SAME endpoint differently whenever a token hosts
       // both a cross-line departure AND other same-token arcs — this pass's predicted label midpoint (used only
       // to grow inter-line gaps) drifting from what positionBracketAnnots actually draws, under-growing the gap.
-      const cArcs=cRec.map(c=>{ const a={hk:c.head.dataset.tok, dk:c.dep.dataset.tok, xh:c.Hcx, xd:c.Dcx, len:Math.hypot(c.Dcx-c.Hcx,c.Dt-c.Ht), c};
+      const cArcs=cRec.map(c=>{ const a={hk:c.head.dataset.tok, dk:c.dep.dataset.tok, xh:c.Hcx, xd:c.Dcx, len:Math.hypot(c.Dcx-c.Hcx,c.Dt-c.Ht), cross:true, c};   // cross: ranked innermost at both nodes whatever `len` says (fanArcs, js/diagram/diagram-wrap.js) — and stated HERE too, or this pass predicts a fan the draw below does not apply and grows the wrong gap
         if(c.depUp) a.dkey="B"+a.dk; else a.hkey="B"+a.hk; return a; });
       // item 7: fold cross-line GHOST endpoints into this fan too — positionBracketAnnots now does the same (its
       // own fanArcs call takes a ghostFan third arg, see that function's own item-7 comment), so a ghost sharing a
@@ -2306,7 +2306,7 @@ function reserveBracketArcRoom(){ document.querySelectorAll("#doc .bwrap").forEa
         const headTok=box.querySelector(`.bwtok[data-tok="${ghOid}"]`); if(!headTok) return null;
         const Dr=rectOf(dep), Hr=rectOf(headTok); if(Math.abs(Dr.t-Hr.t)<6) return null;
         const depUp=Dr.t<Hr.t, len=Math.hypot(Dr.cx-Hr.cx,Dr.t-Hr.t),   // matches cArcs' own hypot len just above — not fanArcs' bare |xd-xh| fallback, which omits the vertical term
-          a={hk:ghOid,dk:dep.dataset.tok,xh:Hr.cx,xd:Dr.cx,len}; if(depUp) a.dkey="B"+a.dk; else a.hkey="B"+a.hk; return a; })).filter(Boolean);
+          a={hk:ghOid,dk:dep.dataset.tok,xh:Hr.cx,xd:Dr.cx,len,cross:true}; if(depUp) a.dkey="B"+a.dk; else a.hkey="B"+a.hk; return a; })).filter(Boolean);   // this pool is CROSS-line ghosts only (the |Dr.t-Hr.t|>=6 filter above), so every member takes the flag
       fanArcs(cArcs, fanStep(), ghostFan);   // the VERY fan positionBracketAnnots applies → matching fanned midpoints → matching de-collision
       for(let it=0; it<6; it++){
         const B=box.getBoundingClientRect();   // live: line boxes shift down as gaps grow, so re-measure each pass
@@ -2415,7 +2415,7 @@ function positionBracketAnnots(){ document.querySelectorAll("#doc .bwrap").forEa
   // hk/dk are bucketed with the SAME token id a within-line bump at that token uses — EXCEPT the endpoint that sits
   // on the line ABOVE, which gets its own "B"+id bucket (mirroring arcsWrapped's Item 16) so it never fans with
   // reference to unrelated endpoints belonging to rows further above; only same-row neighbours ever share a bucket.
-  const cArcs=cross.map(p=>{ const depUp=p.Dr.t<p.Hr.t, a={hk:p.headTok.dataset.tok,dk:p.dep.dataset.tok,xh:p.Hr.cx,xd:p.Dr.cx,len:Math.hypot(p.Dr.cx-p.Hr.cx,p.Dr.t-p.Hr.t),p};
+  const cArcs=cross.map(p=>{ const depUp=p.Dr.t<p.Hr.t, a={hk:p.headTok.dataset.tok,dk:p.dep.dataset.tok,xh:p.Hr.cx,xd:p.Dr.cx,len:Math.hypot(p.Dr.cx-p.Hr.cx,p.Dr.t-p.Hr.t),cross:true,p};   // cross: innermost at both its nodes regardless of `len` — see fanArcs' own note (js/diagram/diagram-wrap.js)
     if(depUp) a.dkey="B"+a.dk; else a.hkey="B"+a.hk; return a; });
   // Ghost arcs (Shared=Yes and Subject-raising), computed HERE — ahead of the fan below — so their endpoints fold
   // into the SAME per-token pool the real within-line/cross-line arcs resolve in, instead of a separate later
@@ -2434,7 +2434,7 @@ function positionBracketAnnots(){ document.querySelectorAll("#doc .bwrap").forEa
       // cArcs' hypot includes, mismatching against a real cross-line arc's own length there.
       len=cross?Math.hypot(Dr.cx-Hr.cx,Dr.t-Hr.t):Math.abs(Dr.cx-Hr.cx),
       a={hk:ghOid,dk:dep.dataset.tok,xh:Hr.cx,xd:Dr.cx,len};
-    if(cross){ if(depUp) a.dkey="B"+a.dk; else a.hkey="B"+a.hk; }
+    if(cross){ a.cross=true; if(depUp) a.dkey="B"+a.dk; else a.hkey="B"+a.hk; }   // …and the innermost-ranking rule travels with the bucket split, exactly as it does for a real cross-line arc
     return a; });
   // FAN the shared-node endpoints for BOTH kinds of REAL arc, AND every ghost, in ONE combined pass — a token with
   // both a within-line bump AND a cross-line arc needs one consistent offset across both (Item 16), not two

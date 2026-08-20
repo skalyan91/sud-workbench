@@ -355,16 +355,30 @@ function fanStep(){ const st=parseFloat(css("--arc-stroke"))||1.7; return ((st+3
 // node hosts a root stub. Registered as its own side-0 sentinel (same as the flat arcs() view already does for
 // its OWN local bucket pass — see the mirrored anchor-selection just below), so a bucket with a root stub in it
 // is detectable at the point every OTHER member's own anchor is chosen.
-function fanArcs(arcs,spread,ghostArcs,rootKeys){ const ep={}; const reg=(k,len,side,set)=>{(ep[k]=ep[k]||[]).push({len,side,set});};
-  arcs.forEach(a=>{ reg(a.hkey??a.hk,a.len,Math.sign(a.xd-a.xh)||1,o=>a.offH=o);   // this node is the head → outgoing edge fans. a.hkey/a.dkey override only the FAN-BUCKET key (not a.hk/a.dk, which are read downstream) so a cross-line arc's UPPER-line endpoint can bucket with the bottom-of-line endpoints instead of the top-side ones at the same token
-                    reg(a.dkey??a.dk,a.len,Math.sign(a.xh-a.xd)||1,o=>a.offD=o); }); // this node is the dependent → incoming edge fans the same way (no longer centre-eligible — see block comment)
+/* ⚠ A CROSS-LINE ARC IS ALWAYS THE INNERMOST MEMBER OF ITS BUCKET, whatever its `len` says — on request,
+   and `a.cross` is how a caller declares one. The ranking below reads `len` as a proxy for RANGE: the
+   longest-reaching arc takes the centre slot and shorter ones fan outward, so an arc never has to cross a
+   longer one to reach its node. That proxy holds inside one line and breaks across a wrap, because a
+   cross-line arc's `len` measures its chord in the WRAPPED FRAME rather than its reach in the sentence.
+   Its endpoints are on different lines, so the chord can be almost vertical — a few pixels — while the arc
+   genuinely spans further than every within-line bump at that token, which is exactly the case where being
+   ranked as the SHORTEST puts it outside arcs it encloses. Being a cross-line arc is the strongest range
+   claim available at a node, so it is treated as one rather than measured; among several cross-line arcs in
+   one bucket `len` still decides, and the within-line arcs rank among themselves exactly as before.
+   ⚠️ CROSS-LINE GHOSTS TOO, on the same terms every other ghost/real comparison here is made on: a ghost is
+   ranked into this pool by length like any other member (see the ghost-arg note below), so the one rule that
+   overrides length has to reach it, or a ghost duplicating a cross-line attachment would fan outside the
+   real cross-line arc beside it. */
+function fanArcs(arcs,spread,ghostArcs,rootKeys){ const ep={}; const reg=(k,len,side,set,cross)=>{(ep[k]=ep[k]||[]).push({len,side,set,cross:!!cross});};
+  arcs.forEach(a=>{ reg(a.hkey??a.hk,a.len,Math.sign(a.xd-a.xh)||1,o=>a.offH=o,a.cross);   // this node is the head → outgoing edge fans. a.hkey/a.dkey override only the FAN-BUCKET key (not a.hk/a.dk, which are read downstream) so a cross-line arc's UPPER-line endpoint can bucket with the bottom-of-line endpoints instead of the top-side ones at the same token
+                    reg(a.dkey??a.dk,a.len,Math.sign(a.xh-a.xd)||1,o=>a.offD=o,a.cross); }); // this node is the dependent → incoming edge fans the same way (no longer centre-eligible — see block comment)
   (ghostArcs||[]).forEach(a=>{ const len=a.len??Math.abs(a.xd-a.xh);   // a ghost registers on BOTH sides — ranked into the pool by length like any other member, same anchor rule as a real edge
-    reg(a.hkey??a.hk,len,Math.sign(a.xd-a.xh)||1,o=>a.offH=o);
-    reg(a.dkey??a.dk,len,Math.sign(a.xh-a.xd)||1,o=>a.offD=o); });
+    reg(a.hkey??a.hk,len,Math.sign(a.xd-a.xh)||1,o=>a.offH=o,a.cross);
+    reg(a.dkey??a.dk,len,Math.sign(a.xh-a.xd)||1,o=>a.offD=o,a.cross); });
   (rootKeys||[]).forEach(k=>reg(k,Infinity,0,()=>{}));   // the root stub's own slot — no setter needed (its own draw call seats it at the node's x unconditionally, see arcsWrapped's root-stub loop), only its PRESENCE in this node's bucket matters below
   Object.values(ep).forEach(arr=>{ const hasRoot=arr.some(e=>e.side===0);   // item 2: a root stub occupies this node's dead-centre slot → every OTHER (±1) member here anchors one more half-fan-step further out than it otherwise would
     arr.filter(e=>e.side===0).forEach(e=>e.set(0));   // a side-0 sentinel (arcs() registers one for the root stub locally; rootKeys registers one here) — always centre, never ranked: it isn't "on a side" at all, so the edge-anchor rule below doesn't apply to it
-    [-1,1].forEach(side=>{ const grp=arr.filter(e=>e.side===side).sort((p,q)=>q.len-p.len);   // this side's whole pool — real AND ghost together — ranked by length alone; longest first (j=0) → nearest centre
+    [-1,1].forEach(side=>{ const grp=arr.filter(e=>e.side===side).sort((p,q)=>(q.cross-p.cross)||(q.len-p.len));   // this side's whole pool — real AND ghost together — every CROSS-LINE arc first (see the block comment above: a wrap makes `len` say nothing about range), then by length; longest first (j=0) → nearest centre
       if(!grp.length) return;
       // Several rounds of trig-factor tuning (see git log — matching a same-side reference gap, then patching
       // in the arrowhead's overshoot two different ways, sign errors both times) all replaced, on report: "I
@@ -780,7 +794,7 @@ function arcsWrapped(si){
     // pixel position is actually on — geometrically meaningful for a same-row arc AND for a cross-row one,
     // since both share one coordinate frame. (a.xh/a.xd here still feed ONLY fanArcs' fan-SIDE sign — the
     // real drawn geometry is re-derived fresh by crossEnds() further down via NX()+offset, unchanged.)
-    a.xh=NX(a.hk); a.xd=NX(a.dk); a.len=fanLen(a);   // supersedes the token-index span crossArcs was built with — see fanLen's own note above
+    a.xh=NX(a.hk); a.xd=NX(a.dk); a.len=fanLen(a); a.cross=true;   // supersedes the token-index span crossArcs was built with — see fanLen's own note above. `cross`: this arc outranks every within-line one at either of its nodes, because fanLen measures its chord in the WRAPPED frame and says nothing about its range (fanArcs' own block comment)
     fanAll.push(a); });
   // item 7: ghost endpoints (Shared=Yes AND Subject-raising) computed HERE, ahead of fanArcs, so they fold into
   // the SAME per-token fan pool the reals resolve in — see fanArcs' own ghost-arg comment (mirrors 84e7938's
@@ -809,8 +823,8 @@ function arcsWrapped(si){
   // endpoint's node sits at the edge of, not about which coordinates are meaningful.
   const ghostFan=ghostPairs.map(p=>{ const cross=rowOf(p.oh)!==rowOf(p.i);
     const a={hk:p.oh,dk:p.i,xh:NX(p.oh),xd:NX(p.i)}; a.len=fanLen(a);   // the SAME measure the reals now carry — a ghost ranked in other units is the unit-mismatch bug the note below describes, just the other way round
-    if(cross){ const iUp=rowOf(p.i).ord<rowOf(p.oh).ord;
-      if(iUp) a.dkey="B"+a.dk; else a.hkey="B"+a.hk; }   // item 1's own cross-line bucket split, applied to ghosts too
+    if(cross){ a.cross=true; const iUp=rowOf(p.i).ord<rowOf(p.oh).ord;
+      if(iUp) a.dkey="B"+a.dk; else a.hkey="B"+a.hk; }   // item 1's own cross-line bucket split, applied to ghosts too — and the innermost-ranking rule with it, so a ghost never fans outside the real cross-line arc it duplicates
     return a; });
   // item 2: the root token's own bucket key — plain (no "B" bucket-split: the root stub is always drawn in ITS
   // OWN row, never as a cross-line endpoint) — so fanArcs can detect it sharing a node with other arcs and push

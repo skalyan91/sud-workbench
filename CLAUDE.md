@@ -463,6 +463,24 @@ one that begins or continues under an in-flight gesture. A pane scrolling native
 fires no #doc scroll event, so neither trips for it and the pane keeps the wheel at rest exactly as
 before.
 
+⚠ **A CROSS-LINE ARC IS ALWAYS THE INNERMOST MEMBER OF ITS FAN BUCKET.** `fanArcs`
+(js/diagram/diagram-wrap.js) ranks the arcs meeting one node by `len` and gives the longest the centre slot,
+so an arc never has to cross a longer one to reach its own node — `len` stands in for RANGE. That proxy holds
+inside one line and **breaks across a wrap**: a cross-line arc's `len` measures its chord in the WRAPPED
+FRAME, and with its endpoints on different lines that chord can be almost vertical — a few pixels — while the
+arc genuinely spans further than every within-line bump at the same token. Ranked as the shortest, it was
+fanned OUTSIDE arcs it encloses. Being cross-line is the strongest range claim available at a node, so
+`a.cross` is declared and the sort puts those first; among several cross-line arcs `len` still decides, and
+the within-line ones rank among themselves exactly as before. Cross-line GHOSTS take the flag too — a ghost is
+ranked into the same pool by length like any other member, so the one rule that overrides length has to reach
+it, or a ghost would fan outside the real arc it duplicates. Declared at all three pools that hold cross-line
+arcs: `arcsWrapped`, and BOTH of the wrapped-bracket passes (`positionBracketAnnots` and the
+gap-reservation prediction beside it — that pass exists to predict this very fan, so a flag on one and not the
+other would grow the wrong gap). The flat arc and flat bracket views have no cross-line arcs and are
+untouched. ⚠️ Measured on the fixture in a 560px port, wrapped arcs: 77 buckets hold both kinds of endpoint,
+and the cross-line one is innermost in all 77 — against **40 of 70 fanned outside a within-line arc** under
+the old length-only ranking, driven through the same instrumented `fanArcs` as a control.
+
 ⚠ **THE READING POSITION SURVIVES A CHROME OR ZOOM CHANGE**, and `withTopChrome` is the one instrument
 for it — `preserveScroll` cannot do this job, since it anchors on the FOCUSED block's offset from #doc's
 RAW top, and both of those are wrong here (the focused block need not be on screen; the raw top is not
