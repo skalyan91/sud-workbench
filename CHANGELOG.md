@@ -2,7 +2,62 @@
 
 All notable changes to SUD Workbench are documented in this file.
 
-## [Unreleased]
+## [0.3.12] — 2026-08-20
+
+### Added: a foreign token is marked by FACE in Chinese, not by a slant
+
+- Han has no italic, so `Foreign=Yes` on a Chinese token was drawing a **synthesised oblique** — a
+  sheared 行, which is not a mark Chinese typography makes. What it makes is a change of face, 楷體
+  against the body face, the way a Latin text sets a foreign word in italics. The Kai face is declared
+  in the **italic slot** of its own family, so nothing at the point of use needs to know the token is
+  Chinese — and any Latin in the same token still falls through to Noto Sans Italic and is still
+  italicised, which no single font-family swap could have done.
+- The face is **not fetched and not bundled**: every Kai named is one macOS or Windows already ships,
+  and a machine with none falls back to exactly what was drawn before. Simplified and traditional get
+  their own family, because the two genuinely differ — 9 of 14 sampled graphs paint different outlines.
+- Three corrections ride with it, each measured over 20 dense glyphs rather than eyeballed. A Kai
+  **字面 is smaller** than a Hei's (ink 83.85 against PingFang's 90.28), so the run is scaled up and
+  their half-cap-height lines aligned. Every Han ideograph is **one em wide in every face** — `palt`
+  and `pwid` move none of them, those features being for punctuation and Latin — so the Kai's narrower
+  ink is the same box with more air around it, and the run is tightened to give back the sans's own
+  gap. A brush hand is **lighter** (ink coverage 0.2426 against 0.4198), so it is set Bold in the
+  running sentence, where the word sits in a row of sans text; the diagram keeps Regular, where an
+  isolated token among light-grey annotations reads as shouting at Bold.
+
+### Added: the hierarchy and the outline show Sanskrit in its pausa form
+
+- Sandhi records the junction with the word that **follows**, so a sandhied surface is only a true
+  spelling while the words stand in reading order. The hierarchy and the outline take them out of that
+  order — a token sits under its head, beside neither of the neighbours whose junctions its form
+  records — so those two views now draw MISC `Unsandhied`, the citation form, where there is one. The
+  stemma, arcs and brackets keep the sentence's own sequence and are untouched, as is the running line.
+- Under a script the pausa gets its **own** conversion rather than the form's, on the same round trip;
+  the transliteration row follows the glyph, so the two never disagree about which word this is.
+
+### Fixed: an italic token reserved more room than it painted
+
+- `Foreign=Yes` sets a form in italics, and every measurement of it already added the italic tracking
+  bump — while the rule that draws it declared the slant and nothing else. The form painted about
+  0.02em per character narrower than its own slot, and the inline editor opened at a different tracking
+  from the row beneath it. The rows that flip the other way (a foreign token on the transliteration or
+  segmentation row, and every row under a non-Latin displayed transliteration) had the mirror-image
+  fault and are fixed with it.
+
+### Fixed: on WebKit, every tracked row reserved the untracked width
+
+- `getComputedTextLength()` returns the **untracked** advance in WebKit and the tracked one in Chrome —
+  measured, `abcd` at italic 15px with .02em comes back 32.685 either way there against Chrome's
+  33.891. So the transliteration, both gloss tiers, the outline's form row, the relation labels and the
+  AVM columns have all been reserving too little room on the one engine this app ships on. The tracked
+  width now comes from a live HTML element, which reproduces Chrome's number exactly, including for a
+  Devanagari conjunct where the obvious `getBBox()` shortcut is 0.9px out.
+
+### Fixed: the Grids button was tighter than every other button in the titlebar
+
+- `tablecells` is the one genuinely wide symbol up there, and a wide glyph in a square button has less
+  air beside it. Measured against every neighbour's real ink box, it cleared 3.90px each side where the
+  rest clear 6.42–7.93; the button is now 36px wide and clears 6.90. Windows is deliberately unchanged:
+  its own grid icon is square and already sits inside that kit's band.
 
 ### Added: glosses derived from the sentence's English translation
 

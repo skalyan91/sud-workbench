@@ -33,7 +33,7 @@
 # (an ImportError three menus deep, not a `dnf install` error), which is worse than getting it wrong
 # at build time.
 
-%global app_version 0.3.11
+%global app_version 0.3.12
 
 Name:           sud-workbench
 Version:        %{app_version}
@@ -211,6 +211,11 @@ update-desktop-database %{_datadir}/applications &>/dev/null || :
 gtk-update-icon-cache %{_datadir}/icons/hicolor &>/dev/null || :
 
 %changelog
+* Thu Aug 20 2026 Siva Kalyan - 0.3.12-1
+- A foreign token in a Chinese document is marked by a Kai face rather than a synthesised
+  oblique; the hierarchy and outline show Sanskrit in its pausa form; italic rows reserve the
+  tracking they paint, on WebKit as well as Chrome.
+
 * Wed Aug 19 2026 Siva Kalyan - 0.3.11-1
 - Corrects both 0.3.10 fixes: wrapped cross-line arc endpoints are ordered by the distance they
   actually reach, and the full-screen titlebar duck-under measures the window that carries the band.
