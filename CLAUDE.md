@@ -379,15 +379,33 @@ a RANKING has to be softmaxed, and reading them as weights gave every class an e
 pooled from the joint `POS=…|Feat=Val` label, which is also the pooling the POS menu's dot-suffixed submenu
 needs — a parent row is weighted by exactly its own flyout.
 
-⚠ **THE RELATION FOLLOWS THE HEAD IN THREE TIERS**, ordered by what each is worth (`headSyncDeprel`): the arc
+⚠ **THE RELATION FOLLOWS THE HEAD IN THREE TIERS**, ordered by what each is worth: the arc
 the parser genuinely weighed; else `arcLabelScores`, a state SYNTHESISED to put the pair at the boundary
 (counterfactual, and labelled as such — measured against a real state it ranks the same two relations first
 and second and moves the split, .785/.214 → .576/.416); else the old whole-tree agreement rule, for the
-documents the scores cannot serve. ⚠️ **And the chosen relation is validated before it is written**:
-`setDiagramHead` already refuses a DROP whose relation is error-level on the new head, and an automatic step
-must not introduce what the manual one is stopped from doing. Verified: dragging `who` under `saw` — an arc the
-walk never weighed — takes `comp:obj` from the synthesised state, and a relation the validator rejects leaves
-the token untouched.
+documents the scores cannot serve. The tiers live in **`scoredRelsForHead(si, tokId, headId)`**
+(js/io/bridge.js), which asks about ONE (child, head) pair with the head passed EXPLICITLY, so the same
+implementation serves both moments the question arises: `headSyncDeprel` asks it AFTER a head change, about a
+head already in the document, and a re-heading DROP asks it BEFORE writing anything, about an attachment that
+does not exist yet. It returns the whole RANKING rather than the argmax, because a candidate the validator
+refuses is a reason to look at the next one down. ⚠️ **And the chosen relation is validated before it is
+written** — `relForNewHead` walks that ranking and answers with the best relation `depIsError` accepts on the
+new head, so an automatic step can never introduce what a manual one is stopped from doing. Verified:
+dragging `who` under `saw` — an arc the walk never weighed — takes `comp:obj` from the synthesised state, and
+a relation the validator rejects leaves the token untouched.
+
+⚠ **AND A DROP WHOSE OLD RELATION DOES NOT FIT THE NEW HEAD IS RE-LABELLED, NOT REFUSED — reversing what this
+file used to record.** `setDiagramHead` used to test the token's EXISTING relation against the head being
+dropped on and reject the whole gesture when it was error-level there (`subj` dragged under a noun), which
+read as the app refusing an edit rather than answering it. The reader's gesture is about the HEAD and is
+unambiguous; the relation is the part that needed an answer, and `relForNewHead` above is that answer, written
+in the SAME undo entry as the head because they are one edit. A refusal now means only what the message always
+claimed: nothing the model ranks survives the validator on that head. A relation that IS still valid is not
+pre-empted — nothing is asked, and `afterHeadEdit`'s own background `headSyncDeprel` re-asks exactly as it
+does for every other re-heading path. Both the arc-drag path and `attachAsSharedConjunct` follow this rule.
+Verified with a stubbed, genuinely-awaiting `valid_deprels`: `subj@expl` dropped on a NOUN becomes `mod@expl`
+(the `@deep` tail is the reader's and survives), a valid relation is untouched, and where the validator
+accepts nothing the head, the relation and the undo stack are all left exactly as they were.
 
 ⚠ **EXPECT ONE LIT NODE MOST OF THE TIME during a drag, and that is the honest answer rather than a thin
 feature.** A trained parser is genuinely certain about a determiner's noun; the spread appears exactly where a

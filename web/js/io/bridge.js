@@ -2410,22 +2410,44 @@ const PARSE_FIELDS=["lemma","xpos","feats","deps","misc"];
 /* `quiet` suppresses only the trailing render — the write and markDirty still happen — so a caller
    moving SEVERAL heads in one command can draw once at the end instead of once per token. See
    headSyncDeprels just below; every other caller leaves it unset and behaves exactly as before. */
+/* ── THE THREE TIERS, AS A QUESTION ABOUT ONE (child, head) PAIR ──────────────────────────────────
+   Factored out of headSyncDeprel below, because a re-heading DROP has to ask the very same question
+   BEFORE it writes anything (`relForNewHead`, and setDiagramHead's use of it in
+   js/diagram/diagram-edit.js) while headSyncDeprel asks it AFTER, about a head already in the
+   document. One implementation of the ranking, its prune and its fallbacks; two moments at which it
+   is consulted. `headId` is passed EXPLICITLY rather than read off the token, which is the whole
+   point — the caller may be asking about an attachment that does not exist yet.
+   Ranked rather than argmax (see rankedScoredRels, js/io/scores.js): a candidate the validator
+   refuses is a reason to look at the next one down, not to abandon the question. */
+async function scoredRelsForHead(si,tokId,headId){ if(!(hasBridge()&&model)) return [];
+  const s=DOC[si], t=s&&s.tokens[tokId-1]; if(!t||!(headId>=1)||headId>s.tokens.length) return [];
+  const forms=s.tokens.map(x=>x.form||""); if(!forms.some(f=>f)) return [];
+  let out=[];
+  if(typeof tokenScores==="function"){
+    const sc=await tokenScores(si);
+    if(sc&&sc.deprels&&sc.deprels[tokId-1]) out=rankedScoredRels(sc.deprels[tokId-1][String(headId)]);   // tier 1: the arc the parser genuinely weighed
+    if(!out.length) out=rankedScoredRels(await arcLabelScores(si,tokId,headId));                          // tier 2: a state SYNTHESISED to put the pair at the boundary
+  }
+  if(out.length) return out;
+  let r; try{ r=await window.pywebview.api.parse_tokens(forms,model); }catch(e){ return []; }              // tier 3: no scores at all (Stanza) → the whole-tree agreement rule
+  if(!r||!r.parsed||!r.tokens||r.tokens.length!==s.tokens.length) return [];
+  const p=r.tokens[tokId-1]; if(!p) return [];
+  if(parseInt(p.head,10)!==headId) return [];                    // the parser is talking about a different edge
+  return p.deprel?[p.deprel]:[]; }
+/* …AND THE BEST OF THEM THE VALIDATOR WILL ACTUALLY ACCEPT ON THAT HEAD, as a BASE relation (the
+   caller re-attaches its own `@deep` tail — that tail is the reader's and no re-heading may take it).
+   "" when nothing is expressible, which every caller reads as "leave the relation alone". */
+async function relForNewHead(si,tokId,headId){
+  const s=DOC[si], t=s&&s.tokens[tokId-1], hd=s&&s.tokens[headId-1]; if(!t||!hd) return "";
+  const cands=await scoredRelsForHead(si,tokId,headId);
+  for(const r of cands){ const base=depBase(r); if(!base) continue;
+    if(typeof depIsError!=="function") return base;
+    if(!await depIsError(hd.upos,t.upos,withDepBase(t.deprel,base))) return base; }   // asked about the relation AS IT WOULD BE WRITTEN, tail and all — the same string setDiagramHead's own guard tests
+  return ""; }
 async function headSyncDeprel(si,tokId,quiet){ if(!(hasBridge()&&model)) return false;
   const s=DOC[si], t=s&&s.tokens[tokId-1]; if(!t) return false;
   const want=parseInt(t.head,10); if(!(want>=1)) return false;   // a new ROOT is settled by afterHeadEdit's own invariant — there is nothing to ask
-  const forms=s.tokens.map(x=>x.form||""); if(!forms.some(f=>f)) return false;
-  let rel="";
-  if(typeof tokenScores==="function"){
-    const sc=await tokenScores(si);
-    if(sc&&sc.deprels&&sc.deprels[tokId-1]) rel=bestScoredRel(sc.deprels[tokId-1][String(want)]);
-    if(!rel) rel=bestScoredRel(await arcLabelScores(si,tokId,want));
-  }
-  if(!rel){                                                      // no scores at all (Stanza) → the whole-tree agreement rule
-    let r; try{ r=await window.pywebview.api.parse_tokens(forms,model); }catch(e){ return false; }
-    if(!r||!r.parsed||!r.tokens||r.tokens.length!==s.tokens.length) return false;
-    const p=r.tokens[tokId-1]; if(!p) return false;
-    if(parseInt(p.head,10)!==want) return false;                 // the parser is talking about a different edge
-    rel=p.deprel||""; }
+  const rel=(await scoredRelsForHead(si,tokId,want))[0]||"";     // the shared three tiers, above
   const now=DOC[si]&&DOC[si].tokens[tokId-1];                    // re-read: the document may have moved while the call was out
   if(!now||now!==t||parseInt(now.head,10)!==want) return false;
   const nd=withDepBase(now.deprel,depBase(rel));                 // the RELATION only — any `@deep` tail the reader set is theirs and survives

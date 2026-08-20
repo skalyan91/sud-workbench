@@ -19,10 +19,32 @@ const ddEdge=el=>el&&el.closest?el.closest("#doc .edge-g, #doc .arc"):null;
 // never steal a hit ddNode/ddEdge would otherwise have claimed.
 const ddMwtGroup=el=>el&&el.closest?el.closest("#doc .mwt-g[data-mwtfrom]"):null;
 const DNODE_Q=`.node[data-s="{s}"], .tok-group[data-s="{s}"], .bwtok[data-s="{s}"]`;   // every drawn token in a sentence, across the draggable notations
+/* ⚠ A DROP WHOSE OLD RELATION DOES NOT FIT THE NEW HEAD IS RE-LABELLED, NOT REFUSED — on report, and it
+   reverses what this line used to do. A relation describes an EDGE, so dragging the edge's other end can
+   leave the label describing nothing: `subj` under a noun is the standing example, and this function's own
+   guard read that as a reason to reject the gesture and put the arc back. But the reader's gesture is about
+   the HEAD, and it is unambiguous; the relation is the part that needs an answer, and the app already has
+   one — `relForNewHead` (js/io/bridge.js) is the same three-tier ranking `headSyncDeprel` adopts from after
+   every other head change, asked here about the head being dropped ON rather than the one being left.
+   Only when nothing expressible survives the validator on the new head is the drop refused, which is the
+   case the old message was really about.
+   ⚠️ THE OLD LABEL IS NEVER JUDGED AGAINST THE NEW HEAD AND THEN KEPT. Where it IS still valid this asks
+   nothing and writes nothing — `afterHeadEdit`'s own headSyncDeprel then re-asks in the background exactly as
+   it does for every other re-heading path (the grid's Head cell, Find & Replace, setAsRoot), so a valid-but-
+   wrong label is corrected by the one mechanism that has always corrected it, and this branch stays scoped
+   to the case that used to end in a refusal.
+   ⚠️ WRITTEN IN THE SAME UNDO ENTRY AS THE HEAD, because they are one edit: a re-headed token whose
+   relation had to move is not two things the reader did. And the ranking is asked BEFORE pushUndo — it
+   crosses the bridge, so a refusal must leave no entry behind at all. */
 async function setDiagramHead(si,depId,headId){ const s=DOC[si]; if(!s||depId<1||depId>s.tokens.length)return;
   const dep=s.tokens[depId-1], head=(headId>=1&&headId<=s.tokens.length)?s.tokens[headId-1]:null;
-  if(head && await depIsError(head.upos,dep.upos,dep.deprel)){ toast(`Can't attach: “${dep.deprel}” isn't valid on ${head.upos||"?"}`); return; }   // error-level invalid → don't let the drag stick
-  pushUndo(si); dep.head=String(headId); afterHeadEdit(dep,s);
+  let relabel="";
+  if(head && await depIsError(head.upos,dep.upos,dep.deprel)){   // the OLD relation is error-level on the NEW head → ask what this head's own relation would be
+    relabel=(typeof relForNewHead==="function")?await relForNewHead(si,depId,headId):"";
+    if(!relabel){ toast(`Can't attach: “${dep.deprel}” isn't valid on ${head.upos||"?"}`); return; }   // nothing the validator accepts either → the drag still doesn't stick
+    if(DOC[si]!==s||s.tokens[depId-1]!==dep||s.tokens[headId-1]!==head) return; }   // the ranking is a bridge round-trip; the document may have moved under it
+  pushUndo(si); if(relabel) dep.deprel=withDepBase(dep.deprel,relabel);   // …and the `@deep` tail the reader set survives, exactly as headSyncDeprel leaves it
+  dep.head=String(headId); afterHeadEdit(dep,s);
   // Task B: NO regenTok here — re-heading a token by drag is purely structural and must never trigger a
   // gloss/MGloss recompute (the one thing regenTok's regenSecondaries call does besides re-derive lemma/feats/
   // deps, none of which a head edit needs either). Every other head/deprel edit site dropped this same call —
@@ -231,8 +253,13 @@ async function attachAsSharedConjunct(si,depId,conjDepId){ const s=DOC[si]; if(!
   const conjHeadId=parseInt(conjDep.head,10);
   const targetId=(conjHeadId>=1 && conjHeadId<=s.tokens.length && Math.abs(depId-conjHeadId)<Math.abs(depId-conjDepId)) ? conjHeadId : conjDepId;
   const dep=s.tokens[depId-1], head=s.tokens[targetId-1];
-  if(head && await depIsError(head.upos,dep.upos,dep.deprel)){ toast(`Can't attach: “${dep.deprel}” isn't valid on ${head.upos||"?"}`); return; }
-  pushUndo(si); dep.head=String(targetId); afterHeadEdit(dep,s);
+  let relabel="";   // same rule as setDiagramHead above (see its note): a relation that no longer fits the head this drop chose is RE-ASKED of the ranking, not used as grounds to reject the gesture
+  if(head && await depIsError(head.upos,dep.upos,dep.deprel)){
+    relabel=(typeof relForNewHead==="function")?await relForNewHead(si,depId,targetId):"";
+    if(!relabel){ toast(`Can't attach: “${dep.deprel}” isn't valid on ${head.upos||"?"}`); return; }
+    if(DOC[si]!==s||s.tokens[depId-1]!==dep||s.tokens[targetId-1]!==head) return; }
+  pushUndo(si); if(relabel) dep.deprel=withDepBase(dep.deprel,relabel);
+  dep.head=String(targetId); afterHeadEdit(dep,s);
   // regenTok's own parser pass rewrites FEATS from scratch (reparseTokenFields → PARSE_FIELDS includes "feats") — awaiting
   // it here (instead of the usual fire-and-forget regenTok) and stamping Shared=Yes AFTER means the parser's guess can
   // never race past this point and silently clobber the marker we're about to set.

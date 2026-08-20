@@ -78,6 +78,13 @@ function scoreRealRel(r){ return !!r && r.indexOf("||")<0; }
 function bestScoredRel(map){ let best="", bp=0;
   Object.keys(map||{}).forEach(r=>{ if(scoreRealRel(r)&&map[r]>bp){ bp=map[r]; best=r; } });
   return best; }
+/* …and the WHOLE ranking, best first, for the one caller that cannot simply take the argmax: a re-heading
+   drop must not write a relation the validator calls an error on the new head (`relForNewHead`,
+   js/io/bridge.js), and "the top-ranked one is refused" is a reason to look at the runner-up rather than to
+   give up. Same `scoreRealRel` filter bestScoredRel applies — a `||` composite is never a relation the
+   editor may adopt, however the caller walks the list — so `bestScoredRel(m)` is exactly
+   `rankedScoredRels(m)[0]||""` and the two cannot disagree about what is expressible. */
+function rankedScoredRels(map){ return Object.keys(map||{}).filter(r=>scoreRealRel(r)&&map[r]>0).sort((a,b)=>map[b]-map[a]); }
 /* P(relation) for one token under ONE head, pooled to the BASE relation — which is the same pooling
    the relation menu's submenus do (a row's deep-feature flyout holds `mod@relcl` under `mod`), so the
    menu and this agree by construction rather than by coincidence. */
