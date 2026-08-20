@@ -33,7 +33,7 @@
 # (an ImportError three menus deep, not a `dnf install` error), which is worse than getting it wrong
 # at build time.
 
-%global app_version 0.3.12
+%global app_version 0.3.13
 
 Name:           sud-workbench
 Version:        %{app_version}
@@ -211,6 +211,12 @@ update-desktop-database %{_datadir}/applications &>/dev/null || :
 gtk-update-icon-cache %{_datadir}/icons/hicolor &>/dev/null || :
 
 %changelog
+* Thu Aug 20 2026 Siva Kalyan - 0.3.13-1
+- A cross-line arc's label sits on the arc and the arc itself fans innermost; dragging a token to a
+  new head re-labels the edge for that head instead of refusing the drop; Reset Parse re-analyses the
+  tokens rather than re-tokenising; feature values are listed in their own conventional order; the
+  avagraha is spelt detached in IAST and flush in a Brahmic script.
+
 * Thu Aug 20 2026 Siva Kalyan - 0.3.12-1
 - A foreign token in a Chinese document is marked by a Kai face rather than a synthesised
   oblique; the hierarchy and outline show Sanskrit in its pausa form; italic rows reserve the

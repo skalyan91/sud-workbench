@@ -2,6 +2,88 @@
 
 All notable changes to SUD Workbench are documented in this file.
 
+## [0.3.13] — 2026-08-20
+
+### Fixed: a cross-line arc's label sat above a point on the arc rather than on it
+
+- A within-line bump has a **crown**, so a label 8 px above it stands beside the arc, clear of the ink.
+  A cross-line arc has no crown — the point the label hangs from is the **midpoint of its chord**,
+  which is exactly the point the drawn curve passes through half-way along — so putting the label above
+  it left it floating beside the arc's middle, attached to nothing in particular. It now sits **on** the
+  arc, interrupting its own edge the way the hierarchy and tree views already label every edge, with the
+  label's opaque casing clearing the stroke behind the text.
+- De-collision is unchanged: a label that has to rise to clear a shorter one still rises, and still
+  grows a dashed leader back down to its arc.
+
+### Fixed: a cross-line arc fanned outside arcs it encloses
+
+- Where several arcs meet one token they fan apart, the longest-reaching taking the centre slot so no arc
+  has to cross a longer one to reach its node. The measure of "longest" is the arc's own chord, which is
+  the right proxy **inside one line and the wrong one across a wrap**: a cross-line arc's endpoints are on
+  different lines, so its chord can be nearly vertical — a few pixels — while the arc genuinely spans
+  further than every ordinary bump at that token.
+- A cross-line arc is now ranked innermost outright, which is what its being cross-line already says. On
+  the sample document, 77 shared endpoints were affected; under the old ranking the cross-line arc was
+  fanned outside an ordinary one at **40 of 70** of them.
+
+### Changed: dragging a token to a new head re-labels the edge for that head
+
+- The relation was tested against the head being dropped on and the **whole gesture rejected** when it did
+  not fit — `subj` dragged under a noun. But the gesture is about the head and is unambiguous; the
+  relation is the part that needed an answer, and the app already had one. The same ranking that follows
+  every other head change is now asked *before* the drop, and the best relation the validator accepts on
+  the new head is written in the same undo step as the head itself.
+- A refusal now means only what its message always claimed: nothing the parser ranks is valid on that
+  head. A relation that still fits is left alone, and any `@deep` tail the annotator set survives.
+
+### Changed: Reset Parse re-analyses the tokens that are there
+
+- ⌘R re-segmented the sentence from `# text` and adopted the tokeniser's own multi-word tokens, so a
+  compound split by hand, a clitic merged by hand or a corrected segmentation was **silently reverted by
+  the one control that says it is about the parse**. Segmentation is the annotator's: only editing the
+  running sentence or the grid re-tokenises now.
+- The forms, the multi-word tokens and `# text` are held fixed and the sentence goes through the
+  pre-tokenised parser instead. Spacing (`SpaceAfter=No` and its neighbours) survives verbatim, since a
+  parser handed a word list has no running text to read spacing off — and in a spaceless script that
+  spacing is the whole of it. With no model loaded it says so instead of quietly re-splitting the
+  sentence on spaces.
+
+### Changed: a feature's values are listed in their own conventional order
+
+- The feature tables had been alphabetised, and that table **is** the order every menu prints — the FEATS
+  cell, the value pills, the AVM rows, the glossing-abbreviation menu. A paradigm was being presented the
+  way a list of strings is: Com, Fem, Masc, Neut; Coll … Plur … Sing; Fut … Past … Pres.
+- Now masculine, feminine, neuter; singular, dual, plural; present, past, future; positive, comparative,
+  superlative — and Case in the traditional sequence: nominative, accusative, instrumental, dative,
+  ablative, genitive, locative, vocative, then the ergative pair, then the remaining non-core cases, then
+  the local ones. No value is dropped or added.
+
+### Fixed: the avagraha's spacing, in both scripts
+
+- Romanised Sanskrit writes the elided initial *a* as an apostrophe attached to the word it **opens** and
+  detached from the word before it — `tato 'ṅghridvayam` — while Devanagari writes ऽ flush against the
+  preceding syllable, ततोऽङ्घ्रिद्वयम्, the elision being inside one akṣara run. The space is a fact
+  about the script, exactly as its absence before a virāma-joined word already is, and neither side was
+  getting the one it uses: both errors were live on this project's own two Bṛhajjātaka samples.
+- The sandhi generator agrees with them now. It withheld the space after `-aḥ + a → -o'` on the grounds
+  that an avagraha is a genuine merge — phonologically true, orthographically not — so one sandhi had two
+  spellings depending on which rule reached it. A multi-word token is untouched: its components make one
+  orthographic word, the one place the mark has no boundary to sit at.
+
+### Fixed: a Kai run's two edges had the wrong gap
+
+- Tightening a foreign Chinese run equalises the gap **between two Kai characters** with the surrounding
+  sans, and says nothing about the gap between a Kai character and the non-Kai one beside it — which it
+  then gets wrong in both directions at once, too wide before the run and too tight after it. Both edges
+  are corrected by half the tightening, which is derived rather than tuned. Two adjacent foreign tokens —
+  般若波羅蜜多 — keep their own spacing exactly, by construction.
+
+### Changed: the Literary Chinese sample is now the Heart Sūtra
+
+- Twenty-four sentences of 玄奘's 般若波羅蜜多心經 in place of a single seven-token maxim, with real
+  `Foreign=Yes` tokens sitting among ordinary Han and sentences long enough to exercise the wrapped
+  notations.
+
 ## [0.3.12] — 2026-08-20
 
 ### Added: a foreign token is marked by FACE in Chinese, not by a slant
