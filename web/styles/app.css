@@ -113,6 +113,22 @@
   body.fs-chrome-hidden.fs-reveal .viewbar{ top:calc(var(--fsRevealTbH,44px) + var(--fsNativeTbH,0px)); }   /* --tbH is 0 while collapsed → pin the revealed options bar below the revealed titlebar */
   body.fs-on .titlebar{ padding-inline-start:14px }   /* item 10: in full screen the native traffic lights are hidden, so the ~82px --lights-right gutter on the left sits EMPTY and shoves the heading right. Reclaim it — pull the heading/icons left to a normal 14px inset. (When the menu bar + lights briefly reveal at the top edge they may overlap; the trade-off removes the persistent empty space.) */
   #doc{font-family:var(--token-font)}   /* the WHOLE document view renders in the Noto token stack; grid DATA cells override to --mono-font below, and app UI/chrome lives OUTSIDE #doc so it keeps the system font */
+  /* ── THE FACE A *FOREIGN* TOKEN TAKES (item 2) ────────────────────────────────────────────────
+     Ordinarily the token stack itself: a Foreign=Yes word is marked by italics (.tok-ital, below) and
+     nothing else, and these two properties then resolve to exactly what every other token uses. In a
+     CHINESE document they gain a Kai family at the HEAD of the stack — see the "SUD Kai SC"/"SUD Kai TC"
+     @font-faces in styles/fonts.css for what that family is and why it is declared in the ITALIC slot,
+     and hanFrnFace() (js/lang/translit.js) for which of the two a document gets and how `data-hanfrn`
+     comes to be set. The family's own `unicode-range` is what confines it to Han, so a Latin word marked
+     foreign in a Chinese sentence still falls through to Noto Sans Italic and is still italicised.
+     ⚠ DECLARED AS A PAIR OF PROPERTIES, NOT WRITTEN INTO THE RULES BELOW, because the JS side has to
+     measure in the face it paints in: refreshFontStacks (js/diagram/diagram-core.js) reads both of these
+     straight back off #doc into LIVE_FRN_STACK/LIVE_FRN_MONO_STACK, exactly as it already does for
+     --token-font/--mono-font, so the stylesheet stays the single authority and a canvas/SVG measurement
+     cannot resolve a different face from the paint. */
+  #doc{--frn-font:var(--token-font); --frn-mono-font:var(--mono-font)}
+  #doc[data-hanfrn="sc"]{--frn-font:"SUD Kai SC",var(--token-font); --frn-mono-font:"SUD Kai SC",var(--mono-font)}
+  #doc[data-hanfrn="tc"]{--frn-font:"SUD Kai TC",var(--token-font); --frn-mono-font:"SUD Kai TC",var(--mono-font)}
   #doc.no-relcolour{--tie-hue:var(--ink)}   /* "Relation colours" off → POS tags/bracket ties go monochrome too, not just the deprel labels relColor() already gates */
   /* ── item 3: PAGE-LIKE LAYOUT ────────────────────────────────────────────────────────────────────────────
      Paged caps the document to a fixed MEASURE on a wide screen and lays it on sheets, the way a Jupyter
@@ -346,6 +362,7 @@
   .stx-frn{font-style:italic}   /* Foreign=Yes — italics ALONE, no underline, exactly as italDeco draws it on the diagram */
   .strans .stx-frn{font-style:normal}   /* …but the transliteration slot is ALREADY italic as a whole (.strans), so a foreign word FLIPS UPRIGHT there instead — the same inversion frnUp makes for the italic MSeg tier */
   #doc.ortho-script .strans .stx-frn{font-style:italic}   /* …unless a non-Latin DISPLAYED transliteration has dropped the row's romanisation italics (line ~381), in which case italic is the marked value again */
+  #doc[data-hanfrn] .stx-frn{font-family:var(--frn-font)}   /* item 2: the running line carries the Kai face too — the same mark the diagram and the grid draw, on the same run. Layout-safe despite this section's ink-only rule: the family is confined by unicode-range to Han, and Han is one em in the Kai faces exactly as in the body face (measured at 64px: 64.00 in both), so no advance moves and the token↔text alignment paintStext depends on is untouched */
   /* TYPO — the two spellings TRADE PLACES with the editing state (see "THE TWO STATES" in
      js/core/document.js). At rest the line carries the CORRECTED spelling and the file's own is the
      mark above it; focused, the line carries the file's own and the correction is the mark above. The
@@ -526,7 +543,7 @@
   .wrap-rule{border:none; border-top:1px dashed var(--hairline); margin:0}
   .cont-chev{fill:var(--dia-muted); opacity:.75}   /* continuation chevron where an arc crosses a wrap */
   svg.tree{display:block}
-  .tok-word{font-size:calc(15px * var(--script-mag,1)); font-weight:var(--script-wght,400); fill:var(--text); font-family:var(--token-font);
+  .tok-word{font-size:calc(15px * var(--script-mag,1) * var(--frn-scale,1)); font-weight:var(--script-wght,400); fill:var(--text); font-family:var(--token-font);
     paint-order:stroke; stroke:var(--casing); stroke-width:3.5px; stroke-linejoin:round; fill-opacity:var(--script-op,1); stroke-opacity:var(--script-op,1)}   /* ⚠ fill-opacity/stroke-opacity, NOT opacity — on report ("it's the opacity setting that's cutting off the subjoined letters in Safari"). `opacity<1` on an SVG element forces the engine to render it to an offscreen compositing layer and composite that layer back at reduced alpha — and that layer's own bounds come from getBBox(), which this exact investigation just measured to under-report a real subjoined Javanese conjunct's ink by ~12px (canvas: 18.64px descent; getBBox(): 6.59px) despite the glyph SHAPING correctly (SVG/canvas width match exactly, ruling out a shaping failure). The offscreen buffer is sized off that wrong, too-shallow number, so the part of the glyph beyond it is cut off when the layer composites back — a genuine WebKit compositing bug, not a layout/reserve-space one (the reserved wash box has 100+px to spare). fill-opacity/stroke-opacity sidestep it entirely: they are PAINT-TIME alpha adjustments on the fill/stroke operations themselves, not element-level compositing, so they never require an offscreen buffer or ask getBBox() anything. Applies only where this element is genuinely SVG text (fill:var(--text) confirms it, as does the paint-order:stroke casing halo needing its own stroke-opacity) — the smpReshape()-swapped foreignObject case (Grantha/Kawi) is unaffected either way: its own dimming lives on .fo-form (below), an HTML element where fill-opacity has no meaning and opacity is exactly right; removing opacity from THIS rule only stops that case being (silently, harmlessly by luck) double-dimmed through both rules at once. */
   .tok-pos{font-size:15px; font-weight:400; font-feature-settings:"c2sc" 1; fill:var(--tie-hue); font-family:var(--token-font);   /* POS tags: same size + weight as the transliteration (TRANS_F/.translit, 15px normal) — c2sc renders the (already all-caps) tag as small caps instead of relying on a bumped weight/shrunk size for the "tag" register. No letter-spacing: 15px is the tracking curve's own reference size (TOK_REF_SIZE, trackCurve()), where it's 0 — was a flat .02em. cpsp dropped: it's calibrated for genuine full-height capitals, not the c2sc-substituted small-cap glyph forms, and over-spaced them. POS luminance = the subj/comp/mod deprel labels': --c-other is the palette's neutral member, derived at their SAME L≈0.656 (and matching dark contrast), so POS sits at the same lightness as the coloured labels in both themes */
     paint-order:stroke; stroke:var(--casing); stroke-width:3px; stroke-linejoin:round}
@@ -647,7 +664,7 @@
   .bwbr{font-family:var(--token-font); font-size:15px; font-weight:700; margin:0; vertical-align:baseline; position:var(--script-brk-pos,static); top:calc(-1 * var(--script-brk-lift,0px))}   /* ⚠ position/top is the MAGNIFIED-TOKEN CENTRING (\"in brackets and outlines, the Chinese tokens need to be centre-aligned with the brackets\"), and it is deliberately NOT the `vertical-align:middle` the note below records as tried and reverted: that keys off the PARENT's x-height (13px .text-conv text), which answers a question about neither the bracket nor the token and drifted between engines. --script-brk-lift (refreshFontStacks, js/diagram/diagram-core.js) is the same closed form flat brackets and the seam mark use — half the token's own x-height at its painted size, less half the bracket's in the bracket's own face — and `position:relative` moves the PAINT only, so the greedy line-packing budget bracketsWrapped computes against meas() is untouched. 0px at TOK_MAG 1, i.e. `top:0`, which is exactly the layout this rule had. */   /* SAME as the unwrapped brackets' BRK (700 15px) — don't inherit the 13px .text-conv base. NO side margins: a bracket next to a TOKEN then leans on the token's own 1px margin + 3px padding alone, so the bracket↔token ink gap (~5px) matches the unwrapped flat view's ~4.8px gap=5 spacing — the old 1px side margins added a spurious ~1px, making wrapped brackets sit LOOSER than flat. Share the form's baseline, exactly as the flat brackets do (there the "[" and the word are both SVG text on the same y): the form then sits at the same height against the glyph as in flat. vertical-align:middle keyed off the parent's x-height, which raised the glyph (forms read as sitting too high) and drifted between engines */
   .bwclose{font-family:var(--token-font); font-size:13.5px; font-weight:444;   /* weight curve @13.5px */ letter-spacing:.0084em;   /* tracking curve @13.5px */ color:var(--muted); margin-inline-end:3px; unicode-bidi:isolate}   /* head repeated (muted) beside a closing bracket */
   .bwrel{position:absolute; left:0; right:0; top:0; text-align:center; font-family:var(--token-font); font-size:11px; font-weight:545;   /* weight curve @11px, matching .lbl — was a flat 600 */ letter-spacing:.0248em;   /* tracking curve @11px, matching .lbl/.orel */ color:var(--dia-muted); unicode-bidi:isolate}   /* relation, in the reserved space above the form */
-  .bwform{position:relative; z-index:3; display:inline-block; font-family:var(--token-font); font-size:calc(15px * var(--script-mag,1)); font-weight:var(--script-wght,400); opacity:var(--script-op,1); color:var(--text); margin:0; unicode-bidi:isolate}   /* opacity: offsets a magnified script's own un-lightened weight — see magOpacityDia's note, js/diagram/diagram-core.js. SAME 15px as the unwrapped brackets' WORD_F — wrapping must not shrink the form. z-index:3 (Item 23 + Item 28) → the form paints ABOVE the deprel label (.bwrel, below), any neighbour's annotation, AND the .bwannot interrupter-arc/MWT overlay (z-index:2), so where a wide label/POS or an arc meets a token the TOKEN glyph wins (the arc tucks behind the glyph; its casing/halo behaviour is otherwise unchanged). Positioning context for the relation (above) and POS/translit (below), so they track the form, not the slot */
+  .bwform{position:relative; z-index:3; display:inline-block; font-family:var(--token-font); font-size:calc(15px * var(--script-mag,1) * var(--frn-scale,1)); font-weight:var(--script-wght,400); opacity:var(--script-op,1); color:var(--text); margin:0; unicode-bidi:isolate}   /* opacity: offsets a magnified script's own un-lightened weight — see magOpacityDia's note, js/diagram/diagram-core.js. SAME 15px as the unwrapped brackets' WORD_F — wrapping must not shrink the form. z-index:3 (Item 23 + Item 28) → the form paints ABOVE the deprel label (.bwrel, below), any neighbour's annotation, AND the .bwannot interrupter-arc/MWT overlay (z-index:2), so where a wide label/POS or an arc meets a token the TOKEN glyph wins (the arc tucks behind the glyph; its casing/halo behaviour is otherwise unchanged). Positioning context for the relation (above) and POS/translit (below), so they track the form, not the slot */
   .bwpos{font-family:var(--token-font); font-size:15px; font-weight:400; font-feature-settings:"c2sc" 1; color:var(--tie-hue); margin-inline-start:6px; unicode-bidi:isolate}   /* size/weight now matches the transliteration (15px normal) with c2sc small caps, mirroring .tok-pos/.opos/.node-cat. No letter-spacing: 15px is the tracking curve's reference size (0). cpsp dropped — see .tok-pos. Item 2: the LUMINANCE (colour) also matches the unwrapped-bracket POS — --c-other (the palette's neutral member at the subj/comp/mod deprel L), exactly as .opos/.tok-pos use — so wrapped-bracket POS tags read at the same lightness as the flat-bracket ones instead of the plainer --dia-muted (still true as a claim about HUE, but the LIGHTNESS gap it leans on has narrowed a lot since --dia-muted became black-at-50 % flattened: OKLab L .508 → .600 against --c-other's .655, i.e. Δ.147 → Δ.055. Re-measure before citing this as a contrast argument) */
   /* SELECTED TOKEN TEXT IS ACCENT-COLOURED, NEVER BOLDER. The accent carries the selection on its own, and the
      weight bump this used to add (font-weight:640) could not be made to pay for itself: every renderer lays its
@@ -943,11 +960,11 @@
   .dim-peri .tok-pos,.dim-peri .node-cat,.dim-peri .mwt-pos,.dim-peri .opos,.dim-peri .bwpos,
   .dim-out .tok-pos,.dim-out .node-cat,.dim-out .mwt-pos,.dim-out .opos,.dim-out .bwpos{fill:var(--dim-tie); color:var(--dim-tie)}
   .dim-peri .mwt-tie,.dim-peri .mwt-tie-h,.dim-out .mwt-tie,.dim-out .mwt-tie-h{stroke:var(--dim-edge)}   /* the MWT bracket is drawn in the arc ink, so it fades with the arcs, not with the forms it brackets */
-  .node-lbl{font-size:calc(15px * var(--script-mag,1)); font-weight:var(--script-wght,400); fill:var(--text); text-anchor:middle; font-family:var(--token-font);   /* ⚠ 15px, NOT 14, AND NO letter-spacing — the CSS half of 336a7b9, which moved NODE_F to magFont(15) ("the node glyph's base size is 15px, the SAME as WORD_F, not 14") and left this rule behind. Every measurement about this row has been at 15px ever since — the slot widths (lw/stemmaLayout's fmeas(NODE_F)), every ascent/descent-derived reserve, and _measOneUncached's own tracking, which reads trackCurve(15)=0 and so assumed no letter-spacing while this rule still painted .0055em. Reported from the other end: the MWT tie's own .mwt-form is 15px (it measures with MWT_F=WORD_F), so a stemma's multi-word token painted visibly BIGGER than the tokens it spans. One size for every token glyph in every notation — .tok-word, .baseword, .node-lbl, .bwform, .mwt-form — which is what the measurements already believed. */   /* tracking curve @14px — stated for the UNMAGNIFIED size and deliberately NOT re-derived at 2×: letter-spacing suppresses the GSUB substitutions a Brahmic conjunct is built from, so a magnified script must carry the same tracking it does at rest. meas() divides by --script-mag to match (see _measOneUncached). opacity offsets a magnified script's own un-lightened weight — see magOpacityDia's note, js/diagram/diagram-core.js */
+  .node-lbl{font-size:calc(15px * var(--script-mag,1) * var(--frn-scale,1)); font-weight:var(--script-wght,400); fill:var(--text); text-anchor:middle; font-family:var(--token-font);   /* ⚠ 15px, NOT 14, AND NO letter-spacing — the CSS half of 336a7b9, which moved NODE_F to magFont(15) ("the node glyph's base size is 15px, the SAME as WORD_F, not 14") and left this rule behind. Every measurement about this row has been at 15px ever since — the slot widths (lw/stemmaLayout's fmeas(NODE_F)), every ascent/descent-derived reserve, and _measOneUncached's own tracking, which reads trackCurve(15)=0 and so assumed no letter-spacing while this rule still painted .0055em. Reported from the other end: the MWT tie's own .mwt-form is 15px (it measures with MWT_F=WORD_F), so a stemma's multi-word token painted visibly BIGGER than the tokens it spans. One size for every token glyph in every notation — .tok-word, .baseword, .node-lbl, .bwform, .mwt-form — which is what the measurements already believed. */   /* tracking curve @14px — stated for the UNMAGNIFIED size and deliberately NOT re-derived at 2×: letter-spacing suppresses the GSUB substitutions a Brahmic conjunct is built from, so a magnified script must carry the same tracking it does at rest. meas() divides by --script-mag to match (see _measOneUncached). opacity offsets a magnified script's own un-lightened weight — see magOpacityDia's note, js/diagram/diagram-core.js */
     paint-order:stroke; stroke:var(--casing); stroke-width:3.5px; stroke-linejoin:round; fill-opacity:var(--script-op,1); stroke-opacity:var(--script-op,1)}   /* fill-opacity/stroke-opacity, not opacity — WebKit compositing-clip fix, see .tok-word's own note */
   .node-cat{font-size:15px; font-weight:400; font-feature-settings:"c2sc" 1; fill:var(--tie-hue); text-anchor:middle; font-family:var(--token-font);   /* matches the transliteration's size/weight (15px normal); c2sc small caps for the tag register, like .tok-pos/.opos/.bwpos; luminance matches --c-other (the subj/comp/mod deprel L), same as every other POS-tag rendering — was the odd one out on the plainer --dia-2. cpsp dropped — see .tok-pos */
     paint-order:stroke; stroke:var(--casing); stroke-width:3.5px}
-  .baseword{font-size:calc(15px * var(--script-mag,1)); font-weight:var(--script-wght,400); fill:var(--text); text-anchor:middle; font-family:var(--token-font);   /* ⚠ 15px, NOT 14, AND NO letter-spacing — the CSS half of 336a7b9, which moved NODE_F to magFont(15) ("the node glyph's base size is 15px, the SAME as WORD_F, not 14") and left this rule behind. Every measurement about this row has been at 15px ever since — the slot widths (lw/stemmaLayout's fmeas(NODE_F)), every ascent/descent-derived reserve, and _measOneUncached's own tracking, which reads trackCurve(15)=0 and so assumed no letter-spacing while this rule still painted .0055em. Reported from the other end: the MWT tie's own .mwt-form is 15px (it measures with MWT_F=WORD_F), so a stemma's multi-word token painted visibly BIGGER than the tokens it spans. One size for every token glyph in every notation — .tok-word, .baseword, .node-lbl, .bwform, .mwt-form — which is what the measurements already believed. */   /* tracking curve @14px — stated for the UNMAGNIFIED size and deliberately NOT re-derived at 2×: letter-spacing suppresses the GSUB substitutions a Brahmic conjunct is built from, so a magnified script must carry the same tracking it does at rest. meas() divides by --script-mag to match (see _measOneUncached). opacity offsets a magnified script's own un-lightened weight — see magOpacityDia's note, js/diagram/diagram-core.js */
+  .baseword{font-size:calc(15px * var(--script-mag,1) * var(--frn-scale,1)); font-weight:var(--script-wght,400); fill:var(--text); text-anchor:middle; font-family:var(--token-font);   /* ⚠ 15px, NOT 14, AND NO letter-spacing — the CSS half of 336a7b9, which moved NODE_F to magFont(15) ("the node glyph's base size is 15px, the SAME as WORD_F, not 14") and left this rule behind. Every measurement about this row has been at 15px ever since — the slot widths (lw/stemmaLayout's fmeas(NODE_F)), every ascent/descent-derived reserve, and _measOneUncached's own tracking, which reads trackCurve(15)=0 and so assumed no letter-spacing while this rule still painted .0055em. Reported from the other end: the MWT tie's own .mwt-form is 15px (it measures with MWT_F=WORD_F), so a stemma's multi-word token painted visibly BIGGER than the tokens it spans. One size for every token glyph in every notation — .tok-word, .baseword, .node-lbl, .bwform, .mwt-form — which is what the measurements already believed. */   /* tracking curve @14px — stated for the UNMAGNIFIED size and deliberately NOT re-derived at 2×: letter-spacing suppresses the GSUB substitutions a Brahmic conjunct is built from, so a magnified script must carry the same tracking it does at rest. meas() divides by --script-mag to match (see _measOneUncached). opacity offsets a magnified script's own un-lightened weight — see magOpacityDia's note, js/diagram/diagram-core.js */
     paint-order:stroke; stroke:var(--casing); stroke-width:3.5px; stroke-linejoin:round; fill-opacity:var(--script-op,1); stroke-opacity:var(--script-op,1)}   /* fill-opacity/stroke-opacity, not opacity — WebKit compositing-clip fix, see .tok-word's own note. item 4: the wrapped stemma's baseline word row is a token FORM and was the one form rendering with no casing halo (audited across all five notations × wrap on/off) — .tok-word/.node-lbl/.mwt-form all carry 3.5px. It needs it more than most: the .proj dotted connectors land ON this row, so without a halo every line ran straight through the glyphs. Costs no layout width — a paint-order stroke paints outside the advance width and the renderers measure with meas() at the resting face either way */
   /* item 3 — FEATS Typo=Yes strikes the token form through. Set on the FORM element of every notation (the
      FORM_SEL family: .tok-word/.baseword/.node-lbl/.bwform/.oform, plus the folded-punctuation satellites) and on
@@ -961,12 +978,164 @@
      cell, and the inline node editor, which copies the form's computed font-style. Every layout measurement of a
      form mirrors the swap (fmeas() in the diagrams, GRID_ITAL_F in the grid), so slots, the MWT tie, hit boxes
      and column widths are sized in the face the glyphs actually render in. */
-  .tok-ital{font-style:italic}
+  .tok-ital{font-style:italic; letter-spacing:.02em}   /* tracking curve @15px (0, the reference size) + the ITALIC bump (ITALIC_TRACK, diagram-core.js) — see the .tok-ital/.frn-up tracking note below for why the bump is not optional */
   .cin.tok-ital{font-style:italic}   /* the grid's Form cell is a field: .cin's `font:inherit` shorthand RESETS font-style, and sits later in this sheet at the same specificity as .tok-ital above — so the field needs the two-class selector to keep its italics */
+  /* ⚠ THE ITALICS CARRY THEIR TRACKING WITH THEM, AND NOT DOING SO WAS A RESERVE/PAINT MISMATCH — the same
+     class of bug the magnification's own tracking term records (magTrack, diagram-core.js), one flip down.
+     `fmeas1()` measures a Foreign=Yes form as `"italic "+f`, and `_measOneUncached` puts `trackEmOf(f)` on the
+     measuring element — which for an italic string is `trackCurve(px) + ITALIC_TRACK`. So the SLOT has always
+     been reserved with the .02em bump every OTHER italic row in this sheet states as a literal (.strans,
+     .translit, .otrans, .gloss[data-tier="mseg"]), while `.tok-ital` declared font-style ALONE and painted with
+     none of it. Measured over all five notations at FS 1: the form painted 0.02em/character narrower than its
+     own reserve, and the inline editor — which takes its tracking from `trackEmOf(fontStr)`, i.e. from the same
+     measurement — opened at 0.3px against the display's 0. Stating the bump here is what makes the three agree.
+     `.oform` needs its own value because its base is 14px, not the 15px reference: .0055 + .02 = .0255em, which
+     is exactly what `.otrans` (the italic row beside it, same size) already carries. */
+  .oform.tok-ital{letter-spacing:.0255em}   /* tracking curve @14px (.0055em) + the italic bump — matches .otrans's own literal */
   /* …and the two rows a diagram already sets in italics — the transliteration and the MSeg (segmentation) tier —
      flip the other way for a foreign token, so the row keeps its contrast against its upright neighbours instead
-     of dissolving into them. Two-class selectors → these win over the .translit/.otrans/.gloss italic above. */
-  .translit.frn-up,.otrans.frn-up,.gloss.frn-up[data-tier="mseg"]{font-style:normal}
+     of dissolving into them. Two-class selectors → these win over the .translit/.otrans/.gloss italic above.
+     ⚠ …AND THEY GIVE THE ITALIC BUMP BACK, for the mirror image of the reason .tok-ital now takes it: `trFont()`/
+     `tierFont()` hand an UPRIGHT font string (TRANS_UP_F / MSEG_UP_F) to every measurement of these rows, so the
+     reserve carries `trackCurve(px)` alone — while the rule these override kept its .02em on. Measured: the
+     MSeg tier painted upright at 0.3px of tracking against a 0px reserve, and its editor at 0. Each row states
+     its own base, since the three are not all one size. */
+  .translit.frn-up{font-style:normal; letter-spacing:0}          /* tracking curve @15px — the reference size, so 0 */
+  .otrans.frn-up{font-style:normal; letter-spacing:.0055em}      /* tracking curve @14px */
+  .gloss.frn-up[data-tier="mseg"]{font-style:normal; letter-spacing:0}   /* tracking curve @15px — the reference size, so 0 */
+  /* item 2 — …AND IN A CHINESE DOCUMENT THE FOREIGN MARK IS THE FACE, NOT THE SLANT. Han has no italic:
+     `font-style:italic` on 行 gets a SYNTHESISED oblique, a sheared glyph that is not a mark Chinese
+     typography makes. What it makes is 楷體 against the body face, which is what these rules select —
+     without touching `.tok-ital` itself, since the swap is carried by the @font-face's italic slot (see
+     --frn-font above). The ID selector is deliberate: it has to outrank `.oform`, which declares its own
+     font-family LATER in this sheet and would otherwise win the cascade on the outline's form row. */
+  #doc[data-hanfrn] .tok-ital{font-family:var(--frn-font)}
+  #doc[data-hanfrn] .cin.tok-ital{font-family:var(--frn-mono-font)}   /* the grid's Form cell — a field, in the MONO stack; same two-class shape its font-style rule above needs, for the same `font:inherit` reason */
+  /* ⚠ …AND THE KAI FACE IS SET LARGER AND HIGHER THAN THE SANS BESIDE IT, BECAUSE ITS 字面 IS SMALLER.
+     A Kai (楷體) face is a brush hand: it is drawn to a smaller face-square inside the same em than a modern
+     Hei is, which is exactly why a foreign token read as SHRUNKEN next to its neighbours rather than merely
+     differently cut. Measured (headless Chrome, canvas actualBoundingBox over TWENTY dense, box-filling
+     glyphs — 國圖書體鹽讀龜藝醫職顧願麗議讚靈邊關營嚴 — at 100px; a mixed set including 一 二 十 measures
+     stroke count rather than face size and skews the two faces differently, so it was rejected):
+
+        face                ink ascent   ink descent   ink h   ink w
+        PingFang SC/TC          80.50         9.79     90.28   88.63   ← what --token-font resolves Han to
+        Kaiti SC                70.79        13.06     83.85   83.00
+        Kaiti TC                71.40        12.92     84.32   83.87
+
+     Two corrections follow, and each is derived, not picked: `--frn-scale` is the geometric mean of the two
+     INK-BOX ratios (SC 90.28/83.85 and 88.63/83.00 → 1.0722; TC → 1.0637) so the ink boxes match, and
+     `--frn-lift` then puts the two HALF-CAP-HEIGHT lines together.
+     ⚠ SCALED ON THE INK BOX, NOT ON THE CAP HEIGHT, and that is a decision that was made, unmade and made
+     again — leave it alone without a fresh report. Scaling on the ascent instead (`asc_sans/asc_kai` → TC
+     1.1275) makes the two cap heights equal and so puts the half-cap lines together with no lift at all,
+     which is tidier on paper; shipped and looked at, it read as TOO BIG, because Kai's descent scales with
+     it and the token's total ink then runs ~5 % taller than its neighbours'. The ink-box scale is what the
+     eye approved. (The size was never the real complaint in the round that produced it — the Kai face's own
+     calligraphic SLANT was, and no scale addresses that.)
+     ⚠️ HALF-CAP-HEIGHT, NOT THE INK-BOX CENTRE, for the lift, and the two are genuinely different because
+     Kai descends further below the baseline than the sans does. Cap height is measured from the baseline UP,
+     so half-cap-height is a point at half the ascent and owes nothing to the descent — whereas an ink-box
+     centre is (asc − desc)/2 and is dragged DOWN by exactly the descent Kai has more of. Centring the ink
+     boxes lifted the Kai body 0.020 em too high; the lift is `asc_sans/2 − asc_kai × scale / 2` instead, i.e.
+     SC 0.0230 em and TC 0.0228 em.
+     ⚠️ A THIRD reading of "cap height" — each face's own LATIN capitals, which `1cap` and OS/2 sCapHeight
+     answer for — was measured and rejected: PingFang 71.40 against Kaiti 69.55 asks for a small DOWNWARD
+     shift and so leaves the Han bodies almost exactly where the two designers happened to put them relative
+     to their own Latin. That is the mismatch being corrected, not a datum to correct it against, and neither
+     face ever paints a Latin capital here — the Kai family's own unicode-range confines it to Han. (`1cap`
+     is also not usable for these faces even where it is the right question: it reports 86 for PingFang and
+     for BiauKaiTC against real cap ink of 71.40 and 64.90; only Kaiti's 69.5 is truthful.)
+     ⚠️ AND THE CHARACTERS ARE NOT SPACED PROPORTIONALLY, WHICH IS THE FONTS' ANSWER RATHER THAN A CHOICE.
+     Kai's ink is narrower than its em (83.87 against the sans's 88.63), so its characters sit in visibly
+     roomier boxes — but every Han ideograph in every face installed here is exactly one em wide and stays
+     that way: measured, ten ideographs come to exactly 1000px at 100px in Kaiti SC/TC, STKaiti, BiauKaiTC,
+     TW-Kai, Xingkai SC, Adobe Kaiti Std, PingFang SC, Songti SC and Hiragino Sans, and `palt`, `pwid` and
+     `halt` move none of them. Those features exist for PUNCTUATION and Latin/kana, not for ideographs — the
+     fixed body is the writing system's own grid. Synthesising per-glyph advances would mean placing every
+     character by hand from its ink width, which is not a number the shipping engine can obtain for a family
+     canvas will not resolve there.
+     Both properties are exactly 1 and 0 for every non-Chinese document, where neither is ever set and every
+     `var(--frn-scale,1)`/`var(--frn-lift,0em)` consumer falls back to its no-op.
+     ⚠ MEASURED ON THE macOS FACES, which are the ones these families resolve to on the platform that has
+     actually run. Windows' own pairing (Microsoft YaHei/JhengHei against SimKai/DFKai-SB) has never been
+     measured here and may want its own numbers; the direction of the correction is a property of the Kai
+     STYLE rather than of any one file, so this is the right value to be wrong by a percent on, not a reason
+     to leave the glyph visibly small. */
+  #doc[data-hanfrn="sc"] .tok-ital,#doc[data-hanfrn="sc"] .stx-frn{--frn-scale:1.0722; --frn-lift:.0230em; --frn-track:-.0640em}
+  #doc[data-hanfrn="tc"] .tok-ital,#doc[data-hanfrn="tc"] .stx-frn{--frn-scale:1.0637; --frn-lift:.0228em; --frn-track:-.0544em}
+  /* ⚠ AND THE RUN IS TIGHTENED, BECAUSE A KAI CHARACTER CARRIES MORE AIR INSIDE ITS OWN EM THAN THE SANS
+     DOES. Every Han ideograph is exactly one em wide in every face — measured, ten of them come to exactly
+     1000px at 100px in Kaiti SC/TC, STKaiti, BiauKaiTC, TW-Kai, Xingkai SC, Adobe Kaiti Std, PingFang SC,
+     Songti SC and Hiragino Sans, and `palt`/`pwid`/`halt` move none of them; those features exist for
+     PUNCTUATION and Latin/kana, never for ideographs, because the fixed body is the writing system's own
+     grid. So the Kai's narrower INK (83.87 against the sans's 88.63) is not narrower boxes but the same
+     boxes with more space around the letters, which reads as a loosely-set word beside its neighbours.
+     What is available is to give the run back the sans's own gap. Per em of the row's nominal size F:
+     a sans character leaves F − 0.8863F = 0.1137F between its ink and the next, a TC Kai character (whose
+     own em is F × 1.0637) leaves 1.0637F − 0.8387×1.0637F = 0.1716F. Subtracting the difference through
+     letter-spacing — expressed in the Kai element's OWN em, so ÷1.0637 — gives −0.0544em, and SC's wider
+     side bearings give −0.0640em. These are NET values that replace `.tok-ital`'s .02em italic bump rather
+     than adding to it: the bump is a correction for SLANT, and this face is upright.
+     ⚠️ TRULY PROPORTIONAL SPACING — each character advancing by its own ink — is a different thing and is
+     not reachable here. It would have to be synthesised from per-glyph ink extents, and the shipping engine
+     cannot measure them: WebKit's canvas actualBoundingBoxLeft/Right returns the ADVANCE box for Han (一 and
+     丨 both answer 100 of 100 at 100px, where Chrome answers real, varying ink) and SVG getBBox is
+     advance-based there too. HarfBuzz could supply them — `hbjs.createFace` already takes the face index a
+     .ttc needs — but Kaiti ships as a 106 MB, 7-face collection in the OS asset store whose single face
+     still carries 28–37 MB of tables, against the 2.0 MB of the largest face this app hands HarfBuzz today,
+     and the resulting <path> run would reach the SVG diagram only, leaving the running line and the grid on
+     full-width spacing. Costed, not overlooked.
+     ⚠️ DOCUMENT-SCOPED, NOT PER TOKEN, and by now that caveat covers THREE properties: a LATIN word marked
+     Foreign in a Chinese document is enlarged 6.4 %, tightened 0.074 em and set bold, and wants none of the
+     three (its face really is italic, and the .02em bump the tightening replaces is what that face wants).
+     Each of these serves a whole element and the element is the token, so telling the two apart means a
+     per-token predicate — "is this form Han" — threaded through italDeco, paintStext and frnFontStr. That
+     is worth doing if such tokens turn out to be common in practice; it is stated here rather than
+     discovered later. Literary Chinese, the language this feature was built for, has essentially none. */
+  /* ⚠ AND THE RUN IS SET BOLD, WHICH IS A COLOUR CORRECTION AND NOT AN EMPHASIS. A brush hand's stroke is
+     thinner and more modulated than a Hei's, so at the same size and the same ink colour a Kai word reads
+     as FADED beside its neighbours rather than merely different. Measured as ink coverage — alpha mass per
+     em², the same 20 dense glyphs, each at the size it is actually painted: PingFang 0.4198, Kaiti TC
+     Regular 0.2426, i.e. 58 % of the sans's ink. Bold takes it to 0.3060 (73 %), which is what this asks
+     for; Black would reach 0.3507 (84 %) and is available if 73 % still reads light, but it is a display
+     cut. See the bold @font-face blocks in styles/fonts.css for the rest of the measurement and for why
+     Kaiti SC's own Medium is not usable. Parity is not reachable at any weight — the thin stroke IS the
+     face — so this closes about half the gap and stops there.
+     ⚠️ AND THE WEIGHT IS THE ONE THING HERE THAT DIFFERS BY VENUE, on report: Bold reads right in the
+     RUNNING SENTENCE and too heavy in the DIAGRAM. Both halves make sense against what surrounds the word.
+     The running line sets it in a continuous row of sans text at the same size, where the comparison is
+     immediate and the Kai's 58 % of the sans's ink is what made it look faded. A diagram token is isolated
+     — space around it, and every annotation near it (POS, deprel, the AVM) deliberately light grey — so it
+     is already the densest thing in its neighbourhood and the extra ink reads as shouting rather than as
+     matching. The base size differs too, which pushes the same way: the diagram's form row is 22.5px for a
+     magnified lzh document against the running line's 19.5px, so identical weights put appreciably more
+     absolute ink on screen there.
+     ⚠️ IT IS A CHOICE BETWEEN TWO FACES, NOT A DIAL, so there is no middle to split the difference with.
+     Kaiti TC ships Regular, Bold and Black and nothing between; SC's Medium cannot be selected (see the
+     fonts.css note). A synthetic middle is not available either: the SVG form row's `stroke` is already
+     spoken for by the casing (paint-order:stroke, .tok-word), and an feMorphology filter — the other way to
+     thin a Bold — forces the offscreen buffer whose getBBox-derived bounds this file has already been bitten
+     by once (see .stext-script's fill-opacity note on the clipped Javanese conjuncts). So: 700 where it was
+     asked for, 400 where it was not. */
+  #doc[data-hanfrn] .stx-frn{--frn-wght:700}
+  #doc[data-hanfrn] .tok-ital{--frn-wght:400}   /* the diagram's five form rows and the grid's Form cell — see above */
+  #doc[data-hanfrn] .tok-ital,#doc[data-hanfrn] .stx-frn{letter-spacing:var(--frn-track); font-weight:var(--frn-wght)}
+  /* The SCALE reaches the five form rows through the `* var(--frn-scale,1)` factor already threaded into
+     each of their own font-size calcs, beside `var(--script-mag,1)` — the same list, the same shape, the
+     same no-op default. These two rows have no font-size of their own to thread it into, so they take it
+     relative to the line they sit in: inside a `font-size` declaration `1em` is the PARENT's size, which is
+     precisely the sans size being matched. */
+  #doc[data-hanfrn] .stx-frn,#doc[data-hanfrn] .cin.tok-ital{font-size:calc(1em * var(--frn-scale,1))}
+  /* …and the LIFT is paint-only in both technologies, so no row's reserved height moves: an SVG <text>
+     takes a transform (`em` there resolves against the element's OWN font-size, i.e. the scaled one, which
+     is what the offset was derived in), an HTML run takes the `position:relative` + `top` this file already
+     uses for exactly this kind of optical nudge (see --script-brk-lift). NOT the grid's Form cell: its
+     glyph has no sans neighbour on a shared baseline to align to — each form sits alone in its own row —
+     and an <input> given `position:relative` would join the cascade its own pop-out editing overlay
+     (.cin.editing) already fights over. */
+  #doc[data-hanfrn] text.tok-ital{transform:translateY(calc(-1 * var(--frn-lift,0em)))}
+  #doc[data-hanfrn] .oform.tok-ital,#doc[data-hanfrn] .bwform.tok-ital,#doc[data-hanfrn] .stx-frn{position:relative; top:calc(-1 * var(--frn-lift,0em))}
   .tok-typo{text-decoration-thickness:from-font; text-decoration-skip-ink:none}   /* skip-ink:none — a descender crossing the rule must not punch a gap in it; the rule is an ANNOTATION here, not typographic underlining */
   /* item 4 — the SVG marker line (svgMarks): drawn behind the glyphs so it reads as one cased unit with the
      text. Colour tracks the form (--text, → --accent when the token is selected / in a range). */
@@ -1177,7 +1346,7 @@
   .ohovbox{position:absolute; z-index:0; background:var(--row-hover); border-radius:6px; pointer-events:none; display:none}                                 /* hover — same span as a row selection */
   .oreportbox{position:absolute; z-index:0; border:.5px solid color-mix(in srgb,var(--text) 18%,transparent); border-radius:7px; background:color-mix(in srgb,var(--content-bg) 55%,transparent); box-shadow:0 1px 4px rgba(0,0,0,.12),0 0 0 .5px rgba(0,0,0,.02); pointer-events:none}   /* item 7: a reported-speech subtree sits in a subtly drop-shadowed box (behind the rows, so it never shifts their horizontal alignment) */
   .orel{font-family:var(--token-font); font-size:11px; font-weight:545;   /* weight curve @11px, matching .lbl/.bwrel — was a flat 600 */ color:var(--dia-muted); margin-inline-end:9px; letter-spacing:.0248em;   /* tracking curve @11px, matching .lbl/.bwrel — was a flat .02em */ unicode-bidi:isolate}
-  .oform{font-family:var(--token-font); font-size:calc(14px * var(--script-mag,1)); font-weight:var(--script-wght,400); opacity:var(--script-op,1); color:var(--text); font-weight:400; letter-spacing:.0055em;   /* tracking curve @14px */ unicode-bidi:isolate; padding:0 1px}   /* matches every OTHER view's token-form weight (.tok-word/.node-lbl/.baseword/.bwform are all unset → 400); was 520, reading noticeably heavier here than the same word rendered as a diagram token. opacity offsets a magnified script's own un-lightened weight — see magOpacityDia's note, js/diagram/diagram-core.js */
+  .oform{font-family:var(--token-font); font-size:calc(14px * var(--script-mag,1) * var(--frn-scale,1)); font-weight:var(--script-wght,400); opacity:var(--script-op,1); color:var(--text); font-weight:400; letter-spacing:.0055em;   /* tracking curve @14px */ unicode-bidi:isolate; padding:0 1px}   /* matches every OTHER view's token-form weight (.tok-word/.node-lbl/.baseword/.bwform are all unset → 400); was 520, reading noticeably heavier here than the same word rendered as a diagram token. opacity offsets a magnified script's own un-lightened weight — see magOpacityDia's note, js/diagram/diagram-core.js */
   .punctsat{font-family:var(--token-font); font-size:14px; color:var(--text); letter-spacing:.0055em;   /* tracking curve @14px */ unicode-bidi:isolate; cursor:pointer}   /* a folded punctuation mark rendered as its OWN selectable, unannotated inline element beside its host (outline / wrapped brackets); real horizontal space, no arc/deprel/POS of its own */
   .punctsat.sel{color:var(--accent)}   /* accent only, no weight bump — see the "selected token text" note beside .node.sel .node-lbl */
   #doc.zone-grid .punctsat.sel{color:var(--accent-dim)}
@@ -1196,7 +1365,24 @@
   .bwrap .punctsat{font-size:calc(15px * var(--script-mag,1))}   /* …15px, matching .bwform beside it — the outline's own .punctsat is 14px because .oform is, and this override (added when wrapped-brackets punctuation was found not to scale with magnification at all) carried that 14 across to a row whose host form is 15. A satellite is drawn glued to its host's form and has to be set in the same size as it; at 2× the 1px difference paints as 2. */
   .otrans{font-style:italic; color:var(--dia-muted); font-size:14px; letter-spacing:.0255em;   /* tracking curve @14px (.0055em) + italic bump (ITALIC_TRACK, diagram-core.js — kept in sync with _measOneUncached's italicTrackOf() by hand) */ margin-inline-start:8px; unicode-bidi:isolate; font-family:var(--token-font)}   /* same size as the form beside it */
   /* item 7: under a script orthography the translit row shows the ORIGINAL (CJK) script — italics are for romanisation only */
-  #doc.ortho-script .otrans,#doc.ortho-script .translit,#doc.ortho-script .strans{font-style:normal}
+  /* ⚠ …AND THE TRACKING COMES OFF WITH THEM, for the reason the .tok-ital/.frn-up pair above states at
+     length: `trFont()` hands the measurement an UPRIGHT font string here (trRowItalic, diagram-core.js),
+     so `trackEmOf` gives `trackCurve(px)` and not the italic bump, while these rules kept the bump on.
+     Measured under a Zhuyin display: the row painted upright at 0.3px of tracking against a 0px reserve,
+     and its inline editor — whose own tracking comes from `trackEmOf(fontStr)`, built off this element's
+     COMPUTED style, so upright — opened at 0 against the row's 0.3px. That is the transliteration row's
+     copy of the very mismatch the .frn-up block above fixes for the Foreign flip. Each row states its own
+     base, since the three are not one size. */
+  #doc.ortho-script .translit{font-style:normal; letter-spacing:0}        /* tracking curve @15px — the reference size, so 0 */
+  #doc.ortho-script .otrans{font-style:normal; letter-spacing:.0055em}    /* tracking curve @14px */
+  #doc.ortho-script .strans{font-style:normal; letter-spacing:normal}     /* .strans states the bump ALONE (see its own rule) — upright, there is nothing left to state */
+  /* …and a FOREIGN token's row flips back to italic, because the marked value is whatever the row around
+     it is not. This is the rule `#doc.ortho-script .strans .stx-frn` (above) already applies on the
+     running sentence line, brought to the diagram rows the line is the summary of: without it the two
+     `font-style:normal` rules met and a foreign word under a Zhuyin display was drawn exactly like its
+     neighbours, with the mark silently gone. `trFont()` answers the same XOR. */
+  #doc.ortho-script .translit.frn-up{font-style:italic; letter-spacing:.02em}      /* tracking curve @15px (0) + the italic bump */
+  #doc.ortho-script .otrans.frn-up{font-style:italic; letter-spacing:.0255em}      /* tracking curve @14px (.0055em) + the italic bump */
   /* THE TEXT CURSOR MARKS WHAT OPENS A FIELD. Every diagram text that answers a click with an input already
      said so — the romanisation row, the gloss tiers, the CorrectForm companion — but the FORM itself did not,
      which is the one every user reaches for first. The cursor is the only affordance these have: there is no

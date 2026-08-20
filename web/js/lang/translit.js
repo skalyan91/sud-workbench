@@ -599,6 +599,25 @@ const STACKING_SCRIPTS=new Set(["Grantha","Javanese","Balinese","Kawi","Burmese"
 const HANGING_SCRIPTS=new Set(["Devanagari","Bengali","Tirhuta","Sharada","Newa","Ranjana",
   "Siddham","Soyombo","Tibetan","ZanabazarSquare","Gujarati","Nandinagari"]);
 function isLzhLang(lang){ const b=((lang!=null?lang:DOCLANG)||"").toLowerCase().split(/[-_]/)[0]; return b==="lzh"; }
+/* ── WHICH KAI FACE A FOREIGN TOKEN TAKES IN A CHINESE DOCUMENT (item 2) ───────────────────────────
+   Han has no italic, so a Foreign=Yes token in zh/yue/lzh is marked by a change of FACE — 楷體 against
+   the body face — rather than by the synthesised oblique `.tok-ital` used to get. This answers WHICH of
+   the two Kai families (see the "SUD Kai SC"/"SUD Kai TC" @font-faces in styles/fonts.css) draws it, or
+   "" for every other language, which is what the whole feature is gated on.
+   ⚠ THE READER'S OWN SCRIPT CHOICE OUTRANKS THE LANGUAGE, because it is the more specific statement:
+   the Script pill's `simplified`/`traditional` (_HANZI_CONV, app/translit.py) says outright which
+   character set is on screen, and a zh document being READ in traditional wants the traditional shapes.
+   With no such pick the language decides, and lzh/yue take TC: Literary Chinese is written in
+   traditional characters, and so is essentially every Cantonese text this app will open, while modern
+   zh defaults to SC. Only these three languages — ja/ko are Han-using too and neither marks a foreign
+   word this way (Japanese has katakana for exactly this job), so neither was included.
+   The two faces are not interchangeable: 9 of 14 sampled graphs paint different outlines in Kaiti SC
+   and Kaiti TC (measured — see the fonts.css note), and both cover all 14, so the pick changes shapes
+   rather than coverage and a wrong answer here is visible rather than fatal. */
+function hanFrnFace(lang){ const b=((lang!=null?lang:DOCLANG)||"").toLowerCase().split(/[-_]/)[0];
+  if(b!=="zh"&&b!=="yue"&&b!=="lzh") return "";
+  if(typeof ORTHO_SCHEME!=="undefined"){ if(ORTHO_SCHEME==="traditional") return "tc"; if(ORTHO_SCHEME==="simplified") return "sc"; }
+  return b==="zh"?"sc":"tc"; }
 /* Literary Chinese magnifies too, on request — its Han glyphs run to the same dense, fine-stroke
    complexity (rare/archaic characters, more strokes per square than the simplified everyday set) that
    is the whole rationale above for the Indic scripts. Scoped to lzh specifically, not Chinese generally

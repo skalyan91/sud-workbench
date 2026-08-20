@@ -171,7 +171,62 @@ const _mdiv=document.createElement("div");
 _mdiv.setAttribute("aria-hidden","true");
 _mdiv.style.cssText="position:absolute;left:-99999px;top:0;white-space:pre;visibility:hidden;pointer-events:none";
 function _measMountHTML(){ const h=document.documentElement||document.body; if(h&&!_mdiv.isConnected) h.appendChild(_mdiv); }
-function _measDOM(s,f){ _measMountHTML(); _mdiv.style.font=f; _mdiv.textContent=s||""; return _mdiv.getBoundingClientRect().width; }
+/* `trackEm` — the row's own letter-spacing, for the ONE caller that needs this element to reproduce a
+   TRACKED width (see svgTracksText below). Applied as a longhand AFTER `style.font`, never folded into
+   the shorthand: `font:` resets letter-spacing to its initial value, so the order is the same one
+   `_measOneUncached`'s own cssText already depends on. Written on EVERY call, "normal" included, because
+   `_mdiv` is reused — a previous tracked call's value would otherwise ride along into an untracked one. */
+function _measDOM(s,f,trackEm){ _measMountHTML(); _mdiv.style.font=f; _mdiv.style.letterSpacing=trackEm?trackEm+"em":"normal"; _mdiv.textContent=s||""; return _mdiv.getBoundingClientRect().width; }
+/* ── DOES THIS ENGINE'S SVG TEXT LENGTH INCLUDE letter-spacing? WEBKIT'S DOES NOT. ────────────────────
+   `_measOneUncached` mirrors the row's tracking onto the measuring element and then asks
+   getComputedTextLength() — which in Chrome returns the tracked advance and in WebKit returns the
+   UNTRACKED one, silently. Measured in the shipping WKWebView against the same strings in headless
+   Chrome, `italic 15px` + .02em: "abcd" 32.685 either way in WebKit against Chrome's 32.688 → 33.891,
+   "ipso facto" 64.890 against 64.891 → 67.891. So every tracked row in the sheet — the transliteration,
+   both gloss tiers, the outline's form row, the relation labels, the AVM columns, and now a Foreign
+   token's italic form — has been reserving the UNtracked width on the one engine this app ships on,
+   painting up to `n × trackPx` wider than its own slot.
+   ⚠ THE CORRECTION IS THE HTML MEASUREMENT, NOT getBBox(), AND THE DIFFERENCE IS NOT COSMETIC. Both
+   were measured against Chrome's number (the one the layout is already right for) over Latin, a
+   Devanagari conjunct and Han:
+     · `getBBox()` — one read on the element already in hand — is WebKit's own SVG paint, and WebKit
+       applies SVG letter-spacing PER CODE POINT: `देवदत्त` (7 code points, 4 typographic character
+       units) came back 36.438 against Chrome's 35.844, i.e. 0.9px out, and needs a further +1×trackPx
+       for the trailing space getBBox does not include. Latin and Han matched to 0.004.
+     · the live HTML element applies it per typographic character unit, exactly as Chrome does, and
+       reproduces Chrome's number to 0.000 on ALL FIVE strings — Devanagari included.
+   So the tracked width is taken from `_measDOM`, which is a mechanism this file already trusts for
+   exactly this reason (see its own note: measure through the thing that will paint). Verified
+   untracked too: `_measDOM` and getComputedTextLength agree to ≤0.011px in both engines.
+   ⚠ AND THE CHEAP ARITHMETIC ALTERNATIVE WAS MEASURED AND REJECTED, so nobody has to try it twice. CSS
+   inserts the spacing between TYPOGRAPHIC CHARACTER UNITS, which `Intl.Segmenter` grapheme clusters
+   reproduce closely enough to be tempting: `ctl + nGraphemes × trackPx` needs no layout at all and
+   matched the DOM number to 0.013px on 17 of 20 strings. It is the other three that rule it out — over
+   a 20-string corpus it was out by up to 1.50px in Chrome (`مكتبة`, where letter-spacing is suppressed
+   in a cursive join and the model adds it anyway; `कृष्ण`, `मूर्तित्वे`) and up to 4.01px in WebKit
+   (a skin-tone emoji sequence, the Leipzig run `PST.PTCP-GEN.SG.M`, Balinese and Javanese akṣara). An
+   engine that disagrees with the model is not a bug to work around — it is the paint, and the paint is
+   the thing being reserved for.
+   PROBED, never branched on the engine — the same rule smpUnshaped's own probe follows: an engine that
+   gains this simply reports true and nothing changes. One-shot, and deliberately NOT re-probed on a
+   font-stack change: this is a property of the text engine, not of the face. Memoised only once the
+   probe has a real measurement to go on, so a call made before #doc or the fonts exist cannot freeze
+   the answer at a pair of zeros. The probe string is ASCII and the spacing an absurd 1em, so no amount
+   of rounding can make "honours it" and "ignores it" look alike. */
+let _SVG_TRACKS=null;
+function svgTracksText(){ if(_SVG_TRACKS!==null) return _SVG_TRACKS;
+  _measMount();
+  const keepCss=_mtxt.style.cssText, keepTxt=_mtxt.textContent;   // the probe borrows the shared measuring element; hand it back exactly as found, since _measOneUncached may be part way through its own use of it
+  let plain=0, spaced=0;
+  try{
+    _mtxt.style.cssText="white-space:pre;font:15px monospace"; _mtxt.textContent="AVAV";
+    plain=_mtxt.getComputedTextLength();
+    _mtxt.style.letterSpacing="1em";
+    spaced=_mtxt.getComputedTextLength();
+  }catch(_){ }
+  _mtxt.style.cssText=keepCss; _mtxt.textContent=keepTxt;
+  if(!(plain>0)) return true;   // nothing measurable yet (no layout, no fonts) — answer the no-op and stay UNmemoised, so the next call asks again
+  return (_SVG_TRACKS = spaced>plain+1); }
 /* A HIDDEN PARKING SPOT FOR AN ELEMENT THAT ISN'T ATTACHED YET BUT NEEDS getComputedStyle() TO ANSWER
    FOR REAL — see smpReshape's own note for exactly which caller needs this and why: renderSentence()
    calls smpReshape on the freshly-built diagram BEFORE its own caller (document.js) inserts it into
@@ -308,6 +363,27 @@ Object.defineProperty(window,"MONO_STACK",{configurable:true,
 function _lazyFont(name,derive){ let v; Object.defineProperty(window,name,{configurable:true,
   get(){ return v!==undefined?v:(v=derive()); }, set(x){ v=x; } }); }
 _lazyFont("LIVE_TOKEN_STACK",()=>TOKEN_STACK); _lazyFont("LIVE_MONO_STACK",()=>MONO_STACK);
+/* …and the pair a FOREIGN token measures in (item 2). Identical to the two above in every language but
+   Chinese, where app.css's `#doc[data-hanfrn]` puts a Kai family at the head of each — see --frn-font
+   there and hanFrnFace() (js/lang/translit.js). Read back off the DOM by refreshFontStacks in the same
+   breath as the other two, for the same reason: the paint comes from the stylesheet and a measurement
+   that resolved a different face would misplace the slot, the MWT tie and the hit box. */
+_lazyFont("LIVE_FRN_STACK",()=>LIVE_TOKEN_STACK); _lazyFont("LIVE_FRN_MONO_STACK",()=>LIVE_MONO_STACK);
+/* …and how much LARGER a foreign token's own face is set than the row's nominal size. A Kai face's 字面 is
+   about 7 % smaller than the Hei beside it, so app.css scales it back up (see --frn-scale there for the
+   measurement); mirrored here for the same reason TOK_MAG is — a canvas/SVG font string cannot carry a
+   var(), and a paint that grew without the measurement following it would lay out a 15px slot around a
+   16px glyph. Exactly 1 for every non-Chinese document. */
+let FRN_SCALE=1;
+/* …and the letter-spacing that run is set at, which is NOT the row's own: a Kai character carries more air
+   inside its em than the sans does, so app.css tightens it back to the sans's gap (see --frn-track there for
+   the derivation). Mirrored here for the same reason FRN_SCALE is — the measurement has to reserve what the
+   paint occupies. `null` means "no override", which is every non-Chinese document. */
+let FRN_TRACK=null;
+/* …and the WEIGHT it is set at, which is the face's own Bold rather than the row's 400: a brush hand is
+   lighter than the Hei beside it and reads as faded at the same weight (see --frn-wght, app.css, for the
+   ink-coverage measurement). 0 means "no override" — every non-Chinese document. */
+let FRN_WGHT=0;
 /* THE GLYPH MAGNIFICATION, mirrored off CSS `--script-mag` by refreshFontStacks (see its own note for
    why a canvas font string cannot read the property itself). 1 everywhere except the ornamental Sanskrit
    scripts. It multiplies the TOKEN-FORM faces only — WORD_F/NODE_F/MWT_F and the goeswith tie — never the
@@ -417,8 +493,24 @@ function italicTrackOf(f){ return /(?:^|\s)italic(?:\s|$)/.test(f||"")?ITALIC_TR
    NODE_DESC_EXTRA) before the hierarchy's LEVEL HEIGHT wanted the same quantity and made it a fifth. */
 function magAscExtra(f){ return TOK_MAG>1?ascent(f)*(1-1/TOK_MAG):0; }
 function magDescExtra(f){ return TOK_MAG>1?descent(f)*(1-1/TOK_MAG):0; }
-function trackEmOf(f){ const pxm=(f||"").match(/(\d+(?:\.\d+)?)px/); let px=pxm?parseFloat(pxm[1]):TOK_REF_SIZE;
-  if(TOK_MAG>1 && [15,14,26].some(b=>Math.abs(px-b*TOK_MAG)<0.01)) px/=TOK_MAG;
+/* Is this the FOREIGN font string, i.e. one frnFontStr built? Only those carry the Kai family, and only
+   those are painted at `--frn-track` instead of the row's own tracking. Tested by the TAIL rather than by a
+   flag threaded through every caller: frnFontStr's whole job is to swap LIVE_TOKEN_STACK for LIVE_FRN_STACK,
+   so a string ending in the latter is exactly the set of strings that rule paints. The grid's own foreign
+   string ends in LIVE_FRN_MONO_STACK and is deliberately NOT matched — its Form cell keeps the row's
+   tracking, since it has no sans neighbour on a line to be spaced against. */
+function frnTrackOf(f){ return (FRN_TRACK!==null && LIVE_FRN_STACK!==LIVE_TOKEN_STACK
+  && f && f.length>LIVE_FRN_STACK.length && f.endsWith(LIVE_FRN_STACK)) ? FRN_TRACK : null; }
+function trackEmOf(f){ const ft=frnTrackOf(f); if(ft!==null) return ft;   // …and no trackCurve/italic term on top: --frn-track is the NET value the stylesheet states, exactly as .tok-ital's own rule is
+  const pxm=(f||"").match(/(\d+(?:\.\d+)?)px/); let px=pxm?parseFloat(pxm[1]):TOK_REF_SIZE;
+  /* ⚠ THE FOREIGN FACE-SIZE CORRECTION IS DIVIDED BACK OUT ALONGSIDE THE MAGNIFICATION, and for the identical
+     reason: the stylesheet states a row's tracking as a literal for its RESTING size and re-derives it at
+     neither. `.tok-ital{letter-spacing:.02em}` is that literal here, and without this a Kai form measured at
+     15 × 1.0637 = 15.96px would be given trackCurve(15.96) = −0.0054em instead of trackCurve(15) = 0, i.e.
+     .0146em against the .02em actually painted. Tried in the same pass as TOK_MAG rather than after it,
+     because the two multiply (a magnified lzh foreign form is 15 × 1.5 × 1.0637). */
+  const div=[TOK_MAG, TOK_MAG*FRN_SCALE].find(k=>k>1 && [15,14,26].some(b=>Math.abs(px-b*k)<0.01));
+  if(div) px/=div;
   return trackCurve(px)+italicTrackOf(f); }
 // …and the same quantity in px, at the size the string actually paints at (NOT the unmagnified size the curve
 // is read off: CSS applies an em letter-spacing against the element's own font-size, magnified and all).
@@ -1773,7 +1865,21 @@ function _measOneUncached(s,f,extraCss){
     // matched the real painted ink to within a rounding pixel. Chrome-checked: the two numbers agree
     // exactly there (getComputedTextLength===getBBox().width), so preferring getBBox() whenever a feature-
     // settings override is in play is WebKit-only-corrective, not a behaviour change under Chrome.
-    w=_ffsM?_mtxt.getBBox().width:_mtxt.getComputedTextLength();
+    /* …and on an engine whose getComputedTextLength() drops the tracking (WebKit — see svgTracksText),
+       the tracked width is taken from the live HTML element INSTEAD of the SVG one, never in addition to
+       it: each is its own forced layout, and asking for a number that is about to be discarded would pay
+       for two. Gated on `track` so an untracked row is byte-for-byte the old path, and on `!_ffsM`
+       because that branch already reads getBBox(), which DOES carry the spacing in both engines — and
+       `_measDOM` could not reproduce its feature settings anyway. The SVG read stays as the fallback for
+       the one case the DOM one cannot answer (a detached/unlaid-out element, width 0).
+       ⚠ WHAT IT COSTS, measured in the shipping WKWebView: a tracked cache MISS goes 0.155 ms → 0.28 ms,
+       and one cold-cache render of the sample document (183 distinct measurements) 167-192 ms → 233-244
+       ms. Chrome is untouched — it never enters this branch. Warm renders are unaffected in both, since
+       every hit still comes off _MEAS_CACHE, so the cost is per DISTINCT string per cache clear (a first
+       render, a font-stack change, a landed face) and not per token per frame. */
+    const domTrack=!!track && !_ffsM && !svgTracksText();
+    w=domTrack?_measDOM(s,f,track):(_ffsM?_mtxt.getBBox().width:_mtxt.getComputedTextLength());
+    if(domTrack && !(w>0)) w=_mtxt.getComputedTextLength();
   } catch(_){ w=0; }
   /* …and where the SVG cannot shape this string, its width describes a rendering nobody will see. A live
      DOM element is what the HTML fallback (foreignObject) paints — see _measDOM's own note on why this is
@@ -1838,9 +1944,31 @@ function refreshFontStacks(){
        the typeof guard is for the measurement harnesses that load this file alone (they keep whatever
        --script-mag the page already carries, exactly as before). */
     if(typeof scriptMag==="function") d.style.setProperty("--script-mag",String(scriptMag()));
+    /* …AND WHICH FACE A FOREIGN TOKEN TAKES (item 2), published BEFORE the computed style is read, since
+       --frn-font/--frn-mono-font below are what this attribute selects. "" for every non-Chinese document,
+       and the attribute is REMOVED rather than left empty so the plain `#doc[data-hanfrn]` rules in app.css
+       (which match on presence) go quiet with it. Same typeof guard as scriptMag above, for the harnesses
+       that load this file alone. */
+    const hf=(typeof hanFrnFace==="function")?hanFrnFace():""; if(hf) d.dataset.hanfrn=hf; else delete d.dataset.hanfrn;
     const cs=getComputedStyle(d);
     const t=cs.getPropertyValue("--token-font").trim(), m=cs.getPropertyValue("--mono-font").trim();
     if(t) LIVE_TOKEN_STACK=t; if(m) LIVE_MONO_STACK=m;
+    const ft=cs.getPropertyValue("--frn-font").trim(), fm=cs.getPropertyValue("--frn-mono-font").trim();
+    LIVE_FRN_STACK=ft||LIVE_TOKEN_STACK; LIVE_FRN_MONO_STACK=fm||LIVE_MONO_STACK;
+    /* …and the face-size correction, read off a probe element rather than off #doc: --frn-scale is declared
+       on the TOKEN (`#doc[data-hanfrn] .tok-ital`), not on #doc, because it is a property of the foreign run
+       and not of the document, so #doc's own computed style does not carry it. `_mmount` already sits inside
+       #doc for exactly this class of question (see its note), so a .tok-ital probe parked there resolves the
+       same cascade a real token does. Falls back to 1 on anything unmeasurable, which is also its no-op. */
+    let fs=1, ftrk=null, fw=0;
+    try{ _measMountRoot(); const pr=document.createElement("span"); pr.className="tok-ital";
+      pr.style.cssText="position:absolute;visibility:hidden"; _mmount.appendChild(pr);
+      const cs2=getComputedStyle(pr);
+      const v=parseFloat(cs2.getPropertyValue("--frn-scale")); if(v>0) fs=v;
+      const tv=cs2.getPropertyValue("--frn-track").trim(); ftrk=/em$/.test(tv)?parseFloat(tv):null;
+      const wv=parseFloat(cs2.fontWeight); if(wv>0) fw=wv;   // the COMPUTED font-weight, not the custom property: the rule that sets it is the one the real token matches, and a computed number is what a font shorthand needs anyway   // em ONLY: the stylesheet states it in em and every consumer below is an em quantity, so a value in any other unit is a mistake to ignore rather than to convert
+      pr.remove(); }catch(_){ }
+    FRN_SCALE=fs; FRN_TRACK=(ftrk===ftrk&&ftrk!==null)?ftrk:null; FRN_WGHT=(fw===fw)?fw:0;   // …and never left stale from the previous document: an unconditional assignment, unlike the two above, because "no override" here is a real answer (every non-Chinese document) rather than the missing-property case those guard against
     /* …AND HOW BIG THE GLYPHS ARE. `--script-mag` is the Indic-script magnification (1.5 for every
        script in INDIC_SCRIPTS, js/lang/translit.js — every _AKSHARA_SCRIPTS scheme, app/translit.py), published on #doc
        one line above. Read back HERE, off the same element and in the same breath as the font stacks,
@@ -2755,7 +2883,29 @@ function formDeco(tk,gwHead){ const gw=(gwHead===undefined)?!!gwOf(tk).length:!!
 function isForeign(tk){ return !!(tk&&tk._gwFrn) || hasFeat(tk&&tk.feats,"Foreign","Yes"); }
 function italDeco(tk){ return isForeign(tk)?" tok-ital":""; }
 function frnUp(tk){ return isForeign(tk)?" frn-up":""; }
-function fmeas1(tk,f){ return meas(bform(tk), isForeign(tk)?"italic "+f:f); }   // ONE token's form width in the face it ACTUALLY renders in
+/* ── THE FONT STRING A FOREIGN TOKEN IS MEASURED IN ────────────────────────────────────────────────
+   "italic " prepended, exactly as before — and, in a Chinese document, the Kai family swapped in with
+   it, because that is what app.css's `#doc[data-hanfrn] .tok-ital{font-family:var(--frn-font)}` paints
+   the form in (item 2). Done as a substitution of one live stack for the other rather than by
+   re-concatenating a family onto the size: every string reaching this point (WORD_F, NODE_F, MWT_F,
+   magFont(15)…) is built by refreshFontStacks out of LIVE_TOKEN_STACK in the same pass that set
+   LIVE_FRN_STACK, so the two are always in step and the tail to replace is always exactly there. The
+   replacement is passed as a FUNCTION so a `$` anywhere in a family list could not be read as a
+   replacement pattern.
+   ⚠ NUMERICALLY A NO-OP TODAY, AND KEPT ANYWAY. The Kai families' own unicode-range confines them to
+   Han, and Han is one em wide in a Kai face exactly as in the body face (measured at 64px: 64.00 in
+   both, and the Latin in the same string still resolves to Noto Sans Italic either way), so no width
+   this returns actually moves. It is the INVARIANT that matters — "a face swap that skipped the
+   measurement would misplace the slot", the rule stated above isForeign — and a Kai face whose Han were
+   not exactly one em, or a future family here with Latin coverage, would break it silently. */
+/* …and the SIZE is scaled with the family, because app.css sets the Kai face larger than the row's nominal
+   size to match its smaller 字面 (--frn-scale there). One substitution on the way past: the size token is the
+   only number in these strings that is a length in px, and `trackEmOf` divides the same factor back out (see
+   its own note) so the tracking still reads off the RESTING size the stylesheet states it for. */
+function _frnSize(f){ return FRN_SCALE===1?f:f.replace(/(\d+(?:\.\d+)?)px/,(m,n)=>(parseFloat(n)*FRN_SCALE).toFixed(3)+"px"); }
+function frnFontStr(f){ const w=(FRN_WGHT&&FRN_WGHT!==400)?FRN_WGHT+" ":"";   // …and the WEIGHT, in the shorthand's own `style weight size family` order. Only when it differs from the resting 400, so a non-Chinese document's string is byte-identical to what it was
+  return "italic "+w+_frnSize((LIVE_FRN_STACK&&LIVE_FRN_STACK!==LIVE_TOKEN_STACK)?f.replace(LIVE_TOKEN_STACK,()=>LIVE_FRN_STACK):f); }
+function fmeas1(tk,f){ return meas(bform(tk), isForeign(tk)?frnFontStr(f):f); }   // ONE token's form width in the face it ACTUALLY renders in
 function fmeas(tk,f){ let w=fmeas1(tk,f); const g=(tk&&tk._gw)||[];   // …and the WHOLE WORD's, which for a goeswith unit is the head plus every continuation folded onto it (see the goeswith block below)
   for(let i=0;i<g.length;i++) w+=gwGap(f)+fmeas1(g[i].tok,f); return w; }
 /* ── GOESWITH — ONE WORD THAT A STRAY SPACE SPLIT IN THE SOURCE ─────────────────────────────────────────────
@@ -2930,8 +3080,23 @@ function gwHolds(el,tk){ const u=el.getAttribute("data-gw");
 // forward/self head so a malformed HEAD column can't send a caller round a loop.
 function gwUnitId(si,tk){ const s=DOC[si]; if(!s||!s.tokens) return tk; const t=s.tokens[tk-1];
   if(!t||!isGoesWith(t.deprel)) return tk; const h=parseInt(t.head,10); return (h>=1&&h<tk)?h:tk; }
-function gridFormFont(tk){ return isForeign(tk)?GRID_ITAL_F:GRID_F; }   // the grid Form cell's measurement font (column autosize, the wrap/expand thresholds)
-function trFont(tk){ return isForeign(tk)?TRANS_UP_F:TRANS_F; }
+function gridFormFont(tk){ if(!isForeign(tk)) return GRID_F;   // the grid Form cell's measurement font (column autosize, the wrap/expand thresholds)
+  return _frnSize((LIVE_FRN_MONO_STACK&&LIVE_FRN_MONO_STACK!==LIVE_MONO_STACK)?GRID_ITAL_F.replace(LIVE_MONO_STACK,()=>LIVE_FRN_MONO_STACK):GRID_ITAL_F); }   // …with the Kai family swapped in for a Chinese document, exactly as frnFontStr does for the diagrams — see its note; GRID_ITAL_F already carries the "italic"
+/* ── IS THE TRANSLITERATION ROW ITALIC? THE ANSWER IS AN XOR, NOT A FLAG ──────────────────────────────
+   The row is set in italics as a romanisation; TWO things flip it upright, and each flips whatever it
+   finds. `frn-up` is the Foreign mark (see isForeign's own note above), and `#doc.ortho-script` is the
+   display scheme putting a real SCRIPT in the row instead of a romanisation (Zhuyin) — "italics are for
+   romanisation only", as that rule says. Apply both and the marked value is italic again, which is what
+   `#doc.ortho-script .strans .stx-frn` has always done on the running sentence line and what the diagram
+   rows now do beside it.
+   ⚠ ONE PREDICATE FOR THE CLASS AND FOR THE FONT STRING. `orthoScriptRow()` is what js/core/document.js
+   toggles the `ortho-script` class from, so the measurement cannot come to disagree with the paint about
+   which scheme this is — the same reason `trFont` exists at all rather than each render site guessing.
+   ⚠️ NOT `orthoScript()`, one screen up, which asks about the SCRIPT (ORTHO_SCHEME) — this asks about the
+   DISPLAYED TRANSLITERATION, and the two are independent menus. */
+function orthoScriptRow(){ return TRANSLIT_SCHEME==="zhuyin"; }   // a non-Latin DISPLAYED transliteration in the row
+function trRowItalic(tk){ return isForeign(tk)===orthoScriptRow(); }   // upright ⟺ exactly one of the two flips applies
+function trFont(tk){ return trRowItalic(tk)?TRANS_F:TRANS_UP_F; }
 // item 4 — in the SVG diagrams the Typo strikethrough is drawn as an EXPLICIT line appended to the token group
 // AFTER the form text, so it paints IN FRONT of the glyphs (a strikethrough sits over the letters like a real
 // strike), with pointer-events:none so it never intercepts a click on the token. Drawn as a line rather than a

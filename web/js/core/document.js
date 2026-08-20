@@ -1821,7 +1821,7 @@ function renderDoc(){
   const host=document.getElementById("doc"); host.textContent="";
   if(DOC.length) clearBootSkeleton();   // …and the boot skeleton goes the moment there is a real block to put in its place (index.html; a no-op once it has)
   host.lang=bcp47Tag();   // BCP-47 tag → inherits to every token/diagram/grid text so the browser picks locale-correct Cyrillic/Han glyphs (locl + system-font region); re-run on every language/script change
-  host.classList.toggle("ortho-script", TRANSLIT_SCHEME==="zhuyin");   // a non-Latin DISPLAYED transliteration (Zhuyin) in the row → drop the romanisation italics
+  host.classList.toggle("ortho-script", typeof orthoScriptRow==="function"?orthoScriptRow():TRANSLIT_SCHEME==="zhuyin");   // a non-Latin DISPLAYED transliteration (Zhuyin) in the row → drop the romanisation italics. Through orthoScriptRow (js/diagram/diagram-core.js) so this class and trFont()'s own font string are ONE predicate: the row's reserve is measured in the face this class decides it paints in
   host.classList.toggle("script-form", typeof iastFormEdit==="function"&&iastFormEdit());   // Sanskrit under a real script → every token FORM on screen is a derived rendering of the stored IAST, not an editable field, so it takes the pointing hand (app.css). The MWT/goeswith glyphs set the same cursor inline via formCursor(), being SVG text with their own click contract
   host.classList.toggle("no-relcolour", !show.colour);   // "Relation colours" off → --tie-hue swaps --c-other for --ink, so POS tags/bracket ties go monochrome too, not just the deprel labels relColor() already gates
   /* Item 3 — PAGED LAYOUT. In paged mode the blocks are grouped into .docsheet containers and a `# newdoc` ENDS one

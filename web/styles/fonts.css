@@ -121,3 +121,52 @@
   @font-face{font-family:"Noto Sans Kawi";font-style:normal;font-weight:100 900;font-display:swap;src:url("../fonts/notosanskawi.ttf") format("truetype-variations")}
   @font-face{font-family:"Noto Sans Zanabazarsquare";font-style:normal;font-weight:400;font-display:swap;src:url("../fonts/notosanszanabazarsquare.ttf") format("truetype")}
   @font-face{font-family:"Noto Serif Tibetan";font-style:normal;font-weight:100 900;font-display:swap;src:url("../fonts/notoseriftibetan.ttf") format("truetype-variations")}
+
+  /* ── THE FOREIGN MARK IN A CHINESE DOCUMENT IS A TYPEFACE, NOT A SLANT ────────────────────────────
+     Han has no italic. `.tok-ital` (FEATS Foreign=Yes) asks for `font-style:italic` and the engine
+     answers with a SYNTHESISED oblique — a sheared 行, which is not a mark Chinese typography makes.
+     What it makes instead is a change of face: 楷體/楷体 (Kaiti, the regular-script brush hand) set
+     against the body Song/Hei, the way a Latin text sets a foreign word in italics.
+     ⚠ THE FACE IS DECLARED IN THE *ITALIC* SLOT, AND THAT IS THE WHOLE TRICK. Nothing needs to know
+     that this token is Chinese at the point the class is applied: `.tok-ital` goes on asking for
+     italic, and this @font-face says "the italic of THIS family is that upright Kai file". So the Han
+     comes out as real, unslanted Kaiti while any Latin in the SAME token — a foreign word in a Chinese
+     sentence is as often `ipso facto` as it is 漢語 — falls straight through to Noto Sans Italic and is
+     still italicised, which no single font-family swap could have done. `unicode-range` is what keeps
+     the family off everything but Han; the normal slot is declared alongside so the family behaves the
+     same way wherever it is used upright.
+     ⚠ EACH FACE IS NAMED THREE WAYS — full name, PostScript name, family — because the two engines do not
+     agree on which of them `local()` matches. The spec says full font name and PostScript name; Chrome
+     also accepts the FAMILY (verified: `local("Kaiti SC")` alone resolves there), WebKit is the stricter
+     of the two, and naming all three costs nothing and removes the question. macOS: Kaiti SC Regular /
+     STKaitiSC-Regular, Kaiti TC Regular / STKaitiTC-Regular, BiauKaiTC-Regular — read off the installed
+     faces rather than guessed. Windows: KaiTi (SimKai) and DFKai-SB (標楷體, PostScript DFKaiShu-SB-Estd-BF).
+     ⚠ `local()` ONLY — nothing is fetched and nothing is bundled. Every Kai face named here ships with
+     macOS (Kaiti SC/TC, STKaiti, BiauKaiTC) or Windows (KaiTi = SimKai, DFKai-SB = 標楷體), and none of
+     them is ours to redistribute. A machine with none installed resolves no source, the @font-face is
+     skipped, and those characters fall through to the next family in the stack — i.e. exactly the
+     synthesised oblique this app drew before, which is the right way for this to be absent.
+     ⚠ TWO FAMILIES, SC AND TC, because the two faces genuinely differ: rendered at 40px against the
+     bundled system faces, 9 of 14 sampled graphs (體 聲 鳳 與 灣 国 学 們 氣) paint DIFFERENT outlines in
+     Kaiti SC and Kaiti TC, and all 14 are covered by both — so this is a choice about which shapes to
+     show, never about coverage. `hanFrnFace()` (js/lang/translit.js) is what picks between them. */
+  @font-face{font-family:"SUD Kai SC";font-style:italic;font-weight:400;src:local("Kaiti SC Regular"),local("STKaitiSC-Regular"),local("Kaiti SC"),local("STKaiti"),local("KaiTi"),local("SimKai"),local("Kaiti TC Regular"),local("STKaitiTC-Regular"),local("BiauKaiTC-Regular"),local("DFKai-SB");unicode-range:U+2E80-2EFF,U+2F00-2FDF,U+3005-3007,U+3021-3029,U+3038-303B,U+3400-4DBF,U+4E00-9FFF,U+F900-FAFF,U+20000-2A6DF,U+2A700-2EBEF,U+2F800-2FA1F}
+  @font-face{font-family:"SUD Kai SC";font-style:normal;font-weight:400;src:local("Kaiti SC Regular"),local("STKaitiSC-Regular"),local("Kaiti SC"),local("STKaiti"),local("KaiTi"),local("SimKai"),local("Kaiti TC Regular"),local("STKaitiTC-Regular"),local("BiauKaiTC-Regular"),local("DFKai-SB");unicode-range:U+2E80-2EFF,U+2F00-2FDF,U+3005-3007,U+3021-3029,U+3038-303B,U+3400-4DBF,U+4E00-9FFF,U+F900-FAFF,U+20000-2A6DF,U+2A700-2EBEF,U+2F800-2FA1F}
+  @font-face{font-family:"SUD Kai TC";font-style:italic;font-weight:400;src:local("Kaiti TC Regular"),local("STKaitiTC-Regular"),local("Kaiti TC"),local("BiauKaiTC-Regular"),local("BiauKaiTC"),local("DFKai-SB"),local("DFKaiShu-SB-Estd-BF"),local("標楷體"),local("TW-Kai"),local("Kaiti SC Regular"),local("STKaitiSC-Regular"),local("KaiTi");unicode-range:U+2E80-2EFF,U+2F00-2FDF,U+3005-3007,U+3021-3029,U+3038-303B,U+3400-4DBF,U+4E00-9FFF,U+F900-FAFF,U+20000-2A6DF,U+2A700-2EBEF,U+2F800-2FA1F}
+  @font-face{font-family:"SUD Kai TC";font-style:normal;font-weight:400;src:local("Kaiti TC Regular"),local("STKaitiTC-Regular"),local("Kaiti TC"),local("BiauKaiTC-Regular"),local("BiauKaiTC"),local("DFKai-SB"),local("DFKaiShu-SB-Estd-BF"),local("標楷體"),local("TW-Kai"),local("Kaiti SC Regular"),local("STKaitiSC-Regular"),local("KaiTi");unicode-range:U+2E80-2EFF,U+2F00-2FDF,U+3005-3007,U+3021-3029,U+3038-303B,U+3400-4DBF,U+4E00-9FFF,U+F900-FAFF,U+20000-2A6DF,U+2A700-2EBEF,U+2F800-2FA1F}
+
+  /* ⚠ AND A BOLD SLOT FOR EACH, BECAUSE A BRUSH HAND IS LIGHTER THAN A HEI AND READS AS FADED BESIDE ONE.
+     Measured as ink COVERAGE — alpha mass per em², 20 dense glyphs, at the size each is actually painted:
+     PingFang 0.4198, Kaiti TC Regular 0.2426 (58 % of it), Kaiti TC Bold 0.3060 (73 %), Kaiti TC Black
+     0.3507 (84 %); SC's own cuts run within a percent of TC's. Parity is not on offer at any weight — the
+     thin, modulated stroke IS the face — so Bold is what the run asks for (see --frn-wght, app.css): it
+     closes about half the gap and is still recognisably 楷體, where Black is a display cut that clots at a
+     15px body size. `local()` only and named three ways, exactly as the Regular blocks above are and for
+     the same engine-matching reason. ⚠️ Kaiti SC also ships a MEDIUM and it is not used: measured, weight
+     500 renders at 0.2387 — identical to its own Regular, because CSS font matching for a desired 500 with
+     only 400 and 700 declared walks DOWN first and lands on 400. Two static faces are a binary choice, not
+     a range, and a `font-weight:500` here would have looked like a setting while changing nothing. */
+  @font-face{font-family:"SUD Kai SC";font-style:italic;font-weight:700;src:local("Kaiti SC Bold"),local("STKaitiSC-Bold"),local("KaiTi Bold"),local("SimKai Bold"),local("Kaiti TC Bold"),local("STKaitiTC-Bold");unicode-range:U+2E80-2EFF,U+2F00-2FDF,U+3005-3007,U+3021-3029,U+3038-303B,U+3400-4DBF,U+4E00-9FFF,U+F900-FAFF,U+20000-2A6DF,U+2A700-2EBEF,U+2F800-2FA1F}
+  @font-face{font-family:"SUD Kai SC";font-style:normal;font-weight:700;src:local("Kaiti SC Bold"),local("STKaitiSC-Bold"),local("KaiTi Bold"),local("SimKai Bold"),local("Kaiti TC Bold"),local("STKaitiTC-Bold");unicode-range:U+2E80-2EFF,U+2F00-2FDF,U+3005-3007,U+3021-3029,U+3038-303B,U+3400-4DBF,U+4E00-9FFF,U+F900-FAFF,U+20000-2A6DF,U+2A700-2EBEF,U+2F800-2FA1F}
+  @font-face{font-family:"SUD Kai TC";font-style:italic;font-weight:700;src:local("Kaiti TC Bold"),local("STKaitiTC-Bold"),local("BiauKaiTC-Bold"),local("DFKai-SB Bold"),local("Kaiti SC Bold"),local("STKaitiSC-Bold");unicode-range:U+2E80-2EFF,U+2F00-2FDF,U+3005-3007,U+3021-3029,U+3038-303B,U+3400-4DBF,U+4E00-9FFF,U+F900-FAFF,U+20000-2A6DF,U+2A700-2EBEF,U+2F800-2FA1F}
+  @font-face{font-family:"SUD Kai TC";font-style:normal;font-weight:700;src:local("Kaiti TC Bold"),local("STKaitiTC-Bold"),local("BiauKaiTC-Bold"),local("DFKai-SB Bold"),local("Kaiti SC Bold"),local("STKaitiSC-Bold");unicode-range:U+2E80-2EFF,U+2F00-2FDF,U+3005-3007,U+3021-3029,U+3038-303B,U+3400-4DBF,U+4E00-9FFF,U+F900-FAFF,U+20000-2A6DF,U+2A700-2EBEF,U+2F800-2FA1F}
