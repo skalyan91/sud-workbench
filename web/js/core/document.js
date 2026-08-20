@@ -1562,7 +1562,7 @@ function buildBlock(i,ctx){ const s=DOC[i];
       // reports it as saying nothing the glyph does not and returns "" — which fell back to the plain
       // form and put the unmarked sentence back on the line. The running line is the glyphs joined,
       // exactly as it is for a Brahmic script; only the gap rule differs (marked junctions go apart).
-      if(cslTop) line=runningLine(s,i,u=>bform(u.mwt||u.tok)," ");
+      if(cslTop) line=runningLine(s,i,u=>bform(u.mwt||u.tok,true)," ");   // `true` = never the pausa: this is the running SENTENCE, whose whole content is the sequence the sandhi describes — see bform's own note on the opt-out
       else if(isSanskritLang() && s.orthoLine){ line=s.orthoLine; }   // item 27(b): Sanskrit's running text is the WHOLE sentence fused by external sandhi then scripted (fillOrtho → s.orthoLine), not a naive per-word join
       /* Every other language joins its own tokens, and the WHITESPACE BETWEEN THEM IS `# text`'s, not
          something to invent. Preferred source: the alignment stextSpans already computes for the

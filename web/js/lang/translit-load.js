@@ -236,6 +236,16 @@ function orthoLemOf(t){ return (t&&t.lemma&&t.lemma!=="_")?t.lemma:""; }
 function orthoKeyOf(t){ const base=trKey(t.form,trUpos(t));
   return orthoNeedsMorph() ? base+" "+(t.feats||"")+" "+orthoLemOf(t) : base; }
 function orthoStale(t,k){ return !t.ortho || t._orthoKey!==k; }
+/* THE PAUSA'S OWN SCRIPT RENDERING — same cache shape as `ortho`/`_orthoKey` one line up, keyed on the
+   PAUSA string instead of the form, so a form edit (which moves Unsandhied through saSyncUnsandhied) and a
+   hand edit of MISC both invalidate it without anyone remembering to. Its consumer is bform() in the two
+   non-linear notations; see saPausa there for why those two and not the other three.
+   `unsandhiedOf` is deliberately NOT gated on the notation, unlike saPausa: the fill runs once per document
+   and must not have to be re-run because the reader switched from arcs to the outline. */
+function unsandhiedOf(t){ return (t&&t.misc&&isSanskritLang()) ? (miscKV(t.misc,"Unsandhied")||"") : ""; }
+function unOrthoKeyOf(t){ const base=trKey(unsandhiedOf(t),trUpos(t));
+  return orthoNeedsMorph() ? base+" "+(t.feats||"")+" "+orthoLemOf(t) : base; }
+function unOrthoStale(t,k){ return !t.unOrtho || t._unOrthoKey!==k; }
 // TRANSLITERATION's own morph-awareness — Arabic/Persian only (Latin has no transliteration menu; it
 // IS the script). A romanisation is now always built from the VOCALISED form (app/translit.py's
 // `_legacy`), and `vocalise.vocalise` disambiguates THAT lookup on the same (upos, feats)/(upos,
@@ -288,7 +298,21 @@ async function fillOrtho(){ if(!hasBridge()||!DOCLANG) return false;
   if(scriptOn){   // fetch the SCRIPT rendering for single tokens (and MWTs for non-Sanskrit)
     const need=new Map();   // orthoKeyOf: (surface, upos) as the transliteration passes use — plus FEATS + lemma where the scheme reads them (see the note above fillOrtho). A script rendering can be reading-dependent, so it must not be shared between two tokens spelt alike but analysed differently
     const want=(k,txt,u,fe,le)=>{ if(!need.has(k)) need.set(k,[txt,u,fe||"",le||"",k]); };
-    DOC.forEach(s=>{ s.tokens.forEach(t=>{ const k=orthoKeyOf(t); if(t.form&&orthoStale(t,k))want(k,t.form,trUpos(t),t.feats,orthoLemOf(t)); }); if(!skt)(s.mwt||[]).forEach(m=>{ if(m.form&&!m.ortho)want(trKey(m.form,""),m.form,""); }); });   // an MWT range has no one UPOS (see fillTranslit) → no opinion, and no FEATS or lemma either
+    DOC.forEach(s=>{ s.tokens.forEach(t=>{ const k=orthoKeyOf(t); if(t.form&&orthoStale(t,k))want(k,t.form,trUpos(t),t.feats,orthoLemOf(t));
+      /* …and the PAUSA spelling gets its own rendering, on the same round trip. The hierarchy and the
+         outline draw MISC `Unsandhied` rather than the form (see saPausa/bform, js/diagram/diagram-core.js),
+         and a script rendering converted from the SANDHIED surface is the wrong glyphs for it. Queued into
+         the SAME `need` map, so a pausa equal to some other token's form costs nothing extra and the whole
+         document still goes out in one call.
+         ⚠ NOT SKIPPED WHERE THE PAUSA EQUALS THE FORM, which was the first cut and is what drew a hierarchy
+         in a MIX of scripts. That case is not rare, it is the norm: a component inside a multi-word token is
+         already stored in pausa, so `Unsandhied` simply repeats the form for most of a DCS document —
+         measured against the real bridge on samples/brihat_jataka.conllu, mūrtitve, parikalpitaḥ, śaśa,
+         bhṛtaḥ, vartmā and janmanām every one. Skipping those left `t.unOrtho` empty for exactly them and
+         bform() fell back to the raw pausa STRING, so they drew in IAST beside `ददातु`, whose pausa does
+         differ and which therefore had a rendering to draw. Including them costs nothing: equal strings give
+         equal keys, `want` de-duplicates on the key, and one answer comes back to both fields. */
+      const un=unsandhiedOf(t); if(un&&unOrthoStale(t,unOrthoKeyOf(t))) want(unOrthoKeyOf(t),un,trUpos(t),t.feats,orthoLemOf(t)); }); if(!skt)(s.mwt||[]).forEach(m=>{ if(m.form&&!m.ortho)want(trKey(m.form,""),m.form,""); }); });   // an MWT range has no one UPOS (see fillTranslit) → no opinion, and no FEATS or lemma either
     if(need.size){ const batch=[...need.values()]; let r;
       // feats/lemma ride along beside upos for the Latin `macron` scheme, which is keyed on the whole
       // morphological analysis rather than on the class: the form alone reaches only the
@@ -297,7 +321,8 @@ async function fillOrtho(){ if(!hasBridge()||!DOCLANG) return false;
                                                     batch.map(x=>x[2]||""),batch.map(x=>x[3]||"")); }catch(e){ return false; }
       if(superseded()) return false;   // another script was picked while this was in flight — see the note above
       const map={}; batch.forEach((x,i)=>{ const v=(r&&r.ortho&&r.ortho[i])||""; if(v)map[x[4]]=v; });   // x[4] = the key the entry was queued under, so the answer comes back to exactly the tokens that asked
-      DOC.forEach(s=>{ s.tokens.forEach(t=>{ const k=orthoKeyOf(t), v=(t.form&&orthoStale(t,k))?map[k]:""; if(v){ t.ortho=v; t._orthoKey=k; } }); if(!skt)(s.mwt||[]).forEach(m=>{ const v=m.form&&!m.ortho?map[trKey(m.form,"")]:""; if(v) m.ortho=v; }); });   // the stamp rides WITH the value: a rendering and the analysis it was computed for can never be separated
+      DOC.forEach(s=>{ s.tokens.forEach(t=>{ const k=orthoKeyOf(t), v=(t.form&&orthoStale(t,k))?map[k]:""; if(v){ t.ortho=v; t._orthoKey=k; }
+        const un=unsandhiedOf(t), uk=unOrthoKeyOf(t), uv=(un&&unOrthoStale(t,uk))?map[uk]:""; if(uv){ t.unOrtho=uv; t._unOrthoKey=uk; } }); if(!skt)(s.mwt||[]).forEach(m=>{ const v=m.form&&!m.ortho?map[trKey(m.form,"")]:""; if(v) m.ortho=v; }); });   // the stamp rides WITH the value: a rendering and the analysis it was computed for can never be separated
       any=true; }
     if(laOrthoNeedsMorph() && laMwtCompose()) any=true;      // …and the multi-word tokens, whose surface no lexicon lists — see laMwtCompose. Latin only.
     if(ORTHO_SCHEME==="vocalise" && vocaliseMwtCompose()) any=true; }   // Arabic/Persian's own, simpler composer — see vocaliseMwtCompose

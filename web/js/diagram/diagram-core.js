@@ -2686,7 +2686,32 @@ function dandaFlush(form){ return ORTHO_SCHEME!=="iast" && !!dandaGlyph(form); }
 function dandaSp(p){ return !!p.sp && !dandaFlush(p.form); }
 // item 11: the SCRIPT drives the MAIN GLYPH. "Original" (default, ORTHO_SCHEME="") → the stored form;
 // "None" (ORTHO_SCHEME="none") → the DISPLAYED transliteration becomes the main glyph; a script id → that script.
-function bform(t){ const f=(t&&t.mform!=null)?t.mform:(t?t.form:"");
+/* ── A NON-LINEAR NOTATION SHOWS THE PAUSA FORM, BECAUSE SANDHI IS A FACT ABOUT THE LINE ────────────
+   Sanskrit stores the SANDHIED surface in FORM and the padapāṭha in MISC `Unsandhied` (see the DCS
+   convention in app/sa_notation.py). That surface carries the junction with the word that FOLLOWS it,
+   so it is only a true spelling while the words stand in reading order. The hierarchy and the outline
+   take them out of that order — a token sits under its head, beside neither of the neighbours whose
+   junctions its form records — and `kratuś` there is not the word, it is the word plus a fragment of
+   the next one. The citation form is what belongs in those two views, and only in those two: the
+   stemma, arcs and brackets all keep the sentence's own sequence, where the sandhied surface is exactly
+   right and swapping it would be a falsification of what the file says the text reads.
+   ⚠ FUNNELLED THROUGH bform() AND NOT THROUGH THE DRAW SITES, so every measurement follows for free:
+   fmeas1() measures bform()'s own answer, so the slot, the hit box and the MWT tie are all reserved for
+   the string actually painted. Nine draw sites would each have needed the substitution AND its own
+   measurement kept in step; this is one. */
+function nonLinearConv(){ return conv==="tree"||conv==="outline"; }
+/* The token's pausa spelling, or "" — for a REAL token only. An MWT range has no `misc` of its own here
+   and wants none of this anyway: its label is the orthographic word, whose whole point is that it is the
+   fused surface. A component INSIDE such a range is already stored in pausa (saSyncUnsandhied's own two
+   cases), so its Unsandhied equals its form and this substitutes nothing. */
+function saPausa(t,noPausa){ return (t&&!noPausa&&t.misc&&t.from==null&&isSanskritLang()&&nonLinearConv())
+  ? (miscKV(t.misc,"Unsandhied")||"") : ""; }   // `t.from==null` excludes an MWT RANGE, which is the fused orthographic word by definition and carries no MISC of its own here
+/* `noPausa` — an explicit opt-out for a caller that is drawing the SENTENCE, not a node. There is exactly
+   one: the CSL running line (js/core/document.js), which renders each token through bform() to build a line
+   of continuous text. That line is the sequence itself, so the pausa substitution would be a falsification
+   there whatever notation happens to be selected below it. It is spelt as a parameter rather than inferred,
+   because "am I drawing a diagram or a line" is not a question the globals can answer. */
+function bform(t,noPausa){ const un=saPausa(t,noPausa); const f=un||((t&&t.mform!=null)?t.mform:(t?t.form:""));
   /* Script=Latin + Displayed=CSL name ONE Latin line, so CSL is the GLYPH itself — not a second row
      under an IAST one saying the same word in a different notation. This is the substitution
      Script=None already makes for Chinese three lines down, reached from the other side: there the
@@ -2694,8 +2719,17 @@ function bform(t){ const f=(t&&t.mform!=null)?t.mform:(t?t.form:"");
      trTxt then drops the transliteration row on its own, since it suppresses a value equal to bform. */
   if(typeof saCslTop==="function" && saCslTop() && show.translit && t && t.translit) return dispScheme(t.translit,TRANSLIT_SCHEME);
   const scriptOn=!!ORTHO_SCHEME && ORTHO_SCHEME!=="none";
+  /* …and under a SCRIPT the glyph has to be the script rendering OF THE PAUSA, not of the form: `t.ortho`
+     was converted from the sandhied surface and would put the line's spelling back on screen in Devanagari
+     while the Latin row beneath it read the citation form. `t.unOrtho` is that same conversion asked about
+     the pausa string (fillOrtho, js/lang/translit-load.js); until it lands — no bridge, or the very first
+     render after an edit — the pausa is shown in the stored script, which is what it is written in. */
   if(scriptOn){ const dg=dandaGlyph(f); if(dg) return dg;   // item 17: an un-folded daṇḍa PUNCT token → the script's native daṇḍa
+    if(un) return (t&&t.unOrtho) ? dispScheme(t.unOrtho,ORTHO_SCHEME)
+                : (t&&t.ortho&&un===t.form) ? dispScheme(t.ortho,ORTHO_SCHEME)   // the pausa IS the form (the usual case inside a multi-word token) → the form's own rendering already says it, so never fall through to the bare pausa string and draw one token in a different script from its neighbours
+                : un;
     return (t && t.ortho) ? dispScheme(t.ortho,ORTHO_SCHEME) : f; }
+  if(un) return un;   // Original/None: the pausa IS the stored spelling — never t.ortho, which is the MWT's fused surface (below) and describes the line
   if(isSanskritLang() && t && t.ortho) return t.ortho;   // item 18: Sanskrit MWT sandhi-fused IAST is the surface form even with NO script (None/Original)
   if(ORTHO_SCHEME==="none") return (show.translit && t && t.translit) ? dispScheme(t.translit,TRANSLIT_SCHEME) : f;
   return f; }
@@ -2939,7 +2973,8 @@ function trTxt(o){ if(!o||!show.translit) return "";
      through to the ordinary o.translit path below. */
   if(isSanskritLang() && orthoScript() && TRANSLIT_SCHEME!=="csl"){   // feature 7: Sanskrit's stored form IS the IAST — show it as the romanisation ROW beneath the script glyph (bform rendered that glyph FROM this very IAST). fillTranslit leaves o.translit empty here (IAST→IAST is a no-op in _iast()), so read the stored surface form directly.
     if(dandaGlyph((o.mform!=null)?o.mform:o.form)) return "";   // a daṇḍa punct mark: its script glyph needs no "|"/"‖" romanisation beneath it
-    const iast=(o.miast!=null&&o.miast!=="")?o.miast:((o.mform!=null)?o.mform:o.form); return (iast && iast!==bform(o)) ? iast : ""; }   // an MWT carries its sandhi-fused IAST in o.miast (fillOrtho ← sanskrit_mwt.iast); prefer it so the romanisation ROW reads the fused form (ahorātra), not the naive concatenation stored in m.form (ahaḥrātra). Single tokens have no miast → fall back to the stored surface form as before.
+    const iast=saPausa(o)||((o.miast!=null&&o.miast!=="")?o.miast:((o.mform!=null)?o.mform:o.form));   // …and where the glyph above shows the PAUSA (a non-linear notation, see saPausa) this row shows the same word, not the line's own spelling of it: two rows disagreeing about which word this is would be worse than either alone
+    return (iast && iast!==bform(o)) ? iast : ""; }   // an MWT carries its sandhi-fused IAST in o.miast (fillOrtho ← sanskrit_mwt.iast); prefer it so the romanisation ROW reads the fused form (ahorātra), not the naive concatenation stored in m.form (ahaḥrātra). Single tokens have no miast → fall back to the stored surface form as before.
   const r=dispScheme(o.translit||"",TRANSLIT_SCHEME); return (r && r!==bform(o)) ? r : ""; }
 // item 7: the TOP-OF-BLOCK transliteration line is a property of the DISPLAYED transliteration, not the Script.
 // Under Script=None the diagram borrows the translit as its main glyph (bform), which would make trTxt() see the

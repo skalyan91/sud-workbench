@@ -255,7 +255,7 @@ async function storedPick(id){ stClose(); id=id||""; if(id===STORED_SCHEME) retu
 let ORTHO_SCHEMES=[];   // cached [{id,label,available}] for the current DOCLANG (empty ⇒ no menu)
 let ORTHO_SCHEME="";    // chosen orthography id ("" ⇒ Original / no re-rendering)
 let _orLangLoaded=null;
-function clearOrthoCache(){ DOC.forEach(s=>{ s.tokens.forEach(t=>{ t.ortho=""; }); (s.mwt||[]).forEach(m=>{ m.ortho=""; m.miast=""; }); s.orthoLine=""; }); }   // s.orthoLine = the block-initial running text fused by external sandhi then scripted (item 27b); invalidated on a script/language change
+function clearOrthoCache(){ DOC.forEach(s=>{ s.tokens.forEach(t=>{ t.ortho=""; t.unOrtho=""; }); (s.mwt||[]).forEach(m=>{ m.ortho=""; m.miast=""; }); s.orthoLine=""; }); }   // s.orthoLine = the block-initial running text fused by external sandhi then scripted (item 27b); invalidated on a script/language change
 function isSanskritLang(lang){ const b=((lang!=null?lang:DOCLANG)||"").toLowerCase().split(/[-_]/)[0]; return b==="sa"||b==="san"; }
 /* ── which script the DOCUMENT is stored in ───────────────────────────────────────────────────────
    Sanskrit is DIGRAPHIC IN STORAGE: `sa_sud_vedic_ufal_dcs` takes IAST or Devanagari and puts back

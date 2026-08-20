@@ -2556,7 +2556,7 @@ async function afterFormEdit(si,tokId,changed){ const s=DOC[si], t=s&&s.tokens[t
   if(!t) return;
   if(!changed) return;   // no net change (a cancelled edit, or a keystroke that nets out to the original form) → nothing is stale, so no re-parse either
   await stextAfterFormEdit(si,tokId);   // …and `# text` follows the form: the running sentence spells this word, so leaving it on the OLD spelling is the file disagreeing with itself. FIRST, before any of the refreshes below — fillOrtho rebuilds the Sanskrit running line FROM s.text (s.orthoLine), so a splice after it would leave that line a version behind
-  t.translit=""; t.translitLemma=""; t.ortho=""; t._trMisc=false; t._trPick=false;     // drop the stale caches so the fills recompute — including a hand-picked CJK reading (js/lang/readings.js), which was a statement about the OLD form and says nothing about the new one
+  t.translit=""; t.translitLemma=""; t.ortho=""; t.unOrtho=""; t._trMisc=false; t._trPick=false;     // drop the stale caches so the fills recompute — including a hand-picked CJK reading (js/lang/readings.js), which was a statement about the OLD form and says nothing about the new one
   t.misc=setMiscKV(setMiscKV(t.misc,"Translit",""),"LTranslit","");                     // stale MISC Translit for the old form (rewritten below)
   // item A: refresh the LANGUAGE-driven secondaries IMMEDIATELY — a single-token form edit doesn't change the
   // token count, so no re-tokenisation is needed; the transliteration / script / MSeg update at once instead of
@@ -2669,7 +2669,7 @@ async function sandhiMergeForm(si,tokId,forms,lemmas){
   const fused=r&&r.form&&r.form[0];
   if(!fused) return false;
   if(fused!==t.form){ t.form=fused;
-    t.translit=""; t.translitLemma=""; t.ortho=""; t._trMisc=false; t._trPick=false;   // a romanisation of the unfused string says nothing about the fused piece (afterFormEdit drops these for the same reason)
+    t.translit=""; t.translitLemma=""; t.ortho=""; t.unOrtho=""; t._trMisc=false; t._trPick=false;   // a romanisation of the unfused string says nothing about the fused piece (afterFormEdit drops these for the same reason)
     t.misc=setMiscKV(setMiscKV(t.misc,"Translit",""),"LTranslit",""); }
   t.misc=setMiscKV(t.misc,"Unsandhied","");   // a component is STORED in pausa, so its form is its pausa: the head's old Unsandhied described one piece and would now describe the merged whole — the stale `-tve` trap documented below
   markDirty();
@@ -2743,7 +2743,7 @@ async function sandhiSplitPausa(si,from){
       c.misc=setMiscKV(c.misc,"Unsandhied",p||c.form);
     if(!p||p===c.form) continue;                        // ambiguous, or nothing to undo — desandhi_final declines rather than guesses
     c.form=p; any=true;
-    c.translit=""; c.translitLemma=""; c.ortho=""; c._trMisc=false; c._trPick=false;   // every derived field spelt the sandhied form
+    c.translit=""; c.translitLemma=""; c.ortho=""; c.unOrtho=""; c._trMisc=false; c._trPick=false;   // every derived field spelt the sandhied form
     c.misc=setMiscKV(setMiscKV(c.misc,"Translit",""),"LTranslit","");
     /* …and MSeg, which SEGMENTS the form and so cannot outlive it: this just respelt `bhṛto` as `bhṛtaḥ`, and a
        segmentation of the old spelling now names morphemes the token no longer has. Unforced, exactly as a form
