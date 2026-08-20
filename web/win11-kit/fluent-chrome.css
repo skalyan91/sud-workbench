@@ -199,6 +199,13 @@
   .titlebar.win-inactive .tbpill > .tbtn.active::before,.titlebar.win-inactive .tbpill > .tbtn.active + .tbtn::before,
   .titlebar.win-inactive .tbmodel > .tbtn.active::before,.titlebar.win-inactive .tbmodel > .tbtn.active + .tbtn::before{background:transparent}
   .tbzoom{gap:0; padding:0}
+  /* ⚠ #btnGrids DELIBERATELY TAKES NO WIDENING HERE, unlike the shared sheet (see its own note there), and
+     the reason is that this kit does not draw the same glyph. The macOS button is widened because Apple's
+     `tablecells` is a genuinely wide symbol (ink 22.20 × 17.20 in a 20px box); Fluent's own grid icon is
+     SQUARE — measured the same way, mask decoded to a canvas and alpha-thresholded, its ink is 16.53 ×
+     16.53 — so the shared 32px button already clears it by 7.73px each side, inside this kit's own 7.60
+     (#btnOptions) to 10.13 (unpaged) band. Widening it to match macOS's 38px was tried and measured at
+     10.73px of clear space, i.e. the same complaint in the other direction. */
   .tbzoom .tbtn.icon{width:32px; height:28px}
   .tbzoom .tbtn.icon .sfi{width:16px; height:16px}
   /* MODEL MANAGER + HELP: 20px, not the 24px `.tbtn.icon .sfi` gives every other icon button.

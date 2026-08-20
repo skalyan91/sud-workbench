@@ -363,6 +363,18 @@
      as the pill being on — for a uniformity nobody was asking for. Don't re-do it.)
      Text Only keeps its compact pill: there is no icon button there to grow. */
   .titlebar:not(.tb-textonly) .tbpill:has(> #btnOptions){padding:0}
+  /* ⚠ THE GRIDS BUTTON IS WIDER THAN THE SHARED 30px, BECAUSE ITS GLYPH IS. `tablecells` (--sf-grid) is the
+     one genuinely WIDE symbol in this bar — app.css already stops the shared `aspect-ratio:1/1` squashing it
+     (see #btnGrids .sfi there for the measurement) — and a wide glyph in a square button has less air beside
+     it than a square one does. Measured live in the shipping WKWebView, every titlebar icon's real INK box
+     (its mask decoded to a canvas, alpha-thresholded, scaled by what `mask-size:contain` does to it) against
+     its button's own width: undo/redo 7.12px of clear space each side, parse 7.08, paged/unpaged 7.50, help
+     6.42, the three zoom steppers 7.93 — and Grids 3.90, which is what "looks like it wants to be wider"
+     is. Its ink is 22.20px wide, so 22.20 + 2×7.12 = 36.4 → 36px puts it back at 6.90, inside the same band
+     as everything around it. Only the WIDTH moves: the 30px height, the glyph box and the hit target's own
+     height are untouched, and `--r-control` is 999px here so the button and the 3px-padded pill around it
+     simply become capsules, exactly as #btnModels' own widening already does two rules down. */
+  #btnGrids.tbtn.icon{width:36px; min-width:36px}
   .titlebar:not(.tb-textonly) #btnOptions.tbtn.icon{width:36px; height:36px}
   /* model chevron button: icon + a small disclosure chevron opening the model menu */
   .tbtn.model{width:auto; padding:0 9px; gap:3px; border-radius:999px}
