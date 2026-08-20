@@ -2314,7 +2314,7 @@ function reserveBracketArcRoom(){ document.querySelectorAll("#doc .bwrap").forEa
           const r=e.getBoundingClientRect(); out.push({l:r.left-B.left, r:r.right-B.left, b:r.bottom-B.top}); }); return out; });   // real glyph-row boxes (POS/rel are absolute → hang past the line box)
         const cl=cArcs.map(a=>{ const c=a.c, loRel=c.loTok.querySelector(".bwrel"), loRelTop=loRel?(c.loTok.offsetTop+loRel.offsetTop):(rectOf(c.loTok).t-GAPL),
             HX=c.Hcx+(a.offH||0), DX=c.Dcx+(a.offD||0), upP0=c.depUp?DX:HX, loP0=c.depUp?HX:DX, upY=tokBot(c.upTok)+GAPU, loY=loRelTop-3;
-          return {c, mx:(upP0+loP0)/2, apex:(upY+loY)/2, text:c.rel, level:Math.hypot(upP0-loP0,upY-loY)}; });
+          return {c, mx:(upP0+loP0)/2, apex:(upY+loY)/2, mid:true, text:c.rel, level:Math.hypot(upP0-loP0,upY-loY)}; });   // mid: a cross-line label is seated ON its arc's centre (placeLabels, js/diagram/diagram-wrap.js) — this prediction pass has to state the same seat the draw below does, or the gap it grows is measured against a label height that is never used
         placeLabels(cl);
         const push=new Map();
         cl.forEach(L=>{ const labTop=L.fy-L.hh, half=meas(L.text,POS_F)/2+3, xl=L.mx-half, xr=L.mx+half; let need=0;
@@ -2460,7 +2460,7 @@ function positionBracketAnnots(){ document.querySelectorAll("#doc .bwrap").forEa
     const gap=[tokBot(depUp?dep:headTok), loRelTop];   // the arc may bow within the inter-line gap: up to the upper token's bottom, down to the lower token's deprel-label top
     drawCrossLine(g,frm,tip,col,AH,true,gap);   // SAME helper the wrapped arc view uses → identical curvature/take-off; casing halo added here
     svg.appendChild(g);
-    if(show.labels && rel) clabs.push({g,dep:+dep.dataset.tok,mx:(upP[0]+loP[0])/2,apex:(upP[1]+loP[1])/2,text:rel,col,level:Math.hypot(upP[0]-loP[0],upP[1]-loP[1]),frm,tip,gap,arcEls:[...g.childNodes]}); });   // frm/tip/gap/arcEls: Item 4 lets a lifted label grow the arc up to it
+    if(show.labels && rel) clabs.push({g,dep:+dep.dataset.tok,mx:(upP[0]+loP[0])/2,apex:(upP[1]+loP[1])/2,mid:true,text:rel,col,level:Math.hypot(upP[0]-loP[0],upP[1]-loP[1]),frm,tip,gap,arcEls:[...g.childNodes]}); });   // frm/tip/gap/arcEls: Item 4 lets a lifted label grow the arc up to it
   if(show.labels){ decollide(clabs,[],svg,si0); growCrossArcs(clabs,AH,null,si0); }   // fold cross-line labels into the SAME de-collision pass as the within-line bumps; then grow/widen: raise any arc whose label cleared its top endpoint, widen the band, re-solve the band
   // s0 (item 25/4: resolves each token's own model object for undBot()/the AVM loop below) is now hoisted all the way up to the top of this function, beside si0 — the early-return guard needs it too (item 25/9)
   mwts.forEach(m=>{ const a=box.querySelector(`.bwtok[data-tok="${m.fromTok}"]`), b=box.querySelector(`.bwtok[data-tok="${m.toTok}"]`); if(!a||!b)return;

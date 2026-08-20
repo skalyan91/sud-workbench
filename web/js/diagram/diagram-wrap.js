@@ -494,8 +494,21 @@ function chordSide(A,B){ return A[1]<B[1]?-1:1; }
 // measure-only label de-collision: lift each label (shortest arc first) until it clears the taller ones already
 // placed, recording fy/hh/y0. No drawing, no boxes. Used by decollide() (which then draws) AND by the wrapped views'
 // pre-pass that grows the inter-line gaps to fit the de-collided CROSS-line labels before the rows/lines are placed.
+/* ⚠ `mid` — THE LABEL SITS ON THE ARC'S CENTRE RATHER THAN ABOVE ITS CROWN, and that is the whole
+   difference between a within-line label and a CROSS-LINE one. A within-line bump has a crown: `apex` is
+   the top of the curve, and a label 8px above it is beside the arc, clear of the ink. A cross-line arc has
+   no crown — `apex` is the MIDPOINT of the chord, which for both branches drawCrossLine draws is exactly
+   the point the curve passes through at t=0.5 (the straight branch trivially; the S-curve because
+   arcCtrlChord's two handles are antisymmetric, v2=−v1, so the cubic is point-symmetric about that
+   midpoint). Hanging the label 8px above THAT put it beside the arc's middle, attached to nothing in
+   particular. Centred, it interrupts its own arc — which reads as a label ON that edge, the same way the
+   tree/hierarchy views already draw every edge label at its midpoint — and drawLabel's opaque `.lbl`
+   casing is what clears the stroke behind the text. De-collision is unchanged: a label that must rise to
+   clear a shorter one still rises, and still grows a leader back down to the arc (`y0` is what decollide
+   compares against to decide it moved). The wrapped-brackets ghost cross-line label has been placed this
+   way since it was written (js/core/document.js) — this is the rest of them agreeing with it. */
 function placeLabels(labs,seed){ const placed=seed?seed.map(o=>({x:o.x,y:o.y,hx:o.hx,hy:o.hy})):[];   // seed = fixed obstacle boxes (e.g. the NEXT line's within-line labels) the labels must ALSO avoid, without being emitted (Item 13)
-  labs.slice().sort((p,q)=>p.level-q.level || p.mx-q.mx).forEach(L=>{ const half=meas(L.text,POS_F)/2+3, hh=7, y0=L.apex-(L.root?9:8);   // shortest arc first
+  labs.slice().sort((p,q)=>p.level-q.level || p.mx-q.mx).forEach(L=>{ const half=meas(L.text,POS_F)/2+3, hh=7, y0=L.apex-(L.mid?0:(L.root?9:8));   // shortest arc first; `mid` = a cross-line label, centred ON the arc (see above)
     let y=y0, guard=0;
     while(guard++<40 && placed.some(p=>Math.abs(p.x-L.mx)<p.hx+half && Math.abs(p.y-y)<p.hy+hh)) y-=hh*2+3;   // lift until clear of all placed (shorter) labels
     L.fy=y; L.hh=hh; L.y0=y0; placed.push({x:L.mx,y,hx:half,hy:hh,level:L.level}); }); }
@@ -875,7 +888,7 @@ function arcsWrapped(si){
     const cl=[];
     for(let i=0;i<n;i++){ const h=heads[i]-1; if(h<0)continue; const ri=rowOf(i),rh=rowOf(h); if(ri===rh)continue;
       const {upP,loP,up}=crossEnds(i), U=rowOf(up);   // fanned endpoints (the exact geometry the arcs are drawn with) → label placement stays in sync with the fan
-      cl.push({mx:(upP[0]+loP[0])/2, apex:(upP[1]+loP[1])/2, text:t[i].deprel||"", level:Math.hypot(upP[0]-loP[0],upP[1]-loP[1]), Uord:U.ord, Ubot:U.tieBot}); }
+      cl.push({mx:(upP[0]+loP[0])/2, apex:(upP[1]+loP[1])/2, mid:true, text:t[i].deprel||"", level:Math.hypot(upP[0]-loP[0],upP[1]-loP[1]), Uord:U.ord, Ubot:U.tieBot}); }   // mid: this gap-reservation pre-pass must predict placeLabels' answer EXACTLY, so it states the same centred seat the real draw below does
     if(cl.length){ placeLabels(cl,inlineObstacles());   // Item 13: also avoid the next line's within-line labels, so the reserved gap accounts for the extra lift
       cl.forEach(L=>{ const short=(L.Ubot+CLEARX)-(L.fy-L.hh); if(short>0.5){ const k=L.Uord+1; if(k<extra.length) extra[k]=Math.max(extra[k],2*short); } }); }
     return extra; };
@@ -909,7 +922,7 @@ function arcsWrapped(si){
     const col=relColor(t[i].deprel), {upP,loP,tip,frm,gap}=crossGeom(i);   // fanned endpoints at BOTH the head- and dependent-token ends (multiple cross-line arcs at one token no longer overlap)
     const g=E("g",{class:"arc","data-s":si,"data-dep":OID(i),"data-head":OID(h)});
     drawCrossLine(g,frm,tip,col,AH,true,gap,undefined,isMorphRel(t[i].deprel));   // straight when the chord already meets ≥ the take-off angle θ, else the angle-enforcing Hobby spline (arcCtrlChord) — see drawCrossLine's own comment. Shared cross-line edge WITH its casing halo (Item 3): the arc-casing/ah-casing opaque background so a crossing cross-line arc occludes cleanly, exactly like the within-line bumps (drawBump) and the flat arc view. Its LABEL gets the .lbl paint-order casing via the same decollide→drawLabel path below.
-    if(show.labels){const mx=(upP[0]+loP[0])/2, my=(upP[1]+loP[1])/2; clabs.push({dep:OID(i),mx,apex:my,text:t[i].deprel,col,level:Math.hypot(upP[0]-loP[0],upP[1]-loP[1]),g,frm,tip,gap,arcEls:[...g.childNodes]});}   // lift-until-clear + leader, exactly like a within-line arc's label (frm/tip/gap/arcEls: Item 4 lets a lifted label grow the arc up to it)
+    if(show.labels){const mx=(upP[0]+loP[0])/2, my=(upP[1]+loP[1])/2; clabs.push({dep:OID(i),mx,apex:my,mid:true,text:t[i].deprel,col,level:Math.hypot(upP[0]-loP[0],upP[1]-loP[1]),g,frm,tip,gap,arcEls:[...g.childNodes]});}   // lift-until-clear + leader, exactly like a within-line arc's label (frm/tip/gap/arcEls: Item 4 lets a lifted label grow the arc up to it)
     g.style.cursor="pointer"; g.addEventListener("click",()=>pick(si,OID(i))); svg.appendChild(g); }
   if(show.labels){ const inl=inlineObstacles(); decollide(clabs,boxes,svg,si,inl); growCrossArcs(clabs,AH,boxes,si,inl); }   // de-collide cross-line labels (Item 13: also against the next line's within-line labels); then grow/widen: raise any arc whose label cleared its top endpoint, widen the band, re-solve the band
   rows.forEach(r=>{
@@ -982,7 +995,7 @@ function arcsWrapped(si){
       wireGhostClick(g,si,kind,gtok,gother);
       drawCrossLine(g,frm,tip,col,AH,false,[repBase(rep,tokStackBot(up),up),repBase(rep,rowOf(lo).wordY,lo)-ASC]);   // item 11: same report-lifted band bounds crossGeom() gives the real cross-line arcs — item 22: tokStackBot(up), not rowOf(up).stackBot, for the same reason crossGeom's own gap[0] just changed: this band's top has to match whatever NBOT(up) actually seated upP at, or a ghost landing on a light-AVM token gets the identical collapsed-angle bug a real cross-line arc did
       g.querySelectorAll(".arc-path").forEach(pp=>pp.classList.add("arc-ghost")); g.querySelectorAll(".ah").forEach(pp=>pp.classList.add("ah-ghost"));
-      svg.appendChild(g); ghostG.push({g,mx:(upP[0]+loP[0])/2,apex:(upP[1]+loP[1])/2,rel,col}); } });
+      svg.appendChild(g); ghostG.push({g,mx:(upP[0]+loP[0])/2,apex:(upP[1]+loP[1])/2,mid:true,rel,col}); } });   // mid: a ghost cross-line label is centred on its arc for the same reason a real one is (placeLabels' own note) — the two must not sit at different heights on the same kind of edge
   // Every REAL edge in this diagram, as the flattened obstacles the ghost-label pass below lifts off. Read off the
   // groups themselves — the control points drawBump/drawCrossLine/the root stub recorded as they drew — and read
   // HERE, at the end, because that is the only point at which they are all final: growCrossArcs may have re-solved
@@ -995,7 +1008,7 @@ function arcsWrapped(si){
   // read, never altered) — only the ghost labels themselves move (item 6). Each ghost's OWN crown box is pushed
   // to `boxes` only AFTER its label is placed (not during the drawing loop above) — pushing it first made every
   // ghost's own initial position (only 8px from its own crown) collide with itself, lifting labels needlessly high.
-  if(show.labels) ghostG.forEach(({g,mx,apex,rel,col})=>{ const half=meas(rel,POS_F)/2+3, hh=7, y0=apex-8;
+  if(show.labels) ghostG.forEach(({g,mx,apex,mid,rel,col})=>{ const half=meas(rel,POS_F)/2+3, hh=7, y0=apex-(mid?0:8);   // mid (a cross-line ghost) → centred on the arc, exactly as placeLabels seats a real one
     let y=y0, guard=0;
     while(guard++<40 && boxes.some(b=>Math.abs(b.x-mx)<b.hx+half && Math.abs(b.y-y)<b.hy+hh)) y-=hh*2+3;
     // …then keep lifting off any REAL EDGE the label would land on top of (see edgeObstacle): a ghost label carries
