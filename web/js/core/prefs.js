@@ -38,7 +38,7 @@ function prefTranslit(lang){ const t=PREFS.translit;
 function prefStored(lang){ return (PREFS.stored&&PREFS.stored[lang])||""; }
 let _prefsT=null;
 function savePrefs(){ if(!hasBridge())return;
-  PREFS.show={colour:show.colour,labels:show.labels,pos:show.pos,arrows:show.arrows,mergePunct:show.mergePunct,wrap:show.wrap,grids:show.grids,avm:show.avm}; PREFS.notation=notation; PREFS.paged=PAGED;
+  PREFS.show={colour:show.colour,labels:show.labels,pos:show.pos,arrows:show.arrows,mergePunct:show.mergePunct,wrap:show.wrap,grids:show.grids,avm:show.avm}; PREFS.notation=notation; PREFS.paged=PAGED; PREFS.autoregen=AUTOREGEN;
   clearTimeout(_prefsT); _prefsT=setTimeout(()=>{ try{ window.pywebview.api.save_prefs(PREFS); }catch(e){} },300); }   // debounced
 async function loadPrefs(){ if(!hasBridge())return; let p; try{ p=await window.pywebview.api.get_prefs(); }catch(e){ return; } if(!p||typeof p!=="object")return;
   PREFS.ortho=(p.ortho&&typeof p.ortho==="object")?p.ortho:{}; PREFS.translit=(p.translit&&typeof p.translit==="object")?p.translit:{}; PREFS.stored=(p.stored&&typeof p.stored==="object")?p.stored:{};
@@ -47,11 +47,13 @@ async function loadPrefs(){ if(!hasBridge())return; let p; try{ p=await window.p
   if(p.show&&typeof p.show==="object"){ ["colour","labels","pos","arrows","mergePunct","wrap","grids","avm"].forEach(k=>{ if(typeof p.show[k]==="boolean") show[k]=p.show[k]; }); }
   if(typeof p.notation==="string"&&p.notation){ notation=p.notation; }
   if(typeof p.paged==="boolean"){ PAGED=p.paged; }   // only an explicit stored choice moves it off the paged default
+  if(typeof p.autoregen==="boolean"){ AUTOREGEN=p.autoregen; }   // …same shape: only an explicit stored choice moves it off the ON default, so a prefs file written before this existed leaves it on
   if(typeof applyPageMode==="function") applyPageMode();   // reflect it on #doc + the toolbar pill (the re-render below repaints the sheets)
   if(typeof applyTbMode==="function") applyTbMode(typeof p.tbmode==="string"?p.tbmode:"icon");   // restore the titlebar display mode
   const sel=document.getElementById("convSel"); if(sel)sel.value=notation; syncNotation();
   document.querySelectorAll('#toggles input[type="checkbox"][data-t]').forEach(cb=>{ const k=cb.dataset.t; if(k in show)cb.checked=show[k]; });
   const gc=document.querySelector('[data-t="grids"]'); if(gc)gc.checked=show.grids;
+  const ar=document.querySelector("#autoregenChk input"); if(ar)ar.checked=AUTOREGEN;   // …and the options bar's own checkbox, which lives outside #toggles and so is not covered by the data-t sweep above
   // item 17: restore the custom relation colours + the light/dark link state, then repaint the override <style>
   PREFS.relColours=(p.relColours&&typeof p.relColours==="object")?p.relColours:undefined;
   PREFS.relColLink=(typeof p.relColLink==="boolean")?p.relColLink:undefined;   // only an explicit stored choice persists; unset → linked (relColLinked() default ON)
@@ -532,6 +534,24 @@ function setGlossText(el,tier,txt){ el.textContent="";
     const s=svg?document.createElementNS(SVGNS,"tspan"):document.createElement("span");
     s.setAttribute("class","glabbr"); s.textContent=t; el.appendChild(s); }); }
 let AUTONUM=true;   // continue sentence-ID numbering when sentences are inserted or deleted
+/* ── AUTO-REGENERATION: does an edit to one field let the MODEL revise the others? ─────────────────
+   ON by default, because that is what keeps a token describing one word: retag 行 NOUN→VERB and its
+   FEATS and lemma should stop being the noun's, re-head a token and its relation should stop
+   describing an edge it no longer has. An annotator CORRECTING a model's output wants the opposite
+   — nothing they did not type rewritten under them — and the options bar is where they say so.
+   ⚠ IT GATES THE TWO FUNNELS THAT ASK THE PARSER, and nothing else: `reparseTokenFields` (the
+   lemma/XPOS/FEATS re-derivation behind a form or UPOS edit, and behind a split's new pieces) and
+   `headSyncDeprel` (the relation re-asked after a head change). Both already answer `false` with no
+   model, and every caller handles that, so switching this off is a path the app has always had.
+   Deliberately NOT gated: transliteration, the macron display layer, the gloss that follows a FEATS
+   edit, the MSeg refill. None of those is the parser having an opinion — they are derivations of what
+   the reader themselves typed, they run with no model at all, and stopping them would leave the
+   annotation rows disagreeing with the fields beside them rather than leaving them alone.
+   ⚠️ AND IT PERSISTS, where AUTONUM beside it does not. The difference is what a forgotten value
+   costs: auto-numbering coming back on renumbers sentences the reader can see, while this coming
+   back on lets the model quietly rewrite fields in the next session — which is the very thing the
+   reader turned it off to prevent. A preference against automatic edits has to outlive the window. */
+let AUTOREGEN=true;
 // transliteration is a toggleable layer; in the real app each token's `translit` is produced by
 // wiktra (github.com/twardoch/wiktra2 — Transliterator().tr(form, to_sc="Latn"), 514 langs / 102 scripts)
 // and cached on the token. Here it is pre-filled on the sample tokens.

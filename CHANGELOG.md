@@ -2,6 +2,21 @@
 
 All notable changes to SUD Workbench are documented in this file.
 
+## [0.3.16] — 2026-08-22
+
+### Added: auto-regeneration can be turned off
+
+- An **Auto-regenerate** checkbox at the right-hand end of the options bar, on by default. It is what
+  makes an edit to one field leave the rest of the token describing the same word — retag 行 NOUN→VERB
+  and its features stop being the noun's, re-head a token and its relation stops describing an edge it
+  no longer has.
+- Turned off, nothing you did not type is rewritten: the model is not consulted for a token's lemma,
+  XPOS or features after a form or word-class edit, and a re-headed token keeps the relation you gave
+  it. The choice **persists between sessions**, since a preference against automatic edits that
+  forgot itself overnight would be no preference at all.
+- Transliteration, the macron display, and the glosses that follow your own FEATS edit are untouched
+  by it — none of those is the parser having an opinion.
+
 ## [0.3.15] — 2026-08-22
 
 ### Added: the open file follows changes made to it on disk

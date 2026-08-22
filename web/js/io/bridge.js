@@ -2563,7 +2563,8 @@ async function relForNewHead(si,tokId,headId){
     if(typeof depIsError!=="function") return base;
     if(!await depIsError(hd.upos,t.upos,withDepBase(t.deprel,base))) return base; }   // asked about the relation AS IT WOULD BE WRITTEN, tail and all — the same string setDiagramHead's own guard tests
   return ""; }
-async function headSyncDeprel(si,tokId,quiet){ if(!(hasBridge()&&model)) return false;
+async function headSyncDeprel(si,tokId,quiet){ if(!AUTOREGEN) return false;   // …the other half of Auto-regenerate: with it off, a re-headed token keeps the relation the reader gave it. The head-0 ⟺ `root` rule is NOT here — that is an invariant of the annotation rather than the parser's opinion, and afterHeadEdit applies it regardless
+  if(!(hasBridge()&&model)) return false;
   const s=DOC[si], t=s&&s.tokens[tokId-1]; if(!t) return false;
   const want=parseInt(t.head,10); if(!(want>=1)) return false;   // a new ROOT is settled by afterHeadEdit's own invariant — there is nothing to ask
   const rel=(await scoredRelsForHead(si,tokId,want))[0]||"";     // the shared three tiers, above
@@ -2614,6 +2615,7 @@ const GESTURE_FEATS=["Shared","Typo","Foreign"];   // FEATS keys settable only v
 const SUD_TREE_MISC=["Idiom","InIdiom","Reported","Subject"];
 async function reparseTokenFields(si,tokIds,opts){
   opts=opts||{};
+  if(!AUTOREGEN) return false;   // the options bar's Auto-regenerate, off: the reader has asked that nothing they did not type be rewritten. Answered here rather than at the four call sites, and answered with the SAME `false` this function already returns with no model — every caller handles that, so this is a path the app has always taken (see AUTOREGEN, js/core/prefs.js)
   if(!(hasBridge()&&model)) return false;
   const s=DOC[si]; if(!s)return false;
   /* PRE-TOKENISED, and that is the whole point of this call. The tokens are the annotation — the

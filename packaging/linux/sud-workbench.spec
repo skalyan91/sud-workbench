@@ -33,7 +33,7 @@
 # (an ImportError three menus deep, not a `dnf install` error), which is worse than getting it wrong
 # at build time.
 
-%global app_version 0.3.15
+%global app_version 0.3.16
 
 Name:           sud-workbench
 Version:        %{app_version}
@@ -211,6 +211,10 @@ update-desktop-database %{_datadir}/applications &>/dev/null || :
 gtk-update-icon-cache %{_datadir}/icons/hicolor &>/dev/null || :
 
 %changelog
+* Sat Aug 22 2026 Siva Kalyan - 0.3.16-1
+- Auto-regeneration can be turned off: an Auto-regenerate checkbox in the options bar, on by default,
+  gating the parser's re-derivation of a token's fields and of a re-headed token's relation
+
 * Sat Aug 22 2026 Siva Kalyan - 0.3.15-1
 - The open file follows changes made to it on disk: a clean document reloads, a dirty one warns with
   Reload from Disk / Overwrite / Cancel

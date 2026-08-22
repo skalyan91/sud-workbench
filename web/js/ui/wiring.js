@@ -318,6 +318,7 @@ document.getElementById("toggles").addEventListener("change",e=>{ const cb=e.tar
   show[k]=cb.checked; updateViewOptions(); preserveScroll(renderDoc); savePrefs(); });   // (transliteration is no longer a checkbox — it is driven by the status-bar transliteration menu)
 document.getElementById("btnGrids").addEventListener("click",toggleGrids);   // was the standalone "Show grids" checkbox's own change listener, removed on request — #btnGrids now drives the same shared toggleGrids() the ⌃⌘G shortcut and native View-menu row already called
 document.getElementById("autonumChk").addEventListener("change",e=>{ AUTONUM=e.target.checked; });
+document.getElementById("autoregenChk").addEventListener("change",e=>{ AUTOREGEN=e.target.checked; savePrefs(); });   // savePrefs, unlike the line above: a preference against automatic edits has to outlive the window (see AUTOREGEN, js/core/prefs.js). Nothing to re-render — the flag is read at the next edit, not drawn
 /* ⚠ AN OPTIONS-BAR DROPDOWN NEEDS NO CLAMP OF ITS OWN, AND THE ONE IT BRIEFLY HAD IS THE REASON THE BAR
    MOVED. `.drawer-pop` is placed by CSS alone — `position:absolute; top:calc(100% + 6px)` in
    mac-chrome.css, `+ 4px` in fluent-chrome.css — so it is the one popup in the app that never went

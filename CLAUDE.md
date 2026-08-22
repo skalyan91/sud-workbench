@@ -1100,6 +1100,16 @@ recorded in SUD-spaCy's own CLAUDE.md (zh ships no `Subject`; fa/la no `Reported
 treebanks that annotate no idioms no `Idiom`), so **an absent key means "this model says nothing
 here", never "no"**.
 
+⚠ **AND THE WHOLE OF IT IS GATED ON `AUTOREGEN`** (js/core/prefs.js), the options bar's own
+**Auto-regenerate** checkbox — on by default, persisted in PREFS. It gates the two funnels that consult
+the MODEL and nothing else: `reparseTokenFields` and `headSyncDeprel`, each answering the same `false`
+they already answer with no model installed, so every caller's degradation path is one the app has
+always had. NOT gated: transliteration, `app/macron.py`'s display layer, `retargetGlossForFeatsChange`,
+`msegRefill` — none of those is the parser having an opinion, all of them run with no model, and
+stopping them would leave the annotation rows disagreeing with the fields beside them. The head-0 ⟺
+`root` rule is likewise ungated: it is an invariant of the annotation, applied by `afterHeadEdit`
+itself before `headSyncDeprel` is ever reached.
+
 ⚠ **A RE-PARSE OF ONE TOKEN'S FIELDS MUST NOT TAKE THEM.** All four are read off the tree the model
 itself produced, and `reparseTokenFields` (`SUD_TREE_MISC`, js/io/bridge.js) adopts none of the
 parser's heads or relations — it re-derives the model-derived FIELDS on the reader's own tokens. So

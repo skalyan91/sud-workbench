@@ -257,6 +257,13 @@
       <span class="spring" style="flex:1"></span>
       <span class="vsep" aria-hidden="true"></span>
       <label class="chk" id="autonumChk" title="Continue sentence-ID numbering when sentences are inserted or deleted"><input type="checkbox" checked>Auto-number</label>
+      <!-- item: the parser's own follow-up work, under the reader's control. ON by default — it is what makes an
+           edit to one field leave the rest of the token describing the same word — but an annotator correcting a
+           model's output wants to be able to stop it revising fields they did not type. Gates exactly the two
+           funnels that consult the MODEL (reparseTokenFields, headSyncDeprel — see AUTOREGEN in js/core/prefs.js);
+           the deterministic follow-ups (transliteration, the gloss following a FEATS edit, MSeg) are not
+           re-parsing and are not gated. -->
+      <label class="chk" id="autoregenChk" title="Re-parse a token's lemma, XPOS and features when its form or word class is edited, and re-ask the relation when a token is given a new head"><input type="checkbox" checked>Auto-regenerate</label>
     </div>
 
     <div class="doc" id="doc"></div>
