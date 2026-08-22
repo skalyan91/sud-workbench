@@ -42,6 +42,10 @@ All notable changes to SUD Workbench are documented in this file.
 
 ### Fixed
 
+- A click outside a context menu now dismisses it **however the click's target handles the event**.
+  The dismissal was bubble-phase, so any element that stops click propagation swallowed it — most
+  visibly the translations grid, which meant opening a context menu and then clicking into a
+  translation field left the menu standing.
 - `c2sc` small caps no longer apply to the **lexical** gloss tier, where a capital is the word's own —
   a name, an acronym, or the English first-person `I`, which rendered as a small-cap. The morphemic
   tier keeps them. This also settled a paint/measurement disagreement in the lexical row's own
