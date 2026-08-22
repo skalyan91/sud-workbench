@@ -33,7 +33,7 @@
 # (an ImportError three menus deep, not a `dnf install` error), which is worse than getting it wrong
 # at build time.
 
-%global app_version 0.3.13
+%global app_version 0.3.14
 
 Name:           sud-workbench
 Version:        %{app_version}
@@ -211,6 +211,10 @@ update-desktop-database %{_datadir}/applications &>/dev/null || :
 gtk-update-icon-cache %{_datadir}/icons/hicolor &>/dev/null || :
 
 %changelog
+* Sat Aug 22 2026 Siva Kalyan - 0.3.14-1
+- Gloss from a translation by what the words mean, not by structure alone
+- Foreign words underlined in scripts that have no italic
+
 * Thu Aug 20 2026 Siva Kalyan - 0.3.13-1
 - A cross-line arc's label sits on the arc and the arc itself fans innermost; dragging a token to a
   new head re-labels the edge for that head instead of refusing the drop; Reset Parse re-analyses the

@@ -2,6 +2,51 @@
 
 All notable changes to SUD Workbench are documented in this file.
 
+## [0.3.14] — 2026-08-22
+
+### Added: glossing from a translation weighs what the words *mean*
+
+- The alignment between a sentence and its English translation now weighs the two words' **meaning**
+  alongside their position in the two trees, using thirteen cross-lingually aligned vector tables that
+  are **downloaded with the parser** — one per language, in one shared space, plus the English hub.
+  Failure to fetch them is a warning: a model still installs and parses.
+- Each word is looked up by **both its form and its lemma** and the two averaged, which is what keeps
+  the feature alive on inflected languages — on Sanskrit it takes tokens carrying a vector from 22 of
+  78 to 75 of 78.
+- **Proper nouns are matched on position alone.** A name's neighbours in that space are the other names
+  of its region and period, not its own translation.
+- An **adposition that introduces an oblique** makes its relation transparent, so a role a case
+  language marks with an ending and English marks with a preposition can still be paired — six of the
+  nineteen unmatched tokens on the Virgil sample were exactly this.
+- Word classes may differ **inside a supercategory** (nominal / predicate / modifier) or where the
+  meaning vouches for the crossing; `dep`, UD's "no relation could be determined", is now treated as
+  uninformative rather than contradictory.
+- What the tree cannot place is glossed by **retrieval** from the sentence's own translation, with a
+  lower threshold where **Apte** independently confirms the word; a matched English node may expand to
+  its **subtree**, giving a multi-word gloss; and every matched pair anchors a **re-alignment inside
+  its own subtree**, recovering pairs the global no-crossing rule refuses.
+- A sentence with **no translation at all** is glossed from the vectors alone, with the dictionary
+  supplying the candidates — Sanskrit only, since Apte is offline where Wiktionary is a network call.
+  Open-vocabulary retrieval was measured and refused: it is ~14 % accurate with no usable threshold.
+- Glosses are lowercased except proper nouns and `I`. An unmatched **proper noun takes its own lemma**,
+  capitalised, romanised where the lemma is not written in Latin.
+
+### Added: a foreign word is underlined in scripts that have no italic
+
+- Italic is a Latin device that Cyrillic and Greek also have; a Brahmic script, an abjad, Han/kana/
+  Hangul have none, so what a browser drew there was a **synthesised oblique**. Those documents now
+  mark `Foreign=Yes` with an **underline** instead. Chinese is unaffected — it already marks a foreign
+  word by a change of face to 楷體.
+- The displayed script decides, so the same file read in IAST is italicised and read in Devanagari is
+  underlined.
+
+### Fixed
+
+- `c2sc` small caps no longer apply to the **lexical** gloss tier, where a capital is the word's own —
+  a name, an acronym, or the English first-person `I`, which rendered as a small-cap. The morphemic
+  tier keeps them. This also settled a paint/measurement disagreement in the lexical row's own
+  geometry (26.81 px against 30.69 px on `PST.I`).
+
 ## [0.3.13] — 2026-08-20
 
 ### Fixed: a cross-line arc's label sat above a point on the arc rather than on it
