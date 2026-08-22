@@ -285,7 +285,15 @@ rather than vendored — see `app/grammars.py`.
   trees rather than the SUD form, which is what puts the two languages' content words in
   comparable positions — SUD promotes function words over their hosts, and promotes
   different ones in different languages. Two words are matched only where their word classes agree
-  exactly and their relations agree at least at class level. Turning a glossing tier on — or off and
+  exactly and their relations agree at least at class level — with one transparency, that an
+  adposition introducing an oblique lets its nominal be compared to the other language's nominal
+  whether that one is marked by a preposition or by a case ending. Among the candidates that pass, the
+  alignment also weighs **what the two words mean** — cross-lingually aligned word vectors,
+  downloaded alongside each parser, in one shared space where a word in any language can be compared
+  to a word in any other. Each word is looked up by both its form and its lemma, on both sides, so an
+  inflected token is still recognised through its dictionary form. Proper names are matched on
+  position alone: a name's neighbours in that space are the other names of its region, not its own
+  translation. Without the vectors the feature works exactly as it did before them. Turning a glossing tier on — or off and
   back on — glosses every translated sentence in the document; afterwards, editing a translation,
   retagging a word or moving an arc re-glosses the sentences whose analysis actually changed. Either
   tier can be used on its own. A word the alignment cannot place is left unglossed rather than guessed at,
@@ -333,12 +341,14 @@ app/  __main__.py       pywebview bootstrap, application menu, and the AppKit/Py
       parse_sud.py      backwards-compat shim over app.parse
       models_registry.py  available/installed models, GitHub-release + Stanza download
       extras.py         on-demand install of the optional tiers (Stanza/JP/Arabic/Latin macrons/
-                        Persian vocalisation/Sanskrit lexicon)
+                        Persian vocalisation/Sanskrit lexicon/alignment vectors)
       translit.py       Latin transliteration, routed to a backend per language
       macron.py         Latin vowel lengths (display only) — a façade over the Latin model's own
                         la_macronise component; fetches the Morpheus data on demand
       vidyut_data.py    fetches vidyut's Sanskrit morphological lexicon on demand and points
                         the Sanskrit model at it through VIDYUT_DATA
+      vectors.py        fetches the cross-lingually aligned word-vector tables (one per parser
+                        language) and reads them for gloss_align.py
       langid.py         offline language identification (vendored fastText lid.176)
       wiktionary.py     Wiktionary definition lookup (MediaWiki REST API)
       apte.py           Apte Sanskrit-English dictionary lookup (vendored index; C-SALT fallback)
@@ -397,6 +407,7 @@ Everything the installed app keeps per user lives in one directory:
 ├── site-packages/      the heavy on-demand tiers (stanza/torch, japanese, arabic)
 ├── stanza_resources/   downloaded Stanza models
 ├── vidyut-data/        the Sanskrit morphological lexicon the Sanskrit parser reads
+├── vectors/            cross-lingual alignment vectors, one table per parser language
 ├── cache/              release listings and similar
 └── state.json          recent files, preferences, the last document
 ```
@@ -413,6 +424,7 @@ almost anything is to delete the relevant subdirectory and relaunch. Quit the ap
 | **Stanza fails with `RuntimeError: Numpy is not available!` (or the model just does nothing), on an Intel Mac.** PyTorch's last macOS x86_64 build (2.2.2) predates the NumPy 2.0 ABI; a venv built before `requirements-core.txt` pinned `numpy<2` on Intel resolved a current, incompatible numpy instead — and reinstalling only the Stanza tier can't fix it, because that numpy is CORE's, loaded on every document open (`app/langid.py`'s language auto-detect), well before Stanza is ever touched. | `rm -rf ~/Library/Application\ Support/SUD\ Workbench/venv ~/Library/Application\ Support/SUD\ Workbench/site-packages` and relaunch, then reinstall the Stanza tier from Manage Models. (On Apple Silicon this pin is a no-op — current torch there is numpy-2-safe, so this specific failure shouldn't occur; a NumPy report on Apple Silicon has a different cause.) |
 | a Stanza model is corrupt | `rm -rf ~/Library/Application\ Support/SUD\ Workbench/stanza_resources` |
 | **the Latin “With macrons” row stays unavailable, or macronises nothing.** Two separate things have to be present: the Latin model (which *is* the macroniser) and the Morpheus vowel lengths it reads. The lengths live in the model's own cache, outside Application Support, so a clean slate there does not touch them. | Download `la_sud_ittb_proiel_perseus` in Manage Models, then install the **Latin macrons** tier in the same window. To force the data to be re-fetched: `rm -rf ~/.cache/sud-spacy` (or `$LA_MORPHEUS_TABLE`, if you set one). |
+| **glossing from the translation ignores what the words mean.** The alignment weighs the two words' meaning as well as their position in the two trees, from cross-lingually aligned vector tables that are fetched with the parser — so a model installed before this feature existed has none, and the glossing quietly falls back to structure alone. (Thirteen languages have a table; a document in any other is unaffected, and correctly so.) | Install the **Cross-lingual alignment vectors** tier in Manage Models, or press Install/Update on the model for that language — that fetches the missing tables too, even when the model itself is already up to date. To force a re-fetch: `rm -rf ~/Library/Application\ Support/SUD\ Workbench/vectors`. |
 | **Sanskrit parses nothing, or the Sanskrit model errors about vidyut data.** The Sanskrit model asks vidyut's morphological lexicon what analyses each form can have, as part of its own embedding layer — so unlike the Latin macrons, this is not a display extra the parser can do without: with no lexicon it raises rather than degrading. The `vidyut` package installs with the model; the ~32 MB of lexicon data is a separate download, because upstream publishes it as data rather than as a package. | Install the **Sanskrit lexicon (vidyut)** tier in Manage Models, or press Install/Update on the Sanskrit model there — that fetches a missing lexicon too, even when the model itself is already up to date. To force a re-fetch: `rm -rf ~/Library/Application\ Support/SUD\ Workbench/vidyut-data`. |
 | **the window's corners are not fully rounded** (and other native chrome looks a version behind). AppKit reads the `LC_BUILD_VERSION` of the binary the app runs *inside* — the interpreter — and holds an older-SDK app at the previous appearance. | Check what the venv was built from: `otool -l "$(readlink ~/Library/Application\ Support/SUD\ Workbench/venv/bin/python)" \| awk '/LC_BUILD_VERSION/{f=1} f&&$1=="sdk"{print "sdk",$2;exit}'`. If it is behind your macOS major version, `brew install python@3.12`, then force a rebuild (below). |
 | **forcing a different Python 3.12** | `rm -rf ~/Library/Application\ Support/SUD\ Workbench/venv` and relaunch. The first-launch setup runs again, and `find_py()` picks the newest-SDK interpreter it can find. To name one instead, run the bundle's own launcher from a terminal so the variable reaches it (`open -a` does not pass the environment): <br>`SUD_PYTHON=/opt/homebrew/bin/python3.12 "/Applications/SUD Workbench.app/Contents/MacOS/SUD Workbench"` |

@@ -1070,7 +1070,9 @@ def _immutable_dist_dir(package: str) -> str:
 def _ensure_side_data(package: str, note, progress=None) -> str:
     """Install the on-demand DATA a just-installed model needs, returning "" or a warning phrase.
 
-    Today that is the ``vidyut`` tier and nothing else. The PIP half of vidyut is already done by
+    Today that is the ``vidyut`` tier and nothing else — the alignment vectors are its sibling
+    :func:`_ensure_vectors` rather than another branch here, because they are keyed by LANGUAGE where
+    everything in this function is keyed by what the WHEEL declares. The PIP half of vidyut is already done by
     the time this runs — it is in the Sanskrit wheel's own ``Requires-Dist``, which
     :func:`_unsatisfied_requirements` honours — but its ~81 MB LEXICON is on PyPI in no form at all,
     and it is what ``sud.AnalyserFeatsEmbed.v1`` reads PER TOKEN in the ``runtime = true`` mode the
@@ -1097,6 +1099,30 @@ def _ensure_side_data(package: str, note, progress=None) -> str:
     if r.get("error"):
         return "its Sanskrit lexicon did not: " + r["error"]
     return ""
+
+
+def _ensure_vectors(lang: str, note, progress=None) -> str:
+    """Fetch this language's cross-lingual alignment table (and the English hub's) beside the model.
+
+    ``app/gloss_align.py`` aligns a sentence with its ENGLISH TRANSLATION, and from this release it
+    weighs each candidate pair by what the two words MEAN as well as by where they sit in the two
+    trees — read off the aligned vector assets :mod:`app.vectors` fetches. Those are published as
+    side assets rather than inside the wheels (a table is only useful held two at a time, and eleven
+    of the thirteen are CC BY-SA where the la/ta/te wheels are CC BY-NC-SA), so nothing about
+    installing a parser brings them along by itself. Fetching them HERE is what makes "download the
+    Chinese parser" mean the same thing as "be able to gloss Chinese from its translation" — the same
+    courtesy, for the same reason, as the vidyut branch above and the Stanza-library branch in
+    :func:`download`.
+
+    ⚠ UNLIKE vidyut, THIS IS NOT LOAD-BEARING: a model with no vector table parses exactly as well,
+    and the glossing pass simply scores on structure alone, which is the answer it gave before the
+    tables existed. So a failure is a warning, a language the release has no asset for is a silent
+    no-op, and nothing here is ever an error."""
+    try:
+        from . import vectors
+        return vectors.ensure_for_lang(lang, progress)
+    except Exception as exc:  # noqa: BLE001 — an optional table must never fail a model install
+        return f"its alignment vectors did not: {exc}"
 
 
 def _ensure_tokenizer_deps(package: str, progress=None, declared=()) -> dict:
@@ -1246,6 +1272,10 @@ def download(model_id: str, progress=None) -> dict:
     engine = model_id.split(":", 1)[0]
     if engine == "sud":
         pkg = model_id.split(":", 1)[1]
+        # The language this wheel parses, read off the package name the same way parse_asset does —
+        # `_ensure_vectors` needs it, and the wheel is not yet downloaded (let alone installed) at
+        # the point the "already up to date" branch below asks.
+        entry_lang = pkg.split("_sud_", 1)[0]
         found = _asset_url(model_id)
         if not found:
             return {"error": f"no downloadable asset for {model_id}"}
@@ -1293,11 +1323,16 @@ def download(model_id: str, progress=None) -> dict:
                 # lexicon is EXACTLY the state a reader is in when they press Install/Update on a
                 # Sanskrit model that parses nothing. Returning "Already up to date" without looking
                 # would send them away with the one thing they came for still missing.
-                w = _ensure_side_data(pkg, note, progress)
+                # …and for the alignment vectors, which are the same kind of separate fact about
+                # this machine: an install that predates this app fetching them is exactly the state
+                # a reader is in when the glossing pass ignores meaning and they press Update to find
+                # out why.
+                ws = [x for x in (_ensure_side_data(pkg, note, progress),
+                                  _ensure_vectors(entry_lang, note, progress)) if x]
                 note(100, "Already up to date")
                 out = {"ok": True, "id": model_id, "unchanged": True}
-                if w:
-                    out["warning"] = "The model is up to date, but " + w
+                if ws:
+                    out["warning"] = "The model is up to date, but " + "; ".join(ws)
                 return out
 
             note(None, "Installing…")
@@ -1356,6 +1391,7 @@ def download(model_id: str, progress=None) -> dict:
                 pass
         _invalidate_parse_cache(pkg)
         vidyut_warning = _ensure_side_data(pkg, note, progress)
+        vectors_warning = _ensure_vectors(entry_lang, note, progress)
         note(None, "Checking tokeniser…")   # install the model's raw-text tokeniser backend if it needs one
         dep = _ensure_tokenizer_deps(pkg, progress=progress, declared=declared)
         core_warning = ""
@@ -1409,6 +1445,7 @@ def download(model_id: str, progress=None) -> dict:
         warnings = [w for w in (
             ("its tokeniser dependency did not: " + dep.get("error", "")) if not dep.get("ok") else "",
             vidyut_warning,
+            vectors_warning,
             core_warning,
         ) if w]
         if warnings:
@@ -1444,8 +1481,14 @@ def download(model_id: str, progress=None) -> dict:
         except Exception as exc:  # noqa: BLE001
             return {"error": str(exc)}
         _invalidate_parse_cache()
+        # Same courtesy for a Stanza model: the vector assets are keyed by LANGUAGE, not by engine or
+        # by wheel, so a Stanza parser earns the same table a SUD one would.
+        vectors_warning = _ensure_vectors(lang, note, progress)
         note(100, "Installed")
-        return {"ok": True, "id": model_id}
+        out = {"ok": True, "id": model_id}
+        if vectors_warning:
+            out["warning"] = "Model installed, but " + vectors_warning
+        return out
 
     return {"error": f"unknown engine for {model_id}"}
 

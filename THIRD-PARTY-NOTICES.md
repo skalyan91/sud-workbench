@@ -128,10 +128,15 @@ Digitisation of Apte is by the Cologne Digital Sanskrit Dictionaries project.
 |---|---|---|---|
 | `toolbox.py` (SIL Toolbox/FLEx reader) | `_toolbox_vendor.py` | [acoli-repo/toolbox_py](https://github.com/acoli-repo/toolbox_py) @ `27bdaa3` | MIT |
 | `scripts/external_sandhi.py` (forward Sanskrit sandhi, CSL notation) | `_sa_sandhi_vendor.py` | [SunflowerAI/sud-spacy-parsers](https://github.com/SunflowerAI/sud-spacy-parsers) @ `6997ed73` | MIT, Copyright (c) 2026 Sunflower AI |
+| `scripts/aligned_vectors.py` (reader for the aligned vector assets) | `_aligned_vectors_vendor.py` | [SunflowerAI/sud-spacy-parsers](https://github.com/SunflowerAI/sud-spacy-parsers), beside the `vectors-v0.1.0` release | MIT, Copyright (c) 2026 Sunflower AI |
 
 Each file states its own provenance and the exact edits made in its module docstring — one import
-redirected to `collections.abc` in the first, and nothing at all in the second — it imports nothing
-and is copied verbatim.
+redirected to `collections.abc` in the first, nothing at all in the second (it imports nothing and is
+copied verbatim), and the `argparse` CLI dropped off the foot of the third. The third is the reader
+for the vector assets in the section below, and it is vendored precisely so that this app cannot
+develop a second opinion about how one of them is keyed: three things about an asset (lowercasing,
+form-vs-lemma keying, the Latin orthography fold) are recorded in its own `meta` and read back by
+that file, never re-derived on this side.
 
 (`_sa_csl_vendor.py`, `scripts/sa_tokenizer.py`'s Sanskrit CSL de-sandhi, was vendored here until
 `sa_sud_vedic_ufal_dcs` replaced the CSL Sanskrit model. That notation is now internal to the model
@@ -275,6 +280,46 @@ both are named here.
 | `data-<version>.zip` — the `kosha/` FST + registry this app reads | ambuda-org/vidyut release assets | MIT |
 | `prakriya/` data, in that same archive (unused here) | [ashtadhyayi.com](https://ashtadhyayi.com) | MIT, by that author's own grant to vidyut |
 | `chandas/meters.tsv`, in that same archive (unused here) | Shreevatsa Rajagopalan's Sanskrit metres, from Dr Dhaval Patel's *Vṛttaratnākara* transcription | MIT, as redistributed by vidyut |
+
+## Cross-lingual alignment vectors — FETCHED AT RUNTIME, never shipped
+
+`app/gloss_align.py` glosses a sentence from its English translation by aligning the two dependency
+trees, and from this release it also weighs **what the two words mean**. That evidence comes from
+thirteen aligned vector tables — `sud_vec_<lang>_128d.npz`, one per language, all in one shared
+128-dimensional space so that a dot product between any two of them is a cosine — published as side
+assets of the **`vectors-v0.1.0`** release of
+[SunflowerAI/sud-spacy-parsers](https://github.com/SunflowerAI/sud-spacy-parsers). `app/vectors.py`
+fetches them onto the end user's own machine, into
+`~/Library/Application Support/SUD Workbench/vectors/`, beside whichever parser made them useful
+(24–32 MB each; the English hub is fetched with every other language, since a table is only useful
+held two at a time).
+
+**Here the reason for fetching rather than shipping IS partly a licence restriction**, unlike the
+vidyut section above. Eleven of the thirteen derive from **fastText** (Facebook AI Research), **CC
+BY-SA 3.0**, redistributed by upstream as CC BY-SA 4.0 under 3.0 §4(b)'s later-version clause — a
+ShareAlike term that could not sit inside the CC BY-NC-SA `la`/`ta`/`te` model wheels, which is why
+upstream ships them as side assets rather than inside the wheels at all. The practical reason
+applies too: thirteen tables is ~340 MB, and no single wheel can use more than its own.
+
+⚠ **Two of the thirteen have unresolved upstream provenance, and this app takes upstream's word for
+the status rather than restating it.** `sa` is trained over the Digital Corpus of Sanskrit
+(`OliverHellwig/sanskrit`) and `lzh` over the `kanripo/KR*` repositories; **neither carries a LICENSE
+file**, and the kanripo text headers carry no rights metadata. Upstream releases those two as
+*derived models* rather than as redistributions of the corpora, records the status in each asset's
+own `meta`, and says to treat their provenance as unresolved — so this app, which only ever
+downloads them onto the user's machine and never redistributes them, says the same.
+
+No dictionary content is redistributed by any asset. Apte (via CDSL), the MUSE bilingual
+dictionaries and Wiktionary/kaikki.org were used only to **fit a rotation**; what ships in an asset
+is a matrix of floats. Each asset's `meta` carries its own `licence` and `attribution` strings, which
+is the authoritative statement for that file.
+
+| Component | Origin | Licence |
+|---|---|---|
+| `sud_vec_{ar,en,fa,id,ja,ko,la,ta,te,yue,zh}_128d.npz` | fastText word vectors, Facebook AI Research, as rotated and truncated by [SunflowerAI/sud-spacy-parsers](https://github.com/SunflowerAI/sud-spacy-parsers) `vectors-v0.1.0` | CC BY-SA 3.0, redistributed CC BY-SA 4.0 under 3.0 §4(b) |
+| `sud_vec_sa_128d.npz` | floret over the Digital Corpus of Sanskrit's lemmas ([OliverHellwig/sanskrit](https://github.com/OliverHellwig/sanskrit)) | ⚠ upstream corpus declares none — released as a derived model |
+| `sud_vec_lzh_128d.npz` | floret over the [kanripo](https://github.com/kanripo) `KR*` corpora | ⚠ upstream corpus declares none — released as a derived model |
+| rotation anchors (used to fit, never redistributed) | Apte via [CDSL](https://www.sanskrit-lexicon.uni-koeln.de/), [MUSE](https://github.com/facebookresearch/MUSE) dictionaries, Wiktionary via [kaikki.org](https://kaikki.org) | CC BY-SA (Apte, Wiktionary); the fitted output is a matrix of floats |
 
 ## Bundled pip dependencies — the exceptions to "pip deps aren't listed"
 

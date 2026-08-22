@@ -1722,7 +1722,22 @@ let _autoGlossToasted=false;  // …and say so exactly once per session, never o
 let _autoGlossT=null;
 let AUTOGLOSS_WARM=false;                 // has a call ever come back? drives the busy label (see fillAutoGloss)
 const AUTOGLOSS_TIMEOUT=120000;           // generous: the cold path legitimately takes ~9s, and much longer on a loaded machine — this is the "never settled" backstop, not a performance budget
-const ALIGN_VERSION=2;        // bump when app/gloss_align.py's tables or weights move, so an upgrade re-glosses rather than leaving the previous version's answers cached against every file
+const ALIGN_VERSION=7;        // bump when app/gloss_align.py's tables or weights move, so an upgrade re-glosses rather than leaving the previous version's answers cached against every file
+/* 3: the alignment now weighs what the two words MEAN as well as where they sit — app/vectors.py's
+   cross-lingually aligned tables, looked up by both form and lemma, fetched beside each parser.
+   ⚠ THE BUMP MATTERS EVEN WHERE THE PAIR COUNT DOES NOT MOVE: a reader whose tables arrive with their
+   NEXT model download is asking a different question from the one their cached keys answer, and a
+   document glossed table-less would otherwise never be re-asked.
+   4: the exact word-class gate is gone, an adposition that introduces an oblique makes its relation
+   transparent, and what the tree cannot place is glossed by retrieval (with an Apte-confirmed lower
+   tier for Sanskrit). All three change the answer materially, so every cached key must be re-asked.
+   5: word classes leak inside a supercategory, a certain cosine may cross one relation rung, and a
+   matched English node may expand to its SUBTREE — so a gloss can now be several words, which this
+   function already handles (spaces to "-" for Gloss, "_" for MGloss's stem).
+   6: every matched pair is an anchor and the alignment is re-run inside its subtree, so a pair the
+   global no-crossing rule refused can now be made locally.
+   7: `dep` is uninformative rather than contradictory, and a sentence with NO translation is glossed
+   from the vectors alone (dictionary-constrained) — which is why glossKeyOf now keys those too. */
 /* ⚠ KEYED ON THE QUESTION, NOT ON THE SENTENCE INDEX — the same rule scoresKey (js/io/scores.js)
    follows, and for the same payoff: invalidation stops being a list of edit sites to remember and
    becomes a property of the inputs. The question is "given this English sentence and this tree, what
@@ -1733,9 +1748,16 @@ const ALIGN_VERSION=2;        // bump when app/gloss_align.py's tables or weight
    over-signed key costs an occasional needless recompute, an under-signed one costs a wrong gloss. */
 function glossKeyOf(s){ if(!s||!s.tokens) return "";
   const tr=(sentTranslations(s)||[]).find(r=>(r.lang==="en"||r.lang==="eng")&&(r.text||"").trim());
-  if(!tr) return "";
   const tree=s.tokens.map(t=>[t.upos||"",t.feats||"",t.head||"",t.deprel||""].join("\u0001")).join("\u0002");
-  return [ALIGN_VERSION,DOCLANG||"",DOCFORMAT||"",tr.text.trim(),tree].join("\u0000"); }
+  /* ⚠ AN UNTRANSLATED SENTENCE IS STILL A QUESTION, and returning "" for it — as this did — is what
+     kept app/gloss_align.py's `_gloss_without_translation` unreachable: fillAutoGloss only ever
+     queues a sentence whose key is non-empty, so a document with no `# text_en` was never sent at
+     all. The key still SIGNS the translation where there is one, so an edit to it re-asks; with none,
+     the FORMS and LEMMAS are what the answer depends on (the dictionary is keyed by lemma and the
+     vectors by both), and they are not in `tree`, which carries only upos/feats/head/deprel. So they
+     are signed here rather than assumed — otherwise correcting a lemma would leave its gloss stale. */
+  const words=tr?"":s.tokens.map(t=>[t.form||"",t.lemma||""].join("\u0001")).join("\u0002");
+  return [ALIGN_VERSION,DOCLANG||"",DOCFORMAT||"",tr?tr.text.trim():"\u0003none",tree,words].join("\u0000"); }
 /* ⚠ SEEDED ONLY WHERE THE SENTENCE ALREADY CARRIES A GLOSS, and getting this wrong breaks the feature
    in one direction or the other. `_glossKey` means "the question THIS SENTENCE'S GLOSSES ARE THE ANSWER
    TO", and on open there are exactly two cases:

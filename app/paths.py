@@ -65,6 +65,13 @@ FA_VOCAB_DIR = os.path.join(APP_DATA, "fa_vocab")
 # none: nothing hermetically pre-fetches this one.
 VIDYUT_DIR = os.path.join(APP_DATA, "vidyut-data")
 
+# The cross-lingually aligned vector tables (app/vectors.py fetches them; see that module's header
+# for why they are fetched rather than shipped — one table is 24–32 MB, they are only useful held
+# two at a time, and the fastText ones are CC BY-SA where several model wheels are CC BY-NC-SA).
+# One `sud_vec_<lang>_128d.npz` per language, downloaded beside the parser for that language. No Nix
+# escape hatch, for the same reason FA_VOCAB_DIR and VIDYUT_DIR have none: nothing pre-fetches them.
+VECTORS_DIR = os.path.join(APP_DATA, "vectors")
+
 
 def ensure_dirs() -> None:
     os.makedirs(STANZA_DIR, exist_ok=True)
@@ -74,3 +81,4 @@ def ensure_dirs() -> None:
         os.makedirs(GRAMMARS_DIR, exist_ok=True)
     os.makedirs(FA_VOCAB_DIR, exist_ok=True)
     os.makedirs(VIDYUT_DIR, exist_ok=True)
+    os.makedirs(VECTORS_DIR, exist_ok=True)

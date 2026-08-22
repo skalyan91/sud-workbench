@@ -13,17 +13,21 @@ Tiers (each behind a lazy ``try: import`` in ``translit`` / ``parse``):
   * ``grammars`` — UD↔SUD conversion grammars (also a DATA tier), ~450 KB
   * ``fa_vocab`` — Persian vocalisation lexicon (also a DATA tier — see :mod:`app.fa_vocab`), ~10 MB
   * ``vidyut``   — Vidyut's Sanskrit lexicon (also a DATA tier — see :mod:`app.vidyut_data`), ~32 MB
+  * ``vectors``  — cross-lingually aligned word vectors (also a DATA tier — see :mod:`app.vectors`),
+    ~25 MB per parser language
   * ``grew``     — the grewpy_backend OCaml binary (also a DATA tier, installed via opam rather
     than fetched — see :mod:`app.grew_backend`), size varies (opam build)
 
-NOT EVERY TIER IS A PIP INSTALL. ``la_macron``, ``grammars``, ``fa_vocab``, ``vidyut`` and ``grew``
-each fetch/
+NOT EVERY TIER IS A PIP INSTALL. ``la_macron``, ``grammars``, ``fa_vocab``, ``vidyut``, ``vectors``
+and ``grew`` each fetch/
 install something other than a pip package: the Morpheus vowel-length table can't be bundled with
 the Latin model for licensing reasons and isn't on PyPI in any form (see :mod:`app.macron`), the
 surfacesyntacticud/tools conversion grammars carry no declared licence at all, so shipping a copy —
 in this repo or in any built package — would republish someone else's work without a grant to (see
 :mod:`app.grammars` and ``THIRD-PARTY-NOTICES.md``), KaamelDict is GPL, which restricts distribution
-rather than use (see :mod:`app.fa_vocab`), and grewpy_backend is CeCILL v2.1 licensed — same
+rather than use (see :mod:`app.fa_vocab`), the aligned vector tables are only useful two at a time
+and eleven of the thirteen are CC BY-SA where several model wheels are CC BY-NC-SA (see
+:mod:`app.vectors`), and grewpy_backend is CeCILL v2.1 licensed — same
 restricts-distribution-not-use shape, but with no PyPI wheel and no plain downloadable binary either,
 so its own on-demand path drives opam rather than downloading anything itself (see
 :mod:`app.grew_backend`). A tier therefore declares EITHER ``pip`` + ``probe`` or
@@ -85,6 +89,13 @@ TIERS: dict[str, dict] = {
         "module": "vidyut_data",   # a DATA tier: app/vidyut_data.py fetches ambuda-org/vidyut's kosha bundle
         "note": "vidyut's morphological lexicon, fetched from ambuda-org/vidyut (~32 MB download, "
                 "~81 MB on disk) — needed by the Sanskrit model",
+    },
+    "vectors": {
+        "label": "Cross-lingual alignment vectors",
+        "module": "vectors",    # a DATA tier: app/vectors.py fetches the sud-spacy-parsers vector assets
+        "note": "Aligned word vectors used to gloss a sentence from its translation "
+                "(app/gloss_align.py) — one ~25 MB table per installed parser language, plus the "
+                "English hub; normally fetched with the parser itself",
     },
     "grew": {
         "label": "grew conversion backend",
