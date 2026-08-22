@@ -184,7 +184,20 @@ function showCtx(x,y,items,twoCol,rtlArg,fit){ const norm=items.map(normItem);
   ctx.style.left=Math.max(8,Math.min(left,innerWidth-w-8))+"px"; ctx.style.top=Math.max(menuTopBound(),Math.min(y,innerHeight-h-8))+"px"; }   // menuTopBound (js/core/scroll.js): a bare 8 now — this app no longer offers macOS window tabbing, so there is no native tab bar left for a menu to be drawn under
 function closeCtx(){ ctx.classList.remove("show"); closeSub(); void ctx.offsetHeight;   // same forced-reflow fix as closeSub, for ctx's own backdrop-filter layer
   if(typeof setPillMenuOpen==="function") setPillMenuOpen("fmtPill",false); }   // the Format pill borrows this shared #ctx for its own menu (fmtMenu, js/io/formats.js) and its chevron has to point back UP however the menu was dismissed — Escape, a pick, a click outside, or another menu stealing #ctx. Unconditional and idempotent: for every OTHER #ctx menu the pill is already un-flagged, so clearing it again costs a no-op class toggle. typeof-guarded because this file loads before js/ui/wiring.js, which defines the helper — harmless at runtime (closeCtx only ever runs from a handler, long after both are defined), but the guard is what the codebase's forward-reference rule asks for
-addEventListener("click",closeCtx);
+/* ⚠ CAPTURE PHASE, AND EXCLUDING THE MENU SYSTEM — the same shape (and the same reason) as the
+   contextmenu handler just below. This was a bare bubble-phase `addEventListener("click",closeCtx)`,
+   which meant any element that stops click propagation swallowed the dismissal and left the menu
+   standing. The translations grid is exactly that: `box.addEventListener("click",e=>e.stopPropagation())`
+   (js/io/bridge.js), added so a click inside the grid never falls through to token deselection — so
+   opening a context menu and then clicking into a translation field left the menu open on screen.
+   Capture runs before any of them, so the dismissal no longer depends on what the click's target
+   chooses to do with the event.
+   ⚠️ THE EXCLUSION IS REQUIRED, NOT TIDINESS. A row that opens a flyout relies on `e.stopPropagation()`
+   to keep its own parent menu alive (makeCtxButton's `it.sub` branch), and capture phase runs BEFORE
+   the target — so without this guard every submenu would close the menu it was opening. Nothing is
+   lost by excluding the menu itself: an ORDINARY row already calls closeCtx() in its own handler, so
+   this listener was never what dismissed a menu on a pick. */
+addEventListener("click",e=>{ if(ctx.contains(e.target)||ctx2.contains(e.target)) return; closeCtx(); },true);
 // item 3: a right-click OUTSIDE an open menu (on a target none of #doc's own contextmenu branches will claim —
 // blank canvas, a diagram's own margin, another window region) never dismissed #ctx before: nothing downstream
 // of a non-match ever calls closeCtx, so the stale menu just sat there behind whatever the browser's native
