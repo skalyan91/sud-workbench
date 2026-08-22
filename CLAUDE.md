@@ -188,6 +188,14 @@ placed in the element's own zoom context; Chrome answers 100, WebKit answers 100
 branching on engine or namespace, and `visualFontPx(el)` is what the two `applyFont`s now call. **This
 is why the headless-Chrome smoke test is not sufficient on its own for anything measuring text**: run
 the WKWebView probe too (a `webview.create_window(hidden=True)` + `evaluate_js`, ~15 lines).
+⚠️ **`requestAnimationFrame` NEVER FIRES IN THAT HIDDEN WINDOW**, so anything a rAF defers has not run
+when the probe measures, and the element reads as though the code were broken. Measured: the grid's MWT
+surface-form field, which a `rAF(size)` grows past its column, read exactly column-width and clipped —
+misdiagnosed as a WebKit `scrollWidth` fault and "fixed" into a `meas()` call before the probe itself was
+suspected. It is not one: driven through its own `input` listener, WebKit answers `scrollWidth` 169
+against `clientWidth` 28 for a 30px-wide field, i.e. the overflowing content width exactly as Chrome
+does. Drive rAF-deferred code through its own listener (`dispatchEvent(new Event("input"))`) or call it
+directly, and conclude nothing from the resting geometry of a rAF-sized element.
 
 ⚠ **ONLY A CLICK OR A RECTANGLE SELECTS A NODE.** No command may make a selection on the reader's behalf, and
 `setAsRoot` (js/editing/edit-ops.js) was the one that did: reached from the right-click menu — or from the
@@ -877,6 +885,24 @@ so that module is inert there). Add a command **once**, in the spec.
 `IsNonClientRegionSupportEnabled` enables the standard `app-region: drag`, which brings Snap
 Layouts, the right-click system menu and double-click-to-maximise with it. pywebview does not set
 that property itself — `app/win/` does.
+
+⚠ **THE OPEN FILE IS WATCHED ON DISK, AND WHAT THE READER IS TOLD DEPENDS ON WHETHER THEY HAVE EDITS.**
+`Api._watch_loop` stats the current path every 1.5 s (a **poll**, deliberately — the three platforms'
+event APIs are three different non-stdlib things, and this app already takes that view for the Windows
+accent watcher) and calls `window.__fileChangedOnDisk` when the signature moves off the one this window
+last **read or wrote**. `_rearm_watch` is what makes that "somebody else's write": it is called from the
+`path` setter, `get_state`, `save`, `save_as`/`save_to`/`rename_to` and `reload`, so the app's own writes
+are never announced back to it. A CLEAN document simply reloads and keeps the block being read
+(`reloadFromDisk`, js/io/bridge.js — `Api.reload`, not `open_path`, since re-reading the open document
+must not push it onto the recent list); a DIRTY one gets the three-button sheet — Reload from Disk
+(destructive, the reader's edits go), Cancel, Overwrite (primary, `doSave` writes theirs over the disk's).
+⚠️ A signature of `None` is **not** an event: an editor saving by atomic replace leaves a few ms in which
+the path does not resolve, and the rename lands a moment later with a real signature. Verified in the
+shipping WKWebView against a real `os.replace`. ⚠️ The new signature is adopted **as it is announced**, so
+one external write asks once rather than every 1.5 s behind the sheet; Cancel therefore leaves the
+conflict standing until the next write, a save, or a reload. `evaluate_js` runs on the watcher's own
+daemon thread — never the AppKit main thread, per `_dialog_lock`'s note — and each pywebview call carries
+its own semaphore, so it cannot race the other push threads.
 
 `api.py` is `window.pywebview.api`: open/save/save-as/rename, parse/tokenize/sentencize, validate,
 format detection + conversion, model list/download/remove, extras install, transliteration,

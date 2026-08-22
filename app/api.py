@@ -25,6 +25,7 @@ from .paths import APP_DATA
 _STATE_FILE = os.path.join(APP_DATA, "state.json")   # small persisted app state (recent files, …)
 _SNAP_FILE = os.path.join(APP_DATA, "launch_snapshot.jpg")   # the last view of the launch document — a FILE, not a field in state.json, which save_scroll rewrites on every scroll and would otherwise carry a few hundred kB of base64 each time
 _MAX_RECENT = 10
+_WATCH_POLL = 1.5   # seconds between stat()s of the open document — see Api._watch_loop for why this polls at all
 
 IS_MAC = sys.platform == "darwin"
 IS_WIN = sys.platform == "win32"
@@ -110,6 +111,13 @@ class Api:
         self.window: Any = None
         self._path: str | None = None   # current document path (for Save)
         self.dirty = False
+        # ── the open file, watched on disk (see _watch_loop) ────────────────────────────────────
+        # The signature of the current path as THIS window last READ or WROTE it. Anything else on
+        # disk is somebody else's write, and the frontend is told so. None = nothing to compare
+        # against (no path, or the file does not exist yet).
+        self._watch_sig: tuple[int, int] | None = None
+        self._watch_thread: threading.Thread | None = None
+        self._closed = False           # set from the window's `closed` handler → the watcher below stops with the window
         self._force_close = False      # set by confirm_close_without_saving() → lets the NEXT native close-veto through
         self.format = "SUD"            # detected format of the live doc (app-state, never persisted)
         self._jobs: dict[str, dict] = {}   # background download jobs, by id
@@ -156,9 +164,98 @@ class Api:
     @path.setter
     def path(self, value: str | None) -> None:
         """Every assignment live-refreshes the Open Recent submenu — it must never list
-        the document that's now current (whichever of open/save-as/rename/adopt set it)."""
+        the document that's now current (whichever of open/save-as/rename/adopt set it) — and
+        re-baselines the on-disk watch onto the file this window is now looking at."""
         self._path = value
+        self._rearm_watch()
         self._notify_recent_changed()
+
+    # ── the open file, watched on disk (see _watch_loop for the whole account) ───────────────
+    @staticmethod
+    def _file_sig(path: str) -> tuple[int, int] | None:
+        """What "this file, as we last saw it" means: modification time and size. ``st_mtime_ns``
+        rather than ``st_mtime`` because a float mtime is rounded on some filesystems and two writes
+        inside one second are exactly the case this has to catch; size beside it because a write that
+        lands in the same nanosecond bucket almost always changes the length. A content hash was the
+        alternative and is not worth it — this polls every open document forever, and re-reading a
+        20 MB treebank a second to answer a question stat() already answers is a real cost for a
+        false-positive rate no user would ever notice."""
+        try:
+            st = os.stat(path)
+        except OSError:      # missing, unreadable, mid-atomic-replace — see _watch_loop
+            return None
+        return (st.st_mtime_ns, st.st_size)
+
+    def _rearm_watch(self) -> None:
+        """Adopt what is on disk NOW as ours. Called wherever this window reads the file or writes
+        it — the path setter, get_state, save/save_as/save_to/rename_to, reload — so the app's own
+        writes can never be reported back to it as somebody else's."""
+        p = self._path
+        self._watch_sig = self._file_sig(p) if p else None
+        if p and self._watch_thread is None and not self._closed:
+            self._watch_thread = threading.Thread(
+                target=self._watch_loop, name="doc-watch", daemon=True)
+            self._watch_thread.start()
+
+    def _watch_loop(self) -> None:
+        """Poll the open document's own path and tell the frontend when someone else writes it.
+
+        ⚠ POLLING, NOT A FILESYSTEM EVENT API, deliberately. The three platforms offer three
+        different ones (FSEvents/kqueue, ReadDirectoryChangesW, inotify), none of them in the
+        standard library, and this app already takes the same view for the Windows accent/theme
+        watcher — a 2 s registry poll. One stat() every 1.5 s against ONE path is far below the
+        noise floor of anything else this process does, and it is the same code on every platform.
+
+        ⚠ A SIGNATURE OF None IS NOT AN EVENT. An editor that saves by atomic replace (write a
+        temporary file, rename it over the target) leaves a window of a few milliseconds in which
+        the path does not resolve — announcing a "change" there would fire on a vanished file the
+        frontend cannot reload. The rename lands a moment later with a genuinely new signature and
+        is reported then; a file the user really did delete simply stops being watched, which is the
+        honest answer for a change this app cannot act on either way.
+
+        ⚠ AND THE NEW SIGNATURE IS ADOPTED AS WE ANNOUNCE IT, so one external write is announced
+        ONCE. Without that the next tick would see the same difference and put the warning up again
+        every 1.5 s behind whatever the user was reading. If they choose Reload, the read re-arms on
+        the same value and nothing further is said; if they choose to keep their own version, the
+        next save re-arms it too.
+
+        ⚠ `evaluate_js` FROM THIS THREAD IS THE SUPPORTED SHAPE and the AppKit main thread is not:
+        it does callAfter + semaphore.acquire, so calling it from a main-thread callback would park
+        the very run loop that has to service it (see _dialog_lock's own note). A daemon thread of
+        our own is what Open Recent already uses for the same reason."""
+        while not self._closed:
+            time.sleep(_WATCH_POLL)
+            try:
+                p, base = self._path, self._watch_sig
+                if not p or base is None:
+                    continue
+                sig = self._file_sig(p)
+                if sig is None or sig == base:
+                    continue
+                self._watch_sig = sig
+                win = self.window
+                if win is not None:
+                    self._eval_quiet(win, "window.__fileChangedOnDisk && window.__fileChangedOnDisk()")
+            except Exception:  # noqa: BLE001 — a watcher must never take the window down with it
+                pass
+
+    def reload(self) -> dict:
+        """Re-read the CURRENT path — the file changed under us and the frontend is taking the
+        disk's version. Deliberately NOT ``open_path``: that one is the Open Recent command and
+        pushes the file onto the recent list, which is not what re-reading the document already open
+        means. Re-arms the watch on what it just read, so the reload is not itself announced."""
+        p = self._path
+        if not p:
+            return {"error": "No file"}
+        try:
+            sentences = io_conllu.read_file(p)
+        except Exception as exc:  # noqa: BLE001 — a half-written file is the likeliest failure here
+            return {"error": str(exc)}
+        self.format = detect.detect_format(sentences)
+        self.dirty = False
+        self._rearm_watch()
+        return {"sentences": sentences, "path": p,
+                "name": os.path.basename(p), "format": self.format}
 
     def set_window(self, window):
         self.window = window
@@ -183,6 +280,7 @@ class Api:
         if self.path and os.path.exists(self.path):
             sentences = io_conllu.read_file(self.path)
             self.format = detect.detect_format(sentences)
+            self._rearm_watch()   # …and THIS is the version the window is showing, so a later write by anyone else is somebody else's
             self._record_recent(self.path)   # a command-line / open-file-event document counts as recently opened
         return {
             "path": self.path,
@@ -269,6 +367,7 @@ class Api:
         changes: a second, empty window opening would otherwise erase what the first has open.
         An UNTITLED window with unsaved content also records ``None``, because there is no file to
         reopen — the recovery story for that is Save, not this."""
+        self._closed = True   # …and the on-disk watcher stops with the window: it outlives nothing, and a session that opens and closes many windows would otherwise keep a polling thread per window it no longer has
         state = _load_state()
         state["last_doc"] = os.path.abspath(self.path) if self.path else None
         _save_state(state)
@@ -466,6 +565,7 @@ class Api:
         except Exception as exc:  # noqa: BLE001
             return {"error": str(exc)}
         self.dirty = False
+        self._rearm_watch()   # our own write, not somebody else's — the path did not change, so the setter's re-arm never ran
         return {"ok": True, "path": self.path, "name": os.path.basename(self.path)}
 
     def save_as(self, sentences: list[dict]) -> dict:

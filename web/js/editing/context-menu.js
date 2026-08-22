@@ -1872,8 +1872,9 @@ async function exportSVG(i){ const b=document.querySelector(`.sblock[data-i="${i
    The checkmark shows the EFFECTIVE visibility, so a column the width rule has auto-hidden reads as unchecked —
    it is, after all, not on screen. Clicking it then pins it ON (toggleCol toggles that same effective state), which
    is what makes the menu's own display and its behaviour agree without the user having to know the rule exists.
-   `si` names the sentence whose header was clicked: the column SET is document-wide, but which columns a document
-   admits at all is not (ALLCOLS's transliteration gate is per-sentence), so the list is built for that sentence. */
+   `si` names the sentence whose header was clicked and is passed on to ALLCOLS. That list is document-wide today —
+   the per-sentence gate it once applied went with the transliteration columns (see ALLCOLS, js/grid/grid.js) — and
+   the argument is threaded anyway, since the caller has it and a future per-sentence column would want it. */
 function columnMenu(x,y,si){
   /* ID AND FORM ARE NOT LISTED AT ALL. They were shown as ticked-but-disabled rows, on the reasoning that a
      chooser should account for every column; but a row that cannot be changed is not a choice, and two inert

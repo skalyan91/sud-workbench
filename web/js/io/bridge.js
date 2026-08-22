@@ -335,6 +335,60 @@ async function doOpen(){ if(!hasBridge())return toast("Open is available in the 
   toast(`Opened ${r.name} · ${r.sentences.length} sentence${r.sentences.length>1?"s":""}`);
   if(r.format==="UD") toast("This file looks like UD — use the Format pill → Import UD… to convert it to SUD for editing"); }
 
+/* ── THE FILE CHANGED ON DISK UNDER US ────────────────────────────────────────────────────────────
+   Api._watch_loop (app/api.py) stats the open document every 1.5s and calls this when the signature
+   moves off the one this window last read or wrote — i.e. when another program has written the file.
+   Two states, and the difference between them is the whole feature:
+     · CLEAN — there is nothing of the reader's to lose, so the new file is simply shown. Saying
+       "the file changed, would you like to see it?" to someone who has made no edit is a question
+       with one answer, and the document on screen would otherwise go on disagreeing with the file
+       it names until they thought to reopen it.
+     · DIRTY — two versions of the document now exist and only the reader can say which one is the
+       document. The warning offers exactly that: take the disk's (losing their edits) or overwrite
+       it with theirs. Cancel is the third answer and is the SAFE one — nothing is written, nothing
+       is discarded, the conflict simply stands until they save (which overwrites) or reload.
+   ⚠ ONE AT A TIME. A busy flag rather than a queue: while the sheet is up the standing question is
+   already "the file changed", and a second write does not ask a different one. The reload reads at
+   the moment it is chosen, so the answer is still the newest bytes on disk, not the ones that were
+   there when the sheet opened. */
+let FILE_CHANGE_BUSY=false;
+window.__fileChangedOnDisk=async function(){
+  if(!hasBridge()||!DOCPATH||FILE_CHANGE_BUSY) return;
+  FILE_CHANGE_BUSY=true;
+  try{
+    if(!DIRTY){ await reloadFromDisk(true); return; }
+    const r=await askConfirm(
+      `“${DOCNAME}” has been changed by another program, and you have unsaved changes here. Reloading discards your changes; overwriting discards the version on disk.`,
+      {title:"The file changed on disk", danger:true,
+       okLabel:"Reload from Disk", cancelLabel:"Cancel", saveLabel:"Overwrite"});
+    if(r===true) await reloadFromDisk(false);           // the destructive one, and so the one styled destructive: the reader's own edits go
+    else if(r==="save") await doSave();                 // …and this writes our version over theirs, which re-arms the watch on what we wrote
+  } finally { FILE_CHANGE_BUSY=false; }                 // …in a `finally`, so a throw anywhere above cannot leave every later change unannounced for the life of the session
+};
+/* Re-read the current path and put it on screen. Shares doOpen's body in everything except the two
+   things a RELOAD is not: it does not ask about unsaved changes (its caller has already settled
+   that) and it does not move the reader — the same file is still open, at the same place in it, so
+   the block being read is restored rather than reset to the first. `Api.reload` is used rather than
+   `open_path` because this is not the Open Recent command: re-reading the document already open
+   must not push it onto the recent list. */
+async function reloadFromDisk(silent){
+  if(!hasBridge()||!DOCPATH) return false;
+  let r; try{ r=await window.pywebview.api.reload(); }catch(e){ toast("Reload failed: "+e); return false; }
+  if(!r) return false;
+  if(r.error){ toast("Reload failed: "+r.error); return false; }   // a file mid-write parses as garbage as often as not; the document on screen is left exactly as it was and the next write announces itself
+  const at=Math.max(0,curBlock());   // the block being READ, captured before the document under it is replaced
+  DOC.length=0; resetUndo(); normSents(r.sentences||[]).forEach(s=>DOC.push(s));   // the undo history described sentences that no longer exist — the same reasoning doOpen states
+  DOCNAME=r.name||DOCNAME; if(r.path)DOCPATH=r.path; markDirty(false);
+  setFormat(r.format||"SUD"); syncGlossTiersFromDoc(); syncDeprelVocabFromDoc(); detectXposMirrorsUpos(); syncDocFonts();
+  refreshTransLangs(); renderTransDrawer();
+  const i=Math.min(at,Math.max(0,DOC.length-1));
+  setTitle(); renderDoc(); clearSelToBlock(DOC.length?i:0,false); settleAlign();   // nothing selected: the tokens under the cursor may not be the same tokens any more, and only a click may make a selection
+  adoptDocSchemes();   // this file's own stored-transliteration scheme — its metadata may have moved with its sentences
+  maybeAutoDetectLang();   // …and so may its language: the filename check answers first and costs nothing, and a file whose content was replaced wholesale deserves the same detection an open gets
+  if(DOC.length) alignBlockTop(i);   // …and the reader is put back where they were reading, clamped to a file that may now be shorter
+  toast(silent ? `Reloaded ${r.name} — the file changed on disk`
+               : `Reloaded ${r.name} from disk`);
+  return true; }
 /* Open Recent (native File-menu submenu) — mirrors doOpen but opens a known path via open_path. */
 async function openRecentFile(path){ if(!hasBridge())return toast("Open is available in the desktop app");
   if(!(await confirmDiscardUnsaved("Open a different file and discard them?"))) return;

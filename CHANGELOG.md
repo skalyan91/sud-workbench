@@ -2,6 +2,51 @@
 
 All notable changes to SUD Workbench are documented in this file.
 
+## [0.3.15] — 2026-08-22
+
+### Added: the open file follows changes made to it on disk
+
+- A document changed by **another program** — a script, a `git checkout`, a second editor — no longer
+  sits on screen disagreeing with the file it names. With **no unsaved changes** the new version is
+  simply shown, and the sentence you were reading stays where it was.
+- With **unsaved changes** the two versions are yours to choose between: **Reload from Disk** takes
+  theirs and discards your edits, **Overwrite** writes yours over the file, and **Cancel** does neither
+  — nothing is written, nothing is lost, and the next write asks again.
+- The app's own saves are never mistaken for someone else's, and an editor that saves by writing a
+  temporary file and renaming it over the target is handled as the single change it is.
+
+### Fixed
+
+- In a Chinese document, a **Latin** word marked `Foreign=Yes` is no longer set as though it were 楷體.
+  The face swap brings four corrections with it — 6.4 % larger, lifted, tightened by 0.054–0.064 em and,
+  on the running line, bold — every one of them derived from Kai's metrics against the sans's, and each
+  serves a whole element while the element is the token. A Latin word contains none of those glyphs: its
+  face really is italic, and what an italic wants is the ordinary 0.02 em bump the tightening replaced.
+  The five corrections now come off a foreign form the Kai face paints nothing of, in the diagrams, the
+  grid's Form cell and the running sentence alike. A form that **mixes** Han and Latin is unchanged.
+- The grid's **multi-word-token rows are set upright**. The row rule declared a synthetic italic — the mono
+  stack has no real one, and a synthesised slant pushes shaped Arabic past its own box — and then all three
+  things the row actually draws took it back off again. The row is a surface form and its MISC, file content
+  set the way every other cell's is.
+- The **transliteration column machinery is gone**. The grid has drawn the ten CoNLL-U columns for some time;
+  what was left was a per-sentence visibility gate with nothing to gate, a "Translit." heading branch, two
+  cell branches and their styling. A token's romanisation is a diagram row and the Head column's own
+  parenthesis, neither of which is a column here.
+- The grid now **paints the letter-spacing its columns have always been sized for**. Every measurement of
+  a cell — the column autosize, the wrap test, the expand-on-focus width — runs the tracking curve at the
+  cell's own size, but the stylesheet stated the curve's literal for the weight and never for the tracking,
+  so the text was set about 0.15 px per character tighter than its column reserved. Four cells were affected
+  and all four now agree with their reserve: the ordinary cell, the heading band at its own 11 px, a
+  `Foreign=Yes` form (which was taking the 15 px reference's literal on a 13 px field), and that same form
+  in a Chinese or an underlining document, where the field was measured in a face it does not paint. No
+  column moves — the space was already reserved.
+- Clicking into a foreign token's form in a diagram no longer **re-spaces its letters**. The editor
+  matched the row's tracking by testing whether its font string ends in the foreign stack — but it builds
+  that string from the element's own `getComputedStyle().fontFamily`, which the engine spells with a space
+  after every comma where the stylesheet writes none. One space was all it took: the field opened at
+  +0.02 em where the diagram painted −0.0544 em. The field's width and its caret hit-testing rode on the
+  same number.
+
 ## [0.3.14] — 2026-08-22
 
 ### Added: glossing from a translation weighs what the words *mean*

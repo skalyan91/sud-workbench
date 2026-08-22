@@ -500,14 +500,44 @@ function italicTrackOf(f){ return /(?:^|\s)italic(?:\s|$)/.test(f||"")?ITALIC_TR
    NODE_DESC_EXTRA) before the hierarchy's LEVEL HEIGHT wanted the same quantity and made it a fifth. */
 function magAscExtra(f){ return TOK_MAG>1?ascent(f)*(1-1/TOK_MAG):0; }
 function magDescExtra(f){ return TOK_MAG>1?descent(f)*(1-1/TOK_MAG):0; }
-/* Is this the FOREIGN font string, i.e. one frnFontStr built? Only those carry the Kai family, and only
-   those are painted at `--frn-track` instead of the row's own tracking. Tested by the TAIL rather than by a
+/* Is this the FOREIGN font string, i.e. one that names the Kai family ahead of the token stack? Only those
+   are painted at `--frn-track` instead of the row's own tracking. Tested by the TAIL rather than by a
    flag threaded through every caller: frnFontStr's whole job is to swap LIVE_TOKEN_STACK for LIVE_FRN_STACK,
    so a string ending in the latter is exactly the set of strings that rule paints. The grid's own foreign
-   string ends in LIVE_FRN_MONO_STACK and is deliberately NOT matched — its Form cell keeps the row's
-   tracking, since it has no sans neighbour on a line to be spaced against. */
-function frnTrackOf(f){ return (FRN_TRACK!==null && LIVE_FRN_STACK!==LIVE_TOKEN_STACK
-  && f && f.length>LIVE_FRN_STACK.length && f.endsWith(LIVE_FRN_STACK)) ? FRN_TRACK : null; }
+   string ends in LIVE_FRN_MONO_STACK, and IS matched — reversing an exclusion this note used to defend.
+   ⚠️ THE EXCLUSION WAS MIRRORING A PAINT THAT DOES NOT EXIST. It read "the Form cell keeps the row's own
+   tracking, having no sans neighbour on a line to be spaced against" — but `#doc[data-hanfrn]
+   .tok-ital{letter-spacing:var(--frn-track)}` (app.css) matches `.cin.tok-ital`, the Form cell BEING a
+   `.tok-ital`, so that cell has always painted the tightening. Measured on an lzh document with the grids
+   shown: −0.0544em painted against +0.0265em measured (trackCurve(13.83) + ITALIC_TRACK), ~0.081em per
+   character of column width reserved for space the cell never spends. The paint is the authority here and
+   the derivation backs it — the tightening equalises the gap BETWEEN TWO KAI CHARACTERS with the sans's,
+   which is a fact about any Kai run including a two-character form alone in a cell; what genuinely has no
+   meaning without a neighbour is the ±t/2 EDGE correction, and that is `.stx-frn`'s own rule and stays
+   running-line-only. So the measurement follows the paint, as everywhere else in this file.
+   ⚠ THE TAIL IS COMPARED NORMALISED, BECAUSE A FONT-FAMILY LIST REACHES THIS SPELT TWO WAYS AND A RAW
+   `endsWith` MISSED ONE OF THEM. LIVE_FRN_STACK is `--frn-font`'s own token sequence, read back off the
+   computed style exactly as app.css writes it — `"SUD Kai TC","Noto Sans", …`, with NO space after that
+   first comma — while a string built from an element's `getComputedStyle().fontFamily` carries the engine's
+   NORMALISED list, `"SUD Kai TC", "Noto Sans", …`. Every string frnFontStr builds is the first kind and
+   always matched; the INLINE EDITOR's is the second (makeEditable's applyFont copies the family off the very
+   element it lays itself over — js/editing/context-menu.js), and that one space was enough to fall through
+   to `trackCurve(px)+ITALIC_TRACK`. Measured on an lzh document, a Foreign=Yes Han form at TOK_MAG 1.5: the
+   diagram painted −0.0544em (−1.30px per character) and the field opened at +0.02em (+0.48px) — the reported
+   "the extra letterspacing only shows once you click through to the input field", and 0.0744em of it, the
+   sign wrong as well as the size. The field's WIDTH and its caret hit-test go with it, both being meas()
+   against this same string. Quotes and comma spacing are all that is folded away: a family name's own
+   internal spaces are load-bearing and are left exactly as they are. */
+const _famNorm=s=>(s||"").replace(/["']/g,"").replace(/\s*,\s*/g,",");
+let _FRN_STACK_N=null, _FRN_STACK_N_SRC=null;   // memoised on the pair's own identity — these lists run to ~4 kB each, they move only when refreshFontStacks re-reads them, and this question is asked once per uncached measurement
+function _frnStackNorm(){ const k=LIVE_FRN_STACK+"\u0000"+LIVE_FRN_MONO_STACK;
+  if(_FRN_STACK_N_SRC!==k){ _FRN_STACK_N_SRC=k;
+    _FRN_STACK_N=[_famNorm(LIVE_FRN_STACK), (LIVE_FRN_MONO_STACK&&LIVE_FRN_MONO_STACK!==LIVE_MONO_STACK)?_famNorm(LIVE_FRN_MONO_STACK):""]; }   // the mono entry is "" for a document with no Kai mono swap, and the loop skips it — never LIVE_MONO_STACK itself, which every ordinary grid string ends in
+  return _FRN_STACK_N; }
+function frnTrackOf(f){ if(FRN_TRACK===null || LIVE_FRN_STACK===LIVE_TOKEN_STACK || !f) return null;
+  const g=_famNorm(f);
+  for(const n of _frnStackNorm()) if(n && g.length>n.length && g.endsWith(n)) return FRN_TRACK;   // the token stack (every diagram row, the running line) or the MONO one (the grid's Form cell) — both are painted at --frn-track, so both answer with it
+  return null; }
 function trackEmOf(f){ const ft=frnTrackOf(f); if(ft!==null) return ft;   // …and no trackCurve/italic term on top: --frn-track is the NET value the stylesheet states, exactly as .tok-ital's own rule is
   const pxm=(f||"").match(/(\d+(?:\.\d+)?)px/); let px=pxm?parseFloat(pxm[1]):TOK_REF_SIZE;
   /* ⚠ THE FOREIGN FACE-SIZE CORRECTION IS DIVIDED BACK OUT ALONGSIDE THE MAGNIFICATION, and for the identical
@@ -2901,7 +2931,42 @@ function isForeign(tk){ return !!(tk&&tk._gwFrn) || hasFeat(tk&&tk.feats,"Foreig
    same question ("is this token's own glyph carrying the foreign mark"), and only the STYLESHEET needs
    to know which mark that is. Splitting the class would mean teaching all of them a distinction none of
    them uses. `#doc[data-frnul]` carries it instead, one attribute on one element. */
-function italDeco(tk){ return isForeign(tk)?" tok-ital":""; }
+function italDeco(tk){ return isForeign(tk)?(" tok-ital"+frnLatDeco(tk)):""; }
+/* ── …AND IN A CHINESE DOCUMENT, IS THE KAI FACE ACTUALLY PAINTING THIS FORM? ───────────────────────
+   Everything `#doc[data-hanfrn]` does to a foreign token — the face swap, the 6.4 % size correction,
+   the lift, the 0.054–0.064 em tightening and (on the running line) the bold — is derived from Kai's own
+   metrics measured against the sans's, and every one of the five serves a whole ELEMENT while the element
+   is the TOKEN. So a LATIN word marked Foreign=Yes in a Chinese document was enlarged, lifted, tightened
+   and emboldened by corrections computed for glyphs it does not contain — while its face really is
+   italic, the Kai families' own unicode-range confining them to Han so the word resolves to the sans's
+   italic whatever the family list says. What that face wants is the ordinary ITALIC_TRACK bump the
+   tightening replaced. Reported as exactly that ("the tightness works for CJK characters in Kai, but not
+   for Latin text"), and the per-token predicate that answers it is the one app.css's own note named as
+   the fix the first time round ("worth doing if such tokens turn out to be common in practice").
+   `.frn-lat` is it, and it opts the element out of ALL FIVE at once — the FAMILY included, though that
+   one is a no-op on Latin by unicode-range — because `frnTrackOf` reads "is this the Kai stack" off a
+   font string's TAIL: leaving the family swapped while the tracking came off would make that test stop
+   describing which elements the stylesheet tightens, and the inline editor (which builds its string from
+   the element's own computed family) would paint the tightening back on.
+   ⚠ THE TEST IS "DOES KAI PAINT ANY OF IT", NOT "IS IT ALL HAN", and the difference is where a MIXED
+   form lands. All-or-nothing would send `般若X` down the Latin path and take the Kai face off its Han
+   too — a regression on a form that renders correctly today. Asking whether Kai paints anything at all
+   leaves every mixed form exactly as it is and moves only the forms Kai paints NOTHING in, which is the
+   reported case and the only one where all five corrections are certainly wrong. A mixed form goes on
+   carrying corrections derived for its Han half; that is unchanged, and it is the honest place to stop
+   without inventing a per-CHARACTER treatment a single element cannot express anyway.
+   ⚠️ THE RANGE IS THE @font-face's OWN, mirrored by hand from the `SUD Kai SC`/`SUD Kai TC` blocks in
+   styles/fonts.css rather than approximated as `\p{Script=Han}` — the two are close and not equal (the
+   declared range takes U+3006, which is Script=Common, and stops short of a few points Script=Han
+   carries). Same "keep the literal in sync by hand" contract weightCurve and trackCurve already run on:
+   change the @font-face, change this. */
+const KAI_RANGE=/[\u2E80-\u2EFF\u2F00-\u2FDF\u3005-\u3007\u3021-\u3029\u3038-\u303B\u3400-\u4DBF\u4E00-\u9FFF\uF900-\uFAFF\u{20000}-\u{2A6DF}\u{2A700}-\u{2EBEF}\u{2F800}-\u{2FA1F}]/u;
+function hanFrnPaints(s){ return KAI_RANGE.test(String(s==null?"":s)); }   // …asked of the string as DISPLAYED (bform / the running line's own shown slice), never of the FORM column: a Chinese document read in the other script is still Han, and it is the painted glyphs these corrections are about
+/* Live only while the Kai swap itself is — LIVE_FRN_STACK moves off LIVE_TOKEN_STACK exactly when
+   refreshFontStacks reads a `--frn-font` that differs, i.e. exactly under `[data-hanfrn]` — so every
+   non-Chinese document's class lists, and every font string built below, are byte-identical to what
+   they were. Not gated on isForeign(): both callers are inside that test already. */
+function frnLatDeco(tk){ return (LIVE_FRN_STACK!==LIVE_TOKEN_STACK && !hanFrnPaints(bform(tk)))?" frn-lat":""; }
 function frnUp(tk){ return isForeign(tk)?" frn-up":""; }
 /* ── THE FONT STRING A FOREIGN TOKEN IS MEASURED IN ────────────────────────────────────────────────
    "italic " prepended, exactly as before — and, in a Chinese document, the Kai family swapped in with
@@ -2923,9 +2988,10 @@ function frnUp(tk){ return isForeign(tk)?" frn-up":""; }
    only number in these strings that is a length in px, and `trackEmOf` divides the same factor back out (see
    its own note) so the tracking still reads off the RESTING size the stylesheet states it for. */
 function _frnSize(f){ return FRN_SCALE===1?f:f.replace(/(\d+(?:\.\d+)?)px/,(m,n)=>(parseFloat(n)*FRN_SCALE).toFixed(3)+"px"); }
-function frnFontStr(f){ const w=(FRN_WGHT&&FRN_WGHT!==400)?FRN_WGHT+" ":"";   // …and the WEIGHT, in the shorthand's own `style weight size family` order. Only when it differs from the resting 400, so a non-Chinese document's string is byte-identical to what it was
+function frnFontStr(f,tk){ if(tk!==undefined && frnLatDeco(tk)) return (FRN_UNDERLINE?"":"italic ")+f;   // …and a foreign form the Kai face paints nothing of is measured exactly as one in a NON-Chinese document is: no stack swap, no --frn-scale, no weight — the three things `.frn-lat` takes off it in the stylesheet (see frnLatDeco above). Byte-identical to this function's own answer when LIVE_FRN_STACK===LIVE_TOKEN_STACK, which is what makes paint and measurement agree by construction rather than by two literals kept in step
+  const w=(FRN_WGHT&&FRN_WGHT!==400)?FRN_WGHT+" ":"";   // …and the WEIGHT, in the shorthand's own `style weight size family` order. Only when it differs from the resting 400, so a non-Chinese document's string is byte-identical to what it was
   return (FRN_UNDERLINE?"":"italic ")+w+_frnSize((LIVE_FRN_STACK&&LIVE_FRN_STACK!==LIVE_TOKEN_STACK)?f.replace(LIVE_TOKEN_STACK,()=>LIVE_FRN_STACK):f); }
-function fmeas1(tk,f){ return meas(bform(tk), isForeign(tk)?frnFontStr(f):f); }   // ONE token's form width in the face it ACTUALLY renders in
+function fmeas1(tk,f){ return meas(bform(tk), isForeign(tk)?frnFontStr(f,tk):f); }   // ONE token's form width in the face it ACTUALLY renders in
 function fmeas(tk,f){ let w=fmeas1(tk,f); const g=(tk&&tk._gw)||[];   // …and the WHOLE WORD's, which for a goeswith unit is the head plus every continuation folded onto it (see the goeswith block below)
   for(let i=0;i<g.length;i++) w+=gwGap(f)+fmeas1(g[i].tok,f); return w; }
 /* ── GOESWITH — ONE WORD THAT A STRAY SPACE SPLIT IN THE SOURCE ─────────────────────────────────────────────
@@ -3100,8 +3166,24 @@ function gwHolds(el,tk){ const u=el.getAttribute("data-gw");
 // forward/self head so a malformed HEAD column can't send a caller round a loop.
 function gwUnitId(si,tk){ const s=DOC[si]; if(!s||!s.tokens) return tk; const t=s.tokens[tk-1];
   if(!t||!isGoesWith(t.deprel)) return tk; const h=parseInt(t.head,10); return (h>=1&&h<tk)?h:tk; }
-function gridFormFont(tk){ if(!isForeign(tk)) return GRID_F;   // the grid Form cell's measurement font (column autosize, the wrap/expand thresholds)
-  return _frnSize((LIVE_FRN_MONO_STACK&&LIVE_FRN_MONO_STACK!==LIVE_MONO_STACK)?GRID_ITAL_F.replace(LIVE_MONO_STACK,()=>LIVE_FRN_MONO_STACK):GRID_ITAL_F); }   // …with the Kai family swapped in for a Chinese document, exactly as frnFontStr does for the diagrams — see its note; GRID_ITAL_F already carries the "italic"
+/* ── THE GRID FORM CELL'S MEASUREMENT FONT (column autosize, the wrap test, the expand-on-focus width) ──
+   The diagram's counterpart is frnFontStr, and this is the same three questions asked of the mono stack:
+   is the mark an italic or an underline, does the Kai family come in, and does the size go with it.
+   ⚠ THE UNDERLINE CASE WAS MISSING AND IS WHY AN UNDERLINED DOCUMENT MEASURED A FACE IT NEVER PAINTED.
+   `#doc[data-frnul] .tok-ital{font-style:normal}` matches `.cin.tok-ital` — the Form cell is a `.tok-ital`
+   — so a Devanagari/Arabic document's Form cell renders UPRIGHT while this returned GRID_ITAL_F, an italic
+   string, unconditionally. Same shape as frnFontStr's own `FRN_UNDERLINE?"":"italic "`, and it now shares
+   the reasoning rather than restating half of it. */
+function _gridFrnFont(lat){ const it=FRN_UNDERLINE?GRID_ITAL_F.replace(/^italic\s+/,""):GRID_ITAL_F;
+  if(lat) return it;   // a form the Kai face paints nothing of takes the plain italic mono, exactly as it does in a non-Chinese document — the same `.frn-lat` opt-out the cell's own class list carries (see frnLatDeco)
+  return _frnSize((LIVE_FRN_MONO_STACK&&LIVE_FRN_MONO_STACK!==LIVE_MONO_STACK)?it.replace(LIVE_MONO_STACK,()=>LIVE_FRN_MONO_STACK):it); }   // …with the Kai family swapped in for a Chinese document, and the SIZE with it, exactly as frnFontStr does for the diagrams
+function gridFormFont(tk){ return isForeign(tk)?_gridFrnFont(!!frnLatDeco(tk)):GRID_F; }
+/* …and the identical answer for a caller holding the FIELD rather than the token (expand(), js/grid/grid.js),
+   read off the two classes italDeco wrote onto it. It used to test `tok-ital` alone and take GRID_ITAL_F,
+   which is right for neither Chinese mode: a Kai cell paints one em-size and one tracking larger than that
+   string states, and an underlined one paints upright. Derived from the element rather than threading the
+   token through expand()'s two call sites, since the classes ARE the record of what italDeco decided. */
+function gridFormFontOf(el){ return (el&&el.classList&&el.classList.contains("tok-ital"))?_gridFrnFont(el.classList.contains("frn-lat")):GRID_F; }
 /* ── IS THE TRANSLITERATION ROW ITALIC? THE ANSWER IS AN XOR, NOT A FLAG ──────────────────────────────
    The row is set in italics as a romanisation; TWO things flip it upright, and each flips whatever it
    finds. `frn-up` is the Foreign mark (see isForeign's own note above), and `#doc.ortho-script` is the

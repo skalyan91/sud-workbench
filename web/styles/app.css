@@ -362,7 +362,7 @@
   .stx-frn{font-style:italic}   /* Foreign=Yes — italics ALONE, no underline, exactly as italDeco draws it on the diagram */
   .strans .stx-frn{font-style:normal}   /* …but the transliteration slot is ALREADY italic as a whole (.strans), so a foreign word FLIPS UPRIGHT there instead — the same inversion frnUp makes for the italic MSeg tier */
   #doc.ortho-script .strans .stx-frn{font-style:italic}   /* …unless a non-Latin DISPLAYED transliteration has dropped the row's romanisation italics (line ~381), in which case italic is the marked value again */
-  #doc[data-hanfrn] .stx-frn{font-family:var(--frn-font)}   /* item 2: the running line carries the Kai face too — the same mark the diagram and the grid draw, on the same run. Layout-safe despite this section's ink-only rule: the family is confined by unicode-range to Han, and Han is one em in the Kai faces exactly as in the body face (measured at 64px: 64.00 in both), so no advance moves and the token↔text alignment paintStext depends on is untouched */
+  #doc[data-hanfrn] .stx-frn:not(.frn-lat){font-family:var(--frn-font)}   /* …and `:not(.frn-lat)` for the same reason the diagram's own swap carries it (see that rule, line ~1047): a foreign run the Kai face paints nothing of is not a Kai run at all, and saying so in one place keeps the class one statement rather than four-fifths of one. */   /* item 2: the running line carries the Kai face too — the same mark the diagram and the grid draw, on the same run. Layout-safe despite this section's ink-only rule: the family is confined by unicode-range to Han, and Han is one em in the Kai faces exactly as in the body face (measured at 64px: 64.00 in both), so no advance moves and the token↔text alignment paintStext depends on is untouched */
   /* TYPO — the two spellings TRADE PLACES with the editing state (see "THE TWO STATES" in
      js/core/document.js). At rest the line carries the CORRECTED spelling and the file's own is the
      mark above it; focused, the line carries the file's own and the correction is the mark above. The
@@ -979,7 +979,7 @@
      form mirrors the swap (fmeas() in the diagrams, GRID_ITAL_F in the grid), so slots, the MWT tie, hit boxes
      and column widths are sized in the face the glyphs actually render in. */
   .tok-ital{font-style:italic; letter-spacing:.02em}   /* tracking curve @15px (0, the reference size) + the ITALIC bump (ITALIC_TRACK, diagram-core.js) — see the .tok-ital/.frn-up tracking note below for why the bump is not optional */
-  .cin.tok-ital{font-style:italic}   /* the grid's Form cell is a field: .cin's `font:inherit` shorthand RESETS font-style, and sits later in this sheet at the same specificity as .tok-ital above — so the field needs the two-class selector to keep its italics */
+  .cin.tok-ital{font-style:italic; letter-spacing:.0314em}   /* the grid's Form cell is a field: .cin's `font:inherit` shorthand RESETS font-style, and sits later in this sheet at the same specificity as .tok-ital above — so the field needs the two-class selector to keep its italics */   /* …and its own tracking base: tracking curve @13px (.0114em) + the italic bump = .0314em, which is what GRID_ITAL_F (`italic 462 13px`) has always measured. `.tok-ital`'s .02em above is the 15px reference's literal and was landing on a 13px field — the cell painted .0114em tighter than its own column reserved. Third base beside .tok-ital's 15px and .oform.tok-ital's 14px, for the same reason each of those states one */
   /* ⚠ THE ITALICS CARRY THEIR TRACKING WITH THEM, AND NOT DOING SO WAS A RESERVE/PAINT MISMATCH — the same
      class of bug the magnification's own tracking term records (magTrack, diagram-core.js), one flip down.
      `fmeas1()` measures a Foreign=Yes form as `"italic "+f`, and `_measOneUncached` puts `trackEmOf(f)` on the
@@ -1009,6 +1009,7 @@
   #doc[data-frnul] .tok-ital{font-style:normal; letter-spacing:0;
     text-decoration:underline; text-decoration-thickness:.055em; text-underline-offset:.16em}
   #doc[data-frnul] .oform.tok-ital{letter-spacing:.0055em}   /* tracking curve @14px, upright — the bump gone */
+  #doc[data-frnul] .cin.tok-ital{letter-spacing:.0114em}   /* tracking curve @13px, upright — the counterpart .oform got and the grid's Form cell did not. `_gridFrnFont` (js/diagram/diagram-core.js) drops the "italic" from its measurement string in this mode for the other half of the same correction: the cell renders upright here (the `#doc[data-frnul] .tok-ital` rule above reaches it, the Form cell being a .tok-ital), and it was being measured in an italic face carrying a bump it does not paint */
   /* The running sentence line. Scoped to `.stext` so the TRANSLITERATION row is untouched: that row is a
      Latin romanisation whatever the main line is written in, so italics remain the right mark there and
      `.strans .stx-frn`'s own inversion (line ~363) keeps working exactly as it did. */
@@ -1031,8 +1032,21 @@
      without touching `.tok-ital` itself, since the swap is carried by the @font-face's italic slot (see
      --frn-font above). The ID selector is deliberate: it has to outrank `.oform`, which declares its own
      font-family LATER in this sheet and would otherwise win the cascade on the outline's form row. */
-  #doc[data-hanfrn] .tok-ital{font-family:var(--frn-font)}
-  #doc[data-hanfrn] .cin.tok-ital{font-family:var(--frn-mono-font)}   /* the grid's Form cell — a field, in the MONO stack; same two-class shape its font-style rule above needs, for the same `font:inherit` reason */
+  /* ⚠ `:not(.frn-lat)` ON EVERY ONE OF THESE, BECAUSE THE KAI TREATMENT IS A PROPERTY OF THE GLYPHS AND
+     THE ELEMENT IS THE TOKEN. A LATIN word marked Foreign=Yes in a Chinese document was taking all five
+     corrections below — the face, the 6.4 % size, the lift, the tightening and the running line's bold —
+     every one of them derived from Kai's metrics against the sans's, for glyphs the word does not
+     contain. Its face really is italic, and the .02em ITALIC_TRACK bump the tightening replaced is what
+     that face wants. `.frn-lat` is written by italDeco/stxUnitDeco onto exactly the foreign forms the Kai
+     face paints NOTHING of (frnLatDeco, js/diagram/diagram-core.js — which is also where the "paints any
+     of it" test, rather than "is it all Han", is argued out); a mixed form is untouched.
+     ⚠️ THE FAMILY IS GATED TOO, though the swap is a no-op on Latin by unicode-range: `frnTrackOf`
+     (js/diagram/diagram-core.js) decides which strings are painted at `--frn-track` by reading the Kai
+     stack off a font string's TAIL, and the INLINE EDITOR builds its string from this very element's
+     computed family. Leave the family swapped with the tracking off and that test stops describing the
+     stylesheet — the field would open at the tightening the form no longer paints. */
+  #doc[data-hanfrn] .tok-ital:not(.frn-lat){font-family:var(--frn-font)}
+  #doc[data-hanfrn] .cin.tok-ital:not(.frn-lat){font-family:var(--frn-mono-font)}   /* the grid's Form cell — a field, in the MONO stack; same two-class shape its font-style rule above needs, for the same `font:inherit` reason */
   /* ⚠ …AND THE KAI FACE IS SET LARGER AND HIGHER THAN THE SANS BESIDE IT, BECAUSE ITS 字面 IS SMALLER.
      A Kai (楷體) face is a brush hand: it is drawn to a smaller face-square inside the same em than a modern
      Hei is, which is exactly why a foreign token read as SHRUNKEN next to its neighbours rather than merely
@@ -1084,8 +1098,8 @@
      measured here and may want its own numbers; the direction of the correction is a property of the Kai
      STYLE rather than of any one file, so this is the right value to be wrong by a percent on, not a reason
      to leave the glyph visibly small. */
-  #doc[data-hanfrn="sc"] .tok-ital,#doc[data-hanfrn="sc"] .stx-frn{--frn-scale:1.0722; --frn-lift:.0230em; --frn-track:-.0640em}
-  #doc[data-hanfrn="tc"] .tok-ital,#doc[data-hanfrn="tc"] .stx-frn{--frn-scale:1.0637; --frn-lift:.0228em; --frn-track:-.0544em}
+  #doc[data-hanfrn="sc"] .tok-ital:not(.frn-lat),#doc[data-hanfrn="sc"] .stx-frn:not(.frn-lat){--frn-scale:1.0722; --frn-lift:.0230em; --frn-track:-.0640em}
+  #doc[data-hanfrn="tc"] .tok-ital:not(.frn-lat),#doc[data-hanfrn="tc"] .stx-frn:not(.frn-lat){--frn-scale:1.0637; --frn-lift:.0228em; --frn-track:-.0544em}
   /* ⚠ AND THE RUN IS TIGHTENED, BECAUSE A KAI CHARACTER CARRIES MORE AIR INSIDE ITS OWN EM THAN THE SANS
      DOES. Every Han ideograph is exactly one em wide in every face — measured, ten of them come to exactly
      1000px at 100px in Kaiti SC/TC, STKaiti, BiauKaiTC, TW-Kai, Xingkai SC, Adobe Kaiti Std, PingFang SC,
@@ -1108,13 +1122,18 @@
      still carries 28–37 MB of tables, against the 2.0 MB of the largest face this app hands HarfBuzz today,
      and the resulting <path> run would reach the SVG diagram only, leaving the running line and the grid on
      full-width spacing. Costed, not overlooked.
-     ⚠️ DOCUMENT-SCOPED, NOT PER TOKEN, and by now that caveat covers THREE properties: a LATIN word marked
-     Foreign in a Chinese document is enlarged 6.4 %, tightened 0.074 em and set bold, and wants none of the
-     three (its face really is italic, and the .02em bump the tightening replaces is what that face wants).
-     Each of these serves a whole element and the element is the token, so telling the two apart means a
-     per-token predicate — "is this form Han" — threaded through italDeco, paintStext and frnFontStr. That
-     is worth doing if such tokens turn out to be common in practice; it is stated here rather than
-     discovered later. Literary Chinese, the language this feature was built for, has essentially none. */
+     ⚠️ NO LONGER DOCUMENT-SCOPED — the per-token predicate this used to ask for HAS BEEN BUILT, on report
+     ("the tightness works for CJK characters in Kai, but not for Latin text"). What stood here was: a LATIN
+     word marked Foreign in a Chinese document is enlarged 6.4 %, tightened 0.074 em and set bold, wants
+     none of the three (its face really is italic, and the .02em bump the tightening replaces is what that
+     face wants), and telling it apart means a per-token predicate threaded through italDeco, paintStext
+     and frnFontStr — "worth doing if such tokens turn out to be common in practice". That predicate is
+     `frnLatDeco` (js/diagram/diagram-core.js): it writes `.frn-lat` onto a foreign form the Kai face paints
+     NOTHING of, and the `:not(.frn-lat)` now on this block and on every other `[data-hanfrn]` rule takes
+     all five corrections off it at once. A MIXED form still takes them, deliberately — see that function's
+     own note for why "does Kai paint any of it" is the test rather than "is it all Han". Literary Chinese,
+     the language this feature was built for, has essentially no such tokens; a modern Chinese document
+     citing a Latin term has them, which is what the report was about. */
   /* ⚠ AND THE RUN IS SET BOLD, WHICH IS A COLOUR CORRECTION AND NOT AN EMPHASIS. A brush hand's stroke is
      thinner and more modulated than a Hei's, so at the same size and the same ink colour a Kai word reads
      as FADED beside its neighbours rather than merely different. Measured as ink coverage — alpha mass per
@@ -1140,9 +1159,16 @@
      thin a Bold — forces the offscreen buffer whose getBBox-derived bounds this file has already been bitten
      by once (see .stext-script's fill-opacity note on the clipped Javanese conjuncts). So: 700 where it was
      asked for, 400 where it was not. */
-  #doc[data-hanfrn] .stx-frn{--frn-wght:700}
-  #doc[data-hanfrn] .tok-ital{--frn-wght:400}   /* the diagram's five form rows and the grid's Form cell — see above */
-  #doc[data-hanfrn] .tok-ital,#doc[data-hanfrn] .stx-frn{letter-spacing:var(--frn-track); font-weight:var(--frn-wght)}
+  #doc[data-hanfrn] .stx-frn:not(.frn-lat){--frn-wght:700}
+  #doc[data-hanfrn] .tok-ital:not(.frn-lat){--frn-wght:400}   /* the diagram's five form rows and the grid's Form cell — see above */
+  /* ⚠ THESE TWO CONSUME WITHOUT A FALLBACK, WHICH IS WHY THE GATE HAS TO BE ON THE SELECTOR AND NOT ONLY
+     ON THE DECLARATIONS ABOVE. `var(--frn-scale,1)` and `var(--frn-lift,0em)` each carry their own no-op,
+     so the five form rows' font-size calcs and the two lift rules below need no `:not()` — an undeclared
+     property simply lands on the fallback. A bare `var(--frn-track)` has none: undeclared, the whole
+     declaration is invalid at computed-value time and `letter-spacing` falls back to INHERITING rather
+     than to `.tok-ital`'s own .02em. Not matching at all is what lets `.tok-ital` / `.oform.tok-ital`
+     state each row's tracking once and win here, instead of a third copy of those two literals. */
+  #doc[data-hanfrn] .tok-ital:not(.frn-lat),#doc[data-hanfrn] .stx-frn:not(.frn-lat){letter-spacing:var(--frn-track); font-weight:var(--frn-wght)}
   /* ⚠ AND THE RUN'S TWO EDGES ARE CORRECTED BY HALF THAT TRACK EACH, BECAUSE letter-spacing CANNOT REACH
      A JUNCTION IT ONLY HAS ONE SIDE OF. The tightening above equalises the gap BETWEEN TWO KAI CHARACTERS
      with the sans's own; it says nothing about the gap between a Kai character and the non-Kai one next to
@@ -1165,7 +1191,7 @@
      margin: each of those draws its token ALONE in its own centred slot, with no neighbouring character for
      a junction to exist between — the nearest thing to one there is the slot's own padding, which is
      measured (meas()/fmeas()) and would have to move with it. */
-  #doc[data-hanfrn] .stx-frn{margin-inline-start:calc(var(--frn-track) / 2); margin-inline-end:calc(var(--frn-track) / -2)}
+  #doc[data-hanfrn] .stx-frn:not(.frn-lat){margin-inline-start:calc(var(--frn-track) / 2); margin-inline-end:calc(var(--frn-track) / -2)}
   /* The SCALE reaches the five form rows through the `* var(--frn-scale,1)` factor already threaded into
      each of their own font-size calcs, beside `var(--script-mag,1)` — the same list, the same shape, the
      same no-op default. These two rows have no font-size of their own to thread it into, so they take it
@@ -1567,7 +1593,16 @@
      full-bleed, square-cornered stripe these three values move away from. */
   :root{--grid-r:8px; --grid-row-r:8px; --grid-row-pad:10px}   /* --grid-row-r raised 6→8px on request, to match --grid-r (the grid frame's own corner radius) */
   .gwrap{overflow:auto; max-height:calc(var(--cap-grid,40vh) + 1px); margin-top:2px; border:.5px solid var(--hairline-strong); border-radius:var(--grid-r); position:relative}   /* position:relative → the containing block for the .mwt-grid-tie overlays (absolutely positioned inside a scroll container, so they scroll WITH the rows they mark) */   /* +1px so the .5px top+bottom border doesn't eat into the content cap and force a 1px phantom scroll */   /* the radius needs no matching one on table.grid or the corner cells: .gwrap is the scroll container (overflow:auto), so it CLIPS to its own padding box and the square-cornered sticky header and last row are cut to the curve for free */
-  table.grid{border-collapse:separate; border-spacing:0; font-family:var(--mono-font); font-size:var(--grid-cell); font-weight:462;   /* weight curve @13px = --grid-cell, see the :root comment — was a flat 400, reading noticeably lighter than every other 12.65px sans text in the block (e.g. .tg-lname) at the same size */ table-layout:fixed; width:100%;
+  /* ⚠ THE TRACKING CURVE'S OWN LITERAL FOR 13px, STATED AT LAST — AND IT COSTS NO LAYOUT, BECAUSE EVERY
+     MEASUREMENT OF A GRID CELL HAS RESERVED IT ALL ALONG. `GRID_F` is `462 13px <mono>`, and `meas()` puts
+     `trackEmOf(f)` = trackCurve(13) = .0114em on the measuring element (js/diagram/diagram-core.js) — so
+     the column autosize, the wrap test and the expand-on-focus width have every one of them been sizing a
+     tracked run while this rule stated the WEIGHT curve's literal beside it and not the TRACKING curve's.
+     The cells simply never spent the space: ~0.15px per character at 13px, painted tighter than reserved.
+     Stating it here is the same one-literal-per-consumer contract .gloss (13px, .0114em), .lbl (11px) and
+     .omwtcomp (10.5px) already keep — and it is what the curve asks for in the first place, 13px text
+     reading visually tighter than the 15px reference beside it. */
+  table.grid{border-collapse:separate; border-spacing:0; font-family:var(--mono-font); font-size:var(--grid-cell); font-weight:462; letter-spacing:.0114em;   /* tracking curve @13px = --grid-cell — see the note just above */   /* weight curve @13px = --grid-cell, see the :root comment — was a flat 400, reading noticeably lighter than every other 12.65px sans text in the block (e.g. .tg-lname) at the same size */ table-layout:fixed; width:100%;
     background:var(--content-bg)}   /* solid ground → grid unaffected by the selected block's tint; the enclosing frame is the .gwrap outline */
   /* THE HEADING BAND. Three deliberate departures from what it used to be, all of them requested:
      · TITLE CASE IN THE UI FONT. The labels are UI chrome naming a column, not treebank content, so they belong
@@ -1597,7 +1632,7 @@
      surface (CLAUDE.md's rule — the kits own chrome, app.css owns what draws the treebank). */
   :root{--grid-head-ink-req:rgb(0 0 0 / .85); --grid-head-ink-opt:rgb(0 0 0 / .5)}
   @media (prefers-color-scheme:dark){ :root{--grid-head-ink-req:rgb(255 255 255 / .85); --grid-head-ink-opt:rgb(255 255 255 / .5)} }
-  table.grid th{font-family:var(--ui-font); text-align:start; font-weight:500; color:var(--grid-head-ink-opt); font-size:11px; line-height:14px;   /* 500 = SF Pro Medium, on request (was 590, the "emphasized label" weight) — the optional headings now carry no emphasis at all, which is the point: the two obligatory ones below take Bold and the contrast between the two states is what says which columns can be switched off */
+  table.grid th{font-family:var(--ui-font); text-align:start; font-weight:500; color:var(--grid-head-ink-opt); font-size:11px; line-height:14px; letter-spacing:.0248em;   /* tracking curve @11px — its OWN literal rather than the 13px one it would otherwise inherit from table.grid above, and the value `pillColW` has always measured the label at (HEAD_F = `500 11px <ui-font>`, so meas() puts trackCurve(11) on it). The heading band is the one part of the grid at a size of its own; without this it would take a cell's tracking and be sized for a heading's */   /* 500 = SF Pro Medium, on request (was 590, the "emphasized label" weight) — the optional headings now carry no emphasis at all, which is the point: the two obligatory ones below take Bold and the contrast between the two states is what says which columns can be switched off */
     padding:4px 8px; box-shadow:inset 0 -.5px 0 var(--grid-head-border); white-space:nowrap; background:var(--content-bg);
     position:sticky; top:0; z-index:3}   /* headers stay fixed while the grid body scrolls; bottom rule via box-shadow (not border) so it adds no fractional row height → no 1px phantom scroll. Figma: black at 5% (--grid-head-border) */
   table.grid th.th-req{font-weight:700; color:var(--grid-head-ink-req)}   /* ID and Form — the two columns the header's context menu draws as disabled, since neither can be turned off. 700 = SF Pro Bold at 85 % ink, on request; was --text at the shared 590. HEAD_F_REQ (js/diagram/diagram-core.js) measures against this weight, and scanColW/pillColW pick it per column — change the weight here and that string must follow, or the two columns are sized to a face they aren't drawn in */
@@ -1607,16 +1642,28 @@
   .colresize::after{content:""; position:absolute; left:50%; top:4px; bottom:5px; width:1px; transform:translateX(-50%); border-radius:1px; background:var(--grid-col-border)}   /* visible column divider — Figma: black at 10%, inset 4px from the header's own top and 5px from its bottom (was a symmetric 2px/2px, --hairline-strong) */
   .colresize:hover::after,.colresize.dragging::after{width:2px; background:var(--accent)}
   table.grid td{padding:0; vertical-align:middle; white-space:nowrap; position:relative}   /* NO per-row divider (Figma: a zebra-striped data table has stripe, no rule — this grid already stripes via .striperow); used to paint one via box-shadow (inset 0 -.5px 0 var(--hairline)), removed outright rather than just recoloured */
-  table.grid td.rocell{padding:0 8px; color:var(--muted); font-style:italic; unicode-bidi:isolate; overflow:hidden; text-overflow:ellipsis}   /* transliteration: muted, non-editable */
-  table.grid th.th-tr{color:var(--grid-head-fg,var(--muted)); font-style:italic; font-weight:600; unicode-bidi:isolate}   /* keep "Translit." intact (dot stays on the right) under RTL; item 7: share the darker light-mode heading fg */
   table.grid td.col-id{padding-block:0; padding-inline:var(--grid-row-pad) 6px; font-variant-numeric:tabular-nums; color:var(--muted); text-align:end; cursor:grab}   /* the inline-END half stays the old flat 6px — the gap to the Form column, unrelated to the row band. The inline-START half now matches --grid-row-pad, the SAME inset td:first-child::before (below) uses for the row's own background/stripe/selection band: before this, the ID column was the one edge that didn't already tie its own padding to that token — the LAST column's padding-inline-end has, since ~line 1211 below, for the identical reason ("the content of that cell stops where the band does"). text-align:end means the numeral itself doesn't visibly shift — what this actually fixes is the column's own claimed WIDTH: idWRaw (js/grid/grid.js) and marginNumWidth (js/core/document.js) both size <col id> off this same padding, via idPadTotal(), and have been updated to read --grid-row-pad rather than assume the old flat 6+6, or the column would now come out 4px too narrow for what it reserves. Right in LTR, left in RTL: padding-inline is logical, so RTL still puts the wide edge on the correct side */
   table.grid th.col-id{padding:4px 6px; text-align:end}   /* ID heading: right in LTR, left in RTL (opposite the other headings) */
   table.grid td.col-id:active{cursor:grabbing}
-  table.grid tbody tr.mwt-row td{color:var(--text-2); font-style:italic; padding:0}   /* padding 0 like normal cells → the surface form aligns in the Form column */
+  /* ⚠ THE RANGE ROW IS UPRIGHT, AND IT IS UPRIGHT HERE RATHER THAN IN THREE PLACES THAT CANCELLED OUT.
+     This rule used to set `font-style:italic` on the row — a SYNTHETIC italic, since the mono stack has no
+     real one, which slants shaped Arabic past its own box — and then everything the row actually draws took
+     it straight back off again: `.mwtform` below, `td.pillcol`, and an inline `style.fontStyle="normal"` in
+     renderGrid. Three overrides for one declaration, with nothing left over that the italic reached. The
+     row is a surface form and its MISC, both of them file content set the way every other cell's is; on
+     request ("MWTs should be set upright"), it simply is not italic. */
+  table.grid tbody tr.mwt-row td{color:var(--text-2); padding:0}   /* padding 0 like normal cells → the surface form aligns in the Form column */
   table.grid tbody tr.mwt-row td input{color:var(--text-2)}
-  .mwtform{position:relative; z-index:2; width:auto; font-style:normal}   /* the MWT surface form may break out of the Form column instead of truncating; upright (synthetic italic slants shaped Arabic past the box) */
-  table.grid tbody tr.mwt-row td.rocell{padding:0 8px; overflow:visible; text-overflow:clip}   /* MWT transliteration aligns with the column but may break out (never truncated) */
-  table.grid tbody tr.mwt-row td.pillcol{font-style:normal}   /* MWT MISC pills upright (undo the range row's synthetic italic), like the surface-form field */
+  /* ⚠ AND THE SURFACE FORM MAY RUN PAST THE FORM COLUMN, WHICH IS WHY THAT COLUMN IS NOT SIZED FOR IT.
+     A fused range ("vartmāpunarjanmanām") is routinely wider than every component token under it, so sizing
+     the Form column to fit it would widen the column for every ordinary row to suit the one row that is not
+     a token — which is exactly why colW skips MWT forms (see its own note, js/grid/grid.js). The field is
+     then sized to its own content and allowed out of the cell: `width:auto` plus a `size()` that reads
+     scrollWidth, over a cell that does not clip. `z-index` puts it above the neighbouring cells it crosses.
+     Stated here rather than as the inline `td.style.overflow="visible"` renderGrid used to set, so the
+     permission and the sizing that relies on it read as one rule. */
+  table.grid tbody tr.mwt-row td.w-form{overflow:visible; text-overflow:clip}
+  .mwtform{position:relative; z-index:2; width:auto}
   /* The grid's MWT bracket is drawn as a REAL SVG (gridTie, one overlay per group, measured over the group's rows
      — a table can't span an element across rows, so a CSS border + two pseudo-element ticks was the alternative).
      It reuses the diagram's own .mwt-tie / .mwt-tie-h classes verbatim, so the ink formula, the var(--arc-stroke)
@@ -1761,7 +1808,6 @@
      Scoped to where the full accent ACTUALLY paints: with focus in the diagram the row falls back to the dim
      wash below and keeps its ordinary ink. */
   html:not(.win-inactive) #doc:not(.zone-diagram) table.grid tbody tr:is(.sel,.mwtsel) td,
-  html:not(.win-inactive) #doc:not(.zone-diagram) table.grid tbody tr:is(.sel,.mwtsel) td.rocell,
   html:not(.win-inactive) #doc:not(.zone-diagram) table.grid tbody tr:is(.sel,.mwtsel) td.col-id,
   html:not(.win-inactive) #doc:not(.zone-diagram) table.grid tbody tr:is(.sel,.mwtsel) .cin,
   html:not(.win-inactive) #doc:not(.zone-diagram) table.grid tbody tr:is(.sel,.mwtsel) .csel{color:#fff}
@@ -1836,6 +1882,14 @@
   td.w-deep .deepat{position:absolute; inset-inline-start:8px; top:50%; transform:translateY(-50%); z-index:21; pointer-events:none; color:var(--text-2); font:inherit; visibility:hidden}   /* a non-editable "@" before the deep feature; z-index above the .editing input's opaque bg so it stays visible while editing; pointer-events:none → clicks/caret pass through to the input */
   td.w-deep .deepat.on{visibility:visible}   /* revealed only once the field holds non-whitespace text */
   .cin,.csel{line-height:16px}   /* integer line-height → each cell/row is a whole number of px, so the grid height never lands on a fraction (which would trip a 1px phantom scroll) */
+  /* ⚠ AND `letter-spacing` HAS TO BE ASKED FOR BY NAME, WHICH IS WHY table.grid's OWN VALUE NEVER REACHED
+     A CELL. Every UA stylesheet resets the text properties on a form control — `letter-spacing:normal`
+     alongside `word-spacing`, `text-transform` and `text-indent` — so an <input>/<select> does not inherit
+     it the way an ordinary <td> does, and `font:inherit` above cannot carry it either (the `font` shorthand
+     names neither). The fields are ALL of the grid's own text: every cell but the ID column is one of these
+     two, so without this the tracking curve's literal would paint on nothing at all while every column went
+     on being measured with it. Same shape as the `font:inherit` beside it, and for the same reason. */
+  .cin,.csel{letter-spacing:inherit}
   .cin:hover,.csel:hover{border-color:var(--hairline)}
   .cin:focus,.csel:focus{background-color:var(--field-focus); border-color:var(--accent)}   /* background-COLOR only → keep the dropdown chevron (a background-image) */
   .cin.editing,.csel.editing{position:absolute; left:0; top:50%; transform:translateY(-50%); z-index:20; background-color:var(--edit-bg); border-color:var(--accent);

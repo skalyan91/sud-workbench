@@ -10,7 +10,6 @@
 // does carry one should still show it whenever the page is wide enough to.
 const COLS=[["form","w-form","text","Form"],["lemma","","text","Lemma"],["upos","w-upos","upos","UPOS"],["xpos","","text","XPOS"],
   ["feats","","text","Feats"],["head","w-head","head","Head"],["deprel","w-deprel","deprel","DepRel"],["deep","w-deep","deep","Deep"],["deps","","text","Deps"],["misc","","text","Misc"]];   // CoNLL-U column order, with DEPREL split into its two halves (DepRel = depBase, Deep = the "@" tail) — so DEPS lands where the format puts it, between them and MISC
-function sentHasTranslit(s){ return s.tokens.some(t=>t.translit&&t.translit.length) || (s.mwt||[]).some(m=>m.translit); }
 /* item 1 — ITRANS → IAST on a committed Form/Lemma cell, for a Sanskrit document (itransFix in
    js/lang/translit.js is a no-op everywhere else). Three deliberate choices:
    · ON BLUR, not on "input": the evidence gate reads the WHOLE word, and half a word ("raa") is not
@@ -84,11 +83,19 @@ async function itransCell(ctl,t,key,si,ti){ const v0=t[key]||""; const v=await i
   else commitLemmaEdit(si,ti+1,t); }                                              // …and MISC LTranslit + the morpheme segmentation (and the MGloss slots naming it) from the lemma
 // Head cell shows the head token's form, plus its transliteration in parentheses when the layer is on
 function headText(o){ const st=o?miscTranslit(o.misc):""; return st ? `${o.form} (${st})` : (o?o.form:""); }   // item 1: Head column shows the STORED romanisation (MISC Translit), the canonical transliteration
-// transliteration columns (5th flag) show only when the layer is on AND the sentence's script needs it
 // ALLCOLS is every column the DOCUMENT admits — the base list AC narrows further by visibility (see below). Kept
 // separate because the two have different jobs: scanColW has to measure columns that are currently HIDDEN (else a
 // column could never be shown again — see computeAutoHide), and the header's column menu has to LIST them.
-const ALLCOLS=si=>COLS.filter(c=>!c[4] || (show.translit && (si==null ? DOC.some(sentHasTranslit) : sentHasTranslit(DOC[si]))));
+/* ⚠ EVERY COLUMN, FULL STOP — the per-sentence filter this used to apply had nothing left to filter.
+   It gated a 5th flag on a COLS entry ("show this column only when the transliteration layer is on and
+   this sentence's script needs it"), which existed for a pair of transliteration columns the grid no
+   longer has: no COLS entry carries that flag, so `!c[4]` was true of all ten and the filter returned
+   the list it was given. The grid draws the ten CoNLL-U columns and nothing else, on request ("there
+   shouldn't be a transliteration column in the grid") — a token's romanisation is a DIAGRAM row (the
+   .translit/.otrans tier) and the Head column's own `form (translit)` parenthesis, neither of which is
+   a column here. `si` is kept in the signature because every caller has one and passes it, and because
+   a future per-sentence column would want exactly this shape back. */
+const ALLCOLS=si=>COLS;
 /* ── WHICH COLUMNS ARE SHOWN ────────────────────────────────────────────────────────────────────────────────────
    Two things decide, in this order:
     · THE USER'S OWN CHOICE, made by ticking or unticking a row in the header's column menu (columnMenu,
@@ -166,7 +173,7 @@ function scanColW(from,to){
         str=(t.head==="0"?padHead(0)+" · root":(o?`${padHead(t.head)} · ${headText(o)}`:t.head)); }
       const pad=((ty==="upos"||ty==="head")?34:18)+(k==="deep"?16:0);   // input padding (8+8) +2 border; dropdown adds ~22 chevron. DepRel is now a free-text autocomplete <input> like Deep, not a <select> — no chevron reserve. Deep reserves +16px for its fixed "@" prefix decoration (.cin.deepin padding-inline-start)
       m=Math.max(m, meas(str, k==="form"?gridFormFont(t):GRID_F)+pad); }));   // a Foreign=Yes form renders italic in the Form cell → size the column to the italic width
-    colWRaw[k]=Math.round(Math.min(320,Math.max(colWRaw[k]||0,m))); });   // columns cap at 320. MWT forms AND transliterations aren't counted — both break out of the column instead (the MWT row's own input sizes itself past td.offsetWidth when needed, see the mwt-row "form" branch below)
+    colWRaw[k]=Math.round(Math.min(320,Math.max(colWRaw[k]||0,m))); });   // columns cap at 320. AN MWT'S SURFACE FORM IS NOT COUNTED: a fused range is routinely wider than every component token under it, so sizing the Form column to fit it would widen the column for every ordinary row to suit the one row that is not a token. It breaks out of the column instead — its own input sizes itself past td.offsetWidth and the cell does not clip (see the mwt-row "form" branch below, and `tr.mwt-row td.w-form` in styles/app.css). (Transliterations were named here too, for a pair of columns the grid no longer has — see ALLCOLS.)
 }
 function computeColW(){
   // Scan the CURRENT RENDER'S WINDOW (js/core/document.js's winLo/winHi — computeWindow() has already run by the
@@ -379,9 +386,8 @@ function renderGrid(si){
   const thead=document.createElement("thead"); const htr=document.createElement("tr");
   const idth=Object.assign(document.createElement("th"),{className:"col-id th-req",textContent:"ID"}); idth.appendChild(grip("id",true)); htr.appendChild(idth);   // .th-req: ID and Form are the two OBLIGATORY columns, and their headings say so by taking the full --text ink instead of the muted heading colour (styles/app.css) — the same distinction the column menu draws by greying their rows out
   AC(si).forEach(([k,cls,ty,H])=>{const th=document.createElement("th"); th.dataset.col=k;
-    if(ty==="rotext"){ th.className="th-tr"; const sp=document.createElement("span"); sp.dir="ltr"; sp.textContent=H; th.appendChild(sp); }   // LTR span → "Translit." keeps its dot on the right even under RTL
-    else th.textContent=H;
-    if(k==="form") th.classList.add("th-req");   // …the other obligatory heading (classList.add, not className=, so the rotext branch's own class survives)
+    th.textContent=H;   // a "rotext" branch stood here, wrapping a "Translit." label in an LTR span so its dot stayed on the right under RTL; gone with the transliteration columns themselves (see ALLCOLS)
+    if(k==="form") th.classList.add("th-req");   // …the other obligatory heading
     if(k!=="misc") th.appendChild(grip(k, !!FIXEDW[k]));   // Misc stretches to fill, so it isn't resizable
     htr.appendChild(th);});
   /* Right-click ANY heading → the Finder-style column chooser (columnMenu). Bound to the header ROW rather than
@@ -407,8 +413,8 @@ function renderGrid(si){
       mid.addEventListener("dragstart",e=>{ DRAG={si,group:{gf:ms.from-1,gt:ms.to-1}}; mr.classList.add("dragging"); e.dataTransfer.effectAllowed="move"; e.dataTransfer.setData("text/plain","mwt"); });
       mid.addEventListener("dragend",()=>{ mr.classList.remove("dragging"); clearDZ(); });
       AC(si).forEach(([key,cls,type])=>{ const td=document.createElement("td"); if(cls)td.className=cls;
-        if(key==="form"){ td.style.overflow="visible"; const inp=document.createElement("input"); inp.className="cin mwtform"; inp.value=ms.form; inp.spellcheck=false; inp.title="surface form"; inp.dir=sentRTL(sent)?"rtl":"ltr"; inp.style.fontStyle="normal";   // upright (inline wins over .cin{font:inherit}, which otherwise re-inherits the row's italic and slants shaped Arabic past the box); dir set so RTL forms align/measure correctly
-          const size=()=>{ inp.style.width="30px"; inp.style.width=Math.max(td.offsetWidth||0, inp.scrollWidth+14)+"px"; };   // scrollWidth = the input's real content width (shaped Arabic, zoom-consistent) → never clips
+        if(key==="form"){ const inp=document.createElement("input"); inp.className="cin mwtform"; inp.value=ms.form; inp.spellcheck=false; inp.title="surface form"; inp.dir=sentRTL(sent)?"rtl":"ltr";   // …no inline overflow and no inline font-style any more: `tr.mwt-row td.w-form{overflow:visible}` states the permission this size() depends on, and the row is upright in the stylesheet rather than by an override per cell (styles/app.css). the row's italic and slants shaped Arabic past the box); dir set so RTL forms align/measure correctly
+          const size=()=>{ inp.style.width="30px"; inp.style.width=Math.max(td.offsetWidth||0, inp.scrollWidth+14)+"px"; };   // scrollWidth = the input's real content width (shaped Arabic, zoom-consistent) → never clips. ⚠ VERIFIED IN BOTH ENGINES, after a round that "fixed" this into a meas() call on the strength of a hidden-window WKWebView probe reporting the field clipped: what that probe had actually found is that requestAnimationFrame NEVER FIRES in a hidden window, so this line had not run at all. Driven through its own `input` listener instead, WebKit answers scrollWidth 169 against clientWidth 28 for a 30px-wide field — i.e. it reports the overflowing content width exactly as Chrome does, and meas() would only have re-derived (to within 2px) what the engine already knows about the field it is actually laying out
           // The MWT range row's own Form funnel, matching the token rows': ONE undo snapshot per editing session
           // (taken on focus, pushed on the first keystroke that actually changes the value — the same shape the
           // .cin cells use), and a commit that routes through afterMwtFormEdit so the edit reaches `# text`.
@@ -421,7 +427,6 @@ function renderGrid(si){
           inp.addEventListener("blur",()=>{ mwtSnap=null; });
           inp.addEventListener("change",()=>{ afterMwtFormEdit(si,ms.from,inp.value!==mwtOrig); scheduleDoc(); });
           td.appendChild(inp); requestAnimationFrame(size); }
-        else if(key==="translit"){ td.className=(cls?cls+" ":"")+"rocell"; td.textContent=ms.translit||""; }
         else if(key==="misc"){ if(!Array.isArray(ms._cols))ms._cols=["_","_","_","_","_","_","_","_","_","_"]; while(ms._cols.length<10)ms._cols.push("_");   // an MWT's MISC is raw column 9 (0-indexed); create the raw row on demand so an edit round-trips byte-stably
           const proxy={get misc(){return ms._cols[9];}, set misc(v){ms._cols[9]=v;}};   // buildFeatEditor reads/writes t.misc → route it to the MWT's MISC column
           buildFeatEditor(td,sent,proxy,si,i,"misc");   // same Gmail-style pill editor as ordinary tokens
@@ -453,7 +458,6 @@ function renderGrid(si){
     tr.addEventListener("contextmenu",e=>{ if(e.target.closest(".colresize"))return; e.preventDefault(); e.stopPropagation(); tokenMenu(e.clientX,e.clientY,si,i,e.target); });   // right-click ANY cell → the row menu
     AC(si).forEach(([key,cls,type])=>{
       const td=document.createElement("td"); if(cls)td.className=cls;
-      if(type==="rotext"){ td.className=(cls?cls+" ":"")+"rocell"; td.textContent=t[key]||""; tr.appendChild(td); return; }   // transliteration: muted, non-editable
       if(key==="feats"||key==="misc"){ buildFeatEditor(td,sent,t,si,i,key); tr.appendChild(td); return; }   // FEATS/MISC → Key=Value pill chips (Gmail-style)
       let ctl;
       /* Task A/B — grid-cell edits reach the diagram (and the undo stack) ONLY ON COMMIT: blur, Enter, Tab-away,
@@ -681,7 +685,8 @@ function deprelAcOpen(inp){ if(_acCloseT){clearTimeout(_acCloseT);_acCloseT=null
   deprelMenuGroups(vocab).forEach(([name,members])=>{ const items=members.filter(m=>matchSet.has(m));
     if(items.length) groups.push({title:name,items}); });
   acShowGrouped(inp,groups,null); }   // onPick=null → the default fill path (inp.value=v + input event), same as the Deep cell
-function expand(ctl,td){ if(ctl.tagName==="INPUT"){ const need=meas(ctl.value, ctl.classList.contains("tok-ital")?GRID_ITAL_F:GRID_F)+20; if(need>td.offsetWidth){ctl.style.width=need+"px"; ctl.classList.add("editing");} else collapse(ctl); }   // a Foreign form's field renders italic → measure the expansion in that face
+function expand(ctl,td){ if(ctl.tagName==="INPUT"){ const need=meas(ctl.value, gridFormFontOf(ctl))+20;   // gridFormFontOf (js/diagram/diagram-core.js) — the ONE expression the column autosize and the wrap test already ask, read off this field's own classes. It used to be `tok-ital ? GRID_ITAL_F : GRID_F` inline, which is right for a plain italic and for neither of the two document-level foreign modes: a Chinese document's Kai cell paints 6.4 % larger and 0.08 em tighter than that string states, and an underlined script's paints upright
+  if(need>td.offsetWidth){ctl.style.width=need+"px"; ctl.classList.add("editing");} else collapse(ctl); }   // a Foreign form's field renders italic → measure the expansion in that face
   else { const txt=ctl.options[ctl.selectedIndex]?.textContent||""; const need=meas(txt,GRID_F)+34; if(need>td.offsetWidth){ctl.style.width=need+"px"; ctl.classList.add("editing");} } }
 function collapse(ctl){ ctl.classList.remove("editing"); ctl.style.width=""; }
 /* caret line-position probes for line-aware ↑/↓ nav — move within a multiline field first, cross rows only from its top/bottom visual line */

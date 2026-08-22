@@ -430,6 +430,13 @@ function stxUnitDeco(s,units,spans,disp){
     // Foreign on ANY component: a surface unit whose parts are foreign is a foreign word, and the
     // unit is one string in the text — there is no way to italicise only part of a clitic cluster.
     const ital=tks.some(isForeign);
+    /* …and, in a Chinese document, whether the 楷體 face paints any of THIS unit's own letters. The five
+       `[data-hanfrn]` corrections are a property of the Kai glyphs, not of the document, so a Latin word
+       marked Foreign=Yes in a Chinese file wants none of them — see frnLatDeco (js/diagram/diagram-core.js)
+       for the whole account. Asked of the SHOWN slice rather than of any token's form column: this line is
+       the running text, an MWT unit's shown string is the contraction rather than its members' forms, and
+       what these corrections are about is the glyphs actually on the line. */
+    const frnLat=ital && typeof hanFrnPaints==="function" && LIVE_FRN_STACK!==LIVE_TOKEN_STACK && !hanFrnPaints(shown);
     let cf="",strike=false;
     u.ids.forEach(id=>{ const tk=t[id-1]; if(!tk||gwHead.has(id)) return;   // A GOESWITH HEAD IS SKIPPED WHOLE, not just for the strike. Its Typo=Yes marks the stray SPACE and its CorrectForm is the two halves joined — a statement about the SPLIT, which the diagram already makes by folding the halves under one slur. Gating only the strike (as this did) still let the correction float above the word, so the suppression was half-applied and "together" hovered over "to" for no reason a reader could follow
       if(!cf) cf=correctFormOf(tk);
@@ -445,7 +452,7 @@ function stxUnitDeco(s,units,spans,disp){
     // all its members ("du" for de+le) — putting one member's correction in place of the whole
     // contraction would be a worse lie than the typo. Such a unit keeps the pre-existing treatment
     // (struck through, correction above) in BOTH states.
-    return (ital||cf||strike||rep)?{ital,cf,strike,rep,ids:u.ids}:null; }); }   // `ids` rides along so the painted span can name the tokens it covers — that is what lets a prompt anchor under the WORD in the line (see askCorrectForms)   // `form`/`one` are gone with the substitution they gated: the line now always shows `# text`, so what is struck is whatever the walk matched there
+    return (ital||cf||strike||rep)?{ital,frnLat,cf,strike,rep,ids:u.ids}:null; }); }   // `ids` rides along so the painted span can name the tokens it covers — that is what lets a prompt anchor under the WORD in the line (see askCorrectForms)   // `form`/`one` are gone with the substitution they gated: the line now always shows `# text`, so what is struck is whatever the walk matched there
 /* WHY AN ABSOLUTELY-POSITIONED ::before AND NOT <ruby>, for the ABOVE-THE-LINE spelling (whichever of
    the two it currently is). Three constraints decide it, and ruby fails all three. (a) The mark must
    NEVER survive into the committed text: .stext is edited in place and commitSentText reads
@@ -474,7 +481,7 @@ function stxUnitDeco(s,units,spans,disp){
      ON THE LINE   → .stx-typo   (line-through)          … the file's own spelling, the one being rejected
      ABOVE IT      → [data-cf]   (muted)                 … the correction */
 function stxUnitEl(d,text){ const e=document.createElement("span");   // no `editing` parameter any more: the two states render identically, which is the point
-  e.className="stx-tok"+(d.ital?" stx-frn":"")+(d.strike?" stx-typo":"");   // `strike` and not merely `cf`: on a goeswith head Typo=Yes marks the stray SPACE, not a misspelling of this form, so that unit takes no strike
+  e.className="stx-tok"+(d.ital?(" stx-frn"+(d.frnLat?" frn-lat":"")):"")+(d.strike?" stx-typo":"");   // `strike` and not merely `cf`: on a goeswith head Typo=Yes marks the stray SPACE, not a misspelling of this form, so that unit takes no strike
   if(d.ids&&d.ids.length) e.dataset.ids=d.ids.join(" ");   // e.g. data-ids="4" (or "4 5" for an MWT range) → queried with [data-ids~="4"]
   if(d.cf){ e.dataset.cf=d.cf; e.title="correct form of “"+text+"”: "+d.cf; }
   e.textContent=text; return e; }

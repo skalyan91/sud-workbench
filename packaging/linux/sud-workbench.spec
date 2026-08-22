@@ -33,7 +33,7 @@
 # (an ImportError three menus deep, not a `dnf install` error), which is worse than getting it wrong
 # at build time.
 
-%global app_version 0.3.14
+%global app_version 0.3.15
 
 Name:           sud-workbench
 Version:        %{app_version}
@@ -211,6 +211,13 @@ update-desktop-database %{_datadir}/applications &>/dev/null || :
 gtk-update-icon-cache %{_datadir}/icons/hicolor &>/dev/null || :
 
 %changelog
+* Sat Aug 22 2026 Siva Kalyan - 0.3.15-1
+- The open file follows changes made to it on disk: a clean document reloads, a dirty one warns with
+  Reload from Disk / Overwrite / Cancel
+- A Latin word marked Foreign in a Chinese document is no longer set as though it were Kai
+- Grid: MWT rows upright, the dead transliteration-column machinery removed, and every cell painting
+  the letter-spacing its column was already sized for
+
 * Sat Aug 22 2026 Siva Kalyan - 0.3.14-1
 - Gloss from a translation by what the words mean, not by structure alone
 - Foreign words underlined in scripts that have no italic
