@@ -496,6 +496,20 @@ function tierDisp(o,tier){ const v=tierText(o,tier);
 // survive a re-definition — see GLOSS_ABBR_TOK_RE / applyWiktionaryDef.
 const GLOSS_ABBR_RE=/(?<=^|\p{P})[A-Z0-9]+(?=\p{P}|$)/gu;
 const GLOSS_ABBR_TOK_RE=/^[A-Z0-9]+$/;   // whole-token form of GLOSS_ABBR_RE, for tokens already split on "."/"-"
+/* ⚠ ONLY THE MORPHEMIC TIER SMALL-CAPS ITS CAPITALS, on instruction — and this is the one authority for
+   it, read by the paint (setGlossText), the slot reservation (glossSlotW) and the live editor
+   (makeGlossEditableSC) alike, because those three are what have to agree.
+   A LEXICAL gloss is a WORD, and its capitals are the word's own: a proper name (`Nārada`), the English
+   first-person `I`, an acronym. Small-capping them says "Leipzig abbreviation" about text that is not
+   one — most visibly for `I`, a single capital between string edges, which GLOSS_ABBR_RE matches
+   exactly and which rendered as a small-cap ɪ. The MORPHEMIC tier is where Leipzig abbreviations live
+   (`PST.PTCP-GEN.SG.M`), and it keeps the treatment. MSeg was already exempt: it holds segmented WORD
+   text, not a gloss.
+   ⚠️ IT ALSO SETTLES A PAINT/MEASUREMENT DISAGREEMENT THAT WAS ALREADY THERE. The lexical tier was
+   PAINTED small-capped but measured two different ways: `glossSlotW` reserved its slot through
+   measGloss (c2sc advance widths) while the hit box and seam mark beside it used plain meas(). Whatever
+   the tier renders as, those must agree; making its capitals plain everywhere is what makes them. */
+function glossTierAbbr(tier){ return tier==="mgloss"; }
 function glossAbbrSegments(text){ text=(text||"").replace(INVISIBLE_RE,"").replace(GLOSS_WS_RE,"");   // strip stray invisible/CR-LF-tab characters from ALREADY-STORED gloss data too (e.g. a doc saved before glossEnc started stripping them at the source) — never displayed, and never fed back into an edit as a hidden extra "character" the user can't see or delete
   const segs=[]; let last=0,m; GLOSS_ABBR_RE.lastIndex=0;
   while((m=GLOSS_ABBR_RE.exec(text))){ if(m.index>last)segs.push([text.slice(last,m.index),false]); segs.push([m[0],true]); last=m.index+m[0].length; }
@@ -511,7 +525,7 @@ function glossAbbrSegments(text){ text=(text||"").replace(INVISIBLE_RE,"").repla
 // element as its own satellite (svgSeamMark / htmlSeamMark), so what sits in here is exactly what the file stores
 // and the field edits.
 function setGlossText(el,tier,txt){ el.textContent="";
-  if(tier==="mseg"){ el.textContent=txt; return; }
+  if(!glossTierAbbr(tier)){ el.textContent=txt; return; }   // …and the LEXICAL tier joins MSeg here — see glossTierAbbr
   const svg=el.namespaceURI===SVGNS;
   glossAbbrSegments(txt).forEach(([t,abbr])=>{
     if(!abbr){ el.appendChild(document.createTextNode(t)); return; }

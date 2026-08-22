@@ -12,7 +12,7 @@
 8	primus	primus	ADJ	Mo	Case=Nom|Gender=Masc|NumType=Ord|Number=Sing	18	mod	_	Gloss=first
 9	ab	ab	ADP	ADP	_	11	mod	_	Gloss=from
 10	oris	os	NOUN	NOUN	Case=Abl|Gender=Masc|Number=Plur	9	comp:obj	_	_
-11	Italiam	Italia	PROPN	PROPN	Case=Acc|Gender=Fem|Number=Sing	18	comp:obj	_	SpaceAfter=No
+11	Italiam	Italia	PROPN	PROPN	Case=Acc|Gender=Fem|Number=Sing	18	comp:obj	_	SpaceAfter=No|Gloss=Italia
 12	,	,	PUNCT	Punc	_	8	punct	_	_
 13	fato	fatum	NOUN	B1|grn1|casF|gen3	Case=Abl|Gender=Neut|InflClass=IndEurO|Number=Sing	14	mod	_	Gloss=fate
 14	profugus	profugus	NOUN	NOUN	Case=Voc|Gender=Masc|InflClass=IndEurO|Number=Sing	7	conj:appos	_	SpaceAfter=No|Gloss=exile

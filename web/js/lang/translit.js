@@ -618,6 +618,46 @@ function hanFrnFace(lang){ const b=((lang!=null?lang:DOCLANG)||"").toLowerCase()
   if(b!=="zh"&&b!=="yue"&&b!=="lzh") return "";
   if(typeof ORTHO_SCHEME!=="undefined"){ if(ORTHO_SCHEME==="traditional") return "tc"; if(ORTHO_SCHEME==="simplified") return "sc"; }
   return b==="zh"?"sc":"tc"; }
+/* ── WHETHER A FOREIGN TOKEN IS UNDERLINED RATHER THAN ITALICISED (item: non-Latin scripts) ────────
+   Italic is a LATIN typographic device. Cyrillic and Greek borrowed it and have real italic faces;
+   the Brahmic scripts, the abjads, Han/kana/Hangul and the rest have none at all, so what a browser
+   draws for `font-style:italic` there is a SYNTHESISED oblique — a mechanical shear of the upright,
+   which in a script built from horizontal head-strokes and stacked marks reads as damage rather than
+   as emphasis. The mark for a foreign word in those scripts is an UNDERLINE, which every script can
+   carry. Returns true where the main line wants that instead of italics.
+   ⚠ CHINESE IS NOT THIS PATH AND IS ASKED FIRST. It already has its own answer — hanFrnFace() above,
+   a change of FACE to 楷體, which is the convention Chinese typography actually uses — and that answer
+   is carried BY `.tok-ital`, so underlining there would both duplicate the mark and undo the face
+   swap. (ja/ko are Han-using and take neither; Japanese has katakana for exactly this job. They fall
+   through to the underline, which is right: neither has an italic either.)
+   ⚠ THE DISPLAYED SCRIPT OUTRANKS THE FILE'S OWN, exactly as it does in hanFrnFace. A Sanskrit
+   document READ in Devanagari has Devanagari on the main line whatever its FORM column holds, and the
+   same file read in IAST has Latin; `orthoScript()` is this app's own name for "a non-Latin script
+   has displaced the top line", so that answer is taken whole rather than re-derived.
+   ⚠ AND WITH NO SUCH SCHEME THE FILE'S OWN FORMS DECIDE — never `t.ortho`. That field is filled
+   ASYNCHRONOUSLY by fillOrtho, so reading it here would answer one way before a bridge round-trip and
+   another after it, flipping the mark under the reader mid-render for no reason they could see.
+   ⚠️ GREEK IS COUNTED AS HAVING AN ITALIC, which is a small widening of "Latin and Cyrillic": Greek
+   italic is a real face with a long tradition (Aldus cut one before anyone cut a Cyrillic), and
+   underlining a Greek word would look as wrong to a classicist as slanting a Devanagari one. */
+const _FRN_ITALIC_SCRIPT=/\p{Script=Latin}|\p{Script=Cyrillic}|\p{Script=Greek}/u;
+const _FRN_ANY_LETTER=/\p{L}/u;
+const _FRN_SCAN_MAX=400;   // a document is not written in two scripts by halves; 400 letters settle it
+function frnUnderline(){
+  if(typeof hanFrnFace==="function" && hanFrnFace()) return false;          // …its own pathway
+  if(typeof orthoScript==="function" && orthoScript()) return true;         // a script has displaced the line
+  let ital=0, other=0, seen=0;
+  const doc=(typeof DOC!=="undefined"&&DOC)||[];
+  for(let i=0;i<doc.length&&seen<_FRN_SCAN_MAX;i++){
+    const tk=(doc[i]&&doc[i].tokens)||[];
+    for(let j=0;j<tk.length&&seen<_FRN_SCAN_MAX;j++){
+      const f=(tk[j]&&tk[j].form)||"";
+      for(const ch of f){
+        if(seen>=_FRN_SCAN_MAX) break;
+        if(!_FRN_ANY_LETTER.test(ch)) continue;
+        seen++; if(_FRN_ITALIC_SCRIPT.test(ch)) ital++; else other++; } } }
+  return other>ital; }
+
 /* Literary Chinese magnifies too, on request — its Han glyphs run to the same dense, fine-stroke
    complexity (rare/archaic characters, more strokes per square than the simplified everyday set) that
    is the whole rationale above for the Indic scripts. Scoped to lzh specifically, not Chinese generally

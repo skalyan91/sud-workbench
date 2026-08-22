@@ -1388,6 +1388,79 @@ def _gloss_case(text: str, upos: str) -> str:
     return wiktionary._decap(text, upos)
 
 
+# ── a PROPER NOUN nothing else could gloss ─────────────────────────────────────────────────────
+# ⚠ A NAME IS TRANSFERRED, NOT TRANSLATED, so its own lemma is a better gloss than no gloss at all.
+# This module already knows more about names than about any other class and all of it points the same
+# way: `_SEM_SKIP_UPOS` excludes PROPN from the semantic term because a name's distribution is its
+# REGION AND PERIOD (`troiae` retrieves peloponnese, laconia, aeneas — Troy is past rank 50), and
+# `_POS_GROUP` puts PROPN in no supercategory because a name against a common noun is two kinds of
+# word. The consequence is that a name the translation does not happen to contain has nothing left to
+# match on. Writing `nārada` there says what the word IS, which is all a gloss of a name can say.
+# ⚠ LAST RESORT, AND ONLY THAT. Anything that actually matched — an English name the alignment paired
+# it with, a dictionary sense, a vector — is better evidence about this token than its own spelling,
+# and every one of them is already in `pairs` by the time this runs. So this fills a gap and never
+# competes: a token that has a gloss keeps it.
+# ⚠ AND IT IS THE LEMMA'S ROMANISATION WHERE THE LEMMA IS NOT LATIN. A gloss is read as English, and
+# pasting देव or 東京 into the gloss row states the word twice in the same script rather than glossing
+# it. MISC `LTranslit` is the lemma's own romanisation — written by `parse._ext_misc` on every parse of
+# a file whose FORM/LEMMA hold the native script, which is the UD convention this app follows — so it
+# is preferred exactly there and ignored everywhere else. `Translit` (the FORM's) is the fallback for a
+# token that carries no lemma at all.
+# Anything outside Latin-1 + the Latin Extended blocks — i.e. "this string is not written in the Latin
+# alphabet", which is the only question `_propn_gloss` asks of it.
+_NON_LATIN_RE = re.compile(r"[^\u0000-\u024F\u1E00-\u1EFF\u2C60-\u2C7F\uA720-\uA7FF]")
+
+
+def _misc_get(t: dict, key: str) -> str:
+    for kv in (t.get("misc") or "").split("|"):
+        k, _, v = kv.partition("=")
+        if k == key:
+            return v.strip()
+    return ""
+
+
+def _cap(s: str) -> str:
+    """Capitalise the first character and touch nothing else — `s.title()`/`s.capitalize()` would both
+    lowercase the rest, which is wrong for `McTavish`, `NASA` and any lemma the file spells with an
+    internal capital. Unicode-correct at position 0: `ā` upcases to `Ā`, `ṛ` to `Ṛ`."""
+    return s[:1].upper() + s[1:] if s else s
+
+
+def _propn_gloss(t: dict) -> str:
+    """What to gloss a PROPN with when nothing else could: its lemma, romanised if it is not Latin.
+
+    ⚠ CAPITALISED, on instruction. A lemma is stored in the file's own citation form, which for most
+    treebanks is lowercase (`nārada`, `italia`); as a GLOSS it is an English proper name, and English
+    capitalises those wherever they stand. ⚠️ This is also why `c2sc` had to come off the lexical gloss
+    tier in the same breath (glossTierAbbr, js/core/prefs.js): a capital in a lexical gloss is now
+    routine, and `GLOSS_ABBR_RE` would have read a one-letter one as a Leipzig abbreviation."""
+    lemma = (t.get("lemma") or "").strip()
+    if lemma in ("", "_"):
+        lemma = ""
+    if lemma and not _NON_LATIN_RE.search(lemma):
+        return _cap(lemma)                 # already Latin — the lemma IS the gloss
+    lt = _misc_get(t, "LTranslit") or _misc_get(t, "Translit")
+    if lt:
+        return _cap(lt)
+    return _cap(lemma)                     # no romanisation on file: the native spelling beats nothing
+
+
+def _fill_propn(sent: dict, pairs: list[dict]) -> list[dict]:
+    """Append a lemma gloss for every PROPN in ``sent`` that ``pairs`` does not already cover."""
+    done = {p["src"] for p in pairs}
+    add = []
+    for i, t in enumerate(sent.get("tokens") or []):
+        if i in done or t.get("upos") != "PROPN":
+            continue
+        g = _propn_gloss(t)
+        if not g:
+            continue
+        # `en` is -1 and the score 0.0: there is no English token behind this and nothing was measured
+        # — it is the fallback, and a score that pretended otherwise would rank it against real ones.
+        add.append({"src": i, "en": -1, "form": g, "lemma": g, "upos": "PROPN", "score": 0.0})
+    return sorted(pairs + add, key=lambda p: p["src"]) if add else pairs
+
+
 def _bare(tokens: list[dict], text: str = "") -> dict:
     """The minimal sentence dict io_conllu.serialize needs -- the same shape parse.py builds when it
     has to hand grew a sentence of its own."""
@@ -1423,7 +1496,8 @@ def gloss_from_translation(sentences: list[dict], lang: str = "", src_format: st
     # must not fall out of the function on its way past.
     for i, txt in jobs:
         if not txt and (sentences[i].get("tokens") or []):
-            out[i]["pairs"] = _gloss_without_translation(sentences[i], lang)
+            out[i]["pairs"] = _fill_propn(sentences[i],
+                                          _gloss_without_translation(sentences[i], lang))
     jobs = [(i, txt) for i, txt in jobs if txt and (sentences[i].get("tokens") or [])]
     if not jobs:
         return out
@@ -1512,6 +1586,7 @@ def gloss_from_translation(sentences: list[dict], lang: str = "", src_format: st
                 "score": p["score"],
             })
         out[i]["pairs"].sort(key=lambda d: d["src"])
+        out[i]["pairs"] = _fill_propn(sentences[i], out[i]["pairs"])
     return out
 
 

@@ -992,6 +992,28 @@
      `.oform` needs its own value because its base is 14px, not the 15px reference: .0055 + .02 = .0255em, which
      is exactly what `.otrans` (the italic row beside it, same size) already carries. */
   .oform.tok-ital{letter-spacing:.0255em}   /* tracking curve @14px (.0055em) + the italic bump — matches .otrans's own literal */
+  /* ── A SCRIPT WITH NO ITALIC MARKS A FOREIGN WORD BY UNDERLINE ────────────────────────────────────
+     Italic is a Latin device that Cyrillic and Greek also have; a Brahmic script, an abjad, Han/kana/
+     Hangul have none, so `font-style:italic` there is a SYNTHESISED oblique — a mechanical shear of the
+     upright, which in a script of horizontal head-strokes and stacked marks reads as damage. See
+     frnUnderline() (js/lang/translit.js) for which documents get this and why the DISPLAYED script
+     outranks the file's own. Chinese never does: it is settled by `data-hanfrn` above, a change of FACE
+     to 楷體, which is carried by this very class.
+     ⚠ THE ITALIC TRACKING BUMP COMES OFF WITH THE SLANT, and it has to come off in BOTH places or the
+     slot and the glyph disagree. `.tok-ital` states `trackCurve(15px)=0 + ITALIC_TRACK`, `.oform.tok-ital`
+     `trackCurve(14px)=.0055em + ITALIC_TRACK`; upright, each is its curve term alone. The measurement
+     follows for free — `frnFontStr` stops prepending "italic ", and `italicTrackOf` keys off exactly that
+     token, so the canvas string loses the same .02 em in the same breath.
+     ⚠️ `text-underline-offset` rather than the default: a Devanagari or Bengali line hangs its below-base
+     marks well under the baseline, and an underline sitting at the default offset strikes through them. */
+  #doc[data-frnul] .tok-ital{font-style:normal; letter-spacing:0;
+    text-decoration:underline; text-decoration-thickness:.055em; text-underline-offset:.16em}
+  #doc[data-frnul] .oform.tok-ital{letter-spacing:.0055em}   /* tracking curve @14px, upright — the bump gone */
+  /* The running sentence line. Scoped to `.stext` so the TRANSLITERATION row is untouched: that row is a
+     Latin romanisation whatever the main line is written in, so italics remain the right mark there and
+     `.strans .stx-frn`'s own inversion (line ~363) keeps working exactly as it did. */
+  #doc[data-frnul] .stext .stx-frn{font-style:normal;
+    text-decoration:underline; text-decoration-thickness:.055em; text-underline-offset:.16em}
   /* …and the two rows a diagram already sets in italics — the transliteration and the MSeg (segmentation) tier —
      flip the other way for a foreign token, so the row keeps its contrast against its upright neighbours instead
      of dissolving into them. Two-class selectors → these win over the .translit/.otrans/.gloss italic above.
@@ -1418,7 +1440,7 @@
      than an I-beam promising an insertion point it cannot honour. #doc.script-form is iastFormEdit(). */
   #doc.script-form .baseword,#doc.script-form .tok-word,#doc.script-form .node-lbl,#doc.script-form .mwt-form{cursor:pointer}
   .tr-edit{cursor:text}   /* an editable romanisation row (double-click to edit; writes MISC Translit) — no hover recolour (accent only on selection, below) */
-  .gloss{font-style:normal; font-weight:462;   /* weight curve @13px */ font-size:13px; letter-spacing:.0114em;   /* tracking curve @13px */ fill:var(--dia-muted); color:var(--dia-muted); unicode-bidi:isolate; margin-inline-start:8px}   /* token gloss row (below transliteration, above POS); MISC Gloss. Shares the MGloss tier's styling below (upright, 13px = --stext-fs, muted colour) — read at prose size, like a running gloss line — AND its Leipzig treatment: setGlossText splits abbreviation runs off both gloss tiers alike, so a "1SG" in a lexical Gloss small-caps exactly as it would in a morphemic one (.gloss .glabbr, below) */
+  .gloss{font-style:normal; font-weight:462;   /* weight curve @13px */ font-size:13px; letter-spacing:.0114em;   /* tracking curve @13px */ fill:var(--dia-muted); color:var(--dia-muted); unicode-bidi:isolate; margin-inline-start:8px}   /* token gloss row (below transliteration, above POS); MISC Gloss. Shares the MGloss tier's styling below (upright, 13px = --stext-fs, muted colour) — read at prose size, like a running gloss line — but NOT its Leipzig treatment: setGlossText splits abbreviation runs off the MORPHEMIC tier only, so a lexical Gloss's capitals stay plain capitals (see .gloss[data-tier="mgloss"] .glabbr, below, for why) */
   .gloss[data-tier="mseg"]{font-style:italic; font-size:15px; font-weight:400; letter-spacing:.02em;   /* weight curve @15px = the reference size itself, so plain 400. letter-spacing: italic bump alone (ITALIC_TRACK, diagram-core.js) — trackCurve(15)=0 at the reference size, kept in sync with _measOneUncached's italicTrackOf() by hand */ fill:var(--text); color:var(--text)}   /* item 5: MSeg = word-like — italic, the SAME size as the tokens themselves (15px = WORD_F, was 14px) + token colour */
   /* item 4 — THE CASING HALO ON THE GLOSS TIERS. Every other diagram row has carried one for a long time; the SVG
      gloss/MSeg/MGloss rows were the hole, audited across all five notations (the HTML sites were already covered:
@@ -1474,7 +1496,7 @@
   span.seam-post{inset-inline-start:100%}   /* after the row: inset-inline-START:100% is its inline END, mirroring under RTL */
   span.seam-pre{inset-inline-end:100%}      /* before it, likewise mirrored */
   .has-seam{position:relative}   /* the containing block for the mark above — the row it belongs to */
-  .gloss .glabbr{font-feature-settings:"c2sc" 1,"onum" 1}   /* Leipzig abbreviation run (e.g. "PST", "3SG") inside EITHER gloss tier — the lexical Gloss and the morphemic MGloss both being glosses written in the Leipzig conventions — → small caps FROM capitals (c2sc), not touching the rest of the (lowercase) gloss text. The MSeg tier never gets a .glabbr node at all (setGlossText leaves it plain), so it needs no exclusion here. onum: old-style (text) figures for any digit in the run (e.g. the "1"/"2"/"3"/"4" person markers) — reads as part of the small-caps register instead of a mismatched full-height lining numeral standing taller than the letters around it. No cpsp: it's calibrated for genuine full-height capitals, not c2sc's small-cap glyph substitutes — pairing them over-spaced the run relative to the plain text around it, showing up as a stray gap hugging each "." at a run boundary. (MGloss's base font-style/size/colour now come from the shared .gloss rule above — identical to the lexical Gloss tier.) */
+  .gloss[data-tier="mgloss"] .glabbr{font-feature-settings:"c2sc" 1,"onum" 1}   /* Leipzig abbreviation run (e.g. "PST", "3SG") in the MORPHEMIC tier → small caps FROM capitals (c2sc), not touching the rest of the (lowercase) gloss text. ⚠ THE LEXICAL Gloss TIER IS NO LONGER INCLUDED, on instruction (this rule used to read `.gloss .glabbr`, both tiers): a lexical gloss is a WORD and its capitals are the word's own — a proper name, the English first-person `I`, an acronym — so small-capping them says "Leipzig abbreviation" about text that is not one. `setGlossText` no longer builds a .glabbr node there at all (glossTierAbbr, js/core/prefs.js, is the one authority the paint, the slot reservation and the live editor all read), so this selector is belt-and-braces; it also settled a paint/measurement disagreement that predated the change — glossSlotW reserved the lexical slot through measGloss's c2sc advance widths while the hit box and seam mark beside it used plain meas(). The MSeg tier never gets a .glabbr node at all (setGlossText leaves it plain), so it needs no exclusion here. onum: old-style (text) figures for any digit in the run (e.g. the "1"/"2"/"3"/"4" person markers) — reads as part of the small-caps register instead of a mismatched full-height lining numeral standing taller than the letters around it. No cpsp: it's calibrated for genuine full-height capitals, not c2sc's small-cap glyph substitutes — pairing them over-spaced the run relative to the plain text around it, showing up as a stray gap hugging each "." at a run boundary. (MGloss's base font-style/size/colour now come from the shared .gloss rule above — identical to the lexical Gloss tier.) */
   .gl-edit{cursor:text}
   .gl-empty{opacity:.4}   /* placeholder "…" for a token with no gloss yet */
   text.gl-edit:hover,.gloss.gl-edit:hover{opacity:1}   /* hover reveals an empty gloss's placeholder at full opacity — but NO accent recolour (accent is for selection only, below) */

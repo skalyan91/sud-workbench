@@ -1113,7 +1113,7 @@ function editTier(si,tokId,tier,clickXY){ const s=DOC[si]; if(!s||tokId<1||tokId
         } else if(moved(tk.form)){ tk.form=bare; markDirty();
           if(typeof afterFormEdit==="function") afterFormEdit(si,tokId,true); } } }
     markDirty(); preserveScroll(renderDoc); };
-  if(tier!=="mseg") makeGlossEditableSC(el, proxy, "v", after, sentRTL(s), ()=>tierElOf(si,tokId,tier), d=>tierNav(si,tokId,tier,d), clickXY, tier==="mgloss"?tk:null);   // live c2sc small-caps on its Leipzig abbreviations as the user types — on BOTH gloss tiers, matching how both now render (setGlossText); MSeg is word text, not a gloss, so it keeps the plain <input> editor. Task C: the trailing token is the MGloss abbreviation-autocomplete's UPOS context (AMBIG_UPOS) — passed ONLY for "mgloss" (a lexical Gloss definition isn't built from Leipzig abbreviations, so it gets no dropdown)
+  if(tier!=="mseg") makeGlossEditableSC(el, proxy, "v", after, sentRTL(s), ()=>tierElOf(si,tokId,tier), d=>tierNav(si,tokId,tier,d), clickXY, tier==="mgloss"?tk:null, glossTierAbbr(tier));   // live c2sc small-caps on its Leipzig abbreviations as the user types — on BOTH gloss tiers, matching how both now render (setGlossText); MSeg is word text, not a gloss, so it keeps the plain <input> editor. Task C: the trailing token is the MGloss abbreviation-autocomplete's UPOS context (AMBIG_UPOS) — passed ONLY for "mgloss" (a lexical Gloss definition isn't built from Leipzig abbreviations, so it gets no dropdown)
   else makeEditable(el, proxy, "v", after, sentRTL(s), ()=>tierElOf(si,tokId,tier), d=>tierNav(si,tokId,tier,d), true, clickXY); }   // item 2: allowEmpty → a gloss/MSeg value can be deleted (cleared), unlike a Form
 // nearest character boundary, as an index into `text`, to a LOCAL x-offset (0 = the start of the rendered run) —
 // walks cumulative substring widths via the same canvas metric (meas) the field itself was sized/centred with, so
@@ -1389,13 +1389,17 @@ function setCaretRange(el,anchorOff,focusOff){ const sel=window.getSelection(); 
 // (positioning, live reflow, Tab/arrow tier navigation, undo snapshot); mgloss always allows an empty commit.
 // caretHint: {x,y} (a click point, hit-tested below) or {at:0|"start"|"end"|<number>} (a logical offset, from
 // arrow-key tier/token navigation — see makeEditable's own caretHint doc).
-function makeGlossEditableSC(el,obj,key,after,rtl,relocate,nav,caretHint,mglossTok){ if(!el)return; const orig=obj[key]||"", pre=snap();
+function makeGlossEditableSC(el,obj,key,after,rtl,relocate,nav,caretHint,mglossTok,abbr){ if(!el)return; const orig=obj[key]||"", pre=snap();
   const box=document.createElement("div"); box.className="nodeedit glabbrbox"; box.contentEditable="plaintext-only";
   let fontStr; const applyFont=e=>{ const cs=getComputedStyle(e); const sizePx=visualFontPx(e)+"px";   // see makeEditable's applyFont: the size is CONVERTED, not multiplied by FS — the two engines report an SVG length inside a zoomed subtree differently (cssLenScale, js/core/document.js)
     box.style.fontFamily=cs.fontFamily; box.style.fontSize=sizePx; box.style.fontWeight=cs.fontWeight; box.style.fontStyle=cs.fontStyle; fontStr=cs.fontStyle+" "+cs.fontWeight+" "+sizePx+" "+cs.fontFamily;
     box.style.letterSpacing=((typeof trackEmOf==="function")?trackEmOf(fontStr):0)+"em"; };   // the row's own tracking, for exactly the reasons makeEditable's own applyFont states just above — this field measures itself with the same meas()/fontStr pair and so has the same obligation to paint what that measurement assumes
   applyFont(el);
-  const render=text=>{ box.innerHTML=""; glossAbbrSegments(text).forEach(([t,abbr])=>{
+  /* …and a tier that does not small-cap edits as plain text — the field must read while typing exactly
+     as the row will once committed, which is this editor's whole reason for existing (see its note
+     above). `abbr` is glossTierAbbr(tier), passed by the caller rather than re-derived here. */
+  const render=text=>{ box.innerHTML=""; if(!abbr){ box.appendChild(document.createTextNode(text)); return; }
+    glossAbbrSegments(text).forEach(([t,abbr])=>{
     if(!abbr){ box.appendChild(document.createTextNode(t)); return; }
     const s=document.createElement("span"); s.className="glabbr"; s.textContent=t; box.appendChild(s); }); };
   render(orig);

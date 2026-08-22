@@ -384,6 +384,13 @@ let FRN_TRACK=null;
    lighter than the Hei beside it and reads as faded at the same weight (see --frn-wght, app.css, for the
    ink-coverage measurement). 0 means "no override" — every non-Chinese document. */
 let FRN_WGHT=0;
+/* ⚠ AND WHETHER THE MARK IS AN UNDERLINE RATHER THAN ITALICS (frnUnderline, js/lang/translit.js — a
+   script with no italic of its own). Live here for the same reason FRN_SCALE is: `frnFontStr` builds
+   the string the layout MEASURES in, and a measurement in an italic face for a form painted upright is
+   exactly the "face swap that skipped the measurement" isForeign's own note forbids. Dropping the
+   "italic " token also drops `italicTrackOf`'s .02 em bump from the same string, which is the other
+   half of the paint — and the stylesheet drops it in the same breath (see `#doc[data-frnul]`). */
+let FRN_UNDERLINE=false;
 /* THE GLYPH MAGNIFICATION, mirrored off CSS `--script-mag` by refreshFontStacks (see its own note for
    why a canvas font string cannot read the property itself). 1 everywhere except the ornamental Sanskrit
    scripts. It multiplies the TOKEN-FORM faces only — WORD_F/NODE_F/MWT_F and the goeswith tie — never the
@@ -863,7 +870,7 @@ _lazyFont("GLOSS_F",()=>weightCurve(13.2)+' 13.2px '+LIVE_TOKEN_STACK); _lazyFon
 function tierFont(tier,tk){ return tier==="mseg"?(isForeign(tk)?MSEG_UP_F:MSEG_F):(tier==="mgloss"?MGLOSS_F:GLOSS_F); }   // the MSeg tier is the only italic one, so it's the only one a Foreign=Yes token flips upright (see frnUp)
 // widest below-token gloss row for a token, in its real font (0 when no gloss tier is on). An empty tier draws "…"
 // (gl-empty) so it contributes that narrow placeholder width — a real gloss dominates. Folded into every slot-width max.
-function glossSlotW(t){ let w=0; belowTiers().forEach(tier=>{ const dtxt=tierDisp(t,tier)||"…"; w=Math.max(w,tier==="mseg"?meas(dtxt,tierFont(tier,t)):measGloss(dtxt,tierFont(tier,t))); }); return w; }   // tierDisp, not tierText: the slot has to reserve what the row PAINTS, and under Latin's macron scheme the MSeg row paints the macronised segmentation, which is wider than the stored bare one
+function glossSlotW(t){ let w=0; belowTiers().forEach(tier=>{ const dtxt=tierDisp(t,tier)||"…"; w=Math.max(w,glossTierAbbr(tier)?measGloss(dtxt,tierFont(tier,t)):meas(dtxt,tierFont(tier,t))); }); return w; }   // tierDisp, not tierText: the slot has to reserve what the row PAINTS, and under Latin's macron scheme the MSeg row paints the macronised segmentation, which is wider than the stored bare one
 // item 22: the AVM's own width, the SAME role glossSlotW plays for the gloss tiers — every caller below that
 // folds glossSlotW into a slot-width max folds this in beside it, or an AVM box (which, unlike a one-line
 // gloss, commonly runs WIDER than its own token — "Definite" alone is longer than "The") crowds or overlaps
@@ -1950,6 +1957,13 @@ function refreshFontStacks(){
        (which match on presence) go quiet with it. Same typeof guard as scriptMag above, for the harnesses
        that load this file alone. */
     const hf=(typeof hanFrnFace==="function")?hanFrnFace():""; if(hf) d.dataset.hanfrn=hf; else delete d.dataset.hanfrn;
+    /* …and whether that mark is an UNDERLINE instead, for a script that has no italic. Published in the
+       same breath and with the same shape as `data-hanfrn` — removed rather than left empty, so the
+       presence-matching rules in app.css go quiet with it — and asked AFTER hanFrnFace because Chinese
+       is settled by that attribute and must not take this one too. */
+    const ul=(typeof frnUnderline==="function")?frnUnderline():false;
+    if(ul) d.dataset.frnul="1"; else delete d.dataset.frnul;
+    FRN_UNDERLINE=ul;
     const cs=getComputedStyle(d);
     const t=cs.getPropertyValue("--token-font").trim(), m=cs.getPropertyValue("--mono-font").trim();
     if(t) LIVE_TOKEN_STACK=t; if(m) LIVE_MONO_STACK=m;
@@ -2881,6 +2895,12 @@ function formDeco(tk,gwHead){ const gw=(gwHead===undefined)?!!gwOf(tk).length:!!
 // render site so every measurement (fmeas1/trFont/gridFormFont) and every draw agrees, which is the whole point of
 // funnelling the italics through these three helpers.
 function isForeign(tk){ return !!(tk&&tk._gwFrn) || hasFeat(tk&&tk.feats,"Foreign","Yes"); }
+/* ⚠ THE CLASS IS STILL `.tok-ital` WHERE THE MARK IS AN UNDERLINE, and that is deliberate rather than
+   a name left behind. Every consumer of it — the five diagram form rows, the grid's Form cell, the
+   `#doc[data-hanfrn]` face swap, the `--frn-scale`/`--frn-track` probe in refreshFontStacks — asks the
+   same question ("is this token's own glyph carrying the foreign mark"), and only the STYLESHEET needs
+   to know which mark that is. Splitting the class would mean teaching all of them a distinction none of
+   them uses. `#doc[data-frnul]` carries it instead, one attribute on one element. */
 function italDeco(tk){ return isForeign(tk)?" tok-ital":""; }
 function frnUp(tk){ return isForeign(tk)?" frn-up":""; }
 /* ── THE FONT STRING A FOREIGN TOKEN IS MEASURED IN ────────────────────────────────────────────────
@@ -2904,7 +2924,7 @@ function frnUp(tk){ return isForeign(tk)?" frn-up":""; }
    its own note) so the tracking still reads off the RESTING size the stylesheet states it for. */
 function _frnSize(f){ return FRN_SCALE===1?f:f.replace(/(\d+(?:\.\d+)?)px/,(m,n)=>(parseFloat(n)*FRN_SCALE).toFixed(3)+"px"); }
 function frnFontStr(f){ const w=(FRN_WGHT&&FRN_WGHT!==400)?FRN_WGHT+" ":"";   // …and the WEIGHT, in the shorthand's own `style weight size family` order. Only when it differs from the resting 400, so a non-Chinese document's string is byte-identical to what it was
-  return "italic "+w+_frnSize((LIVE_FRN_STACK&&LIVE_FRN_STACK!==LIVE_TOKEN_STACK)?f.replace(LIVE_TOKEN_STACK,()=>LIVE_FRN_STACK):f); }
+  return (FRN_UNDERLINE?"":"italic ")+w+_frnSize((LIVE_FRN_STACK&&LIVE_FRN_STACK!==LIVE_TOKEN_STACK)?f.replace(LIVE_TOKEN_STACK,()=>LIVE_FRN_STACK):f); }
 function fmeas1(tk,f){ return meas(bform(tk), isForeign(tk)?frnFontStr(f):f); }   // ONE token's form width in the face it ACTUALLY renders in
 function fmeas(tk,f){ let w=fmeas1(tk,f); const g=(tk&&tk._gw)||[];   // …and the WHOLE WORD's, which for a goeswith unit is the head plus every continuation folded onto it (see the goeswith block below)
   for(let i=0;i<g.length;i++) w+=gwGap(f)+fmeas1(g[i].tok,f); return w; }

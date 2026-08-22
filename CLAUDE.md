@@ -521,6 +521,31 @@ lower the focused block". It is the rAF'd restore inside `syncChrome` that decid
 `recapBlocks` and overrides `withTopChrome`'s synchronous one — so the torn capture is what the reader is left
 looking at. Driving the real command now measures **0px** of drift.
 
+⚠ **A SCRIPT WITH NO ITALIC MARKS A FOREIGN WORD BY UNDERLINE** (`frnUnderline`, js/lang/translit.js;
+`#doc[data-frnul]`, app.css). Italic is a Latin device that Cyrillic and Greek also have; a Brahmic
+script, an abjad, Han/kana/Hangul have none, so `font-style:italic` there is a **synthesised oblique** —
+a mechanical shear of the upright, which in a script of horizontal head-strokes and stacked marks reads
+as damage rather than emphasis. ⚠️ **CHINESE IS ASKED FIRST AND NEVER TAKES THIS PATH**: it already has
+its own answer (`hanFrnFace`, a change of FACE to 楷體), that answer is carried BY `.tok-ital`, and
+underlining there would both duplicate the mark and undo the face swap. ja/ko fall through to the
+underline, which is right — neither has an italic either, and Japanese uses katakana for this job.
+⚠️ **THE DISPLAYED SCRIPT OUTRANKS THE FILE'S OWN**, exactly as in `hanFrnFace`: a Sanskrit document READ
+in Devanagari has Devanagari on the main line whatever its FORM column holds, so `orthoScript()`'s answer
+is taken whole. With no such scheme the file's own FORMS decide, by a capped scan — **never `t.ortho`,
+which `fillOrtho` fills ASYNCHRONOUSLY**, so reading it would answer one way before a bridge round-trip
+and another after it, flipping the mark under the reader mid-render.
+⚠️ **THE MEASUREMENT FOLLOWS THE PAINT, WHICH IS THE WHOLE HAZARD HERE.** `frnFontStr` stops prepending
+`"italic "`, and `italicTrackOf` keys off exactly that token — so the canvas string loses the 0.02 em
+`ITALIC_TRACK` bump in the same breath the stylesheet does, and the slot cannot be measured in a face
+the glyph is not painted in. The class stays `.tok-ital` even where the mark is an underline: every
+consumer asks only "is this token carrying the foreign mark", and only the stylesheet needs to know
+which mark that is. ⚠️ Greek is counted as HAVING an italic — a small widening of "Latin and Cyrillic",
+on the grounds that Greek italic is a real face with a long tradition and underlining a Greek word would
+look as wrong as slanting a Devanagari one. Verified in headless Chrome across all five notations: en
+and Sanskrit-in-IAST italic, Sanskrit-in-Devanagari and an Arabic file underlined, Chinese on its Kai
+path, the running line marked and the transliteration row (a Latin romanisation whatever the main line
+is) left italic.
+
 ⚠ **THE ORNAMENTAL SANSKRIT SCRIPTS ARE DRAWN AT DOUBLE SIZE, AND THE MEASUREMENT HAS TO FOLLOW THE PAINT.**
 Rañjanā, Soyombo and Zanabazar Square were made for titles, seals and inscriptions; their ornament is not
 resolvable at a 15px body size, while every other script in the list is a running hand that reads fine there
@@ -1633,6 +1658,29 @@ not just the one removed, because one pass fills whichever of Gloss and MGloss i
 same question either way. Deliberately **not** `glossSeedKeysFromDoc()`, which re-derives keys from
 whatever MISC still holds: removing only the lexical tier would leave it looking at the morphemic data,
 keeping the keys, and reproducing the bug.
+
+⚠ **A PROPER NOUN NOTHING ELSE COULD GLOSS TAKES ITS OWN LEMMA** (`_fill_propn`, on instruction). A name
+is TRANSFERRED, not translated, and this module already knows more about names than about any other
+class — all of it pointing the same way: `_SEM_SKIP_UPOS` excludes PROPN from the semantic term because
+a name's distribution is its region and period, and `_POS_GROUP` puts it in no supercategory because a
+name against a common noun is two kinds of word. The consequence is that a name the translation happens
+not to contain has nothing left to match on. Writing `nārada` there says what the word IS, which is all
+a gloss of a name can say.
+⚠️ **LAST RESORT AND ONLY THAT**: anything that actually matched — an English name the alignment paired
+it with, a dictionary sense, a vector — is better evidence than the token's own spelling and is already
+in `pairs` when this runs, so it fills a gap and never competes. ⚠️ **And it is the LEMMA'S ROMANISATION
+where the lemma is not Latin**: a gloss is read as English, and pasting देव or 東京 into the gloss row
+states the word twice in one script rather than glossing it. MISC `LTranslit` is the lemma's own
+romanisation (written by `parse._ext_misc` for a file whose FORM/LEMMA hold the native script, the UD
+convention this app follows), with `Translit` — the FORM's — as the fallback for a token carrying no
+lemma at all. Verified: `nārada`→`nārada`, `देव`+LTranslit→`deva`, `東京`+Translit only→`tōkyō`,
+lemma `_`+Translit→`rāma`.
+⚠️ **IT RAISES THE MISMATCH CONTROL, AND THAT IS NOT A REGRESSION.** A lemma gloss is
+TRANSLATION-INDEPENDENT — it is the token's own spelling — so it appears whatever translation is
+attached, and a sentence handed the WRONG one produces MORE of them (la 18 → 21) precisely because
+fewer names align. Every one of those is still correct. The control measures "pairs produced from an
+unrelated translation" as a proxy for spurious MATCHING, and this pass does not match at all; read it
+here as coverage rather than as noise. Real effect: sa 45 → 47, la 38 → 39.
 
 ⚠ **A SENTENCE WITH NO TRANSLATION IS GLOSSED FROM THE VECTORS ALONE** (`_gloss_without_translation`,
 on instruction) — and needs neither grew nor an English parse, so it is the one part of this feature
