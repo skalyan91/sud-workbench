@@ -525,7 +525,7 @@ const _doInsert=doInsert;
 doInsert=async function(index,text){
   if(hasBridge()&&model){
     showBusy("Tokenising…"); let tk;
-    try{ tk=await window.pywebview.api.tokenize(text,model); }catch(e){ hideBusy(); return toast("Parse failed: "+e); }
+    try{ tk=await window.pywebview.api.tokenize(text,model,pipeArms()); }catch(e){ hideBusy(); return toast("Parse failed: "+e); }
     pushUndo();
     const sid=autoInsertSid(index);
     DOC.splice(index,0,{sid,text:(text||"").trim(),tokens:tk.tokens.map(t=>({...t,head:String(t.head)})),mwt:tk.mwt||[]});
@@ -542,7 +542,7 @@ doInsert=async function(index,text){
        __insertPastedText runs it once. Outside a batch this is the same await it always was. */
     if(!inInsertBatch()) await paintTr();                                            // transliterate the tokeniser's tokens BEFORE the parse
     const bt=document.getElementById("busyText"); if(bt)bt.textContent="Parsing…"; let r;
-    try{ r=await window.pywebview.api.parse_text(text,model); }catch(e){ hideBusy(); return toast("Parse failed: "+e); }finally{ hideBusy(); }
+    try{ r=await window.pywebview.api.parse_text(text,model,pipeArms()); }catch(e){ hideBusy(); return toast("Parse failed: "+e); }finally{ hideBusy(); }
     const b=DOC[index]; b.tokens=r.tokens.map(t=>({...t,head:String(t.head)})); b.mwt=r.mwt||[]; if(!b.mwt.length)delete b.mwt;
     morphAfterReparse(b);   // an inserted sentence's tokens carry no MSeg/MGloss either — seed both tiers from the FEATS this parse produced, so a new block doesn't sit tierless among sentences that all have them (same undo entry as the insert)
     renderDiagramIncremental(index);   // as in applySentText's parsed branch — the freshly parsed block converges on its tree instead of sitting blank
@@ -660,7 +660,7 @@ window.__insertPastedText=async function(text,index,opts){ opts=opts||{};
   const paraSents=[];
   for(const para of paras){
     let sents=null;
-    if(hasBridge()){ try{ const r=await window.pywebview.api.sentencize(para.body, DOCLANG||"", model||""); sents=(r&&r.sentences)||null; }catch(e){ sents=null; } }
+    if(hasBridge()){ try{ const r=await window.pywebview.api.sentencize(para.body, DOCLANG||"", model||"", pipeArms()); sents=(r&&r.sentences)||null; }catch(e){ sents=null; } }
     if(!sents||!sents.length) sents=localSentSplit(para.body);
     if(!sents.length) sents=[para.body];
     paraSents.push(sents); }
@@ -668,7 +668,7 @@ window.__insertPastedText=async function(text,index,opts){ opts=opts||{};
   let parsed=null, pi=0;
   if(hasBridge()&&model&&flat.length>1){
     showBusy(`Parsing ${flat.length} sentences…`);
-    try{ const r=await window.pywebview.api.parse_texts(flat,model); parsed=(r&&r.results)||null; }
+    try{ const r=await window.pywebview.api.parse_texts(flat,model,pipeArms()); parsed=(r&&r.results)||null; }
     catch(e){ parsed=null; }
     finally{ hideBusy(); }
     if(parsed&&parsed.length!==flat.length) parsed=null;   // belt and braces: a per-entry answer that doesn't line up is unusable, and the per-sentence path is right there
@@ -874,11 +874,16 @@ function applyParallelTexts(pars,start,room,lead,naive,counts){ if(!pars||!pars.
    language, so the explicit id is applied over it — with a guard, since a model that isn't in the dropdown
    (removed since the listing was built) must leave the picker consistent rather than pointing at nothing. */
 function adoptInsertLang(lang,modelId){
-  if(typeof applyLang==="function") applyLang(lang,true); else setLang(lang);
+  // NOTHING IS THE RIGHT ANSWER TO NOTHING: a custom parser may name no language at all, and
+  // `setLang("")` means English (its own `l||"en"`), so passing an empty choice through would
+  // re-flag the document as English on the strength of a model that made no claim about it. Same
+  // guard, same reason, as #modelSel's own onchange (js/ui/wiring.js).
+  if(lang){ if(typeof applyLang==="function") applyLang(lang,true); else setLang(lang); }
   if(!modelId) return;
   const sel=document.getElementById("modelSel");
   if(sel){ sel.value=modelId; if(sel.value!==modelId) return; }   // not in the picker → keep whatever applyLang settled on
-  model=modelId; if(typeof syncMenu==="function")syncMenu(); }
+  model=modelId; if(typeof syncMenu==="function")syncMenu();
+  if(typeof syncPipeAvail==="function") syncPipeAvail(); }   // the other programmatic model change — same resync as syncModelToLang's (js/core/prefs.js)
 
 /* The MISC keys that describe the RUNNING TEXT rather than the analysis — where the spaces are, and where a
    paragraph starts mid-sentence. Every one of them is a fact about the string the tokens were segmented from,
@@ -919,8 +924,24 @@ async function reparse(i){ const s=DOC[i]; if(!s||!s.tokens||!s.tokens.length)re
   const marks=captureMarks(s);   // the three hand-placed marks no parser predicts (Foreign/Typo + CorrectForm, Reported) — same capture/restore pair applySentText uses, and exact here since the forms cannot move
   const spacing=s.tokens.map(t=>SPACING_MISC.map(k=>miscKV(t.misc,k)));   // …and the spacing column, per token, absence included
   const pre=snapSent(i);   // BEFORE anything is written, so a failed parse can leave the document exactly as it found it
+  /* ⚠ NO `upos` — UNLESS THE MODEL READS THEM AS INPUT. A RESET must not keep the classes it is being
+     asked to reconsider, which is why this call has always sent none (see the note above). But the
+     generic parser behind every custom model does not TAG: "you supply UPOS; the wheel supplies
+     everything else". Sent nothing, its morphologiser invents a class per token — DET for every word
+     of an untagged Basque sentence, measured — and the parser then builds a tree conditioned on that,
+     so a Reset would replace the reader's analysis with one about a sentence nobody described. For
+     such a model the reader's tags are not an answer being reconsidered, they are the QUESTION, so
+     they travel; `parse.model_arms` is what says which kind of model this is, and the backend refuses
+     the syntax rather than guessing when they are absent anyway. */
+  const upIn=(PIPE_AVAIL&&PIPE_AVAIL.indexOf("upos")<0)?s.tokens.map(t=>t.upos||""):null;
+  /* …and every OTHER column the reader has taken over by switching its arm off (pipeGiven,
+     js/core/prefs.js). This is the one thing a reset must NOT reconsider: an arm switched off is a
+     standing instruction that the column is the annotator's, and a reset re-asks the MODEL's
+     questions, not theirs. It is also what the parse is worth — supplying FEATS alongside UPOS moved
+     held-out Basque LAS 38.32 → 53.27. */
+  const givenIn=pipeGiven(s.tokens);
   showBusy("Parsing…"); let r;
-  try{ r=await window.pywebview.api.parse_tokens(forms,model); }catch(e){ toast("Parse failed: "+e); return; }finally{ hideBusy(); }
+  try{ r=await window.pywebview.api.parse_tokens(forms,model,upIn,pipeArms(),givenIn); }catch(e){ toast("Parse failed: "+e); return; }finally{ hideBusy(); }
   if(!r||!r.parsed||!r.tokens||r.tokens.length!==forms.length){ toast("Parse failed"+(r&&r.reason?": "+r.reason:"")); return; }   // a pipeline that rebuilt the Doc anyway must not be aligned against — nothing has been written yet, so there is nothing to roll back
   if(DOC[i]!==s||s.tokens.length!==forms.length) return;   // the document may have moved while the call was out
   s.tokens=r.tokens.map((t,k)=>{ const nt={...t,head:String(t.head)};
@@ -1009,7 +1030,7 @@ async function applySentText(i,newText){ const s=DOC[i]; if(!s)return;
   if(hasBridge()&&model){
     const pre=snapSent(i);   // BEFORE anything is written, so both failure paths can leave the document exactly as they found it
     showBusy("Tokenising…"); let tk;
-    try{ tk=await window.pywebview.api.tokenize(parseText,model); }catch(e){ hideBusy(); toast("Parse failed: "+e); preserveScroll(renderDoc); return; }   // nothing written yet → nothing to undo, nothing to restore
+    try{ tk=await window.pywebview.api.tokenize(parseText,model,pipeArms()); }catch(e){ hideBusy(); toast("Parse failed: "+e); preserveScroll(renderDoc); return; }   // nothing written yet → nothing to undo, nothing to restore
     s.text=display; s.tokens=tk.tokens.map(t=>({...t,head:String(t.head)})); s.mwt=tk.mwt||[]; if(!s.mwt.length)delete s.mwt; s.orthoLine=""; restoreMarks(s,marks);   // the tokeniser's tokens carry no hand-placed marks — put back the ones whose word survived the edit   // item 19: NEW tokens have no cached t.ortho; clear the stale running-line so fillOrtho re-fetches the SCRIPT
     commitSnap(pre);   // the document has changed → its single undo entry goes in NOW, so markDirty (which reads UNDO.length) tells the truth for the seconds the parse takes
     markDirty(); preserveScroll(renderDoc); clearSelToBlock(i,scroll);   // item 9: a re-parse replaces the sentence's tokens, so the old selection is meaningless and a NEW one would be the app's choice, not the user's — leave nothing selected and move only the reading focus (which is what `scroll` was ever for)
@@ -1020,7 +1041,7 @@ async function applySentText(i,newText){ const s=DOC[i]; if(!s)return;
     // drop the undo entry that was speaking for it: the operation failed, so it did nothing. (`r.parsed===false` is
     // a different thing — the backend answering honestly with a whitespace fallback — and that result is kept.)
     const rollback=()=>{ if(UNDO[UNDO.length-1]===pre)UNDO.pop(); applySnap(pre); updateUndoUI(); };   // pop only while it's still on top: an overlapping edit's entry is not ours to remove
-    try{ r=await window.pywebview.api.parse_text(parseText,model); }catch(e){ hideBusy(); rollback(); toast("Parse failed: "+e); return; }finally{ hideBusy(); }
+    try{ r=await window.pywebview.api.parse_text(parseText,model,pipeArms()); }catch(e){ hideBusy(); rollback(); toast("Parse failed: "+e); return; }finally{ hideBusy(); }
     s.tokens=r.tokens.map(t=>({...t,head:String(t.head)})); s.mwt=r.mwt||[]; if(!s.mwt.length)delete s.mwt; s.orthoLine=""; restoreMarks(s,marks);   // …and again after the PARSE, which replaces the tokeniser's tokens in turn (its FEATS come from the model and know nothing of Foreign/Reported/Typo)
     morphAfterReparse(s);   // the new tokens carry no MSeg/MGloss — re-seed both tiers from the FEATS this parse just produced (inside the same undo entry: it is part of the re-parse, not a second edit)
     renderDiagramIncremental(i);   // js/core/document.js: this sentence was just parsed → let the render on the next line draw its tree breadth-first by depth and converge on the real one, rather than leaving the row blank for the whole layout pass. ARMS the sequence; the render below IS its first stage
@@ -1850,6 +1871,7 @@ function glossAdoptLexFromDoc(){ DOC.forEach(s=>s.tokens.forEach(t=>{
        the batch's tail marks the document dirty again, which re-arms this naturally. */
 function scheduleAutoGloss(){
   if(AUTOGLOSS_BLOCKED||!hasBridge()||!(GLOSS_ON||MORPH_ON)) return;
+  if(typeof pipeOn==="function"&&!pipeOn("gloss")) return;   // …the Pipeline drawer's Glossing arm, beside the tier tests rather than instead of them: a reader may keep the gloss ROWS and still not want them filled in for them
   if(isEnglishDoc()) return;   // glossing an English sentence with English words says nothing
   clearTimeout(_autoGlossT);
   _autoGlossT=setTimeout(()=>{
@@ -1873,6 +1895,7 @@ window.__autoGlossUnblock=function(){ AUTOGLOSS_BLOCKED=false; _autoGlossToasted
    dropped rather than written; the pass that superseded it is still coming and will answer. */
 async function fillAutoGloss(){
   if(!hasBridge()||!(GLOSS_ON||MORPH_ON)||AUTOGLOSS_BLOCKED) return false;
+  if(typeof pipeOn==="function"&&!pipeOn("gloss")) return false;
   const jobs=[]; DOC.forEach((s,i)=>{ const k=glossKeyOf(s); if(k&&k!==s._glossKey) jobs.push({i,k}); });
   if(!jobs.length) return false;
   /* ⚠ THE FIRST CALL OF A SESSION CAN STILL BE THE SLOW ONE, AND IT SAYS SO. Profiled: loading the
@@ -2238,6 +2261,7 @@ function composeMGlossPrefill(lex,featsStr,upos,seg){
    test morphEdited uses to decide whether the tier has been touched at all. Returns true iff it wrote something,
    so the caller can markDirty() for a real change and stay silent for a no-op. */
 function msegRefill(t,force){ if(!MORPH_ON||!t) return false;
+  if(typeof pipeOn==="function"&&!pipeOn("gloss")) return false;   // the Pipeline drawer's Glossing arm; `false` is the answer this already gives with the tier off, so every caller's degradation path is one it has always had
   const cur=miscKV(t.misc,"MSeg");
   if(!force && cur && cur!==(t._msegPre||"")) return false;   // hand-edited → the user's, not ours — UNLESS force: a direct lemma edit (afterLemmaEdit's own call) is new evidence about what the word IS, strong enough to supersede a hand correction that was made against the OLD lemma, so it always re-derives; the background-reparse and form-edit callers below stay unforced (weaker evidence: a parser guess, or a form change that hasn't touched the lemma at all)
   const pv=glossEnc(msegPrefillParts(t).seg);
@@ -2344,7 +2368,7 @@ function morphPrefillSent(s){ if(!s||!s.tokens) return;
 // item: a re-parse replaced this sentence's tokens outright, so both morphemic tiers came back empty — re-seed them
 // from the FEATS the parse just produced. No-op unless the morphemic tier is on. The caller owns the undo snapshot
 // (a re-parse pushes one before it starts), so this rides along inside that single undoable step.
-function morphAfterReparse(s){ if(MORPH_ON) morphPrefillSent(s); }
+function morphAfterReparse(s){ if(MORPH_ON && (typeof pipeOn!=="function"||pipeOn("gloss"))) morphPrefillSent(s); }
 function morphEdited(){ return DOC.some(s=>s.tokens.some(t=>{ const mg=tierText(t,"mgloss"); if(mg && mg!==(t._mglossPre||""))return true; const ms=tierText(t,"mseg"); return !!(ms && ms!==(t._msegPre||"")); })); }   // item 11c/12b: has the user changed any MSeg or MGloss from its auto-prefill? (an untouched FEATS-derived MGloss prefill counts as empty)
 window.addGloss=function(){ setTier("gloss",true); };
 window.addMorphGloss=function(){ setTier("morph",true); };
@@ -2548,7 +2572,11 @@ async function scoredRelsForHead(si,tokId,headId){ if(!(hasBridge()&&model)) ret
     if(!out.length) out=rankedScoredRels(await arcLabelScores(si,tokId,headId));                          // tier 2: a state SYNTHESISED to put the pair at the boundary
   }
   if(out.length) return out;
-  let r; try{ r=await window.pywebview.api.parse_tokens(forms,model); }catch(e){ return []; }              // tier 3: no scores at all (Stanza) → the whole-tree agreement rule
+  // Tier 3 asks for a WHOLE-TREE parse and reads one edge off it, so it needs the same input regime
+  // reparse() states above: a model that reads word classes rather than predicting them gets the
+  // reader's, or the backend declines the syntax and this tier has nothing to read.
+  const upIn3=(PIPE_AVAIL&&PIPE_AVAIL.indexOf("upos")<0)?s.tokens.map(x=>x.upos||""):null;
+  let r; try{ r=await window.pywebview.api.parse_tokens(forms,model,upIn3,pipeArms(),pipeGiven(s.tokens)); }catch(e){ return []; }              // tier 3: no scores at all (Stanza) → the whole-tree agreement rule
   if(!r||!r.parsed||!r.tokens||r.tokens.length!==s.tokens.length) return [];
   const p=r.tokens[tokId-1]; if(!p) return [];
   if(parseInt(p.head,10)!==headId) return [];                    // the parser is talking about a different edge
@@ -2639,7 +2667,7 @@ async function reparseTokenFields(si,tokIds,opts){
      it says so by asking for it. */
   const uposIn=opts.upos?null:s.tokens.map(t=>trUpos(t));
   showBusy("Parsing…"); let r;
-  try{ r=await window.pywebview.api.parse_tokens(forms,model,uposIn); }catch(e){ return false; }finally{ hideBusy(); }
+  try{ r=await window.pywebview.api.parse_tokens(forms,model,uposIn,pipeArms(),pipeGiven(s.tokens)); }catch(e){ return false; }finally{ hideBusy(); }
   if(!r||!r.parsed||!r.tokens||r.tokens.length!==s.tokens.length) return false;   // belt and braces: a pipeline that rebuilt the Doc anyway must not be aligned against
   const targets=tokIds?new Set(tokIds):null;
   s.tokens.forEach((t,i)=>{ if(targets && !targets.has(i+1)) return; const p=r.tokens[i]; if(!p)return;

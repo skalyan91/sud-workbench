@@ -61,7 +61,10 @@ async function arcLabelScores(si,child,head){
   const k=scoresKey(s)+"\u0003"+child+"\u0003"+head; if(!k) return null;
   const hit=ARC_SCORES.get(k); if(hit) return (hit&&typeof hit.then==="function")?await hit:hit;
   const p=(async()=>{
-    let r; try{ r=await window.pywebview.api.arc_scores(s.tokens.map(t=>t.form||""),model,child,head); }
+    // …and the reader's own word classes, as `tokenScores` above already sends: a model that READS
+    // them (the generic parser behind every custom model) refuses a sentence that has none, and this
+    // counterfactual is asked about a token the reader has just dragged — so the tags are right there.
+    let r; try{ r=await window.pywebview.api.arc_scores(s.tokens.map(t=>t.form||""),model,child,head,s.tokens.map(t=>trUpos(t))); }
     catch(e){ r=null; }
     const out=(r&&r.scored&&r.labels)?r.labels:null;
     scoresPut(ARC_SCORES,k,out); return out; })();

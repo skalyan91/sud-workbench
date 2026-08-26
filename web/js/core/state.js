@@ -46,8 +46,15 @@ function wordPrefixRe(q){ return new RegExp("(?:^|[^\\p{L}\\p{N}])"+String(q).re
 function wordPrefix(name,q){ return !!name && !!q && wordPrefixRe(q).test(name); }   // `name` is expected already lowercased by the caller (every call site lowercases both sides once, rather than per-row)
 // 2-letter ISO 639-1 ↔ 3-letter ISO 639-3 bridge: each ISO639_3 row carries [code3, code1||"", name]. The
 // canonical UD code of a row is code1||code3 (used at pick time); isoName above resolves EITHER code to a name.
+let MODELLANG_CUSTOM={};   // custom model id → the ISO code its maker chose, filled by populateModels (js/io/models.js) — a custom model's language is NOT derivable from its id, which carries a slug the reader named
 function modelLang(id){ if(!id)return ""; const i=id.indexOf(":"); if(i<0)return ""; const eng=id.slice(0,i),name=id.slice(i+1);
-  if(eng==="sud")return name.split("_")[0]||""; if(eng==="stanza")return name.split("#")[0]||""; return ""; }
+  if(eng==="sud")return name.split("_")[0]||""; if(eng==="stanza")return name.split("#")[0]||"";
+  // A CUSTOM MODEL CARRIES NO LANGUAGE IN ITS ID, deliberately: it is named by the reader, may be one
+  // of several for the same language, and may be for a register or an author with no ISO code at all.
+  // So the code is looked up from the listing, and "" — the answer for a model whose maker chose no
+  // language — is a real answer here, leaving the document's own language exactly where it was.
+  if(eng==="custom")return MODELLANG_CUSTOM[id]||"";
+  return ""; }
 function setLang(l){ DOCLANG=l||"en"; const p=document.getElementById("tokInfo"); if(!p)return;   // item 21: default to English when none is detected/selected; the language can no longer be UNSET
   p.classList.add("pickable");   // the pill always opens the ISO 639-3 language picker
   p.title="Click to set the document language (any ISO 639-3 language)";

@@ -260,7 +260,7 @@ class Api:
     def set_window(self, window):
         self.window = window
 
-    def _modal_dialog(self, *args, **kwargs):
+    def _modal_dialog(self, *args, window=None, **kwargs):
         """Serialise native file dialogs behind _dialog_lock so two overlapping
         bridge calls can't race on pywebview's shared _file_name/semaphore (the
         intermittent open-file hang).
@@ -268,9 +268,16 @@ class Api:
         Always runs on a JS-bridge thread (every caller is a bridge method), never on
         the AppKit main thread — see the _dialog_lock invariant in __init__. On a bridge
         thread create_file_dialog does callAfter(create_dialog) + semaphore.acquire(),
-        which the main run loop is free to service, so the modal always opens."""
+        which the main run loop is free to service, so the modal always opens.
+
+        ``window`` presents the sheet on a CHILD window instead of the document one — for a dialog
+        opened from the Model Manager, where a sheet dropping out of the window behind it reads as
+        the app having hung. It falls back to the document window when the child is not there (the
+        in-page-sheet path), so no caller has to test for it. The lock is the same one either way:
+        pywebview's ``_file_name``/semaphore are process-wide, not per window, which is the whole
+        reason this method exists."""
         with self._dialog_lock:
-            return self.window.create_file_dialog(*args, **kwargs)
+            return (window or self.window).create_file_dialog(*args, **kwargs)
 
     def get_state(self) -> dict:
         """Initial state for the frontend on load.  ``sentences`` is None when
@@ -935,13 +942,21 @@ class Api:
         return {"ok": True, "path": new_path, "name": os.path.basename(new_path)}
 
     # ── parse ────────────────────────────────────────────────────────────────
-    def parse_text(self, text: str, model_id: str = "") -> dict:
+    # ⚠ EVERY PARSE ENDPOINT TAKES ``arms``, AND EVERY ONE DEFAULTS IT TO None.  It is the options
+    # bar's Pipeline drawer — the list of arms the reader has left switched on — and ``None`` means
+    # "all of them", so an older frontend, a headless caller or a test that says nothing behaves
+    # exactly as it did before the drawer existed.  See `parse.ARMS` for what the eight are and for
+    # why only two of them skip a component.  The frontend sends the list on every call rather than
+    # setting it once: it is per-window state a reader can change between two parses, and a
+    # server-side "current arms" would be one more thing that can drift out of step with the ticks
+    # they can see.
+    def parse_text(self, text: str, model_id: str = "", arms=None) -> dict:
         """Tokenise ``text`` (+ parse if a model is given).  Returns tokens plus any
         multi-word tokens (``mwt``); falls back to whitespace tokenisation with a
         ``reason`` when the requested model/engine can't run."""
-        return parse.parse(text, model_id)
+        return parse.parse(text, model_id, arms)
 
-    def parse_texts(self, texts: list, model_id: str = "") -> dict:
+    def parse_texts(self, texts: list, model_id: str = "", arms=None) -> dict:
         """`parse_text` over a LIST, in one bridge call — what a multi-sentence paste needs.
 
         Inserting a pasted passage used to cost two awaited round-trips per sentence (tokenize, then
@@ -950,10 +965,10 @@ class Api:
         `nlp.pipe`, and Stanza with a SINGLE grew UD→SUD conversion across the whole list, which its
         worker pool then runs in parallel. Entries come back in the order given, each in exactly
         `parse_text`'s shape (including a per-entry `reason` when the engine could not run)."""
-        return {"results": parse.parse_many(list(texts or []), model_id)}
+        return {"results": parse.parse_many(list(texts or []), model_id, arms)}
 
     def parse_tokens(self, forms: list[str], model_id: str = "",
-                     upos: list[str] | None = None) -> dict:
+                     upos: list[str] | None = None, arms=None, given=None) -> dict:
         """Re-parse a sentence whose TOKENISATION IS FIXED — one token per entry of ``forms``.
 
         What the frontend needs after a Form or UPOS edit, where the heads, relations and annotation
@@ -963,8 +978,13 @@ class Api:
 
         ``upos`` carries the reader's OWN word classes, so a retag re-derives the features for the class
         that was chosen instead of returning the model's unchanged opinion of the same sentence — see
-        `parse._force_upos`."""
-        return parse.parse_pretokenized(forms or [], model_id, upos or None)
+        `parse._force_upos`.
+
+        ``given`` — ``{arm: [column values]}`` — carries the columns the reader has taken over by
+        switching the arm off, so every component that READS one reads theirs. Measured worth on ten
+        held-out Basque sentences: supplying FEATS alongside UPOS moves LAS 38.32 → 53.27. See
+        `parse._GIVEN_SETTER`."""
+        return parse.parse_pretokenized(forms or [], model_id, upos or None, arms, given)
 
     def model_feats_inventory(self, model_id: str = "") -> dict:
         """``{FeatName: [values...]}`` the given model's own morphologizer can jointly emit — see
@@ -984,20 +1004,21 @@ class Api:
         transition-based parser at all, and why Stanza answers ``scored: False``."""
         return parse.analysis_scores(forms or [], model_id, upos or None)
 
-    def arc_scores(self, forms: list[str], model_id: str, child: int, head: int) -> dict:
+    def arc_scores(self, forms: list[str], model_id: str, child: int, head: int,
+                   upos: list[str] | None = None) -> dict:
         """"If ``child`` hung off ``head``, what would you call that edge?" (both 1-based).
 
         The counterfactual companion to `token_scores`, for the arc a reader has just made by hand and
         the parser never considered — so there is no recorded deliberation to read.  See
         `parse.arc_label_scores`, which states plainly what a synthesised state can and cannot claim."""
-        return parse.arc_label_scores(forms or [], model_id, int(child), int(head))
+        return parse.arc_label_scores(forms or [], model_id, int(child), int(head), upos or None)
 
-    def tokenize(self, text: str, model_id: str = "") -> dict:
+    def tokenize(self, text: str, model_id: str = "", arms=None) -> dict:
         """FAST first step of the interactive parse sequence (tokenise → transliterate → parse):
         tokenise ONLY, so the tokens and their transliterations paint before the heavy parse. The
         follow-up step is the ordinary ``parse_text`` on the same text (which reproduces exactly
         these tokens). Returns ``{"tokens","mwt","parsed":False,…}``."""
-        return parse.tokenize(text, model_id)
+        return parse.tokenize(text, model_id, arms)
 
     def token_spans(self, text: str, forms: list[str], model_id: str = "",
                     parts: list[list[str]] | None = None, lang: str = "") -> dict:
@@ -1012,11 +1033,39 @@ class Api:
         undecorated. Never raises — an uninstalled model comes back as an empty list + reason."""
         return parse.token_spans(text or "", forms or [], model_id or "", parts or None, lang or "")
 
-    def sentencize(self, text: str, lang: str = "", model_id: str = "") -> dict:
+    def sentencize(self, text: str, lang: str = "", model_id: str = "", arms=None) -> dict:
         """Split pasted text into sentences for the "Insert text" flow (item 24).  Uses the
         selected spaCy model's sentence segmentation when one is loaded, else a script-aware
         rule-based splitter (Latin .?!… + Indic daṇḍa ।॥).  Returns ``{"sentences": [...]}``."""
-        return {"sentences": parse.sentencize(text or "", lang or "", model_id or "")}
+        return {"sentences": parse.sentencize(text or "", lang or "", model_id or "", arms)}
+
+    def model_arms(self, model_id: str = "") -> dict:
+        """Which pipeline arms this model implements, and which of them read which others.
+
+        Asked per model rather than derived in the frontend, because both answers are read off the
+        loaded pipeline itself (`parse.model_arms`, `parse.arm_deps`): a wheel that gains or loses a
+        component says so here without a table anywhere needing to be edited to match.
+
+        ``deps`` is ``{arm: [arms it reads]}`` — the cascade, read off each component's own declared
+        input features (`parse.arm_deps`), never off pipeline order. The options bar uses it to show an
+        arm as inert when something it reads has been switched off, and `parse._pipe_plan` applies the
+        same graph to the answer, so what the drawer shows and what the parse does cannot drift.
+        It is model-specific and that is the point: `xx_sud_generic`'s morphologiser embeds the word
+        class and its parser embeds both class and features, where `en_sud_ewt_gum`'s parser embeds
+        only NORM/PREFIX/SUFFIX/SHAPE and reads neither."""
+        mid = model_id or ""
+        out = {"arms": parse.model_arms(mid), "all": list(parse.ARMS), "deps": {},
+               # …and whether the word classes are this model's INPUT rather than something it
+               # simply cannot do. The options bar shows the two differently: a missing component is
+               # a feature the model has not got, where this is a request for the annotator.
+               "reads_upos": parse._needs_given_upos(mid)}
+        try:
+            engine, name, tb_lang = parse._resolve_model(mid)
+            if engine == "sud" and name:
+                out["deps"] = parse.arm_deps(parse._load_spacy(name))
+        except Exception:  # noqa: BLE001 — no deps is "nothing cascades", which greys nothing
+            pass
+        return out
 
     # ── validation ───────────────────────────────────────────────────────────
     def validate(self, sentences: list[dict]) -> dict:
@@ -1545,6 +1594,144 @@ class Api:
         with self._pip_lock:
             return models_registry.remove(model_id)
 
+    # ── custom models (instances of the generic parser) ───────────────────────
+    def custom_model_status(self) -> dict:
+        """What the Add-custom-model sheet needs before it can offer anything: whether the generic
+        wheel is here, the 80 languages whose embedding row is already fitted, the sentence floor
+        and the held-out figures a model with no training file falls back to."""
+        from . import generic_models
+        st = generic_models.status()
+        if not st["installed"]:
+            # The download size, so the sheet can say what a first custom model actually costs
+            # rather than starting a 31 MB fetch with no warning. Cache-only: this runs while a
+            # sheet is opening, and a cold/offline release listing must not park it behind an HTTP
+            # timeout (see models_registry.CACHE_ONLY, which exists for the same reason).
+            try:
+                for e in models_registry.list_available(models_registry.CACHE_ONLY):
+                    if e.get("id") == st["model_id"]:
+                        st["size"] = e.get("size")
+                        st["version"] = e.get("version")
+                        break
+            except Exception:  # noqa: BLE001 — a size is decoration; the offer stands without it
+                pass
+        return st
+
+    def create_custom_model(self, name: str, lang: str = "", conllu: str = "") -> dict:
+        """Start making one custom model in the background; returns a ``job_id`` to poll with
+        model_job_status, exactly as ``download_model`` does.
+
+        ⚠ IT MAY HAVE TO DOWNLOAD A 31 MB WHEEL FIRST, and that is ONE job rather than two: from the
+        reader's side "make me a Wolof parser" is a single act, and splitting it would put a second
+        progress bar in front of them for a dependency they did not ask about. The fetch takes the
+        first 40 % of the bar and the fit the rest.
+
+        Serialised behind ``_pip_lock`` like every other install: the download half genuinely is a
+        pip install, and the fit half loads an 8 s model — two of those at once would double the
+        memory for no gain."""
+        from . import generic_models
+        self._job_seq += 1
+        job_id = f"job{self._job_seq}"
+        self._jobs[job_id] = {"pct": 0, "note": "Starting…", "done": False, "error": None,
+                              "id": f"custom:{name}"}
+
+        def worker():
+            def progress(pct, note):
+                job = self._jobs.get(job_id)
+                if job is not None:
+                    if pct is not None:
+                        job["pct"] = pct
+                    job["note"] = note
+
+            with self._pip_lock:
+                result: dict = {}
+                # THE BAR IS SPLIT ONLY WHEN THERE ARE TWO THINGS TO DO. On the second and every later
+                # custom model the wheel is already here, and a bar that starts at 40 % says a step ran
+                # that did not.
+                need = not generic_models.installed()
+                base, span = (40, 60) if need else (0, 100)
+                if need:
+                    def dl(pct, note):
+                        progress(int((pct or 0) * 0.4), note or "Downloading the generic parser…")
+                    result = models_registry.download(generic_models.GENERIC_MODEL_ID, progress=dl)
+                    if result.get("error"):
+                        result = {"error": "the generic parser could not be installed: "
+                                           + str(result["error"])}
+                if not result.get("error"):
+                    def fit(pct, note):
+                        progress(base + int((pct or 0) * span / 100), note)
+                    result = generic_models.create(name, lang, conllu, progress=fit)
+            job = self._jobs.get(job_id)
+            if job is not None:
+                job["done"] = True
+                if result.get("error"):
+                    job["error"] = result["error"]
+                else:
+                    job["pct"] = 100
+                    job["note"] = "Ready"
+                    job["entry"] = result.get("entry")
+                    job["model"] = result.get("id")
+
+        threading.Thread(target=worker, daemon=True).start()
+        return {"job_id": job_id}
+
+    def update_custom_model(self, slug: str, name: str = "", lang: str = "",
+                            conllu: str = "") -> dict:
+        """Edit one custom model in the background; returns a ``job_id`` like create_custom_model.
+
+        ⚠ THE SHEET SENDS ALL THREE FIELDS EVERY TIME, which is why they are plain strings here where
+        `generic_models.update` distinguishes None (unchanged) from "" (cleared). It always knows the
+        whole intended state — it was pre-filled with the current one — so "" from the sheet genuinely
+        means the reader emptied that field.
+
+        A rename is instant: the row is re-fitted only where the evidence it was fitted FROM has
+        moved, which is a different file or the same file with a different mtime or size."""
+        from . import generic_models
+        self._job_seq += 1
+        job_id = f"job{self._job_seq}"
+        self._jobs[job_id] = {"pct": 0, "note": "Starting…", "done": False, "error": None,
+                              "id": f"custom:{slug}"}
+
+        def worker():
+            def progress(pct, note):
+                job = self._jobs.get(job_id)
+                if job is not None:
+                    if pct is not None:
+                        job["pct"] = pct
+                    job["note"] = note
+
+            with self._pip_lock:
+                result = generic_models.update(slug, name, lang, conllu, progress=progress)
+            job = self._jobs.get(job_id)
+            if job is not None:
+                job["done"] = True
+                if result.get("error"):
+                    job["error"] = result["error"]
+                else:
+                    job["pct"] = 100
+                    job["note"] = "Saved"
+                    job["entry"] = result.get("entry")
+                    job["model"] = result.get("id")
+
+        threading.Thread(target=worker, daemon=True).start()
+        return {"job_id": job_id}
+
+    def pick_conllu_file(self) -> dict:
+        """Native open dialog for the custom model's training file — no reading, just the path.
+
+        Presented on the MODEL MANAGER's own window where there is one, not on the document window
+        behind it: a modal sheet that drops out of a window the reader is not looking at reads as the
+        app having hung. Falls back to the main window (the in-page sheet path, where the Model
+        Manager is not a separate window at all)."""
+        result = self._modal_dialog(
+            webview.FileDialog.OPEN, allow_multiple=False,
+            file_types=("CoNLL U treebank (*.conllu;*.conll)", "All files (*.*)"),
+            window=self._child_windows.get("models"),
+        )
+        if not result:
+            return {"cancelled": True}
+        path = result[0]
+        return {"path": path, "name": os.path.basename(path)}
+
     # ── optional heavy-dependency tiers (on-demand: Stanza/torch, Japanese, Arabic) ───────────
     def list_extras(self) -> dict:
         """Installable/installed optional language-support tiers for the Manage Models UI."""
@@ -1862,7 +2049,12 @@ class Api:
                 # Sanskrit translation of an English text is still typed in ITRANS, and an English
                 # translation of a Sanskrit text must not be rewritten as if it were Sanskrit.
                 raw = itrans.convert(raw, lang)["converted"]
-                model_id = self._model_for_language(lang, groups)
+                # ⚠ THE DIALOG'S OWN CHOICE WINS, and only falls back to the registry's pick when it
+                # sent none. `_model_for_language` cannot name a CUSTOM model — `best_installed_model`
+                # refuses to choose between the reader's own, by design — so recomputing here would
+                # quietly parse with the language's ordinary wheel after the dialog had promised
+                # otherwise. It also removes the standing requirement that the two sides agree.
+                model_id = str(p.get("model") or "") or self._model_for_language(lang, groups)
                 paras = self._sentencize_parallel(raw, lang, model_id)
                 if paras:
                     if not model_id:
@@ -1882,7 +2074,9 @@ class Api:
                          "text": main_text,
                          # the parser the main text should be read with — only consulted when the
                          # document was EMPTY and this dialog chose its language (see best_installed_model)
-                         "model": self._model_for_language(main_lang, groups) if main_on else ""},
+                         "model": ((str(m.get("model") or "")
+                                    or self._model_for_language(main_lang, groups))
+                                   if main_on else "")},
                 "parallels": parallels, "adoptLang": adopt, "naive": naive,
                 # The script the user TYPED IN, when that was a Brahmic one. The text itself is stored
                 # as Devanagari (the only script the model reads), so this is the DISPLAY choice the
@@ -2199,6 +2393,29 @@ class Api:
     <script>document.addEventListener('keydown',function(e){if(e.key==='Escape'){e.preventDefault();try{window.pywebview.api.close_child_window('about');}catch(_){}}});</script>
     </body></html>""")
 
+    _ISO_JS: str | None = None
+
+    @classmethod
+    def _iso639_js(cls) -> str:
+        """The app's own vendored ISO 639-3 table, verbatim, for a page that loads no app scripts.
+
+        The Model Manager is a self-contained ``html=`` window: nothing it contains is fetched, so a
+        ``<script src>`` cannot reach ``web/iso639-3.js`` and the table has to be inlined.  Inlined
+        rather than sent over the bridge as JSON — it is ~7 900 rows, and shipping the FILE means the
+        name-menu here resolves a code to exactly the name the status-bar language picker resolves it
+        to, Glottolog overrides included, with one table on disk and no second parse of it anywhere.
+        Read once per process; a missing file leaves the menu free-text-only rather than breaking the
+        window, which is the same degradation the picker itself takes."""
+        if cls._ISO_JS is None:
+            try:
+                from .__main__ import WEB_DIR
+                with open(os.path.join(WEB_DIR, "iso639-3.js"), encoding="utf-8") as fh:
+                    cls._ISO_JS = fh.read()
+            except Exception as exc:  # noqa: BLE001
+                print(f"[models] ISO 639-3 table unavailable: {exc}", file=sys.stderr)
+                cls._ISO_JS = ""
+        return cls._ISO_JS
+
     def _models_html(self, focus: str = "") -> str:
         # `focus` is an extras tier KEY, and it is JSON-encoded into the page rather than
         # interpolated raw: it arrives from the frontend (translit.js's `needs`), and this page is
@@ -2206,7 +2423,8 @@ class Api:
         return (
             "<!DOCTYPE html><html><head><meta charset=\"utf-8\"><script>" + self._confirm_js()
             + "var FOCUS=" + json.dumps(str(focus or "")) + ";"
-            + "</script><style>" + self._base_css() + """
+            + "</script><script>" + self._iso639_js() + "</script>"
+            + "<style>" + self._base_css() + """
     body{display:flex;flex-direction:column;padding:16px;gap:11px}
     .sub{font-size:12.5px;color:var(--muted)}
     .bar{display:flex;gap:8px;align-items:center}
@@ -2300,13 +2518,84 @@ class Api:
        its heading, ahead of the rows it applies to. */
     .gwarn{margin:2px 8px 6px;padding:7px 9px;border-radius:7px;font-size:11.5px;line-height:1.45;
            background:color-mix(in srgb,var(--accent-orange,#d08700) 15%,transparent)}
+    /* ── CUSTOM MODELS ─────────────────────────────────────────────────────────────────────────
+       The "Add custom model…" row is an ACTION dressed as a row, so it takes the row geometry whole
+       and differs only in the accent ink and the leading +: it sits at the top of a list of things
+       you HAVE, and it is the one line there that makes another one. */
+    .row.addrow{cursor:pointer;color:var(--accent,#0a84ff)}
+    .row.addrow .nm{font-weight:600;color:inherit}
+    .row.addrow .plus{font-size:15px;line-height:1;width:14px;text-align:center;flex:0 0 auto}
+    /* the caveat under a custom model's figures — what the UAS/LAS was actually measured on. Wrapped
+       rather than ellipsised (unlike .nm above): the whole point of it is the sentence, and half a
+       caveat is worse than none. */
+    .mi .cav{font-size:11px;line-height:15px;color:var(--label-secondary,rgba(0,0,0,.5));white-space:normal}
+    /* THE NEW-MODEL SHEET. An in-page scrim, not a second native window: it is a modal step OF this
+       window (pick a name, pick a file, press Create) and a separate window would leave the reader to
+       find which of two windows their answer belongs to — the same reasoning the app's own sheets
+       take. z-index above the sticky group headings (2) and the drawer pops. */
+    .scrim{position:fixed;inset:0;z-index:400;background:rgba(0,0,0,.28);display:flex;align-items:center;justify-content:center;padding:20px}
+    .scrim[hidden]{display:none}
+    .sheet{width:min(430px,100%);max-height:100%;overflow:auto;background:var(--bg);border-radius:12px;
+           border:.5px solid var(--line);box-shadow:0 12px 44px rgba(0,0,0,.28);padding:16px;display:flex;flex-direction:column;gap:11px}
+    .sheet h2{margin:0;font-size:14px;font-weight:600}
+    .sheet .fieldh{font-size:11px;font-weight:600;color:var(--head);margin-bottom:3px}
+    .sheet .hint{font-size:11.5px;line-height:1.5;color:var(--muted)}
+    .fld{position:relative}
+    .fld input[type=text]{width:100%;box-sizing:border-box}
+    /* the name menu — the same shape as the app's own language picker: a scrolling list of matches
+       under the field, arrow-navigable, and NOT a <datalist>. A datalist would have been fewer lines
+       and is wrong for two reasons: it renders differently in each of the three shells this app runs
+       in, and it cannot show the CODE beside the name, which is the column that tells two similarly
+       named languages apart and is the value actually being chosen. */
+    .lm{position:absolute;left:0;right:0;top:calc(100% + 4px);z-index:10;max-height:190px;overflow:auto;
+        background:var(--menu-bg,var(--bg));border:.5px solid var(--line);border-radius:9px;box-shadow:0 8px 26px rgba(0,0,0,.22);padding:4px}
+    .lm[hidden]{display:none}
+    .lm button{display:flex;width:100%;align-items:baseline;gap:8px;background:none;border:none;text-align:start;
+               padding:4px 8px;border-radius:6px;font-size:12.5px;height:auto;min-width:0;color:var(--text)}
+    .lm button:hover,.lm button.hi{background:var(--accent,#0a84ff);color:#fff}
+    .lm .nm2{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+    .lm .cd{font-size:11px;opacity:.6;font-variant-numeric:tabular-nums;flex:0 0 auto}
+    .lm .note{padding:5px 8px;font-size:11px;color:var(--muted)}
+    .filerow{display:flex;align-items:center;gap:8px}
+    .filerow .fname{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px}
+    .filerow .fname.none{color:var(--muted)}
+    .sheet .err{font-size:11.5px;line-height:1.5;color:#ff453a}
+    .sheet .acts{display:flex;justify-content:flex-end;gap:8px}
     </style></head><body>
-    <div class="sub">Download and remove SUD (spaCy) and UD (Stanza) parser models.</div>
+    <div class="sub">Download and remove SUD (spaCy) and UD (Stanza) parser models, and build custom ones from the generic parser.</div>
     <div class="bar"><input id="q" type="search" placeholder="Search language…" spellcheck="false" autocomplete="off"><button class="sec sm" id="instonly" aria-pressed="false" title="Show only the models installed on this machine">Installed only</button></div>
     <div id="list">Loading…</div>
     <div class="foot">
       <button class="sec" id="refresh">Refresh</button>
       <button id="close">Close</button>
+    </div>
+    <div class="scrim" id="newscrim" hidden>
+      <div class="sheet" role="dialog" aria-modal="true" aria-labelledby="newh">
+        <h2 id="newh">New custom model</h2>
+        <div class="hint" id="newintro"></div>
+        <div>
+          <div class="fieldh">Name</div>
+          <div class="fld">
+            <input type="text" id="newname" placeholder="A language, or any name you like" spellcheck="false" autocomplete="off" aria-autocomplete="list">
+            <div class="lm" id="newlm" hidden role="listbox"></div>
+          </div>
+          <div class="hint" id="newlang" style="margin-top:4px"></div>
+        </div>
+        <div>
+          <div class="fieldh">Training data <span style="font-weight:400;color:var(--muted)">— optional</span></div>
+          <div class="filerow">
+            <button class="sec sm" id="newpick">Choose…</button>
+            <span class="fname none" id="newfile">No file</span>
+            <button class="sec sm" id="newclear" hidden aria-label="Use no training file">Clear</button>
+          </div>
+          <div class="hint" id="newfilehint" style="margin-top:5px"></div>
+        </div>
+        <div class="err" id="newerr" hidden></div>
+        <div class="acts">
+          <button class="sec" id="newcancel">Cancel</button>
+          <button id="newgo">Create</button>
+        </div>
+      </div>
     </div>
     <script>
     var AVAIL=[];
@@ -2315,6 +2604,7 @@ class Api:
     var KEEP_SCROLL=0;   // list scroll offset carried across a re-render (item 17)
     var INST_ONLY=false;   // the "Installed only" filter — a VIEW state of this window, not a stored preference
     var GREW=null;         // grewpy + backend: null until probed, then true/false (see the Stanza note in draw())
+    var GENERIC=null;      // the generic parser's status: installed?, download size, licence, the 80 fitted languages, the sentence floor. Null until load() asks — every reader of it tests for that, so the window draws before the answer lands rather than after
     function api(){return window.pywebview&&window.pywebview.api;}
     function esc(s){return (s||'').replace(/[&<>]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;'}[c];});}
     function fmtN(n){return String(n).replace(/\\B(?=(\\d{3})+(?!\\d))/g,',');}
@@ -2352,12 +2642,40 @@ class Api:
       // …and whether grew can run, which decides whether the Stanza group is usable at all. Probed here
       // rather than per row: conversion_available spawns the OCaml backend on its first call.
       try{var g=await api().conversion_available(); GREW=!!(g&&g.grewpy&&g.backend);}catch(e){}
+      // …and whether the generic parser is here, which decides what the "Add custom model…" row
+      // promises. Re-asked on every load rather than cached: the first Create INSTALLS it, and the
+      // row's subtitle has to stop offering a 31 MB download the moment it is no longer one.
+      try{GENERIC=await api().custom_model_status();}catch(e){GENERIC=null;}
       draw(); pollTrain(!!refresh);}
     function draw(){var host=document.getElementById('list'); var keep=host.scrollTop||KEEP_SCROLL; KEEP_SCROLL=0;
       var q=(document.getElementById('q').value||'').trim().toLowerCase(); host.innerHTML='';
       function grp(title,engine){var rows=AVAIL.filter(function(e){return e.engine===engine&&match(e,q);}); if(!rows.length)return;
         var h=document.createElement('div');h.className='gh';h.textContent=title;host.appendChild(h);
         rows.forEach(function(e){host.appendChild(row(e));});}
+      /* ── CUSTOM, AT THE TOP, ALWAYS ────────────────────────────────────────────────────────────
+         Its heading and its "Add custom model…" row are drawn whether or not anything matches the
+         search, and whether or not any custom model exists — unlike every other group here, which
+         appears only when it has rows. Two reasons. It is the only group that is a THING TO DO
+         rather than a list to read, and hiding the way in until there is already something to see is
+         the shape of a feature nobody finds. And its rows are named by the reader, not by a language
+         table, so "Installed only" says nothing about them (they are all installed, by construction)
+         and a language search that hides the button would leave a reader who typed one wondering
+         where it went. The search DOES still filter the rows themselves, by their names.
+         Suppressed under a search only when the reader is plainly looking for something else — i.e.
+         a query that matches no custom model at all AND matches something in another group. */
+      var customs=AVAIL.filter(function(e){return e.engine==='custom';});
+      var cmatch=customs.filter(function(e){return match(e,q);});
+      if(!q||cmatch.length||!AVAIL.some(function(e){return e.engine!=='custom'&&match(e,q);})){
+        var ch=document.createElement('div');ch.className='gh';ch.textContent='Custom';host.appendChild(ch);
+        host.appendChild(addRow());
+        cmatch.forEach(function(e){host.appendChild(customRow(e));});
+        // …and the shared wheel itself, LAST in its own group and only once it is here. It is the one
+        // thing under this heading that is a download rather than a row of a table, so it needs the
+        // Update and Remove buttons every other downloaded model has — without a row of its own the
+        // 31 MB would have been installable and never removable. Its `engine` keeps it out of the SUD
+        // group (models_registry.GENERIC_SUD), which is why it has to be drawn deliberately here.
+        var g=AVAIL.filter(function(e){return e.engine==='generic'&&e.installed;})[0];
+        if(g)host.appendChild(genericRow(g));}
       grp('SUD · spaCy','sud'); grp('UD · Stanza','stanza');
       /* …AND WHY EVERY STANZA MODEL WOULD BE INERT, said BEFORE a 400 MB download rather than after.
          Stanza emits UD and this app stores SUD, so parse._parse_stanza_ud_to_sud runs the conversion
@@ -2384,6 +2702,58 @@ class Api:
       FOCUS=''; if(!el)return;
       try{el.scrollIntoView({block:'nearest'});}catch(_){el.scrollIntoView();}
       el.classList.add('flash');}
+    /* ── the Custom group's own two row shapes ───────────────────────────────────────────────── */
+    function addRow(){var r=document.createElement('div');r.className='row addrow';r.setAttribute('role','button');r.tabIndex=0;
+      var p=document.createElement('span');p.className='plus';p.textContent='+';
+      var info=document.createElement('div');info.className='mi';
+      var nm=document.createElement('span');nm.className='nm';nm.textContent='Add custom model…';
+      var sub=document.createElement('small');
+      // The two facts a reader needs BEFORE the sheet, not inside it: that this is one parser many
+      // languages share, and (until it is here) that saying yes means a 31 MB download.
+      sub.textContent=GENERIC&&GENERIC.installed
+        ? 'One language of the generic parser, fitted on your own annotated sentences'
+        : ('Fetches the generic parser'+(GENERIC&&GENERIC.size?' ('+Math.round(GENERIC.size/1e6)+' MB)':'')+' the first time');
+      info.appendChild(nm);info.appendChild(sub);
+      r.appendChild(p);r.appendChild(info);
+      // …called with NO argument, deliberately: `onclick=openNew` would hand it the MouseEvent where
+      // it expects an entry to pre-fill from. It works only because a MouseEvent happens to have no
+      // `.slug` or `.label`, which is not a thing to rely on.
+      r.onclick=function(){openNew();}; r.onkeydown=function(ev){if(ev.key==='Enter'||ev.key===' '){ev.preventDefault();openNew();}};
+      return r;}
+    function genericRow(e){var r=document.createElement('div');r.className='row';r.setAttribute('data-mid',e.id);
+      var info=document.createElement('div');info.className='mi';
+      var meta=[e.version?('v'+e.version):null,e.size?(Math.round(e.size/1e6)+' MB'):null,
+                (GENERIC&&GENERIC.licence)||null].filter(Boolean).join(' · ');
+      var n=(GENERIC&&GENERIC.count)||0;
+      info.innerHTML='<span class="nm">'+esc(e.label||e.id)+'</span><small>'+esc(meta)+'</small>'
+        +'<small class="cav">The pipeline every custom model above is one language row of. '
+        +(n?('Removing it stops '+n+' custom model'+(n===1?'':'s')+' parsing; their fitted rows are kept and work again if it is reinstalled.')
+           :'Custom models are built from it.')+'</small>';
+      var right=document.createElement('div');right.className='right';
+      var tag=document.createElement('span');tag.className='pill';tag.textContent='Installed ✓';right.appendChild(tag);
+      if(e.update_available){var u=document.createElement('button');u.className='success sm';u.textContent='Update';
+        u.onclick=function(){downloadModel(e,r,u,'Update');};right.appendChild(u);}
+      var b=document.createElement('button');b.className='danger sm';b.textContent='Remove';
+      b.onclick=function(){removeModel(e,r);};right.appendChild(b);
+      r.appendChild(info);r.appendChild(right);return r;}
+    function customRow(e){var r=document.createElement('div');r.className='row';r.setAttribute('data-mid',e.id);
+      var info=document.createElement('div');info.className='mi';
+      var meta=[e.lang?('Language: '+e.lang):null,
+                e.basis==='file'?('Fitted on '+e.train_sents+' sentences'):'Not fitted'].filter(Boolean).join(' · ');
+      var sc=(e.uas!=null&&e.las!=null)?('<small class="sc">UAS <b>'+(+e.uas)+'</b> · LAS <b>'+(+e.las)+'</b></small>'):'';
+      info.innerHTML='<span class="nm">'+esc(e.label||e.id)+'</span><small>'+esc(meta)+'</small>'+sc
+        // ⚠ THE CAVEAT IS NOT OPTIONAL FURNITURE. These figures sit in the same column as every other
+        // model's, and for a model with no training file they are the generic parser's HELD-OUT
+        // average over twenty languages that are not this one. A number in that column with nothing
+        // saying what it measured is the single most misleading thing this window could show.
+        + (e.caveat?'<small class="cav">'+esc(e.caveat)+'</small>':'');
+      var right=document.createElement('div');right.className='right';
+      // Edit before Remove: the ordinary act first, the destructive one last and in its own colour.
+      var ed=document.createElement('button');ed.className='sec sm';ed.textContent='Edit';
+      ed.onclick=function(){openNew(e);};right.appendChild(ed);
+      var b=document.createElement('button');b.className='danger sm';b.textContent='Remove';
+      b.onclick=function(){removeModel(e,r);};right.appendChild(b);
+      r.appendChild(info);r.appendChild(right);return r;}
     function row(e){var row=document.createElement('div');row.className='row';row.setAttribute('data-mid',e.id);
       var info=document.createElement('div');info.className='mi';
       // On report ("whenever there is a newer version of a parser than what's installed, the Install
@@ -2483,6 +2853,141 @@ class Api:
         if(st.done){load(false);return;}
         setTimeout(tick,500);};
       tick();}
+    /* ══ THE NEW-CUSTOM-MODEL SHEET ═════════════════════════════════════════════════════════════
+       Two fields and one button. What makes it more than that is what it has to be honest about:
+       whether the 31 MB wheel is here yet, whether the named language is one of the 80 the embedding
+       table was already fitted for, and what the figures in the row it creates will actually mean. */
+    var EDITING='';      // the slug being edited, "" when the sheet is making a new model
+    var NEWLANG='';      // the ISO code the reader PICKED from the menu, "" for a free-text name
+    var NEWFILE='';      // the chosen training file's path, "" for none
+    var NEWFILENAME='';
+    var _lmItems=[],_lmIdx=-1;
+    // The same word-prefix rule the list search above uses and the app's own language picker uses:
+    // "eng" finds English, Engenni and Middle English, and no longer every name with those letters
+    // buried in the middle of a word.
+    function isoRows(){return window.ISO639_3||[];}
+    var _glot=null;
+    function glotName(c){ if(_glot===null){_glot={}; (window.GLOTTOLOG_NAME||'').split('\t').forEach(function(e){var i=e.indexOf('=');if(i>0)_glot[e.slice(0,i)]=e.slice(i+1);});} return _glot[c]||''; }
+    function isoLabel(e){return glotName(e[0])||e[2];}
+    function isoCode(e){return e[1]||e[0];}   // the canonical code the app keys on: 2-letter where the language has one
+    function newIntro(){
+      var d=document.getElementById('newintro');
+      if(EDITING){   // they have one already; what they need to know is what pressing Save will cost
+        d.innerHTML='Renaming is instant. The language embedding is re-fitted only if you point it at a <b>different training file</b> — or at the same one after editing it.';
+        return;}
+      var base='A custom model is one language of the <b>generic parser</b> — a pipeline trained on 80 SUD treebanks that reads your word classes and supplies the features and the tree. Each one is a single 128-value row fitted for a language of your choosing, so you can make as many as you like.';
+      if(GENERIC&&!GENERIC.installed)
+        base+=' The parser itself is fetched the first time'+(GENERIC.size?' ('+Math.round(GENERIC.size/1e6)+' MB)':'')+'; it is '+esc(GENERIC.licence||'')+', which is why it is downloaded rather than shipped with the app.';
+      d.innerHTML=base;}
+    function newFileHint(){
+      var h=document.getElementById('newfilehint'), min=(GENERIC&&GENERIC.min_sents)||30,
+          few=(GENERIC&&GENERIC.few_sents)||10;
+      // WITH A FILE, the thing worth saying is what the FIGURES will mean, since the fitting happens
+      // either way: the floor gates the SCORE, not the file. Said before Create rather than in the
+      // row afterwards, because it is the one thing the reader could still act on.
+      if(NEWFILE){ h.innerHTML='Fitted on these sentences. With <b>'+min+' or more</b> the row is fitted on most of them and scored on the rest, so its UAS/LAS is measured on data the fitting never saw; with fewer, all of them are used for the fitting and no figure is measured — about '+few+' is where the gain starts.'; return; }
+      // WHAT HAPPENS WITH NO FILE, said before the reader presses Create rather than in the row
+      // afterwards — and the answer is genuinely different for the 80 fitted languages, which is
+      // exactly the thing a reader cannot be expected to know.
+      if(NEWLANG&&GENERIC&&(GENERIC.fitted_langs||[]).indexOf(NEWLANG)>=0){
+        h.innerHTML="Without a file this model uses the row the generic parser already learnt for <b>"+esc(NEWLANG)+"</b>, one of its 80 training languages. It will parse — but the figures in the list will be the parser's held-out average over 20 <i>unseen</i> languages, not a measurement on your data.";
+        return;}
+      h.innerHTML="Around <b>"+few+" annotated sentences</b> is enough to fit the language row, and "+min+" or more also buys a held-out UAS/LAS. Without any, the row is left unfitted — which upstream measured costing about 4 LAS against carrying no language channel at all, so the model will parse, badly.";}
+    function newLangLine(){
+      var el=document.getElementById('newlang');
+      if(!NEWLANG){ el.textContent=document.getElementById('newname').value.trim()?'Not a language name — that is fine, the model is simply called that.':''; return; }
+      var fitted=GENERIC&&(GENERIC.fitted_langs||[]).indexOf(NEWLANG)>=0;
+      el.innerHTML="Language code <b>"+esc(NEWLANG)+"</b> — "+(fitted?"already one of the parser's 80 training languages.":"new to the parser, so it needs a training file.");}
+    function lmClose(){document.getElementById('newlm').hidden=true;_lmItems=[];_lmIdx=-1;}
+    function lmFilter(q){
+      q=(q||'').trim().toLowerCase(); var box=document.getElementById('newlm');
+      if(!q||!isoRows().length){lmClose();return;}
+      var wp=wpRe(q),pre=[],sub=[];
+      for(var i=0;i<isoRows().length;i++){var e=isoRows()[i],nm=isoLabel(e).toLowerCase();
+        if(e[0]===q||e[1]===q||nm.indexOf(q)===0)pre.push(e);
+        else if(wp.test(nm))sub.push(e);
+        if(pre.length>=40)break;}
+      _lmItems=pre.concat(sub).slice(0,40);_lmIdx=-1;
+      box.innerHTML='';
+      if(!_lmItems.length){box.innerHTML='<div class="note">No matching language — press Create to use this as a plain name.</div>';box.hidden=false;return;}
+      _lmItems.forEach(function(e,k){var b=document.createElement('button');b.type='button';
+        b.innerHTML='<span class="nm2">'+esc(isoLabel(e))+'</span><span class="cd">'+esc(e[1]?e[1]+' · '+e[0]:e[0])+'</span>';
+        b.onmousedown=function(ev){ev.preventDefault();};   // don't blur the field before the click lands
+        b.onclick=function(){lmPick(e);};
+        b.onmouseenter=function(){lmHi(k);};
+        box.appendChild(b);});
+      box.hidden=false;box.scrollTop=0;}
+    function lmHi(k){_lmIdx=k;var bs=document.getElementById('newlm').querySelectorAll('button');
+      for(var i=0;i<bs.length;i++)bs[i].classList.toggle('hi',i===k);
+      if(bs[k])bs[k].scrollIntoView({block:'nearest'});}
+    function lmPick(e){document.getElementById('newname').value=isoLabel(e);NEWLANG=isoCode(e);lmClose();newLangLine();newFileHint();}
+    /* ONE SHEET FOR BOTH, pre-filled when editing. The two acts ask for exactly the same three
+       answers — a name, a language, a training file — so a second sheet would be the same form twice,
+       drifting apart at the first change to either. `EDITING` is the slug being edited, "" for a new
+       model, and it is the only thing the Save handler branches on. */
+    function openNew(e){
+      EDITING=(e&&e.slug)||'';
+      NEWLANG=(e&&e.lang)||'';NEWFILE=(e&&e.train_file)||'';NEWFILENAME=(e&&e.train_name)||'';
+      var n=document.getElementById('newname');n.value=(e&&e.label)||'';
+      var f=document.getElementById('newfile');
+      f.textContent=NEWFILENAME||'No file'; f.className='fname'+(NEWFILE?'':' none');
+      document.getElementById('newclear').hidden=!NEWFILE;
+      var err=document.getElementById('newerr');err.hidden=true;err.textContent='';
+      var go=document.getElementById('newgo');go.disabled=false;go.textContent=EDITING?'Save':'Create';
+      document.getElementById('newh').textContent=EDITING?'Edit custom model':'New custom model';
+      newIntro();newLangLine();newFileHint();lmClose();
+      document.getElementById('newscrim').hidden=false;
+      setTimeout(function(){n.focus();n.select();},0);}
+    function closeNew(){document.getElementById('newscrim').hidden=true;lmClose();}
+    (function(){
+      var n=document.getElementById('newname');
+      n.addEventListener('input',function(){
+        // TYPING CLEARS THE PICKED CODE. The code is a claim the reader made by CHOOSING a row; once
+        // the text no longer is that row's name, the claim is stale, and silently keeping it would
+        // fit "Wolof" onto a model the reader has since renamed to something else entirely.
+        NEWLANG='';lmFilter(n.value);newLangLine();newFileHint();});
+      n.addEventListener('keydown',function(ev){
+        var box=document.getElementById('newlm');
+        if(ev.key==='ArrowDown'&&!box.hidden){ev.preventDefault();lmHi(Math.min(_lmIdx+1,_lmItems.length-1));}
+        else if(ev.key==='ArrowUp'&&!box.hidden){ev.preventDefault();lmHi(Math.max(_lmIdx-1,0));}
+        else if(ev.key==='Enter'){ if(!box.hidden&&_lmIdx>=0){ev.preventDefault();lmPick(_lmItems[_lmIdx]);} else {ev.preventDefault();createNew();} }
+        else if(ev.key==='Escape'){ if(!box.hidden){ev.stopPropagation();lmClose();} }});
+      n.addEventListener('blur',function(){setTimeout(lmClose,120);});
+      document.getElementById('newpick').onclick=async function(){
+        if(!api())return; var r; try{r=await api().pick_conllu_file();}catch(e){return;}
+        if(!r||r.cancelled)return;
+        NEWFILE=r.path||'';NEWFILENAME=r.name||'';
+        var f=document.getElementById('newfile');f.textContent=NEWFILENAME||'No file';f.className='fname'+(NEWFILE?'':' none');
+        document.getElementById('newclear').hidden=!NEWFILE; newFileHint();};
+      document.getElementById('newclear').onclick=function(){NEWFILE='';NEWFILENAME='';
+        var f=document.getElementById('newfile');f.textContent='No file';f.className='fname none';
+        document.getElementById('newclear').hidden=true;newFileHint();};
+      document.getElementById('newcancel').onclick=closeNew;
+      document.getElementById('newgo').onclick=createNew;
+      document.getElementById('newscrim').addEventListener('mousedown',function(ev){if(ev.target===this)closeNew();});
+    })();
+    async function createNew(){
+      var name=document.getElementById('newname').value.trim();
+      var err=document.getElementById('newerr'), go=document.getElementById('newgo');
+      function fail(msg){err.textContent=msg;err.hidden=false;p.reset();}
+      if(!name){err.textContent='Give the model a name.';err.hidden=false;return;}
+      err.hidden=true; go.disabled=true;
+      var p=progressButton(go,EDITING?'Save':'Create');
+      var r; try{r=EDITING?await api().update_custom_model(EDITING,name,NEWLANG,NEWFILE)
+                          :await api().create_custom_model(name,NEWLANG,NEWFILE);}
+             catch(e){return fail(String(e));}
+      if(r.error)return fail(r.error);
+      var job=r.job_id;
+      var tick=async function(){var st; try{st=await api().model_job_status(job);}catch(e){return;}
+        if(st.error)return fail(st.error);
+        if(st.pct!=null)p.setPct(st.pct); if(st.note)p.setText(st.note);
+        if(st.done){closeNew();
+          // The main window's model dropdown gains the new row too — it is immediately selectable,
+          // and a model you have to reopen a window to see is one you assume did not get made.
+          try{api().child_refresh_models();}catch(_){}
+          load(false);return;}
+        setTimeout(tick,500);};
+      tick();}
     document.getElementById('q').addEventListener('input',draw);
     // The toggle re-filters IN PLACE — the listing is already loaded, so it costs no bridge call.
     (function(){var b=document.getElementById('instonly');
@@ -2490,7 +2995,14 @@ class Api:
         b.classList.toggle('on',INST_ONLY); b.setAttribute('aria-pressed',String(INST_ONLY)); draw();};})();
     document.getElementById('refresh').onclick=function(){load(true);};
     document.getElementById('close').onclick=function(){try{api().close_child_window('models');}catch(_){}};
-    document.addEventListener('keydown',function(e){if(e.key==='Escape'){e.preventDefault();try{api().close_child_window('models');}catch(_){}}});
+    // ESCAPE CLOSES THE INNERMOST THING THAT IS OPEN. With the new-model sheet up it dismisses the
+    // SHEET, not the window behind it: a modal that shares its dismissal key with its own parent
+    // throws away a half-typed form and the window it was in, on one keystroke meant for the form.
+    // (The name field's own handler takes Escape first when its language menu is open — same rule,
+    // one level further in.)
+    document.addEventListener('keydown',function(e){if(e.key!=='Escape')return; e.preventDefault();
+      if(!document.getElementById('newscrim').hidden){closeNew();return;}
+      try{api().close_child_window('models');}catch(_){}});
     window.addEventListener('pywebviewready',function(){load(false);});
     if(api())load(false);
     </script>

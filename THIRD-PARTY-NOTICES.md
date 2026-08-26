@@ -321,6 +321,34 @@ is the authoritative statement for that file.
 | `sud_vec_lzh_128d.npz` | floret over the [kanripo](https://github.com/kanripo) `KR*` corpora | ⚠ upstream corpus declares none — released as a derived model |
 | rotation anchors (used to fit, never redistributed) | Apte via [CDSL](https://www.sanskrit-lexicon.uni-koeln.de/), [MUSE](https://github.com/facebookresearch/MUSE) dictionaries, Wiktionary via [kaikki.org](https://kaikki.org) | CC BY-SA (Apte, Wiktionary); the fitted output is a matrix of floats |
 
+## Generic parser (`xx_sud_generic`) — FETCHED AT RUNTIME, never shipped
+
+The pipeline every **custom model** in this app is one embedding row of (`app/generic_models.py`):
+a morphologiser that predicts FEATS from UPOS feeding a dependency parser that reads UPOS, decomposed
+FEATS and a trainable per-language embedding, trained on **80 SUD 2.18 treebanks** and published as
+`xx_sud_generic-0.1.0-py3-none-any.whl` under the **`generic-v0.1.0`** release of
+[SunflowerAI/sud-spacy-parsers](https://github.com/SunflowerAI/sud-spacy-parsers). The app fetches it
+onto the end user's own machine (31 MB), into
+`~/Library/Application Support/SUD Workbench/site-packages/`, the first time a custom model is made.
+
+**The reason for fetching rather than shipping is a licence restriction, and it is the whole reason.**
+The wheel is **CC BY-NC-SA 4.0**: 24 of its 80 training treebanks are NonCommercial — 276 891 of
+880 919 training tokens, 31 % — so the union of the corpus licences carries a NonCommercial term, and
+relabelling the wheel does not change what the training data permits. `packaging/make_portable.sh`
+pip-installs the model wheels it distributes *straight into the app it ships*, so that term would
+attach to the whole bundle. It is exactly the term the bundled English parser was selected to avoid
+(see `en_sud_ewt_gum` below: CC BY-SA only because GUM's five NonCommercial genres are excluded from
+it upstream). Nothing in `packaging/` references this wheel, and `models_registry.GENERIC_SUD` keeps
+it out of every listing that could offer it as an ordinary language model.
+
+What a custom model itself stores is **128 floats per embedding table**, fitted on the user's own
+annotated sentences with every other parameter of the wheel frozen. No part of the wheel is copied,
+redistributed or modified on disk; nothing leaves the machine.
+
+| Component | Origin | Licence |
+|---|---|---|
+| `xx_sud_generic` 0.1.0 | [SunflowerAI/sud-spacy-parsers](https://github.com/SunflowerAI/sud-spacy-parsers) `generic-v0.1.0`, trained over 80 [SUD 2.18](https://surfacesyntacticud.org/data) treebanks | **CC BY-NC-SA 4.0** (union: 24 of the 80 treebanks are NonCommercial) |
+
 ## Bundled pip dependencies — the exceptions to "pip deps aren't listed"
 
 Four `pip` dependencies break the "not vendored, not listed" rule stated at the top of this file.

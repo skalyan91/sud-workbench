@@ -38,7 +38,7 @@ function prefTranslit(lang){ const t=PREFS.translit;
 function prefStored(lang){ return (PREFS.stored&&PREFS.stored[lang])||""; }
 let _prefsT=null;
 function savePrefs(){ if(!hasBridge())return;
-  PREFS.show={colour:show.colour,labels:show.labels,pos:show.pos,arrows:show.arrows,mergePunct:show.mergePunct,wrap:show.wrap,grids:show.grids,avm:show.avm}; PREFS.notation=notation; PREFS.paged=PAGED; PREFS.autoregen=AUTOREGEN;
+  PREFS.show={colour:show.colour,labels:show.labels,pos:show.pos,arrows:show.arrows,mergePunct:show.mergePunct,wrap:show.wrap,grids:show.grids,avm:show.avm}; PREFS.notation=notation; PREFS.paged=PAGED; PREFS.autoregen=AUTOREGEN; PREFS.pipeline=Object.assign({},PIPELINE);
   clearTimeout(_prefsT); _prefsT=setTimeout(()=>{ try{ window.pywebview.api.save_prefs(PREFS); }catch(e){} },300); }   // debounced
 async function loadPrefs(){ if(!hasBridge())return; let p; try{ p=await window.pywebview.api.get_prefs(); }catch(e){ return; } if(!p||typeof p!=="object")return;
   PREFS.ortho=(p.ortho&&typeof p.ortho==="object")?p.ortho:{}; PREFS.translit=(p.translit&&typeof p.translit==="object")?p.translit:{}; PREFS.stored=(p.stored&&typeof p.stored==="object")?p.stored:{};
@@ -48,12 +48,17 @@ async function loadPrefs(){ if(!hasBridge())return; let p; try{ p=await window.p
   if(typeof p.notation==="string"&&p.notation){ notation=p.notation; }
   if(typeof p.paged==="boolean"){ PAGED=p.paged; }   // only an explicit stored choice moves it off the paged default
   if(typeof p.autoregen==="boolean"){ AUTOREGEN=p.autoregen; }   // …same shape: only an explicit stored choice moves it off the ON default, so a prefs file written before this existed leaves it on
+  // …and the pipeline arms, per key rather than wholesale: a prefs file written before an arm existed
+  // simply has no opinion about it and it stays ON, which is the only reading that lets a new arm be
+  // added without silently switching itself off for everyone who already has a prefs file.
+  if(p.pipeline&&typeof p.pipeline==="object"){ PIPE_ARMS.forEach(a=>{ if(typeof p.pipeline[a]==="boolean") PIPELINE[a]=p.pipeline[a]; }); }
   if(typeof applyPageMode==="function") applyPageMode();   // reflect it on #doc + the toolbar pill (the re-render below repaints the sheets)
   if(typeof applyTbMode==="function") applyTbMode(typeof p.tbmode==="string"?p.tbmode:"icon");   // restore the titlebar display mode
   const sel=document.getElementById("convSel"); if(sel)sel.value=notation; syncNotation();
   document.querySelectorAll('#toggles input[type="checkbox"][data-t]').forEach(cb=>{ const k=cb.dataset.t; if(k in show)cb.checked=show[k]; });
   const gc=document.querySelector('[data-t="grids"]'); if(gc)gc.checked=show.grids;
   const ar=document.querySelector("#autoregenChk input"); if(ar)ar.checked=AUTOREGEN;   // …and the options bar's own checkbox, which lives outside #toggles and so is not covered by the data-t sweep above
+  document.querySelectorAll("#pipePop input[data-arm]").forEach(cb=>{ cb.checked=PIPELINE[cb.dataset.arm]!==false; });   // …and the Pipeline drawer's own ten, which live in their own pop for the same reason
   // item 17: restore the custom relation colours + the light/dark link state, then repaint the override <style>
   PREFS.relColours=(p.relColours&&typeof p.relColours==="object")?p.relColours:undefined;
   PREFS.relColLink=(typeof p.relColLink==="boolean")?p.relColLink:undefined;   // only an explicit stored choice persists; unset → linked (relColLinked() default ON)
@@ -84,7 +89,12 @@ function syncModelToLang(lang){ const selEl=document.getElementById("modelSel");
   if(model && modelLang(model)===lang) return;   // current parser already speaks this language → leave it
   const id=lang?(MODELLANG[lang]||""):"";        // an installed model whose language matches (MODELLANG is keyed by the same UD code form), else None
   model=id; if(selEl){ selEl.value=id; if(selEl.value!==id){ model=""; selEl.value=""; } }   // programmatic .value assignment does NOT fire onchange → no reentrancy
-  syncMenu(); if(typeof refreshModelFeatsInventory==="function") refreshModelFeatsInventory(); }   // …and since onchange never fires here, this IS the choke point for a programmatic model change (js/io/bridge.js) — #modelSel's own onchange (js/ui/wiring.js) covers the manual pick
+  syncMenu(); if(typeof refreshModelFeatsInventory==="function") refreshModelFeatsInventory();
+  // …and the Pipeline drawer's own per-model state, for the same reason and at the same moment. It
+  // was missing here, and the boot order is what made that bite: init.js calls syncPipeAvail once,
+  // while `model` is still "", and the language auto-detect then sets the model through THIS
+  // function — so the drawer went on describing a model that had since been replaced.
+  if(typeof syncPipeAvail==="function") syncPipeAvail(); }   // …and since onchange never fires here, this IS the choke point for a programmatic model change (js/io/bridge.js) — #modelSel's own onchange (js/ui/wiring.js) covers the manual pick
 let MODELLANG={};   // language code → an installed model id, for auto-selecting a parser when a file is opened
 // Language authority order (see maybeAutoDetectLang): (1) a filename `<langcode>_…` prefix pins the
 //  language and overrides everything; else (2) the Kyoto XPOS ⇒ lzh heuristic; else (3) fastText. The chosen
@@ -552,6 +562,93 @@ let AUTONUM=true;   // continue sentence-ID numbering when sentences are inserte
    back on lets the model quietly rewrite fields in the next session — which is the very thing the
    reader turned it off to prevent. A preference against automatic edits has to outlive the window. */
 let AUTOREGEN=true;
+/* ── THE PIPELINE: which arms of the parse the reader has left switched on ─────────────────────────
+   The options bar's Pipeline drawer. Ten arms, ALL ON by default — the resting state is "the model
+   does everything it can", exactly as before this existed — persisted in PREFS like AUTOREGEN and for
+   the same reason: a preference against the parser filling in a column has to outlive the window, or
+   it comes back on and quietly refills it in the next session.
+   ⚠ AN ARM IS NAMED AFTER WHAT IT FILLS IN, not after a spaCy component, because the column is what
+   the reader can check afterwards. The first eight are the parser's and travel to the bridge on every
+   parse call (see PIPE_BACKEND / pipeArms); the last two never leave the frontend:
+     · translit — js/lang/translit.js's own pass. Not the parser having an opinion, and it runs with
+       no model at all, which is the same line AUTOREGEN's note above draws for the same reason.
+     · gloss    — the FEATS→MGloss / translation-alignment passes (js/io/bridge.js, app/gloss_align.py).
+   ⚠ AND AN ARM THE MODEL DOES NOT IMPLEMENT IS GREYED, NOT SILENTLY IGNORED. `PIPE_AVAIL` is the
+   answer `Api.model_arms` gives for the CURRENT model — the generic parser behind every custom model
+   ships no tokeniser, no tagger, no lemmatiser and no XPOS, deliberately (see app/generic_models.py's
+   GENERIC_ARMS for what upstream measured before leaving each one out) — and a greyed arm still does
+   SOMETHING: the app falls back to what it does with no model at all, a whitespace split for
+   tokenisation and the rule splitter for sentences. What is missing is the model's opinion. */
+const PIPE_ARMS=["tokenise","sentence","lemma","upos","xpos","feats","syntax","sudmisc","translit","gloss"];
+const PIPE_BACKEND=["tokenise","sentence","lemma","upos","xpos","feats","syntax","sudmisc"];   // …the eight the bridge is told about
+let PIPELINE={}; PIPE_ARMS.forEach(a=>{ PIPELINE[a]=true; });
+/* Arms the CURRENT model implements. ⚠ **null MEANS "DON'T KNOW" AND IS THE ONLY SAFE UNKNOWN** —
+   every reader treats it as "assume all", so nothing greys before the answer lands.
+   ⚠️ AND AN EMPTY ARRAY IS NOT AN ANSWER. `Api.model_arms` returns `[]` for a model it could not
+   resolve or could not load, and `[]` is TRUTHY: read as a real answer it says "this model implements
+   nothing", which greys and DISABLES all eight backend arms at once — with no way back, because
+   re-ticking the arm that would fix it is itself disabled. That is the reported "turning off Word
+   classes disables everything else, and then I can't turn word classes back on". Every model that
+   loads has at least tokenise and sentence, so an empty list is never a true answer about a real
+   model; it is always the question having failed. It becomes null here. */
+let PIPE_AVAIL=null;
+let PIPE_READS_UPOS=false;   // the model takes the word classes as INPUT (the generic parser does) — see paintPipe, js/ui/wiring.js
+let PIPE_DEPS={};      // {arm: [arms it reads]} for the CURRENT model — the cascade. Model-specific: xx_sud_generic's parser reads the FEATS its morphologiser just wrote; en_sud_ewt_gum's parser runs BEFORE its morphologiser and reads neither. Both answers come from Api.model_arms, which reads them off the loaded pipeline
+/* ── THE CASCADE ───────────────────────────────────────────────────────────────────────────────────
+   Switching an arm off makes everything that READS it inert too, so a reader never gets an answer
+   computed from a column they just said they did not want. Run to a FIXPOINT, so a chain
+   (upos → feats → syntax → sudmisc on the generic parser) collapses in one pass rather than one arm
+   per parse. `parse._pipe_plan` applies the identical graph to the answer — the drawer showing one
+   thing and the parse doing another is the failure this is written to make impossible. */
+let _pipeEff=null;   // memoised: pipeOn() is called per TOKEN by the gloss passes, and the inputs change only when a box is ticked or the model changes — both of which call pipeInvalidate()
+function pipeInvalidate(){ _pipeEff=null; }
+/* The four arms that ARE a CoNLL-U column, and so can be supplied by the annotator instead of by the
+   model. Tokenisation and sentence splitting are not columns; the two frontend-only arms are not the
+   model's to supply either way. */
+const PIPE_COLUMN=["upos","xpos","lemma","feats"];
+/* ⚠ **AN ARM YOU SWITCH OFF IS ONE YOU HAVE TAKEN OVER**, so it still SATISFIES everything that reads
+   it — the parse reads yours instead of the model's. That is the difference between the two answers
+   this returns. `writes` is "the model fills this column", which decides what runs and what comes
+   back blank; `have` is "there is a value here for a component to read", which is what the cascade
+   asks. An arm goes inert only where what it reads has NO source at all: the model not writing it and
+   nobody else supplying it.
+   Measured worth of the difference, on held-out Basque through this app's own scorer: a parse given
+   the annotator's FEATS as well as their UPOS scores LAS 53.27 against 38.32 without. */
+function pipeEffective(){ if(_pipeEff) return _pipeEff;
+  const writes={},have={};
+  PIPE_ARMS.forEach(a=>{
+    const ticked=PIPELINE[a]!==false;
+    // A BACKEND arm the model does not implement is off whatever the tick says. The two
+    // frontend-only arms (translit, gloss) are never the model's to lack, so availability
+    // never applies to them — see PIPE_BACKEND.
+    const modelHas=(PIPE_AVAIL===null)||(PIPE_BACKEND.indexOf(a)<0)||(PIPE_AVAIL.indexOf(a)>=0);
+    writes[a]=ticked&&modelHas;
+    // …and the annotator owns a COLUMN arm they have unticked, or one this model reads rather than
+    // predicts (word classes on the generic parser — "you supply these").
+    const mine=PIPE_COLUMN.indexOf(a)>=0 && (!ticked || (!modelHas && a==="upos" && PIPE_READS_UPOS));
+    have[a]=writes[a]||mine; });
+  for(let pass=0;pass<PIPE_ARMS.length;pass++){ let moved=false;
+    for(const a in PIPE_DEPS){ if(writes[a] && (PIPE_DEPS[a]||[]).some(r=>!have[r])){ writes[a]=false; have[a]=false; moved=true; } }
+    if(!moved) break; }
+  return (_pipeEff={writes:writes,have:have}); }
+/* The list a parse call sends. An arm the MODEL cannot do is dropped whether or not its box is
+   ticked: the box is greyed, so a stale `true` under it is a value the reader never chose, and
+   sending it would ask the backend for something it would have to decline anyway. Arms the cascade
+   has made inert are dropped for the same reason. The two frontend-only arms never travel. */
+function pipeArms(){ const w=pipeEffective().writes; return PIPE_BACKEND.filter(a=>w[a]); }
+function pipeOn(arm){ return pipeEffective().writes[arm]!==false; }
+/* The columns the annotator is handing in for this parse: every COLUMN arm the model is not writing,
+   taken off the tokens the caller already has. Only arms something in THIS model actually READS are
+   worth sending (the values of `PIPE_DEPS`) — anything else would be data the pipeline never looks
+   at. `upos` still travels separately where it is the retag constraint; the backend folds the two
+   together (`parse.parse_pretokenized`). Null when there is nothing to say. */
+function pipeGiven(tokens){ if(!tokens||!tokens.length) return null;
+  const reads=new Set(); for(const a in PIPE_DEPS)(PIPE_DEPS[a]||[]).forEach(r=>reads.add(r));
+  const w=pipeEffective().writes, out={};
+  PIPE_COLUMN.forEach(a=>{ if(w[a]||!reads.has(a))return;
+    const col=tokens.map(t=>String((a==="upos"?t.upos:a==="xpos"?t.xpos:a==="lemma"?t.lemma:t.feats)||""));
+    if(col.some(v=>v&&v!=="_")) out[a]=col; });
+  return Object.keys(out).length?out:null; }
 // transliteration is a toggleable layer; in the real app each token's `translit` is produced by
 // wiktra (github.com/twardoch/wiktra2 — Transliterator().tr(form, to_sc="Latn"), 514 langs / 102 scripts)
 // and cached on the token. Here it is pre-filled on the sample tokens.

@@ -126,6 +126,7 @@ async function fillTranslitCSL(){
   if(any){ if(typeof invalidateDiaCache==="function") invalidateDiaCache(); preserveScroll(renderDoc); }
   return any; }
 async function fillTranslit(){ if(!hasBridge()||!DOCLANG) return;   // transliteration is enabled only when a model sets the language
+  if(typeof pipeOn==="function"&&!pipeOn("translit")) return;   // the options bar's Pipeline drawer. Gated at the ONE entry point every caller goes through, rather than at each of them, so a new call site inherits the switch. Not the parser's own work (it runs with no model at all) — which is why it is a frontend-only arm and never travels to the bridge; see PIPELINE, js/core/prefs.js
   if(TRANSLIT_SCHEME==="csl"&&isSanskritLang()) return void await fillTranslitCSL();
   let any=false;
   const same=(!TRANSLIT_SCHEME||!STORED_SCHEME||STORED_SCHEME===TRANSLIT_SCHEME);   // is the row showing the scheme the file stores?

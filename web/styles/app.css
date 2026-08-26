@@ -2166,6 +2166,11 @@
   .modelrow .mi .mts{font-variant-numeric:tabular-nums}   /* training-set size; empty until the background sweep resolves it */
   .modelrow .mi .mts:empty{display:none}
   .modelrow .mi .mts b{font-weight:600}   /* the FIGURE carries the emphasis, not its caption */
+  .modelrow .mi .msc{font-size:11.5px; color:var(--head); font-variant-numeric:tabular-nums}   /* a custom model's UAS/LAS — the same treatment the native window's .sc gives the per-model figures */
+  .modelrow .mi .msc b{font-weight:600}
+  /* …and what those figures were measured on. WRAPPED, unlike the single-line meta rows above: the
+     whole value of a caveat is the sentence, and half of one is worse than none. */
+  .modelrow .mi .mcav{white-space:normal; line-height:15px}
   .mgroup-h{font-size:11px; font-weight:700; letter-spacing:.04em; text-transform:uppercase; color:var(--muted); margin:12px 0 2px}
   /* the Manage Models filter row: the language search takes the space, the "Installed only" toggle
      takes only what its label needs. `align-items:stretch` so the button matches the field's height

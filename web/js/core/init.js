@@ -74,7 +74,7 @@ function bootState(){
     setTitle(); renderDoc(); clearSelToBlock(0,false); settleAlign();   // item 9: nothing selected; the reading focus starts on the first sentence (a no-op on an empty document — clearSelToBlock range-checks the index) and restoreScrollPos below owns the viewport
     if(DOC.length&&st)restoreScrollPos(st.scroll);   // restore the launch file's remembered reading position
     setTimeout(captureViewSnapshot,4000);   // …and remember THIS view for the next launch, once the render, the fonts and the transliteration passes have all settled
-    Promise.resolve(populateModels()).then(()=>{ maybeAutoDetectLang(); refreshModelFeatsInventory(); });   // fill the dropdown, then let fastText decide the language (authoritative) and drive the matching parser; refreshModelFeatsInventory covers a model already restored from the launch state (js/io/bridge.js), not just a later manual pick (js/ui/wiring.js's own call)
+    Promise.resolve(populateModels()).then(()=>{ maybeAutoDetectLang(); refreshModelFeatsInventory(); syncPipeAvail(); });   // fill the dropdown, then let fastText decide the language (authoritative) and drive the matching parser; refreshModelFeatsInventory and syncPipeAvail both cover a model already restored from the launch state (js/io/bridge.js), not just a later manual pick (js/ui/wiring.js's own call)
   }).catch(e=>console.error("get_state failed",e));
   try{ window.pywebview.api.list_models(true); }catch(e){}   // refresh the available-models list freshly at launch
 }

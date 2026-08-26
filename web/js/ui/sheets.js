@@ -217,14 +217,28 @@ function sheetInsert(index){
   const err=m=>{ errEl.textContent=m||""; };
   let LANGS=null;   // {installed,others} once Api.insert_languages answers (below); null = still loading
   const PARS=[];    // {row,on,sel,ta,note,sync} per parallel-text field
-  const parserOf=code=>(LANGS&&LANGS.installed.find(e=>e.code===code))||null;
+  // …the ordinary parser for a language, for annotating a translation tier that HAS one. Never a
+  // custom model: this is the app choosing on the reader's behalf, which is the one thing a custom
+  // model is deliberately never eligible for (models_registry.installed_by_language says the same).
+  const parserOf=code=>(LANGS&&LANGS.installed.find(e=>e.code===code&&!e.custom))||null;
   // The languages a parallel text may be in — the rule above, as a list. A translation tier is shown with
   // whatever parser it HAS (same row shape as `installed`), so one select builder covers both cases.
   const parLangs=()=>ctx.hasSentences
     ? ctx.transLangs.map(t=>{ const g=parserOf(t.code)||{};
         return {code:t.code,name:t.name||g.name||t.code,model:g.model||"",label:g.label||""}; })
-    : (LANGS?LANGS.installed.concat(LANGS.others):[]);
-  const optRow=(host,e)=>{ const o=document.createElement("option"); o.value=e.code; o.textContent=(e.name||e.code)+" ("+e.code+")";
+    // A parallel text is written as `# text_LANG`, so a row with no language code cannot serve one —
+    // which a custom parser built for a register or an author may well have. It stays offered for the
+    // MAIN text, where the only language at stake is the document's own.
+    : (LANGS?LANGS.installed.concat(LANGS.others).filter(e=>e.code):[]);
+  /* A CUSTOM parser's row is named by the MODEL, because that is what tells it apart from the ordinary
+     parser for the same language sitting beside it in the same group — two rows both reading "English
+     (en)" would be a coin toss. Its language code still trails it where it has one, and a model built
+     for a register or an author with no code simply shows its name.
+     Two options may now share a `value` (the language code), which is fine: a <select> tracks
+     selectedIndex, `selInfo` reads the model off the option actually selected, and the code is still
+     what `submit` writes as the text's language. */
+  const optRow=(host,e)=>{ const o=document.createElement("option"); o.value=e.code;
+    o.textContent=e.custom?((e.label||e.name)+(e.code?" ("+e.code+")":"")):((e.name||e.code)+" ("+e.code+")");
     o.dataset.model=e.model||""; o.dataset.label=e.label||""; host.appendChild(o); return o; };
   // Installed-first (item 7a): the parsers you actually have, in their own group at the top, then everything
   // else. Each option carries its model id, so the note under the field can name the parser that will run.
@@ -368,12 +382,16 @@ function sheetInsert(index){
       // One field per language: two fields in the same language would write the same `# text_LANG` twice
       // and the second would silently replace the first.
       if(seen[lang]){ err("Two parallel texts are in the same language."); p.sel.focus(); return; }
-      seen[lang]=1; parallels.push({lang,text:txt}); }
+      seen[lang]=1; parallels.push({lang,text:txt,model:selInfo(p.sel).model||""}); }
     if(!mainEnabled&&!parallels.length){ err("Nothing to insert."); return; }
     // adoptLang: an empty document takes the language this dialog chose (and the parser that goes with
     // it) — see adoptInsertLang, which must run BEFORE the first sentence is parsed.
     const adopt=!ctx.hasSentences, mainInfo=selInfo(mainSel);
-    const payload={index,main:{enabled:mainEnabled,lang:mainLang(),text:mainEnabled?text:"",adoptLang:adopt},parallels};
+    // …and the MODEL each field chose travels with it. Python used to recompute it from the language
+    // (`_model_for_language`), which cannot name a custom model at all — so the note under the field
+    // promised one parser and the insert quietly ran another.
+    const payload={index,main:{enabled:mainEnabled,lang:mainLang(),text:mainEnabled?text:"",
+                               adoptLang:adopt,model:mainInfo.model||""},parallels};
     /* ITEM 8 — THE LANGUAGE CHOSEN HERE IS THE ONE THAT PARSES. Adopt it ON THE CLICK, through the same
        adoptInsertLang the payload path uses (never a second language→model route), so the model menu shows
        the choice immediately instead of only when the Python worker's round trip lands — that trip
@@ -385,7 +403,10 @@ function sheetInsert(index){
        whitespace-tokenised, which is the other half of the same promise.
        Only when the document is EMPTY: that is the only case with a picker, and a document that already
        has sentences must keep its own language and parser. */
-    if(adopt&&mainEnabled&&payload.main.lang) adoptInsertLang(payload.main.lang,mainInfo.model||"");
+    // `|| mainInfo.model`: a custom parser may carry NO language code (a register, an author), and
+    // there is still a parser to adopt. adoptInsertLang leaves the document's language alone when it
+    // is handed nothing, rather than defaulting it to English.
+    if(adopt&&mainEnabled&&(payload.main.lang||mainInfo.model)) adoptInsertLang(payload.main.lang,mainInfo.model||"");
     closeSheet();   // every value is already read off the fields the close tears down
     /* The document's storage script and whether it HAS one yet travel with the payload: Python decides
        whether the typed notation can be stored (Api.child_insert_text), and only this side knows both.

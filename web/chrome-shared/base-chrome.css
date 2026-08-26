@@ -554,6 +554,15 @@
   .drawer-btn svg{width:9px; height:6px; opacity:.55; transition:transform .18s}
   .drawer.open .drawer-btn{border-color:var(--accent); background:var(--accent-weak); box-shadow:0 0 0 3px var(--accent-weak)}
   .drawer.open .drawer-btn svg{transform:rotate(180deg)}
+  /* THE PIPELINE DRAWER HANGS THE OTHER WAY. Its trigger sits on the RIGHT of the options bar (past
+     the spring, beside Auto-number/Auto-regenerate), so a pop anchored `left:0` like the four on the
+     left runs off the window edge — measured at ~150px of it clipped on a 1280px window, with no
+     horizontal scroll anywhere to reveal it, since `.viewbar` is a fixed overlay. Anchoring the pop's
+     RIGHT edge to the trigger's mirrors the geometry rather than clamping it: the pop grows leftward
+     into the bar it already occupies. `left:auto` is stated as well as `right:0` because the base rule
+     above sets `left:0`, and two competing offsets on one absolutely-positioned box resolve by
+     writing direction rather than by the later declaration — in an RTL window the wrong one would win. */
+  #pipeDrawer .drawer-pop{left:auto; right:0}
   .drawer-pop{position:absolute; top:calc(100% + 6px); left:0; z-index:200; width:max-content; min-width:0; background:var(--menu-bg,rgba(250,250,252,.92));
     border:.5px solid var(--pill-border); border-radius:var(--r-menu,13px); box-shadow:var(--lg-menu-shadow,0 0 2px rgba(0,0,0,.1),0 0 25px rgba(0,0,0,.16)); padding:10px 12px; display:none; flex-direction:column; gap:10px;
     -webkit-backdrop-filter:blur(24px) saturate(180%); backdrop-filter:blur(24px) saturate(180%)}
@@ -580,6 +589,26 @@
      by the footer, not by the pop. */
   .drawer-pop > label.chk{height:24px; box-sizing:border-box; padding-inline:10px; margin-inline:-10px; border-radius:6px}
   .drawer-pop > label.chk:hover{background:var(--block-sel)}
+  /* AN ARM THE CURRENT MODEL DOES NOT IMPLEMENT (syncPipeAvail, js/ui/wiring.js). Dimmed and inert
+     rather than hidden: a row that disappears when the model changes reads as the app losing a
+     feature, where a greyed one — with the `title` saying whose absence it is and what happens
+     instead — says the model has nothing to offer here. The whole label goes down, box and text
+     together, because the box alone at `:disabled` opacity beside a full-strength label reads as a
+     rendering fault rather than as a state. */
+  .drawer-pop > label.chk.armoff{opacity:.42}
+  .drawer-pop > label.chk.armoff:hover{background:none}
+  /* …AND THE OTHER KIND OF DOING-NOTHING: the model HAS this arm, but something it reads is switched
+     off (paintPipe, js/ui/wiring.js). Deliberately a LIGHTER dim than .armoff above, and the control
+     stays enabled and ticked: this state is undone by re-ticking the arm above it, where .armoff is
+     not undoable at all, and two states that look identical would invite the reader to click the one
+     that cannot help. The reason is appended after the label — it is the one case where the cause is
+     three rows away and cannot be read off the row itself. */
+  .drawer-pop > label.chk.arminert{opacity:.62}
+  /* NO ::after NOTE HERE, DELIBERATELY. The reason a row is dim used to be appended after its label,
+     which grew the row and resized the whole popover the moment a box was unticked — under the
+     pointer, between the reader's click and their next one. It lives in the row's `title` instead
+     (paintPipe, js/ui/wiring.js): same information, no reflow, and the right weight for a detail
+     that is secondary to the dimming itself. */
   .drawer-pop > label.chk + label.chk{margin-top:-10px}   /* cancels the pop's own 10px gap between CONSECUTIVE toggles so they tile like a Form Group's rows; a heading or separator between two of them keeps its gap */
   .drawer-group-h{font-size:9.5px; font-weight:700; letter-spacing:.05em; text-transform:uppercase; color:var(--muted); margin:0 2px 1px; padding-top:10px; border-top:.5px solid var(--menu-sep)}   /* item 3: subtle group heading + separator in the drawer */   /* THE RULE IS CENTRED IN ITS OWN GAP, on request. It sat 16px below the last checkbox of the group above and 6px above its own heading text — measured, and the asymmetry is not obvious from the values, because the space ABOVE is the .drawer-pop's own 10px flex `gap` PLUS this margin-top, while the space BELOW is the padding-top alone. Dropping margin-top to 0 leaves the 10px gap, and 10px of padding matches it: 10 above, 10.5 below. Change the pop's gap and this padding has to follow it. Ink is --menu-sep, the shared in-surface separator (was --hairline, which light mode raised to 90% black — a black rule across a translucent menu). */
   .drawer-pop .drawer-group-h:first-child{margin-top:0; padding-top:0; border-top:none}

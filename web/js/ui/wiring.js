@@ -216,10 +216,17 @@ function openTbGroupMenu(items,x,y,owner){ closeTbMenu(); _tbPass(true);   // it
       const r=label.getBoundingClientRect(); openTbGroupMenu(_tbGroupItems(pill), r.left, r.bottom+4, label); }
     else{ const btn=pill.querySelector(".tbtn"); if(btn) btn.click(); } }); }); })();
 document.getElementById("modelSel").onchange=e=>{ model=e.target.value; const label=model?(MODELINFO[model]||model):"";
-  setLang(modelLang(model));   // language follows the model → updates the status pill and RTL
+  /* Language follows the model → updates the status pill and RTL. ⚠ EXCEPT WHERE THE MODEL NAMES NO
+     LANGUAGE, which a CUSTOM one may not: it can be for a register, a dialect or an author with no
+     ISO code, and modelLang returns "" for those. setLang("") means English (its own `l||"en"`), so
+     passing the empty answer through would have re-flagged the document as English every time such a
+     model was chosen — silently changing the transliteration and orthography menus, the RTL decision
+     and the status pill on the strength of a model that made no claim about any of them. Nothing is
+     the right answer to nothing: the document keeps the language it had. */
+  const ml=modelLang(model); if(ml||!model) setLang(ml);
   toast(model?`Model: ${label} · ${langName(DOCLANG)||"?"}`:"Manual annotation · whitespace tokeniser");
   if(DOC.length) preserveScroll(renderDoc);   // re-lay-out in case the language flipped LTR/RTL
-  if(show.translit) fillTranslit(); syncMenu(); refreshModelFeatsInventory(); };   // async, fire-and-forget — the FEATS-value/gloss menus just fall back to the UD-wide table until it resolves
+  if(show.translit) fillTranslit(); syncMenu(); refreshModelFeatsInventory(); syncPipeAvail(); };   // both async, fire-and-forget — the FEATS-value/gloss menus fall back to the UD-wide table until one resolves, and the Pipeline drawer greys nothing until the other does
 // — status-bar language picker: the language indicator always opens a searchable list of every ISO 639-3
 //   language (name + 2-/3-letter codes). Filters by name OR either code; ↑/↓ + Enter, or click. Selecting a
 //   language sets DOCLANG (via applyLang) and auto-switches the parser model to match it (or None).
@@ -318,7 +325,77 @@ document.getElementById("toggles").addEventListener("change",e=>{ const cb=e.tar
   show[k]=cb.checked; updateViewOptions(); preserveScroll(renderDoc); savePrefs(); });   // (transliteration is no longer a checkbox — it is driven by the status-bar transliteration menu)
 document.getElementById("btnGrids").addEventListener("click",toggleGrids);   // was the standalone "Show grids" checkbox's own change listener, removed on request — #btnGrids now drives the same shared toggleGrids() the ⌃⌘G shortcut and native View-menu row already called
 document.getElementById("autonumChk").addEventListener("change",e=>{ AUTONUM=e.target.checked; });
-document.getElementById("autoregenChk").addEventListener("change",e=>{ AUTOREGEN=e.target.checked; savePrefs(); });   // savePrefs, unlike the line above: a preference against automatic edits has to outlive the window (see AUTOREGEN, js/core/prefs.js). Nothing to re-render — the flag is read at the next edit, not drawn
+document.getElementById("autoregenChk").addEventListener("change",e=>{ AUTOREGEN=e.target.checked; savePrefs(); });
+/* ── THE PIPELINE DRAWER ───────────────────────────────────────────────────────────────────────────
+   Ten arms; see PIPELINE (js/core/prefs.js) for what each gates. savePrefs, like Auto-regenerate
+   beside it and for the same reason: a preference against the parser filling in a column has to
+   outlive the window. Nothing to re-render — an arm is read at the NEXT parse, not drawn. */
+document.getElementById("pipePop").addEventListener("change",e=>{ const cb=e.target.closest("input[data-arm]"); if(!cb)return;
+  PIPELINE[cb.dataset.arm]=cb.checked; pipeInvalidate(); paintPipe(); savePrefs(); });   // paintPipe, because unticking one arm can make several others inert (the cascade) and the drawer is open in front of the reader while it happens
+/* WHICH ARMS THE CURRENT MODEL CAN ACTUALLY DO, asked of the bridge whenever the model changes.
+   The answer is read off the loaded pipeline's own component list (`parse.model_arms`), so a wheel
+   that gains or loses a component moves this with nothing here to edit — and the generic parser
+   behind every custom model reports the two it ships (FEATS and syntax) and nothing else.
+   ⚠ THE TICK IS LEFT WHERE THE READER PUT IT. A greyed arm is disabled, not unticked: `pipeArms()`
+   already drops it from what the bridge is told, and clearing the box would silently discard a
+   choice they made under a different model and would still want back when they switch to one that
+   can do it. WITHOUT a bridge (browser design use) nothing greys — PIPE_AVAIL stays null, which
+   every reader treats as "all of them". */
+async function syncPipeAvail(){ const pop=document.getElementById("pipePop"); if(!pop)return;
+  if(hasBridge()){ try{ const r=await window.pywebview.api.model_arms(model||"");
+      // …and an EMPTY list is not an answer, it is the question having failed — see PIPE_AVAIL
+      // (js/core/prefs.js) for what reading it as one did to the drawer.
+      const got=r&&Array.isArray(r.arms)&&r.arms.length?r.arms:null;
+      PIPE_AVAIL=got; PIPE_DEPS=(got&&r.deps)||{}; PIPE_READS_UPOS=!!(got&&r.reads_upos); }
+    catch(e){ PIPE_AVAIL=null; PIPE_DEPS={}; PIPE_READS_UPOS=false; } }
+  else { PIPE_AVAIL=null; PIPE_DEPS={}; PIPE_READS_UPOS=false; }
+  pipeInvalidate(); paintPipe(); }
+/* THE DRAWER SHOWS TWO DIFFERENT KINDS OF "THIS ARM IS DOING NOTHING", and conflating them would
+   answer the wrong question:
+     · `.armoff`   — the MODEL has no such component. Disabled, because there is nothing to choose.
+     · `.arminert` — the model has it, but something it READS is switched off, so it cannot run.
+                     Left ENABLED and left TICKED: the reader's tick is a standing preference, and
+                     re-ticking the upstream arm has to bring this one straight back rather than make
+                     them hunt for what their own earlier click turned off.
+   With NO model at all neither is painted: there is no model whose absence to report, and ten dimmed
+   rows would say "this app cannot do these things" rather than "choose a model first". The Model pill
+   beside it is where that is already said. */
+function paintPipe(){ const pop=document.getElementById("pipePop"); if(!pop)return;
+  const avail=(!model||PIPE_AVAIL===null)?null:PIPE_AVAIL, eff=pipeEffective();
+  // `writes` is what the model fills in; `have` is what there is a value for at all, the annotator's
+  // own columns included. An arm reads as INERT only against `writes` failing for want of `have` —
+  // unticking Features no longer silences Syntax, because unticking it means you are supplying them.
+  pop.querySelectorAll("input[data-arm]").forEach(cb=>{ const arm=cb.dataset.arm;
+    const missing=!!avail && PIPE_BACKEND.indexOf(arm)>=0 && avail.indexOf(arm)<0;   // the two frontend-only arms (translit, gloss) are never the model's to lack
+    const inert=!missing && !!model && cb.checked && !eff.writes[arm];
+    cb.disabled=missing; const lab=cb.closest("label.chk"); if(!lab)return;
+    lab.classList.toggle("armoff",missing); lab.classList.toggle("arminert",inert);
+    /* ⚠ THE REASON GOES IN THE TOOLTIP, NEVER INTO THE ROW. It used to be appended after the label
+       through a `::after`, which meant unticking one box GREW two other rows and resized the popover
+       under the pointer, mid-click — the reader's next click landed somewhere they had not aimed at.
+       Text that appears and disappears as you tick boxes is the wrong weight for a secondary detail
+       anyway: the dimming already says "this is doing nothing", and the row keeps a stable width.
+       The base title from the markup is captured once and the reason appended to THAT, so a row that
+       goes back to normal gets its own tooltip back rather than an empty one. */
+    const base=(lab.dataset.tip!==undefined)?lab.dataset.tip:(lab.dataset.tip=lab.getAttribute("title")||"");
+    let why="";
+    // ONE GREYED ROW IS NOT AN ABSENCE AT ALL. Where the model READS the word classes — the generic
+    // parser behind every custom model does; "you supply UPOS, the wheel supplies everything else" is
+    // the deal it offers — a bare grey row says "this app cannot tag", when what is true is "you tag,
+    // and the rest follows".
+    if(missing&&arm==="upos"&&PIPE_READS_UPOS) why="You supply these — the model reads them rather than predicting them.";
+    // Only the prerequisites actually MISSING, not every one the arm reads: "needs Features and
+    // Lemmas and Syntax and Word classes" for a row waiting on one of the four is a list to audit
+    // rather than an instruction, and three of its four entries are things the reader has already got.
+    else if(inert) why="Doing nothing: needs "+(PIPE_DEPS[arm]||[]).filter(r=>!eff.have[r]).map(armLabel).join(" and ")+".";
+    else if(missing) why="This model has no such component.";
+    // Joined by a NEWLINE, not by a dash: several of these base titles already contain an em dash of
+    // their own ("Off — every token comes back unattached"), and a second one ran the two sentences
+    // together into something that read like one clause. A `title` renders \n as a line break in all
+    // three of the shells this app runs in.
+    lab.title=[base,why].filter(Boolean).join("\n"); }); }
+function armLabel(a){ const cb=document.querySelector('#pipePop input[data-arm="'+a+'"]');
+  return cb&&cb.parentElement?cb.parentElement.textContent.trim():a; }   // savePrefs, unlike the line above: a preference against automatic edits has to outlive the window (see AUTOREGEN, js/core/prefs.js). Nothing to re-render — the flag is read at the next edit, not drawn
 /* ⚠ AN OPTIONS-BAR DROPDOWN NEEDS NO CLAMP OF ITS OWN, AND THE ONE IT BRIEFLY HAD IS THE REASON THE BAR
    MOVED. `.drawer-pop` is placed by CSS alone — `position:absolute; top:calc(100% + 6px)` in
    mac-chrome.css, `+ 4px` in fluent-chrome.css — so it is the one popup in the app that never went
@@ -342,11 +419,17 @@ document.getElementById("autoregenChk").addEventListener("change",e=>{ AUTOREGEN
    there is no native view left for a pop to need clearing of at all. menuTopBound() is a bare 8 now, not
    --tabH; left as history rather than rewritten, since the geometry argument (a bar positioned past every
    native view needs no clamp) is still the right shape of reasoning for whatever comes next. */
-document.getElementById("toggles").addEventListener("click",e=>{
+/* ⚠ BOUND TO EVERY `.drawers` GROUP, NOT TO `#toggles`. There are two of them now — the four display
+   drawers on the left and the Pipeline drawer on the right of the spring — and they are separate
+   elements because the Pipeline drawer must NOT be swept by #toggles' own `data-t` prefs loop (see
+   the markup note in index.html). One listener per group, and the "close every other drawer" sweep
+   spans BOTH: opening Pipeline while Show/Hide is open has to close Show/Hide, or two pops overlap
+   the document at once and only one of them belongs to the button the reader just pressed. */
+document.querySelectorAll(".viewbar .drawers").forEach(host=>host.addEventListener("click",e=>{
   if(e.target.closest(".drawer-pop")&&!e.target.closest(".drawer-btn")) return;   // clicks inside an open pop (checkboxes, the translations list/search) don't toggle the drawer
   const btn=e.target.closest(".drawer-btn"); if(!btn)return;   // open/close a drawer
   const d=btn.parentElement, wasOpen=d.classList.contains("open");
-  document.querySelectorAll("#toggles .drawer.open").forEach(x=>x.classList.remove("open"));
+  document.querySelectorAll(".viewbar .drawer.open").forEach(x=>x.classList.remove("open"));
   if(!wasOpen){ d.classList.add("open"); syncGlossUI();
     /* A DRAWER THAT OPENS WITH A SEARCH FIELD PUTS THE CARET IN IT, on request for Translations — which is the
        only drawer that has one today, but written generically because the reason is generic: a drawer whose
@@ -355,7 +438,7 @@ document.getElementById("toggles").addEventListener("click",e=>{
        gesture and should not disagree. Guarded on there BEING such a field, so Show/Hide, Glossing and Colours —
        whose first control is a checkbox — are untouched and keep focus where it was. */
     const q=d.querySelector(".drawer-pop input.lmsearch");
-    if(q) requestAnimationFrame(()=>q.focus()); } });   // NEXT FRAME, not this one: .drawer-pop is display:none until the `.open` class above takes effect, and focus() on a still-unrendered element is silently dropped — the class was added microseconds ago and the style recalc it needs has not necessarily run
+    if(q) requestAnimationFrame(()=>q.focus()); } }));   // NEXT FRAME, not this one: .drawer-pop is display:none until the `.open` class above takes effect, and focus() on a still-unrendered element is silently dropped — the class was added microseconds ago and the style recalc it needs has not necessarily run
 /* An open drawer closes on any press outside it — including on a diagram token, which is the case that was
    missing, and which is missing for a reason worth recording because it is not obvious:
    A CLICK ON A DIAGRAM TOKEN OFTEN FIRES NO `click` EVENT AT ALL. The token's pointerdown selects it, which
@@ -369,14 +452,14 @@ document.getElementById("toggles").addEventListener("click",e=>{
    makes most often. The `click` listener stays alongside it for presses that never happen — a keyboard-activated
    button emits a click with no pointerdown at all. Both are idempotent and inert for everything else: neither
    preventDefaults nor stops propagation, so the gesture still does whatever it was going to do. */
-const closeDrawers=e=>{ if(e.target&&e.target.closest&&e.target.closest("#toggles"))return;
-  document.querySelectorAll("#toggles .drawer.open").forEach(x=>x.classList.remove("open")); };
+const closeDrawers=e=>{ if(e.target&&e.target.closest&&e.target.closest(".viewbar .drawers"))return;
+  document.querySelectorAll(".viewbar .drawer.open").forEach(x=>x.classList.remove("open")); };
 addEventListener("pointerdown",closeDrawers,true);
 addEventListener("click",closeDrawers,true);
 // item 12/13: "Edit mappings…" in the Glossing pop → close the drawer and open the mapping editor.
 // Prefer the SEPARATE NATIVE WINDOW (open_glossmap_window) — matching Manage Models / Help; fall back to
 // the in-page sheet only when there is no bridge (headless/browser design use).
-document.getElementById("glossMapBtn").addEventListener("click",()=>{ document.querySelectorAll("#toggles .drawer.open").forEach(x=>x.classList.remove("open"));
+document.getElementById("glossMapBtn").addEventListener("click",()=>{ document.querySelectorAll(".viewbar .drawer.open").forEach(x=>x.classList.remove("open"));
   if(hasBridge()){ try{ window.pywebview.api.open_glossmap_window(); return; }catch(e){} }
   openSheet(sheetGlossMap()); });
 /* ZOOMING KEEPS THE READING POSITION, and preserveScroll alone cannot give it.

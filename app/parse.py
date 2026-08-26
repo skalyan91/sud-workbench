@@ -45,6 +45,475 @@ def whitespace_tokens(text: str) -> list[dict]:
             for j, f in enumerate(forms)]
 
 
+# ── PIPELINE ARMS ────────────────────────────────────────────────────────────────────────────────
+# The options bar's Pipeline drawer, as the parser sees it: eight switchable arms, each named after
+# the thing it fills in rather than after a spaCy component, because that is what the reader can check
+# afterwards.  ``None`` means every arm — the default at every call site, so a caller that says
+# nothing behaves exactly as it did before this existed.
+#
+# ⚠ **ONLY TWO OF THEM SKIP A COMPONENT; THE REST BLANK A COLUMN AFTERWARDS**, and that asymmetry is
+# deliberate.  Skipping the morphologiser to turn FEATS off would also take UPOS with it (spaCy
+# predicts the two as ONE joint label) and, on the generic parser, would degrade the SYNTAX as well —
+# the parser there READS the FEATS the morphologiser has just written, which is the whole reason
+# `package_generic_v2.sh` calls the pipeline order load-bearing.  A reader who unticks "Features" has
+# asked for an empty FEATS column, not for a worse parse of the sentence, and those are different
+# requests.  Blanking the column after the fact costs one component's runtime and has no
+# cross-component consequence at all.  The two that ARE skipped have none either way: the parser
+# (nothing downstream of it reads a tree the reader has just said they don't want) and the `sud_*`
+# components, which only write extensions and are meaningless without that tree anyway.
+#
+# The frontend has two more arms — Transliteration and Glossing — which never reach this module:
+# neither is the parser having an opinion, and both run with no model at all.  See AUTOREGEN's own
+# note in js/core/prefs.js for the same distinction drawn for the same reason.
+ARMS = ("tokenise", "sentence", "lemma", "upos", "xpos", "feats", "syntax", "sudmisc")
+_ARM_COLUMN = {"lemma": "lemma", "upos": "upos", "xpos": "xpos", "feats": "feats"}
+
+# ── WHICH COMPONENT OWNS WHICH ARM ───────────────────────────────────────────────────────────────
+# Predicates rather than names, because a wheel may carry either lemmatiser and a clause parser is
+# still a parser.  A component is switched OFF only when EVERY arm it owns is off — the morphologiser
+# predicts UPOS and FEATS as one joint label, so unticking Features alone leaves it running and blanks
+# the column afterwards (see the note above).
+_ARM_PIPE = {
+    "lemma":   lambda n: n in ("lemmatizer", "trainable_lemmatizer"),
+    "upos":    lambda n: n == "morphologizer",
+    "feats":   lambda n: n == "morphologizer",
+    "xpos":    lambda n: n == "tagger",
+    "syntax":  lambda n: n == "parser" or n.endswith("_parser"),
+    # ⚠ `sud_require_upos` IS NOT A MISC ANNOTATOR, however its name sorts. It writes no column at
+    # all — it is a GUARD the generic wheel ships to refuse a Doc whose UPOS is missing (see
+    # _GUARD_PIPES). Left in this predicate it would have owned the `sudmisc` arm, so unticking "SUD
+    # annotations" would have switched off the model's own contract check, and a custom model would
+    # have gone back to parsing untagged text on the absent-feature row without saying so.
+    "sudmisc": lambda n: n.startswith("sud_") and n not in _GUARD_PIPES,
+}
+# ── COMPONENTS THAT WRITE NOTHING AND REFUSE SOMETHING ───────────────────────────────────────────
+# `sud_require_upos` raises for a Doc with an untagged token: "this arm READS UPOS and does not
+# predict it -- tagging does not transfer across languages, which is why the column is yours to
+# supply". That is the model stating its own contract, and it is a better statement of it than
+# anything this app can infer — so it is read (`_needs_given_upos`, `model_arms`) rather than
+# second-guessed. It is skipped only when the app has ALREADY decided not to ask for word classes, in
+# which case the answer it would refuse is one nobody is going to be shown.
+_GUARD_PIPES = {"sud_require_upos": "upos"}
+
+# ── AND WHAT EACH ARM READS ──────────────────────────────────────────────────────────────────────
+# ⚠ **SWITCHING AN ARM OFF MAKES EVERYTHING THAT READS IT INERT TOO**, so a reader never gets an
+# answer computed from a column they just said they did not want.
+#
+# ⚠️ **AND "READS" MEANS WHAT THE COMPONENT'S ENCODER DECLARES, NOT WHERE IT SITS IN THE PIPELINE.**
+# This was a hand-written table filtered by `pipe_names` ORDER, on the reasoning that a component
+# cannot read what has not run yet.  That reasoning is sound as far as it goes — but it is a BOUND on
+# what a component could be reading, not a statement of what it does read, and using it as one
+# asserted two edges that do not exist and missed two that do, on the one wheel this app ships:
+#
+#   · `lemma ← upos` was ASSERTED for `en_sud_ewt_gum` because its lemmatiser follows its
+#     morphologiser.  It is a `trainable_lemmatizer` — an `EditTreeLemmatizer` over its own
+#     `HashEmbedCNN`, POS-BLIND by construction, which is exactly what `_force_upos`'s own docstring
+#     already says ("its lemma will not move on a retag however the class is set").  Unticking Word
+#     classes was blanking the lemmas over a dependency that is not there.
+#   · `xpos ← upos, feats` was MISSED entirely.  That wheel's tagger runs on
+#     `sud.Tok2VecPlusFeats.v1`, whose `feats_embed` declares `attrs=['POS']` plus seven FEATS names —
+#     so XPOS really is conditioned on both, and unticking either left it computing from empty ones.
+#   · `sudmisc ← lemma, upos, feats, syntax` was reduced to `← syntax`.  `sud_shared` embeds
+#     `attrs=[NORM, PREFIX, SUFFIX, SHAPE, LEMMA, POS, DEP, MORPH, IS_QUOTE]`; four of those are
+#     columns other arms write.
+#   · `feats ← upos` on the generic parser needed a special case bolted on beside the table.  It needs
+#     nothing: its morphologiser embeds `sud.GenericTagEmbed.v1(attrs=[…, POS])`, so the edge is there
+#     to be read like every other one.
+#
+# So the graph is READ OFF THE MODEL — every `attrs` list, every `feats` list and every `upos_rows` in
+# the component's own resolved config, mapped through `_ATTR_ARM` — and there is no pipeline order
+# anywhere in it.  A wheel that changes what its tagger conditions on moves this by itself.
+#
+# NOT in the graph: `tokenise` and `sentence`.  Both have a defined non-model fallback that everything
+# downstream consumes identically — a whitespace split and the rule sentence splitter — so switching
+# one off SUBSTITUTES a segmentation rather than removing one, and parsing a segmentation the model
+# did not produce is a first-class operation here, not a degraded one (`parse_pretokenized` exists for
+# exactly that, and "SEGMENTATION IS THE ANNOTATOR'S" is the rule Reset Parse is built on).
+_ATTR_ARM = {"POS": "upos", "MORPH": "feats", "TAG": "xpos", "LEMMA": "lemma",
+             "DEP": "syntax", "HEAD": "syntax"}
+# A RULE component declares no model to read this off, so what it consumes is stated here instead.
+# `sud_reported_rule` and `sud_idiom` walk the TREE — that is what they are — and a wheel carrying one
+# of them without the trainable `sud_shared` beside it would otherwise show no `sudmisc` edge at all.
+_RULE_READS = {"sud_reported_rule": ("syntax",), "sud_idiom": ("syntax",),
+               "sud_require_upos": ("upos",)}
+
+
+def _arms_of(name: str) -> set:
+    """The arms this component's output belongs to."""
+    return {a for a, test in _ARM_PIPE.items() if test(name)}
+
+
+def _cfg_reads(cfg, tok2vecs, depth: int = 0) -> set:
+    """The arms whose columns a component's model config declares as INPUT features.
+
+    Three shapes carry that, and all three are ordinary config keys rather than anything this has to
+    reverse-engineer: ``attrs`` (spaCy's own ``MultiHashEmbed``/``HashEmbed`` attribute list, and the
+    SUD kit's), ``feats`` (a list of FEATS NAMES, which is a MORPH read however it is spelled) and
+    ``upos_rows`` (``sud.GenericEmbed.v2``'s own way of saying it hashes the word class).
+
+    A ``Tok2VecListener`` reads whatever the tok2vec component it listens to reads, so it is followed
+    through.  ``upstream`` names a component; the default ``"*"`` is resolved to the UNION of every
+    tok2vec-ish component in the pipeline rather than to the nearest preceding one — spaCy's own rule
+    there is positional, and a union is both position-free and conservative (a superset of what the
+    listener could be reading, so the cascade errs towards keeping an arm live rather than silencing
+    one that was fine)."""
+    got: set = set()
+    if depth > 12:
+        return got                       # a listener chain that loops: stop rather than recurse for ever
+    if isinstance(cfg, (list, tuple)):
+        for v in cfg:
+            got |= _cfg_reads(v, tok2vecs, depth + 1)
+        return got
+    if not isinstance(cfg, dict):
+        return got
+    if "Tok2VecListener" in str(cfg.get("@architectures") or ""):
+        up = str(cfg.get("upstream") or "*")
+        for nm, sub in tok2vecs.items():
+            if up in ("*", nm):
+                got |= _cfg_reads(sub, {}, depth + 1)   # {} — a tok2vec cannot itself listen
+        return got
+    for a in (cfg.get("attrs") or ()):
+        arm = _ATTR_ARM.get(str(a).upper())
+        if arm:
+            got.add(arm)
+    if cfg.get("feats"):
+        got.add("feats")
+    if cfg.get("upos_rows"):
+        got.add("upos")
+    for v in cfg.values():
+        got |= _cfg_reads(v, tok2vecs, depth + 1)
+    return got
+
+
+def arm_deps(nlp) -> dict:
+    """``{arm: [arms it reads]}`` for THIS model, read off the model.
+
+    Handed to the frontend by ``Api.model_arms`` so the options bar can show an arm as inert when
+    something it reads is switched off, and used by :func:`_pipe_plan` to do the same thing to the
+    answer — one graph, so the drawer and the parse cannot disagree.
+
+    Two edges are dropped, both because they would say nothing: a SELF-edge (the morphologiser reads
+    POS and also writes it, which is a fact about how it is conditioned, not a prerequisite it can
+    fail), and an edge onto an arm this pipeline has no component for at all — that column is empty
+    for this model whatever anyone ticks, so treating it as a switch would make its dependants
+    permanently inert on a state nobody can change.
+
+    Never raises: a config shaped differently than expected yields no edges, which is the pre-cascade
+    behaviour and the safe direction to fail in (an arm stays live rather than being silenced by a
+    dependency this could not read)."""
+    try:
+        cfgs = nlp.config.get("components") or {}
+        tok2vecs = {n: (cfgs.get(n) or {}).get("model")
+                    for n in nlp.pipe_names
+                    if str((cfgs.get(n) or {}).get("factory") or "") in ("tok2vec", "transformer")}
+        owned = {a for n in nlp.pipe_names for a in _arms_of(n)}
+        out: dict = {}
+        for name in nlp.pipe_names:
+            arms = _arms_of(name)
+            if not arms:
+                continue
+            reads = _cfg_reads((cfgs.get(name) or {}).get("model"), tok2vecs)
+            reads |= set(_RULE_READS.get(name, ()))
+            for arm in arms:
+                got = (reads - {arm}) & owned
+                if got:
+                    out[arm] = sorted(set(out.get(arm, ())) | got)
+        return out
+    except Exception:  # noqa: BLE001 — no edges is "nothing cascades", which is how this behaved before
+        return {}
+
+
+def _pipe_plan(nlp, arms: set, given: set = frozenset()) -> tuple:
+    """``(components to skip, the arms that are really on)`` for one call.
+
+    Two passes.  First the cascade: an arm whose prerequisite is off goes off too, to a fixpoint, so a
+    chain (upos → feats → syntax → sudmisc) collapses in one step rather than one arm per parse.  Then
+    the components: one is skipped when EVERY arm it owns is off, which for the generic parser means
+    that switching off word classes takes its morphologiser — and, through the cascade, its parser —
+    out of the run entirely rather than leaving them to compute an answer nobody will be shown."""
+    eff = set(arms)
+    # ⚠ A COLUMN THE ANNOTATOR SUPPLIED SATISFIES THE ARM FOR DEPENDENCY PURPOSES WITHOUT TURNING IT
+    # BACK ON. The two facts are different and both matter: `have` is "is there a value here for a
+    # component to read", which is what the cascade asks, while `eff` stays "is the MODEL writing this
+    # column", which is what decides whether the component runs and whether the column is blanked. So
+    # unticking Features on a re-parse leaves Syntax live — reading the annotator's own FEATS — where
+    # it would go inert on a raw-text parse, and that is the honest difference between the two.
+    have = eff | set(given)
+    deps = arm_deps(nlp)
+    changed = True
+    while changed:                       # fixpoint: an arm may be dropped by an arm dropped this pass
+        changed = False
+        for arm, reads in deps.items():
+            if arm in eff and any(r not in have for r in reads):
+                eff.discard(arm)
+                have.discard(arm)
+                changed = True
+    off = []
+    for name in nlp.pipe_names:
+        owners = _arms_of(name)
+        if owners:
+            if not (owners & eff):
+                off.append(name)
+            continue
+        # A component that OWNS no arm is normally left alone — but a GUARD is skipped when the arm it
+        # guards is off. Without this the generic wheel's `sud_require_upos` would raise on every
+        # raw-text parse instead of the app returning the words with the columns it can honestly
+        # fill; the reader would get an exception where the decision not to ask for word classes had
+        # already been taken, two lines earlier, by this same function's caller.
+        want = _GUARD_PIPES.get(name)
+        if want and want not in eff:
+            off.append(name)
+    return off, eff
+
+
+def _arms(arms) -> set:
+    """Normalise an arms argument into a set.  ``None`` (or anything unrecognisable) = all of them,
+    so no caller can accidentally disable an arm by passing a shape this doesn't understand."""
+    if arms is None:
+        return set(ARMS)
+    try:
+        got = {str(a) for a in arms}
+    except TypeError:
+        return set(ARMS)
+    return got & set(ARMS)
+
+
+def model_arms(model_id: str = "") -> list:
+    """The arms a given model actually IMPLEMENTS — what the options bar greys out.
+
+    An arm this list omits is not merely switched off: the model has nothing to say there, and the
+    app falls back to what it does with no model at all (a whitespace split, the rule sentence
+    splitter, an empty column).  A custom model's answer is `generic_models.GENERIC_ARMS`, which is
+    the wheel's own account of what it ships and why each absence is deliberate; everything else
+    reports whatever its pipeline can be seen to contain, so a wheel that gains or loses a component
+    changes this without anyone editing a table here."""
+    if not model_id:
+        return []
+    try:
+        engine, name, tb_lang = _resolve_model(model_id)
+    except ParserUnavailable:
+        return []
+    # Keyed on the PACKAGE, not on the id: `custom:<slug>` and the bare `sud:xx_sud_generic` name the
+    # same pipeline, and it is the pipeline that ships no tokeniser, no tagger and no lemmatiser. The
+    # bare id is not selectable in the model dropdown today (models_registry.GENERIC_SUD keeps it out
+    # of every language listing), but answering differently for the two ids would be a trap for
+    # whatever reaches it next — `_needs_given_upos` reads this function, so the difference would show
+    # up as one of them silently inventing word classes.
+    from . import generic_models
+    if tb_lang is not None or name == generic_models.GENERIC_PKG:
+        return sorted(generic_models.GENERIC_ARMS)
+    if engine == "stanza":
+        # A full Stanza UD pipeline segments, tokenises, tags, lemmatises and parses; the SUD MISC
+        # layer is a SUD wheel's own and survives no UD→SUD conversion, so it is the one absence.
+        return sorted(set(ARMS) - {"sudmisc"})
+    if engine != "sud":
+        from . import models_registry
+        name = models_registry.resolve_default_package(model_id) or ""
+    if not name:
+        return []
+    try:
+        pipes = set(_load_spacy(name).pipe_names)
+    except Exception:  # noqa: BLE001 — not installed: claim nothing rather than guess
+        return []
+    got = {"tokenise", "sentence"}          # every SUD wheel carries a real tokeniser
+    if pipes & {"lemmatizer", "trainable_lemmatizer"}:
+        got.add("lemma")
+    if "tagger" in pipes:
+        got.add("xpos")
+    if "morphologizer" in pipes:
+        got |= {"upos", "feats"}            # ONE joint label predicts both — see _force_upos
+    if any(p == "parser" or p.endswith("_parser") for p in pipes):
+        got.add("syntax")
+    if any(p.startswith("sud_") and p not in _GUARD_PIPES for p in pipes):
+        got.add("sudmisc")
+    # ⚠ A GUARD TAKES ITS ARM OUT OF THE OUTPUT SET. A morphologiser predicts UPOS and FEATS as one
+    # joint label, so the clause above claims both — but a wheel shipping `sud_require_upos` is
+    # saying in as many words that the class is its INPUT and it does not predict one. Read off the
+    # pipeline rather than keyed to a package, so a future wheel that declares the same contract is
+    # covered with nothing here to edit. (The generic package's own entry above says the same thing
+    # and is kept as the floor: it is a fact about what the arm was TRAINED to do, and it still holds
+    # for a copy of the wheel installed before this component existed.)
+    for guard, arm in _GUARD_PIPES.items():
+        if guard in pipes:
+            got.discard(arm)
+    return sorted(got & set(ARMS))
+
+
+# An arm whose absence has a real FALLBACK rather than an empty column: with no model tokeniser the
+# text is split on whitespace, with no model sentence splitter the app's rule splitter runs.  Every
+# other arm's absence means "this column stays empty", which is a different thing and is why
+# `_effective_arms` treats the two groups differently.
+_FALLBACK_ARMS = frozenset({"sentence"})
+
+
+def _effective_arms(model_id: str, arms) -> set:
+    """The reader's arms narrowed to what this model can actually do.
+
+    ⚠ **THE INTERSECTION HAPPENS HERE, NOT ONLY IN THE OPTIONS BAR.**  The drawer greys an arm the
+    model lacks and `pipeArms()` already drops it, so this is belt to that pair of braces — but it is
+    also the only place a caller that never saw the drawer (a batch insert, a headless run, a future
+    bridge method) is covered.  Without it, a model with no UPOS tagger returns whatever its
+    morphologiser guessed in a column the app then saves as annotation, and the reader has no way to
+    tell that answer from one the model was actually trained to give.
+
+    ``sentence`` is exempt: its absence routes to the rule splitter, not to an unsplit paragraph, and
+    a reader who leaves the box ticked is asking for sentences, not for the model specifically."""
+    got = _arms(arms)
+    try:
+        can = set(model_arms(model_id))
+    except Exception:  # noqa: BLE001 — a model that cannot be inspected will fail its own parse next
+        return got
+    if not can:
+        return got
+    return {a for a in got if a in can or a in _FALLBACK_ARMS}
+
+
+def _needs_given_upos(model_id: str) -> bool:
+    """Whether this model reads UPOS as an INPUT it cannot supply for itself.
+
+    ⚠ THE GENERIC PARSER DOES, AND THAT CHANGES WHAT A RAW-TEXT PARSE MAY CLAIM.  "You supply UPOS;
+    the wheel supplies everything else" is the pipeline's stated contract — tagging is lexical and
+    upstream measured that it does not transfer (32-39 % over held-out languages, no better than a
+    single English tagger).  So the morphologiser, handed a Doc with no word classes on it, invents
+    some: on an untagged Basque sentence it returned DET for every token, and the parser then read
+    THAT and produced a tree conditioned on it.  The tree parsed, the columns filled, and the whole
+    answer was about a sentence nobody had described.
+
+    Silence is the preferred failure for annotation (CLAUDE.md), so where this is true and no UPOS
+    has been given, `syntax` and `feats` are dropped and the caller is told why.  Supply the word
+    classes — which `reparseTokenFields` does after any edit, and which `reparse` now does too for
+    exactly these models — and both arms come back.
+
+    ⚠ AN EMPTY ANSWER IS "DON'T KNOW", NOT "HAS NO TAGGER".  `model_arms` returns `[]` for a model it
+    could not inspect at all — not installed, an unknown id, a pipeline that failed to load — and a
+    bare `"upos" not in set(...)` reads that as true, which would strike the syntax off every parse
+    whose model this function merely could not see.  Those parses fail on their own a moment later,
+    with their own reason; they must not first be quietly relabelled as this one."""
+    can = set(model_arms(model_id))
+    return bool(can) and "upos" not in can
+
+
+def _apply_arms(tokens: list[dict], arms: set, given: set = frozenset()) -> list[dict]:
+    """Empty the columns whose arm is off, in place.
+
+    A disabled column comes back EMPTY rather than carrying the model's answer unshown: the token
+    dicts are the document, they are what gets saved, and "the parser filled this in but the app is
+    hiding it" would be a lie the CoNLL-U file on disk then tells for ever."""
+    for key, col in _ARM_COLUMN.items():
+        # ⚠ …BUT NEVER A COLUMN THE CALLER SUPPLIED. Blanking an off arm is right when the model
+        # simply did not write it; here the ANNOTATOR wrote it, handed it in as input, and is about to
+        # have this answer merged back over their own tokens. Emptying it would delete the very
+        # annotation the parse was conditioned on — the same fault the `upos` restore below was
+        # written for, arriving by a different door.
+        if key not in arms and key not in given:
+            for t in tokens:
+                t[col] = ""
+    if "syntax" not in arms:
+        # The same flat, unparsed shape `whitespace_tokens` produces — head 0 on the first token, no
+        # relation on the rest — rather than heads left at whatever a skipped parser never wrote.
+        for j, t in enumerate(tokens):
+            t["head"] = "0" if j == 0 else "1"
+            t["deprel"] = "root" if j == 0 else ""
+    return tokens
+
+
+# ── CUSTOM MODELS: one shared wheel, one embedding row each ──────────────────────────────────────
+def _resolve_model(model_id: str) -> tuple:
+    """``(engine, name, tb_lang)`` for any model id, custom ones included.
+
+    A ``custom:<slug>`` id is not a package of its own — it is the shared generic wheel plus the
+    ``Doc._.tb_lang`` that selects this model's row of its embedding table (see app/generic_models.py).
+    Resolving it HERE, once, is what lets every ``engine == "sud"`` branch below go on working
+    unchanged: a custom model IS a SUD spaCy model, differing only in which vector it reads."""
+    engine, _, name = (model_id or "").partition(":")
+    if engine == "custom" and name:
+        from . import generic_models
+        tb = generic_models.tb_lang_for(model_id)
+        if not tb:
+            raise ParserUnavailable(f"no such custom model: {name!r}")
+        return "sud", generic_models.GENERIC_PKG, tb
+    return engine, name, None
+
+
+# ── WHAT THE ANNOTATOR IS SUPPLYING ──────────────────────────────────────────────────────────────
+# ⚠ **AN ARM THAT IS OFF IS ONE THE ANNOTATOR HAS TAKEN OVER.** The model will not write that column,
+# so the column is theirs — and every component that READS it should read theirs. That is the same
+# `arm_deps` graph as the cascade, followed in the other direction: not "Syntax is inert because
+# Features is off" but "Syntax reads the Features you supplied". It is also the rule already in force
+# for UPOS on a model that cannot tag, generalised from that one column to all of them.
+#
+# ⚠️ AND IT IS WORTH MORE THAN ANY SECOND PARSER WOULD BE. Measured on ten held-out Basque sentences
+# through this app's own scorer: UPOS alone gives LAS 38.32, UPOS + FEATS gives **53.27** (+14.95),
+# which reproduces upstream's own table (Georgian 55.00 → 69.27, Basque 43.48 → 53.42). Ensembling
+# the generic arm with a monolingual wheel buys nothing by comparison — where both exist the wheel is
+# 20-35 LAS better and the weaker model only drags, and where only the generic one exists there is
+# nothing to ensemble with, because a borrowed tagger reaches 32-39 % UPOS on a language it was not
+# trained on and wrong word classes cost about half a LAS point each. The annotator is the second
+# model, and a far better one.
+_GIVEN_SETTER = {
+    "upos":  lambda tok, v: setattr(tok, "pos_", v),
+    "feats": lambda tok, v: tok.set_morph(v),
+    "lemma": lambda tok, v: setattr(tok, "lemma_", v),
+    "xpos":  lambda tok, v: setattr(tok, "tag_", v),
+}
+
+
+def _given_arms(given) -> set:
+    """The arms the caller is supplying a real value for, ignoring empty columns."""
+    if not isinstance(given, dict):
+        return set()
+    return {a for a, col in given.items()
+            if a in _GIVEN_SETTER and any(v and v != "_" for v in (col or ()))}
+
+
+def _given_doc(nlp, forms, tb_lang, upos=None, given=None):
+    """A Doc carrying everything the CALLER is supplying, before any component runs.
+
+    ⚠ **THE WORD CLASSES GO ON HERE, NOT AFTER THE MORPHOLOGISER.** `_force_upos` has always applied
+    them at that later point, which was enough while it was only being used to CONSTRAIN a model that
+    tags for itself. It is not enough for a model that reads them: `sud_require_upos` runs FIRST and
+    refuses a Doc with an untagged token, so a call that set them three components later got the
+    wheel's own refusal for tags it was in the middle of supplying. It is also simply the right
+    moment — the generic morphologiser embeds `attrs=[…, POS]`, so a class arriving after it has run
+    is a class it never conditioned on.
+
+    `_force_upos` still runs where it always did, and still earns its place: it re-derives the FEATS
+    for the chosen class from the model's own joint label, which setting `pos_` cannot do.
+
+    ``given`` carries the other columns the annotator owns (see the note above), each applied the same
+    way and at the same moment.  ``upos`` stays a parameter of its own because it means something
+    slightly different: ``given`` is "the model is not writing this, so read mine", where ``upos`` is
+    "the model may write this, but CONSTRAIN it to mine" — the retag case `_force_upos` exists for."""
+    from spacy.tokens import Doc
+    doc = _tb(Doc(nlp.vocab, words=forms), tb_lang)
+    for i, want in enumerate(upos or ()):
+        if want and want != "_" and i < len(doc):
+            doc[i].pos_ = want
+    for arm, col in (given or {}).items():
+        setter = _GIVEN_SETTER.get(arm)
+        if setter is None:
+            continue
+        for i, val in enumerate(col or ()):
+            if val and val != "_" and i < len(doc):
+                try:
+                    setter(doc[i], val)
+                except Exception:  # noqa: BLE001 — a value this vocab cannot take (a malformed FEATS
+                    pass           # string) is the annotator's to fix, not a reason to fail the parse
+    return doc
+
+
+def _tb(doc, tb_lang):
+    """Stamp a Doc with the language row a custom model reads, before any component runs.
+
+    ⚠ IT MUST BE SET ON THE DOC, NOT PASSED TO THE PIPELINE, and it must be set BEFORE the first
+    component: `sud.GenericEmbed.v2`'s `LangSlotExtractor` reads `Doc._.tb_lang` on every forward
+    pass and RAISES for a language it has no slot for, deliberately — "a default row would silently
+    give it some training language's vector"."""
+    if tb_lang:
+        doc._.tb_lang = tb_lang
+    return doc
+
+
 # ── engine caches (each model loaded at most once per session) ────────────────
 _SPACY_MODELS: dict[str, object] = {}
 _STANZA_PIPES: dict[str, object] = {}
@@ -110,6 +579,17 @@ def _load_spacy_locked(package: str):
         why = f"{type(exc).__name__}: {exc}".strip(": ")
         raise ParserUnavailable(
             f"model {package!r} could not be loaded (is it installed?) — {why}") from exc
+    # A CUSTOM MODEL'S ROW IS PART OF THE PIPELINE, so it is written in before anything can parse
+    # with it — not on first use, where a cache hit would skip it. Cheap (128 floats per model per
+    # embedding table) and total: `apply_to` also CLEARS any `custom:` key the table does not have a
+    # stored row for, so a freshly-loaded pipeline can never carry a slot for a model that was
+    # removed while it was cached out.
+    if package == "xx_sud_generic":
+        try:
+            from . import generic_models
+            generic_models.apply_to(nlp)
+        except Exception as exc:  # noqa: BLE001 — the generic wheel still parses its 80 built-in languages
+            print(f"[custom] rows not applied: {exc}", file=sys.stderr)
     _SPACY_MODELS[package] = nlp
     return nlp
 
@@ -130,7 +610,7 @@ def warm(model_id: str = "") -> bool:
     may lack it), and a warm-up is by definition something nobody asked for -- there is no one to
     tell. The real call sites resolve the model themselves and report their own absence properly."""
     try:
-        engine, _, name = (model_id or "").partition(":")
+        engine, name, _tb_lang = _resolve_model(model_id)
         if engine != "sud" or not name:
             return False
         _load_spacy(name)
@@ -139,7 +619,7 @@ def warm(model_id: str = "") -> bool:
         return False
 
 
-def _spacy_doc_to_sud(doc) -> tuple[list[dict], list[dict]]:
+def _spacy_doc_to_sud(doc, arms: set | None = None) -> tuple[list[dict], list[dict]]:
     """Turn a PARSED spaCy Doc into a SUD token table + MWT ranges (heads/relations/POS/lemma/
     features), factored out of `_parse_spacy_sud`."""
     words = list(doc)
@@ -152,7 +632,7 @@ def _spacy_doc_to_sud(doc) -> tuple[list[dict], list[dict]]:
         deprel = "root" if is_root else (t.dep_ or "")
         out.append(_tok(t.text, t.lemma_ or "", t.pos_ or "", t.tag_ or "",
                         str(t.morph) if t.morph else "", head, deprel,
-                        misc=_ext_misc(t)))
+                        misc=_ext_misc(t, arms=arms)))
         space_after.append(t.whitespace_ != "")
     if not out:
         return [], []
@@ -171,14 +651,35 @@ def _spacy_doc_to_sud(doc) -> tuple[list[dict], list[dict]]:
     return out, mwt
 
 
-def _parse_spacy_sud(text: str, package: str) -> tuple[list[dict], list[dict]]:
+def _parse_spacy_sud(text: str, package: str, tb_lang=None,
+                     arms: set | None = None) -> tuple[list[dict], list[dict]]:
     nlp = _load_spacy(package)
+    arms = set(ARMS) if arms is None else arms
     try:
-        doc = nlp(text)
+        # The Doc is built and STAMPED before the pipeline runs, rather than handed to `nlp(text)`:
+        # a custom model's embedding row is selected by `Doc._.tb_lang`, and the first component to
+        # look for it raises if it is not there (see `_tb`). `nlp.tokenizer(text)` is exactly the
+        # step `nlp(text)` would have taken first, so nothing else about the call changes.
+        # …and with TOKENISATION off, the tokeniser is not what decides the words: a whitespace split
+        # is, and the rest of the pipeline runs over that. That is what the arm means, and it is the
+        # only honest reading of it — a "tokenisation off" that still let the model re-segment would
+        # be a switch that does nothing.
+        if "tokenise" in arms:
+            doc = nlp.tokenizer(text)
+        else:
+            from spacy.tokens import Doc
+            words = [f for f in text.strip().split() if f] or [text.strip()]
+            doc = Doc(nlp.vocab, words=words)
+        _tb(doc, tb_lang)
+        off, arms = _pipe_plan(nlp, arms)
+        for name, proc in nlp.pipeline:
+            if name in off:
+                continue
+            doc = proc(doc)
     except Exception as exc:  # noqa: BLE001 — e.g. a raw-text tokeniser dependency isn't installed yet
         raise ParserUnavailable(str(exc)) from exc
-    out, mwt = _spacy_doc_to_sud(doc)
-    return (out, mwt) if out else (whitespace_tokens(text), [])
+    out, mwt = _spacy_doc_to_sud(doc, arms)
+    return (_apply_arms(out, arms), mwt) if out else (whitespace_tokens(text), [])
 
 
 def _spacy_tokenize(text: str, package: str) -> tuple[list[dict], list[bool], list[dict]]:
@@ -395,12 +896,17 @@ _TOKEN_MISC_EXT = (("translit", "Translit"), ("ltranslit", "LTranslit"),
 _SUD_MISC_KEYS = ("Idiom", "InIdiom", "Reported", "Subject")
 
 
-def _ext_misc(tok, misc: str = "_") -> str:
+def _ext_misc(tok, misc: str = "_", arms: set | None = None) -> str:
     """``misc`` with whatever `_TOKEN_MISC_EXT` / `sud_misc` values this token carries folded in.
 
     Silent about extensions that are not registered (every model but the Sanskrit one, and every
     model packaged before the SUD MISC layer existed) and about empty values, so a model that
-    publishes none leaves MISC exactly as it was."""
+    publishes none leaves MISC exactly as it was.
+
+    With the **SUD annotations** arm off, `_SUD_MISC_KEYS` are not folded in even where a component
+    somehow wrote them — the arm already skips those components (`_pipe_plan`), and this is the
+    belt to that pair of braces. `_TOKEN_MISC_EXT` is NOT gated with them: those are the tokeniser's
+    own facts about the token (transliteration, source offsets), not the parser having an opinion."""
     parts = [p for p in (misc or "").split("|") if p and p != "_"]
     have = {p.split("=", 1)[0] for p in parts}
     try:
@@ -411,7 +917,7 @@ def _ext_misc(tok, misc: str = "_") -> str:
             val = getattr(tok._, attr, "") or ""
             if val:
                 parts.append(f"{key}={val}")
-        if Token.has_extension("sud_misc"):
+        if Token.has_extension("sud_misc") and (arms is None or "sudmisc" in arms):
             sud = getattr(tok._, "sud_misc", None) or {}
             for key in _SUD_MISC_KEYS:            # a fixed order, not the dict's: MISC is a set of
                 val = str(sud.get(key) or "")     # key=value pairs and the file should not record
@@ -716,19 +1222,31 @@ def _stanza_tokenize(text: str, lang: str, package: str) -> tuple[list[dict], li
 
 
 # ── batch ────────────────────────────────────────────────────────────────────
-def _parse_spacy_sud_many(texts: list[str], package: str) -> list[tuple]:
+def _parse_spacy_sud_many(texts: list[str], package: str, tb_lang=None,
+                          arms: set | None = None) -> list[tuple]:
     """`_parse_spacy_sud` over a list, through ``nlp.pipe`` — which is spaCy's own batching and the
     reason this exists rather than a loop at the call site: the pipeline's components run over the
     whole batch at once instead of once per text."""
     nlp = _load_spacy(package)
+    arms = set(ARMS) if arms is None else arms
     try:
-        docs = list(nlp.pipe(texts))
+        # `nlp.pipe(texts)` would build every Doc itself, leaving nowhere to stamp `tb_lang` before
+        # the first component sees it — so the Docs are built here and piped as Docs, which
+        # `Language.pipe` accepts and which keeps the batching this function exists for.
+        from spacy.tokens import Doc
+        if "tokenise" in arms:
+            docs = [_tb(nlp.tokenizer(t), tb_lang) for t in texts]
+        else:
+            docs = [_tb(Doc(nlp.vocab, words=([f for f in t.strip().split() if f] or [t.strip()])),
+                        tb_lang) for t in texts]
+        off, arms = _pipe_plan(nlp, arms)
+        docs = list(nlp.pipe(docs, disable=off))
     except Exception as exc:  # noqa: BLE001 — e.g. a raw-text tokeniser dependency isn't installed yet
         raise ParserUnavailable(str(exc)) from exc
     out = []
     for text, doc in zip(texts, docs):
-        toks, mwt = _spacy_doc_to_sud(doc)
-        out.append((toks, mwt) if toks else (whitespace_tokens(text), []))
+        toks, mwt = _spacy_doc_to_sud(doc, arms)
+        out.append((_apply_arms(toks, arms), mwt) if toks else (whitespace_tokens(text), []))
     return out
 
 
@@ -760,7 +1278,7 @@ def _parse_stanza_many(texts: list[str], lang: str, package: str) -> list[tuple]
             for i, (tk, mwt) in enumerate(got)]
 
 
-def parse_many(texts, model_id: str = "") -> list[dict]:
+def parse_many(texts, model_id: str = "", arms=None) -> list[dict]:
     """:func:`parse` over a list of texts, in ONE call and with the engine's own batching.
 
     The shape of each entry is exactly `parse`'s, so a caller can treat the two interchangeably. What
@@ -777,48 +1295,72 @@ def parse_many(texts, model_id: str = "") -> list[dict]:
         return []
     if not model_id:
         return [{"tokens": whitespace_tokens(t), "mwt": [], "parsed": False} for t in texts]
-    engine, _, name = model_id.partition(":")
+    arms = _effective_arms(model_id, arms)
+    note = ""
+    needs_upos = _needs_given_upos(model_id)
+    if needs_upos:      # see `parse` just below — the same rule, and the same cascade
+        arms.discard("upos")
+        note = ("This model reads the word classes as INPUT and cannot tag for itself, so it is not "
+                "asked to: with none given, its morphologiser and everything that reads it stay out "
+                "of the run. Tag the tokens and the features and the tree follow.")
     try:
+        engine, name, tb_lang = _resolve_model(model_id)
         if engine == "stanza":
             lang, _, package = name.partition("#")
             pairs = _parse_stanza_many(texts, lang, package or "default")
-            return [{"tokens": tk, "mwt": m, "parsed": True, "engine": "stanza", "model": name}
-                    for tk, m in pairs]
+            return [{"tokens": _apply_arms(tk, arms), "mwt": m, "parsed": True,
+                     "engine": "stanza", "model": name} for tk, m in pairs]
         package = name
         if engine != "sud":                      # legacy bare id → best-effort SUD package via the registry
             from . import models_registry
             package = models_registry.resolve_default_package(model_id)
             if not package:
                 raise ParserUnavailable(f"unknown model {model_id!r}")
-        pairs = _parse_spacy_sud_many(texts, package)
-        return [{"tokens": tk, "mwt": m, "parsed": True, "engine": "sud", "model": package}
-                for tk, m in pairs]
+        pairs = _parse_spacy_sud_many(texts, package, tb_lang, arms)
+        return [{"tokens": tk, "mwt": m, "parsed": True, "engine": "sud", "model": package,
+                 **({"note": note} if note else {})} for tk, m in pairs]
     except ParserUnavailable as exc:
         return [{"tokens": whitespace_tokens(t), "mwt": [], "parsed": False, "reason": str(exc)}
                 for t in texts]
 
 
 # ── dispatch ─────────────────────────────────────────────────────────────────
-def parse(text: str, model_id: str = "") -> dict:
+def parse(text: str, model_id: str = "", arms=None) -> dict:
     if not model_id:
         return {"tokens": whitespace_tokens(text), "mwt": [], "parsed": False}
-    engine, _, name = model_id.partition(":")
+    arms = _effective_arms(model_id, arms)
+    note = ""
+    needs_upos = _needs_given_upos(model_id)
+    if needs_upos:
+        # ⚠ `upos` COMES OFF, AND THE CASCADE DOES THE REST. Striking `syntax` and `feats` by hand
+        # here would have left the morphologiser RUNNING and its invented tags feeding the parser,
+        # with both answers thrown away a line later — measured, on "The cat sat on the mat.": with
+        # no UPOS given it returns DET ADJ DET ADV DET ADV DET. Dropping the arm the model cannot
+        # supply lets `_pipe_plan` take the component out of the run altogether, and the model's own
+        # dependency graph (`arm_deps`) then carries that through to everything that reads it.
+        arms.discard("upos")
+        note = ("This model reads the word classes as INPUT and cannot tag for itself, so it is not "
+                "asked to: with none given, its morphologiser and everything that reads it stay out "
+                "of the run. Tag the tokens and the features and the tree follow.")
     try:
+        engine, name, tb_lang = _resolve_model(model_id)
         if engine == "sud":
-            tokens, mwt = _parse_spacy_sud(text, name)
-            return {"tokens": tokens, "mwt": mwt, "parsed": True, "engine": "sud", "model": name}
+            tokens, mwt = _parse_spacy_sud(text, name, tb_lang, arms)
+            return {"tokens": tokens, "mwt": mwt, "parsed": True, "engine": "sud", "model": name,
+                    **({"note": note} if note else {})}
         if engine == "stanza":
             lang, _, package = name.partition("#")
             tokens, mwt = _parse_stanza_ud_to_sud(text, lang, package or "default")
-            return {"tokens": tokens, "mwt": mwt, "parsed": True,
+            return {"tokens": _apply_arms(tokens, arms), "mwt": mwt, "parsed": True,
                     "engine": "stanza", "model": name}
         # legacy bare id → best-effort SUD package via the registry
         from . import models_registry
         package = models_registry.resolve_default_package(model_id)
         if not package:
             raise ParserUnavailable(f"unknown model {model_id!r}")
-        tokens, mwt = _parse_spacy_sud(text, package)
-        return {"tokens": tokens, "mwt": mwt, "parsed": True, "engine": "sud", "model": package}
+        tokens, mwt = _parse_spacy_sud(text, package, tb_lang, arms)
+        return {"tokens": tokens, "mwt": mwt, "parsed": True, "engine": "sud", "model": package,
+                **({"note": note} if note else {})}
     except ParserUnavailable as exc:
         return {"tokens": whitespace_tokens(text), "mwt": [], "parsed": False,
                 "reason": str(exc)}
@@ -869,7 +1411,7 @@ def model_feats_inventory(model_id: str) -> dict:
     return {k: sorted(v) for k, v in out.items()}
 
 
-def _force_upos(morphologizer, doc, upos) -> None:
+def _force_upos(morphologizer, doc, upos, keep_feats=frozenset()) -> None:
     """Re-derive each token's FEATS **for the word class the reader chose**, in place.
 
     ⚠ THIS IS WHAT MAKES A RETAG DO ANYTHING AT ALL.  `parse_pretokenized` hands the pipeline the FORMS
@@ -914,13 +1456,19 @@ def _force_upos(morphologizer, doc, upos) -> None:
                 continue                       # the model knows no analysis of this class → leave it be
             feats = Morphology.feats_to_dict(labels[best_j])
             feats.pop("POS", None)
-            doc[i].set_morph(feats)
+            # ⚠ UNLESS THE CALLER SUPPLIED THIS TOKEN'S FEATS. Re-deriving them for the chosen class
+            # is this function's whole point where the MODEL owns the column — and is destructive
+            # where the annotator does: they handed those values in as input, and replacing them with
+            # the model's guess would undo, three components later, the thing the parse was given.
+            if i not in keep_feats:
+                doc[i].set_morph(feats)
             doc[i].pos_ = want
     except Exception:  # noqa: BLE001 — a model whose morphologizer is shaped differently keeps the plain answer
         pass
 
 
-def parse_pretokenized(forms: list[str], model_id: str = "", upos: list[str] | None = None) -> dict:
+def parse_pretokenized(forms: list[str], model_id: str = "", upos: list[str] | None = None,
+                       arms=None, given=None) -> dict:
     """Parse a sentence whose TOKENISATION IS ALREADY DECIDED — one token per entry of ``forms``.
 
     This is what "re-derive the model-derived fields for these tokens" needs, and it is not the same
@@ -951,10 +1499,34 @@ def parse_pretokenized(forms: list[str], model_id: str = "", upos: list[str] | N
     forms = [str(f or "") for f in (forms or []) if str(f or "")]
     if not forms:
         return {"tokens": [], "parsed": False, "reason": "nothing to parse"}
-    engine, _, name = (model_id or "").partition(":")
     if not model_id:
         return {"tokens": whitespace_tokens(" ".join(forms)), "parsed": False}
+    # TOKENISATION IS NOT AN ARM HERE and could not be: this function's whole contract is that the
+    # tokenisation is already decided (see the docstring above), so there is nothing for the arm to
+    # switch off. Every other arm applies exactly as it does to a full parse.
+    arms = _effective_arms(model_id, arms) | {"tokenise"}
+    note = ""
+    needs_upos = _needs_given_upos(model_id)
+    # The columns the ANNOTATOR is supplying — every arm they have switched off, plus `upos` whenever
+    # it is passed as a retag constraint. See _GIVEN_SETTER for what that means and what it is worth.
+    gset = _given_arms(given)
+    has_upos = any(u and u != "_" for u in (upos or ()))
+    # ⚠ A CALLER WHO SUPPLIES THE WORD CLASSES SATISFIES THE ARM. `_effective_arms` strikes `upos`
+    # from a model that cannot tag for itself — right for a raw-text parse, wrong here, where the
+    # classes are an ARGUMENT. Without this the cascade would read "no UPOS" and take the
+    # morphologiser (and, for the generic parser, everything after it) out of a call whose whole
+    # point is to re-derive the fields AROUND the tags just handed to it.
+    if has_upos:
+        arms.add("upos")
+        gset.add("upos")
+    elif needs_upos and "upos" not in gset:
+        # …and here it is not a refusal but a request: this caller HAS the reader's tags (it is
+        # re-deriving the fields around an edit they just made) and simply did not send them. Same
+        # single `discard` as `parse`, and the same cascade behind it.
+        arms.discard("upos")
+        note = "Send the word classes: this model reads them as input and cannot tag for itself."
     try:
+        engine, name, tb_lang = _resolve_model(model_id)
         if engine == "stanza":
             lang, _, package = name.partition("#")
             tokens, _mwt = _stanza_ud([forms], lang, package or "default", pretokenized=True)
@@ -966,28 +1538,61 @@ def parse_pretokenized(forms: list[str], model_id: str = "", upos: list[str] | N
                 tokens = convert.ud_to_sud([ud_sent])[0]["tokens"]
             except (convert.ConversionUnavailable, convert.ConversionError) as exc:
                 raise ParserUnavailable(str(exc)) from exc
-            return {"tokens": tokens, "parsed": True, "engine": "stanza", "model": name}
+            return {"tokens": _apply_arms(tokens, arms, gset), "parsed": True,
+                    "engine": "stanza", "model": name, **({"note": note} if note else {})}
         if engine != "sud":
             from . import models_registry
             name = models_registry.resolve_default_package(model_id) or ""
             if not name:
                 raise ParserUnavailable(f"unknown model {model_id!r}")
         nlp = _load_spacy(name)
-        from spacy.tokens import Doc
-        doc = Doc(nlp.vocab, words=forms)
+        doc = _given_doc(nlp, forms, tb_lang, upos, given)
+        off, arms = _pipe_plan(nlp, arms, gset)
+        keep = {i for i, v in enumerate((given or {}).get("feats") or ())
+                if v and v != "_"} if "feats" in gset else frozenset()
         for _pname, proc in nlp.pipeline:
+            if _pname in off:
+                continue
             doc = proc(doc)
             if _pname == "morphologizer":
-                _force_upos(proc, doc, upos)   # …and everything downstream now reads the READER's word class
+                _force_upos(proc, doc, upos, keep)   # …and everything downstream now reads the READER's word class
 
-        tokens, _mwt = _spacy_doc_to_sud(doc)
+        tokens, _mwt = _spacy_doc_to_sud(doc, arms)
+        tokens = _apply_arms(tokens, arms, gset)
         if len(tokens) != len(forms):
             # A component may still rebuild the Doc (clause_parser does); if one ever changes the
             # count the caller must be told, not handed a table it cannot align.
             raise ParserUnavailable("the pipeline changed the token count")
         for tok, f in zip(tokens, forms):
             tok["form"] = f          # the reader's spelling, quantities and all — this call re-derives FIELDS, never the forms
-        return {"tokens": tokens, "parsed": True, "engine": "sud", "model": name}
+        # ⚠ AND A WORD CLASS THE CALLER SUPPLIED COMES BACK AS THEY SUPPLIED IT, on the same
+        # principle as the form above: this call re-derives the fields AROUND the reader's edit, and
+        # UPOS here is the edit. It matters because of `_apply_arms`: a model with no tagger of its
+        # own has `upos` struck from its arms, which empties that column — correct for a raw-text
+        # parse where nobody has said what the classes are, and destructive here, where the reader
+        # has just typed them and `reparseTokenFields` is about to merge this answer back over their
+        # tokens. The generic parser is exactly that model, so without this line the first custom
+        # model would have silently wiped the tags its own analysis was conditioned on.
+        # It ALSO used to be the only thing standing between the reader's tags and the generic
+        # morphologiser's `overwrite = true`, which replaced them with its own guess mid-pipeline.
+        # Upstream has since set `overwrite = false`, so that half is now belt to `sud_require_upos`'s
+        # braces rather than the only guard — but a wheel that overwrites is a shape this function
+        # still has to be correct for, and restoring the caller's own argument costs one loop.
+        if upos:
+            for tok, want in zip(tokens, upos):
+                if want and want != "_":
+                    tok["upos"] = want
+        # …and every other column the caller handed in, for the same reason: this call re-derives the
+        # fields AROUND what the annotator owns and may never hand back less of it than it was given.
+        for arm in gset:
+            col = _ARM_COLUMN.get(arm)
+            if not col:
+                continue
+            for tok, want in zip(tokens, (given or {}).get(arm) or ()):
+                if want and want != "_":
+                    tok[col] = want
+        return {"tokens": tokens, "parsed": True, "engine": "sud", "model": name,
+                **({"note": note} if note else {})}
     except ParserUnavailable as exc:
         return {"tokens": [], "parsed": False, "reason": str(exc)}
     except Exception as exc:  # noqa: BLE001 — a pipeline that refuses pre-tokenised input must degrade
@@ -1137,9 +1742,8 @@ def _upos_scores(morphologizer, doc):
     return out
 
 
-def _score_doc(nlp, package, forms, upos=None):
-    from spacy.tokens import Doc
-    doc = Doc(nlp.vocab, words=forms)
+def _score_doc(nlp, package, forms, upos=None, tb_lang=None):
+    doc = _given_doc(nlp, forms, tb_lang, upos)
     heads: list = []
     deprels: list = []
     uposd: list = []
@@ -1154,15 +1758,27 @@ def _score_doc(nlp, package, forms, upos=None):
     return heads, deprels, uposd
 
 
-def _resolve_sud_package(model_id: str) -> str:
-    """The spaCy package name behind a model id, or "" for anything that is not a SUD spaCy model."""
-    engine, _, name = (model_id or "").partition(":")
-    if engine == "stanza" or not model_id:
-        return ""
+def _sud_target(model_id: str) -> tuple:
+    """``(package, tb_lang)`` behind a model id — ``("", None)`` for anything that is not a SUD spaCy
+    model.  A CUSTOM model resolves to the shared generic package plus its own embedding row, so the
+    two callers below (which read a component's raw scores) work on it unchanged."""
+    if not model_id:
+        return "", None
+    try:
+        engine, name, tb_lang = _resolve_model(model_id)
+    except ParserUnavailable:
+        return "", None
+    if engine == "stanza":
+        return "", None
     if engine != "sud":
         from . import models_registry
-        return models_registry.resolve_default_package(model_id) or ""
-    return name
+        return models_registry.resolve_default_package(model_id) or "", None
+    return name, tb_lang
+
+
+def _resolve_sud_package(model_id: str) -> str:
+    """The spaCy package name behind a model id, or "" for anything that is not a SUD spaCy model."""
+    return _sud_target(model_id)[0]
 
 
 def analysis_scores(forms: list[str], model_id: str = "", upos: list[str] | None = None) -> dict:
@@ -1180,16 +1796,27 @@ def analysis_scores(forms: list[str], model_id: str = "", upos: list[str] | None
     forms = [str(f or "") for f in (forms or [])]
     if not forms or not any(forms):
         return {"scored": False, "reason": "nothing to score"}
-    name = _resolve_sud_package(model_id)
+    name, tb_lang = _sud_target(model_id)
     if not name:
         return {"scored": False, "reason": "the ranking below the winner is a SUD spaCy model's own"}
-    key = (name, tuple(forms), tuple(upos or ()))
+    # ⚠ A MODEL THAT READS THE WORD CLASSES CANNOT RANK A SENTENCE THAT HAS NONE. Its own guard
+    # refuses the Doc, which would arrive here as a bare exception; and disabling the guard to get an
+    # answer anyway would rank one sentence against a reading of it in which every token is
+    # category-unknown. Say so instead — every caller of this already degrades to the plain editor
+    # when the answer is `scored: False`.
+    if _needs_given_upos(model_id) and not any(u and u != "_" for u in (upos or ())):
+        return {"scored": False, "reason": "this model reads the word classes; tag the tokens first"}
+    # ⚠ `tb_lang` IS PART OF THE CACHE KEY, not decoration. Every custom model shares ONE package
+    # name, so keying on the package alone would hand the second custom model of a session the first
+    # one's ranking for the same sentence — a different model's answer, silently, and the whole point
+    # of a custom model is that its row makes it answer differently.
+    key = (name, tb_lang, tuple(forms), tuple(upos or ()))
     hit = _SCORE_CACHE.get(key)
     if hit is not None:
         return hit
     try:
         nlp = _load_spacy(name)
-        heads, deprels, uposd = _score_doc(nlp, name, forms, upos)
+        heads, deprels, uposd = _score_doc(nlp, name, forms, upos, tb_lang)
         if len(heads) != len(forms):
             return {"scored": False, "reason": "the pipeline changed the token count"}
         out = {
@@ -1227,7 +1854,8 @@ def _synth_state(parser, doc, i, j):
     return state
 
 
-def arc_label_scores(forms: list[str], model_id: str, child: int, head: int) -> dict:
+def arc_label_scores(forms: list[str], model_id: str, child: int, head: int,
+                     upos: list[str] | None = None) -> dict:
     """"If this token hung off THAT one, what would you call the edge?" — ``child``/``head`` 1-based.
 
     ⚠ THIS IS THE COUNTERFACTUAL QUESTION, and it is asked only where the honest one has no answer.
@@ -1244,14 +1872,15 @@ def arc_label_scores(forms: list[str], model_id: str, child: int, head: int) -> 
     n = len(forms)
     if not (1 <= child <= n and 1 <= head <= n) or child == head:
         return {"scored": False}
-    name = _resolve_sud_package(model_id)
+    name, tb_lang = _sud_target(model_id)
     if not name:
         return {"scored": False}
+    if _needs_given_upos(model_id) and not any(u and u != "_" for u in (upos or ())):
+        return {"scored": False}      # see analysis_scores — the same refusal, for the same reason
     try:
         nlp = _load_spacy(name)
-        from spacy.tokens import Doc
         import numpy as np
-        doc = Doc(nlp.vocab, words=forms)
+        doc = _given_doc(nlp, forms, tb_lang, upos)
         parser = None
         for pname, proc in nlp.pipeline:
             if pname == "parser":
@@ -1278,7 +1907,7 @@ def arc_label_scores(forms: list[str], model_id: str, child: int, head: int) -> 
         return {"scored": False, "reason": str(exc)}
 
 
-def tokenize(text: str, model_id: str = "") -> dict:
+def tokenize(text: str, model_id: str = "", arms=None) -> dict:
     """The FAST first step of the tokenise → transliterate → parse sequence: tokenise ONLY (no
     tagging or parsing), so the tokens — and their transliterations — paint before the heavy
     parse runs. The follow-up parse is the ordinary :func:`parse` on the SAME text: every engine
@@ -1287,8 +1916,13 @@ def tokenize(text: str, model_id: str = "") -> dict:
     fallback contract as :func:`parse`; returns ``{"tokens","mwt","parsed":False, …}``."""
     if not model_id:
         return {"tokens": whitespace_tokens(text), "mwt": [], "parsed": False}
-    engine, _, name = model_id.partition(":")
+    # THE ONE ARM THIS CALL IS ABOUT. With tokenisation off — or with a model that ships no tokeniser
+    # at all, which is every custom model — the preview is a whitespace split, exactly what the
+    # follow-up parse will then work from, so the two never disagree about what the words are.
+    if "tokenise" not in _arms(arms) or "tokenise" not in model_arms(model_id):
+        return {"tokens": whitespace_tokens(text), "mwt": [], "parsed": False}
     try:
+        engine, name, _tb_lang = _resolve_model(model_id)
         if engine == "sud":
             toks, _spaces, mwt = _spacy_tokenize(text, name)
             return {"tokens": toks, "mwt": mwt, "parsed": False, "engine": "sud", "model": name}
@@ -1475,6 +2109,13 @@ def _sentencizer_nlp(lang: str = "", model_id: str = ""):
     segment one language's text with another language's model."""
     if model_id:
         engine, _, name = model_id.partition(":")
+        # …and never the GENERIC wheel, whose own `_resolve_model` target this would otherwise reach
+        # through a `custom:` id. It ships no language-specific tokeniser, so its boundaries are
+        # spaCy's bare `xx` rules over segments it never learnt — not the MODEL's answer, and worth
+        # neither the 8 s load nor the `tb_lang` refusal that would follow it. `sentencize` falls
+        # through to `_rule_sentencize`, which is the app's answer with no model at all.
+        if engine == "custom" or name == "xx_sud_generic":
+            return None
         if engine == "sud" and name:
             try:
                 return _load_spacy(name)
@@ -1565,7 +2206,7 @@ def _extend_over_ender(text: str, pos: int) -> int:
     return pos
 
 
-def sentencize(text: str, lang: str = "", model_id: str = "") -> list[str]:
+def sentencize(text: str, lang: str = "", model_id: str = "", arms=None) -> list[str]:
     """Split ``text`` into sentences.  Uses the selected model's own sentence segmentation when one
     is loaded (its handling of the various sentence-final marks is best), but ALWAYS returns slices
     of the ORIGINAL ``text`` — a sandhi/compound-splitting tokeniser (Sanskrit) reconstructs altered
@@ -1574,6 +2215,11 @@ def sentencize(text: str, lang: str = "", model_id: str = "") -> list[str]:
     text = (text or "").strip()
     if not text:
         return []
+    # Sentence splitting OFF means one sentence, not "split it some other way": the reader has said
+    # the paragraph in front of them is the unit, and a rule splitter second-guessing that is the
+    # very thing they switched off.
+    if "sentence" not in _arms(arms):
+        return [text]
     ends: list[int] = []
     to_orig = (lambda p: p)
     engine, _, name = (model_id or "").partition(":")

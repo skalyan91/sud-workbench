@@ -1,0 +1,22 @@
+# sent_id = s1
+# text = Tog tog i van en, ige ta Bankis kē en, am̄ag en, kēy et ēglal te so Ḡot lok ave
+1	Tog	_	VERB	_	ExtPos=ADV	15	mod	_	_
+2	tog	_	VERB	_	_	1	flat	_	_
+3	i	_	ADP	_	_	2	flat	_	_
+4	van	_	VERB	_	_	3	flat	_	_
+5	en,	_	DET	_	_	4	flat	_	_
+6	ige	_	NOUN	_	_	15	subj	_	_
+7	ta	_	ADP	_	Definite=Def	6	mod	_	_
+8	Bankis	_	PROPN	_	_	7	comp:obj	_	_
+9	kē	_	PART	_	Deixis=Prox	8	mod	_	_
+10	en,	_	DET	_	Definite=Def	6	det	_	_
+11	am̄ag	_	NOUN	_	_	15	mod	_	_
+12	en,	_	DET	_	Definite=Def	11	det	_	_
+13	kēy	_	PRON	_	Case=Nom|Number=Pauc|PronType=Prs	15	subj	_	_
+14	et	_	ADV	_	Polarity=Neg	15	mod	_	_
+15	ēglal	_	VERB	_	_	0	root	_	_
+16	te	_	ADV	_	Polarity=Neg	14	mod	_	_
+17	so	_	SCONJ	_	_	15	comp:obj	_	_
+18	Ḡot	_	PROPN	_	_	19	subj	_	_
+19	lok	_	ADP	_	_	17	comp:obj	_	_
+20	ave	_	NOUN	_	_	19	comp:obj	_	_

@@ -216,6 +216,35 @@ rather than vendored — see `app/grammars.py`.
   lexicon is a prerequisite for parsing at all rather than an optional extra. Manage
   Models fetches it (~32 MB) along with the model, and respects a `VIDYUT_DATA` you have
   set yourself.
+- **Custom models — a parser for a language nothing else covers.** The **generic
+  parser** is a language-agnostic pipeline trained on 80 SUD treebanks: you supply the
+  tokens and their word classes, it supplies the features and the tree, and which
+  language it is reading is one 128-value row of a table it carries. Manage Models →
+  **Custom → Add custom model…** fits one of those rows for a language of your choosing.
+  Name it from the ISO 639-3 list or type any name you like — a register, a dialect or an
+  author with no code is a perfectly good thing to fit a row for — and give it a CoNLL-U
+  file of any size, about ten sentences being where the gain starts. With **30 or more**
+  the row is fitted on most of them and scored on the rest, so the UAS/LAS beside it is
+  measured on data the fitting never saw; with fewer, all of them go into the fitting and
+  no figure is measured. Where nothing was measured the row shows the parser's held-out
+  average over 20 languages it has never seen, and says so. Each model is a couple of
+  kilobytes, so make as many as you like, and each is offered by name under **Installed
+  parsers** when you insert text. **Edit** rebuilds any of it later: a rename is
+  instant and keeps what the model has learnt, and the embedding is re-fitted only when
+  the training data itself has changed. The parser itself is fetched the first time (31 MB, CC BY-NC-SA 4.0 — which is why
+  it is downloaded rather than shipped). It does **not** tag: parse raw text with one and
+  you get the words and nothing else, because a tree conditioned on word classes it made
+  up would be a claim about a sentence nobody described. Tag them, and the features and
+  the tree follow.
+- **The pipeline drawer** (options bar, right-hand end) switches off the parts of the
+  parse you do not want: tokenisation, sentence splitting, lemmas, word classes,
+  language-specific tags, features, syntax, the SUD MISC layer, transliteration and
+  glossing. A switched-off arm leaves its column **empty** rather than filled in and
+  hidden, so the file on disk says exactly what the switches say — and switching one off
+  switches off everything that reads it, which is worked out from the input features each
+  model's own components were built on rather than from the order they run in. An arm the
+  current model cannot do is greyed, and one that has nothing to read is dimmed; hover
+  either to see why. The choice persists.
 - **Manage Models** dialog (toolbar cube button, or Format → Manage Models…) —
   lists SUD models from the GitHub release repo and a curated set of Stanza UD
   languages, with training-set sizes, background downloading with a progress bar,

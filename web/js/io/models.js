@@ -12,12 +12,18 @@ async function populateModels(){ if(!hasBridge())return;
   // installed row (merged into an offered one, or synthesised when offline/rate-limited — see that
   // function's own note), so filtering it down to the installed ones loses nothing this dropdown
   // used to show. On report ("this should be indicated somehow in the models dropdown").
-  const inst=((r&&r.available)||[]).filter(e=>e.installed); MODELINFO={}; MODELLANG={};
+  const inst=((r&&r.available)||[]).filter(e=>e.installed); MODELINFO={}; MODELLANG={}; MODELLANG_CUSTOM={};
   const selEl=document.getElementById("modelSel"), cur=model;
   selEl.innerHTML='<option value="">None (manual)</option>';
-  const groups={sud:[],stanza:[]};
-  inst.forEach(e=>{ MODELINFO[e.id]=e.label||e.id; (groups[e.engine]||(groups[e.engine]=[])).push(e); });
-  [...inst].sort((a,b)=>(a.engine==="sud"?0:1)-(b.engine==="sud"?0:1)).forEach(e=>{ if(e.lang&&!(e.lang in MODELLANG))MODELLANG[e.lang]=e.id; });   // prefer a SUD parser per language
+  const groups={custom:[],sud:[],stanza:[]};
+  inst.forEach(e=>{ MODELINFO[e.id]=e.label||e.id; (groups[e.engine]||(groups[e.engine]=[])).push(e);
+    if(e.engine==="custom") MODELLANG_CUSTOM[e.id]=e.lang||"";   // a custom model's language is not in its id — see modelLang (js/core/state.js)
+  });
+  // MODELLANG is "which model answers for this language on the reader's behalf" (language picker,
+  // auto-detect). A CUSTOM model is deliberately never that: the reader may have three for one
+  // language and name them by hand, and the app choosing between them is not a choice it can make.
+  // Same rule models_registry.installed_by_language applies on the Python side, for the same reason.
+  [...inst].filter(e=>e.engine!=="custom").sort((a,b)=>(a.engine==="sud"?0:1)-(b.engine==="sud"?0:1)).forEach(e=>{ if(e.lang&&!(e.lang in MODELLANG))MODELLANG[e.lang]=e.id; });   // prefer a SUD parser per language
   const addGroup=(label,arr)=>{ if(!arr||!arr.length)return; const og=document.createElement("optgroup"); og.label=label;
     arr.forEach(e=>{ const o=document.createElement("option"); o.value=e.id;
       // A plain text marker, not just a colour: three different native <select> popups render this
@@ -27,7 +33,7 @@ async function populateModels(){ if(!hasBridge())return;
       o.textContent=(e.update_available?"↑ ":"")+(e.label||e.id);
       if(e.update_available){ o.style.color="var(--good)"; o.title=`Update available: v${e.installed_version} installed, v${e.version} available — Manage Models to update`; }
       og.appendChild(o); }); selEl.appendChild(og); };
-  addGroup("SUD · spaCy",groups.sud); addGroup("UD · Stanza",groups.stanza);
+  addGroup("Custom",groups.custom); addGroup("SUD · spaCy",groups.sud); addGroup("UD · Stanza",groups.stanza);   // Custom leads: they are the reader's own, few, and the ones they came to the menu for
   if([...selEl.options].some(o=>o.value===cur)) selEl.value=cur; else { model=""; selEl.value=""; } }
 /* `focus` names an extras tier to scroll to and flash on arrival — how the Script and transliteration
    menus' "install" link on an unavailable scheme leads to the row that answers it rather than to the
@@ -104,7 +110,12 @@ function drawModelList(host,query){ if(!host)return; const q=(query||"").trim().
   const mk=(title,engine)=>{ const rows=MODELS_AVAIL.filter(e=>e.engine===engine && match(e)); if(!rows.length)return;
     const h=document.createElement("div"); h.className="mgroup-h"; h.textContent=title; host.appendChild(h);
     rows.forEach(e=>host.appendChild(modelRow(e))); };
-  mk("SUD · spaCy","sud"); mk("UD · Stanza","stanza");
+  /* Custom leads, exactly as it does in the native window (Api._models_html). This list is the
+     HEADLESS fallback — manageModels() opens the real window wherever there is a bridge — so it has
+     no "Add custom model…" row: making one needs a native file dialog and a background fit, neither
+     of which exists on the path that reaches this sheet. Custom models that ALREADY exist still list
+     and can still be removed, so the two lists never disagree about what is there. */
+  mk("Custom","custom"); mk("SUD · spaCy","sud"); mk("UD · Stanza","stanza");
   /* …AND WHY EVERY STANZA MODEL WOULD BE INERT, said BEFORE a 400 MB download rather than after.
      Stanza emits UD and this app stores SUD, so `parse._parse_stanza_ud_to_sud` runs the conversion
      grammar on EVERY Stanza parse — which needs grewpy AND its OCaml backend. Where the backend is
@@ -175,6 +186,17 @@ async function installExtra(t,row,btn){ btn.disabled=true; btn.textContent="Star
   tick(); }
 function modelRow(e){ const row=document.createElement("div"); row.className="modelrow"; row.dataset.mid=e.id;
   const info=document.createElement("div"); info.className="mi";
+  if(e.engine==="custom"){   // its own shape: no version, no size, no download — a name, what it was fitted on, and what its figures mean
+    const meta=[e.lang?("Language: "+e.lang):null, e.basis==="file"?("Fitted on "+e.train_sents+" sentences"):"Not fitted"].filter(Boolean).join(" · ");
+    const sc=(e.uas!=null&&e.las!=null)?`<small class="msc">UAS <b>${+e.uas}</b> · LAS <b>${+e.las}</b></small>`:"";
+    info.innerHTML=`<span>${esc(e.label||e.id)}</span><small>${esc(meta)}</small>${sc}`
+      // …and the caveat, for the same reason the native window states it: these figures share a
+      // column with every other model's, and for an unfitted model they are the generic parser's
+      // held-out average over twenty languages that are not this one.
+      +(e.caveat?`<small class="mcav">${esc(e.caveat)}</small>`:"");
+    const right=document.createElement("div"); right.style.display="flex"; right.style.alignItems="center"; right.style.gap="8px";
+    const b=document.createElement("button"); b.className="tbtn"; b.textContent="Remove"; b.onclick=()=>removeModel(e,row); right.appendChild(b);
+    row.appendChild(info); row.appendChild(right); return row; }
   // On report ("whenever there is a newer version of a parser than what's installed, the Install
   // button should become a green Update button"): update_available/installed_version come from
   // models_registry.merge_installed, which now keeps the on-disk version distinct from `version`

@@ -95,6 +95,22 @@ DEPRECATED_SUD = {"sa_sud_vedic_ufal_csl"}
 # even though the augmented arm's headline LAS is a few points BELOW the arm it replaced on this same
 # benchmark, comparable training data is comparable training data and the newer one is still what ships.
 SUPERSEDED_SUD = {"zh_sud_gsd_simp_trad"}
+# ⚠ NOT A LANGUAGE MODEL, and the fourth listing set exists because the other three are all about
+# WHICH language wheel to offer.  `xx_sud_generic` parses no language of its own: it is a
+# language-agnostic pipeline plus a per-language embedding table, and one INSTANCE of it (one fitted
+# row) is what a "custom model" in this app is — see app/generic_models.py.  Its release asset happens
+# to match `_ASSET_RE` (`xx` + `generic`), so without this set it would list in the SUD group as a
+# language called "xx", offer itself for download beside real parsers, be picked by
+# `resolve_default_package("xx")` and group under a language code no document has.  What the set does
+# is re-label it `engine = "generic"` at `parse_asset`, which is the ONE place both the available and
+# the installed listings build their rows — every engine-keyed reader downstream (the toolbar
+# dropdown's `groups.sud`/`groups.stanza`, the Model Manager's two group headings,
+# `installed_by_language`) then passes over it without being edited, and the Custom section draws it
+# deliberately instead.
+# The `id` is deliberately left as `sud:xx_sud_generic`: it IS a spaCy SUD wheel as far as
+# `download()`/`remove()`/`_installed_sud_packages()` are concerned, and re-keying it would mean a
+# second install path beside the one that already works.
+GENERIC_SUD = {"xx_sud_generic"}
 # Per-model UAS/LAS accuracy: SUD scores live in the repo README's scores table; Stanza (UD) scores
 # come from the official performance page.  Both are fetched + cached (TTL) and re-fetched on refresh.
 SUD_README_URL = f"https://raw.githubusercontent.com/{SUD_REPO}/main/README.md"
@@ -204,6 +220,12 @@ def parse_asset(name: str) -> dict | None:
         return None
     lang, treebank, version = m["lang"], m["treebank"], m["version"]
     package = f"{lang}_sud_{treebank}"
+    if package in GENERIC_SUD:      # see GENERIC_SUD: a pipeline, not a language — engine, not id
+        return {
+            "id": f"sud:{package}", "engine": "generic", "lang": "", "treebank": treebank,
+            "package": package, "version": version, "filename": name, "generic": True,
+            "label": "Generic parser (any language)",
+        }
     return {
         "id": f"sud:{package}", "engine": "sud", "lang": lang, "treebank": treebank,
         "package": package, "version": version, "filename": name,
@@ -668,13 +690,24 @@ def list_installed() -> list[dict]:
             except Exception:  # noqa: BLE001 — no distribution metadata (the BUNDLED find_spec path above
                 entry.pop("version", None)   # finds a package that has none): the "0" of the synthetic
                 #                              wheel name a line up is regex filler, not a version to show.
-        entry.update(engine="sud", installed=True)
+        entry.setdefault("engine", "sud")   # …but NOT over `generic`, which parse_asset already set
+        entry["installed"] = True
         if pkg in BUNDLED_SUD:
             entry["bundled"] = True   # the Model Manager shows a "Bundled" pill in place of the Remove button
         out.append(entry)
     for lang, tb in sorted(_installed_stanza_models()):
         out.append({"id": f"stanza:{lang}#{tb}", "engine": "stanza", "lang": lang, "treebank": tb,
                     "label": _stanza_label(lang, tb), "installed": True})
+    # …and every CUSTOM model, which is installed by construction: it is a row of the generic wheel's
+    # own embedding table sitting in APP_DATA, so there is nothing to scan a filesystem for and
+    # nothing to download. A machine with no generic wheel still lists them — they are the reader's
+    # own work, and a row that vanished when the wheel was removed would look like data loss rather
+    # than like a missing dependency (the Custom section says which it is).
+    try:
+        from . import generic_models
+        out.extend(generic_models.entries())
+    except Exception as exc:  # noqa: BLE001 — a custom store that cannot be read must not empty the list
+        print(f"[custom] not listed: {exc}", file=sys.stderr)
     # The two loops above sort by CODE (package name / (lang, treebank)) purely so their own iteration
     # is deterministic — that ordering leaked all the way to the toolbar's model dropdown (populateModels
     # in web/js/io/models.js builds its groups straight from this list, unlike the Manage Models sheet's
@@ -743,7 +776,7 @@ def merge_installed(available: list[dict], installed: list[dict]) -> list[dict]:
     # The engine rank is STATED rather than inferred from the merged list: infer it and an offline
     # run, whose ``available`` holds no SUD row at all to be seen first, puts Stanza ahead of SUD.
     # An unknown engine sorts after both rather than jumping the queue.
-    rank = {"sud": 0, "stanza": 1}
+    rank = {"custom": 0, "sud": 1, "stanza": 2, "generic": 3}   # Custom leads the list; see _models_html
     rows.sort(key=lambda e: (rank.get(e.get("engine") or "", 2), e.get("label") or e.get("id") or ""))
     return rows
 
@@ -758,7 +791,8 @@ def resolve_default_package(lang: str) -> str | None:
     package that is not RETIRED, and only then whatever is left — a retired wheel still answers when it
     is genuinely all this machine has, which is the same "keep parsing with what you have" posture
     :func:`_installed_sud_packages` takes for the other two sets."""
-    pkgs = sorted(p for p in _installed_sud_packages() if p.startswith(f"{lang}_sud_"))
+    pkgs = sorted(p for p in _installed_sud_packages()
+                  if p.startswith(f"{lang}_sud_") and p not in GENERIC_SUD)
     if not pkgs:
         return None
     for pkg in pkgs:
@@ -835,6 +869,12 @@ def installed_by_language(refresh=CACHE_ONLY) -> dict[str, list[dict]]:
         merged = dict(meta.get(e.get("id") or "") or {})            # size / train_sents / uas / las …
         merged.update({k: v for k, v in e.items() if v not in (None, "")})   # …under the INSTALLED record, which is authoritative about what is actually there
         code = model_language(merged)
+        # The generic wheel and the custom models built on it are deliberately absent from the
+        # per-language picker: the wheel parses no language of its own, and a custom model is a
+        # choice the reader makes by NAME (they may have three for one language, or one for a
+        # register with no code at all), never something the app should pick on their behalf.
+        if merged.get("engine") in ("generic", "custom"):
+            continue
         if code:
             groups.setdefault(code, []).append(merged)
     for entries in groups.values():
@@ -872,12 +912,32 @@ def language_choices(extra: dict | None = None) -> dict:
         best = entries[0]
         inst.append({"code": code, "name": _lang_name(code),
                      "model": best.get("id") or "", "label": best.get("label") or best.get("id") or ""})
+    # ⚠ AND EVERY CUSTOM MODEL, BY NAME. `installed_by_language` deliberately leaves them out — the app
+    # must never PICK one on the reader's behalf, since they may have three for one language and named
+    # them by hand. Offering them here is the opposite act: the reader is doing the picking, and a
+    # parser they built for a language nothing else covers is the one they most need this dialog to
+    # list. A row carries the MODEL's own name rather than a language name, because that is what
+    # distinguishes it from the language's ordinary parser sitting beside it in the same group.
+    covered = set(groups)
+    try:
+        from . import generic_models
+        for e in generic_models.entries():
+            code = (e.get("lang") or "").lower()
+            inst.append({"code": code, "name": e.get("label") or e["id"], "model": e["id"],
+                         "label": e.get("label") or e["id"], "custom": True})
+            if code:
+                covered.add(code)
+    except Exception as exc:  # noqa: BLE001 — a custom store that cannot be read must not empty the menu
+        print(f"[custom] not offered for insert: {exc}", file=sys.stderr)
     inst.sort(key=lambda r: r["name"].lower())
     names = dict(LANG_NAMES)
     for code, name in (extra or {}).items():
         if code and code not in names:
             names[str(code)] = str(name or code)
-    others = [{"code": c, "name": n} for c, n in names.items() if c not in groups]
+    # `covered`, not `groups`: a language whose only parser is a CUSTOM one must not also appear under
+    # "Other languages", where the dialog's own note would tell the reader no parser is installed for
+    # it — three rows above the one they just built.
+    others = [{"code": c, "name": n} for c, n in names.items() if c not in covered]
     others.sort(key=lambda r: r["name"].lower())
     return {"installed": inst, "others": others}
 
@@ -1131,8 +1191,22 @@ def _ensure_tokenizer_deps(package: str, progress=None, declared=()) -> dict:
     declares (pip installs into this venv + any data-fetch console script it provides).
 
     ``declared`` is the wheel's own unsatisfied ``Requires-Dist`` list, used as a fallback when the
-    ImportError carries no runnable command — see the note at that branch."""
+    ImportError carries no runnable command — see the note at that branch.
+
+    ⚠ THE GENERIC WHEEL IS EXEMPT, because the probe is a PARSE and this one cannot be parsed blind.
+    `sud.GenericEmbed.v2` raises for a `Doc._.tb_lang` it has no slot for, deliberately — so a probe
+    with no language set gets "no embedding slot for None", which is the model working exactly as
+    designed and has nothing to do with a tokeniser dependency. It was reported verbatim to the
+    reader as "its tokeniser dependency did not [install]" on a wheel that had just installed
+    perfectly. There is nothing to probe FOR either: the generic pipeline ships spaCy's bare `xx`
+    tokeniser and no third-party segmenter, which is the whole reason tokenisation is not one of its
+    arms (app/generic_models.py, GENERIC_ARMS)."""
     import importlib
+    if package in GENERIC_SUD:
+        return {"ok": True}     # …and `ok`, not `{}`: the caller reads a falsy `ok` as a FAILURE and
+        #                         reported "its tokeniser dependency did not [install]" with an empty
+        #                         reason after it. Nothing was wrong; the exemption was saying so in
+        #                         the shape that means the opposite.
     venv_bin = os.path.dirname(sys.executable)
     env = dict(os.environ)
     env["PATH"] = venv_bin + os.pathsep + env.get("PATH", "")
@@ -1563,6 +1637,11 @@ def _remove_targeted(pkg: str) -> bool | None:
 
 def remove(model_id: str) -> dict:
     engine = model_id.split(":", 1)[0]
+    if engine == "custom":
+        # A few kB of JSON, and the shared generic wheel is untouched — it is every OTHER custom
+        # model's home too, and removing IT is a separate act with its own row.
+        from . import generic_models
+        return generic_models.remove(model_id)
     if engine == "sud":
         pkg = model_id.split(":", 1)[1]
         if pkg in BUNDLED_SUD:   # belt and braces — the Model Manager offers no Remove button for these
