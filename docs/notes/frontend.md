@@ -137,3 +137,24 @@ padding 52, `docTopInset()` 91, i.e. **39px** of shift, which is the reported "e
 lower the focused block". It is the rAF'd restore inside `syncChrome` that decides, since it runs after
 `recapBlocks` and overrides `withTopChrome`'s synchronous one — so the torn capture is what the reader is left
 looking at. Driving the real command now measures **0px** of drift.
+
+## A theme (or accent) change has to drop TWO caches
+
+⚠️ **A COLOUR TOKEN CHANGING INVALIDATES `_CSSVAR` AND `DIA_CACHE`, AND MISSING THE SECOND IS WHY A RE-RENDER CAN
+REPAINT THE OLD COLOURS PERFECTLY.** `relColor()` is `css("--c-"+cat(r))` — a value read through a memo
+(`_CSSVAR`, `js/diagram/diagram-core.js`) and then BAKED into SVG `fill`/`stroke` attributes at build time. A
+built sentence is itself cached: `diaSentence` hands back the same node unless the sentence's content signature
+or the view signature moved, and a theme flip moves neither. So the old code's flip handler re-derived the
+accent triad and called `renderDoc()` — which faithfully re-appended the nodes it already had, in the other
+theme's colours. Reported as "the deprel colours stay as they are when switching between dark and light mode".
+`colourTokensChanged()` (`js/ui/colours.js`) drops both, and every site that writes a colour token calls it:
+`arh_applyAccentVars` (a system accent change), `applyRelColours` (the override `<style>`), and the flip handler
+itself. Verified by construction: with only `_CSSVAR` cleared, a re-render still paints the old hue; with both,
+the new one lands on the first render.
+
+⚠️ **AND THE FLIP IS RE-CHECKED ON FOCUS AND VISIBILITY, against a remembered value**, not just on the
+`matchMedia` event: the appearance can change while the app is in the background, and an engine that coalesces
+or skips that event would otherwise leave the document painted in the other theme's hues until the next edit.
+`deriveRelHuesFromAccent`'s own cache key already carries the theme, so the re-derive is a no-op when nothing
+moved — `themeFlipCheck` only adds the two cache drops and the render a real flip needs.
+

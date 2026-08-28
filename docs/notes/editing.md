@@ -183,3 +183,159 @@ here once the survivor has settled one member shorter. The survivor's `Unsandhie
 rewritten: a component's form IS its pausa, and the head's old value described one piece while now sitting
 on the merged whole — the stale `-tve` trap. Fire-and-forget off the bridge, exactly as `sandhiMwtForms`
 is; the concatenation stands in until it lands, and is the answer if it never does.
+
+## Clearing a word class or a relation
+
+⚠️ **A PICKER OF A CLOSED VOCABULARY CANNOT SAY "NONE OF THESE" ON ITS OWN.** Every row of the POS menu and the
+relation menu SETS a value, and re-picking the current one is a documented no-op in both, so until now the only
+routes to an empty word class or relation were the grid's own `(none)` option and its free-text DepRel cell —
+and nothing in the diagram at all. `optionMenu` takes a `clearRow` ({label, fn}) which it appends in the same
+trailing group as the guidelines link, and both menus pass one. It calls **`choose("")` — the very function
+every value row calls** — so clearing goes down the one path that already knows what the edit entails: for a
+retag, dropping the dot-suffixed subtypes, re-syncing XPOS where it mirrors, dropping a `Subject` only a
+VERB/AUX can carry, retargeting the closed-class gloss prefix and re-asking the parser for the fields that
+follow from the class; for a relation, `afterDeprelEdit` and the goeswith normalisation.
+
+⚠️ **THE ROW IS OFFERED ONLY WHERE IT WOULD DO SOMETHING**, which is why the two conditions differ: the POS row
+appears when there is a tag *or* a subtype hanging off one; the relation row appears when there is a relation
+**and the token is not the root**. `head 0 ⟺ deprel "root"` is an invariant this app maintains at every other
+edit site — `afterDeprelEdit` rewrites a head-0 token's relation back to `"root"`, and `afterHeadEdit` does the
+same in the other direction — so a Clear row on the root would be a visible no-op.
+
+⚠️ **AND THE HEAD CLEARS TOO — `clearHead`, which also clears the RELATION.** A deprel is a statement about an
+EDGE, so keeping `subj` on a token with nothing to be the subject *of* leaves the file asserting something it no
+longer has the structure to mean. That is the same reasoning `afterHeadEdit` already applies in the two
+directions it knows (head 0 ⟹ `root`; away from head 0 ⟹ `root` demoted to `udep`); "no head at all" is the
+third, and it is cleared in `clearHead` rather than inside `afterHeadEdit` because that function is the funnel
+for EVERY head change and must not start blanking relations on the ordinary re-attach paths. ⚠️ **THE ORDER
+MATTERS**: the deprel goes first, or `afterHeadEdit`'s own `depBase==="root"` branch rewrites a detached root's
+relation to `udep` — a value nobody chose — instead of leaving it empty. `afterHeadEdit` still runs (the funnel
+rule), and its `headSyncDeprel` already declines to ask the parser for a relation when there is no head to ask
+about (`!(want>=1)`), so nothing refills it. Reachable from **Clear head** in the token menu's own head group
+(beside the two rows that step through candidate heads — this is the third thing you can do to an attachment)
+and from the grid's Head cell, which gained the explicit `(none)` option its UPOS neighbour already had.
+
+⚠️ **AN UNATTACHED TOKEN WAS A LATENT CRASH IN TWO RENDERERS, and a half-annotated FILE could always produce
+one** — `HEAD` is `_` there long before anyone clears a head from the UI. `bracketsWrapped` computed
+`dparent[p]=head[p]-1`, which is `NaN` for an unattached token, and `dchildren[NaN].push(p)` threw at the top
+level — blanking the whole app on any wrapped bracket view of such a sentence. And the OUTLINE walks from the
+root, so anything the root cannot reach was simply not listed: in every other notation an unattached token still
+draws in reading order and merely loses its arc, but there it vanished, along with everything hanging off it.
+Both now take the view `structure()` itself takes of a headless token (its own `isNaN(h)||h<1||h>n` branch makes
+it top-level): the bracket nests it under `root`, and the outline sweeps up whatever its root-first descent
+missed — the same fallback `structure` applies to any token its own first pass never visits, which also covers
+the far side of a head CYCLE.
+
+⚠️ **CLEARING IS AN ✕ ON THE CHOSEN ROW, NOT A ROW OF ITS OWN.** It reads as what it is — the one value the
+menu has actually SET, with the means to unset it attached to it — where a trailing "Clear …" row read as one
+more option to pick. `optionMenu` hands it to whichever row carries the checkmark; the guidelines link goes back
+to the full-width row it always was. ⚠️ **IT IS A RING, NOT A BARE GLYPH**, on report ("the ✕ needs to be circled, so it's actually visible"): at
+this size a lone mark beside a label reads as a stray character, where the ring says "control".
+
+⚠️ **AND IT SITS ON THE BASELINE, STRUCTURALLY.** `.rowclear` is a ZERO-WIDTH anchor that stays IN FLOW as the
+last item of the `.lblgrp` — which is `align-items:baseline`, so the anchor's own bottom edge lands exactly on
+the label's baseline with no magic number to keep in step with a font; `.rcx`, the ring, is absolutely
+positioned against it, so `bottom:0` IS the baseline. Zero width is what keeps the other promise ("make sure the
+✕ won't force the menu to be any wider" — a column is sized to its widest row). The ring is 9px, the label's own
+cap height, so it occupies the band the capitals do.
+
+⚠️ **THREE ROUNDS OF "IT SITS TOO HIGH" WERE ALL MEASURED AGAINST THE WRONG THING, and the fix was to look at
+the pixels.** Box geometry said it was centred; canvas ink metrics in the shipping engine said it was centred to
+0.08px. What finally showed the fault was a screen capture of a real WKWebView window — markers pinning the
+viewport→screen mapping, the ✕ isolated by an A/B diff, printed one character per CSS px: a 10px ring centred on
+the label's ink ran rows 7–17 where `DET`'s ink ran 7–16 and **the badge beside it ran 9–16**. The eye was
+comparing it to its NEIGHBOUR, not to the label — 2px proud at the top, 1px under the baseline. ⚠️ **HEADLESS
+CHROME CANNOT SEE ANY OF THIS**: it substitutes a face for `-apple-system` and put the same ring 0.75px BELOW
+the label's ink where WebKit puts it 0.5px above. Measure this affordance in a WKWebView capture, never in the
+CDP harness.
+
+⚠️ **AND THE MARK INSIDE IT IS DRAWN, NOT SET** — two rotated bars in `::before`/`::after`. A `✕` GLYPH centred
+by `align-items:center` is centred by its LINE BOX, and that box reserves descent space the character does not
+use: measured with canvas ink metrics, U+2715's ink runs 5.4px above the baseline to 0.2px below, putting its
+ink centre 2.6px above the ring's. Bars have no baseline to be asymmetric about — they are centred by
+construction, at any size, in any font, including a fallback face substituted for a missing ✕. The element's own
+text is empty as a result; the name lives on `aria-label`/`title`.
+
+⚠️ **AND THE CURRENT VALUE ALWAYS HAS A ROW TO PUT THE ✕ ON**, even when it is outside the inventory the menu
+offers — a tag or relation a FILE carries that `SETTINGS.upos`/`SETTINGS.deprel` doesn't list, or one the reader
+has since removed from it. `optionMenu` appends `current` to its own option list when it is missing, and it
+falls through the categorisation like any other unplaced option into "Other"/"Custom" — where the grid's
+out-of-inventory values already appear. This replaced a first attempt that dropped the ✕ on such a row and fell
+back to a trailing Clear row instead, which had it exactly backwards: an unfamiliar tag is MORE likely to want
+clearing, not less, and the menu was also showing no tick at all for a value the token demonstrably had. The
+trailing row survives for the one genuinely rowless case: no current value, yet something to clear — a token
+with no word class that still carries a lexical SUBTYPE feature, which "Clear word class" drops with it.
+
+⚠️ **AN EDGE NEEDS A FAT INVISIBLE HIT STROKE TO BE RIGHT-CLICKABLE AT ALL.** The stemma's and the hierarchy's
+visible line is `--edge-stroke` (1.4–1.7px) and its casing halo is hoisted OUT of the `.edge-g` group into
+`edge-casing-group` for z-order — so the only thing inside the group that hit-tests is that hairline, and the
+menu below was reachable only by landing on it exactly. `.edge-hit` is the same `d` at 9px of transparent stroke
+with `pointer-events:stroke`, appended FIRST so it paints over nothing; measured, ±6px off the line now resolves
+to the edge's own group. The ARC views need none — `drawBump` keeps their `.arc-casing` (`pointer-events:stroke`,
++3.5px) inside the `.arc` group itself, so an arc already had a ~5px target that resolved correctly.
+
+⚠️ **THE EDGE ITSELF OPENS THE RELATION MENU** (`posRelHit`'s third branch, `.edge-g`/`.arc`). It is the only
+way in once the label is gone — an empty relation draws no label at all — and it is offered on every edge, not
+only the unlabelled ones, since the arc is a far bigger target than its label and means the same thing. Those
+groups already carry `data-s`/`data-dep` for the DEPENDENT, which is the token a relation belongs to and exactly
+what `tokFromEl` reads. `.ghost-g` is deliberately excluded: a ghost duplicates an attachment drawn elsewhere
+and names no edge of its own. Checked LAST, so a click landing on a label or a POS tag inside one of these
+groups still resolves to that.
+
+⚠️ **AND ITS TARGET IS THE ROW, NOT THE INK.** The placeholder's ink is one underscore — 4.8×14px measured —
+and the rect around it was 16×14, barely more than the glyph: reported as "the hitbox is tiny, covering only
+the underscore". It is 24×20 now, reaching UP into the clearance the tier already leaves under the POS baseline
+(`avmTopGap`, ~10px of empty space) rather than down past the stack bottom, and the outline's own span takes
+the same treatment through padding. Verified by hit-testing a grid of points: the whole 24×20 region resolves
+to the placeholder, right-clicks 9px out horizontally and 7px vertically all open its menu, the POS row above
+still resolves to `.tok-pos`, neighbouring tokens' targets stay 49px apart, and the outline's row heights are
+unchanged (the negative block margin pays for the taller box). ⚠ IT IS DELIBERATELY NOT PUSHED INTO `boxes`:
+`fitTight` would then grow the diagram's crop around an invisible rectangle, adding whitespace under every
+token that has one.
+
+⚠️ **THE PLACEHOLDER'S MENU IS THE "Add feature…" FLYOUT, OPENED IN PLACE** — same items (both go through
+`addFeatureItems`) and now the same SHAPE: one fitted column, `subFit`-style, never the balanced two-column
+layout `showCtx` switches to past 12 rows. On report ("right-clicking an AVM placeholder should ONLY bring up
+the contents of the Add feature submenu"): the content was already exactly that — verified in all five
+notations and in the wrapped-bracket overlay, none of which fell through to the token or sentence menu — so
+what read as a different menu was the two columns. Measured after: 12 rows either way, identical row text,
+130px against the flyout's own 132px.
+
+⚠️ **THE ADD-FEATURE PICKER IS SCOPED BY WORD CLASS, AND THE MODEL IS WHAT MAKES THAT POSSIBLE.** The rule is
+"only features compatible with the UPOS" — and the document's own usage cannot carry it alone: narrowing to what
+is attested ON THIS CLASS is right where the class has attestation and silently fatal where it has none
+(measured: **0** items for a PUNCT and for a PROPN, so `avmAddMenu` answered false and right-clicking the
+placeholder did nothing — reported twice). Dropping the scoping instead was worse: it put Tense in a PUNCT's
+picker, because some verb in the document had one.
+`MODEL_FEATS_BY_UPOS` (`js/io/bridge.js` ← `app/parse.py`'s `model_feats_by_upos`) is the third source that
+resolves it. The morphologizer's labels are JOINT — `POS=NOUN|Number=Sing` — so reading them WITHOUT throwing
+the `POS=` half away yields exactly "which features go with which class", **in this language**: the only kind of
+authority there is for that question, since it is a per-language fact and no universal table would be right.
+`strictAttestedVals` unions it with the document's own class-scoped usage (a corpus may annotate what a model
+never predicts), and `addFeatureItems` then stops there for a tagged token, empty or not. Measured against
+`en_sud_ewt_gum`: NOUN → Number/Abbr, VERB → Number/Mood/Tense/Voice/Person/Abbr, PRON → +Gender/Case/Reflex,
+ADP → Abbr, **PUNCT → nothing**.
+
+⚠️ **AND THE PICKER IS ORDERED THE WAY THE AVM TIER LAYS A TOKEN OUT** — the AGR block first (Person, Number,
+Gender, Clusivity, in `AVM_GROUPS`' own order), then TAM (Tense, Aspect, Mood, Evident), then everything else in
+GLOSSING order (`MGLOSS_FEAT_RANK` — the sequence the morphemic tier already writes its abbreviations in), and
+anything in neither table last, alphabetically, so an unknown feature has a stable place rather than a random
+one. ⚠️ **THE SAME RANK NOW ORDERS `avmStruct`'s OWN TAIL**, which used to walk `Object.keys(UD_FEATS)`: one
+function both call is what makes "the menu is sorted the way the AVM is" true by construction rather than by
+two lists happening to agree. Measured: a VERB offers Person, Number → Tense, Mood → Abbr, Voice; a PRON adds
+Gender to the block and then Case, Reflex, Abbr; and a token carrying eight features draws
+AGR(Person,Number) · TAM(Tense,Mood) · Case · Degree · Definite · Voice in both places.
+
+⚠️ **AN EMPTY LIST FOR A TAGGED TOKEN IS A REAL ANSWER** — "this class takes no features here" — and the gesture
+then falls through to the ordinary token menu rather than opening a picker of things that cannot apply. The
+document-wide and whole-inventory fallbacks survive only for a token with NO class, where there is nothing to
+scope BY: scoping by `""` asks what other untagged tokens carry, which is nothing, and the inventory itself is
+all a fresh document with no model has to offer. Same judgement as the annotation rules in `CLAUDE.md`: an
+honest blank beats an invented feature set.
+
+⚠️ **AN EMPTY UPOS OR DEPREL IS A THING THE FILE CAN SAY**, so nothing downstream needs teaching: `_blank`
+(`app/io_conllu.py`) writes `_` for either, `depIsError` returns false for an empty relation (so a cleared one
+never blocks a re-head drag), and `reparseTokenFields` never writes `upos` back unless a caller asks for it
+(`opts.upos`, the split-token path) — which is what stops the background re-parse from refilling a class the
+reader has just cleared. What the reader sees afterwards is the tier's own placeholder — see the empty-value
+placeholder in `diagram-rendering.md`.

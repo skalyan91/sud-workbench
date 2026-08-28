@@ -51,6 +51,90 @@ All notable changes to SUD Workbench are documented in this file.
 - An arm the current model **cannot do** is greyed, and one that has nothing to read is dimmed; either
   way the row itself never changes size, and hovering it says why. The choice persists between sessions.
 
+### Changed: an annotation tier that is showing tells you where it has nothing
+
+- A tier on display in a diagram now marks the tokens it says nothing about with an **`_`** — the
+  same character the file itself uses for an empty field — instead of leaving a hole in the row. It
+  covers the transliteration row, the POS tags, the glossing tiers and the feature matrices alike, in
+  every notation, and replaces the `…` the glossing tiers used to show. The mark itself is decoration —
+  nothing is written to the file until you put something there.
+- The rows that carry it now **line up across the sentence**, because a token with no value keeps its
+  place in the stack. An untagged word used to pull the feature matrix beneath it up into the row its
+  neighbours were using for their POS tags; a word with no transliteration did the same to the glossing
+  tiers beneath it in the hierarchy.
+- A stemma of word classes is the exception: its tags *are* its nodes, so an untagged one goes on showing
+  **`X`** rather than a placeholder.
+
+### Added: clearing a word class, a relation, or a head
+
+- **Clear word class** at the foot of the POS menu, and **Clear relation** at the foot of the relation menu.
+  Both were pickers that could only ever set a value: re-choosing the tag a token already has does nothing,
+  so short of the grid there was no way to say a word is *not yet* classified. An empty UPOS or DEPREL is
+  what the file itself says with `_`, and the tier draws it as the `_` above.
+- Clearing goes down the same path as picking, so everything that follows a retag still follows: dot-suffixed
+  subtypes drop, XPOS keeps mirroring where it mirrors, and the background re-parse no longer refills the
+  class you just cleared.
+- The row is offered only where it would do something: on the POS menu whenever there is a tag, and on the
+  relation menu for any token but the **root** — a root's relation is `root` by definition, and the app keeps
+  that in step with its head everywhere else.
+- Clearing is a **circled ✕ beside the value the menu has set**, rather than a row of its own — attached to
+  the one row that is ticked, after its badge. It adds nothing to the menu's width. A tag or relation from outside
+  the menu's own list gets a row of its own so it is ticked and clearable like any other. An untagged token
+  has neither the ✕ nor a guidelines link: there is no page for a word class that isn't there.
+- **Right-click the edge itself** to set a relation. That is the way in once a relation is cleared, since an
+  empty one draws no label, and it works on any edge — the arc is a much bigger target than its label.
+- **Clear head** detaches a token outright, beside Select previous/next head in its own menu, and the grid's
+  Head cell now offers **(none)** the way its POS cell already did. The relation goes with the head — a
+  relation describes an edge, and there is no longer one — so a detached token is blank in both columns, which
+  is what `_` in a half-annotated file already means. An unattached token still draws in reading order in
+  every notation; it simply has no arc, and no label to go with it.
+
+### Added: adding a feature from the feature matrix itself
+
+- The list is **ordered the way the feature matrix itself is** — agreement first, then tense/aspect/mood,
+  then the rest in glossing order. The matrix's own rows follow the same order now, so the two can't drift.
+- The list offers **only features that go with the token's word class** — a noun is not offered a tense, and
+  punctuation is offered nothing at all. Which features a class takes is a fact about the language rather than
+  a universal one, so it is read off the parser's own labels (which name the class and the features together)
+  and joined with what the document itself uses on that class.
+- **Right-click the empty matrix** under a token with no features and you get the **Add feature** list
+  itself — the same items the token menu offers, in the same single-column shape, opened where you clicked.
+  Until now a token with no features drew nothing there, so there was nothing to right-click.
+- **Right-click a feature already in the matrix** and its menu ends with **Add feature…**, so changing one
+  value and adding another are the same gesture in the same place.
+
+### Added: how many choices are behind a row, and how likely each one is
+
+- A menu row with a right-click submenu now carries a **numeric badge**, right after the label, saying how
+  many things are in it — the subtypes of a word class (PRON.Dem, NUM.Ord), the deep features of a relation.
+  Those submenus show no chevron, by design, so until now nothing said a row had one at all. A count of one
+  isn't drawn, and a word class with no subtypes stops offering an empty submenu.
+- **Submenus fade by likelihood too**, exactly as the menus they hang off already did: a subtype the parser
+  gave almost no weight to reads as faint as an unlikely word class does. The submenu's rows are the very
+  readings its parent row's own weight is the sum of, so the two now say the same thing at both levels.
+
+### Fixed
+
+- **Relation colours follow the light/dark switch.** They are baked into the diagram when it is drawn, and
+  both the colour lookups and the drawn sentences are cached — so flipping appearance repainted the document
+  in the colours it already had. The same was true of a system accent change.
+- **Right-clicking an empty feature matrix opens a menu on every token.** It used to offer only features
+  already attested on that token's own word class — and the tokens that show an empty matrix are mostly
+  punctuation and proper nouns, classes a document carries no features on at all, so the list came back
+  empty and nothing happened. It now falls back to what the document attests anywhere, and, in a document
+  with no features yet, to the standard inventory: adding the first one is the whole point of the command.
+- **A dependency edge is big enough to right-click.** The line itself is under two pixels wide and its halo
+  sits in a separate layer, so the relation menu an edge opens was reachable only by hitting the hairline
+  exactly. Edges now carry an invisible nine-pixel target.
+- **A partly attached sentence no longer breaks two views.** A token with no head — which any half-annotated
+  file can carry, and Clear head now produces — crashed the wrapped bracket view outright, and quietly
+  vanished from the outline along with anything hanging off it. Both now show it where it stands, unattached.
+- **The cursor is visible in a field you click into while it is empty.** An empty editing box has no line
+  to put a cursor on, so the field took your typing and showed you nothing. Fixed for the gloss tiers in a
+  diagram, for the sent_id of an unnamed sentence, for an unfilled translation row, and for the name of a
+  document or paragraph marker — the last of which shows nothing else at all when empty, so there was no
+  sign whatever that the click had landed.
+
 ## [0.3.16] — 2026-08-22
 
 ### Added: auto-regeneration can be turned off

@@ -1366,6 +1366,47 @@ def parse(text: str, model_id: str = "", arms=None) -> dict:
                 "reason": str(exc)}
 
 
+def model_feats_by_upos(model_id: str) -> dict:
+    """The same inventory, SPLIT BY WORD CLASS: ``{"NOUN": {"Number": ["Sing", "Plur"], ...}, ...}``.
+
+    ``model_feats_inventory`` below throws the ``POS=`` half of each joint label away, which is the
+    right answer for its own callers (a value picker for a feature the token already has) and the wrong
+    one for "which features could this token take at all": a PUNCT was being offered Tense because some
+    VERB in the document had one.  The labels are joint by construction — ``POS=NOUN|Number=Sing`` — so
+    the model itself is the authority on which features go with which class IN THIS LANGUAGE, and no
+    hand-written universal table is needed (nor would one be right: which features a class takes is a
+    per-language fact, which is exactly what a trained morphologizer's label set records).
+
+    Same contract as its sibling in every other respect: empty dict, never raises, for an unresolvable
+    or unloadable model id, a Stanza model (its label inventory is not introspectable this way), or a
+    pipeline with no morphologizer.  Reading ``.labels`` triggers no inference.
+    """
+    if not model_id:
+        return {}
+    engine, _, name = model_id.partition(":")
+    if engine != "sud" or not name:
+        return {}
+    try:
+        nlp = _load_spacy(name)
+        morphologizer = nlp.get_pipe("morphologizer")
+    except Exception:  # noqa: BLE001 — model not installed, or a pipeline shaped without this component
+        return {}
+    from spacy.morphology import Morphology
+    out: dict[str, dict] = {}
+    try:
+        for lab in morphologizer.labels:
+            feats = Morphology.feats_to_dict(lab)
+            pos = feats.pop("POS", "")
+            if not pos:
+                continue                      # a label with no class says nothing about class compatibility
+            per = out.setdefault(pos, {})
+            for k, v in feats.items():
+                per.setdefault(k, set()).add(v)
+    except Exception:  # noqa: BLE001 — a morphologizer shaped differently than expected
+        return {}
+    return {p: {k: sorted(v) for k, v in per.items()} for p, per in out.items()}
+
+
 def model_feats_inventory(model_id: str) -> dict:
     """``{FeatName: sorted[values...]}`` — every ``Feat=Val`` pair the model's own morphologizer can
     JOINTLY emit alongside *any* word class, read straight off ``morphologizer.labels`` (the same
@@ -1706,13 +1747,28 @@ def _arc_scores(parser, doc):
     return heads, deprels
 
 
+# The lexical features the POS menu draws as dot-suffixed SUBTYPES (PRON.Dem, NUM.Ord) — kept in step with the
+# frontend's own UPOS_SUBTYPE_FEATS (js/editing/context-menu.js), which is the list that decides which rows the
+# subtype flyout actually has. Only these are pooled into the joint map below: the morphologizer's labels carry
+# every inflectional feature too, and a map of all of them would be an order of magnitude larger for rows no
+# menu draws.
+_SUBTYPE_FEATS = ("PronType", "NumType", "VerbForm", "Poss", "Reflex", "Abbr")
+
+
 def _upos_scores(morphologizer, doc):
-    """The morphologizer's own distribution, POOLED BY WORD CLASS.
+    """The morphologizer's own distribution, POOLED BY WORD CLASS — and, beside it, by CLASS+SUBTYPE.
 
     It predicts UPOS and FEATS as one joint label (`POS=NOUN|Case=Nom|Number=Sing` — the same fact
     `_force_upos` leans on), so the probability of a CLASS is the sum over every analysis carrying it.
     That pooling is also what item 4 needs for the menu's dot-suffixed subtypes: PRON.Dem and PRON.Int
-    are two of PRON's labels, so a parent row's weight is the sum of its submenu's."""
+    are two of PRON's labels, so a parent row's weight is the sum of its submenu's.
+
+    ⚠ AND THE SECOND MAP IS WHAT LETS THE SUBMENU BE WEIGHTED AT ALL. Pooling by class alone discards
+    exactly the half of each label the subtype flyout is a picker for, so the flyout had no ranking to
+    read and drew every subtype at full strength while its parent row was faded — the one place in the
+    menu system where "the model gave this ~0" was invisible. Keyed ``"PRON|PronType=Dem"``: the pair
+    the flyout's own row means (a subtype is only ever offered UNDER a class), summed over every label
+    carrying both. Same 0.002 floor, and confined to `_SUBTYPE_FEATS` so the payload stays small."""
     import numpy as np
     labels = list(morphologizer.labels)
     # ⚠ LOGITS, NOT PROBABILITIES — measured: a row sums to -147.3 and runs -16.4 … +21.0.  Reading
@@ -1727,19 +1783,30 @@ def _upos_scores(morphologizer, doc):
                 p = part[4:]
                 break
         pos.append(p)
+    subs = []                              # …and the SUBTYPE parts of each label, cached the same way
+    for lab in labels:
+        subs.append([part for part in lab.split("|")
+                     if part.split("=", 1)[0] in _SUBTYPE_FEATS])
     out = []
+    out_sub = []
     all_idx = list(range(len(labels)))
     for i in range(len(doc)):
         if i >= scores.shape[0]:
             out.append({})
+            out_sub.append({})
             continue
         probs = _softmax(scores[i], all_idx)
         agg: dict = {}
+        agg_sub: dict = {}
         for j, p in enumerate(pos):
             if p:
                 agg[p] = agg.get(p, 0.0) + probs[j]
+                for part in subs[j]:
+                    k = p + "|" + part
+                    agg_sub[k] = agg_sub.get(k, 0.0) + probs[j]
         out.append({k: v for k, v in agg.items() if v >= 0.002})
-    return out
+        out_sub.append({k: v for k, v in agg_sub.items() if v >= 0.002})
+    return out, out_sub
 
 
 def _score_doc(nlp, package, forms, upos=None, tb_lang=None):
@@ -1747,15 +1814,16 @@ def _score_doc(nlp, package, forms, upos=None, tb_lang=None):
     heads: list = []
     deprels: list = []
     uposd: list = []
+    uposub: list = []
     for pname, proc in nlp.pipeline:
         if pname == "parser":
             heads, deprels = _arc_scores(proc, doc)
         elif pname == "morphologizer":
-            uposd = _upos_scores(proc, doc)
+            uposd, uposub = _upos_scores(proc, doc)
         doc = proc(doc)
         if pname == "morphologizer":
             _force_upos(proc, doc, upos)
-    return heads, deprels, uposd
+    return heads, deprels, uposd, uposub
 
 
 def _sud_target(model_id: str) -> tuple:
@@ -1816,7 +1884,7 @@ def analysis_scores(forms: list[str], model_id: str = "", upos: list[str] | None
         return hit
     try:
         nlp = _load_spacy(name)
-        heads, deprels, uposd = _score_doc(nlp, name, forms, upos, tb_lang)
+        heads, deprels, uposd, uposub = _score_doc(nlp, name, forms, upos, tb_lang)
         if len(heads) != len(forms):
             return {"scored": False, "reason": "the pipeline changed the token count"}
         out = {
@@ -1826,6 +1894,8 @@ def analysis_scores(forms: list[str], model_id: str = "", upos: list[str] | None
             "deprels": [{str(h + 1): {r: round(p, 4) for r, p in ls.items()}
                          for h, ls in d.items()} for d in deprels],
             "upos": [{k: round(v, 4) for k, v in d.items()} for d in uposd],
+            # …and the class+subtype pairs behind them, for the subtype flyout's own dimming (_upos_scores)
+            "upos_sub": [{k: round(v, 4) for k, v in d.items()} for d in uposub],
         }
     except Exception as exc:  # noqa: BLE001 — a pipeline shaped differently keeps the plain editor
         return {"scored": False, "reason": str(exc)}

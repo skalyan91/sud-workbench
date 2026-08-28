@@ -57,8 +57,19 @@ let ARH_ACCENT_OVERRIDE=null;
 // consumers (--accent-dim / --row-sel-dim) and the direct var(--accent-blue) reads then recompute for free.
 // Called ONLY when a sticky override is active — at rest these inline props are absent and the CSS keyword/hex
 // owns the accent (so the steady state still tracks the real AccentColor and the dark-mode #0a84ff stays put).
+/* ⚠ A COLOUR TOKEN CHANGING INVALIDATES TWO CACHES, NOT ONE, and missing the second is why a re-render can
+   repaint the OLD colours perfectly. `clearCssVarCache` drops diagram-core's memo of the `--*` reads; but the
+   values those reads produce are BAKED into SVG attributes (`fill`, `stroke`) at build time, and a built
+   sentence is itself cached — `DIA_CACHE` (js/core/document.js) hands `diaSentence` the same node back unless
+   the sentence's own content signature or the view signature moved, and a theme or accent change moves
+   neither. So renderDoc() faithfully re-appends the nodes it already had. `invalidateDiaCache()` is the
+   wholesale drop its own note lists a font-stack change under — the same class of cross-document, non-content
+   change as this one. Both, together, at every site that writes a colour token. */
+function colourTokensChanged(){
+  if(typeof clearCssVarCache==="function") clearCssVarCache();
+  if(typeof invalidateDiaCache==="function") invalidateDiaCache(); }
 function arh_applyAccentVars(root,rgb){
-  if(typeof clearCssVarCache==="function") clearCssVarCache();   // the --accent family is about to change → drop diagram-core's cached reads of it
+  colourTokensChanged();   // the --accent family is about to change → drop diagram-core's cached reads of it, and the built sentences that baked them in
   const dark=matchMedia("(prefers-color-scheme: dark)").matches, [r,g,b]=rgb, c=`rgb(${r},${g},${b})`;
   const wk=dark?.22:.14, rs=dark?.20:.12, ff=dark?.22:.10, bs=dark?.09:.05;   // per-theme alphas mirror the light/dark :root definitions
   root.style.setProperty("--accent-blue",c);   // active-pill highlight (#btnOptions.active) + the arh probe
@@ -109,9 +120,33 @@ function deriveRelHuesFromAccent(force,rgbOverride){
 }
 // The boot call + 1s poll moved to js/init.js (they render → renderDoc's grid path needs miscTranslit,
 // declared in the later-loaded js/translit-load.js, so they can't run at this module's load time).
-addEventListener("focus",()=>deriveRelHuesFromAccent(false));
-document.addEventListener("visibilitychange",()=>{ if(!document.hidden)deriveRelHuesFromAccent(false); });
-matchMedia("(prefers-color-scheme: dark)").addEventListener("change",()=>{ deriveRelHuesFromAccent(true); preserveScroll(renderDoc); });   // (c) theme flip: re-derive with the new theme's default L/C, then keep the scroll (a theme flip must never jump the scroll position)
+/* ⚠ A THEME FLIP MUST DROP THE CSS-VARIABLE CACHE BEFORE ANYTHING RE-RENDERS, and that is the whole of this
+   bug: `relColor()` is `css("--c-"+cat(r))` (js/diagram/diagram-core.js) — a value BAKED into every label's
+   `fill` and every edge's `stroke` at render time, read through a Map that is cleared at exactly two choke
+   points, `arh_applyAccentVars` and `applyRelColours`. On a flip the listener below re-derived and re-rendered,
+   but reached NEITHER of those on the two commonest paths — no accent RGB available yet (`deriveRelHuesFromAccent`
+   returns before it touches anything), and the derivation being gated off — so the diagram was rebuilt reading
+   the OLD theme's colours back out of the cache and repainted itself exactly as it was. Reported as "the deprel
+   colours stay as they are". Clearing it HERE, before the re-derive, covers every path through that function
+   including the ones that return early, and it is cheap: the map holds a handful of entries and refills on the
+   first read of the very render that follows.
+   ⚠️ AND THE FLIP IS RE-CHECKED ON FOCUS/VISIBILITY TOO, against a remembered value rather than trusting the
+   media event alone: the appearance can change while the app is in the background, and an engine that skips or
+   coalesces that event would otherwise leave the document painted in the other theme's hues until the next
+   edit. `deriveRelHuesFromAccent`'s own key already carries the theme, so the re-derive is a no-op when nothing
+   moved; this only adds the cache drop and the render the flip itself needs. */
+let _lastDark=matchMedia("(prefers-color-scheme: dark)").matches;
+function themeFlipCheck(force){
+  const dark=matchMedia("(prefers-color-scheme: dark)").matches;
+  if(!force && dark===_lastDark) return false;
+  _lastDark=dark;
+  colourTokensChanged();   // …BEFORE the re-derive/re-render below — see the note above, and colourTokensChanged's own on why the DIAGRAM cache goes too
+  deriveRelHuesFromAccent(true);                                  // re-derive the accent triad for the new theme's own default L/C
+  if(typeof DOC!=="undefined"&&DOC.length) preserveScroll(renderDoc);   // …and repaint what bakes those values in (a flip must never jump the scroll)
+  return true; }
+addEventListener("focus",()=>{ if(!themeFlipCheck(false)) deriveRelHuesFromAccent(false); });
+document.addEventListener("visibilitychange",()=>{ if(document.hidden) return; if(!themeFlipCheck(false)) deriveRelHuesFromAccent(false); });
+matchMedia("(prefers-color-scheme: dark)").addEventListener("change",()=>{ themeFlipCheck(true); });   // (c) theme flip: re-derive with the new theme's default L/C, then keep the scroll (a theme flip must never jump the scroll position)
 // (d) item 9: the native side observes NSSystemColorsDidChangeNotification and pushes the fresh system accent RGB here (WKWebView won't re-resolve the AccentColor keyword on its own, so the JS poll above can't see the change).
 window.__accentChanged=function(r,g,b){ ARH_ACCENT_OVERRIDE=[Math.round(+r),Math.round(+g),Math.round(+b)]; deriveRelHuesFromAccent(true,ARH_ACCENT_OVERRIDE); };   // item 14: remember the fresh accent so every later re-derive stays on it (no snap-back). deriveRelHuesFromAccent now also repaints the whole accent family (arh_applyAccentVars) from this sticky override, so both the deprel hues AND --accent/--accent-blue/selection/focus colours update live.
 
@@ -189,7 +224,7 @@ function relColMidLinear(hexA,hexB){ const na=parseInt(hexA.slice(1),16), nb=par
   return "#"+hx(mix(16))+hx(mix(8))+hx(mix(0)); }
 // Write (or clear) the live override <style>. Does NOT re-render — callers re-render when needed.
 function applyRelColours(){
-  if(typeof clearCssVarCache==="function") clearCssVarCache();   // …and the --c-* relation hues, for the same reason
+  colourTokensChanged();   // …and the --c-* relation hues, for the same reason
   const o=(PREFS.relColours&&typeof PREFS.relColours==="object")?PREFS.relColours:{};
   const cats=RELCOL_CATS.map(c=>c[0]);
   const linked=relColLinked();

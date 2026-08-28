@@ -2051,10 +2051,21 @@ function syncXposMirror(t){ if(XPOS_MIRRORS_UPOS) t.xpos=t.upos; }
 // already degrades to "show everything UD defines" when this is empty, so a blank object is a safe
 // default, not a state anything needs to special-case.
 let MODEL_FEATS_INVENTORY={};
+/* …and the SAME inventory split by word class ({UPOS: {Feat: [vals]}}, app/parse.py's model_feats_by_upos),
+   which is what "only features compatible with the UPOS" is answered from. The flat one above pools every
+   class together — right for a value picker on a feature the token already carries, wrong for "what could this
+   token take at all", where it offered a PUNCT the Tense some verb in the document has. The model's own labels
+   are joint (POS=NOUN|Number=Sing), so the model is the authority on which features go with which class IN
+   THIS LANGUAGE — and that is the only kind of authority there is: which features a class takes is a
+   per-language fact, not a universal one, so no hand-written table would be right. Fetched together with the
+   flat map, on the same model change, and blank for the same reasons (no bridge, no model, a Stanza model). */
+let MODEL_FEATS_BY_UPOS={};
 async function refreshModelFeatsInventory(){
-  if(!hasBridge()||!model){ MODEL_FEATS_INVENTORY={}; return; }
+  if(!hasBridge()||!model){ MODEL_FEATS_INVENTORY={}; MODEL_FEATS_BY_UPOS={}; return; }
   try{ MODEL_FEATS_INVENTORY=await window.pywebview.api.model_feats_inventory(model)||{}; }
   catch(e){ MODEL_FEATS_INVENTORY={}; }
+  try{ MODEL_FEATS_BY_UPOS=(window.pywebview.api.model_feats_by_upos && await window.pywebview.api.model_feats_by_upos(model))||{}; }
+  catch(e){ MODEL_FEATS_BY_UPOS={}; }
 }
 // item 7: the Glossing drawer's two checkboxes toggle the tiers. Checking creates+shows (undoable);
 // unchecking DELETES the tier, confirming ONLY when it has data. All undoable via snap() (captures the flags + MISC).
@@ -2450,6 +2461,7 @@ function renderBlockTrans(i){ const s=DOC[i], rows=sentTranslations(s);
     let row=rows.find(r=>r.lang===code); if(!row){ row={lang:code,text:""}; rows.push(row); }
     const text=document.createElement("div"); text.className="tg-text"; text.setAttribute("contenteditable","plaintext-only"); text.setAttribute("role","textbox"); text.spellcheck=false; text.dir="auto"; text.setAttribute("aria-label",(langName(code)||code)+" translation");
     text.textContent=row.text||""; if(!row.text)text.dataset.empty="1";   // data-empty → CSS placeholder (unfocused looks like plain text)
+    keepEmptyCaret(text);   // …and an empty row still needs a LINE for the caret to sit on — see keepEmptyCaret (js/core/document.js); the data-empty placeholder above is an attribute, not `:empty`, so the <br> leaves it alone
     /* NO CLICK GATE HERE, AND THAT IS THE POINT — recorded because it was got wrong twice and the wrong version
        is the tempting one. The field's BOX is its click target: anywhere inside it focuses and places a caret,
        anywhere outside it does not (and blurs it, since nothing out there is focusable). That is the browser's

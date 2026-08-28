@@ -212,6 +212,12 @@ Break one of these and the failure is silent or misdiagnosed. Each is expanded i
   set, a guessed gloss, or a 14 %-accurate retrieval in an annotator's document. →
   `glossing.md`, `parsing-models.md`
 - **An absent key means "this model says nothing here", never "no".** → `parsing-models.md`
+- **A visible tier with no value draws `TIER_EMPTY`, and every tier row gates on the ROW, never on the
+  value.** The reserves have always asked whether the row exists (`belowReserveH(hasTr(t), …, show.pos, …)`);
+  a draw site that asks whether THIS token has something skips a step the reserve already paid for and
+  silently lifts everything below it out of line with its neighbours. **The relation LABEL is the standing
+  exception** — no reserved slot, and the edge under it already carries the gesture that sets it, so an empty
+  one draws nothing. Tried both ways; that is the settled one. → `diagram-rendering.md`
 - **A custom model is one embedding ROW of one shared generic wheel, never a wheel of its own.** The
   pipeline is loaded once and every stored row written into it; a parse selects its model by stamping
   `Doc._.tb_lang` before the first component runs. Anything keyed on the package name alone (a cache,

@@ -993,6 +993,14 @@ class Api:
         menu never offers a value neither the document nor the active parser has ever produced."""
         return parse.model_feats_inventory(model_id or "")
 
+    def model_feats_by_upos(self, model_id: str = "") -> dict:
+        """`model_feats_inventory`, split by word class — see `parse.model_feats_by_upos`.
+
+        What the AVM tier's "add a feature" pickers narrow against: a class the model never emits a
+        given feature alongside does not offer it, so a PUNCT is not offered Tense because some verb
+        in the document has one."""
+        return parse.model_feats_by_upos(model_id or "")
+
     def token_scores(self, forms: list[str], model_id: str = "",
                      upos: list[str] | None = None) -> dict:
         """The pipeline's RUNNERS-UP for one sentence — what it ranked second, and by how much.

@@ -484,7 +484,9 @@ function renderGrid(si){
         if(key==="deprel"){ t.deprel=withDepBase(t.deprel,ctl.value); afterDeprelEdit(t,sent); }   // keep the "@deep" tail when the relation changes
         else if(key==="deep"){ t.deprel=withDepDeep(t.deprel,ctl.value); }                     // replace only the deep-feature tail
         else if(key==="upos"){ t.upos=ctl.value; syncXposMirror(t); clearSubjIfNotVA(t); uposSyncGloss(t,oldUpos); }   // item 1: a tag change away from VERB/AUX drops any now-meaningless Subj; Task B: retarget the closed-class gloss prefix IN PLACE, immediately — never a wholesale MGloss rebuild
-        else { t[key]=ctl.value; if(key==="head")afterHeadEdit(t,sent); }   // keep head 0 ⟺ deprel "root"
+        else { t[key]=ctl.value;
+          if(key==="head"){ if(!ctl.value.length) t.deprel="";   // detaching clears the relation with it — a deprel describes an EDGE; see clearHead's own note (js/editing/edit-ops.js), and note it must happen BEFORE afterHeadEdit or a detached root's "root" would be demoted to "udep" rather than cleared
+            afterHeadEdit(t,sent); } }   // keep head 0 ⟺ deprel "root"
         if((key==="deps"||key==="misc")&&t[key]==="")t[key]="_";   // empty Deps/Misc round-trips as "_"
         if(key==="form"){ scheduleDoc(); afterFormEdit(si,i+1,true); }
         else if(key==="lemma"){ commitLemmaEdit(si,i+1,t); }   // NO eager scheduleDoc: nothing on screen shows a lemma, and everything that changes BECAUSE of it (MSeg, and the MGloss slots that name it) has to wait on the same await afterLemmaEdit does — see commitLemmaEdit
@@ -506,9 +508,10 @@ function renderGrid(si){
           else if(ev.key==="Escape"){ ev.preventDefault(); ev.stopImmediatePropagation(); acClose(); } });
       } else if(type==="head"){ ctl=document.createElement("select"); ctl.className="csel";
         const maxDig=String(sent.tokens.length).length, padHead=v=>String(v).padStart(maxDig," ");   // item 4: space-pad the token number (NBSP so it isn't collapsed) so the "·" separators line up down the column — display only, never persisted (the option's own value stays the plain number)
+        ctl.appendChild(opt("","(none)",!(t[key]||"").length));   // an explicit EMPTY head — `_` in the file, a token not yet attached — exactly as the UPOS select above offers "(none)". Was unreachable here: the only way out of an attachment was into another one
         ctl.appendChild(opt("0",padHead(0)+" · root",t[key]==="0"));
         sent.tokens.forEach((o,j)=>{ if(j===i)return; ctl.appendChild(opt(String(j+1),`${padHead(j+1)} · ${headText(o)}`,t[key]===String(j+1))); });
-        if(!["0",...sent.tokens.map((_,j)=>String(j+1))].includes(t[key])) ctl.appendChild(opt(t[key],t[key]+" ⚠",true));
+        if((t[key]||"").length && !["0",...sent.tokens.map((_,j)=>String(j+1))].includes(t[key])) ctl.appendChild(opt(t[key],t[key]+" ⚠",true));   // …and an EMPTY head is not an out-of-range one: it now has its own row above, so it must not also mint a "⚠" option for the empty string
       } else if(type==="deep"){ ctl=document.createElement("input"); ctl.className="cin deepin"; ctl.spellcheck=false; ctl.autocomplete="off"; ctl.value=depDeep(t.deprel);   // deep features = the free-text part after "@"
         const ac=ctl;   // custom wide autocomplete (replaces the native <datalist>, whose dropdown truncated): filters this token's admissible deep features (deepVocabFor(t.deprel's base), constrained by DEEP_BY_REL) and completes on click/Enter
         const atPrefix=document.createElement("span"); atPrefix.className="deepat"; atPrefix.textContent="@"; atPrefix.setAttribute("aria-hidden","true");   // fixed "@" decoration: NOT part of ctl.value (so it can't be backspaced/select-all-deleted); the stored deep still goes through withDepDeep(t.deprel, ctl.value)
@@ -827,7 +830,15 @@ function avmStruct(t){ const feats=(t&&t.feats)||""; if(!feats||feats==="_") ret
   const used=new Set(), out=[];
   for(const g of ["AGR","TAM"]){ const members=AVM_GROUPS[g].filter(f=>set[f]!=null);
     if(members.length){ members.forEach(f=>used.add(f)); out.push({group:g, members, combined:members.map(f=>set[f]).join("."), vals:members.map(f=>({feat:f,val:set[f]}))}); } }
-  Object.keys(UD_FEATS).forEach(f=>{ if(set[f]!=null&&!used.has(f)&&!AVM_EXCLUDE.has(f)) out.push({feat:f,val:set[f]}); });
+  /* …then every other feature the token carries, in GLOSSING order (avmFeatCmp, js/editing/context-menu.js —
+     MGLOSS_FEAT_RANK's sequence, the one the morphemic tier already writes its abbreviations in), where this
+     used to walk `Object.keys(UD_FEATS)`. One rank function now orders BOTH this tier and the add-feature
+     picker, so "the menu is sorted the way the AVM is" is true by construction rather than by two lists
+     agreeing. The typeof guard is the usual one for a cross-module call from a file that loads earlier; the
+     old key order is the fallback. */
+  const rest=Object.keys(UD_FEATS).filter(f=>set[f]!=null&&!used.has(f)&&!AVM_EXCLUDE.has(f));
+  if(typeof avmFeatCmp==="function") rest.sort(avmFeatCmp);
+  rest.forEach(f=>out.push({feat:f,val:set[f]}));
   return out; }
 // item 22: an AVM row's right-click edit — same mechanism glossAbbrMenu/acValItems already use (attested-value-
 // narrowed UD_FEATS list, UD's canonical order), but writing UD Feat=Val straight to FEATS instead of a Leipzig

@@ -189,7 +189,7 @@ function stemma(si,{proj,catNodes}){
     svg.appendChild(E("line",{class:"proj",x1:c[i],y1:by-16,x2:c[i],y2:ny(depth[i])+BB}));   // the projection line follows its word down, so node and word stay tied together. Drawn baseline→node (bottom to top) so the dash pattern anchors at the baseline — a dot sits cleanly on the word end and any partial dash lands at the node, matching the icon   // an EDGE: both ends stay on the LAYOUT baselines, so the lowered word simply hangs 2.5px further below the line's foot
     const bg=E("g",{class:"tok-group"+(sel.s===si&&sel.t===OID(i)?" sel":""),"data-s":si,"data-tok":OID(i)});   // baseline words are clickable too
     const bwidth=Math.max(24,bformW[i]+8);
-    const hitW=Math.max(bwidth, trTxt(t[i])?meas(trTxt(t[i]),trFont(t[i]))+10:0, show.pos&&t[i].upos?meas(posDisp(t[i]),POS_F)+10:0, avmSlotW(t[i]));   // widen to the transliteration/POS/AVM below (a short word can romanise, tag, or feature-stack to a wider string) — item: AVM was missing here even though the HEIGHT just below (tokBelowH) already folds in avmHeight(t[i]); avmSlotW is already gated on show.avm (avmLayout's own early return), so this needs no separate show.avm check
+    const hitW=Math.max(bwidth, hasTr(t)?meas(trRowTxt(t[i]),trFont(t[i]))+10:0, show.pos?meas(posRowTxt(t[i]),POS_F)+10:0, avmSlotW(t[i]));   // item 28: measured off what the row PAINTS (its value, or the TIER_EMPTY placeholder) and gated on the row being SHOWN (hasTr for the sentence-wide translit row, show.pos alone for POS) rather than on this token having a value — exactly what belowStack now draws into it   // widen to the transliteration/POS/AVM below (a short word can romanise, tag, or feature-stack to a wider string) — item: AVM was missing here even though the HEIGHT just below (tokBelowH) already folds in avmHeight(t[i]); avmSlotW is already gated on show.avm (avmLayout's own early return), so this needs no separate show.avm check
     const tokBelowH=proj?belowReserveH(trLayer(),belowTierN(),show.pos,avmHeight(t[i])):0;   // item 6: THIS token's own reach — belowH (above) stays the diagram's sentence-wide max for the SVG's total height H, but the wash must not reach any further than what this token itself draws
     bg.appendChild(E("rect",{class:"tok-hit tok-wash",x:c[i]-hitW/2,y:byD-14,width:hitW,height:24+tokBelowH+TOK_Y_LOWER+TOK_TR_GAP}));   // baseline hit already spans just the word+POS band → doubles as the drag-target wash   // seated on the DRAW baseline so the wash stays centred on the glyph it highlights, and grown by the same 2.5 so the (lowered) POS row is still inside it
     const bw=E("text",{class:"baseword"+italDeco(t[i]),x:c[i],y:byD}); bw.textContent=bform(t[i]); boxes.push({x:c[i],y:by-6,hx:bwidth/2,hy:9});   // host form only, centred on c[i]
@@ -234,6 +234,15 @@ function stemma(si,{proj,catNodes}){
     const cg=E("g",{class:"edge-casing-group"}); cg.setAttribute("aria-hidden","true");
     group.forEach(e=>{ cg.appendChild(E("path",{class:"arc-casing",d:e._d})); if(e._ahc) cg.appendChild(E("path",{class:"ah-casing",d:e._ahc})); }); svg.appendChild(cg);
     group.forEach(e=>{ const g=E("g",{class:"edge-g","data-s":si,"data-dep":OID(e.d),"data-head":OID(e.h)});
+      /* ⚠ …AND A FAT, INVISIBLE HIT STROKE, or the edge cannot be right-clicked in practice. The visible line is
+         `--edge-stroke` (1.4–1.7px) and its casing halo is hoisted OUT of this group into `edge-casing-group`
+         for z-order, so the only thing inside `.edge-g` that hit-tests is that 1.4px line: the relation menu the
+         edge now opens (posRelHit) was reachable only by landing on it exactly, which reads as the gesture not
+         working at all — reported as exactly that. `.edge-hit` is the same `d` at ~9px in transparent stroke
+         with `pointer-events:stroke`, appended FIRST so it never paints over the arrowhead or the line. The
+         ARC views need none: drawBump keeps their `.arc-casing` (pointer-events:stroke, +3.5px) inside the
+         `.arc` group itself, so an arc already has a ~5px target that resolves to the right group. */
+      g.appendChild(E("path",{class:"edge-hit",d:e._d}));
       if(e._ah) g.appendChild(E("path",{class:"ah",d:e._ah,fill:e._ink}));
       g.appendChild(E("path",{class:"edge"+(isMorphRel(e.rel)?" morph-edge":""),d:e._d,stroke:e._ink}));
       g.style.cursor="pointer"; g.addEventListener("click",()=>pick(si,OID(e.d))); svg.appendChild(g); }); });
@@ -294,7 +303,7 @@ function stemma(si,{proj,catNodes}){
     boxes.push({x:ge.emptyX,y:ge.gy,hx:8,hy:9+NODE_ASC_EXTRA});   // "∅" is drawn .node-lbl too, so it magnifies with every other node glyph — see NODE_ASC_EXTRA's own note
     svg.appendChild(g); });
   for(let i=0;i<n;i++){const g=E("g",{class:"node"+(sel.s===si&&sel.t===OID(i)?" sel":""),"data-s":si,"data-tok":OID(i)});
-    const txt=catNodes?(posDisp(t[i])||"X"):bform(t[i]), tw=catNodes?meas(txt,POS_F):fmeas(t[i],NODE_F);   // item 11: stemma word-node label uses bform → the SCRIPT glyph-swap applies to stemma nodes too
+    const txt=catNodes?(posDisp(t[i])||"X"):bform(t[i]), tw=catNodes?meas(txt,POS_F):fmeas(t[i],NODE_F);   /* item 11: stemma word-node label uses bform → the SCRIPT glyph-swap applies to stemma nodes too */   /* ⚠ item 28: THE "X" STAYS, on instruction ("don't replace the X UPOS tag with an underscore"), and is the ONE tier this feature deliberately leaves alone. Every other empty tier draws TIER_EMPTY; a stemma of word classes draws its tags AS the nodes, and a node is the tree's own structure rather than a row that can be left blank — "X" (UD's "other" class) is what an untagged node has always shown here and what the layout reserves for. */   // item 11: stemma word-node label uses bform → the SCRIPT glyph-swap applies to stemma nodes too
     const nyL=ny(depth[i]), nyD=nyL+TOK_Y_LOWER+NODE_Y_EXTRA, loB=loBoxes(boxes);   // nyL = the LAYOUT level (every edge endpoint and every box below is stated in it); nyD = where this node's own glyph and satellites actually draw — see TOK_Y_LOWER (js/diagram/diagram-core.js)
     const lbl=E("text",{class:(catNodes?"node-cat":"node-lbl"+italDeco(t[i])),x:c[i],y:nyD}); lbl.textContent=txt; if(catNodes) svgTip(lbl,posTitle(t[i].upos));   // stemma POS-as-node → POS hover tooltip (Item 2)
     const hit=E("rect",{class:"tok-hit tok-wash",x:c[i]-Math.max(26,tw/2+4),y:nyD-A,width:Math.max(52,tw+8),height:A+B});   // node box = its own wash region (no arcs above a node)   // seated on the DRAW level: the wash exists to backlight the GLYPH, so it tracks it rather than the edge endpoints, and A+B is far wider than the glyph either way

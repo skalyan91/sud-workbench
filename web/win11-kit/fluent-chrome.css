@@ -441,6 +441,34 @@
   .ctx button:disabled{color:var(--label-tertiary); pointer-events:none}   /* MenuFlyoutItemForegroundDisabled → TextFillColorDisabledBrush; the same treatment .fpitem[disabled] already gets in the menubar, stated for the context menus' own rows (the grid column chooser's obligatory ID/Form rows). pointer-events:none also drops the hover fill, which `:disabled` alone would not */
   .ctx .kbd{font-size:var(--fs-body); font-weight:var(--fw-normal); color:var(--menu-shortcut); direction:ltr; unicode-bidi:isolate}   /* MenuFlyoutItemKeyboardAcceleratorTextForeground → TextFillColorSecondaryBrush, at the row's own size */
   .ctx .mlbl{direction:ltr; unicode-bidi:isolate}
+  .ctx .lblgrp{position:relative; display:flex; align-items:baseline; gap:5px; min-width:0}   /* item 29: the label, its count and (out of flow, off this box's own end) its ✕, kept together as ONE flex item so `justify-content:space-between` pushes the group — not the number — against the expansion. Only built for a row that has a badge or a ✕; `position:relative` is what the ✕ is placed against */
+  /* item 29 — clears the value this row set. TWO ELEMENTS, and the split is what puts it on the baseline:
+     `.rowclear` is a ZERO-WIDTH anchor that stays IN FLOW as the last item of the `.lblgrp` — which is
+     `align-items:baseline`, so the anchor's own bottom edge lands exactly on the label's baseline, with no
+     magic number to keep in step with a font. `.rcx` is the ring, absolutely positioned against it: `bottom:0`
+     is therefore the baseline. Zero width is what keeps the promise that the ✕ adds nothing to the menu's
+     width — a column is sized to its widest row, and this must not be the thing that widens it.
+     ⚠ THE RING IS THE HEIGHT OF THE SMALL TEXT IT SITS BESIDE, not of the label. Measured from a screen
+     capture of the shipping engine (markers pinning the viewport→screen mapping, ✕ isolated by an A/B diff, 1
+     char per CSS px): a 10px ring centred on the LABEL's ink ran rows 7–17 where `DET`'s own ink ran 7–16 and
+     the badge beside it ran 9–16 — level with the capitals, but 2px proud of its immediate neighbour at the top
+     and 1px under the baseline at the bottom, which is what "the ✕ sits too high" was seeing. At 9px on the
+     baseline it occupies the badge's own band. ⚠️ HEADLESS CHROME CANNOT SEE ANY OF THIS: it substitutes a face
+     for `-apple-system`, and put the same ring 0.75px BELOW the label ink where WebKit puts it 0.5px above.
+     Measure this affordance in a WKWebView probe, never in the CDP harness. */
+  .ctx .rowclear{display:inline-block; width:0; height:9px; position:relative; vertical-align:baseline; cursor:default}
+  .ctx .rcx{position:absolute; inset-inline-start:2px; bottom:0; width:9px; height:9px; box-sizing:border-box;
+    border:1px solid currentColor; border-radius:50%; color:var(--muted); opacity:.8}
+  /* ⚠ THE MARK IS DRAWN, NOT SET. A `✕` GLYPH centred by `align-items:center` is centred by its LINE BOX, and
+     that box reserves descent space the character does not use: measured with canvas ink metrics in both kits,
+     U+2715's ink runs 5.4px above the baseline to 0.2px below, putting its ink centre 2.6px ABOVE the ring's.
+     Two rotated bars have no baseline to be asymmetric about — they are centred by construction, at any size,
+     in any font, including a fallback face substituted for a missing ✕. */
+  .ctx .rcx::before,.ctx .rcx::after{content:""; position:absolute; left:50%; top:50%; width:4.5px; height:1px; background:currentColor; border-radius:.5px}
+  .ctx .rcx::before{transform:translate(-50%,-50%) rotate(45deg)}
+  .ctx .rcx::after{transform:translate(-50%,-50%) rotate(-45deg)}
+  .ctx button:hover .rcx{color:inherit; opacity:.85}   /* the row's hover fill takes the text white/accent-on — ring and bars ride `currentColor`, so they follow with no second colour rule */
+  .ctx .rowclear:hover .rcx{opacity:1; background:color-mix(in srgb, currentColor 22%, transparent)}
   .ctx .expand{font-size:var(--fs-caption); color:var(--label-secondary); font-style:normal; white-space:nowrap; direction:ltr; unicode-bidi:isolate}
   /* (a hovered row's .expand is whitened with its .kbd, up in the hover block above — this rule is gone, not merely superseded) */
   .ctx .rightgrp{display:flex; align-items:center; align-self:center; gap:8px; flex:none; direction:ltr}
@@ -456,6 +484,18 @@
   .ctx .ck{position:absolute; inset-inline-start:15px; top:50%; transform:translateY(-50%); font-size:12px; opacity:1}
   .ctx button:hover .ck{opacity:1}
   .ctx .twocolwrap{display:flex; gap:0; align-items:stretch}
+  /* item 29 — a TWO-UP tail row (the "Clear …" / "Open guidelines for …" pair). Each button takes half, and
+     `min-width:0` is what lets them: a menu button's own content would otherwise push the pair past the menu's
+     width. The buttons keep their own class and every hover/danger rule with it — this is a layout wrapper, not
+     a new kind of row. The trailing one reads as a link, so its label is truncated rather than wrapped: a
+     wrapped half-row would make the pair two rows tall and undo the point of putting them side by side. */
+  /* item 29 — the numeric badge on a row that HAS a right-click flyout (a tag's subtypes, a relation's deep
+     features). Tabular figures and a fixed minimum width so a column of badges lines up; the muted register of
+     an expansion rather than the label's, since it annotates the row rather than naming anything. It rides in
+     the same .rightgrp as the expansion text, so a row carrying both reads "gloss  3". */
+  .ctx .subcount{min-width:11px; text-align:center; font-size:10.5px; font-weight:590;
+    font-variant-numeric:tabular-nums; color:var(--muted); opacity:.85}
+  .ctx button:hover .subcount{color:inherit; opacity:.9}
   .ctx .mcol{min-width:196px}
   .ctx .mcol:first-child{padding-inline-end:8px}
   .ctx .mcol + .mcol{border-inline-start:1px solid var(--hairline); padding-inline-start:8px}

@@ -1066,6 +1066,31 @@ function formTextTarget(b,rtl){ const cell=b.querySelector("td.w-form .cin");
                : r.left +(parseFloat(cs.paddingLeft ||0)+parseFloat(cs.borderLeftWidth ||0))*FS; }
   const br=b.getBoundingClientRect();                                          // grids hidden → the block's own left gutter + the id column, as the diagram alignment has always fallen back to
   return rtl ? br.right-(18+idW+9)*FS : br.left+(18+idW+9)*FS; }
+/* ⚠ WEBKIT PAINTS NO CARET IN A CONTENTEDITABLE THE APP RENDERS EMPTY — an element with no child nodes has no
+   LINE BOX, and a caret has to sit on one. So a field the reader clicks into while it is blank takes their
+   typing and shows them no cursor at all: the sent_id of an unnamed sentence, an unfilled translation row, and
+   the `# newdoc`/`# newpar` name — which shows nothing when empty BY DESIGN (see boundHeading's own note, just
+   below), making it the worst of the three. The same fault, in the diagram's own gloss-tier editor, is fixed at
+   its own render() in js/editing/context-menu.js.
+   THE `<br>` IS WEBKIT'S OWN REMEDY, not an invention here: type into one of these fields and delete back to
+   nothing, and the engine leaves a `<br>` behind for exactly this reason — measured live. It is only the
+   APP-rendered empty state (textContent="", no children at all) that never had one. `textContent` is "" either
+   way, so every commit path, every find/read of these fields, and `.tg-text`'s own `data-empty` placeholder
+   (an ATTRIBUTE, not `:empty`) are all unaffected.
+   The `input` listener re-adds it after a programmatic clear; ordinary typing needs no help — the engine
+   replaces the `<br>` with the text and puts it back when the last character goes. ⚠️ CHROME PAINTS A CARET
+   EITHER WAY, so no headless run can see any of this: verify in a WKWebView probe.
+   ⚠️ THE GRID'S PILL FIELD ALREADY SOLVED THIS ONCE, DIFFERENTLY, and both answers are right for their own
+   field: `.pillfield` keeps zero-width TEXT NODES between its chips (grid.js's `ZW`/`isZWNode`) because it needs
+   an editable caret ANCHOR between contentEditable=false atoms, and it strips them on serialize. A plain text
+   field has no atoms and no serializer to strip anything, so it takes the `<br>` — which never enters
+   `textContent` in the first place and so cannot be committed by accident. */
+function keepEmptyCaret(el){ if(!el) return el;
+  const sync=()=>{ if(el.textContent) return;                                        // has text → the engine's own editing keeps the line box
+    if(el.childNodes.length===1 && el.firstChild.nodeName==="BR") return;             // already exactly the one <br>: leave the caret where it is
+    el.textContent=""; el.appendChild(document.createElement("br")); };
+  sync(); el.addEventListener("input",sync); return el; }
+
 /* ── ONE BOUNDARY HEADING ───────────────────────────────────────────────────────────────────────────────────────
    The sticky `§`/`¶` row that opens a .bsec section: the mark in the sentence-number column, then the optional
    UD id, edited in place beside it. Factored out of renderDoc because the two ranks are now built at two
@@ -1093,6 +1118,7 @@ function boundHeading(s,k,glyph,what,num){
   const cur=boundId(s,k); idEl.textContent=cur;
   idEl.setAttribute("contenteditable","plaintext-only"); idEl.setAttribute("role","textbox"); idEl.spellcheck=false;
   idEl.setAttribute("aria-label",what+" id"); idEl.title="`"+k+" id = …` — optional; leave blank for a bare “# "+k+"”";
+  keepEmptyCaret(idEl);   // an unnamed marker renders this field empty — see keepEmptyCaret
   idEl.addEventListener("mousedown",e=>e.stopPropagation()); idEl.addEventListener("click",e=>e.stopPropagation());   // the block's own click handler deselects on empty space; this field is not empty space. Still needed now the heading sits OUTSIDE the block: pinned, it lies over some other block, and .bm-id is the one part of the heading that takes pointer events at all
   let pre=null, orig=cur;
   idEl.addEventListener("focus",()=>{ pre=snap(); orig=boundId(s,k); });   // one undo per editing session, exactly as the translation fields do it
@@ -1473,6 +1499,7 @@ function buildBlock(i,ctx){ const s=DOC[i];
     // (js/core/document.js's boundHeading, the same contenteditable-id pattern this now mirrors).
     const sid=document.createElement("span"); sid.className="sid-in mono"; sid.textContent=s.sid; sid.title="sent_id";
     sid.setAttribute("contenteditable","plaintext-only"); sid.setAttribute("role","textbox"); sid.setAttribute("aria-label","sent_id"); sid.spellcheck=false;
+    keepEmptyCaret(sid);   // a sentence with no sent_id renders this field empty — see keepEmptyCaret
     sid.addEventListener("mousedown",e=>e.stopPropagation()); sid.addEventListener("click",e=>e.stopPropagation());   // the block's own click handler deselects on empty space; this field is not empty space (same reason .bm-id stops these two — js/core/document.js's boundHeading)
     let sidOrig=s.sid;
     sid.addEventListener("focus",()=>{ sidOrig=s.sid; });
@@ -2349,8 +2376,8 @@ function reserveBracketArcRoom(){ document.querySelectorAll("#doc .bwrap").forEa
     const la=lineOf(a), lb=lineOf(b); if(la<0||la!==lb||la>=lines.length-1) return;   // components split across lines → no tie; last line → the .hasmwt bottom padding already reserves the room
     const undBot=tok=>{ const f=tok.querySelector(".bwform")||tok, u=tok.querySelector(".bwund"), fTop=tok.offsetTop+(f===tok?0:f.offsetTop);
       const base=u?fTop+u.offsetTop+u.offsetHeight:fTop+(f===tok?tok.offsetHeight:f.offsetHeight);
-      const tk=s0r&&s0r.tokens&&s0r.tokens[(+tok.dataset.tok)-1], av=tk&&avmLayout(tk);
-      return av?base+avmTopGap()+av.h:base; };   // item 6: reserve from the below-stack bottom (POS + any gloss/translit tiers) — AND any AVM below that — NOT the bare form bottom — so the reserved gap accounts for gloss layers (and a tall FEATS box) pushing the POS (and hence the tie) down
+      const tk=s0r&&s0r.tokens&&s0r.tokens[(+tok.dataset.tok)-1], ah=tk?avmHeight(tk):0;   // item 28: avmHeight(), not avmLayout().h — a token with the AVM tier ON and no FEATS of its own now paints a TIER_EMPTY placeholder in that slot, and avmHeight is the ONE function that answers how tall the slot is either way (see its own note)
+      return ah?base+avmTopGap()+ah:base; };   // item 6: reserve from the below-stack bottom (POS + any gloss/translit tiers) — AND any AVM below that — NOT the bare form bottom — so the reserved gap accounts for gloss layers (and a tall FEATS box) pushing the POS (and hence the tie) down
     const stackBot=Math.max(undBot(a),undBot(b));
     const tieReach=htmlTieBottom(m)+9;   // htmlTieBottom already folds in the SAME lead (5+tieLead()) positionBracketAnnots' yb seats the tie's top with below, so this is just that reach + a little slack — was "15−capHeight+htmlTieBottom(m)+9", double-counting the lead now that htmlTieBottom carries it too (see htmlTieBottom's own comment)
     grow(lines[la+1], (stackBot+tieReach)-lines[la+1].offsetTop);   // grow() is a no-op when the standard inter-line gap already clears the tie; read live so multiple ties / earlier arc growth stay cumulative-correct
@@ -2486,8 +2513,8 @@ function positionBracketAnnots(){ document.querySelectorAll("#doc .bwrap").forEa
     // clearance convention belowStack's own identical call now uses.
     const undBot=tok=>{ const f=tok.querySelector(".bwform")||tok, u=tok.querySelector(".bwund"), fTop=tok.offsetTop+(f===tok?0:f.offsetTop);
       const base=u?fTop+u.offsetTop+u.offsetHeight:fTop+(f===tok?tok.offsetHeight:f.offsetHeight);
-      const t=s0&&s0.tokens&&s0.tokens[(+tok.dataset.tok)-1], av=t&&avmLayout(t);
-      return av?base+avmTopGap()+av.h:base; };   // item 6: the BOTTOM of the token's below-stack (POS + any gloss/translit tiers), measured live — so the tie clears the POS even when gloss layers sit between the form and the POS
+      const t=s0&&s0.tokens&&s0.tokens[(+tok.dataset.tok)-1], ah=t?avmHeight(t):0;   // item 28: avmHeight(), not avmLayout().h — see the identical change at the grow() pass above
+      return ah?base+avmTopGap()+ah:base; };   // item 6: the BOTTOM of the token's below-stack (POS + any gloss/translit tiers), measured live — so the tie clears the POS even when gloss layers sit between the form and the POS
     const mark0=svg.childNodes.length;   // item 8: everything this tie appends from here on is MOVED into one .mwt-g group at the end — recorded rather than re-pointing a dozen appendChild calls, so the drawing order (casing → tie → translit → form last) stays exactly as written. Mirrors the SVG mwtTie
     // yb: the tie's TOP, seated the SAME way the SVG views' shared mwtTie/tieLead seat every OTHER notation's
     // tie — undBot (this HTML view's own name for the below-stack bottom mwtTie calls stackBot) + 5 (the
@@ -2579,7 +2606,7 @@ function positionBracketAnnots(){ document.querySelectorAll("#doc .bwrap").forEa
   // gloss stack can't collide with its own AVM box.
   {   // s0 hoisted above mwts.forEach now — undBot() there needs it too, see that block's own note
     box.querySelectorAll(".bwtok").forEach(tok=>{ const oid=+tok.dataset.tok, t=s0&&s0.tokens&&s0.tokens[oid-1];
-      if(!t||!avmLayout(t)) return;
+      if(!t||!show.avm) return;   // item 28: gated on the TIER, not on this token having a matrix — drawAVM paints the TIER_EMPTY placeholder for a token with no FEATS, and the room for it is already reserved (avmRowMaxH → --undpad, which reads the same avmHeight())
       const f=tok.querySelector(".bwform")||tok, u=tok.querySelector(".bwund"), fTop=tok.offsetTop+(f===tok?0:f.offsetTop);
       const bot=u?fTop+u.offsetTop+u.offsetHeight:fTop+(f===tok?tok.offsetHeight:f.offsetHeight);
       // cx anchors on the CELL (tok), not the form (f): bracketsWrapped's own wordW(i) (js/diagram/diagram-wrap.js)

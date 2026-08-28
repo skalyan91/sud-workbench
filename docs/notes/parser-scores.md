@@ -102,3 +102,39 @@ threshold means ~0, which is right for everything except a custom relation the m
 leaving every unranked row bright would misreport the far commoner case as plausible. A ROOT's relation menu is
 left unweighted — there is no incoming arc to condition on. Floor 0.4, restored in full on hover: this is a
 ranking, not a disablement.
+
+⚠️ **AND A FLYOUT IS WEIGHTED TOO, BY THE VERY LABELS ITS PARENT ROW'S WEIGHT IS THE SUM OF.** `weightMenuRows`
+only ever reached `ctx`, so a right-click submenu — a tag's dot-suffixed subtypes, a relation's deep features —
+drew every row at full strength beneath a parent row the same ranking had faded. `weightSubRows` is its twin for
+`ctx2`, same floor, same gamma, same `data-optval` lookup, stamped with its own `_wgen` so a slow answer for a
+flyout since closed is dropped. Each row of a flyout sets the optval its own map is keyed by, so the two match
+by construction rather than by convention:
+
+| flyout | row `optval` | map |
+| --- | --- | --- |
+| a tag's subtypes | `PRON\|PronType=Dem` | `upos_sub[i]` — the joint pair, below |
+| a relation's deep features | `mod@relcl` | the arc's own label distribution, **unpooled** |
+
+⚠️ **THE DEEP-FEATURE CASE NEEDED NOTHING NEW FROM THE BACKEND — the SUBTYPE case needed a second map.** A
+relation flyout's rows are the full labels the parser already scores, so `relMenu` now computes its ranking ONCE
+and reads it twice: pooled through `relWeightsFor` for the menu, raw for the flyouts. The morphologizer's
+distribution, by contrast, was pooled by word class **inside `_upos_scores`** — which discards exactly the half
+of each joint label a subtype flyout is a picker for. So that function returns a second map beside the first,
+keyed `"POS|Feat=Val"` and summed over every label carrying both, and `analysis_scores` sends it as `upos_sub`.
+Confined to `_SUBTYPE_FEATS` (the six the POS menu draws as dot-suffixes, kept in step with the frontend's own
+`UPOS_SUBTYPE_FEATS`) and filtered at the same 0.002 floor, so the payload grows by a handful of keys per token
+rather than by the whole FEATS inventory. Verified live against `en_sud_ewt_gum`: "The" → `DET` 0.9997 with
+`DET|PronType=Art` 0.9997 beside it, and a NOUN with no lexical subtype → `{}`.
+
+⚠️ **A ROW WITH A FLYOUT ALSO SAYS HOW MUCH IS IN IT** — a numeric badge (`subCount`), counted the same way the
+flyout builds its rows (attested-values narrowing included, so the badge cannot promise rows the flyout does not
+draw). These flyouts carry no chevron by design — they are a deliberate second gesture on a row that already
+does something on left-click — which had left nothing at all to say a row HAS one. A count of 0 means the POS
+menu offers no flyout on that row at all; the relation menu still opens one, because its free-text
+"New deep feature…" field is there whether or not the taxonomy has anything to list. ⚠️ **THE BADGE RIDES WITH
+THE LABEL, IN A `.lblgrp`, AND A COUNT OF 1 IS NOT DRAWN.** A menu row is `justify-content:space-between`, so a
+badge left in the `.rightgrp` is pushed to the reading-END past the expansion, where it reads as a number
+belonging to the gloss rather than to the label it counts; the wrapper is built ONLY for a row that has a badge,
+so every other row keeps exactly the DOM it had. And "1" says no more than the flyout's own existence does —
+these badges earn their ink by comparison, and a column of 1s is noise.
+

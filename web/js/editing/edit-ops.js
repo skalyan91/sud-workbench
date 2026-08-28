@@ -434,6 +434,28 @@ function stepHead(si,tokId,dir){ const s=DOC[si]; if(!s||tokId<1||tokId>s.tokens
   else { ni=i+dir; if(ni<0||ni>=cands.length)return toast(dir>0?"Already the last candidate head":"Already the first candidate head"); }
   pushUndo(si); if(typeof touchColW==="function") touchColW(si,si+1); dep.head=String(cands[ni]); afterHeadEdit(dep,s);   // Task B: no regenTok — same as setAsRoot above
   markDirty(); sel={s:si,t:tokId}; preserveScroll(renderDoc); pick(si,tokId,false); toast(`Head of token ${tokId} → ${cands[ni]}`); }
+/* ── DETACH A TOKEN: CLEAR ITS HEAD (AND, WITH IT, ITS RELATION) ────────────────────────────────────────────
+   On request ("I'd like to be able to clear both head and deprel"). `_` in the HEAD column is what CoNLL-U says
+   for a token that is not yet attached, and a partially annotated sentence is a state an annotator works
+   through rather than an error to be prevented — every renderer already skips an edge whose head is out of
+   range (`h<1||h>n`), so an unattached token simply draws no edge.
+   ⚠ THE RELATION GOES WITH THE HEAD, always: a deprel is a statement ABOUT an edge, so keeping "subj" on a
+   token with nothing to be the subject OF would leave the file asserting something it no longer has the
+   structure to mean. This is the same reasoning afterHeadEdit already applies in the two directions it knows
+   (head 0 ⟹ "root"; away from head 0 ⟹ "root" demoted to "udep") — the third direction, "no head at all",
+   is this one, and it is cleared HERE rather than inside afterHeadEdit because that function is the funnel for
+   every head change and must not start blanking relations on the ordinary re-attach paths.
+   ⚠ AND THE ORDER MATTERS: the deprel is cleared BEFORE afterHeadEdit runs, or its own `depBase(deprel)==="root"`
+   branch would rewrite a detached ROOT's relation to "udep" — a value nobody chose — instead of leaving it
+   empty. afterHeadEdit still runs (the CLAUDE.md funnel rule: every head change goes through it), and picks up
+   the Shared/Subject re-syncs and the goeswith normalisation; its own headSyncDeprel already declines to ask
+   the parser for a relation when there is no head to ask about (`!(want>=1)`), so nothing refills this. */
+function clearHead(si,tokId){ const s=DOC[si]; if(!s||tokId<1||tokId>s.tokens.length)return;
+  const dep=s.tokens[tokId-1]; if(!dep||!(dep.head||"").length) return;   // nothing attached → nothing to detach
+  pushUndo(si); if(typeof touchColW==="function") touchColW(si,si+1);
+  dep.head=""; dep.deprel="";
+  afterHeadEdit(dep,s);
+  markDirty(); sel={s:si,t:tokId}; preserveScroll(renderDoc); pick(si,tokId,false); toast(`Token ${tokId} detached`); }
 // selection-driven wrappers for the keyboard shortcuts / Edit menu
 window.moveTokenLeft=()=>{ if(sel.s>=0&&sel.t>0)moveTokenSpatial(sel.s,sel.t,-1); };
 window.moveTokenRight=()=>{ if(sel.s>=0&&sel.t>0)moveTokenSpatial(sel.s,sel.t,1); };
@@ -454,7 +476,7 @@ window.selectNextHead=()=>{ if(sel.s>=0&&sel.t>0)stepHead(sel.s,sel.t,1); };
    svgSeamMark in js/diagram/diagram-core.js), so slot k of one names slot k of the other. The Leipzig ATTACHMENT
    marks the prefill writes are that same fact seen from the other side: "walk-ed" glossed "-walk.PST" IS two
    slots whose first one — the stem's — is empty, and an EMPTY SLOT is already how this data spells "this
-   segment isn't glossed" (the row draws it as the "…" placeholder). So a new slot needs nothing invented for it.
+   segment isn't glossed" (the row draws it as the TIER_EMPTY placeholder — "…" when this was written). So a new slot needs nothing invented for it.
    WHEN THE SEGMENTATION MOVES UNDER A GLOSS THAT IS ALREADY THERE, the gloss has to move with it or the two rows
    stop describing the same morphemes. A LEMMA EDIT is the commonest way in: MSeg is derived from the form
    against the LEMMA (msegSegment/msegRefill in js/io/bridge.js), so correcting a lemma can add a boundary

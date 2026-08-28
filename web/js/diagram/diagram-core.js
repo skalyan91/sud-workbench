@@ -898,14 +898,40 @@ function scriptMidEm(){
 // Used to size token/node slots so a wide gloss can't crowd its neighbour (item 13).
 _lazyFont("GLOSS_F",()=>weightCurve(13.2)+' 13.2px '+LIVE_TOKEN_STACK); _lazyFont("MSEG_F",()=>'italic 15px '+LIVE_TOKEN_STACK); _lazyFont("MSEG_UP_F",()=>'15px '+LIVE_TOKEN_STACK); _lazyFont("MGLOSS_F",()=>weightCurve(13.2)+' 13.2px '+LIVE_TOKEN_STACK);   // item 5: MSeg measures at the TOKEN size (15px = WORD_F), not 14px, and at token WEIGHT (no curve bump — see .gloss[data-tier="mseg"]'s literal 400, its size being the reference size itself). MGloss measures at the block-initial sentence size (13.2px = --stext-fs), weighted via weightCurve() so glossSlotW's measured width matches what .gloss/.gloss[data-tier="mgloss"] actually render at
 function tierFont(tier,tk){ return tier==="mseg"?(isForeign(tk)?MSEG_UP_F:MSEG_F):(tier==="mgloss"?MGLOSS_F:GLOSS_F); }   // the MSeg tier is the only italic one, so it's the only one a Foreign=Yes token flips upright (see frnUp)
-// widest below-token gloss row for a token, in its real font (0 when no gloss tier is on). An empty tier draws "…"
-// (gl-empty) so it contributes that narrow placeholder width — a real gloss dominates. Folded into every slot-width max.
-function glossSlotW(t){ let w=0; belowTiers().forEach(tier=>{ const dtxt=tierDisp(t,tier)||"…"; w=Math.max(w,glossTierAbbr(tier)?measGloss(dtxt,tierFont(tier,t)):meas(dtxt,tierFont(tier,t))); }); return w; }   // tierDisp, not tierText: the slot has to reserve what the row PAINTS, and under Latin's macron scheme the MSeg row paints the macronised segmentation, which is wider than the stored bare one
+/* item 28 — THE EMPTY-VALUE PLACEHOLDER. A tier that is VISIBLE in a diagram but has no value for THIS token
+   draws a semitransparent "_" rather than a hole in its row. Purely COSMETIC: never a value, never stored, never
+   read back by an editor — the status the gloss tiers' own "…" already had, which this replaces so that ONE mark
+   now means "nothing here yet" on every tier rather than one mark per tier. "_" is CoNLL-U's own empty field, so
+   the diagram says what the file says.
+   ⚠ ONLY WHERE THE ROW IS ALREADY THERE. A tier whose row no renderer reserves for this sentence — a
+   transliteration layer with nothing to romanise anywhere in it (hasTr) — is not "visible with empty values", it
+   is absent, and filling a row that was never reserved would add a row of underscores to every stack in the
+   document. The tiers whose rows ARE unconditional once switched on (the POS row, the gloss tiers, the AVM) put a
+   placeholder under every token that lacks a value, which is also what keeps those rows ALIGNED across the
+   sentence: a token skipped mid-stack used to draw whatever came next one step too high. */
+const TIER_EMPTY="_";
+// what a tier row PAINTS for this token — its value, or the placeholder. The caller decides whether the row is
+// shown at all; these only answer what goes in it.
+function posRowTxt(t){ return posDisp(t)||TIER_EMPTY; }
+function trRowTxt(t){ return trTxt(t)||TIER_EMPTY; }
+/* ⚠ AND THE RELATION LABEL IS DELIBERATELY NOT ONE OF THESE, on instruction ("empty relation labels should
+   simply disappear, since they can always be set by right-clicking the dependency edge"). It was given the
+   placeholder for one round and taken back off: unlike a below-stack row, a label has no reserved slot whose
+   emptiness needs explaining — the EDGE is already drawn, already says which token attaches where, and already
+   carries the gesture that sets the relation. An underscore floating over it adds a word to read and nothing to
+   learn. So every site that draws a label goes on gating on the relation being non-empty, and the label's
+   reserved WIDTH goes on being measured off the relation itself (0 when there is none). */
+// …and the class that greys it out, APPENDED to the row's own class list, never replacing it: a placeholder is
+// still that row, so every selection/dimming/hit rule keyed on .translit/.tok-pos/.node-cat must keep matching it.
+function tierEmptyCls(v){ return v?"":" tier-empty"; }
+// widest below-token gloss row for a token, in its real font (0 when no gloss tier is on). An empty tier draws
+// TIER_EMPTY (gl-empty) so it contributes that narrow placeholder width — a real gloss dominates. Folded into every slot-width max.
+function glossSlotW(t){ let w=0; belowTiers().forEach(tier=>{ const dtxt=tierDisp(t,tier)||TIER_EMPTY; w=Math.max(w,glossTierAbbr(tier)?measGloss(dtxt,tierFont(tier,t)):meas(dtxt,tierFont(tier,t))); }); return w; }   // tierDisp, not tierText: the slot has to reserve what the row PAINTS, and under Latin's macron scheme the MSeg row paints the macronised segmentation, which is wider than the stored bare one
 // item 22: the AVM's own width, the SAME role glossSlotW plays for the gloss tiers — every caller below that
 // folds glossSlotW into a slot-width max folds this in beside it, or an AVM box (which, unlike a one-line
 // gloss, commonly runs WIDER than its own token — "Definite" alone is longer than "The") crowds or overlaps
 // its neighbour exactly the way an unreserved gloss row used to.
-function avmSlotW(t){ const b=avmLayout(t); return b?b.w:0; }
+function avmSlotW(t){ const b=avmLayout(t); return b?b.w:(show.avm?avmEmptyW():0); }   // item 28: the tier is on and this token has no FEATS → the placeholder's own width, so the slot it is painted into is reserved like any other row's
 /* MEASUREMENTS ARE CACHED, because the same handful of strings is measured over and over: one load of
    the sample document makes 4,985 calls with 183 DISTINCT (text, font, extra-css) triples, and a
    notation switch 6,883 with 325 — 96% repeats. Each miss is a real cost: the body below writes into
@@ -3266,7 +3292,7 @@ function correctFormOf(t){ return hasFeat(t&&t.feats,"Typo","Yes")?(miscKV(t&&t.
 // element for THAT token, so the floating input field always has a real, positioned DOM node to anchor over.
 // Without this, clearing the field to blank would make correctFormOf() fall silent, the element would vanish
 // on the next reflow, and the field would jump to (0,0) — the same class of bug the gloss/MSeg tiers avoid by
-// always rendering (with a "…" placeholder) regardless of content.
+// always rendering (with a placeholder — TIER_EMPTY now, "…" when this was written) regardless of content.
 let CFORM_EDIT=null;
 /* A GOESWITH HEAD SHOWS NO CORRECT FORM. Its Typo=Yes marks the stray SPACE and its CorrectForm is the two
    halves joined — a statement the diagram ALREADY makes, by folding the halves under one slur. Printing
@@ -3797,8 +3823,14 @@ function avmLayout(t){ const feats=(t&&t.feats)||""; if(!feats||feats==="_"||!sh
   const box={rows,attrW,lineH,w,h};
   _avmCache.set(feats,box);
   return box; }
-function avmHeight(t){ const b=avmLayout(t); return b?b.h:0; }
-function avmSlotW(t){ const b=avmLayout(t); return b?b.w:0; }
+/* item 28 — an AVM tier that is ON but empty for this token still occupies its row: ONE box-row's worth of
+   height, the same pitch avmLayout gives a single-row matrix (a placeholder is one line of text, not a box). Every
+   reserve — avmRowMaxH → belowReserveH → --undpad / stackBot / H — follows from this one function, so the row the
+   placeholder is drawn into is the row that was reserved for it. */
+function avmEmptyH(){ return ascent(AVM_VAL_F)+descent(AVM_VAL_F); }
+function avmEmptyW(){ return meas(TIER_EMPTY,AVM_VAL_F); }
+function avmHeight(t){ const b=avmLayout(t); return b?b.h:(show.avm?avmEmptyH():0); }
+function avmSlotW(t){ const b=avmLayout(t); return b?b.w:(show.avm?avmEmptyW():0); }   // item 28: the tier is on and this token has no FEATS → the placeholder's own width, so the slot it is painted into is reserved like any other row's
 // item 22: the reserve a shared row/level height needs is the TALLEST AVM among the tokens sharing it — every
 // belowReserveH call site that sizes ONE ROW'S worth of vertical room (as opposed to one specific token's own
 // hit-rect) passes this rather than a single token's avmHeight. Takes a plain token ARRAY so both a whole
@@ -3831,7 +3863,38 @@ function avmTopGap(){ return belowGap()-AVM_PAD_V-ascent(AVM_VAL_F); }
 // si/tokId tag every row with data-s/data-tok — NOT read by tokFromEl (which walks up to the token's own
 // [data-s] ancestor regardless), but read directly wherever a caller has no such ancestor to walk to (the
 // wrapped overlay, an <svg> appended straight to #doc rather than nested inside the token's own group).
-function drawAVM(svg,cx,y0,t,si,tokId,boxes){ const L=avmLayout(t); if(!L) return y0;
+function drawAVM(svg,cx,y0,t,si,tokId,boxes){ const L=avmLayout(t);
+  /* item 28 — the tier is on, this token has no (displayable) FEATS: the placeholder, in the VAL column's own
+     face so it sits where a one-row box's value would. AND NO BRACKET — the brackets are the notation for a
+     feature MATRIX, and an empty pair of them reads as a matrix whose contents went missing rather than as a
+     token that has no features. Its own class, not .avm-val: the selection rule for a real value re-opaques it
+     (.tok-group.sel .avm-val{opacity:1}), and the HarfBuzz shape-swap sweeps .avm-val unconditionally
+     (FFS_SHAPE_CLASSES) — neither is anything a cosmetic underscore needs. */
+  if(!L){ if(!show.avm) return y0;
+    /* …and it is a RIGHT-CLICK TARGET, on request ("right-clicking an empty AVM placeholder should bring up a
+       context menu for adding features"): `.avm-add` is what `avmMenuAt` (js/editing/context-menu.js) looks for,
+       carrying the same `data-s`/`data-tok` a real `.avm-row` carries — needed for the wrapped-bracket overlay,
+       whose <svg> is appended straight to the block and so gives `tokFromEl` no token ancestor to walk up to.
+       The transparent `.avm-hit` rect is the real target: the glyph itself is ~6px of ink at 10.5px, too small
+       to aim at, and this is the identical rect-under-the-row trick every real AVM row already uses. */
+    /* ⚠ THE HIT RECT IS DELIBERATELY MUCH BIGGER THAN THE MARK, on report ("the hitbox is tiny — covering only
+       the underscore"). The placeholder's ink is one underscore, ~6px wide and a couple of px tall, and it was
+       being asked to be a right-click target: the rect around it was 16×14, which is still barely more than the
+       glyph. A tier's ROW is what the reader is aiming at, not its ink — the same reason every real `.avm-row`
+       has a full-width `.avm-hit` behind it rather than relying on its text. 24px wide (about a word slot, so
+       neighbouring tokens' targets stay apart) and the row's own height plus 8, reaching UP into the clearance
+       above (avmTopGap, ~10px of empty space under the POS baseline) rather than down past the stack bottom. It
+       is NOT pushed into `boxes`: fitTight would then grow the diagram's crop to cover an invisible rectangle,
+       adding whitespace under every token that has one — the ink's own box, pushed below, is what the crop owes
+       a margin to. */
+    const eh=avmEmptyH(), hw=Math.max(avmEmptyW()+16,24);
+    const g=E("g",{class:"avm-add",tabindex:"0"});
+    if(si!=null&&tokId!=null){ g.setAttribute("data-s",si); g.setAttribute("data-tok",tokId); }
+    g.appendChild(E("rect",{class:"avm-hit",x:cx-hw/2,y:y0-5,width:hw,height:eh+8}));
+    const e=E("text",{class:"avm-empty tier-empty",x:cx,y:y0+ascent(AVM_VAL_F),"text-anchor":"middle",direction:"ltr"});
+    e.textContent=TIER_EMPTY; g.appendChild(e); svg.appendChild(g);
+    boxes&&boxes.push({x:cx,y:y0+ascent(AVM_VAL_F)-4,hx:avmEmptyW()/2,hy:7});
+    return y0+eh; }
   const x0=cx-L.w/2, x1=cx+L.w/2, y1=y0+L.h;
   // round 4 — the bracket: mwtTie's own 3-segment tie shape, once per side, turned 90° — casing (one combined
   // L path), spine (long, THIN — .mwt-tie-h) and two short serifs (FULL weight — .mwt-tie). Back to round 2's
@@ -3931,7 +3994,12 @@ function drawAVM(svg,cx,y0,t,si,tokId,boxes){ const L=avmLayout(t); if(!L) retur
 // typography match item 23 also made (.oavm-attr/.oavm-val now sized/weighted/coloured exactly like
 // .avm-attr/.avm-val) stays — that part of the report was correct and orthogonal to the bracket grouping.
 function avmInline(t){ if(!show.avm) return null;   // gated the same way avmLayout() is (diagram-core.js) — every OTHER notation's AVM box goes through avmLayout, which early-returns on !show.avm; this one calls avmStruct directly (a plain data derivation, unaware of display state, and correctly so — the grid's own attribute editor uses it too) and had no gate of its own, so outline was the one notation whose AVM never actually hid when the toggle was switched off
-  const struct=(typeof avmStruct==="function")?avmStruct(t):[]; if(!struct.length) return null;
+  const struct=(typeof avmStruct==="function")?avmStruct(t):[];
+  /* item 28 — the tier is on and this token has no (displayable) FEATS: the placeholder, in the outline's own
+     inline register. Its own class rather than .oavm: that one carries the outer bracket pair as ::before/
+     ::after, and an empty bracket pair reads as a feature structure whose contents went missing — the same
+     reason drawAVM's SVG placeholder is drawn bare. */
+  if(!struct.length){ const e=document.createElement("span"); e.className="oavm-empty tier-empty"; e.textContent=TIER_EMPTY; return e; }
   const span=document.createElement("span"); span.className="oavm";
   struct.forEach((it,i)=>{ if(i) span.appendChild(document.createTextNode(" "));
     const item=document.createElement("span"); item.className="oavm-item avm-row"; item.dataset.feat=it.group||it.feat; item.tabIndex=0;
@@ -4349,7 +4417,7 @@ function tidyLayout(size,root,childrenOf,{lw,hgw,ldw,elw,SPW,NGAP}){
    invariant after moving nodes around, and a second literal there could drift from this one. */
 const STEMMA_PAD=2;
 function stemmaLayout(sent,catNodes,posBelow){const pad=STEMMA_PAD, SP=meas(" ",WORD_F)+8;   // gap matches arc view; slot also fits the baseline POS tag so they don't crowd
-  const lw=sent.tokens.map(t=>Math.max(fmeas(t,WORD_F),catNodes?meas(posDisp(t)||"X",POS_F):fmeas(t,NODE_F), posBelow?meas(posDisp(t)||"X",POS_F):0, trLayer()?meas(trTxt(t),trFont(t)):0, glossSlotW(t), avmSlotW(t)));   // item 13: include the gloss-tier width so glosses stay spaced. item 22: +AVM, same reasoning
+  const lw=sent.tokens.map(t=>Math.max(fmeas(t,WORD_F),catNodes?meas(posDisp(t)||"X",POS_F):fmeas(t,NODE_F), posBelow?meas(posRowTxt(t),POS_F):0, trLayer()?meas(trTxt(t),trFont(t)):0, glossSlotW(t), avmSlotW(t)));   // item 13: include the gloss-tier width so glosses stay spaced. item 22: +AVM, same reasoning
   const c=[], ldw=[]; let x=pad; sent.tokens.forEach((t,i)=>{ const lead=genericSubjGapW(sent.tokens,i,catNodes?POS_F:NODE_F)+leadW(t,NODE_F); ldw.push(lead); x+=lead; c.push(x+lw[i]/2); x+=lw[i]+tailW(t,NODE_F)+SP; });   // reserve inline-START room for right-merging leads (item 2) + inline-end room for trailing satellites; node centre stays on the host (arc endpoints unchanged). Subject=Generic: a virtual ∅-token band inserted just before, same idea as linear()
   const total=x-SP+pad;
   /* `ldw` is that inline-START reserve, kept PER NODE rather than being consumed into `x` and forgotten: it is
@@ -4362,8 +4430,8 @@ function mirror(c,total){ if(RTL) for(let i=0;i<c.length;i++) c[i]=total-c[i]; }
 function hasTr(toks){ return trLayer() && toks.some(x=>trTxt(x)); }   // the transliteration row is active (romanisation, or originals under an orthography) → reserve it for every token (keeps POS aligned)
 function belowStack(g,x,y0,tk,boxes,trRow){ let y=y0+STACKED_GAP;   // trRow: reserve the transliteration row even for a token that has none (so POS stays aligned across the sentence). +STACKED_GAP seeds the ONE gap from the glyph baseline to whichever row is drawn FIRST below it; every later belowGap() step in this function is the plain, un-bumped one
   const showTr = trRow!=null ? trRow : (trLayer() && !!trTxt(tk));
-  if(showTr){ y+=belowGap(); const rt=trTxt(tk); if(rt){ const e=E("text",{class:"translit"+frnUp(tk),x:x,y:y,"text-anchor":"middle"}); e.textContent=rt; if(trRowEdit())e.classList.add("tr-edit"); g.appendChild(e); boxes&&boxes.push({x,y:y-4,hx:meas(rt,trFont(tk))/2,hy:7}); svgSeamMark(g,tk,x,y,meas(rt,trFont(tk))/2,trFont(tk),boxes,null,"translit"); } }   // Item 8: the translit row gains the SAME descender-matched top gap the POS row carries (+descent(POS_F), the label-font descender) so the row above's descenders don't crowd it; .tr-edit → click-to-edit the romanisation, or the STORED transliteration behind it (see trRowEdit). The romanisation is a WORD-LIKE row, so it carries the seam mark too — a word broken across tokens reads as broken on every row that spells it out
-  belowTiers().forEach(tier=>{ y+=belowGap(); const txt=tierDisp(tk,tier)/* the DISPLAY text, not the stored one — under Latin's macron Script scheme the MSeg row paints the macronised segmentation while MISC keeps the bare one (tierDisp, js/core/prefs.js); "" either way, so the gl-empty test below is unaffected */, dtxt=txt||"…"; const e=E("text",{class:"gloss gl-edit"+frnUp(tk),x:x,y:y,"text-anchor":"middle","data-tier":tier,tabindex:"0"}); setGlossText(e,tier,dtxt); if(!txt)e.classList.add("gl-empty"); g.appendChild(e);
+  if(showTr){ y+=belowGap(); const rt=trTxt(tk), rd=trRowTxt(tk); const e=E("text",{class:"translit"+tierEmptyCls(rt)+frnUp(tk),x:x,y:y,"text-anchor":"middle"}); e.textContent=rd; if(rt&&trRowEdit())e.classList.add("tr-edit"); g.appendChild(e); boxes&&boxes.push({x,y:y-4,hx:meas(rd,trFont(tk))/2,hy:7}); svgSeamMark(g,tk,x,y,meas(rd,trFont(tk))/2,trFont(tk),boxes,null,"translit"); }   /* item 28: the row is reserved for the whole sentence (trRow), so a token with nothing to romanise paints TIER_EMPTY into it rather than leaving the gap; NOT .tr-edit (a placeholder is cosmetic — there is no romanisation under it to open), and the seam mark is measured off the painted string exactly as the gloss tiers below measure theirs off theirs, for the same reason: the seam is a fact about the WORD, not about this row\'s coverage of it. */   // Item 8: the translit row gains the SAME descender-matched top gap the POS row carries (+descent(POS_F), the label-font descender) so the row above's descenders don't crowd it; .tr-edit → click-to-edit the romanisation, or the STORED transliteration behind it (see trRowEdit). The romanisation is a WORD-LIKE row, so it carries the seam mark too — a word broken across tokens reads as broken on every row that spells it out
+  belowTiers().forEach(tier=>{ y+=belowGap(); const txt=tierDisp(tk,tier)/* the DISPLAY text, not the stored one — under Latin's macron Script scheme the MSeg row paints the macronised segmentation while MISC keeps the bare one (tierDisp, js/core/prefs.js); "" either way, so the gl-empty test below is unaffected */, dtxt=txt||TIER_EMPTY; const e=E("text",{class:"gloss gl-edit"+frnUp(tk),x:x,y:y,"text-anchor":"middle","data-tier":tier,tabindex:"0"}); setGlossText(e,tier,dtxt); if(!txt)e.classList.add("gl-empty"); g.appendChild(e);
     /* ⚠ THE SAME FONT AND THE SAME measGloss() THE SEAM MARK BELOW ALREADY USES — this box feeds fitTight()
        (js/diagram/diagram-core.js), which resizes the wrapped SVG's own viewBox to its drawn content, so a
        box measured wrong here means the SVG can come out narrower than what MGloss actually draws — clipped
@@ -4374,12 +4442,12 @@ function belowStack(g,x,y0,tk,boxes,trRow){ let y=y0+STACKED_GAP;   // trRow: re
        note: "MGloss text is almost always MOSTLY an abbreviation run"). Wrong font, wrong measurement, and
        the seam mark one line down was already doing this correctly — this box just never matched it. */
     boxes&&boxes.push({x,y:y-4,hx:(tier==="mgloss"?measGloss(dtxt,tierFont(tier,tk)):meas(dtxt,tierFont(tier,tk)))/2,hy:7});
-    if(tier==="mseg"||tier==="mgloss") svgSeamMark(g,tk,x,y,(tier==="mgloss"?measGloss(dtxt,tierFont(tier,tk)):meas(dtxt,tierFont(tier,tk)))/2,tierFont(tier,tk),boxes,null,tier); });   // Item 8: each gloss / morphemic-gloss tier gains the SAME +descent(POS_F) top gap as the POS row, so all sub-token tiers share the descender-based breathing room; BELOW the transliteration and ABOVE the POS row; double-click or Enter to edit → MISC. The SEGMENTATION tier (mseg) and the MORPHEMIC GLOSS tier (mgloss) both take a seam mark — a mark drawn regardless of whether THIS tier happens to be annotated for this token (measured off the "…" placeholder's own width when it isn't), because the seam it decorates is a fact about the SEGMENTATION, not about this tier's own annotation coverage. Gating on `txt` used to silently drop the mark wherever MGloss was sparser than MSeg (a common, unremarkable state for hand-glossed data) — the row still shows a "…" cell there, so a boundary that MSeg draws cleanly would vanish from MGloss for that one seam while surviving on the very next one, reading as the mark randomly relocating/centring rather than a coverage gap. Both are PER-MORPHEME rows that a word-break genuinely interrupts; the lexical GLOSS tier (a single whole-word meaning, on request unchanged) does not
-  if(show.pos && tk.upos){ y+=belowGap(); const pd=posDisp(tk); const e=E("text",{class:"tok-pos",x:x,y:y,"text-anchor":"middle"}); e.textContent=pd; svgTip(e,posTitle(tk.upos)); g.appendChild(e); boxes&&boxes.push({x,y,hx:meas(pd,POS_F)/2,hy:6}); }   // POS hover tooltip (Item 2). Item 1: +descent(POS_F) extra top gap on the POS step — the label font's (POS_F) descender depth, mirroring how the above-token rows fold in descent(WORD_F) — so the POS row isn't crowded by the descenders of the row above it. Every below-reserve that feeds a row height (stackH / belowH / stackBot / --undpad) folds in the SAME descent(POS_F), so POS stays aligned across renderers and nothing clips.
+    if(tier==="mseg"||tier==="mgloss") svgSeamMark(g,tk,x,y,(tier==="mgloss"?measGloss(dtxt,tierFont(tier,tk)):meas(dtxt,tierFont(tier,tk)))/2,tierFont(tier,tk),boxes,null,tier); });   // Item 8: each gloss / morphemic-gloss tier gains the SAME +descent(POS_F) top gap as the POS row, so all sub-token tiers share the descender-based breathing room; BELOW the transliteration and ABOVE the POS row; double-click or Enter to edit → MISC. The SEGMENTATION tier (mseg) and the MORPHEMIC GLOSS tier (mgloss) both take a seam mark — a mark drawn regardless of whether THIS tier happens to be annotated for this token (measured off the "…" placeholder's own width when it isn't), because the seam it decorates is a fact about the SEGMENTATION, not about this tier's own annotation coverage. Gating on `txt` used to silently drop the mark wherever MGloss was sparser than MSeg (a common, unremarkable state for hand-glossed data) — the row still shows a placeholder cell there (TIER_EMPTY; "…" when this was written), so a boundary that MSeg draws cleanly would vanish from MGloss for that one seam while surviving on the very next one, reading as the mark randomly relocating/centring rather than a coverage gap. Both are PER-MORPHEME rows that a word-break genuinely interrupts; the lexical GLOSS tier (a single whole-word meaning, on request unchanged) does not
+  if(show.pos){ y+=belowGap(); const pd=posRowTxt(tk); const e=E("text",{class:"tok-pos"+tierEmptyCls(tk.upos),x:x,y:y,"text-anchor":"middle"}); e.textContent=pd; if(tk.upos)svgTip(e,posTitle(tk.upos)); g.appendChild(e); boxes&&boxes.push({x,y,hx:meas(pd,POS_F)/2,hy:6}); }   /* item 28: gated on show.pos ALONE now, not `&& tk.upos` — the row is reserved for every token alike (belowReserveH's own hasPos, which never asked about the value either), so an untagged token draws TIER_EMPTY into it. That also re-aligns what follows: skipping the step left an untagged token's AVM sitting one row ABOVE its neighbours'. No tooltip on a placeholder — posTitle has nothing to name. */   // POS hover tooltip (Item 2). Item 1: +descent(POS_F) extra top gap on the POS step — the label font's (POS_F) descender depth, mirroring how the above-token rows fold in descent(WORD_F) — so the POS row isn't crowded by the descenders of the row above it. Every below-reserve that feeds a row height (stackH / belowH / stackBot / --undpad) folds in the SAME descent(POS_F), so POS stays aligned across renderers and nothing clips.
   // item 22: the AVM tier — below the POS row, on request. Native SVG now (drawAVM, see its own note) — `g`
   // is this token's own group (already carrying data-s/data-tok, see every belowStack call site), so drawAVM
   // needs no si/tokId of its own: tokFromEl's ".closest('[data-s]')" walk finds it on `g` regardless.
-  if(avmLayout(tk)) y=drawAVM(g,x,y+avmTopGap(),tk,null,null,boxes);   // item 25/4 round 2: avmTopGap() — see its own note for why bare belowGap() (tried first) read as visibly too much
+  if(show.avm) y=drawAVM(g,x,y+avmTopGap(),tk,null,null,boxes);   // item 28: gated on the TIER, not on this token having a matrix — drawAVM paints the placeholder for a token that has none (and still returns y0 untouched when there is nothing at all to draw)   // item 25/4 round 2: avmTopGap() — see its own note for why bare belowGap() (tried first) read as visibly too much
   return y;
 }
 /* multi-word tokens: a rounded tie under the baseline spanning the fused words, carrying the surface form.

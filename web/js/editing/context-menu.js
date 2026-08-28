@@ -13,7 +13,28 @@ function makeCtxButton(it,isSub){ const b=document.createElement("button"); if(i
   else if(it.kbd && !it.sub && !it.subRight) inner+=`<span class="kbd">${it.kbd}</span>`;
   if(it.sub) inner+=`<span class="subarr"></span>`;                               // only the left-click flyout (Wiktionary) shows a chevron.right mask glyph; the right-click deep-feature submenus carry no indicator
   const right = inner ? `<span class="rightgrp">${inner}</span>` : "";
-  b.innerHTML=`${it.check?'<span class="ck">✓</span>':""}<span class="mlbl">${it.label}</span>${right}`;   // mlbl, not lbl → avoid the diagram .lbl rule (monospace/bold)
+  /* item 29 — HOW MANY THINGS ARE BEHIND THIS ROW, as a numeric badge. The right-click flyouts (a tag's
+     dot-suffixed subtypes, a relation's deep features) carry no chevron by design — see the note on the hover
+     rule below for why they are a deliberate second gesture — which also left nothing at all to say that a row
+     HAS one. The count says both: that there is a flyout, and how much is in it, without opening it.
+     ⚠ IT RIDES WITH THE LABEL, not in the `.rightgrp`, on report: the row is `justify-content:space-between`, so
+     anything in that group is pushed to the reading-END, past the expansion — which read as a number belonging
+     to the gloss rather than to the label it counts. The pair share a `.lblgrp` (built ONLY when there is a
+     badge, so every other row keeps exactly the DOM it had), which stays one flex item against the expansion.
+     ⚠️ AND A COUNT OF 1 IS NOT DRAWN: "1" beside a row says no more than the flyout's own existence does, and
+     these badges earn their ink by comparison — a column of them is a shape, and a column of 1s is noise. The
+     flyout is still there and still opens; only the number is dropped. */
+  const badge = it.subCount>1 ? `<span class="subcount">${it.subCount}</span>` : "";
+  /* …and the ✕ that UNSETS this row's value, last in the group so it follows the label and any badge.
+     ⚠ OUT OF FLOW (absolutely positioned off the group's own end — see .rowclear), because it must not make
+     the menu any wider: a column is sized to its widest row, and one row growing by a glyph would push every
+     other row's expansion out with it. */
+  const clearX = it.clearX ? `<span class="rowclear" role="button" aria-label="${esc(it.clearX.title||"Clear")}" title="${esc(it.clearX.title||"Clear")}"><span class="rcx"></span></span>` : "";   // empty: the ✕ is DRAWN (.rowclear::before/::after) rather than set as a character — see that rule for why
+  const lbl = (badge||clearX) ? `<span class="lblgrp"><span class="mlbl">${it.label}</span>${badge}${clearX}</span>`
+                              : `<span class="mlbl">${it.label}</span>`;   // mlbl, not lbl → avoid the diagram .lbl rule (monospace/bold)
+  b.innerHTML=`${it.check?'<span class="ck">✓</span>':""}${lbl}${right}`;
+  if(it.clearX){ const xb=b.querySelector(".rowclear");
+    if(xb) xb.addEventListener("click",e=>{ e.stopPropagation(); e.preventDefault(); closeCtx(); it.clearX.fn(); }); }   // stopPropagation, or the click reaches the row's own handler and re-picks the value instead of clearing it
   if(it.sub){ const raise=()=>{ if(ctx2.classList.contains("show")&&ctx2._owner===b) return;   // already this row's flyout → leave it alone rather than rebuild it under the pointer
       openSub(b,it.sub,it.subFit); };                                              // subFit → shrink the flyout to its content width instead of the shared 224px floor
     b.onclick=e=>{ e.stopPropagation(); clearTimeout(b._subHov); raise(); };       // clicking is just the impatient path to the same thing
@@ -30,6 +51,7 @@ function makeCtxButton(it,isSub){ const b=document.createElement("button"); if(i
   else { b.onclick=()=>{ closeCtx(); it.fn&&it.fn(); };                            // left-click → the row's own action (for a relation, selecting it clears any deep feature)
     // item 3: mousing away from a flyout must NOT dismiss it — a flyout closes only on an explicit action (a click
     // elsewhere, Escape, a selection, or reopening it). (Previously hovering a sibling top-level row closed it.)
+    if(it.subWeights) b._subw=it.subWeights;   // item 29: the ranking THIS row's flyout is to be faded by — read by openSub once the flyout is on screen (weightSubRows)
     if(it.subRight) b.oncontextmenu=e=>{ e.preventDefault(); e.stopPropagation();   // right-click the row → its deep-feature submenu; a second right-click on the SAME row dismisses it
       if(ctx2.classList.contains("show") && ctx2._owner===b){ closeSub(); return; }
       openSub(b,it.subRight,false,it.subColSize); };   // item 3: subColSize → size to one parent column, parent height
@@ -104,6 +126,7 @@ function fitWholeRows(host){
   if(foot) port.style.maxHeight=h+"px"; else host.style.maxHeight=h+"px"; }
 let _subLoadToken=0;   // invalidates a still-pending async sub (item.sub as a function) once the flyout is reopened/closed
 function openSub(btn,items,fit,colSize){ _subLoadToken++; const myToken=_subLoadToken; ctx2._owner=btn;   // remember which row opened this flyout → a second right-click on it toggles it shut
+  const subW=btn&&btn._subw;   // item 29: this row's own ranking for its flyout's rows — applied after each render below (weightSubRows), including the async one
   if(!ctx2.isConnected) document.body.appendChild(ctx2);   // closeSub() removes ctx2 from the DOM entirely (see its own comment) — put it back before showing it again
   ctx2.classList.toggle("defctx",!!fit);   // fit → shrink-to-content (e.g. Wiktionary "Definitions of …", whose rows are often much narrower than the shared 224px floor); reset for every other flyout (the deep-feature subRight menus keep the floor)
   // item 3 — the POS-subtype flyout matches ONE column of the (two-column) POS menu in width, and the whole POS
@@ -128,7 +151,7 @@ function openSub(btn,items,fit,colSize){ _subLoadToken++; const myToken=_subLoad
     const foot=document.createElement("div"); foot.className="ctx-sub-footer"; if(prevHr)foot.appendChild(prevHr); foot.appendChild(guide);   // moves prevHr+guide OUT of ctx2 into foot
     const scroll=document.createElement("div"); scroll.className="ctx-sub-scroll"; while(ctx2.firstChild) scroll.appendChild(ctx2.firstChild);   // everything remaining scrolls
     ctx2.appendChild(scroll); ctx2.appendChild(foot); ctx2.classList.add("ctx-sub-foot"); };
-  const render=arr=>{ ctx2.classList.remove("ctx-sub-foot"); ctx2.dir=ctx.dir; renderMenu(ctx2,(arr||[]).map(normItem),false,undefined,true); ctx2.classList.add("show");
+  const render=arr=>{ ctx2.classList.remove("ctx-sub-foot"); ctx2.dir=ctx.dir; renderMenu(ctx2,(arr||[]).map(normItem),false,undefined,true); ctx2.classList.add("show"); weightSubRows(subW);   // item 29: fade the flyout's own rows by this row's ranking, at EVERY render (an async `items` re-renders through here too)
     ctx2.style.maxWidth=fit?parentW+"px":"";   // item 3: the parent menu's width is the shrink-to-fit flyout's ceiling (see .ctx-sub.defctx in app.css). Cleared for every other flyout — the property is inline, so a previous .defctx call's ceiling would otherwise stick to the next (non-fit) one. Set BEFORE the layout reads below: both the header floor's clamp (which re-reads it off getComputedStyle, so it needs no separate wiring) and positionSub's offsetWidth depend on it
     if(colSize&&colW){ ctx2.style.width=Math.round(colW)+"px"; ctx2.style.minWidth=""; ctx2.style.height=""; ctx2.style.maxHeight=parentH+"px";   // item 2: ONE parent column wide, content-height but NO TALLER than the POS menu (maxHeight, not a fixed height)
       liftFootLink();
@@ -269,17 +292,49 @@ function deprelMenuGroups(vocab){
 function relTitle(r){ const e=deprelExpand(r); return (e||r||"relation")+" — right-click to change (deep features on each relation's submenu)"; }
 function posTitle(p){ return (UPOS_INFO[p]||p||"part of speech")+" — right-click to change"; }
 // build a categorised menu: every option grouped under headers, with right-aligned expansions and a check on the current one
-function optionMenu(x,y,all,cats,expandOf,current,choose,guide,rtl,subFor,customSet,subNote,noteTop,subColSize,freeAdd){
+/* `clearRow` — {label, fn}, appended last (above the guidelines link, below the free-text field), on request
+   ("it should be possible to clear a UPOS or deprel, rather than forcing them to be populated"). A picker of a
+   closed vocabulary has no way to say "none of these" on its own: every row SETS a value, and re-picking the
+   current one is a documented no-op in both menus, so the only routes to an empty word class or relation were
+   the grid's own "(none)" option and its free-text DepRel cell. Callers pass one only when there is something
+   to clear (see posMenu/relMenu), so the row never appears on a token that has no value already. */
+function optionMenu(x,y,all,cats,expandOf,current,choose,guide,rtl,subFor,customSet,subNote,noteTop,subColSize,freeAdd,clearRow){
+  /* ⚠ THE CURRENT VALUE ALWAYS GETS A ROW, even when it is outside the inventory this menu offers — a tag or a
+     relation a FILE carries that `SETTINGS.upos`/`SETTINGS.deprel` doesn't list, or one the reader has since
+     removed from that inventory. Without this the menu showed no tick at all for a value the token demonstrably
+     has, and (once clearing moved onto the ticked row) no ✕ either: the affordance vanished exactly where the
+     value was unusual, which is backwards — an unfamiliar tag is MORE likely to want clearing, not less. It
+     falls through the categorisation below like any other unplaced option and lands under "Other"/"Custom",
+     which is where the grid's own out-of-inventory values already appear. */
+  if(current && !all.includes(current)) all=all.concat([current]);
   const placed=new Set(), items=[];
   if(noteTop) items.push({note:noteTop});   // item 2: a leading scope note (e.g. the external-POS menu explaining which span it tags)
   if(subFor) items.push({note:subNote||"Right-click to show available deep features for a relation"});   // the relation menu's deep features and (item 4) the POS menu's UPOS subtypes both hang off a right-click submenu, so each passes its own hint
-  const row=r=>{ const o={label:esc(r), expand:expandOf(r), check:r===current, opt:true, optval:r, fn:()=>choose(r)}; if(subFor){ const sm=subFor(r); if(sm){ o.subRight=sm; if(subColSize)o.subColSize=true; } } return o; };   // subFor(r) → a submenu builder for that option (relations: deep features), or null. item 3: subColSize → size that flyout to ONE parent column, parent height
+  let usedClear=false;
+  const row=r=>{ const o={label:esc(r), expand:expandOf(r), check:r===current, opt:true, optval:r, fn:()=>choose(r)};
+    if(clearRow&&r===current){ o.clearX={title:clearRow.label, fn:clearRow.fn}; usedClear=true; }   // item 29: the ✕ rides the row it unsets
+    /* item 29: `subFor` may answer a bare function (the old contract) or {fn, count, weights} — the count is the
+       row's numeric badge, the weights the ranking its flyout is faded by. A caller that answers NULL for a row
+       says that row has no flyout at all, which is how a tag with no subtypes stops offering an empty one. */
+    if(subFor){ const sm=subFor(r), fn=(typeof sm==="function")?sm:(sm&&sm.fn);
+      if(fn){ o.subRight=fn; if(subColSize)o.subColSize=true;
+        if(sm&&sm.count!=null)o.subCount=sm.count; if(sm&&sm.weights)o.subWeights=sm.weights; } }
+    return o; };   // subFor(r) → a submenu builder for that option (relations: deep features), or null. item 3: subColSize → size that flyout to ONE parent column, parent height
   cats.forEach(([name,members])=>{ const present=members.filter(m=>all.includes(m));
     present.forEach(m=>placed.add(m)); if(present.length){ items.push({header:name}); present.forEach(m=>items.push(row(m))); } });
   const extra=all.filter(r=>!placed.has(r));   // any options not covered by a category
   const other=customSet?extra.filter(r=>!customSet.has(r)):extra, custom=customSet?extra.filter(r=>customSet.has(r)):[];   // customSet (relMenu only) → session-added relations get their OWN "Custom" heading instead of "Other"
   if(other.length){ items.push({header:"Other"}); other.forEach(r=>items.push(row(r))); }
   if(custom.length){ items.push({header:"Custom"}); custom.forEach(r=>items.push(row(r))); }
+  /* item 29 — CLEARING IS AN ✕ ON THE CHOSEN ROW, not a row of its own, on request ("replace the Clear button
+     with an ✕ next to the selected label"). It reads as what it is — the one value the menu has actually SET,
+     with the means to unset it attached to it — where a trailing row read as one more option to pick, and it
+     leaves the guidelines link the full-width row it always was. Placed by `row()` above on whichever row
+     carries the checkmark — and there is ALWAYS one now that an out-of-inventory value gets its own row (see
+     the note at the top of this function). The fallback below covers the one case that is genuinely rowless:
+     no current value at all, yet something to clear — a token with no word class that still carries a lexical
+     SUBTYPE feature, which "Clear word class" drops along with the (absent) tag. */
+  if(clearRow&&!usedClear) items.push(null,{label:clearRow.label, fn:clearRow.fn});
   if(freeAdd){ items.push(null,{input:true, value:"", placeholder:freeAdd.placeholder||"New…", commit:freeAdd.commit}); }   // relMenu only: free-text authoring of a genuinely new option, mirroring deepSubItems' own free-text row one level down — same {input:true,...} shape (renderMenu never auto-closes an input row; the commit callback must call closeCtx() itself, same as deepSubItems' setDF does)
   if(guide){ items.push(null,guide); }
   showCtx(x,y,items,true,rtl); }   // true → two-column layout (balanced) for tall menus
@@ -312,6 +367,20 @@ function weightMenuRows(p){ if(!p) return;
     ctx.querySelectorAll("button[data-optval]").forEach(b=>{
       const w=OPT_WEIGHT_FLOOR+(1-OPT_WEIGHT_FLOOR)*scoreShade(map[b.dataset.optval]||0);
       b.style.setProperty("--pw",w.toFixed(3)); }); }).catch(()=>{}); }
+/* item 29 — …AND THE SAME FADE INSIDE A FLYOUT. weightMenuRows above only ever reached `ctx`, so a subtype /
+   deep-feature submenu drew every row at full strength while the parent row it hangs off was faded by the very
+   ranking those rows are a breakdown OF — the one place in the menu system where "the model gave this ~0" was
+   invisible. Same floor, same gamma, same `data-optval` lookup; the map's keys are whatever the flyout's rows
+   set as their optval ("PRON|PronType=Dem" for a subtype, "mod@relcl" for a deep feature), so each caller
+   picks a key shape and its own rows match it by construction. `ctx2._wgen` stamps the open the way `ctx._wgen`
+   does, so a slow answer for a flyout that has since been closed or reopened elsewhere is dropped rather than
+   painted over whatever is on screen now. */
+function weightSubRows(p){ if(!p) return;
+  const stamp=(ctx2._wgen=(ctx2._wgen||0)+1);
+  Promise.resolve(p).then(map=>{ if(!map||!Object.keys(map).length||ctx2._wgen!==stamp||!ctx2.classList.contains("show")) return;
+    ctx2.querySelectorAll("button[data-optval]").forEach(b=>{
+      const w=OPT_WEIGHT_FLOOR+(1-OPT_WEIGHT_FLOOR)*scoreShade(map[b.dataset.optval]||0);
+      b.style.setProperty("--pw",w.toFixed(3)); }); }).catch(()=>{}); }
 // right-click a relation label → pick a relation (grouped by role). Each relation's DEEP features live on its OWN
 // submenu, reached by right-clicking that relation's row (or clicking its ▸) — replacing the old ⇧-right-click menu.
 const DEEP_BY_REL={subj:["expl","pass","caus"],comp:["expl","pass"],"comp:aux":["pass","caus","tense"],"comp:obj":["pass","lvc","agent"],"comp:obl":["agent"],mod:["relcl"],"conj:coord":["emb"],flat:["name","foreign"]};   // taxo_2023: the @deep features each surface relation admits
@@ -319,6 +388,10 @@ const DEEP_UNIVERSAL=["scrap"];   // admissible on ANY relation (not tied to a s
 // admissible @deep features for ONE base relation: the taxonomy above ∪ DEEP_UNIVERSAL ∪ any @feature already used
 // with that SAME relation elsewhere in the document (mirrors relMenu's dfMap, but single-relation — used by the
 // grid's Deep-cell autocomplete, which only ever needs one relation's list per keystroke rather than every candidate's).
+// item 29: how many deep-feature rows a relation's flyout would hold — the same union deepSubItems takes, for
+// the parent row's badge. The free-text "New deep feature…" field is not counted: it is always there, so a
+// count of 0 says truthfully "no admissible features yet" while the flyout still opens to offer one.
+function deepSubCount(feats){ return new Set([...(feats||[]),...DEEP_UNIVERSAL]).size; }
 function deepVocabFor(rel){ const vocab=[...new Set([...(DEEP_BY_REL[rel]||[]),...DEEP_UNIVERSAL])], seen=new Set(vocab);
   DOC.forEach(s=>s.tokens.forEach(t=>{ if(depBase(t.deprel)===rel){ const f=depDeep(t.deprel); if(f&&!seen.has(f)){ seen.add(f); vocab.push(f); } } }));
   return vocab; }
@@ -332,7 +405,7 @@ function deepSubItems(si,tokId,D,feats){ const s=DOC[si], dep=s&&s.tokens[tokId-
   // from the document's own usage) always sort alphabetically AFTER them, never interleaved.
   const isStdDeep=f=>DEEP_OFFICIAL.includes(f);
   const allFeats=[...allFeats0.filter(isStdDeep), ...allFeats0.filter(f=>!isStdDeep(f)).sort((a,b)=>a.localeCompare(b))];
-  allFeats.forEach(f=>items.push({label:"@"+esc(f), expand:DEEP_INFO[f]||"", check:cur===f, opt:true, fn:()=>setDF(f)}));
+  allFeats.forEach(f=>items.push({label:"@"+esc(f), expand:DEEP_INFO[f]||"", check:cur===f, opt:true, optval:D+"@"+f, fn:()=>setDF(f)}));   // item 29: optval — the FULL relation this row would write, which is exactly how the parser's own (unpooled) label distribution is keyed, so weightSubRows fades these by the same numbers relWeightsFor pools for the parent row
   if(allFeats.length) items.push(null);
   items.push({input:true, value:"", placeholder:"New deep feature…", commit:v=>setDF((v||"").replace(/^@/,"").trim())});   // add a deep feature to THIS relation (Enter commits)
   if(cur) items.push(null,[`Guidelines for “@${esc(cur)}”`,"↗",()=>openExternal(deepGuideUrl(cur))]);   // the token's CURRENTLY-set deep feature (not just any admissible one) gets a direct link
@@ -345,7 +418,16 @@ function relMenu(x,y,si,tokId){ const s=DOC[si]; if(!s)return; const dep=s.token
   // admissible deep features per relation: the taxonomy ∪ any @feature already used with that relation in the document
   const dfMap={}; Object.keys(DEEP_BY_REL).forEach(k=>dfMap[k]=DEEP_BY_REL[k].slice());
   DOC.forEach(s2=>s2.tokens.forEach(t=>{ const b=depBase(t.deprel), f=depDeep(t.deprel); if(f){ (dfMap[b]=dfMap[b]||[]); if(!dfMap[b].includes(f))dfMap[b].push(f); } }));
-  const subFor=r=>()=>deepSubItems(si,tokId,r,dfMap[r]||[]);   // EVERY relation gets a right-click deep-feature submenu (its taxonomy ∪ file features, or just an add-field)
+  /* item 29 — ONE ranking, read twice: POOLED to the base relation for the menu's own rows (relWeightsFor,
+     which is what makes a row's weight the sum of its flyout's), and UNPOOLED for each row's flyout, whose rows
+     ARE the individual `mod@relcl` labels the pooling adds up. Computed once here so both reads share the same
+     bridge call rather than racing two. Null (and so unweighted) for a ROOT, which has no incoming arc to
+     condition on — see the note on weightMenuRows' call below. */
+  const relScores=(typeof tokenScores!=="function")?null:(async()=>{
+    const h=parseInt(dep.head,10); if(!(h>=1)) return null;
+    const sc=await tokenScores(si);
+    return (sc&&sc.deprels&&sc.deprels[tokId-1]&&sc.deprels[tokId-1][String(h)])||await arcLabelScores(si,tokId,h); })();
+  const subFor=r=>({fn:()=>deepSubItems(si,tokId,r,dfMap[r]||[]), count:deepSubCount(dfMap[r]||[]), weights:relScores});   // EVERY relation gets a right-click deep-feature submenu (its taxonomy ∪ file features, or just an add-field)
   const choose=d=>{ if(d==="root"&&rb!=="root"){ setAsRoot(si,tokId); return; }   // not yet root → the FULL re-attach (migrates the old root's dependents, demotes it to udep), not a naive head=0 flip
     if(d!==dep.deprel){ pushUndo(si); dep.deprel=d; afterDeprelEdit(dep,s); markDirty(); preserveScroll(renderDoc); } };   // left-click sets the BARE relation — so clicking the current relation drops its @feature (= "(none)"); a feature is set via the row's submenu. Task B: no regenTok — structural, must never trigger a gloss/MGloss recompute
   // free-text authoring of a genuinely NEW base relation (parity with the grid's own DepRel cell, which is
@@ -357,19 +439,22 @@ function relMenu(x,y,si,tokId){ const s=DOC[si]; if(!s)return; const dep=s.token
   const commitNewRel=v=>{ closeCtx(); const d=(v||"").trim(); if(!d||d==="_") return;
     if(!SETTINGS.deprel.includes(d)){ SETTINGS.deprel.push(d); SETTINGS.deprel.sort(); }
     choose(d); };
+  /* CLEAR THE RELATION — `choose("")`, the same one every row calls, so afterDeprelEdit still runs and the
+     goeswith normalisation with it. ⚠ NOT OFFERED ON A ROOT: head 0 ⟺ deprel "root" is an invariant this app
+     maintains at every other edit site (afterDeprelEdit itself rewrites the relation back to "root" for a
+     head-0 token, and afterHeadEdit does the same in the other direction), so the row would be a visible no-op
+     there. Clearing the relation of a token that HAS a head is an ordinary partial annotation — the arc keeps
+     its shape and the label shows TIER_EMPTY. */
+  const clearRel=(dep.deprel && parseInt(dep.head,10)!==0)?{label:"Clear relation", fn:()=>choose(""), }:null;
   optionMenu(x,y,cands,deprelMenuGroups(cands),deprelExpand,depBase(dep.deprel),choose,guide,sentRTL(s),subFor,
-    undefined,undefined,undefined,undefined,{placeholder:"New relation…",commit:commitNewRel});   // deprelMenuGroups interleaves any user-added relation into its own family/Other — no separate "Custom" heading needed
+    undefined,undefined,undefined,undefined,{placeholder:"New relation…",commit:commitNewRel},clearRel);   // deprelMenuGroups interleaves any user-added relation into its own family/Other — no separate "Custom" heading needed
   /* …and then fade each row by how likely the parser thinks that relation is FOR THIS EDGE — the arc it
      weighed if this is one it considered, the synthesised state if the reader made the attachment
      themselves. Pooled to the base relation by `relWeightsFor`, which is the same pooling the rows'
      own deep-feature submenus do (`mod@relcl` lives under `mod`), so the two cannot disagree.
      A ROOT has no incoming arc to condition on, so its menu is left unweighted rather than weighted
      against an edge that does not exist. */
-  weightMenuRows(typeof tokenScores!=="function"?null:(async()=>{
-    const h=parseInt(dep.head,10); if(!(h>=1)) return null;
-    const sc=await tokenScores(si);
-    const d=sc&&sc.deprels&&sc.deprels[tokId-1]&&sc.deprels[tokId-1][String(h)];
-    return relWeightsFor(d||await arcLabelScores(si,tokId,h)); })()); }
+  weightMenuRows(relScores&&relScores.then(m=>relWeightsFor(m))); }
 // right-click a POS tag → pick a POS (all shown, grouped by class)
 /* item 4 — the UD LEXICAL features: the ones that subcategorise the UPOS itself (a SUBTYPE of the tag) rather
    than inflect the word, so a token carrying one is naturally read as a dot-suffixed tag — PRON.Dem, NUM.Ord,
@@ -406,6 +491,12 @@ function shortVDesc(s){ s=cleanVDesc(s); const m=s.split(/\s*[\/(,;]/)[0]; retur
 // sets the tag to PRON and PronType=Dem in one step (item 10: a FEATURE edit only, so it never triggers a
 // reparse that would wipe hand-edited features). The submenu carries ONLY dot-suffixed rows — never the bare
 // tag (item 7: selecting the plain tag is what the PARENT menu row already does, and now clears the subtype).
+/* item 29 — how many subtype rows a tag's flyout would hold, for the parent row's numeric badge. Counted the
+   same way posSubItems builds them (its own attested-values narrowing included, so the badge cannot promise
+   rows the flyout does not draw) but WITHOUT building any DOM or resolving the token — it is called once per
+   row of an open POS menu. 0 → posMenu offers no flyout on that row at all. */
+function posSubCount(U){ let n=0; subtypeFeatsFor(U).forEach(f=>{
+    n+=((typeof attestedFeatVals==="function"?attestedFeatVals(f):null)||UD_FEATS[f]||[]).length; }); return n; }
 function posSubItems(si,tokId,U){ const s=DOC[si], t=s&&s.tokens[tokId-1]; if(!t) return null;
   const feats=subtypeFeatsFor(U); if(!feats.length) return null;
   const curOf=f=>t.upos===U?(getFeat(t.feats,f)||""):"";
@@ -421,7 +512,7 @@ function posSubItems(si,tokId,U){ const s=DOC[si], t=s&&s.tokens[tokId-1]; if(!t
   // straight off UD_FEATS instead of. PronType alone carries 11 official values; a document that
   // only ever uses three of them doesn't need the other eight offered here either.
   feats.forEach(f=>{ const cur=curOf(f), vals=(typeof attestedFeatVals==="function"?attestedFeatVals(f):null)||UD_FEATS[f]||[];
-    items.push({header:f}); vals.forEach(v=>items.push({label:esc(subtypeSuffix(f,v)), expand:shortVDesc((FEATS_VDESC[f]||{})[v]||""), check:cur===v, opt:true, fn:()=>setSub(f,v)})); });   // item 3: bare subtype value (the "U." prefix is redundant here) + a SHORT expansion that can't cross the one-column midline
+    items.push({header:f}); vals.forEach(v=>items.push({label:esc(subtypeSuffix(f,v)), expand:shortVDesc((FEATS_VDESC[f]||{})[v]||""), check:cur===v, opt:true, optval:U+"|"+f+"="+v, fn:()=>setSub(f,v)})); });   // item 29: optval — the CLASS+SUBTYPE pair `upos_sub` is keyed by (app/parse.py's _upos_scores), so weightSubRows can fade these rows by the same distribution the parent row is faded by   // item 3: bare subtype value (the "U." prefix is redundant here) + a SHORT expansion that can't cross the one-column midline
   // item 3 — the guidelines link for the subtype the token CURRENTLY carries, pinned STICKY to the flyout bottom (no clear button — a plain-tag pick from the parent menu already clears the subtype)
   let setF=null,setV=""; feats.forEach(f=>{ const v=curOf(f); if(v){ setF=f; setV=v; } });
   if(setF) items.push(null,{label:`Guidelines for “${esc(subtypeSuffix(setF,setV))}”`, kbd:"↗", footLink:true, fn:()=>openExternal(featGuideUrl(setF,setV))});   // item 1: the leading `null` CLOSES the last category group so the link lands at the flyout's TOP LEVEL; footLink → openSub lifts it into a FIXED footer (never scrolls), styled as an ordinary .ctx button exactly like the parent menu's guidelines row
@@ -442,8 +533,13 @@ function posMenu(x,y,si,tokId,opts){ opts=opts||{}; const s=DOC[si]; if(!s)retur
       `External POS of tokens ${sp.from}–${sp.to} — the whole expression`);   // a single line whose width sits BETWEEN one and two POS columns (like the guidelines link) — never wraps
     return; }
   const tok=s.tokens[tokId-1]; if(!tok)return;
-  const guide=[`Open the guidelines for the “${esc(tok.upos)}” part of speech`,"↗",()=>openExternal(posGuideUrl(tok.upos))];
-  const subFor=U=>()=>posSubItems(si,tokId,U);   // item 4: every tag gets a right-click submenu of its own dot-suffixed subtypes
+  const guide=tok.upos?[`Open the guidelines for the “${esc(tok.upos)}” part of speech`,"↗",()=>openExternal(posGuideUrl(tok.upos))]:null;   // item 29: NO LINK FOR AN UNTAGGED TOKEN, on request — there is no page for the empty class, and posGuideUrl("") would send the reader to the guidelines' front door as though it answered their click
+  /* item 29 — the joint CLASS+SUBTYPE distribution behind each row's flyout (`upos_sub`, app/parse.py), asked
+     for once and shared by every row: the flyout's rows are the very labels this row's own weight is the sum
+     of, so fading them by it is the same statement one level down. */
+  const posSubW=(typeof tokenScores!=="function")?null:(async()=>{
+    const sc=await tokenScores(si); return (sc&&sc.upos_sub&&sc.upos_sub[tokId-1])||null; })();
+  const subFor=U=>{ const n=posSubCount(U); return n?{fn:()=>posSubItems(si,tokId,U), count:n, weights:posSubW}:null; };   // item 4: every tag with subtypes gets a right-click submenu of them (item 29: and a badge saying how many; a tag with none no longer offers an empty flyout)
   const choose=p=>{ const posChanged=p!==tok.upos, hadSub=UPOS_SUBTYPE_FEATS.some(f=>getFeat(tok.feats,f));
     if(!posChanged&&!hadSub) return;   // same tag, no subtype to drop → nothing to do
     const before=tok.feats, oldUpos=tok.upos; pushUndo(si); tok.upos=p; syncXposMirror(tok); clearSubjIfNotVA(tok);   // item 1: a tag change away from VERB/AUX drops any now-meaningless Subj
@@ -453,8 +549,15 @@ function posMenu(x,y,si,tokId,opts){ opts=opts||{}; const s=DOC[si]; if(!s)retur
     markDirty(); preserveScroll(renderDoc);
     if(posChanged) uposSyncTranslit(si,tokId);   // the romanisation and script glyph are asked for a form AS a part of speech, so a retag makes both stale — refreshed HERE rather than left to regenTok below, which reaches its own translit pass on only one of its paths (no model / a misaligned re-parse skip it entirely). BEFORE regenTok so the fast language-driven refresh lands first, exactly as afterFormEdit orders the same two; regenTok's trailing pass then finds every value current and rewrites what is already there
     if(posChanged) regenTok(si,tokId,{regloss:true}); };   // regloss: the re-parse re-derives the FEATS for the chosen class, so the MGloss has to gain the categories that class brought with it and not merely lose the old one's (mglossFillFromFeats, js/io/bridge.js) — uposSyncGloss above has already moved the AUX/DET prefix, which is the one piece UPOS drives on its own.   // only a genuine POS change reparses; a same-tag "clear subtype" must not (item 10). regenSecondaries' OWN gloss-touch is now itself non-destructive in place too (Task B) — see its own note
+  /* CLEAR THE WORD CLASS — `choose("")`, the very function every tag row calls, so clearing goes down the one
+     path that already knows what a retag entails (drop the dot-suffix subtypes, re-sync XPOS where it mirrors,
+     drop a Subject that only a VERB/AUX can carry, retarget the closed-class gloss prefix, re-ask the parser for
+     the fields that follow from the class). An untagged token is what the diagram now DRAWS — TIER_EMPTY in the
+     POS row — rather than something the file cannot say: UPOS is `_` in CoNLL-U like any other column. Offered
+     only when there IS a tag (or a subtype hanging off one), so the row never appears with nothing to do. */
+  const clearPos=(tok.upos||UPOS_SUBTYPE_FEATS.some(f=>getFeat(tok.feats,f)))?{label:"Clear word class", fn:()=>choose("")}:null;
   optionMenu(x,y,SETTINGS.upos.slice(),UPOS_CATS,r=>UPOS_INFO[r]||"",tok.upos,choose,guide,rtl,subFor,null,
-    "Right-click a tag for its subtypes (PRON.Dem, NUM.Ord, …)",null,true);   // subColSize=true → the subtype flyout is one POS column wide and as tall as the POS menu (item 3)
+    "Right-click a tag for its subtypes (PRON.Dem, NUM.Ord, …)",null,true,null,clearPos);   // subColSize=true → the subtype flyout is one POS column wide and as tall as the POS menu (item 3)
   /* …and then fade each tag by the morphologizer's own probability for it. The pooling this needs is
      already done where the model is read (`_upos_scores`, app/parse.py): it predicts UPOS and FEATS as
      ONE joint label, so the mass of a CLASS is the sum over every analysis carrying it — which is the
@@ -482,7 +585,15 @@ function moveItems(si,tokId,grid){ return grid
 function insertItems(si,tokId,grid){ return grid
   ? [["Insert token above","⌥⌘↑",()=>insertToken(si,tokId-1)],["Insert token below","⌥⌘↓",()=>insertToken(si,tokId)]]
   : [["Insert token left","⌥⌘←",()=>insertSpatial(si,tokId,-1)],["Insert token right","⌥⌘→",()=>insertSpatial(si,tokId,1)]]; }
-function headItems(si,tokId){ return [["Select previous head","⌃⌘[",()=>stepHead(si,tokId,-1)],["Select next head","⌃⌘]",()=>stepHead(si,tokId,1)]]; }
+/* …and CLEAR HEAD, in the same group as the two that step through candidate heads — this is the third thing
+   you can do to a token's attachment, and it belongs beside them rather than in the relation menu (which is
+   opened on the EDGE, and whose own Clear row is about the label). It detaches AND clears the relation, for the
+   reason clearHead's own note gives: a relation describes an edge. Offered only when there is a head to clear,
+   the root's `0` included — a sentence with no root yet is an ordinary intermediate state, and `_` is what the
+   file writes for either column. */
+function headItems(si,tokId){ const t=DOC[si]&&DOC[si].tokens[tokId-1];
+  return [["Select previous head","⌃⌘[",()=>stepHead(si,tokId,-1)],["Select next head","⌃⌘]",()=>stepHead(si,tokId,1)],
+    ...((t&&(t.head||"").length)?[["Clear head",null,()=>clearHead(si,tokId)]]:[])]; }
 // right-click a node → edit/split-or-merge/move/insert/re-attach/set-root/delete this token (order:
 // Edit, Split/Merge, Move, Insert, Select head, Set as root, Delete)
 function nodeTokenMenu(x,y,si,tokId){ const s=DOC[si]; if(!s)return; const rtl=sentRTL(s);
@@ -707,7 +818,17 @@ function posRelHit(target){ if(!target||!target.closest) return null;
   let relEl=target.closest(".lbl,.orel,.bwrel");
   if(relEl && !(relEl.textContent||"").trim()) relEl=null;   // a reserved (blank " ") .bwrel row — an interrupter's or root-neighbour's placeholder — is NOT a deprel label; fall through to the token menu
   const posEl=relEl?null:target.closest(".tok-pos,.node-cat,.opos,.bwpos");
-  return (relEl||posEl)?{relEl,posEl}:null; }
+  /* item 29 — …AND THE EDGE ITSELF, on request ("right-clicking a dependency edge with no relation should bring
+     up the deprel context menu"). It is the only way in once the label is gone: an EMPTY relation draws no label
+     at all (that is the settled behaviour — see diagram-rendering.md), so there was nothing left to right-click.
+     Offered on every edge, not only the unlabelled ones: the arc is a far bigger target than its label, and it
+     means the same thing. `.edge-g`/`.arc` are the groups every notation puts an edge in, each already carrying
+     `data-s`/`data-dep` for the DEPENDENT — which is the token a relation belongs to, and exactly what
+     tokFromEl reads. `.ghost-g` is deliberately not in the list: a ghost duplicates an attachment the diagram
+     draws elsewhere and names no edge of its own. Checked last, so a click that lands on a label or a POS tag
+     inside one of these groups still resolves to that. */
+  const edgeEl=(relEl||posEl)?null:(target.closest(".edge-g,.arc"));
+  return (relEl||posEl||edgeEl)?{relEl:relEl||edgeEl,posEl}:null; }
 // …and what each of the two gestures then does with it, likewise written once.
 function openPosRelMenu(hit,x,y,shift){ const tk=tokFromEl(hit.relEl||hit.posEl); if(!tk) return false;
   if(hit.relEl) relMenu(x,y,tk.si,tk.tokId);   // a deprel → relation menu (deep features live on each relation's submenu)
@@ -813,6 +934,15 @@ function avmValueMenu(x,y,si,tokId,key){
     if(otherCands.length){ closeGrp();
       items.push({label:"Other "+feat+"…", sub:()=>otherCands.map(v=>({label:v, expand:shortVDesc(desc[v]||""), fn:()=>avmSetFeat(si,tokId,feat,v)})), subFit:true}); }   // shortVDesc, not the raw gloss: this is a NESTED sub flyout same as addFeatureItems' own, and a long raw FEATS_VDESC entry wraps its row character-by-character there (see addFeatureItems' own comment on the exact same bug) — same fix applies here
     if(cur){ closeGrp(); items.push({label:"Clear "+feat, fn:()=>avmSetFeat(si,tokId,feat,null)}); } });
+  /* …and the row menu can also ADD a feature this token doesn't carry yet, on request ("right-clicking in a
+     nonempty AVM should also allow for adding features"). Exactly the row the token menu already offers
+     (addFeatureRow, just below) — reused rather than rebuilt, so the two gestures can only ever offer the same
+     candidates through the same avmSetFeat write. It sits last, after every existing feature's own block, and
+     the whole point of the flyout is that it is ONE level deep: this menu is the top-level ctx, so its `sub`
+     opens in ctx2 exactly as the token menu's does. Omitted (with its separator) when there is nothing left to
+     add, same guard addFeatureRow itself applies. */
+  const addRow=addFeatureRow(si,tokId);
+  if(addRow.length){ if(items.length) items.push(null); items.push(addRow[0]); }
   if(!items.length) return false;
   showCtx(x,y,items, items.length>12, sentRTL(s), true);   // fit → shrink to the widest row (.ctx.defctx, same mechanism the status-bar Format menu uses): AVM feature/value labels ("Sing"/"Plur"/"Fem"…) are short, and the shared 224px floor left visible empty space on the right of a typical few-row menu. Safe with the twoCol branch too — a >12-item combined AGR/TAM group's two columns are already sized off their own widest row (renderMenu's twocolwrap), so the floor was never doing useful work there either
   return true; }
@@ -855,27 +985,78 @@ function docPairValsForUpos(feat,upos){ const set=new Set();
   return set; }
 function strictAttestedVals(feat,upos){ const full=UD_FEATS[feat]||[]; if(!full.length) return full;
   const attested=upos!=null?docPairValsForUpos(feat,upos):new Set((typeof docPairVals==="function"?docPairVals("feats",feat):[]));
-  if(upos==null) (typeof MODEL_FEATS_INVENTORY==="object"&&MODEL_FEATS_INVENTORY&&MODEL_FEATS_INVENTORY[feat]||[]).forEach(v=>attested.add(v));
+  /* ⚠ THE MODEL ANSWERS THE UPOS-SCOPED QUESTION TOO, on request ("only features that are compatible with the
+     UPOS should be shown"). It used to be consulted ONLY for the doc-wide question, because the flat inventory
+     it exposed pooled every word class together (its own docstring: "alongside ANY word class") and so could
+     not narrow anything. MODEL_FEATS_BY_UPOS (js/io/bridge.js ← app/parse.py) reads the SAME labels without
+     throwing the `POS=` half away, so a class the model never emits a feature alongside simply does not offer
+     it. Union, not replacement: the document's own usage is evidence too, and a corpus may annotate what a
+     model never predicts. */
+  if(upos!=null){ const m=(typeof MODEL_FEATS_BY_UPOS==="object"&&MODEL_FEATS_BY_UPOS&&MODEL_FEATS_BY_UPOS[upos])||null;
+    ((m&&m[feat])||[]).forEach(v=>attested.add(v)); }
+  else (typeof MODEL_FEATS_INVENTORY==="object"&&MODEL_FEATS_INVENTORY&&MODEL_FEATS_INVENTORY[feat]||[]).forEach(v=>attested.add(v));
   return full.filter(v=>attested.has(v)); }
+/* ⚠ THE NARROWING FALLS BACK RATHER THAN COMING BACK EMPTY, in two stages, and this is what makes the gesture
+   reliable rather than a coin toss. The rows are narrowed to what is ATTESTED for THIS token's word class,
+   which is right whenever the class has attestation — and silently fatal where it has none. The token this menu
+   is most often opened on is exactly such a token: the AVM placeholder is drawn for a token with NO FEATS, and
+   a token with no feats is usually PUNCT, PROPN or X, classes a document attests no features on at all. The
+   list came back empty, `avmAddMenu` returned false, and right-clicking the placeholder did nothing —
+   reported twice as "the AVM placeholder still doesn't work". So: UPOS-scoped, else DOCUMENT-WIDE (the same
+   question with the class dropped — which is also the only sensible question for an UNTAGGED token, where
+   scoping by "" asks what other untagged tokens carry, i.e. nothing), else the standard inventory itself.
+   ⚠️ THE LAST STAGE IS NOT A WIDENING OF THE ATTESTED-ONLY RULE, which stands wherever there is anything to be
+   narrowed TO: it is the answer for a document that attests NOTHING yet — a fresh annotation, where the whole
+   point of "Add feature" is the FIRST one, and where "only what's attested" and "nothing at all" are the same
+   list. Each stage is tried whole (the items are rebuilt, not topped up), so the menu never mixes registers. */
+/* ⚠ THE PICKER IS ORDERED THE WAY THE AVM TIER LAYS A TOKEN OUT, on request ("features in the menu should be
+   sorted the same way as in the AVMs: agreement, then TAM, then the rest, preferably in glossing order"): the
+   AGR block first (Person, Number, Gender, Clusivity — AVM_GROUPS' own order, js/grid/grid.js), then TAM
+   (Tense, Aspect, Mood, Evident), then everything else in GLOSSING order (MGLOSS_FEAT_RANK, js/io/bridge.js —
+   the sequence the morphemic tier already writes its abbreviations in), and anything in neither table last,
+   alphabetically, so an unknown feature has a stable place rather than a random one.
+   ⚠️ THE SAME RANK ORDERS avmStruct's OWN TAIL (js/grid/grid.js), which used to walk `Object.keys(UD_FEATS)`:
+   that is what makes "the same way as in the AVMs" TRUE rather than approximately true, and it is why the rank
+   lives in one function both call rather than in two lists that would drift. The two GROUP rows are unaffected
+   — they were already first, in this order.
+   Read at call time, so the load order (bridge.js comes after this file) does not matter. */
+function avmFeatRank(f){
+  const G=(typeof AVM_GROUPS==="object"&&AVM_GROUPS)||{};
+  const ai=(G.AGR||[]).indexOf(f); if(ai>=0) return [0,ai,f];
+  const ti=(G.TAM||[]).indexOf(f); if(ti>=0) return [1,ti,f];
+  const R=(typeof MGLOSS_FEAT_RANK==="object"&&MGLOSS_FEAT_RANK)||{};
+  const gi=R[f]; return [2, gi==null?1e6:gi, f]; }
+function avmFeatCmp(a,b){ const x=avmFeatRank(a), y=avmFeatRank(b);
+  return (x[0]-y[0])||(x[1]-y[1])||x[2].localeCompare(y[2]); }
 function addFeatureItems(si,tokId){
   const s=DOC[si], t=s&&s.tokens[tokId-1]; if(!t) return [];
-  const cands=Object.keys(UD_FEATS).filter(f=>!AVM_EXCLUDE.has(f)&&getFeat(t.feats,f)==null);
-  const items=[];
-  cands.forEach(f=>{
-    const vals=strictAttestedVals(f,t.upos);   // UPOS-scoped: a feature/value with no attestation on THIS word class anywhere in the doc is simply not offered — the same "skip if empty" guard right below already excludes the feature entirely once this narrows it to nothing
-    if(!vals.length) return;
-    const desc=(typeof FEATS_VDESC==="object"&&FEATS_VDESC&&FEATS_VDESC[f])||{};
-    items.push({header:f});
-    // on report ("not enough space for the labels to not wrap"): the real cause wasn't the FLYOUT's own width —
-    // it was this row's raw, un-truncated FEATS_VDESC entry as `expand`. posSubItems (above, the pattern this
-    // whole flyout mirrors) already solved exactly this with shortVDesc() — "a SHORT expansion that can't cross
-    // the one-column midline" — but this call used the raw description directly. A long one (NounClass's own
-    // entries run to a full sentence, e.g. "Bantu class 12 (singular: small things, diminutives)") squeezed the
-    // row's own .mlbl flex column down to near-zero width, wrapping the LABEL character-by-character (measured
-    // live: "Bantu12"'s own .mlbl rendered at width:0, height:112px — one character per line) — not a container
-    // sizing problem at all, a per-row internal layout one.
-    vals.forEach(v=>items.push({label:v, expand:shortVDesc(desc[v]||""), fn:()=>avmSetFeat(si,tokId,f,v)})); });
-  return items; }
+  const cands=Object.keys(UD_FEATS).filter(f=>!AVM_EXCLUDE.has(f)&&getFeat(t.feats,f)==null).sort(avmFeatCmp);   // …in the AVM tier's own order — see avmFeatRank
+  /* One pass over the candidate features with whatever narrowing the caller hands in — `vals(f)` is the ONLY
+     thing that differs between the three stages below, so they cannot drift in how they build a row.
+     ⚠ shortVDesc, NOT the raw FEATS_VDESC entry, on report ("not enough space for the labels to not wrap"): the
+     cause was never the flyout's width but this row's own `expand`. posSubItems (above, the pattern this whole
+     flyout mirrors) had already solved it — "a SHORT expansion that can't cross the one-column midline". A long
+     raw description (NounClass's run to a full sentence, e.g. "Bantu class 12 (singular: small things,
+     diminutives)") squeezed the row's own .mlbl flex column to near-zero and wrapped the LABEL character by
+     character — measured live: "Bantu12"'s .mlbl at width:0, height:112px, one character per line. */
+  const build=vals=>{ const out=[];
+    cands.forEach(f=>{ const vv=vals(f); if(!vv.length) return;
+      const desc=(typeof FEATS_VDESC==="object"&&FEATS_VDESC&&FEATS_VDESC[f])||{};
+      out.push({header:f});
+      vv.forEach(v=>out.push({label:v, expand:shortVDesc(desc[v]||""), fn:()=>avmSetFeat(si,tokId,f,v)})); });
+    return out; };
+  const scoped=build(f=>strictAttestedVals(f,t.upos||null));
+  /* ⚠ A TAGGED TOKEN STOPS HERE, EMPTY OR NOT, on request ("only features that are compatible with the UPOS
+     should be shown"). The two fallbacks below drop the word-class scoping, which is exactly what put Tense in
+     a PUNCT's picker; they now apply ONLY to a token with NO class, where there is nothing to scope BY and the
+     document-wide question is the honest one. An empty list for a tagged token is therefore a real answer —
+     "this class takes no features here" — and the gesture falls through to the token menu rather than opening a
+     picker of things that cannot apply. That is the same judgement as the annotation rules in CLAUDE.md: an
+     honest blank beats an invented feature set. */
+  if(t.upos) return scoped;
+  if(scoped.length) return scoped;
+  return build(f=>UD_FEATS[f]||[]);   // untagged AND nothing attested anywhere (a fresh document, no model): the inventory itself is all there is to offer
+}
 // the nodeTokenMenu row itself — omitted entirely when every standard feature is already set (same guard
 // shape as markFeatRow just above it), so the menu never grows for a token with nothing left to add.
 function addFeatureRow(si,tokId){
@@ -891,7 +1072,28 @@ function addFeatureRow(si,tokId){
 // group's own NAME reads as "edit the group", a specific VALUE reads as "edit just that one member". A
 // standalone row's avmEl.dataset.feat already IS the one real feature, so this branch is a no-op there —
 // .closest("[data-subfeat]") never matches (no such attribute exists on that row at all).
-function avmMenuAt(e,x,y){ const avmEl=e.target.closest&&e.target.closest(".avm-row"); if(!avmEl) return false;
+/* item 28 — THE EMPTY AVM PLACEHOLDER'S OWN MENU, on request ("right-clicking an empty AVM placeholder should
+   bring up a context menu for adding features"). A token with no FEATS has no `.avm-row` to right-click — that
+   is the very gap addFeatureRow was written for, reachable until now only through the token menu — so the
+   placeholder the tier now draws in its place (`.avm-add`, drawAVM / `.oavm-empty`, avmInline, both in
+   js/diagram/diagram-core.js) answers with the add-feature picker DIRECTLY rather than as a submenu: there is
+   no existing feature here to edit, so the list of what could be added is the whole menu. Same items, same
+   avmSetFeat write, same one-flyout-deep shape as everywhere else. Returns false when nothing is attested for
+   this token's word class, so the gesture falls through to the ordinary token menu rather than opening an empty
+   one. */
+function avmAddMenu(x,y,si,tokId){ const s=DOC[si]; if(!s) return false;
+  const items=addFeatureItems(si,tokId); if(!items.length) return false;
+  /* ⚠ ONE COLUMN, FITTED — the SAME shape the "Add feature…" flyout has in the token menu, on request
+     ("right-clicking an AVM placeholder should ONLY bring up the contents of the Add feature submenu"). The
+     CONTENT was already exactly that (both go through addFeatureItems, verified in all five notations and in
+     the wrapped-bracket overlay); what differed was that this one asked for the balanced TWO-COLUMN layout
+     once it had more than 12 rows, which reads as a different menu rather than as that submenu opened in
+     place. `false` for twoCol, `true` for fit — `subFit:true` is what addFeatureRow passes for the flyout. */
+  showCtx(x,y,items, false, sentRTL(s), true); return true; }
+function avmMenuAt(e,x,y){
+  const addEl=e.target.closest&&e.target.closest(".avm-add,.oavm-empty");
+  if(addEl){ const atk=tokFromEl(addEl); if(atk) return avmAddMenu(x,y,atk.si,atk.tokId); }
+  const avmEl=e.target.closest&&e.target.closest(".avm-row"); if(!avmEl) return false;
   const tk=tokFromEl(avmEl); if(!tk) return false;
   const subEl=e.target.closest&&e.target.closest("[data-subfeat]");
   const key=(subEl && avmEl.contains(subEl)) ? subEl.dataset.subfeat : avmEl.dataset.feat;
@@ -1411,7 +1613,21 @@ function makeGlossEditableSC(el,obj,key,after,rtl,relocate,nav,caretHint,mglossT
   /* …and a tier that does not small-cap edits as plain text — the field must read while typing exactly
      as the row will once committed, which is this editor's whole reason for existing (see its note
      above). `abbr` is glossTierAbbr(tier), passed by the caller rather than re-derived here. */
-  const render=text=>{ box.innerHTML=""; if(!abbr){ box.appendChild(document.createTextNode(text)); return; }
+  /* ⚠ AN EMPTY BOX GETS A `<br>`, OR WEBKIT PAINTS NO CARET IN IT AT ALL. A contenteditable with no content
+     has no LINE BOX, and with no line box there is nowhere for the caret to be: measured in the shipping
+     engine (a `.glabbrbox` styled exactly as this one, focused, its own contents selected), an empty box
+     reports ZERO client rects for the selection, while the same box holding a single `<br>` reports a real
+     0×16 caret rect at the box's own centre — the caret the reader is looking for. So clicking an
+     un-annotated tier (which is now every tier that shows a TIER_EMPTY placeholder, and was always the
+     gloss tiers' own `…`) opened a field that took typing but showed no cursor. Chrome paints one either
+     way, which is why no headless run could see this.
+     A `<br>` and not a zero-width space: `box.textContent` stays exactly "" through it, so `place()`'s own
+     width measurement, `reflow`'s `caretOffset`, and `finish`'s `v=box.textContent.trim()` commit test all
+     read the field as empty, which is what it is. A U+200B would be measured, committed and stripped again
+     by INVISIBLE_RE downstream — a value where there is none. Re-added on every render (the field returns
+     to empty as soon as the reader deletes the last character, and the caret has to survive that too). */
+  const render=text=>{ box.innerHTML=""; if(!text){ box.appendChild(document.createElement("br")); return; }
+    if(!abbr){ box.appendChild(document.createTextNode(text)); return; }
     glossAbbrSegments(text).forEach(([t,abbr])=>{
     if(!abbr){ box.appendChild(document.createTextNode(t)); return; }
     const s=document.createElement("span"); s.className="glabbr"; s.textContent=t; box.appendChild(s); }); };
