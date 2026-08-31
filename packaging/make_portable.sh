@@ -16,7 +16,7 @@ OUT_DIR="${1:-$PROJECT/dist}"
 APP="$OUT_DIR/SUD Workbench.app"
 RES="$APP/Contents/Resources"
 WORK="$(mktemp -d)"
-VERSION="0.3.17"
+VERSION="0.3.18"
 BUNDLE_ID="io.sunflowerai.sudworkbench"
 PYVER="3.12"
 trap 'rm -rf "$WORK"' EXIT

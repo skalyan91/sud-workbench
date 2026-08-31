@@ -2,59 +2,15 @@
 
 All notable changes to SUD Workbench are documented in this file.
 
-## [0.3.17] — 2026-08-31
+## [0.3.18] — 2026-08-31
 
-### Added: custom models — any language, from your own annotated sentences
+### Changed: a custom model can be chosen for you
 
-- A **Custom** section at the top of the Model Manager, with **Add custom model…**. A custom model is
-  one language of the **generic parser** — a pipeline trained on 80 SUD treebanks that reads your word
-  classes and supplies the features and the tree. Each one is a single 128-value embedding row fitted
-  for a language of your choosing, a couple of kilobytes on disk, so you can make as many as you like.
-- Name it from the **ISO 639-3 language list** or type any name at all: a register, a dialect or an
-  author with no code is a perfectly good thing to fit a row for.
-- Custom parsers are offered under **Installed parsers** in the Insert-text dialog, listed by their
-  own name beside the ordinary parser for the same language, and the one you pick is the one that
-  runs. A language whose only parser is a custom one stops being listed as having none.
 - **A custom model is selected for you when it is the only parser for the language** — when you open
   a file whose language is detected as one that nothing else installed can parse, and you have built
   exactly one model for it. The app still never chooses between two of your own models for the same
   language, and an ordinary parser is still preferred wherever there is one; the picker simply stops
   saying *None (manual)* about a language you have a parser for.
-- **Edit** one afterwards to rename it, change its language, or point it at different training data.
-  Renaming is instant and keeps everything it has learnt; the embedding is re-fitted only when you
-  point it at a different file — or at the same one after editing it.
-- Give it a CoNLL-U file of **any size** and the row is fitted on it — about ten sentences is where
-  the gain starts. With **30 or more**, the fitting uses most of them and the rest are held back, so
-  the **UAS/LAS in the list is measured on data the fitting never saw**; with fewer, all of them go
-  into the fitting and no figure is measured. Where there is nothing measured the row shows the
-  parser's held-out average over 20 languages it has never seen — and every row says in as many words
-  what its own numbers were measured on.
-- The generic parser itself is **fetched the first time** (31 MB) rather than shipped with the app: it
-  is CC BY-NC-SA 4.0, and a NonCommercial term inside the bundle would attach to the whole of it.
-- What it does **not** do is tag: you supply the word classes, which is the deal this pipeline offers
-  and the reason it works on a language it has never seen. Parsing raw text with one therefore gives
-  you the words and nothing else — tag them, and the features and the tree follow.
-
-### Added: the pipeline drawer — switch off the parts of the parse you don't want
-
-- A **Pipeline** drawer at the right-hand end of the options bar, beside Auto-regenerate. Ten
-  switches, all on by default: tokenisation, sentence splitting, lemmas, word classes,
-  language-specific tags, features, syntax, SUD annotations, transliteration and glossing.
-- A switched-off arm leaves its column **empty** rather than filled in and hidden — the file on disk
-  says exactly what the switches say. Switching tokenisation off splits on whitespace; switching
-  sentence splitting off treats what you paste as one sentence.
-- **Switching one off switches off everything that reads it.** Untick Word classes and the
-  language-specific tags go with them; untick Syntax and the SUD annotations do. What reads what is
-  read off each model's own components — the input features they were actually built on — so it
-  differs between models and is right for each: the English parser is built on word shape alone and
-  keeps parsing whatever else you switch off, where the generic parser is built on the word classes
-  and features and cannot.
-- **An arm you switch off is one you have taken over**, so the parse reads *your* column instead of
-  the model's rather than going without. Untick Features and re-parse, and the tree is built from the
-  features you entered — measured worth on held-out Basque, LAS 38.32 → 53.27. Nothing you supplied
-  is ever blanked or overwritten on the way back.
-- An arm the current model **cannot do** is greyed, and one that has nothing to read is dimmed; either
-  way the row itself never changes size, and hovering it says why. The choice persists between sessions.
 
 ### Added: your glosses help the generic parser
 
@@ -218,6 +174,55 @@ All notable changes to SUD Workbench are documented in this file.
   diagram, for the sent_id of an unnamed sentence, for an unfilled translation row, and for the name of a
   document or paragraph marker — the last of which shows nothing else at all when empty, so there was no
   sign whatever that the click had landed.
+
+## [0.3.17] — 2026-08-26
+
+### Added: custom models — any language, from your own annotated sentences
+
+- A **Custom** section at the top of the Model Manager, with **Add custom model…**. A custom model is
+  one language of the **generic parser** — a pipeline trained on 80 SUD treebanks that reads your word
+  classes and supplies the features and the tree. Each one is a single 128-value embedding row fitted
+  for a language of your choosing, a couple of kilobytes on disk, so you can make as many as you like.
+- Name it from the **ISO 639-3 language list** or type any name at all: a register, a dialect or an
+  author with no code is a perfectly good thing to fit a row for.
+- Custom parsers are offered under **Installed parsers** in the Insert-text dialog, listed by their
+  own name beside the ordinary parser for the same language, and the one you pick is the one that
+  runs. A language whose only parser is a custom one stops being listed as having none.
+- **Edit** one afterwards to rename it, change its language, or point it at different training data.
+  Renaming is instant and keeps everything it has learnt; the embedding is re-fitted only when you
+  point it at a different file — or at the same one after editing it.
+- Give it a CoNLL-U file of **any size** and the row is fitted on it — about ten sentences is where
+  the gain starts. With **30 or more**, the fitting uses most of them and the rest are held back, so
+  the **UAS/LAS in the list is measured on data the fitting never saw**; with fewer, all of them go
+  into the fitting and no figure is measured. Where there is nothing measured the row shows the
+  parser's held-out average over 20 languages it has never seen — and every row says in as many words
+  what its own numbers were measured on.
+- The generic parser itself is **fetched the first time** (31 MB) rather than shipped with the app: it
+  is CC BY-NC-SA 4.0, and a NonCommercial term inside the bundle would attach to the whole of it.
+- What it does **not** do is tag: you supply the word classes, which is the deal this pipeline offers
+  and the reason it works on a language it has never seen. Parsing raw text with one therefore gives
+  you the words and nothing else — tag them, and the features and the tree follow.
+
+### Added: the pipeline drawer — switch off the parts of the parse you don't want
+
+- A **Pipeline** drawer at the right-hand end of the options bar, beside Auto-regenerate. Ten
+  switches, all on by default: tokenisation, sentence splitting, lemmas, word classes,
+  language-specific tags, features, syntax, SUD annotations, transliteration and glossing.
+- A switched-off arm leaves its column **empty** rather than filled in and hidden — the file on disk
+  says exactly what the switches say. Switching tokenisation off splits on whitespace; switching
+  sentence splitting off treats what you paste as one sentence.
+- **Switching one off switches off everything that reads it.** Untick Word classes and the
+  language-specific tags go with them; untick Syntax and the SUD annotations do. What reads what is
+  read off each model's own components — the input features they were actually built on — so it
+  differs between models and is right for each: the English parser is built on word shape alone and
+  keeps parsing whatever else you switch off, where the generic parser is built on the word classes
+  and features and cannot.
+- **An arm you switch off is one you have taken over**, so the parse reads *your* column instead of
+  the model's rather than going without. Untick Features and re-parse, and the tree is built from the
+  features you entered — measured worth on held-out Basque, LAS 38.32 → 53.27. Nothing you supplied
+  is ever blanked or overwritten on the way back.
+- An arm the current model **cannot do** is greyed, and one that has nothing to read is dimmed; either
+  way the row itself never changes size, and hovering it says why. The choice persists between sessions.
 
 ## [0.3.16] — 2026-08-22
 
