@@ -2,7 +2,7 @@
 
 All notable changes to SUD Workbench are documented in this file.
 
-## [0.3.17] — 2026-08-26
+## [0.3.17] — 2026-08-31
 
 ### Added: custom models — any language, from your own annotated sentences
 
@@ -15,6 +15,11 @@ All notable changes to SUD Workbench are documented in this file.
 - Custom parsers are offered under **Installed parsers** in the Insert-text dialog, listed by their
   own name beside the ordinary parser for the same language, and the one you pick is the one that
   runs. A language whose only parser is a custom one stops being listed as having none.
+- **A custom model is selected for you when it is the only parser for the language** — when you open
+  a file whose language is detected as one that nothing else installed can parse, and you have built
+  exactly one model for it. The app still never chooses between two of your own models for the same
+  language, and an ordinary parser is still preferred wherever there is one; the picker simply stops
+  saying *None (manual)* about a language you have a parser for.
 - **Edit** one afterwards to rename it, change its language, or point it at different training data.
   Renaming is instant and keeps everything it has learnt; the embedding is re-fitted only when you
   point it at a different file — or at the same one after editing it.
@@ -50,6 +55,30 @@ All notable changes to SUD Workbench are documented in this file.
   is ever blanked or overwritten on the way back.
 - An arm the current model **cannot do** is greyed, and one that has nothing to read is dimmed; either
   way the row itself never changes size, and hovering it says why. The choice persists between sessions.
+
+### Added: your glosses help the generic parser
+
+- The generic parser's new version reads an **English gloss per token** as a further input, and this app
+  supplies it from the glossing you have already done — the **MGloss** tier where its lexical part is
+  filled in, otherwise **Gloss**, with the Leipzig abbreviations and the morpheme hyphens taken off either.
+  A token you have not glossed contributes nothing, which the parser reads as "no gloss here" rather than as
+  a blank one.
+- The same glosses go into **fitting a custom model's row**, read from the training file's own columns, so a
+  row is fitted with the channel filled the way it will be filled when you parse with it — the parser's own
+  documentation is emphatic that the two must match.
+- It reads the tiers whether or not they are on display: a file's glosses are yours whether the rows are
+  drawn or not.
+- **Automatic glossing switches itself off** for a parser that reads glosses, and the Glossing row in the
+  Pipeline drawer says so. A gloss the app guessed, handed back to the parser as though you had written it,
+  would be the app quoting itself — so the tiers are left to you. You can still write and edit them freely,
+  and the app still keeps the grammatical abbreviations in step with your own feature edits; what stops is
+  it composing the word meanings. Your tick comes back when you switch to another parser.
+- The **rankings behind the menus** — how likely the parser thinks each word class or relation is — are asked
+  with the glosses too, so a menu describes the parse you can actually run. Glossing a word re-asks the
+  question rather than serving the answer from before you did.
+- Update the generic parser in the Model Manager to get this — the green Update button appears once the new
+  version is out. Nothing changes for the version you have installed until you do, and nothing changes for
+  any other parser: none of them has this channel.
 
 ### Changed: an annotation tier that is showing tells you where it has nothing
 
@@ -114,6 +143,61 @@ All notable changes to SUD Workbench are documented in this file.
   readings its parent row's own weight is the sum of, so the two now say the same thing at both levels.
 
 ### Fixed
+
+- **A word class is no longer offered subtypes from some other word class.** The POS submenu scoped
+  the *feature* to the class but never its *values*, so it offered whatever the document used
+  elsewhere: NOUN.Fin and NOUN.Inf on a noun, ADJ.Card on an adjective, DET.Frac on a determiner. The
+  same gap was hiding real options in the other direction — a verb could not be given `Conv` or
+  `Part`, a pronoun could not be given `Dem`, unless the document already used them. Both halves are
+  fixed from the UD validator's own permitted-features data, and anything your document actually
+  annotates is still offered whatever the table says.
+- **The word-class subtype flyouts divide the same way.** Right-clicking a word class lists the
+  subtypes your document actually uses for it, and **Other subtype…** opens the rest of what UD defines
+  for that class — with a search field once the list is long enough. A verb in an English document
+  offers `Fin` and `Inf`, with `Sup`, `Part`, `Conv`, `Ger`, `Gdv` and `Vnoun` a row away. A class your
+  document has no subtypes for at all opens straight into that fuller list instead of offering you a
+  menu with one row in it.
+- **"Other feature…" on the feature-matrix menu.** Right-clicking an empty feature matrix lists the
+  features and values in use for that word class; the new flyout beneath them offers **the rest of what
+  UD defines for that class** — so an auxiliary in a document that only ever says `Person=3` can still
+  be given `1` or `2`. The two lists divide the inventory between them rather than repeating it, and
+  both are scoped to the word class, so a punctuation mark is still not offered a tense. The flyout
+  widens far enough that no row wraps rather than squeezing its labels onto two lines, and is as tall as
+  any other flyout instead of being held to the height of the small menu it hangs off.
+- **A long menu flyout has a search field.** Any flyout past about a screenful — "Other feature…", a
+  determiner's subtype list, a word with many dictionary senses — now opens with a search box above its
+  rows. Typing filters by word prefix across both the label and its description, so `dative` finds
+  `Dat` and typing a feature's name brings up that feature's values; Enter takes the first row left.
+  Short flyouts are unchanged, and a flyout you merely hovered over does not take the keyboard.
+- **The grid's FEATS list is scoped to the word class too.** A punctuation mark offered 17 of the 28
+  features; it now offers 6. An untagged token still offers all of them — there is no class to go on.
+- **The Format pill closes its own menu again.** Clicking the pill a second time reopened the menu
+  instead of shutting it, because dismissing-on-click-outside got there first and left the pill
+  looking at a menu that had already gone. Clicking the pill while some other menu is open still
+  replaces that menu with the Format one.
+- **Clicking into a translation or a sentence id dismisses an open context menu.** It already worked
+  everywhere else, which is what hid it: a menu was only being dismissed where the browser had a click
+  to report, and a field that redraws itself the moment you press on it never produces one. Menus now
+  go on the press itself, like the option drawers already did.
+- **Punctuation is tagged for you.** A token made of nothing but punctuation now comes back as `PUNCT`
+  with the `punct` relation wherever a parse left those blank — which is every raw-text insert with a
+  custom model, since the generic parser ships no tagger and reads the word classes as its input. It
+  never overwrites: a class the model gave, or one you handed in yourself, stands as it is, and the
+  head is left alone because which word the punctuation hangs off is a real question about the
+  sentence.
+- **The generic parser tokenises punctuation.** Inserting text with a custom model split it on spaces
+  alone, so a full stop stayed glued to the word before it (`mat.`, `"Really?"`, `(twice).`) and
+  nothing recorded where the spaces had been. It now uses the same language-neutral tokeniser the
+  pipeline already carries, and writes `SpaceAfter=No` exactly as the shipped parsers do — the same
+  sentence comes out identically under either. Switching **Tokenisation** off in the Pipeline drawer
+  still gives you the plain split on spaces.
+- **Reset Parse no longer discards your glosses.** ⌘R replaces a sentence's tokens with the parser's,
+  and the annotation layered into MISC — the lexical gloss, the morpheme segmentation, the morphemic
+  gloss, `Unsandhied`, a typo's `CorrectForm`, a hand-corrected transliteration — went with them. With
+  glossing switched on you saw a gloss replaced by a bare run of abbreviations; with it off or
+  disabled the rows simply emptied. None of those is anything a parser produces, so they now survive
+  a reset the way the spacing and the hand-placed marks already did, and an existing morphemic gloss
+  is re-pointed at the features the reset produced rather than rebuilt.
 
 - **Relation colours follow the light/dark switch.** They are baked into the diagram when it is drawn, and
   both the colour lookups and the drawn sentences are cached — so flipping appearance repainted the document

@@ -941,14 +941,15 @@ async function reparse(i){ const s=DOC[i]; if(!s||!s.tokens||!s.tokens.length)re
      held-out Basque LAS 38.32 → 53.27. */
   const givenIn=pipeGiven(s.tokens);
   showBusy("Parsing…"); let r;
-  try{ r=await window.pywebview.api.parse_tokens(forms,model,upIn,pipeArms(),givenIn); }catch(e){ toast("Parse failed: "+e); return; }finally{ hideBusy(); }
+  try{ r=await window.pywebview.api.parse_tokens(forms,model,upIn,pipeArms(),givenIn,pipeGlosses(s.tokens)); }catch(e){ toast("Parse failed: "+e); return; }finally{ hideBusy(); }
   if(!r||!r.parsed||!r.tokens||r.tokens.length!==forms.length){ toast("Parse failed"+(r&&r.reason?": "+r.reason:"")); return; }   // a pipeline that rebuilt the Doc anyway must not be aligned against — nothing has been written yet, so there is nothing to roll back
   if(DOC[i]!==s||s.tokens.length!==forms.length) return;   // the document may have moved while the call was out
+  const mine=captureAnnot(s);   // …and the annotator's own layered annotation, captured BEFORE the replacement (see restoreAnnot)
   s.tokens=r.tokens.map((t,k)=>{ const nt={...t,head:String(t.head)};
     SPACING_MISC.forEach((key,c)=>{ nt.misc=setMiscKV(nt.misc,key,spacing[k][c]); });   // "" removes the key, so a token that had none keeps none
     return nt; });
   s.orthoLine="";   // the new token objects carry no cached t.ortho/t.translit → clear the running line so fillOrtho re-fetches the SCRIPT
-  restoreMarks(s,marks);
+  restoreMarks(s,marks); restoreAnnot(s,mine);
   morphAfterReparse(s);   // the new tokens carry no MSeg/MGloss — re-seed both tiers from the FEATS this parse just produced (inside the same undo entry: it is part of the re-parse, not a second edit)
   commitSnap(pre); markDirty();
   renderDiagramIncremental(i);   // this sentence was just parsed → let the render below draw its tree breadth-first by depth rather than leaving the row blank for the whole layout pass
@@ -994,6 +995,60 @@ const _MARK_MISC=["Reported"];          // …and in MISC — Reported moved out
                                           // read/write whichever field each mark actually lives in, or the one that
                                           // moved silently stops round-tripping through a sentence retext at all —
                                           // exactly the class of bug this whole pair of functions exists to prevent.
+/* ── AND THE ANNOTATOR'S OWN LAYERED ANNOTATION, for the same reason ────────────────────────────────
+   ⚠ REPORTED: "even if the Glossing checkbox in the Pipeline drawer is off or disabled, glosses still
+   get overwritten". They were not overwritten — they were DESTROYED, and the arm had nothing to do
+   with it: `reparse` replaces every token object wholesale, and MISC Gloss/MSeg/MGloss went with the
+   objects. What made it read as an overwrite is what happened next. With the arm ON, morphAfterReparse
+   re-seeded the morphemic rows from the new FEATS, so the reader saw their gloss REPLACED by a bare
+   run of abbreviations (the lexical stem could not come back: `mglossLexFor` reads `t._glossLex` or
+   the Gloss tier, and the replacement had taken both). With the arm OFF or disabled that re-seed
+   declines, so the rows simply emptied.
+   ⚠ NEITHER IS THE PARSER'S TO SAY. These five keys are layered annotation this app stores in MISC
+   (CLAUDE.md); no parser produces them, so a parse can hold no opinion about them and "reset the
+   parse" cannot mean "discard them". That is the same argument SPACING_MISC and captureMarks are
+   already restored on, and the same `keep` list `reparseTokenFields` carries across a per-token
+   re-parse — this path simply never had one, because losing MISC is invisible in a wholesale
+   replacement in a way that losing a FEATS mark is not.
+   ⚠ BY INDEX, unlike captureMarks' form+occurrence matching, and that is not an oversight: Reset Parse
+   holds the forms fixed and goes through `parse_pretokenized`, so the alignment is 1-to-1 BY
+   CONSTRUCTION (the caller has already refused a result of the wrong length). The marks pair matches
+   by form because ITS other caller re-tokenises; this one has no such caller.
+   Excluded on purpose: `Reported` (restoreMarks' own), `NewPar` (SPACING_MISC's), and Subject/Idiom/
+   InIdiom, which ARE read off the tree — a full parse takes those verbatim, as the note says. */
+const ANNOT_MISC=["Gloss","MSeg","MGloss","Unsandhied","CorrectForm"];
+function captureAnnot(s){ return (s&&s.tokens||[]).map(t=>{
+  const misc={}; ANNOT_MISC.forEach(k=>{ const v=miscKV(t.misc,k); if(v) misc[k]=v; });
+  // A HAND-CORRECTED stored transliteration is the reader's in exactly the same way, and travels on
+  // exactly the condition reparseTokenFields uses: `_trPick` set. Its flag goes with it, or
+  // fillTranslit/annotateTranslitMisc — which skip a _trPick token and run moments later here —
+  // would no longer recognise the value they are meant to leave alone.
+  if(t._trPick){ const tv=miscKV(t.misc,"Translit"); if(tv) misc.Translit=tv; }
+  return {misc:misc, trPick:!!t._trPick, glossLex:t._glossLex||"",
+          msegPre:t._msegPre||"", mglossPre:t._mglossPre||"", feats:t.feats||""}; }); }
+function restoreAnnot(s,mine){ if(!s||!mine) return;
+  s.tokens.forEach((t,k)=>{ const m=mine[k]; if(!m) return;
+    Object.keys(m.misc).forEach(kk=>{ t.misc=setMiscKV(t.misc,kk,m.misc[kk]); });
+    // The JS-side provenance rides along or it is lost with the object it sat on: `_glossLex` is what
+    // mglossLexFor reads for a stem, and the two `…Pre` baselines are what morphEdited() diffs the
+    // tiers against — without them a value this app prefilled comes back looking hand-typed, and the
+    // false tier-deletion warning morphPrefillSent's own else-branch exists to prevent returns.
+    if(m.trPick) t._trPick=true;
+    if(m.glossLex) t._glossLex=m.glossLex;
+    if(m.msegPre) t._msegPre=m.msegPre;
+    if(m.mglossPre) t._mglossPre=m.mglossPre;
+    /* …and the abbreviation run kept in step with the FEATS this reset just produced — RETARGETED IN
+       PLACE, never a wholesale composeMGloss rebuild, which is the restraint reparseTokenFields
+       states at length: a rebuild reshuffles an abbreviation order the reader has already settled and
+       can lose a hand-placed segmentation hyphen. Ungated on the Glossing arm, deliberately and on
+       the line that note draws: moving `-DAT.PL` off a category the parse dropped keeps the reader's
+       own abbreviations in step, and invents no gloss CONTENT — so nothing this composes can reach a
+       gloss-reading model's lexical channel (app/glosses.py strips abbreviations before anything is
+       sent). Anything genuinely EMPTY is still morphPrefillSent's to seed, arm permitting. */
+    const mg=m.misc.MGloss;
+    if(mg&&MORPH_ON&&typeof retargetGlossForFeatsChange==="function"){
+      const next=retargetGlossForFeatsChange(mg,m.feats,t.feats,t.upos);
+      if(next!==mg){ t.misc=setMiscKV(t.misc,"MGloss",next); if(t._mglossPre===mg) t._mglossPre=next; } } }); }
 function captureMarks(s){ const seen=Object.create(null), out=[];
   (s&&s.tokens||[]).forEach((t,i)=>{ const f=t.form||"", n=(seen[f]=(seen[f]||0)+1)-1;
     const feats=_MARK_FEATS.filter(k=>hasFeat(t.feats,k,"Yes"));
@@ -2306,6 +2361,7 @@ function msegRefill(t,force){ if(!MORPH_ON||!t) return false;
    lemma edit re-derives the segmentation but says nothing about the grammatical categories, so there is no
    reason for it to overwrite a gloss someone wrote. */
 function mglossRefill(t,force){ if(!MORPH_ON||!t) return false;
+  if(!glossArmOn()) return false;   // …and here, for the same reason: msegRefill (its one caller today) is gated, but this composes the stem itself
   const cur=miscKV(t.misc,"MGloss");
   if(!force && cur && cur!==(t._mglossPre||"")) return false;   // hand-written → the annotator's, not ours
   const seg=msegPrefillParts(t);
@@ -2363,6 +2419,7 @@ function msegMirrorSeams(t){ if(!t) return false;
 // Called when the tier is first created (setTier, across the whole document) and again for a single sentence after
 // a re-parse hands it a fresh set of tokens — the tiers are FEATS-derived, so new FEATS mean a new MGloss.
 function morphPrefillSent(s){ if(!s||!s.tokens) return;
+  if(!glossArmOn()) return;   // ⚠ THE GATE IS IN THE FUNCTION, NOT ONLY IN ITS CALLERS. This composes a lexical stem into MGloss, which is content the model would read back as the annotator's (see the note at the reparse block); morphAfterReparse already asked, and a second caller that forgot to would have been the leak. Measured: with the arm forced off by a gloss-reading model this wrote a fresh MGloss anyway when called directly
   s.tokens.forEach(t=>{ const seg=msegPrefillParts(t);   // ONE segmentation per token, shared by both rows, so MSeg's boundaries and MGloss's attachment hyphens can never disagree about where the affixes are
     // Either branch below has to end with `_msegPre`/`_mglossPre` matching whatever the MISC value now IS —
     // a token that already carried one (kept below, in the else) is exactly as untouched-by-the-user as one
@@ -2379,6 +2436,11 @@ function morphPrefillSent(s){ if(!s||!s.tokens) return;
 // item: a re-parse replaced this sentence's tokens outright, so both morphemic tiers came back empty — re-seed them
 // from the FEATS the parse just produced. No-op unless the morphemic tier is on. The caller owns the undo snapshot
 // (a re-parse pushes one before it starts), so this rides along inside that single undoable step.
+/* The Glossing arm, asked the way the four sites around here already ask it. Named because it is now
+   read from five places and because what it MEANS has grown: it is switched off by the reader, and
+   also forced off wherever the model reads glosses as an input (PIPE_READS_GLOSS, js/core/prefs.js) —
+   there the app writing a gloss would be quoting itself back to the parser as the annotator's own. */
+function glossArmOn(){ return (typeof pipeOn!=="function")||pipeOn("gloss"); }
 function morphAfterReparse(s){ if(MORPH_ON && (typeof pipeOn!=="function"||pipeOn("gloss"))) morphPrefillSent(s); }
 function morphEdited(){ return DOC.some(s=>s.tokens.some(t=>{ const mg=tierText(t,"mgloss"); if(mg && mg!==(t._mglossPre||""))return true; const ms=tierText(t,"mseg"); return !!(ms && ms!==(t._msegPre||"")); })); }   // item 11c/12b: has the user changed any MSeg or MGloss from its auto-prefill? (an untouched FEATS-derived MGloss prefill counts as empty)
 window.addGloss=function(){ setTier("gloss",true); };
@@ -2588,7 +2650,7 @@ async function scoredRelsForHead(si,tokId,headId){ if(!(hasBridge()&&model)) ret
   // reparse() states above: a model that reads word classes rather than predicting them gets the
   // reader's, or the backend declines the syntax and this tier has nothing to read.
   const upIn3=(PIPE_AVAIL&&PIPE_AVAIL.indexOf("upos")<0)?s.tokens.map(x=>x.upos||""):null;
-  let r; try{ r=await window.pywebview.api.parse_tokens(forms,model,upIn3,pipeArms(),pipeGiven(s.tokens)); }catch(e){ return []; }              // tier 3: no scores at all (Stanza) → the whole-tree agreement rule
+  let r; try{ r=await window.pywebview.api.parse_tokens(forms,model,upIn3,pipeArms(),pipeGiven(s.tokens),pipeGlosses(s.tokens)); }catch(e){ return []; }              // tier 3: no scores at all (Stanza) → the whole-tree agreement rule
   if(!r||!r.parsed||!r.tokens||r.tokens.length!==s.tokens.length) return [];
   const p=r.tokens[tokId-1]; if(!p) return [];
   if(parseInt(p.head,10)!==headId) return [];                    // the parser is talking about a different edge
@@ -2679,7 +2741,7 @@ async function reparseTokenFields(si,tokIds,opts){
      it says so by asking for it. */
   const uposIn=opts.upos?null:s.tokens.map(t=>trUpos(t));
   showBusy("Parsing…"); let r;
-  try{ r=await window.pywebview.api.parse_tokens(forms,model,uposIn,pipeArms(),pipeGiven(s.tokens)); }catch(e){ return false; }finally{ hideBusy(); }
+  try{ r=await window.pywebview.api.parse_tokens(forms,model,uposIn,pipeArms(),pipeGiven(s.tokens),pipeGlosses(s.tokens)); }catch(e){ return false; }finally{ hideBusy(); }
   if(!r||!r.parsed||!r.tokens||r.tokens.length!==s.tokens.length) return false;   // belt and braces: a pipeline that rebuilt the Doc anyway must not be aligned against
   const targets=tokIds?new Set(tokIds):null;
   s.tokens.forEach((t,i)=>{ if(targets && !targets.has(i+1)) return; const p=r.tokens[i]; if(!p)return;
@@ -2716,10 +2778,19 @@ async function reparseTokenFields(si,tokIds,opts){
     // deprel reattach, e.g. attachAsSharedConjunct — is never allowed to touch MGloss/Gloss at all, Task B)
     // skips this whole block outright, leaving the tier exactly as `keep` already restored it above.
     if(!opts.skipGloss){
+      /* ⚠ THE TWO BRANCHES BELOW THAT INVENT LEXICAL CONTENT ARE GATED ON THE GLOSSING ARM, and the
+         line between them and what is NOT gated is worth stating: this app may keep the annotator's
+         own abbreviations in step with the annotator's own edits (retargetGlossForFeatsChange, and
+         featsSyncGloss/uposSyncGloss on the live paths — a FEATS change moves `-DAT.PL`, nothing
+         more), and it may not invent gloss CONTENT. The stem is content. Where the model READS
+         glosses (`xx_sud_generic` 0.2.0's lexical channel), the arm is off — see pipeEffective,
+         js/core/prefs.js — so a stem this app composed can never be handed back to the parser as
+         the annotator's evidence. Abbreviations are stripped before anything is sent (app/glosses.py),
+         which is why the ungated half cannot reach the channel however stale or fresh it is. */
       if(keep.MGloss){ let mg=retargetGlossForFeatsChange(keep.MGloss,oldFeatsStr,t.feats,t.upos);   // symmetric: the categories this re-parse dropped go, the ones it introduced arrive
-        if(opts.regloss) mg=mglossReglossLexical(t,mg);   // …and only a RETAG can move the token across the open/closed-class line that decides whether it carries a stem gloss at all — set by the two UPOS-edit call sites, since a form edit's background re-parse never changes the word class
+        if(opts.regloss && glossArmOn()) mg=mglossReglossLexical(t,mg);   // …and only a RETAG can move the token across the open/closed-class line that decides whether it carries a stem gloss at all — set by the two UPOS-edit call sites, since a form edit's background re-parse never changes the word class
         if(mg!==keep.MGloss) t.misc=setMiscKV(t.misc,"MGloss",mg); }
-      else if(MORPH_ON){ const lex=(GLOSS_ON&&!UPOS_LEIPZIG_ABBR[t.upos])?miscKV(t.misc,"Gloss").replace(/-/g,"_"):"";   // nothing to preserve → compose one fresh, exactly as before (a token that had NO MGloss yet gets one, the same way morphPrefillSent would)
+      else if(MORPH_ON && glossArmOn()){ const lex=(GLOSS_ON&&!UPOS_LEIPZIG_ABBR[t.upos])?miscKV(t.misc,"Gloss").replace(/-/g,"_"):"";   // nothing to preserve → compose one fresh, exactly as before (a token that had NO MGloss yet gets one, the same way morphPrefillSent would)
         const mg=glossEnc(composeMGlossPrefill(lex,t.feats,t.upos,seg));
         if(mg){ t.misc=setMiscKV(t.misc,"MGloss",mg); t._mglossPre=mg; } } }   // …and _mglossPre goes with it, exactly as morphPrefillSent's own compose-fresh branch sets it — this is a DERIVED value, not the reader's, and without a baseline morphEdited() would call it "edited" the moment this reparse lands, before anyone has looked at it
     msegRefill(t); });   // …and the segmentation tier alongside it, so the two morphemic rows never come back half-filled. Item 3: a REFILL, not a fill-if-empty — this is the path a form edit's background re-parse takes to revise the token's LEMMA, and the segmentation is computed from that lemma, so an MSeg still holding its previous auto-prefill has to follow it. msegRefill is what refuses to touch one the user has since typed over

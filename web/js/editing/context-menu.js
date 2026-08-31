@@ -35,9 +35,9 @@ function makeCtxButton(it,isSub){ const b=document.createElement("button"); if(i
   b.innerHTML=`${it.check?'<span class="ck">✓</span>':""}${lbl}${right}`;
   if(it.clearX){ const xb=b.querySelector(".rowclear");
     if(xb) xb.addEventListener("click",e=>{ e.stopPropagation(); e.preventDefault(); closeCtx(); it.clearX.fn(); }); }   // stopPropagation, or the click reaches the row's own handler and re-picks the value instead of clearing it
-  if(it.sub){ const raise=()=>{ if(ctx2.classList.contains("show")&&ctx2._owner===b) return;   // already this row's flyout → leave it alone rather than rebuild it under the pointer
-      openSub(b,it.sub,it.subFit); };                                              // subFit → shrink the flyout to its content width instead of the shared 224px floor
-    b.onclick=e=>{ e.stopPropagation(); clearTimeout(b._subHov); raise(); };       // clicking is just the impatient path to the same thing
+  if(it.sub){ const raise=byClick=>{ if(ctx2.classList.contains("show")&&ctx2._owner===b) return;   // already this row's flyout → leave it alone rather than rebuild it under the pointer
+      openSub(b,it.sub,it.subFit,undefined,it.subNoWrap,byClick); };                      // subFit → shrink the flyout to its content width instead of the shared 224px floor; subNoWrap → …and widen past the cap sooner than wrap a row
+    b.onclick=e=>{ e.stopPropagation(); clearTimeout(b._subHov); raise(true); };   // clicking is just the impatient path to the same thing — and the one that focuses a search band (liftSearch)
     /* item 7 — A FLYOUT OPENS ON HOVER, which is what a native menu does; a click was never meant to be the only
        way in. The delay is what makes that bearable: without it, a pointer travelling down the menu towards some
        other row raises and tears down a flyout for every sub-row it crosses on the way. 140 ms is long enough to
@@ -45,16 +45,16 @@ function makeCtxButton(it,isSub){ const b=document.createElement("button"); if(i
        RIGHT-CLICK FLYOUTS ARE EXCLUDED, deliberately (the `subRight` branch below has no hover of its own): those
        are the deep-feature submenus, a deliberate second gesture on a row that already does something on left
        click, and opening them merely by passing over would fire them constantly while choosing a relation. */
-    b.onmouseenter=()=>{ clearTimeout(b._subHov); b._subHov=setTimeout(raise,140); };
+    b.onmouseenter=()=>{ clearTimeout(b._subHov); b._subHov=setTimeout(()=>raise(false),140); };
     b.onmouseleave=()=>{ clearTimeout(b._subHov); };   // cancels only a PENDING open — an already-raised flyout survives the pointer leaving, per the note below
   }
-  else { b.onclick=()=>{ closeCtx(); it.fn&&it.fn(); };                            // left-click → the row's own action (for a relation, selecting it clears any deep feature)
+  else { b.onclick=()=>{ if(!it.keepOpen) closeCtx(); it.fn&&it.fn(); };            // left-click → the row's own action (for a relation, selecting it clears any deep feature). ⚠ keepOpen: a row that REPLACES this flyout's own contents rather than picking anything (posSubItems' "Other subtype…") — closing first would take the parent menu the reopen positions against with it
     // item 3: mousing away from a flyout must NOT dismiss it — a flyout closes only on an explicit action (a click
     // elsewhere, Escape, a selection, or reopening it). (Previously hovering a sibling top-level row closed it.)
     if(it.subWeights) b._subw=it.subWeights;   // item 29: the ranking THIS row's flyout is to be faded by — read by openSub once the flyout is on screen (weightSubRows)
     if(it.subRight) b.oncontextmenu=e=>{ e.preventDefault(); e.stopPropagation();   // right-click the row → its deep-feature submenu; a second right-click on the SAME row dismisses it
       if(ctx2.classList.contains("show") && ctx2._owner===b){ closeSub(); return; }
-      openSub(b,it.subRight,false,it.subColSize); };   // item 3: subColSize → size to one parent column, parent height
+      openSub(b,it.subRight,false,it.subColSize,false,true); };   // a right-click IS the deliberate gesture here — focus a search band if one is built   // item 3: subColSize → size to one parent column, parent height
   }
   return b; }
 // headers open a .catgrp wrapper so a category never splits across columns; two-col picks the split that best balances the two column heights (rtl → first column on the right)
@@ -100,6 +100,66 @@ function renderMenu(host,items,twoCol,rtl,isSub){ host.innerHTML="";
 //     growing past the cap — would run the flyout off the screen the cap exists to keep it on.
 // Deliberately measured rather than derived from CSS: the row height depends on the wrap, which depends on the
 // width, which is only final at this point in render().
+/* ⚠ A LONG FLYOUT GETS A SEARCH FIELD, and it is built here rather than by each caller so that every
+   one of them gets it on the same terms — "the flyout should have a search bar (as should the
+   equivalent flyout anywhere else)". A flyout of 122 feature values is a list you read by scrolling,
+   which is the only list in this menu system that has ever been long enough to need finding rather
+   than choosing; the threshold is what keeps a five-row flyout from growing a control it has no use
+   for. Structurally it is `liftFootLink`'s twin — a fixed band, a scrolling rest — and reuses that
+   pair's own CSS shape in both kits.
+   ⚠ THE MATCH IS A WORD PREFIX, NOT A SUBSTRING, and it is `wordPrefixRe` (js/core/state.js) — the
+   very function the Languages menu and the translation drawer search with, so the three answer a
+   query the same way. "per" finds Person and (in a value list) Perlative; it does not find Hyper.
+   Both halves of a row are searched, because half of them say what the other half means: `Ptan` is
+   findable as "plurale tantum" and `Gdv` as "gerundive".
+   ⚠ AND A HEADER MATCHES ITS WHOLE GROUP: typing a feature name is how a reader asks for that
+   feature's values, not for the one value whose name happens to repeat the feature's. */
+const SUB_SEARCH_MIN=14;   // rows before the field earns its own band — a little over one screenful of a capped flyout
+function liftSearch(host,autoFocus){
+  const rows=host.querySelectorAll("button");
+  if(rows.length<SUB_SEARCH_MIN || host.querySelector(".ctx-sub-search")) return;
+  let scroll=host.querySelector(".ctx-sub-scroll");
+  if(!scroll){ scroll=document.createElement("div"); scroll.className="ctx-sub-scroll";
+    while(host.firstChild) scroll.appendChild(host.firstChild); host.appendChild(scroll); }
+  const band=document.createElement("div"); band.className="ctx-sub-search";
+  const inp=document.createElement("input"); inp.className="lmsearch"; inp.type="search"; inp.spellcheck=false;
+  inp.placeholder="Search…"; inp.setAttribute("aria-label","Search this list");
+  band.appendChild(inp); host.insertBefore(band,host.firstChild); host.classList.add("ctx-sub-srch");
+  const note=document.createElement("div"); note.className="hdr"; note.textContent="No match"; note.style.display="none";
+  scroll.appendChild(note);
+  const txt=el=>{ const l=el.querySelector(".mlbl"), e=el.querySelector(".expand");
+    return ((l?l.textContent:el.textContent)+" "+(e?e.textContent:"")).toLowerCase(); };
+  const apply=q=>{ q=(q||"").trim().toLowerCase();
+    const re=q?(typeof wordPrefixRe==="function"?wordPrefixRe(q):null):null;
+    const hit=t=>!q||(re?re.test(t):t.indexOf(q)>=0);
+    let any=false, group=null, groupShown=false;
+    const flush=()=>{ if(group) group.style.display=groupShown?"":"none"; };
+    // ⚠ A DESCENDANT WALK, NOT `scroll.children`: renderMenu nests its rows in a column element, so a
+    // walk over direct children saw no buttons at all — every row stayed visible while the "No match"
+    // note appeared beneath them, which is the one state that cannot be true. querySelectorAll is in
+    // document order, which is all the header-grouping below needs.
+    [...scroll.querySelectorAll("button,.hdr,hr")].forEach(n=>{
+      if(n===note) return;
+      if(n.tagName==="HR"){ n.style.display=q?"none":""; return; }
+      if(n.classList&&n.classList.contains("hdr")){ flush(); group=n; groupShown=false;
+        n._hdrHit=hit(n.textContent.toLowerCase()); return; }
+      if(n.tagName!=="BUTTON") return;
+      const on=!q||(group&&group._hdrHit)||hit(txt(n));   // a matching header carries its whole group
+      n.style.display=on?"":"none"; if(on){ any=true; groupShown=true; } });
+    flush();
+    note.style.display=any?"none":""; };
+  inp.addEventListener("input",()=>apply(inp.value));
+  inp.addEventListener("keydown",e=>{ if(e.key!=="Enter")return;   // Enter takes the first row still standing
+    const first=[...scroll.querySelectorAll("button")].find(b=>b.style.display!=="none");
+    if(first){ e.preventDefault(); first.click(); } });
+  inp.addEventListener("pointerdown",e=>e.stopPropagation());   // the field is not a row: clicking into it must not reach the row-hover/open logic behind it
+  /* ⚠ FOCUSED ONLY WHERE THE READER OPENED THIS DELIBERATELY. A flyout also opens on HOVER, after
+     140ms, for a pointer merely travelling down the menu — and a field that grabs the keyboard as the
+     pointer passes over a row would swallow the next thing typed anywhere. A click (or a right-click,
+     for the subtype flyouts) is the gesture that means "I want this list", and that is the one that
+     puts the caret in the field; a hover-opened flyout is searched by clicking into it. */
+  if(autoFocus){ try{ inp.focus({preventScroll:true}); }catch(_){ inp.focus(); } }
+}
 function fitWholeRows(host){
   const foot=host.querySelector(".ctx-sub-footer");
   const port=host.querySelector(".ctx-sub-scroll")||host;
@@ -112,7 +172,8 @@ function fitWholeRows(host){
   // are already `padT`/`padB` below, so this contributes nothing and must not be double-counted.
   const hcs=(port===host)?null:getComputedStyle(host);
   const hostPad=hcs?((parseFloat(hcs.paddingTop)||0)+(parseFloat(hcs.paddingBottom)||0)):0;
-  const avail=cap-(foot?foot.getBoundingClientRect().height:0)-padT-padB-hostPad;
+  const band=host.querySelector(".ctx-sub-search");   // the search band is fixed like the footer, and its height is not the rows' to spend either
+  const avail=cap-(foot?foot.getBoundingClientRect().height:0)-(band?band.getBoundingClientRect().height:0)-padT-padB-hostPad;
   if(!(avail>0)) return;
   const rows=[...port.querySelectorAll("button,.hdr,hr,.note,.ctxinput")];
   if(!rows.length) return;
@@ -125,7 +186,7 @@ function fitWholeRows(host){
   const h=Math.ceil(fitH+padT+padB);
   if(foot) port.style.maxHeight=h+"px"; else host.style.maxHeight=h+"px"; }
 let _subLoadToken=0;   // invalidates a still-pending async sub (item.sub as a function) once the flyout is reopened/closed
-function openSub(btn,items,fit,colSize){ _subLoadToken++; const myToken=_subLoadToken; ctx2._owner=btn;   // remember which row opened this flyout → a second right-click on it toggles it shut
+function openSub(btn,items,fit,colSize,noWrap,focusSearch){ _subLoadToken++; const myToken=_subLoadToken; ctx2._owner=btn; ctx2._colSize=colSize;   // …and HOW it was sized: a drill-down row inside it reopens it off the same owner and must not resize the flyout under itself   // remember which row opened this flyout → a second right-click on it toggles it shut
   const subW=btn&&btn._subw;   // item 29: this row's own ranking for its flyout's rows — applied after each render below (weightSubRows), including the async one
   if(!ctx2.isConnected) document.body.appendChild(ctx2);   // closeSub() removes ctx2 from the DOM entirely (see its own comment) — put it back before showing it again
   ctx2.classList.toggle("defctx",!!fit);   // fit → shrink-to-content (e.g. Wiktionary "Definitions of …", whose rows are often much narrower than the shared 224px floor); reset for every other flyout (the deep-feature subRight menus keep the floor)
@@ -137,9 +198,17 @@ function openSub(btn,items,fit,colSize){ _subLoadToken++; const myToken=_subLoad
   // at the parent's HEIGHT (render() below): a panel hinged off a menu shouldn't outgrow the menu it hangs from.
   // This replaces the fixed 320px reading measure in `.ctx-sub.defctx`, which survives as the fallback below.
   // Floored at 224px — the shared `.ctx{min-width:224px}` every ordinary menu already sits at — so a pathologically
-  // narrow parent (only a `.defctx` menu can be, `min-width:0`; none of those has a sub row today) can't squeeze
-  // the flyout below one normal menu's width, and can't drag the min-width floor clamp in render() down with it.
-  const parentW=Math.max(ctx.offsetWidth,224);
+  // narrow parent (only a `.defctx` menu can be, `min-width:0`) can't squeeze the flyout below one normal menu's
+  // width, and can't drag the min-width floor clamp in render() down with it.
+  // ⚠ "NONE OF THOSE HAS A SUB ROW TODAY" WAS TRUE WHEN THAT WAS WRITTEN AND IS NOT ANY MORE: the AVM placeholder
+  // menu is a `.defctx` fitted menu, and it now carries "Other feature…". With the flat 224 floor its flyout came
+  // out at 224px hanging off a 148px menu, against 128px for the SAME shape of list in the token menu's own "Add
+  // feature…" — reported as "don't make the Other Feature flyout so wide; make it as wide as the other feature
+  // flyouts". A fitted parent therefore caps at its OWN width, which is the rule this whole measure states in the
+  // line above it: a panel hinged off a menu shouldn't outgrow the menu it hangs from. The 224 floor stays for
+  // every ordinary menu, where it is what it was written for; a fitted parent keeps a floor of its own (120px, a
+  // little under the narrowest such menu this app draws) so the clamp can never collapse a flyout to a sliver.
+  const parentW=ctx.classList.contains("defctx")?Math.max(ctx.offsetWidth,120):Math.max(ctx.offsetWidth,224);
   const positionSub=()=>{ const r=btn.getBoundingClientRect(); let left=r.right-2; if(left+ctx2.offsetWidth>innerWidth-8) left=r.left-ctx2.offsetWidth+2;
     ctx2.style.left=Math.max(8,left)+"px"; ctx2.style.top=Math.max(menuTopBound(),Math.min(r.top-5,innerHeight-ctx2.offsetHeight-8))+"px"; };   // item 6: clamp the TOP too (matches showCtx's own Math.max(8,...) on both axes) — a TALL colSize flyout (as tall as the whole POS menu) anchored near a LOW row could otherwise compute a negative top and render mostly off the top of the screen, making it look unresponsive to clicks/Escape that land on the (invisible) area instead
   // item 1 — lift the footer link out of the scrolling content into a FIXED footer: the rows above scroll, the
@@ -152,14 +221,40 @@ function openSub(btn,items,fit,colSize){ _subLoadToken++; const myToken=_subLoad
     const scroll=document.createElement("div"); scroll.className="ctx-sub-scroll"; while(ctx2.firstChild) scroll.appendChild(ctx2.firstChild);   // everything remaining scrolls
     ctx2.appendChild(scroll); ctx2.appendChild(foot); ctx2.classList.add("ctx-sub-foot"); };
   const render=arr=>{ ctx2.classList.remove("ctx-sub-foot"); ctx2.dir=ctx.dir; renderMenu(ctx2,(arr||[]).map(normItem),false,undefined,true); ctx2.classList.add("show"); weightSubRows(subW);   // item 29: fade the flyout's own rows by this row's ranking, at EVERY render (an async `items` re-renders through here too)
+    /* ⚠ …UNLESS THE CAP WOULD MAKE ROWS WRAP, for a flyout whose caller says its rows are LABELS
+       (`subNoWrap`). On report — "don't cap the width if it would lead to line wrapping". Measured:
+       "Other feature…" wants 280px and was held to its parent's 148px, wrapping 38 of its 122 rows
+       ("Grpa / greater paucal" over two lines). A cap is a tidiness; a wrapped label is not tidy, so
+       the tidiness gives way. OPT-IN, because the Wiktionary "Definitions of …" flyout is the opposite
+       case and always was: its rows are SENSES, whole clauses in `.mlbl`, and `.ctx-sub.defctx` lets
+       them wrap deliberately (see base-chrome.css) — uncapping that one would make a menu as wide as
+       the longest definition in the dictionary.
+       ⚠ MEASURED BY LAYOUT, NOT BY FONT STRING: clearing the cap lets the flyout shrink-to-fit to its
+       MAX-CONTENT width, which is by definition the width at which nothing wraps. The floor below does
+       reconstruct row widths from font strings, and that is exactly the sort of measurement this app's
+       notes warn about — the two engines disagree about it — so this asks the engine instead.
+       Still bounded, at half the window: a flyout that ran off the screen would be a worse answer to
+       a long row than a wrapped one. */
     ctx2.style.maxWidth=fit?parentW+"px":"";   // item 3: the parent menu's width is the shrink-to-fit flyout's ceiling (see .ctx-sub.defctx in app.css). Cleared for every other flyout — the property is inline, so a previous .defctx call's ceiling would otherwise stick to the next (non-fit) one. Set BEFORE the layout reads below: both the header floor's clamp (which re-reads it off getComputedStyle, so it needs no separate wiring) and positionSub's offsetWidth depend on it
-    if(colSize&&colW){ ctx2.style.width=Math.round(colW)+"px"; ctx2.style.minWidth=""; ctx2.style.height=""; ctx2.style.maxHeight=parentH+"px";   // item 2: ONE parent column wide, content-height but NO TALLER than the POS menu (maxHeight, not a fixed height)
+    if(fit&&noWrap){ ctx2.style.maxWidth="none"; const nat=ctx2.offsetWidth;   // …then re-read at MAX-CONTENT, which is the width at which nothing wraps
+      ctx2.style.maxWidth=Math.min(Math.max(nat,parentW),Math.round(innerWidth*0.5))+"px"; }
+    if(colSize&&colW){ ctx2.style.width=Math.round(colW)+"px"; ctx2.style.minWidth=""; ctx2.style.height=""; ctx2.style.maxHeight=parentH+"px";
+      liftSearch(ctx2);   // item 2: ONE parent column wide, content-height but NO TALLER than the POS menu (maxHeight, not a fixed height)
       liftFootLink();
       return void positionSub(); }
     ctx2.style.width=""; ctx2.style.height="";
-    ctx2.style.maxHeight=Math.max(60,Math.min(420,innerHeight*.7,ctx.offsetHeight))+"px";   // never taller than the parent menu it flies out from, on top of the existing 420px/70vh caps — but never SHORTER than one row needs either: a short parent menu (few items) could otherwise cap this below even the single-row "Loading…"/"Nothing found"/"Couldn't load" placeholder's own height, clipping it before any real content arrives to grow the flyout naturally
+    /* ⚠ AND THE PARENT'S HEIGHT BOUNDS THIS ONLY WHERE THE PARENT IS AN ORDINARY MENU — the same
+       correction the width cap needed, for the same reason and on the same day: "why does the flyout
+       have such a ridiculously small height cap?!". A `.defctx` menu is deliberately small (it fits
+       its own content, and the AVM placeholder menu can be two rows), so clamping to it squeezed a
+       122-row flyout into 154px of scrolling viewport. Measured: parent 200px → cap 200 → 154 after
+       fitWholeRows, against the 420px the flyout is entitled to. The rule below is about a panel not
+       outgrowing the MENU it hangs from, which is a statement about ordinary menus; a fitted one is
+       not a length to measure anything against. The 420px / 70vh caps still apply to both. */
+    const parentCapH=ctx.classList.contains("defctx")?Infinity:ctx.offsetHeight;
+    ctx2.style.maxHeight=Math.max(60,Math.min(420,innerHeight*.7,parentCapH))+"px";   // never taller than the parent menu it flies out from, on top of the existing 420px/70vh caps — but never SHORTER than one row needs either: a short parent menu (few items) could otherwise cap this below even the single-row "Loading…"/"Nothing found"/"Couldn't load" placeholder's own height, clipping it before any real content arrives to grow the flyout naturally
     ctx2.style.minWidth="";   // clear any previous call's floor before re-measuring — a later render (e.g. "Loading…" → real senses) must never be held to an EARLIER row's width
-    liftFootLink();   // BEFORE the header measurement below, which reads ctx2.offsetWidth — the lift restructures the flyout into a flex column, so measuring first would size the floor against the pre-lift box
+    liftFootLink(); liftSearch(ctx2,focusSearch);   // BEFORE the header measurement below, which reads ctx2.offsetWidth — the lift restructures the flyout into a flex column, so measuring first would size the floor against the pre-lift box
     const hdrs=[...ctx2.querySelectorAll(".hdr")].map(h=>h.textContent);   // .hdr rows (gender groupings, "Loading…"/"Nothing found"/"Couldn't load") are position:sticky with a negative margin for their full-bleed background (see .ctx-sub.defctx .hdr) — some engines under-count that combination's contribution to a shrink-to-fit ancestor's width, clipping the header TEXT even though the identical string in a plain (non-sticky) row would fit fine. Sidestep it with a direct floor from the SAME canvas measurement technique acPos() already uses for the autocomplete menu, rather than fight the engine-dependent shrink-to-fit interaction itself.
     // on report ("Add features flyout… make sure there is enough space for the labels to not wrap"): the floor
     // below only ever measured .hdr text, never a row's own .mlbl label — fine for every PRIOR subFit flyout
@@ -220,7 +315,47 @@ function closeCtx(){ ctx.classList.remove("show"); closeSub(); void ctx.offsetHe
    the target — so without this guard every submenu would close the menu it was opening. Nothing is
    lost by excluding the menu itself: an ORDINARY row already calls closeCtx() in its own handler, so
    this listener was never what dismissed a menu on a pick. */
-addEventListener("click",e=>{ if(ctx.contains(e.target)||ctx2.contains(e.target)) return; closeCtx(); },true);
+/* ⚠ AND ON `pointerdown` AS WELL AS `click`, BECAUSE A CLICK IS NOT GUARANTEED TO EXIST. Reported as
+   "clicking outside the token context menu (or any other context menu) should dismiss it", after the
+   capture-phase fix above had already landed — and the capture phase was never the remaining problem.
+   A `click` is only dispatched when the press and the release share a target, so any field that
+   RE-RENDERS ITSELF on the press dispatches none at all, and a listener waiting for one waits for
+   ever. Measured over CDP (real mouse events, headless Chrome), menu open, clicking each target:
+
+     .stext (sentence text)  click fires  → dismissed        toolbar button   click fires → dismissed
+     .tg-text (translation)  NO CLICK     → LEFT OPEN        status-bar pill  click fires → dismissed
+     .sid-in (sentence id)   NO CLICK     → LEFT OPEN        page background  click fires → dismissed
+
+   Perfectly correlated, and it is why the earlier fix looked complete: every target anyone tried by
+   hand happened to be one that dispatches a click. `pointerdown` always fires, is the first event of
+   the gesture, and covers touch and pen for nothing.
+   ⚠ THE SAME FIX THE DRAWERS ALREADY CARRY — `closeDrawers` (js/ui/wiring.js) is this listener pair,
+   for the same reason, written after the same measurement ("a CDP press/release on a token produced
+   zero capture-phase click events"). The menus simply never got it. Read that note beside this one;
+   the two must not drift, since a reader's click has to dismiss both at once. The `click` listener STAYS beside it — a
+   keyboard activation (Enter on a focused control, an assistive click) dispatches a click with no
+   pointer event before it, and dropping it would trade one gap for another. closeCtx is idempotent,
+   so the two firing in sequence for one ordinary mouse click costs a class removal that has already
+   happened.
+   ⚠ THE SAME EXCLUSION, FOR THE SAME REASON as the click listener's own, and now it matters twice
+   over: a submenu row keeps its parent alive with `e.stopPropagation()`, and on pointerdown that
+   would otherwise close the very menu the row is opening a flyout off. */
+/* ⚠ AND A `.ctxtrigger` EXCLUDES ITSELF, which is what makes a trigger able to TOGGLE its own menu.
+   `#fmtPill` opens its menu in this shared #ctx and decides "already mine, so close" from
+   `ctx.classList.contains("show")` (fmtMenu, js/io/formats.js) — but this listener runs first and had
+   already closed it, so the second click read the menu as absent and reopened it. The pill never shut.
+   ⚠ IT IS NOT A NEW IDEA HERE: #translitPill and #orthoPill have always excluded their own trigger
+   from their outside-close (`!e.target.closest("#translitPill")`, js/lang/translit.js) and toggle
+   correctly BECAUSE they do. This is that rule, written once for the shared menu rather than named
+   pill by pill — a class, so a future trigger opts in by wearing it and context-menu.js goes on
+   knowing nothing about which pills exist.
+   Clicking the pill while SOMEONE ELSE's menu is open is unaffected: nothing is dismissed here, and
+   `fmtMenu` finds a stamp that is not its own and calls showCtx, which replaces the menu outright. */
+const ctxDismissOutside=e=>{ if(ctx.contains(e.target)||ctx2.contains(e.target)) return;
+  if(e.target&&e.target.closest&&e.target.closest(".ctxtrigger")) return;
+  closeCtx(); };
+addEventListener("pointerdown",ctxDismissOutside,true);
+addEventListener("click",ctxDismissOutside,true);
 // item 3: a right-click OUTSIDE an open menu (on a target none of #doc's own contextmenu branches will claim —
 // blank canvas, a diagram's own margin, another window region) never dismissed #ctx before: nothing downstream
 // of a non-match ever calls closeCtx, so the stale menu just sat there behind whatever the browser's native
@@ -495,10 +630,48 @@ function shortVDesc(s){ s=cleanVDesc(s); const m=s.split(/\s*[\/(,;]/)[0]; retur
    same way posSubItems builds them (its own attested-values narrowing included, so the badge cannot promise
    rows the flyout does not draw) but WITHOUT building any DOM or resolving the token — it is called once per
    row of an open POS menu. 0 → posMenu offers no flyout on that row at all. */
-function posSubCount(U){ let n=0; subtypeFeatsFor(U).forEach(f=>{
-    n+=((typeof attestedFeatVals==="function"?attestedFeatVals(f):null)||UD_FEATS[f]||[]).length; }); return n; }
+/* ⚠ THE VALUES OF A SUBTYPE, SCOPED TO THE CLASS — reported as "why does the NOUN submenu contain POS
+   subtypes that are clearly verbal?", and the answer was that only the FEATURE had ever been scoped.
+   `subtypeFeatsFor` asks which features a class may carry (UPOS_SUBTYPE_ON, above); the values then
+   came off `attestedFeatVals(f)`, which scans the whole DOCUMENT regardless of word class and falls
+   back to UD's entire list when nothing is attested. So NOUN was offered whatever VerbForm values the
+   document used on its VERBS — measured, on the dev fixture: NOUN.Fin and NOUN.Inf, while `Vnoun`, the
+   one value that IS nominal, was not offered at all. It was never only NOUN: ADJ.Fin/ADJ.Inf, ADJ.Card,
+   DET.Frac, DET.Range and ADV.Card all came from the same gap.
+   TWO SOURCES, UNIONED, and neither is a guess:
+     · SUBTYPE_VALS (js/grid/grid.js) — the cross-linguistic ceiling, derived from the UD validator's own
+       permitted-features data by one stated rule. NOUN's VerbForm is Inf/Part/Ger/Vnoun there; `Fin`
+       reaches 14 of the 159 languages that permit it at all (8.8 %) and falls below the rule's floor.
+     · strictAttestedVals(f,U) — the EVIDENCE, this document's own tokens of that class plus the model's
+       own labels for it. A corpus that really does annotate NOUN.Fin says so, and is believed: the
+       ceiling is a default for the unknown case, never a veto over what is in front of the reader. */
+/* ⚠ AND THE TWO LISTS SPLIT THE SAME WAY THE FEATURE MENU'S DO — "the UPOS submenus should likewise be
+   limited to POS-relevant attested options, with a flyout listing the full POS-relevant UD inventory
+   with a search bar". So the subtype flyout is now what this DOCUMENT attests for that class, and
+   `posSubOtherItems` below is the rest of what UD defines for it. Same division, same reasoning, same
+   sentence in the note: what is in use here, then everything else this class can take. */
+function subtypeValsAttested(f,U){ const full=UD_FEATS[f]||[]; if(!full.length) return full;
+  const ev=(typeof strictAttestedVals==="function"?strictAttestedVals(f,U||null):null)||[];
+  return full.filter(v=>ev.indexOf(v)>=0); }   // the EVIDENCE alone — this class's own tokens, plus the model's own labels for it
+function subtypeValsCeiling(f,U){ const full=UD_FEATS[f]||[]; if(!full.length) return full;
+  const perF=(typeof SUBTYPE_VALS==="object"&&SUBTYPE_VALS)?SUBTYPE_VALS[f]:null;
+  return perF?full.filter(v=>(perF[U]||[]).indexOf(v)>=0):full; }   // …and what UD defines for the class (a feature with no per-class narrowing — Poss/Reflex/Abbr, one value — keeps its own list)
+function subtypeValsOther(f,U){ const ev=subtypeValsAttested(f,U); return subtypeValsCeiling(f,U).filter(v=>ev.indexOf(v)<0); }
+/* item 29 — the badge counts the rows the flyout HOLDS, "Other subtype…" included: it is a row of that
+   flyout like any other, and a badge that counted only the values would under-promise a list the
+   reader can see. A class with nothing attested still gets a flyout wherever UD gives it something. */
+function posSubCount(U){ let n=0,other=0;
+  subtypeFeatsFor(U).forEach(f=>{ n+=subtypeValsAttested(f,U).length; other+=subtypeValsOther(f,U).length; });
+  return n?n+(other?1:0):other; }   // …and where nothing is attested the flyout IS the other list (posSubItems), so the badge counts THOSE rows
 function posSubItems(si,tokId,U){ const s=DOC[si], t=s&&s.tokens[tokId-1]; if(!t) return null;
   const feats=subtypeFeatsFor(U); if(!feats.length) return null;
+  /* ⚠ NOTHING ATTESTED → THIS FLYOUT *IS* THE OTHER LIST, on request ("if there are no attested
+     subtypes for a given UPOS, the submenu should directly show the Other state"). A flyout whose only
+     row is "Other subtype…" asks the reader to confirm that an empty list is empty; the drill-down is
+     worth a gesture only where there is something above it to drill down FROM. No "back" row either —
+     there is no attested list to go back to, and offering one would return to the very row that would
+     have to send them here again. */
+  if(!feats.some(f=>subtypeValsAttested(f,U).length)) return posSubOtherItems(si,tokId,U);
   const curOf=f=>t.upos===U?(getFeat(t.feats,f)||""):"";
   const setSub=(f,v)=>{ closeCtx(); const before=t.feats; pushUndo(si);
     if(t.upos!==U){ t.upos=U; clearSubjIfNotVA(t); }   // item 1: a tag change away from VERB/AUX drops any now-meaningless Subj
@@ -511,11 +684,50 @@ function posSubItems(si,tokId,U){ const s=DOC[si], t=s&&s.tokens[tokId-1]; if(!t
   // acValItems/glossAbbrMenu already route through, which this submenu had been left reading
   // straight off UD_FEATS instead of. PronType alone carries 11 official values; a document that
   // only ever uses three of them doesn't need the other eight offered here either.
-  feats.forEach(f=>{ const cur=curOf(f), vals=(typeof attestedFeatVals==="function"?attestedFeatVals(f):null)||UD_FEATS[f]||[];
+  // ⚠ SUPERSEDED BY subtypeValsFor (above): document-wide attestation was the wrong question here,
+  // because it is blind to the word class the flyout is hanging off. What it was FOR — not reciting
+  // eleven PronTypes at a document that uses three — still holds and is still done, one level tighter.
+  feats.forEach(f=>{ const cur=curOf(f), vals=subtypeValsAttested(f,U); if(!vals.length) return;   // …and no header over an empty group: a class can now attest nothing for a feature it may carry
     items.push({header:f}); vals.forEach(v=>items.push({label:esc(subtypeSuffix(f,v)), expand:shortVDesc((FEATS_VDESC[f]||{})[v]||""), check:cur===v, opt:true, optval:U+"|"+f+"="+v, fn:()=>setSub(f,v)})); });   // item 29: optval — the CLASS+SUBTYPE pair `upos_sub` is keyed by (app/parse.py's _upos_scores), so weightSubRows can fade these rows by the same distribution the parent row is faded by   // item 3: bare subtype value (the "U." prefix is redundant here) + a SHORT expansion that can't cross the one-column midline
+  /* ⚠ …AND THE REST OF WHAT UD GIVES THIS CLASS, ONE ROW DOWN. It REPLACES this flyout rather than
+     opening inside it, and that is forced rather than chosen: there is exactly ONE flyout layer
+     (`ctx2`), so a `sub:` row here would have to rebuild the element it lives in. Reopening off the
+     SAME owner — the POS row in the parent menu, remembered as `ctx2._owner`, at the size remembered
+     as `ctx2._colSize` — lands the new list exactly where the old one was, with the POS menu still
+     standing behind it. `keepOpen` is what stops the row's own click closing that menu first.
+     A "Back" row returns, so the drill-down is not a one-way door. */
+  const other=posSubOtherItems(si,tokId,U);
+  if(other.length){ if(items.length) items.push(null);
+    items.push({label:"Other subtype…", keepOpen:true, fn:()=>{ const owner=ctx2._owner, cs=ctx2._colSize;
+      if(owner) openSub(owner,()=>posSubOtherItems(si,tokId,U,true),false,cs,false,true); }}); }
   // item 3 — the guidelines link for the subtype the token CURRENTLY carries, pinned STICKY to the flyout bottom (no clear button — a plain-tag pick from the parent menu already clears the subtype)
   let setF=null,setV=""; feats.forEach(f=>{ const v=curOf(f); if(v){ setF=f; setV=v; } });
   if(setF) items.push(null,{label:`Guidelines for “${esc(subtypeSuffix(setF,setV))}”`, kbd:"↗", footLink:true, fn:()=>openExternal(featGuideUrl(setF,setV))});   // item 1: the leading `null` CLOSES the last category group so the link lands at the flyout's TOP LEVEL; footLink → openSub lifts it into a FIXED footer (never scrolls), styled as an ordinary .ctx button exactly like the parent menu's guidelines row
+  return items; }
+/* The full POS-relevant UD inventory for one class, less whatever the attested flyout already carries —
+   the subtype analogue of `otherFeatureItems`, and the same division of the same inventory: what this
+   document uses for the class, then everything else UD defines for it. "POS-relevant" is SUBTYPE_VALS
+   (js/grid/grid.js), so this is not a way back to NOUN.Fin — it is the way to NOUN.Vnoun in a document
+   that has never used it. `back` adds the row that returns to the attested list. */
+function posSubOtherItems(si,tokId,U,back){ const s=DOC[si], t=s&&s.tokens[tokId-1]; if(!t) return [];
+  const feats=subtypeFeatsFor(U); if(!feats.length) return [];
+  const setSub=(f,v)=>{ closeCtx(); const before=t.feats; pushUndo(si);
+    if(t.upos!==U){ t.upos=U; clearSubjIfNotVA(t); }
+    feats.forEach(o=>{ if(o!==f) t.feats=clearFeat(t.feats,o); });
+    t.feats=(f&&v)?setFeat(t.feats,f,v):t.feats;
+    syncXposMirror(t); featsSyncGloss(t,before); markDirty(); preserveScroll(renderDoc); };   // …the SAME commit posSubItems makes, and it must stay that way: the two lists set the same thing
+  const items=[];
+  feats.forEach(f=>{ const vals=subtypeValsOther(f,U); if(!vals.length) return;
+    const cur=t.upos===U?(getFeat(t.feats,f)||""):"";
+    items.push({header:f});
+    vals.forEach(v=>items.push({label:esc(subtypeSuffix(f,v)), expand:shortVDesc((FEATS_VDESC[f]||{})[v]||""), check:cur===v, opt:true, optval:U+"|"+f+"="+v, fn:()=>setSub(f,v)})); });
+  /* ⚠ THE WAY BACK GOES LAST, because renderMenu puts it there whatever this list says: a row that
+     precedes the first `header` belongs to no group, and every groupless row is collected into the
+     TAIL and appended after the groups. Pushed at the front it still rendered at the bottom — with its
+     own separator below it rather than above, which is the only part a reader would have noticed. So
+     it is written where it lands, and the separator reads correctly. */
+  if(back&&items.length) items.push(null,{label:"‹ Attested subtypes", keepOpen:true, fn:()=>{ const owner=ctx2._owner, cs=ctx2._colSize;
+    if(owner) openSub(owner,()=>posSubItems(si,tokId,U),false,cs,false,true); }});
   return items; }
 // right-click a POS tag → pick a UPOS (all shown, grouped by class). With opts.ext it is the SAME menu, only
 // SCOPED to the external POS of a multi-token expression (item 2): the chosen tag lands in ExtPos on the head
@@ -1061,7 +1273,7 @@ function addFeatureItems(si,tokId){
 // shape as markFeatRow just above it), so the menu never grows for a token with nothing left to add.
 function addFeatureRow(si,tokId){
   const items=addFeatureItems(si,tokId);
-  return items.length ? [{label:"Add feature…", sub:()=>addFeatureItems(si,tokId), subFit:true}] : []; }
+  return items.length ? [{label:"Add feature…", sub:()=>addFeatureItems(si,tokId), subFit:true, subNoWrap:true}] : []; }   // the same list one menu up, so the same rule about wrapping
 // item 3 — shared by BOTH triggers below (right-click and double-click), so the two gestures can't come to
 // different conclusions about what was hit. A combined AGR/TAM row's own value carries one [data-subfeat]
 // span/tspan per member (drawAVM/avmInline, diagram-core.js). Landing on one of THOSE scopes the menu to that
@@ -1081,8 +1293,56 @@ function addFeatureRow(si,tokId){
    avmSetFeat write, same one-flyout-deep shape as everywhere else. Returns false when nothing is attested for
    this token's word class, so the gesture falls through to the ordinary token menu rather than opening an empty
    one. */
+/* ⚠ THE FEATURES THIS CLASS COULD TAKE BUT NOTHING HERE ATTESTS, as a flyout of their own — asked for
+   with the placeholder menu ("in addition to the available relevant features, there should also be an
+   'Other Feature…' flyout that shows other POS-relevant features, even if they're not attested in the
+   document"). `addFeatureItems` answers from EVIDENCE and stops there for a tagged token, which is
+   right for the main list and leaves a real gap: a feature this class plainly takes, in a document
+   that has not used it yet and under a model that never emits it, is simply unreachable. This is the
+   way back to it, and it is a separate row rather than a widening of the list above precisely so that
+   "what is used here" and "what could be" stay distinguishable at a glance.
+   POS-RELEVANT is FEAT_UPOS (js/grid/grid.js) — the same UD-validator derivation SUBTYPE_VALS comes
+   from, at the feature level — so this is not the old unfiltered fallback under a new name: Tense is
+   still not offered on a PUNCT. A feature the table has no opinion about (Abbr, Typo, Foreign) is
+   offered on any class, which is what "no opinion" has to mean.
+   ⚠ TOP-LEVEL MENUS ONLY, hence its place here rather than inside addFeatureItems. There is exactly
+   ONE flyout layer (`ctx2`, openSub), so a row carrying `sub:` inside a flyout would have to rebuild
+   the very element it lives in. The token menu's own "Add feature…" IS such a flyout; this menu is
+   opened straight into #ctx by a right-click on the placeholder, so its rows can own flyouts. */
+/* ⚠ THE UD INVENTORY FOR THE CLASS, MINUS WHAT THE MAIN LIST IS ALREADY OFFERING. Settled after three
+   readings of it, and the two rejected ones are kept here because each looks right until it is used:
+     · per FEATURE — carrying only features with NO attestation at all for the class. The narrowing it
+       escapes is per VALUE, so a feature the document used in PART was unreachable in the rest of
+       itself: measured on samples/english.conllu, an AUX offered `Person=3` alone (the only person any
+       AUX in that file carries) with `Person` nowhere in this flyout. "Why am I only seeing 1 under the
+       Person options?"
+     · the WHOLE inventory, overlapping the main list — "it should show the whole UD inventory! The main
+       menu already shows the subset that's attested" — then corrected again to this: "the UD list MINUS
+       what's already attested".
+   ⚠ SO THE TWO LISTS PARTITION THE INVENTORY, and neither repeats the other: the main list is what this
+   document uses for this class, this one is everything else UD defines for it. A feature appears in
+   both only where each has a value the other has not (Person on an AUX: `3` above, `1/2/4/0` here); one
+   with nothing left over is omitted entirely. The other filters are the word class (`featOnUpos`), the
+   AVM's own excluded keys, and a feature already set on this token — which the row above the
+   placeholder is what edits. */
+function otherFeatureItems(si,tokId){ const s=DOC[si], t=s&&s.tokens[tokId-1]; if(!t) return [];
+  const up=t.upos||"";
+  const cands=Object.keys(UD_FEATS).filter(f=>!AVM_EXCLUDE.has(f) && getFeat(t.feats,f)==null
+      && (typeof featOnUpos!=="function"||featOnUpos(f,up)))
+    .sort(avmFeatCmp);
+  const out=[];
+  cands.forEach(f=>{ const shown=(typeof strictAttestedVals==="function"?strictAttestedVals(f,up||null):null)||[];
+    const vv=(UD_FEATS[f]||[]).filter(v=>shown.indexOf(v)<0); if(!vv.length) return;   // …minus the values the main list already carries
+    const desc=(typeof FEATS_VDESC==="object"&&FEATS_VDESC&&FEATS_VDESC[f])||{};
+    out.push({header:f});
+    vv.forEach(v=>out.push({label:v, expand:shortVDesc(desc[v]||""), fn:()=>avmSetFeat(si,tokId,f,v)})); });
+  return out; }
 function avmAddMenu(x,y,si,tokId){ const s=DOC[si]; if(!s) return false;
-  const items=addFeatureItems(si,tokId); if(!items.length) return false;
+  const items=addFeatureItems(si,tokId);
+  const other=otherFeatureItems(si,tokId);
+  if(other.length){ if(items.length) items.push(null);   // a separator only where there is something above it to separate from
+    items.push({label:"Other feature…", sub:()=>otherFeatureItems(si,tokId), subFit:true, subNoWrap:true}); }
+  if(!items.length) return false;
   /* ⚠ ONE COLUMN, FITTED — the SAME shape the "Add feature…" flyout has in the token menu, on request
      ("right-clicking an AVM placeholder should ONLY bring up the contents of the Add feature submenu"). The
      CONTENT was already exactly that (both go through addFeatureItems, verified in all five notations and in

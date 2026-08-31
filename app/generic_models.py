@@ -45,6 +45,8 @@ import threading
 import time
 import unicodedata
 
+from . import glosses    # the ONE place that decides what the lexical channel is fed (app/glosses.py)
+
 from .paths import APP_DATA
 
 GENERIC_PKG = "xx_sud_generic"
@@ -93,7 +95,11 @@ HELDOUT_LANGS = 20
 
 # ── the arms this pipeline HAS ───────────────────────────────────────────────────────────────────
 # Not a policy choice: it is what the wheel ships, and upstream states why each absence is deliberate.
-#   · no tokeniser   — "there is no tokeniser; that is your business"
+#   · no tokeniser OF ITS OWN — "there is no tokeniser; that is your business". SUPERSEDED as an ARM
+#                      (see below): what upstream disclaims is a TRAINED, language-specific tokeniser,
+#                      and the loaded pipeline still carries spaCy's language-neutral `xx` rules,
+#                      which is what `nlp.tokenizer` is and what `parse._parse_spacy_sud` already
+#                      calls for every other spaCy model through the identical line.
 #   · no UPOS tagger — tagging is LEXICAL and does not transfer: a multilingual tagger over all 80
 #                      treebanks reaches 32-39 % on held-out languages, no better than a single
 #                      English tagger, and romanisation cannot close a 55-point gap
@@ -109,7 +115,33 @@ HELDOUT_LANGS = 20
 # and greyed does NOT mean "nothing happens": tokenisation falls to a whitespace split and sentence
 # splitting to the rule splitter, exactly as they do with no model installed at all. What is absent
 # is the MODEL's opinion, which is what an arm switches.
-GENERIC_ARMS = frozenset({"feats", "syntax"})
+# ⚠ `tokenise` IS IN THE LIST, AND WAS NOT. Reported: "the generic parser should tokenise punctuation
+# sensibly (with the SpaceAfter feature)". Omitting the arm did not leave tokenisation to a neutral
+# party — it substituted a WHITESPACE SPLIT, which is strictly worse than the `xx` rules for the one
+# thing at issue: `The cat sat on the mat. "Really?" he said (twice).` came back as the four tokens
+# `mat.` / `"Really?"` / `(twice).` glued to their punctuation, with no SpaceAfter anywhere, because a
+# whitespace split has no boundaries to record. There is precedent for admitting a stock tokeniser as
+# a model's own: `zh_sud_gsd_simp_trad` and `lzh_sud_kyoto` use stock spaCy tokenisers too and have
+# always reported this arm (see `parse._reconstruct_mwt`'s note on them). And the switch still means
+# what it says — turning it OFF gives the whitespace split, which is the fallback this list's absence
+# used to force on everyone.
+# ⚠ `sentence` IS STILL ABSENT and that asymmetry is deliberate: there the app's OWN rule splitter is
+# the better answer, so falling back to it loses nothing, while the tokenisation fallback loses the
+# punctuation boundaries entirely. An arm is omitted where the fallback is as good, not merely where
+# the wheel trained nothing.
+GENERIC_ARMS = frozenset({"feats", "syntax", "tokenise"})
+
+
+def _gloss_ext() -> bool:
+    """Whether THIS wheel has a lexical channel to fill (0.2.0 registers ``Token._.gloss``).
+
+    Read once per call rather than cached at import: the wheel can be downloaded, or upgraded, in a
+    session that has already imported this module, and the answer is a spaCy registry lookup."""
+    try:
+        from spacy.tokens import Token
+        return Token.has_extension("gloss")
+    except Exception:  # noqa: BLE001 — no spaCy at all: nothing fits either
+        return False
 
 _lock = threading.RLock()
 _SLUG_RE = re.compile(r"[^a-z0-9]+")
@@ -358,9 +390,20 @@ def _examples(nlp, sents, key):
     """Gold ``Example``s for the fitting loop, mirroring ``adapt_lang_embed.docs_from_conllu``'s
     PARSER arm (``predict_tags`` off): UPOS and FEATS are the parser's INPUTS, so they go on the
     PREDICTED doc as well as the reference — the reference alone would be fitting the row against a
-    doc the parser never sees."""
+    doc the parser never sees.
+
+    ⚠ AND THE ENGLISH GLOSSES GO ON WITH THEM, for exactly that reason one step further out.  0.2.0's
+    lexical channel is another input the parser reads (`Token._.gloss`, `app/glosses.py`), and
+    `docs_from_conllu` states the rule this mirrors in as many words: **fit the row under the regime
+    it will be used in** — "without this the row is fitted with the lexical channel OOV on every
+    token and then deployed with it filled, the exact train/deploy mismatch this arm exists to
+    avoid".  The training file is the same kind of document the reader will parse, so its own MISC
+    ``Gloss=``/``MGloss=`` are the glosses; a file that carries neither fits exactly as it did before,
+    with the channel OOV throughout, which is what every pre-0.2.0 row was fitted under anyway.
+    Guarded on the extension for the same reason `_given_doc` is: an older wheel does not define it."""
     from spacy.tokens import Doc
     from spacy.training import Example
+    gloss_ext = _gloss_ext()   # …asked ONCE per fitting run, not per token
     out = []
     for rows in sents:
         idx = {r[0]: i for i, r in enumerate(rows)}
@@ -382,6 +425,10 @@ def _examples(nlp, sents, key):
             if r[5] != "_":
                 tok.set_morph(r[5])
                 p.set_morph(r[5])
+            if gloss_ext and len(r) > 9:
+                g = glosses.from_misc(r[9])
+                if g:
+                    p._.gloss = g
         ref._.tb_lang = pred._.tb_lang = key
         out.append(Example(pred, ref))
     return out

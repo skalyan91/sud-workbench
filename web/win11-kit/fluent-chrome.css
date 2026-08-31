@@ -507,6 +507,10 @@
   .ctx-sub.ctx-sub-foot{display:flex; flex-direction:column; overflow:hidden; padding-inline:0}
   .ctx-sub.ctx-sub-foot>.ctx-sub-scroll{flex:1 1 auto; min-height:0; overflow-y:auto; overflow-x:hidden; padding-inline:0}
   .ctx-sub.ctx-sub-foot>.ctx-sub-footer{flex:none; padding-inline:0}
+  /* the search band, mirroring this kit's own footer rules (its rows carry their own inset, hence 0) */
+  .ctx-sub.ctx-sub-srch{display:flex; flex-direction:column; overflow:hidden; padding-inline:0}
+  .ctx-sub.ctx-sub-srch>.ctx-sub-scroll{flex:1 1 auto; min-height:0; overflow-y:auto; overflow-x:hidden; padding-inline:0}
+  .ctx-sub.ctx-sub-srch>.ctx-sub-search{flex:none; padding:1px 5px 5px}
   .ctx-sub.defctx{max-width:320px; font-family:var(--token-font)}
   .ctx-sub.defctx button{white-space:normal}
   .ctx-sub.defctx .mlbl{min-width:0; overflow-wrap:break-word}

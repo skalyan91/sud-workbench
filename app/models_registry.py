@@ -882,16 +882,46 @@ def installed_by_language(refresh=CACHE_ONLY) -> dict[str, list[dict]]:
     return groups
 
 
+def _sole_custom_model(code: str) -> str:
+    """The ONE custom model for ``code``, or ``""`` — never a choice between two.
+
+    The app may not pick BETWEEN custom models (they are named by hand and a reader may have three
+    for one language), but where exactly one exists there is nothing to pick between: the ambiguity
+    the rule protects against does not arise, and refusing to select it leaves a reader whose language
+    NOTHING else covers on "None (manual)" with their own parser one menu away.  Two or more, and this
+    answers "" again, which is the original rule intact for the case it was written for.
+    """
+    if not code:
+        return ""
+    try:
+        from . import generic_models
+        ids = [e.get("id") for e in generic_models.entries()
+               if (e.get("lang") or "").lower() == code and e.get("id")]
+    except Exception:  # noqa: BLE001 — an unreadable custom store picks nothing, as before
+        return ""
+    return ids[0] if len(ids) == 1 else ""
+
+
 def best_installed_model(lang: str, groups: dict | None = None) -> str:
     """The model id the app should parse ``lang`` with, or ``""`` when nothing is installed for it.
-    Pass ``groups`` (an :func:`installed_by_language` result) to answer many languages off one scan."""
+    Pass ``groups`` (an :func:`installed_by_language` result) to answer many languages off one scan.
+
+    ⚠ THE SOLE-CUSTOM FALLBACK LIVES HERE AND NOT IN :func:`installed_by_language`, which stays
+    custom-free.  This function is the one whose whole job is "which model should parse this language
+    on the reader's behalf"; that one is also read by :func:`language_choices`, which already lists
+    every custom model BY NAME in the same menu — so adding them to its groups would print Mwotlap
+    twice, once as the language's parser and once as itself, which is the coin-toss the naming rule
+    exists to avoid.  An ordinary parser still wins where there is one: the fallback is reached only
+    when the language has no group at all."""
     code = (lang or "").lower()
     if not code:
         return ""
     if groups is None:
         groups = installed_by_language()
     entries = groups.get(code) or []
-    return (entries[0].get("id") or "") if entries else ""
+    if entries:
+        return entries[0].get("id") or ""
+    return _sole_custom_model(code)
 
 
 def language_choices(extra: dict | None = None) -> dict:
@@ -1199,8 +1229,11 @@ def _ensure_tokenizer_deps(package: str, progress=None, declared=()) -> dict:
     designed and has nothing to do with a tokeniser dependency. It was reported verbatim to the
     reader as "its tokeniser dependency did not [install]" on a wheel that had just installed
     perfectly. There is nothing to probe FOR either: the generic pipeline ships spaCy's bare `xx`
-    tokeniser and no third-party segmenter, which is the whole reason tokenisation is not one of its
-    arms (app/generic_models.py, GENERIC_ARMS)."""
+    tokeniser and no third-party segmenter, so there is no dependency that could be missing — this
+    probe exists for the wheels that DO pull one in (jieba, CAMeL, the Vedic splitter). ⚠ THAT BARE
+    `xx` TOKENISER USED TO BE THE REASON TOKENISATION WAS NOT ONE OF ITS ARMS; it is now the reason it
+    IS one, since a whitespace split is worse at the only job in question (app/generic_models.py,
+    GENERIC_ARMS). The exemption here is unchanged either way."""
     import importlib
     if package in GENERIC_SUD:
         return {"ok": True}     # …and `ok`, not `{}`: the caller reads a falsy `ok` as a FAILURE and

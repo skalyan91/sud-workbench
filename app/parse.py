@@ -278,6 +278,42 @@ def _arms(arms) -> set:
     return got & set(ARMS)
 
 
+def reads_glosses(model_id: str = "") -> bool:
+    """Whether this model reads an ENGLISH GLOSS per token as an input (0.2.0's lexical channel).
+
+    Read off the loaded pipeline, never off the model's name: the probe is the presence of an
+    ``extract_aligned_vec`` node, which is the very node `set_vectors_fill` switches — so "the app
+    thinks this model reads glosses" and "there is a channel to fill" cannot come apart, and a wheel
+    that gains or loses the arm says so here with no table to edit.  False for every monolingual
+    model, for a Stanza pipeline, and for a generic wheel older than 0.2.0.
+
+    ⚠ WHAT THE FRONTEND DOES WITH IT IS TURN ITS OWN GLOSS GENERATION OFF (`pipeEffective`,
+    js/core/prefs.js).  A gloss this app generated is not evidence about the sentence — it is this
+    app's own guess, and handing it back to a parser as an input is the app answering its own
+    question and then reading the answer as data.  The channel is for what the ANNOTATOR wrote.
+    """
+    if not model_id:
+        return False
+    try:
+        engine, name, _tb = _resolve_model(model_id)
+    except ParserUnavailable:
+        return False
+    if engine != "sud" or not name:
+        return False
+    try:
+        nlp = _load_spacy(name)
+    except Exception:  # noqa: BLE001 — a model that will not load reads nothing
+        return False
+    for _pname, pipe in nlp.pipeline:
+        mdl = getattr(pipe, "model", None)
+        if mdl is None:
+            continue
+        for node in mdl.walk():
+            if node.name == "extract_aligned_vec":
+                return True
+    return False
+
+
 def model_arms(model_id: str = "") -> list:
     """The arms a given model actually IMPLEMENTS — what the options bar greys out.
 
@@ -393,6 +429,46 @@ def _needs_given_upos(model_id: str) -> bool:
     return bool(can) and "upos" not in can
 
 
+def _punct_defaults(tokens: list[dict], given: set = frozenset()) -> list[dict]:
+    """PUNCT, and the ``punct`` relation, on a token made of nothing but punctuation.
+
+    ⚠ THIS IS NOT THE APP GUESSING, which is the only reason it is here at all. "Silence is the
+    preferred failure for annotation" governs everything a model might have an opinion about; a token
+    whose form is entirely punctuation is not one of those. UD and SUD both make it categorical —
+    such a token IS ``PUNCT`` and attaches with ``punct``, in every language, whatever the tagger
+    thinks — which is why `_is_punct_form` can answer for `_reconstruct_mwt` where a UPOS cannot.
+    Reported against a custom model: the generic parser ships no tagger, so a raw-text insert came
+    back with an empty word class on every token INCLUDING the full stops, and the annotator had to
+    type PUNCT into each of them before the wheel (which reads UPOS as input) could parse anything.
+
+    THREE RESTRAINTS, and each one is what keeps this from being an invention:
+
+    · **EMPTY CELLS ONLY.** A tagger that called this token something else has said something about
+      it, and this has not; the tagger wins. Nothing here ever overwrites.
+    · **NEVER A COLUMN THE CALLER HANDED IN** (`given`) — the same guard `_apply_arms` states just
+      above, for the same reason. An arm switched off is the annotator's, and a blank they left in
+      their own column may be deliberate.
+    · **THE RELATION ONLY WHERE THERE IS A HEAD TO CARRY IT** — never on a token whose head is 0,
+      whose relation is `root` and stays `root`. The HEAD is left exactly as it was found: which
+      token the punctuation hangs off is a real question about the sentence, and this answers only
+      the question that is not.
+    """
+    for t in tokens:
+        if not _is_punct_form(t.get("form") or ""):
+            continue
+        if "upos" not in given and not (t.get("upos") or ""):
+            t["upos"] = "PUNCT"
+        # ⚠ AND THE RELATION FOLLOWS THE WORD CLASS, never the form on its own. A tagger that called
+        # this token INTJ has said it is an interjection written in punctuation (`?!`, `¡`), and
+        # `punct` would contradict a reading this deliberately did not overwrite two lines up. So the
+        # relation is written only where the class ENDED UP `PUNCT` — the model's own, or the one just
+        # filled in — which also means a blank the annotator left in a `given` column stays wholly
+        # blank rather than half-answered.
+        if (t.get("upos") or "") == "PUNCT" and not (t.get("deprel") or "") and str(t.get("head") or "0") != "0":
+            t["deprel"] = "punct"
+    return tokens
+
+
 def _apply_arms(tokens: list[dict], arms: set, given: set = frozenset()) -> list[dict]:
     """Empty the columns whose arm is off, in place.
 
@@ -414,7 +490,9 @@ def _apply_arms(tokens: list[dict], arms: set, given: set = frozenset()) -> list
         for j, t in enumerate(tokens):
             t["head"] = "0" if j == 0 else "1"
             t["deprel"] = "root" if j == 0 else ""
-    return tokens
+    # …and LAST, so it fills what every arm above has left empty and nothing else. Ordering matters:
+    # run before the blanking, and an off arm would wipe the word class this just wrote.
+    return _punct_defaults(tokens, given)
 
 
 # ── CUSTOM MODELS: one shared wheel, one embedding row each ──────────────────────────────────────
@@ -466,7 +544,7 @@ def _given_arms(given) -> set:
             if a in _GIVEN_SETTER and any(v and v != "_" for v in (col or ()))}
 
 
-def _given_doc(nlp, forms, tb_lang, upos=None, given=None):
+def _given_doc(nlp, forms, tb_lang, upos=None, given=None, glosses=None):
     """A Doc carrying everything the CALLER is supplying, before any component runs.
 
     ⚠ **THE WORD CLASSES GO ON HERE, NOT AFTER THE MORPHOLOGISER.** `_force_upos` has always applied
@@ -483,12 +561,28 @@ def _given_doc(nlp, forms, tb_lang, upos=None, given=None):
     ``given`` carries the other columns the annotator owns (see the note above), each applied the same
     way and at the same moment.  ``upos`` stays a parameter of its own because it means something
     slightly different: ``given`` is "the model is not writing this, so read mine", where ``upos`` is
-    "the model may write this, but CONSTRAIN it to mine" — the retag case `_force_upos` exists for."""
+    "the model may write this, but CONSTRAIN it to mine" — the retag case `_force_upos` exists for.
+
+    ``glosses`` is a third kind again, and belongs here for the same reason the classes do: it is an
+    INPUT the model reads (`xx_sud_generic` 0.2.0's lexical channel — see `app/glosses.py` for what
+    goes in it and `_load_spacy_locked` for the fill regime), so it has to be on the Doc before the
+    first component runs, not applied to the answer afterwards.  One string per token, ``""`` for a
+    token with no gloss — which reaches the channel as its OOV dimension, deliberately, and not as a
+    zero vector.  ⚠ SET ONLY IF THE EXTENSION EXISTS: `Token._.gloss` is registered by the 0.2.0
+    wheel's own embedding layer, so on an older generic wheel — or any monolingual one — there is
+    nothing to set and nothing to fail about, which is why this is a `has_extension` test rather than
+    a version check."""
     from spacy.tokens import Doc
     doc = _tb(Doc(nlp.vocab, words=forms), tb_lang)
     for i, want in enumerate(upos or ()):
         if want and want != "_" and i < len(doc):
             doc[i].pos_ = want
+    if glosses:
+        from spacy.tokens import Token
+        if Token.has_extension("gloss"):
+            for i, g in enumerate(glosses):
+                if g and i < len(doc):
+                    doc[i]._.gloss = g
     for arm, col in (given or {}).items():
         setter = _GIVEN_SETTER.get(arm)
         if setter is None:
@@ -590,6 +684,24 @@ def _load_spacy_locked(package: str):
             generic_models.apply_to(nlp)
         except Exception as exc:  # noqa: BLE001 — the generic wheel still parses its 80 built-in languages
             print(f"[custom] rows not applied: {exc}", file=sys.stderr)
+        # ⚠ AND THE LEXICAL CHANNEL IS SWITCHED TO "auto", which is a DEPLOYMENT property and not a
+        # weight: 0.2.0's channel fills one aligned vector per token, from the token's own lemma
+        # while training and from an English gloss (`Token._.gloss`) at inference, both looked up in
+        # the same space.  The wheel ships `vectors_fill = "gloss"` in its config, which is right for
+        # its own zero-shot evaluation and wrong here: this app glosses SOME tokens of SOME
+        # documents, and under "gloss" every unglossed token is OOV even where its language has real
+        # rows to fall back on.  "auto" is gloss-then-lemma, so it is never worse than either —
+        # identical to "gloss" for a language with no rows (the lemma route is all-OOV there anyway),
+        # and strictly better wherever rows exist.
+        # ⚠ GUARDED, because `set_vectors_fill` REFUSES at zero nodes by design ("a silent no-op
+        # would report the lemma fill's number under the gloss fill's name") — which is exactly what
+        # a 0.1.0 wheel, still installed for anyone who has not re-downloaded, will do.  A wheel with
+        # no lexical channel is not an error here; it is the previous version, and it parses.
+        try:
+            from xx_sud_generic import sud_generic_embed_v3 as _v3   # noqa: PLC0415 — optional, per-wheel
+            _v3.set_vectors_fill(nlp, "auto")
+        except Exception:  # noqa: BLE001 — v2 wheel / an arm without the channel: nothing to switch
+            pass
     _SPACY_MODELS[package] = nlp
     return nlp
 
@@ -722,7 +834,10 @@ def _mwt_from_doc(doc, tokens: list[dict]) -> list[dict] | None:
     grouping — it did the splitting — so re-deriving it with `_reconstruct_mwt` below throws
     away certainty and replaces it with a guess that reads the **tagger's** PUNCT decisions
     (an MWT can then appear or vanish on a tagging slip: English ``e-mail`` groups because the
-    hyphen came back NOUN, while ``co-op`` doesn't because its hyphen came back PUNCT).  The
+    hyphen came back NOUN, while ``co-op`` doesn't because its hyphen came back PUNCT — ⚠ THE TWO
+    EXAMPLES ARE NOW THE OTHER WAY ROUND, re-measured 2026-08: ``co-op``'s hyphen comes back NOUN and
+    ``well-known``'s PUNCT. The principle is what this records and it is unchanged; only which word
+    illustrates which side has moved under the tagger).  The
     convention is ``doc.user_data["mwt_ranges"] = [(first, last, surface), …]``, 1-based and
     inclusive over the doc's own tokens, alongside ``doc.user_data["source_text"]`` — the raw
     input, which a word-list-built Doc no longer carries in ``doc.text``.
@@ -1005,6 +1120,30 @@ def _spaceless_script(s: str) -> bool:
                                  for ch in letters)
 
 
+def _punct_here(tok: dict) -> bool:
+    """Is this token punctuation, for the run test above? UPOS when there is one, the FORM when
+    there is not.
+
+    ⚠ THE UPOS ANSWER STAYS AUTHORITATIVE WHERE IT EXISTS, for the reason the docstring above gives:
+    a hyphen is punctuation by FORM and not always by ANALYSIS, and only the tagger knows which.
+    Measured on ``The co-op sent an e-mail to a well-known address.`` (en_sud_ewt_gum, 2026-08):
+    ``co-op``/``e-mail`` take a NOUN hyphen and become ranges, ``well-known`` takes a PUNCT one and
+    does not. A form test cannot tell those apart and must never overrule a tagger that has.
+
+    ⚠ BUT AN ABSENT UPOS IS NOT "NOT PUNCTUATION", which is what the bare `== "PUNCT"` test read it
+    as — and the generic parser is the model that made that bite. It ships no tagger, so every token
+    of a raw-text insert reaches here with ``upos == ""``, every chunk read as one long non-punct run,
+    and ``The cat sat on the mat.`` came back with ``mat`` + ``.`` fused into a multi-word token
+    ``mat.`` — plus ``"Really?"`` and ``(twice).`` as ranges of four. The SpaceAfter went with them:
+    `_mark_space_after` writes nothing STRICTLY INSIDE a range, because a range's own form carries the
+    gluing, so a fabricated range silently swallowed the flags too. `_is_punct_form` was already here
+    for exactly this shape of gap (the tokenise-only path, which has no tagger output YET); this is the
+    same question asked by a path that will never have one.
+    """
+    upos = tok.get("upos") or ""
+    return upos == "PUNCT" if upos else _is_punct_form(tok.get("form") or "")
+
+
 def _reconstruct_mwt(tokens: list[dict], space_after: list[bool]) -> list[dict]:
     """When the tokeniser splits one orthographic word into several tokens (e.g. Arabic
     clitics ``وذهب`` → و+ذهب, French ``du`` → de+le), rebuild the multi-word-token range.
@@ -1041,11 +1180,11 @@ def _reconstruct_mwt(tokens: list[dict], space_after: list[bool]) -> list[dict]:
     for a, b in chunks:
         i = a
         while i <= b:
-            if tokens[i]["upos"] == "PUNCT":
+            if _punct_here(tokens[i]):
                 i += 1
                 continue
             j = i
-            while j + 1 <= b and tokens[j + 1]["upos"] != "PUNCT":
+            while j + 1 <= b and not _punct_here(tokens[j + 1]):
                 j += 1
             if j > i:   # ≥2 contiguous non-punct tokens with no internal space → a multi-word token
                 form = "".join(tokens[k]["form"] for k in range(i, j + 1))
@@ -1509,7 +1648,7 @@ def _force_upos(morphologizer, doc, upos, keep_feats=frozenset()) -> None:
 
 
 def parse_pretokenized(forms: list[str], model_id: str = "", upos: list[str] | None = None,
-                       arms=None, given=None) -> dict:
+                       arms=None, given=None, glosses: list[str] | None = None) -> dict:
     """Parse a sentence whose TOKENISATION IS ALREADY DECIDED — one token per entry of ``forms``.
 
     This is what "re-derive the model-derived fields for these tokens" needs, and it is not the same
@@ -1587,7 +1726,7 @@ def parse_pretokenized(forms: list[str], model_id: str = "", upos: list[str] | N
             if not name:
                 raise ParserUnavailable(f"unknown model {model_id!r}")
         nlp = _load_spacy(name)
-        doc = _given_doc(nlp, forms, tb_lang, upos, given)
+        doc = _given_doc(nlp, forms, tb_lang, upos, given, glosses)
         off, arms = _pipe_plan(nlp, arms, gset)
         keep = {i for i, v in enumerate((given or {}).get("feats") or ())
                 if v and v != "_"} if "feats" in gset else frozenset()
@@ -1809,8 +1948,8 @@ def _upos_scores(morphologizer, doc):
     return out, out_sub
 
 
-def _score_doc(nlp, package, forms, upos=None, tb_lang=None):
-    doc = _given_doc(nlp, forms, tb_lang, upos)
+def _score_doc(nlp, package, forms, upos=None, tb_lang=None, glosses=None):
+    doc = _given_doc(nlp, forms, tb_lang, upos, None, glosses)
     heads: list = []
     deprels: list = []
     uposd: list = []
@@ -1849,7 +1988,8 @@ def _resolve_sud_package(model_id: str) -> str:
     return _sud_target(model_id)[0]
 
 
-def analysis_scores(forms: list[str], model_id: str = "", upos: list[str] | None = None) -> dict:
+def analysis_scores(forms: list[str], model_id: str = "", upos: list[str] | None = None,
+                    glosses: list[str] | None = None) -> dict:
     """What the pipeline ranked SECOND (and third) for one sentence's tokens.
 
     ``{"scored": True, "heads": [...], "deprels": [...], "upos": [...]}`` — one entry per form, with
@@ -1878,13 +2018,19 @@ def analysis_scores(forms: list[str], model_id: str = "", upos: list[str] | None
     # name, so keying on the package alone would hand the second custom model of a session the first
     # one's ranking for the same sentence — a different model's answer, silently, and the whole point
     # of a custom model is that its row makes it answer differently.
-    key = (name, tb_lang, tuple(forms), tuple(upos or ()))
+    # ⚠ …AND THE GLOSSES ARE IN IT FOR THE SAME REASON. They are an INPUT to the parse being ranked
+    # (0.2.0's lexical channel — `_given_doc`), so a ranking computed before the reader glossed a
+    # token is a ranking of a different parse than the one they can now run. Keyed on what the CALLER
+    # sent rather than on the derived string: two different tier values can reduce to the same gloss,
+    # which costs a recompute and can never serve a stale answer — the safe direction to be wrong in
+    # for a cache whose whole failure mode is answering about a sentence that has since changed.
+    key = (name, tb_lang, tuple(forms), tuple(upos or ()), tuple(glosses or ()))
     hit = _SCORE_CACHE.get(key)
     if hit is not None:
         return hit
     try:
         nlp = _load_spacy(name)
-        heads, deprels, uposd, uposub = _score_doc(nlp, name, forms, upos, tb_lang)
+        heads, deprels, uposd, uposub = _score_doc(nlp, name, forms, upos, tb_lang, glosses)
         if len(heads) != len(forms):
             return {"scored": False, "reason": "the pipeline changed the token count"}
         out = {
@@ -1925,7 +2071,7 @@ def _synth_state(parser, doc, i, j):
 
 
 def arc_label_scores(forms: list[str], model_id: str, child: int, head: int,
-                     upos: list[str] | None = None) -> dict:
+                     upos: list[str] | None = None, glosses: list[str] | None = None) -> dict:
     """"If this token hung off THAT one, what would you call the edge?" — ``child``/``head`` 1-based.
 
     ⚠ THIS IS THE COUNTERFACTUAL QUESTION, and it is asked only where the honest one has no answer.
@@ -1950,7 +2096,7 @@ def arc_label_scores(forms: list[str], model_id: str, child: int, head: int,
     try:
         nlp = _load_spacy(name)
         import numpy as np
-        doc = _given_doc(nlp, forms, tb_lang, upos)
+        doc = _given_doc(nlp, forms, tb_lang, upos, None, glosses)   # the same inputs the real parse would get — a counterfactual asked under different ones is not this sentence's
         parser = None
         for pname, proc in nlp.pipeline:
             if pname == "parser":

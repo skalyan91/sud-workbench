@@ -27,6 +27,44 @@ is exactly what the re-render reproduces — and the un-minted text rides along 
 
 ## Menus, deletion, and ⌘⌫
 
+⚠ **A MENU IS DISMISSED ON `pointerdown`, NOT ON `click` — BECAUSE A CLICK IS NOT GUARANTEED TO EXIST.**
+The outside-click dismissal has been fixed twice and the first fix (capture phase, so an element that
+stops propagation cannot swallow it) was only half of it. A `click` is dispatched only where the press
+and the release share a target, so any field that RE-RENDERS ITSELF on the press dispatches none at
+all, and a listener waiting for one waits for ever. Measured over CDP with real mouse events, a token
+menu open, clicking each target:
+
+| target | `click` dispatched | menu dismissed |
+| --- | --- | --- |
+| `.tg-text` (a translation) | **no** | **left open** |
+| `.sid-in` (the sentence id) | **no** | **left open** |
+| `.stext`, a toolbar button, a status-bar pill, the page background | yes | dismissed |
+
+Perfectly correlated — and it is why the earlier fix looked complete, since every target tried by hand
+happened to be one that dispatches a click. `ctxDismissOutside` is now bound to **both**
+`pointerdown` and `click` in capture (js/editing/context-menu.js): the first always fires and is the
+gesture's first event, the second covers a keyboard activation that has no pointer event at all.
+⚠ **`closeDrawers` (js/ui/wiring.js) IS THE SAME LISTENER PAIR** and already carried this fix, written
+after the same measurement, while the menus never got it. The two must not drift — one press has to
+dismiss both.
+
+⚠ **AND A `.ctxtrigger` EXCLUDES ITSELF FROM THAT DISMISSAL, WHICH IS WHAT LETS A TRIGGER TOGGLE.**
+The Format pill did not shut on a second click: `fmtMenu` decides "already mine, so close" from
+`ctx.classList.contains("show")` (js/io/formats.js), and the dismissal above had already closed the
+menu, so the second click read it as absent and reopened. Verified to predate the `pointerdown`
+listener — removing that listener at runtime and re-running gave the identical failure — so the
+capture-phase dismissal had been eating the toggle since it landed.
+
+**The fix is the idiom the other pills already use, not a new one.** `#translitPill` and `#orthoPill`
+exclude their own trigger from their outside-close (`!e.target.closest("#translitPill")`,
+js/lang/translit.js) and toggle correctly BECAUSE they do; they were never affected because their
+menus are their own elements rather than the shared `#ctx`. `ctxDismissOutside` now skips a press on
+anything inside a `.ctxtrigger`, and `#fmtPill` wears that class — a class rather than an id list, so
+context-menu.js goes on knowing nothing about which pills exist and a future trigger opts in by
+wearing it. Clicking the pill while ANOTHER menu is open is unaffected: nothing is dismissed, `fmtMenu`
+finds a stamp that is not its own, and `showCtx` replaces the menu outright (measured: a token menu
+becomes the Format menu on one click, rather than being left standing under it).
+
 ⚠ **A DELETION RE-FILTERS THE MGloss DROPDOWN; IT DOES NOT DISMISS IT.** Backspace is how a reader corrects a
 mistyped abbreviation, and closing the list on the keystroke that narrows the typo made the feature unusable for
 the case it is for. `mglossOpenAC` is re-run on any `delete*` inputType while the menu is open on that field; it
@@ -48,6 +86,166 @@ keyboard path in `js/grid/columns.js` went through `deleteSel` (js/core/undo.js)
 and leaves the token selection where the range STARTED. Selecting five blocks and pressing ⌘⌫ therefore
 deleted the FIRST of them. `deleteSel` now keeps the token half (genuinely its own) and delegates the
 sentence half. Two copies of one command drift, and these had.
+
+## Which features (and which of their values) a word class may take
+
+⚠ **THE FEATURE WAS SCOPED PER CLASS; THE VALUES NEVER WERE.** Reported as "why does the NOUN submenu
+contain POS subtypes that are clearly verbal?" — and it was never only NOUN. `subtypeFeatsFor` asks
+which features a class may carry (`UPOS_SUBTYPE_ON`), but the values then came off `attestedFeatVals(f)`,
+which scans the whole DOCUMENT regardless of word class and falls back to UD's entire list when nothing
+is attested. So every class was offered whatever values the document happened to use *anywhere*.
+Measured on the dev fixture, before and after:
+
+| class | before | after |
+| --- | --- | --- |
+| NOUN | `VerbForm[Fin/Inf]` | `VerbForm[Part/Vnoun]` |
+| ADJ | `VerbForm[Fin/Inf]` `PronType[Art/Rel]` `NumType[all 7]` | `VerbForm[Part]` `PronType[Int]` `NumType[Ord/Mult/Frac/Sets/Dist]` |
+| DET | `NumType[all 7]` | `NumType[Card/Sets]` |
+| ADV | `PronType[Art/Rel]` `NumType[all 7]` | `PronType[Int/Rel/Exc/Dem/Tot/Neg/Ind]` `NumType[Card/Ord/Mult/Dist]` |
+| VERB | `VerbForm[Fin/Inf]` | `VerbForm[Fin/Inf/Sup/Part/Conv/Ger/Gdv/Vnoun]` |
+| PRON | `PronType[Art/Rel]` | `PronType[` all 11 `]` |
+
+⚠️ **NOTE THE LAST TWO ROWS: THE SAME BUG WAS ALSO HIDING LEGITIMATE OPTIONS.** Document-wide
+attestation is not merely too loose, it is the wrong question in both directions — VERB could not be
+given `Conv` or `Part`, and PRON could not be given `Dem`, because the little fixture document had
+never used them, while NOUN was offered `Fin` because a VERB somewhere had.
+
+**The tables are derived, not written by hand** (`FEAT_UPOS` and `SUBTYPE_VALS`, js/grid/grid.js): from
+the UD validator's own permitted-features data — `data/feats.json` in `UniversalDependencies/tools`,
+what `validate.py` checks a treebank against — over its 286 languages, universal features only. A bare
+union across 286 languages is useless (some language permits VerbForm on PUNCT), so one stated rule
+does the cutting; the value-level table needs **two clauses**, because the question has two directions
+and either alone gets a real pair wrong: 20 % of the value's most-permitting class ("is this class a
+normal home for this value?") **or** 80 % of that class's own most-permitted value ("is this value a
+normal choice for this class?"). The first alone drops `DET.Card` — 28 languages, but `Card` lives
+overwhelmingly on NUM — while it is the only NumType most of those 28 give a DET; the second alone
+keeps `NOUN.Fin`, the reported fault. Both together keep DET.Card and drop NOUN.Fin.
+
+⚠ **AND THE TABLE IS A DEFAULT, NEVER A VETO.** `subtypeValsFor` unions the ceiling with
+`strictAttestedVals(f,U)` — this document's own tokens of that class, plus the model's own labels for
+it. Verified: in a document that really does annotate a NOUN with `VerbForm=Fin`, NOUN's flyout offers
+`Fin/Part/Vnoun` again. A corpus that annotates something unusual is evidence, and is believed.
+
+⚠ **AND THE ESCAPE HATCH IS THE UD INVENTORY FOR THE CLASS, MINUS WHAT THE MAIN LIST ALREADY OFFERS.**
+It took three readings to settle, and both rejected ones are kept because each looks right until it is
+used:
+
+1. *Per feature* — carrying only features with NO attestation at all for the class. The narrowing it
+   escapes is per VALUE, so a feature the document used in PART was unreachable in the rest of itself.
+   Reported as "why am I only seeing `1` under the Person options?"; measured on
+   `samples/english.conllu`, an AUX offered `Person=3` alone — the only person any AUX in that file
+   carries — with `Person` nowhere in the flyout.
+2. *The whole inventory, overlapping the main list* — "it should show the whole UD inventory! The main
+   menu already shows the subset that's attested in the document" — corrected again to the rule above:
+   "the UD list MINUS what's already attested".
+
+So **the two lists partition the inventory** and neither repeats the other: the main list is what this
+document uses for this class, the flyout is everything else UD defines for it. A feature appears in
+both only where each has a value the other has not — `Person` on an AUX is `3` above and `1/2/4/0`
+here, on a PRON `1,3` above and `2/4/0` here, on a NOUN nothing above and all five here — and one with
+nothing left over is omitted entirely.
+
+⚠ **THE ESCAPE HATCH IS "OTHER FEATURE…", AND IT IS A TOP-LEVEL ROW ONLY.** Asked for with the AVM
+placeholder menu: the main list answers from evidence and stops there for a tagged token, which leaves
+a feature the class plainly takes — in a document that has not used it, under a model that never emits
+it — unreachable. `otherFeatureItems` (js/editing/context-menu.js) offers exactly those, filtered by
+`FEAT_UPOS`, so it is not the old unfiltered fallback under a new name: a PUNCT gets Deixis/DeixisRef,
+not Tense. It hangs off `avmAddMenu` rather than `addFeatureItems` because there is exactly **one**
+flyout layer (`ctx2`): a row carrying `sub:` inside a flyout would have to rebuild the element it
+lives in, and the token menu's own "Add feature…" already IS a flyout.
+
+⚠️ **AND IT IS THE FIRST SUB ROW ON A FITTED MENU, WHICH MOVED `openSub`'s WIDTH CAP TWICE.** That cap
+is `max(parent, 224)`, and its own note said the 224 floor was safe because "only a `.defctx` menu can
+be narrower, and none of those has a sub row today" — true when written, and false the moment this row
+existed. The flyout came out at 224px hanging off a 148px menu, against 128px for the SAME shape of
+list in "Add feature…", so a `.defctx` parent now caps at its own width (floor 120px): the rule the cap
+already states one line up, that a panel hinged off a menu shouldn't outgrow the menu it hangs from.
+
+**Then the cap had to learn to give way** — "don't cap the width if it would lead to line wrapping".
+At 148px the flyout wrapped **38 of its 122 rows** (`Grpa` / `greater paucal` over two lines), because
+capping a shrink-to-fit panel is exactly the same instruction as "wrap". A cap is a tidiness and a
+wrapped label is not tidy, so `subNoWrap` on the row lets the cap rise to the flyout's max-content
+width — 280px here, 0 rows wrapped, while "Add feature…" stays at the 128px it already fitted in.
+⚠ **OPT-IN, BECAUSE THE WIKTIONARY FLYOUT IS THE OPPOSITE CASE** and always was: its rows are SENSES,
+whole clauses in `.mlbl` that `.ctx-sub.defctx` wraps deliberately, and uncapping it would make a menu
+as wide as the longest definition in the dictionary. That is also why the existing header/label floor
+CLAMPS itself to the cap — the clamp is right for that flyout and wrong for these.
+⚠ **AND THE HEIGHT CAP HAD THE SAME FAULT, one line below the width one** — "why does the flyout have
+such a ridiculously small height cap?!". `maxHeight` was `min(420, 70vh, parentHeight)`, on the rule
+that a panel shouldn't outgrow the menu it hangs from — a statement about ORDINARY menus. A `.defctx`
+menu fits its own content and can be two rows, so a 122-row flyout hanging off a 200px placeholder menu
+was squeezed into 154px of scrolling viewport. A fitted parent no longer bounds it: 393px now, the
+420px cap rounded down to whole rows. Both caps therefore read the same way — **a fitted menu is not a
+length to measure anything against.**
+
+⚠ **AND IT MEASURES BY LAYOUT, NOT BY FONT STRING**: clearing the cap lets the panel shrink-to-fit to
+its max-content width, which is by definition the width at which nothing wraps. The floor beside it
+reconstructs row widths from font strings, which is the class of measurement this repo's notes warn
+about (the two engines disagree); asking the engine avoids the question. Bounded at half the window,
+since a flyout running off the screen is a worse answer to a long row than a wrapped one.
+
+⚠ **AND THE SUBTYPE FLYOUT SPLITS THE SAME WAY THE FEATURE MENU DOES** — "the UPOS submenus should
+likewise be limited to POS-relevant attested options, with a flyout listing the full POS-relevant UD
+inventory with a search bar". So the flyout is now what this document attests FOR THAT CLASS
+(`subtypeValsAttested` — its own tokens plus the model's own labels for it), and "Other subtype…" opens
+the rest of what UD gives the class (`subtypeValsOther` = `SUBTYPE_VALS` less the attested). Measured on
+the fixture: VERB attests `Fin/Inf` and its other list is `Sup/Part/Conv/Ger/Gdv/Vnoun/Abbr`; DET
+attests `Art` with fourteen behind it — which is over `SUB_SEARCH_MIN`, so that one opens with a search
+field.
+⚠ **AND A CLASS THAT ATTESTS NOTHING OPENS STRAIGHT INTO THE OTHER LIST** — "if there are no attested
+subtypes for a given UPOS, the submenu should directly show the Other state". A flyout whose only row
+is "Other subtype…" asks the reader to confirm that an empty list is empty; the drill-down earns its
+gesture only where there is something above it to drill down FROM. No way-back row there either: there
+is no attested list to return to, and offering one would land on the very row that would have to send
+them here again. Measured: NOUN opens on `Part/Vnoun/Abbr` (badge 3), ADJ on its nine, ADP on `Abbr`
+alone — and the badge counts what the flyout actually holds in either shape.
+⚠ **IT REPLACES THE FLYOUT RATHER THAN NESTING, AND THAT IS FORCED.** There is exactly one flyout layer
+(`ctx2`), so a `sub:` row inside a flyout would have to rebuild the element it lives in. The row reopens
+`ctx2` off the SAME owner — the POS row in the parent menu, kept as `ctx2._owner`, at the size kept as
+`ctx2._colSize` — so the new list lands exactly where the old one was with the POS menu still standing.
+A new `keepOpen` item flag is what stops the row's own click closing that menu first, and a
+"‹ Attested subtypes" row returns, so the drill-down is not a one-way door.
+⚠ **BOTH THE DRILL-DOWN ROW AND THE WAY BACK RENDER LAST WHATEVER THE LIST SAYS**: `renderMenu` collects
+every row that precedes the first `header` into a TAIL and appends it after the groups. Pushed at the
+front, the back row still came out at the bottom — with its separator BELOW it, which is the only part
+of that a reader would have noticed. Both are now written where they land.
+
+⚠ **THE GRID'S FEATS KEY LIST TAKES THE SAME TABLE** (`acKeyItems(col,upos)`), so the two pickers for
+one column cannot answer differently — and `FEAT_UPOS` is unioned with the curated `UPOS_SUBTYPE_ON`
+to guarantee that. **Its doc-only half had to be scoped too**: `docPairKeys` scans every token of any
+class, which put Tense and PronType straight back on a NOUN and ten features back on a PUNCT after the
+table had just removed them. `docPairKeysForUpos` is the analogue of `docPairValsForUpos` one level up.
+Measured: a PUNCT's list went from 17 of 28 features to 6, a NOUN's from 27 to 20, an untagged token
+keeps all 28 — there is no class to scope by, and the whole inventory is the honest answer.
+
+## A flyout long enough to scroll gets a search field
+
+⚠ **BUILT IN `openSub`, NOT BY THE CALLERS** — "the flyout should have a search bar (as should the
+equivalent flyout anywhere else)", and one implementation is how "anywhere else" comes for free.
+`liftSearch` is `liftFootLink`'s twin: a fixed band, a scrolling rest, reusing that pair's own CSS
+shape in both kits. It appears at **14 rows** (`SUB_SEARCH_MIN`) — a little over a capped flyout's
+screenful — so "Other feature…" (122 rows) and a DET's subtype flyout (15) get one while "Mark as…"
+(3) and a VERB's subtypes (9) do not.
+
+- **The match is a word prefix, not a substring**, and it is `wordPrefixRe` (js/core/state.js) — the
+  very function the Languages menu and the translation drawer search with, so all three answer a query
+  the same way. Both halves of a row are searched, because half of them say what the other half means:
+  `Ptan` is findable as "plurale tantum", `Dat` as "dative". **A header carries its whole group**:
+  typing a feature name asks for that feature's values. Measured — "per" → the Person group entire,
+  plus `Case=Per` (perlative) and DeixisRef's two rows; "dative" → `Case=Dat` alone; "zzz" → nothing,
+  and a "No match" note.
+- ⚠ **THE WALK IS OVER DESCENDANTS, NOT `children`.** `renderMenu` nests rows in a column element, so
+  the first version filtered nothing at all while still showing "No match" beneath 122 visible rows —
+  the one state that cannot be true, and the tell that the walk was looking at the wrong depth.
+- ⚠ **IT FOCUSES ONLY WHEN THE FLYOUT WAS OPENED DELIBERATELY.** These flyouts also open on HOVER,
+  after 140ms, for a pointer merely travelling down the menu; a field grabbing the keyboard as the
+  pointer passes would swallow the next thing typed anywhere in the app. `raise(byClick)` carries that
+  distinction through `openSub` to `liftSearch`, so a click (or the right-click that opens a subtype
+  flyout) focuses and a hover does not. Verified both ways.
+- **Enter takes the first row still standing**, which is what makes the field worth typing into rather
+  than a filter you then have to aim at. Verified: "dative" + Enter sets `Case=Dat` and closes.
+- `fitWholeRows` pays for the band exactly as it already pays for the footer, or the last row it
+  accepts overflows the box and is clipped.
 
 ## A drop must await its commit
 

@@ -94,6 +94,31 @@ is also what an MWT range's re-fusion reads. And **with no model it says so and 
 the old body degraded to a whitespace re-tokenisation — precisely the thing this command may no longer
 do. `applySentText` lost its `force`/`scroll` options with their only caller.
 
+⚠ **AND IT MUST CARRY THE ANNOTATOR'S LAYERED ANNOTATION ACROSS THE REPLACEMENT** — `ANNOT_MISC` =
+Gloss / MSeg / MGloss / Unsandhied / CorrectForm, plus a `_trPick` token's own Translit, restored by
+`captureAnnot`/`restoreAnnot` (js/io/bridge.js) beside the marks and the spacing. Reported as "even if
+the Glossing checkbox in the Pipeline drawer is off or disabled, glosses still get overwritten", and
+the arm was innocent: `reparse` replaces every token OBJECT, so MISC went with the objects. What
+followed differed by arm and neither was right. Measured, on two tokens glossed `dog.SG` / `cat.SG`
+with the FEATS moving `Number=Sing` → `Plur`:
+
+| | Gloss | MSeg | MGloss |
+| --- | --- | --- | --- |
+| before, arm ON | *(gone)* | re-derived | `PL` — the stem lost |
+| before, arm OFF/disabled | *(gone)* | *(gone)* | *(gone)* |
+| after, either | `dog` | `hond` | `dog.PL` |
+
+With the arm ON, `morphAfterReparse` re-seeded the morphemic rows from the new FEATS and the reader
+watched a gloss turn into a bare run of abbreviations — the stem could not return, because
+`mglossLexFor` reads `_glossLex` or the Gloss tier and the replacement had taken both. With it OFF or
+disabled that re-seed declines, so the rows simply emptied. **No parser produces these five keys**, so
+a parse holds no opinion about them and "reset the parse" cannot mean "discard them" — the same
+argument SPACING_MISC and `captureMarks` were already restored on, and the same `keep` list
+`reparseTokenFields` has always carried. Matched BY INDEX here (not `captureMarks`' form+occurrence),
+because this path holds the forms fixed and its alignment is 1-to-1 by construction. An existing
+MGloss is then RETARGETED for the FEATS the reset produced, never rebuilt — the restraint
+`reparseTokenFields` states — and only a genuinely empty row is still `morphPrefillSent`'s to seed.
+
 ⚠ **THE WHEELS GAINED THIS WITHOUT A VERSION BUMP**, so an environment built before them never
 refreshes: `requirements-core.txt` pins the English wheel by release URL at one version, pip sees
 that version installed and skips it, and the per-user venv is built once and gated behind `.sud-core-ready`
@@ -130,6 +155,71 @@ trained together but are not identical. A row is read from and written to BOTH �
 allows both node ids in its optimizer for exactly this reason — which is why a stored model keeps a
 LIST of vectors, one per `find_nodes(nlp, "embed")` result, zipped back on by index.
 
+⚠️ **0.2.0 ADDED A LEXICAL CHANNEL, AND ENGLISH GLOSSES ARE HOW THIS APP FILLS IT.** One aligned vector per
+token, with two fill routes into ONE space: the token's own lemma looked up in its language's table while
+training, an **English gloss** looked up in the English table at deployment. Aligned vectors are rotated into
+the English hub, which is what makes the substitution legitimate rather than a different kind of input — and the
+wheel measured it before relying on it (cos(source, en-gloss) +0.444 on ar PADT and +0.340 on lzh Kyoto against
+a permuted control's +0.109/+0.116). The consequence is the point: training coverage now limits how well the
+channel is LEARNED, not where it can be USED, so a language with no fastText table at all can still fill it.
+
+The interface is two things and this app touches both:
+
+| | what | where |
+| --- | --- | --- |
+| the input | `Token._.gloss`, one string per token, before the first component runs | `parse._given_doc` |
+| the regime | `set_vectors_fill(nlp, …)` ∈ lemma / gloss / auto | `parse._load_spacy_locked` |
+
+⚠️ **THE APP SETS "auto", NOT THE WHEEL'S OWN "gloss".** The shipped config says `vectors_fill = "gloss"`,
+which is right for the wheel's own zero-shot evaluation and wrong here: this app glosses SOME tokens of SOME
+documents, and under `gloss` an unglossed token is OOV even where its language has real rows to fall back on.
+`auto` is gloss-then-lemma — identical to `gloss` for a language with no rows (the lemma route is all-OOV
+there), strictly better wherever rows exist. ⚠ The call is GUARDED, because `set_vectors_fill` **refuses at zero
+nodes** by design ("a silent no-op would report the lemma fill's number under the gloss fill's name") — and a
+0.1.0 wheel, still installed for anyone who has not pressed Update, is exactly that case. A wheel with no
+lexical channel is not an error; it is the previous version, and it parses.
+
+⚠️ **WHAT GOES IN THE CHANNEL IS DECIDED IN ONE PLACE, `app/glosses.py`** — prefer `MGloss`'s lexical part,
+else `Gloss`; strip the Leipzig abbreviations and the morpheme separators from either. Two callers need that
+rule and they are on opposite sides of the bridge: a live parse, whose tiers arrive from the open document, and
+a custom model's FITTING run, which reads the same two tiers out of a training file's MISC with no frontend
+involved. So the frontend sends the tier values RAW (`pipeGlosses`, js/core/prefs.js → `[[Gloss, MGloss], …]`)
+and Python decides. A rule that existed twice would drift, and the drift has a name here: the row would be
+fitted under one reading of "the gloss" and parsed under another — the train/deploy mismatch
+`docs_from_conllu`'s own note is about ("fit the row under the regime it will be used in"), which is why
+`generic_models._examples` sets the extension on its PREDICTED docs too.
+
+⚠️ **AND WHERE THE MODEL READS GLOSSES, THIS APP STOPS WRITING THEM.** `pipeEffective` forces the Glossing arm
+off whenever `PIPE_READS_GLOSS` — the drawer greys the row and says why, and the reader's own tick is left
+untouched so switching models brings it back. The reason is not tidiness: a gloss this app generated is its own
+guess (retrieved by `gloss_align.py`, or composed from FEATS and the lemma), and handing it back to a parser
+that READS glosses would have the model consume the app's answer as evidence and the app read the result as the
+model's opinion. Circular, and invisible — nothing downstream can tell an annotator's gloss from one the app
+wrote for it. The tiers stay fully editable by hand; only the automatic generation stops.
+
+⚠️ **THE LINE IS "MAY KEEP ABBREVIATIONS IN STEP, MAY NOT INVENT CONTENT".** What stays ungated is the upkeep
+that follows the reader's OWN edit — `retargetGlossForFeatsChange`, `featsSyncGloss`, `uposSyncGloss` — all of
+which move only Leipzig abbreviations, and abbreviations are stripped before anything is sent, so they cannot
+reach the channel however stale or fresh they are. What is gated is every path that composes a STEM:
+`fillAutoGloss`, `morphPrefillSent`, `mglossRefill`, `msegRefill`, `mglossReglossLexical` and
+`reparseTokenFields`' compose-fresh branch. ⚠ THE GATE IS IN THE FUNCTIONS, not only at their call sites, and
+that was measured rather than assumed: with the arm forced off, calling `morphPrefillSent` and `mglossRefill`
+directly still wrote a fresh MGloss, because each was gated only by the one caller that happened to ask.
+
+⚠️ **WHAT COUNTS AS "READS GLOSSES" IS READ OFF THE PIPELINE, NOT OFF THE MODEL'S NAME** (`parse.reads_glosses`,
+reported by `model_arms` beside `reads_upos`): the probe is the presence of an `extract_aligned_vec` node, which
+is the very node `set_vectors_fill` switches — so "the app thinks this model reads glosses" and "there is a
+channel to fill" cannot come apart. A 0.1.0 generic wheel answers false and glosses exactly as before.
+
+⚠️ **STRIPPING THE ABBREVIATIONS IS NOT TIDYING.** An interlinear gloss writes content morphemes as English
+words and grammatical ones as Leipzig abbreviations (`pick_up_for-3SG.P-BEN-IMP`); the wheel drops all-caps
+pieces rather than hashing them, "on the grounds that FEATS already carries them". Sending them would fill the
+channel with misses that look like content. A multi-word gloss (`give to`) is OOV by construction — the English
+table is 200 000 single lowercase forms — and picking one of its words instead would be inventing an answer the
+annotator did not write. **Verified on the real 0.2.0 pipeline**: with nothing supplied every token carries the
+channel's OOV flag 1.0; with `dog`/`bark` supplied those two flip to 0.0 and their 129-d rows change (L2 1.414)
+while the unglossed token is byte-identical.
+
 ⚠️ **THE WHEEL IS FETCHED, AND THAT IS A LICENCE RULE.** CC BY-NC-SA 4.0: 24 of its 80 training
 treebanks are NonCommercial. `make_portable.sh` pip-installs the wheels it distributes straight into
 the bundle, so bundling this one would attach a NonCommercial term to the whole app — which is
@@ -162,20 +252,36 @@ score over the 80 training languages, twenty points higher. `generic_models.cave
 that says which of the four bases (`file` / `fitted` / `builtin` / `unfitted`) a row's figures came
 from; three surfaces show it.
 
-⚠ **THE APP NEVER PICKS A CUSTOM MODEL, BUT THE READER MAY ALWAYS CHOOSE ONE**, and those two rules
-live in two functions that look alike and must not be merged. `installed_by_language` /
+⚠ **THE APP NEVER PICKS *BETWEEN* CUSTOM MODELS, BUT THE READER MAY ALWAYS CHOOSE ONE**, and those
+two rules live in two functions that look alike and must not be merged. `installed_by_language` /
 `best_installed_model` answer "which model should parse this language on the reader's behalf" and
-skip custom models entirely: a reader may have three for one language and named them by hand, so
-choosing between them is not a choice the app can make. `language_choices` — the Insert-text dialog's
-own list — is the opposite act, and offers every one of them under **Installed parsers**, named by
-the MODEL rather than by a language (two rows both reading "English (en)" would be a coin toss). A
-language whose only parser is a custom one is also dropped from "Other languages", where the dialog's
-note would otherwise tell the reader no parser is installed for it, three rows below the one they
-built.
+skip custom models: a reader may have three for one language and named them by hand, so choosing
+between them is not a choice the app can make. `language_choices` — the Insert-text dialog's own list
+— is the opposite act, and offers every one of them under **Installed parsers**, named by the MODEL
+rather than by a language (two rows both reading "English (en)" would be a coin toss). A language
+whose only parser is a custom one is also dropped from "Other languages", where the dialog's note
+would otherwise tell the reader no parser is installed for it, three rows below the one they built.
+
+**Superseding the "entirely" above (0.3.17): where EXACTLY ONE custom model claims the language and
+nothing else does, the app picks it.** The rule above is about a choice; one candidate is not one.
+Reported against a custom `mlv` model on a document auto-detected as Mwotlap: the detector named the
+language, the reader's own parser was the only thing installed that spoke it, and the picker still
+said *None (manual)*. Two or more claimants and the answer is `""` again — the original rule intact
+for the case it was written for.
+
+⚠ **AND THE FALLBACK LIVES IN `best_installed_model`, NOT IN `installed_by_language`**, which stays
+custom-free. `language_choices` reads that same map and already lists every custom model by name, so
+letting them into the groups would print such a language TWICE — once as the language's parser, once
+as itself — which is the coin toss the naming rule exists to avoid. `_sole_custom_model` is reached
+only when the language has no group at all, so an ordinary parser still wins wherever there is one.
+The frontend keeps the pair in step in `populateModels` (`js/io/models.js`): the non-custom fill runs
+first, then a second pass adds a language only where one custom model claims it — `""` marks a tie —
+and `MODELLANG` is what `syncModelToLang` reads on auto-detect.
 
 ⚠️ **AND THE DIALOG'S CHOICE TRAVELS WITH THE PAYLOAD.** `child_insert_text` used to recompute the
-model from the language (`_model_for_language`) — which cannot name a custom model by construction,
-so the note under the field promised one parser and the insert quietly ran another. Both the main
+model from the language (`_model_for_language`) — which at the time could not name a custom model at
+all, and which even now names one only where it is the language's sole parser, so the note under the
+field promised one parser and the insert quietly ran another. Both the main
 text and each parallel now carry the `model` their own `<option>` held, and the registry pick is only
 the fallback for a caller that sent none. That also retires the standing requirement that the two
 sides independently agree.
@@ -307,6 +413,53 @@ everything downstream consumes identically — a whitespace split and the rule s
 switching one off SUBSTITUTES a segmentation rather than removing one. Parsing a segmentation the
 model did not produce is a first-class operation here, not a degraded one: `parse_pretokenized` exists
 for exactly that, and "SEGMENTATION IS THE ANNOTATOR'S" is the rule Reset Parse is built on.
+
+⚠ **BUT THOSE TWO FALLBACKS ARE NOT EQUALLY GOOD, AND `GENERIC_ARMS` USED TO ASSUME THEY WERE.** The
+generic wheel omitted `tokenise` on upstream's own words — "there is no tokeniser; that is your
+business" — which is true of a TRAINED, language-specific one and false of the pipeline that gets
+loaded: `nlp.tokenizer` is spaCy's language-neutral `xx` rules, the very object
+`_parse_spacy_sud` calls for every other spaCy model through the identical line. Reported as "the
+generic parser should tokenise punctuation sensibly (with the `SpaceAfter` feature)". Measured, on
+`The cat sat on the mat. "Really?" he said (twice).`:
+
+| | tokens | SpaceAfter |
+| --- | --- | --- |
+| before (whitespace split) | `mat.` `"Really?"` `(twice).` | none written |
+| after (`xx` rules) | `mat` `.` `"` `Really` `?` … | 6, 8, 9, 10, 14, 15, 16 |
+
+The second row is byte-identical to what `en_sud_ewt_gum` produces on the same text. The asymmetry
+with `sentence` is the point and is kept: there the app's OWN rule splitter is as good as the `xx`
+rules, so the absence costs nothing; here the fallback loses every punctuation boundary in the
+sentence, and a whitespace split has no boundaries to record `SpaceAfter` at. **An arm is omitted
+where the fallback is as good, not merely where the wheel trained nothing.** There was precedent
+either way and it favours admitting it: `zh_sud_gsd_simp_trad` and `lzh_sud_kyoto` use stock spaCy
+tokenisers too and have always reported this arm. Switching it off still gives the whitespace split.
+
+⚠ **AND THE SECOND HALF OF THAT BUG WAS `_reconstruct_mwt` READING AN ABSENT UPOS AS "NOT
+PUNCTUATION".** Its run test was `tokens[i]["upos"] == "PUNCT"`, which is a sound question only of a
+pipeline that TAGS. The generic parser ships no tagger, so every token arrived with `upos == ""`,
+every chunk read as one long non-punct run, and admitting the tokeniser alone bought `mat` + `.`
+fused into the multi-word token `mat.` — with `"Really?"` and `(twice).` as ranges of four. The
+`SpaceAfter` went with them, because `_mark_space_after` writes nothing STRICTLY INSIDE a range (the
+range's own form carries the gluing), so a fabricated range silently swallowed the flags too.
+`_punct_here` now asks UPOS where there is one and `_is_punct_form` where there is not — the helper
+that already existed for the tokenise-only path, which has no tagger output YET, asked here by a path
+that will never have one. Verified unchanged on `en_sud_ewt_gum`: `co-op`/`e-mail`/`It's`/`don't` and
+the Chinese spaceless case all produce byte-identical tokens, ranges and MISC either way.
+
+⚠ **AND PUNCTUATION IS THE ONE CELL THE APP FILLS WITHOUT A MODEL** (`_punct_defaults`, called last
+from `_apply_arms` so it sees what every arm has left empty). "Silence is the preferred failure for
+annotation" governs anything a model might have an OPINION about; a token whose form is entirely
+punctuation is not one of those — UD and SUD both make it categorical, such a token IS `PUNCT` and
+attaches with `punct` in every language. It is the same fact `_is_punct_form` already answers with for
+`_reconstruct_mwt`. Reported after the tokenisation fix above: with punctuation finally split off, a
+raw-text insert under a custom model left an empty word class on every full stop, and the wheel reads
+UPOS as INPUT — so the annotator had to type `PUNCT` into each one before anything could be parsed at
+all. Three restraints keep it from being an invention: **empty cells only** (a tagger that said INTJ
+has said something and wins), **never a column the caller handed in** (`given`, the guard
+`_apply_arms` states for itself), and **the relation only where the class ended up `PUNCT` and the
+head is not 0** — a root stays `root`, and the HEAD is never touched, because which token the
+punctuation hangs off is a real question and this answers only the question that is not.
 
 ⚠ **AN ARM THE MODEL CANNOT DO IS STRUCK IN `parse.py`, NOT ONLY IN THE OPTIONS BAR.**
 `_effective_arms` intersects the reader's list with `model_arms(model_id)`, which is read off the

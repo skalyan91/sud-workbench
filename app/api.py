@@ -19,7 +19,8 @@ from typing import Any
 
 import webview
 
-from . import appearance, convert, detect, io_conllu, itrans, menu_spec, model, models_registry, parse, toolbox_import
+from . import (appearance, convert, detect, glosses, io_conllu, itrans, menu_spec, model,
+               models_registry, parse, toolbox_import)
 from .paths import APP_DATA
 
 _STATE_FILE = os.path.join(APP_DATA, "state.json")   # small persisted app state (recent files, …)
@@ -104,6 +105,27 @@ def _save_state(state: dict) -> None:
             json.dump(state, fh, indent=2)
     except Exception:  # noqa: BLE001 — persistence is best-effort
         pass
+
+
+def _english_glosses(pairs) -> list | None:
+    """``[[Gloss, MGloss], …]`` from the frontend → one English gloss per token, or None.
+
+    The DECISION lives in `app.glosses`, not here and not in JS: the fitting path asks the same
+    question of a CoNLL-U file's MISC and must get the same answer, or a custom model's row is
+    fitted under one lexical-channel regime and parsed under another — the mismatch that module's
+    own note is about.  This is only the shape adapter for what the bridge happens to send.
+    Answers None for "nothing to say", so a document with no glossing at all costs the parse path
+    nothing at all.
+    """
+    if not pairs:
+        return None
+    out = []
+    for pair in pairs:
+        if isinstance(pair, (list, tuple)):
+            out.append(glosses.english_gloss(*(list(pair) + ["", ""])[:2]))
+        else:
+            out.append(glosses.english_gloss(str(pair or ""), ""))
+    return out if any(out) else None
 
 
 class Api:
@@ -968,7 +990,8 @@ class Api:
         return {"results": parse.parse_many(list(texts or []), model_id, arms)}
 
     def parse_tokens(self, forms: list[str], model_id: str = "",
-                     upos: list[str] | None = None, arms=None, given=None) -> dict:
+                     upos: list[str] | None = None, arms=None, given=None,
+                     glosses: list | None = None) -> dict:
         """Re-parse a sentence whose TOKENISATION IS FIXED — one token per entry of ``forms``.
 
         What the frontend needs after a Form or UPOS edit, where the heads, relations and annotation
@@ -983,8 +1006,19 @@ class Api:
         ``given`` — ``{arm: [column values]}`` — carries the columns the reader has taken over by
         switching the arm off, so every component that READS one reads theirs. Measured worth on ten
         held-out Basque sentences: supplying FEATS alongside UPOS moves LAS 38.32 → 53.27. See
-        `parse._GIVEN_SETTER`."""
-        return parse.parse_pretokenized(forms or [], model_id, upos or None, arms, given)
+        `parse._GIVEN_SETTER`.
+
+        ``glosses`` carries the two GLOSSING TIERS, raw and per token — ``[[Gloss, MGloss], …]`` — for
+        the lexical channel `xx_sud_generic` 0.2.0 added: one aligned vector per token, filled from an
+        English gloss where the reader has written one.  The frontend sends the tier values rather
+        than a chosen gloss because `app.glosses` is the ONE place that decides between them (prefer
+        MGloss's lexical part, strip the Leipzig abbreviations and the morpheme separators), and the
+        custom-model FITTING path — which reads the same two tiers out of a training file's MISC,
+        where the frontend is not involved at all — has to reach the same answer or the row is fitted
+        under one regime and deployed under another.  Ignored by every other model: nothing but that
+        wheel registers the extension the values go on."""
+        return parse.parse_pretokenized(forms or [], model_id, upos or None, arms, given,
+                                        _english_glosses(glosses))
 
     def model_feats_inventory(self, model_id: str = "") -> dict:
         """``{FeatName: [values...]}`` the given model's own morphologizer can jointly emit — see
@@ -1002,7 +1036,7 @@ class Api:
         return parse.model_feats_by_upos(model_id or "")
 
     def token_scores(self, forms: list[str], model_id: str = "",
-                     upos: list[str] | None = None) -> dict:
+                     upos: list[str] | None = None, glosses: list | None = None) -> dict:
         """The pipeline's RUNNERS-UP for one sentence — what it ranked second, and by how much.
 
         Every component scores a whole inventory and the editor has only ever shown the argmax.  This
@@ -1010,16 +1044,23 @@ class Api:
         relation it would use for each of those arcs, and the morphologizer's distribution over word
         classes.  See `parse.analysis_scores` for how a head distribution is recovered from a
         transition-based parser at all, and why Stanza answers ``scored: False``."""
-        return parse.analysis_scores(forms or [], model_id, upos or None)
+        return parse.analysis_scores(forms or [], model_id, upos or None,
+                                     _english_glosses(glosses))
 
     def arc_scores(self, forms: list[str], model_id: str, child: int, head: int,
-                   upos: list[str] | None = None) -> dict:
+                   upos: list[str] | None = None, glosses: list | None = None) -> dict:
         """"If ``child`` hung off ``head``, what would you call that edge?" (both 1-based).
 
         The counterfactual companion to `token_scores`, for the arc a reader has just made by hand and
         the parser never considered — so there is no recorded deliberation to read.  See
-        `parse.arc_label_scores`, which states plainly what a synthesised state can and cannot claim."""
-        return parse.arc_label_scores(forms or [], model_id, int(child), int(head), upos or None)
+        `parse.arc_label_scores`, which states plainly what a synthesised state can and cannot claim.
+
+        ``glosses`` travels with both scoring calls for the same reason it travels with `parse_tokens`:
+        it is an INPUT to the parse being ranked, so a ranking computed without it describes a
+        different parse than the one the reader can run. Both caches key on it — see
+        `parse.analysis_scores`, and `scoresKey` in js/io/scores.js for the frontend's own half."""
+        return parse.arc_label_scores(forms or [], model_id, int(child), int(head), upos or None,
+                                      _english_glosses(glosses))
 
     def tokenize(self, text: str, model_id: str = "", arms=None) -> dict:
         """FAST first step of the interactive parse sequence (tokenise → transliterate → parse):
@@ -1066,7 +1107,11 @@ class Api:
                # …and whether the word classes are this model's INPUT rather than something it
                # simply cannot do. The options bar shows the two differently: a missing component is
                # a feature the model has not got, where this is a request for the annotator.
-               "reads_upos": parse._needs_given_upos(mid)}
+               "reads_upos": parse._needs_given_upos(mid),
+               # …and whether it reads the GLOSSES the annotator wrote (0.2.0's lexical channel).
+               # The drawer greys its own Glossing arm on this: a gloss the app generated, handed
+               # back to a parser that reads glosses, is the app quoting itself as evidence.
+               "reads_glosses": parse.reads_glosses(mid)}
         try:
             engine, name, tb_lang = parse._resolve_model(mid)
             if engine == "sud" and name:

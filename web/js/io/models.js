@@ -20,10 +20,20 @@ async function populateModels(){ if(!hasBridge())return;
     if(e.engine==="custom") MODELLANG_CUSTOM[e.id]=e.lang||"";   // a custom model's language is not in its id — see modelLang (js/core/state.js)
   });
   // MODELLANG is "which model answers for this language on the reader's behalf" (language picker,
-  // auto-detect). A CUSTOM model is deliberately never that: the reader may have three for one
-  // language and name them by hand, and the app choosing between them is not a choice it can make.
-  // Same rule models_registry.installed_by_language applies on the Python side, for the same reason.
+  // auto-detect). A CUSTOM model is deliberately never that WHERE THERE IS A CHOICE TO MAKE: the
+  // reader may have three for one language and name them by hand, and picking between them is not a
+  // choice the app can make. Where exactly one custom model claims a language nothing else covers,
+  // there is nothing to pick between — and refusing to select it left the reader whose language ONLY
+  // their own parser covers on "None (manual)" after an auto-detect that had named that very language
+  // (reported for a custom `mlv` model on a document detected as Mwotlap). Same pair of rules on the
+  // Python side, in models_registry.best_installed_model — which is where the fallback lives there
+  // and NOT in installed_by_language, since the Insert dialog lists every custom model by name
+  // already and would print such a language twice.
   [...inst].filter(e=>e.engine!=="custom").sort((a,b)=>(a.engine==="sud"?0:1)-(b.engine==="sud"?0:1)).forEach(e=>{ if(e.lang&&!(e.lang in MODELLANG))MODELLANG[e.lang]=e.id; });   // prefer a SUD parser per language
+  // Then the sole-custom fallback, in a second pass so an ordinary parser always wins: a language
+  // reached here has none. `""` marks a language two customs claim — the tie stays unresolved.
+  const soleCustom={}; inst.forEach(e=>{ if(e.engine!=="custom"||!e.lang)return; soleCustom[e.lang]=(e.lang in soleCustom)?"":e.id; });
+  Object.keys(soleCustom).forEach(l=>{ if(soleCustom[l]&&!(l in MODELLANG))MODELLANG[l]=soleCustom[l]; });
   const addGroup=(label,arr)=>{ if(!arr||!arr.length)return; const og=document.createElement("optgroup"); og.label=label;
     arr.forEach(e=>{ const o=document.createElement("option"); o.value=e.id;
       // A plain text marker, not just a colour: three different native <select> popups render this

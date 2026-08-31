@@ -801,6 +801,12 @@
      footer below it, so that rule had no users left and is gone. */
   .ctx-sub.ctx-sub-foot{display:flex; flex-direction:column; overflow:hidden; padding-inline:0}   /* the 12px inset moves onto .ctx-sub-scroll/.ctx-sub-footer themselves below — each needs its OWN padding zone so the base .ctx button rule's -7px bleed (calibrated against exactly a 12px parent inset) lands safely inside it instead of overflowing a zero-padding wrapper and getting clipped by that wrapper's own overflow-x:hidden. Do NOT widen the bleed itself to compensate (a ±12px margin was tried here and reached the flyout's true edge, flush — losing the 5px-short-of-the-edge margin every OTHER context menu's hover fill keeps); matching the padding is enough, the existing ±7px trick already does the rest. */
   .ctx-sub.ctx-sub-foot>.ctx-sub-scroll{flex:1 1 auto; min-height:0; overflow-y:auto; overflow-x:hidden; overscroll-behavior:none; padding-inline:12px}
+  /* …and the SEARCH band is the same shape at the other end: a fixed row above a scrolling rest. Same
+     three rules as the footer's, because it is the same structure inverted — liftSearch (js/editing/
+     context-menu.js) builds it, and either lift can run alone or both together on one flyout. */
+  .ctx-sub.ctx-sub-srch{display:flex; flex-direction:column; overflow:hidden; padding-inline:0}
+  .ctx-sub.ctx-sub-srch>.ctx-sub-scroll{flex:1 1 auto; min-height:0; overflow-y:auto; overflow-x:hidden; overscroll-behavior:none; padding-inline:12px}
+  .ctx-sub.ctx-sub-srch>.ctx-sub-search{flex:none; padding:1px 12px 5px}   /* the field's own 5px sits between it and the first row; the flyout's 5px block padding is above it */
   .ctx-sub.ctx-sub-foot>.ctx-sub-footer{flex:none; padding-inline:12px}   /* the "Open on Wiktionary" link pinned to the flyout's own bottom edge instead of scrolling away with the (often many) senses above it. */
   /* NO SCROLLBAR OF ANY KIND ON A MENU. Apple's HIG ("Menus" chapter, "Scrolling menu" section) describes
      exactly one affordance for an overflowing NSMenu: a downward-pointing triangle at the bottom (an

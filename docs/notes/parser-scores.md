@@ -45,6 +45,16 @@ complete head distribution this whole block works to approximate — but Stanza 
 REWRITES HEADS, so its distribution describes a tree that is not the one on screen. Every caller degrades to
 its pre-existing behaviour; a weaker version of this would be worse than none.
 
+⚠️ **AND THE GLOSSES ARE PART OF THE QUESTION**, on both sides of the bridge. `xx_sud_generic` 0.2.0 reads an
+English gloss per token as a parser INPUT (the lexical channel — `parsing-models.md`), so a ranking computed
+before a token was glossed describes a parse the reader can no longer get. `analysis_scores` and
+`arc_label_scores` take them and thread them through `_given_doc`, exactly as the real parse does, and BOTH
+caches carry them: the backend's key (beside `tb_lang`, which is there for the same class of reason) and
+`scoresKey`'s own. Keyed RAW — the `[Gloss, MGloss]` pair as sent, not the one string `app/glosses.py` derives
+from it: two tier values that reduce to the same gloss then cost a recompute instead of risking a stale answer,
+which is the safe direction to be wrong in for a cache whose only failure mode is answering about a sentence
+that has since changed. A document with no glossing at all keys exactly as it did before.
+
 ⚠ **THE CACHE IS KEYED ON THE QUESTION, NOT ON THE SENTENCE INDEX** (`scoresKey`), which is what makes
 invalidation a non-problem instead of a list of edit sites to remember. The question is "given these FORMS
 and these WORD CLASSES, what did you rank", so any edit that could change the answer changes the key, while

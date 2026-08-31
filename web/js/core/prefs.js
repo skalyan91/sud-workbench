@@ -575,8 +575,10 @@ let AUTOREGEN=true;
      · gloss    — the FEATS→MGloss / translation-alignment passes (js/io/bridge.js, app/gloss_align.py).
    ⚠ AND AN ARM THE MODEL DOES NOT IMPLEMENT IS GREYED, NOT SILENTLY IGNORED. `PIPE_AVAIL` is the
    answer `Api.model_arms` gives for the CURRENT model — the generic parser behind every custom model
-   ships no tokeniser, no tagger, no lemmatiser and no XPOS, deliberately (see app/generic_models.py's
-   GENERIC_ARMS for what upstream measured before leaving each one out) — and a greyed arm still does
+   ships no tagger, no lemmatiser and no XPOS, deliberately (see app/generic_models.py's GENERIC_ARMS
+   for what upstream measured before leaving each one out; TOKENISATION was in that list until it was
+   found to mean "glue every full stop to the word before it", and the wheel's stock `xx` rules answer
+   it now) — and a greyed arm still does
    SOMETHING: the app falls back to what it does with no model at all, a whitespace split for
    tokenisation and the rule splitter for sentences. What is missing is the model's opinion. */
 const PIPE_ARMS=["tokenise","sentence","lemma","upos","xpos","feats","syntax","sudmisc","translit","gloss"];
@@ -593,6 +595,7 @@ let PIPELINE={}; PIPE_ARMS.forEach(a=>{ PIPELINE[a]=true; });
    model; it is always the question having failed. It becomes null here. */
 let PIPE_AVAIL=null;
 let PIPE_READS_UPOS=false;   // the model takes the word classes as INPUT (the generic parser does) — see paintPipe, js/ui/wiring.js
+let PIPE_READS_GLOSS=false;  // …and the GLOSSES the annotator wrote (0.2.0's lexical channel) — which is why this app's own gloss generation stops there; see pipeEffective below and paintPipe
 let PIPE_DEPS={};      // {arm: [arms it reads]} for the CURRENT model — the cascade. Model-specific: xx_sud_generic's parser reads the FEATS its morphologiser just wrote; en_sud_ewt_gum's parser runs BEFORE its morphologiser and reads neither. Both answers come from Api.model_arms, which reads them off the loaded pipeline
 /* ── THE CASCADE ───────────────────────────────────────────────────────────────────────────────────
    Switching an arm off makes everything that READS it inert too, so a reader never gets an answer
@@ -622,7 +625,18 @@ function pipeEffective(){ if(_pipeEff) return _pipeEff;
     // frontend-only arms (translit, gloss) are never the model's to lack, so availability
     // never applies to them — see PIPE_BACKEND.
     const modelHas=(PIPE_AVAIL===null)||(PIPE_BACKEND.indexOf(a)<0)||(PIPE_AVAIL.indexOf(a)>=0);
-    writes[a]=ticked&&modelHas;
+    /* ⚠ AND THE GLOSSING ARM IS OFF WHERE THE MODEL READS GLOSSES, whatever the tick says — the same
+       "off, not merely unticked" the line above applies to a component the model has not got, for a
+       different and stronger reason. `xx_sud_generic` 0.2.0 takes an English gloss per token as a
+       parser INPUT (its lexical channel; pipeGlosses below is what sends them). A gloss THIS APP
+       generated is not evidence about the sentence — it is the app's own guess, retrieved or
+       composed — so feeding it back in would have the parser read the app's answer as data and the
+       app read the result as the parser's opinion. Circular, and invisible: nothing downstream could
+       tell an annotator's gloss from one the app wrote for it. The tier stays fully editable BY HAND;
+       what stops is the automatic generation. The tick is left alone (as with a greyed backend arm),
+       so switching back to a model that does not read them brings the reader's own choice back. */
+    const modelReads=(a==="gloss")&&PIPE_READS_GLOSS;
+    writes[a]=ticked&&modelHas&&!modelReads;
     // …and the annotator owns a COLUMN arm they have unticked, or one this model reads rather than
     // predicts (word classes on the generic parser — "you supply these").
     const mine=PIPE_COLUMN.indexOf(a)>=0 && (!ticked || (!modelHas && a==="upos" && PIPE_READS_UPOS));
@@ -649,6 +663,24 @@ function pipeGiven(tokens){ if(!tokens||!tokens.length) return null;
     const col=tokens.map(t=>String((a==="upos"?t.upos:a==="xpos"?t.xpos:a==="lemma"?t.lemma:t.feats)||""));
     if(col.some(v=>v&&v!=="_")) out[a]=col; });
   return Object.keys(out).length?out:null; }
+/* ── THE GLOSSING TIERS, AS A PARSER INPUT ────────────────────────────────────────────────────────
+   `xx_sud_generic` 0.2.0 added a LEXICAL channel: one aligned vector per token, filled at inference
+   from an ENGLISH GLOSS where there is one (Token._.gloss). This is what supplies it — the two tier
+   values, RAW and per token, in the order the backend expects: [Gloss, MGloss].
+   ⚠ RAW, AND THAT IS THE POINT. The choice between the two tiers, and the stripping of the Leipzig
+   abbreviations and morpheme separators, are `app/glosses.py`'s — because the OTHER caller of that
+   rule is the custom-model fitting run, which reads the same two tiers out of a training file's MISC
+   with no frontend involved at all. A row fitted under one reading of "the gloss" and parsed under
+   another is the train/deploy mismatch the channel exists to avoid, so the rule lives in ONE place
+   and this sends it its inputs.
+   ⚠ READ FROM MISC, NOT FROM THE TIER'S VISIBILITY. GLOSS_ON/MORPH_ON say whether the rows are
+   DRAWN; a document can carry Gloss=/MGloss= from the file with both tiers switched off, and that is
+   still the annotator's own gloss. tierText is the shared accessor (it strips the invisible/stray
+   characters at the read, see its own note), the same one every renderer reads.
+   Null when no token has either, so a document that is not glossed costs the parse call nothing. */
+function pipeGlosses(tokens){ if(!tokens||!tokens.length) return null;
+  const out=tokens.map(t=>[tierText(t,"gloss"),tierText(t,"mgloss")]);
+  return out.some(p=>p[0]||p[1])?out:null; }
 // transliteration is a toggleable layer; in the real app each token's `translit` is produced by
 // wiktra (github.com/twardoch/wiktra2 — Transliterator().tr(form, to_sc="Latn"), 514 langs / 102 scripts)
 // and cached on the token. Here it is pre-filled on the sample tokens.

@@ -346,9 +346,10 @@ async function syncPipeAvail(){ const pop=document.getElementById("pipePop"); if
       // …and an EMPTY list is not an answer, it is the question having failed — see PIPE_AVAIL
       // (js/core/prefs.js) for what reading it as one did to the drawer.
       const got=r&&Array.isArray(r.arms)&&r.arms.length?r.arms:null;
-      PIPE_AVAIL=got; PIPE_DEPS=(got&&r.deps)||{}; PIPE_READS_UPOS=!!(got&&r.reads_upos); }
-    catch(e){ PIPE_AVAIL=null; PIPE_DEPS={}; PIPE_READS_UPOS=false; } }
-  else { PIPE_AVAIL=null; PIPE_DEPS={}; PIPE_READS_UPOS=false; }
+      PIPE_AVAIL=got; PIPE_DEPS=(got&&r.deps)||{}; PIPE_READS_UPOS=!!(got&&r.reads_upos);
+      PIPE_READS_GLOSS=!!(r&&r.reads_glosses); }   // …NOT gated on `got`: a model reading glosses is a fact about the pipeline, not about the arm list having arrived
+    catch(e){ PIPE_AVAIL=null; PIPE_DEPS={}; PIPE_READS_UPOS=false; PIPE_READS_GLOSS=false; } }
+  else { PIPE_AVAIL=null; PIPE_DEPS={}; PIPE_READS_UPOS=false; PIPE_READS_GLOSS=false; }
   pipeInvalidate(); paintPipe(); }
 /* THE DRAWER SHOWS TWO DIFFERENT KINDS OF "THIS ARM IS DOING NOTHING", and conflating them would
    answer the wrong question:
@@ -367,9 +368,13 @@ function paintPipe(){ const pop=document.getElementById("pipePop"); if(!pop)retu
   // unticking Features no longer silences Syntax, because unticking it means you are supplying them.
   pop.querySelectorAll("input[data-arm]").forEach(cb=>{ const arm=cb.dataset.arm;
     const missing=!!avail && PIPE_BACKEND.indexOf(arm)>=0 && avail.indexOf(arm)<0;   // the two frontend-only arms (translit, gloss) are never the model's to lack
-    const inert=!missing && !!model && cb.checked && !eff.writes[arm];
-    cb.disabled=missing; const lab=cb.closest("label.chk"); if(!lab)return;
-    lab.classList.toggle("armoff",missing); lab.classList.toggle("arminert",inert);
+    // …and the one frontend arm a MODEL can take over: where it reads glosses, this app must not
+    // write them (pipeEffective, js/core/prefs.js). Painted like a missing component — disabled,
+    // because there is nothing to choose — with its own reason below.
+    const taken=arm==="gloss" && !!model && PIPE_READS_GLOSS;
+    const inert=!missing && !taken && !!model && cb.checked && !eff.writes[arm];
+    cb.disabled=missing||taken; const lab=cb.closest("label.chk"); if(!lab)return;
+    lab.classList.toggle("armoff",missing||taken); lab.classList.toggle("arminert",inert);
     /* ⚠ THE REASON GOES IN THE TOOLTIP, NEVER INTO THE ROW. It used to be appended after the label
        through a `::after`, which meant unticking one box GREW two other rows and resized the popover
        under the pointer, mid-click — the reader's next click landed somewhere they had not aimed at.
@@ -384,6 +389,10 @@ function paintPipe(){ const pop=document.getElementById("pipePop"); if(!pop)retu
     // the deal it offers — a bare grey row says "this app cannot tag", when what is true is "you tag,
     // and the rest follows".
     if(missing&&arm==="upos"&&PIPE_READS_UPOS) why="You supply these — the model reads them rather than predicting them.";
+    // The same shape of statement one arm along, and the same reason for making it: a bare grey row
+    // would read as "this app cannot gloss", where what is true is "your glosses are this model's
+    // input, so it will not write over them with guesses of its own".
+    else if(taken) why="This model reads your glosses — it parses better with them, so the app leaves the tiers to you.";
     // Only the prerequisites actually MISSING, not every one the arm reads: "needs Features and
     // Lemmas and Syntax and Word classes" for a row waiting on one of the four is a list to audit
     // rather than an instruction, and three of its four entries are things the reader has already got.

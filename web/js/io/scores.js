@@ -26,10 +26,19 @@ const SCORES_MAX = 24;                       // sentences; an entry measured 580
 const SCORES = new Map();                    // key → payload | Promise<payload>
 const ARC_SCORES = new Map();                // key + child + head → labels | Promise<labels>
 
-// The question, verbatim: the model, the forms, and the reader's own tags (which `analysis_scores`
-// threads to `_force_upos` exactly as `parse_tokens` does, so the two agree about the sentence).
+/* The question, verbatim: the model, the forms, the reader's own tags (which `analysis_scores` threads
+   to `_force_upos` exactly as `parse_tokens` does, so the two agree about the sentence) — and their
+   GLOSSES, which 0.2.0's lexical channel reads as an input like any other.
+   ⚠ THE GLOSSES ARE PART OF THE QUESTION, so they are part of the KEY. Without them a ranking computed
+   before a token was glossed would be served again afterwards, describing a parse the reader can no
+   longer get — the same shape of fault `tb_lang` in the backend's own key is a note about, and the
+   reason that one is there. The pair is keyed RAW, exactly as it is sent: the backend derives one
+   string from the two tiers (app/glosses.py), and two tier values that reduce to the same gloss cost a
+   recompute here rather than risking a stale answer, which is the safe direction for this cache. */
 function scoresKey(s){ if(!s||!s.tokens||!s.tokens.length) return "";
-  return (model||"")+"\u0000"+s.tokens.map(t=>(t.form||"")+"\u0002"+(trUpos(t)||"")).join("\u0001"); }
+  const gl=(typeof pipeGlosses==="function"&&pipeGlosses(s.tokens))||null;
+  return (model||"")+"\u0000"+s.tokens.map((t,i)=>(t.form||"")+"\u0002"+(trUpos(t)||"")
+    +(gl?"\u0004"+gl[i][0]+"\u0005"+gl[i][1]:"")).join("\u0001"); }
 function scoresPut(map,k,v){ map.set(k,v); while(map.size>SCORES_MAX) map.delete(map.keys().next().value); }
 function scoresUsable(){ return !!(hasBridge()&&model&&typeof trUpos==="function"); }
 
@@ -40,7 +49,7 @@ async function tokenScores(si){
   const k=scoresKey(s); if(!k) return null;
   const hit=SCORES.get(k); if(hit) return (hit&&typeof hit.then==="function")?await hit:hit;
   const p=(async()=>{
-    let r; try{ r=await window.pywebview.api.token_scores(s.tokens.map(t=>t.form||""),model,s.tokens.map(t=>trUpos(t))); }
+    let r; try{ r=await window.pywebview.api.token_scores(s.tokens.map(t=>t.form||""),model,s.tokens.map(t=>trUpos(t)),pipeGlosses(s.tokens)); }
     catch(e){ r=null; }
     const out=(r&&r.scored)?r:null;
     scoresPut(SCORES,k,out);                 // …including a null: a model that cannot answer must not be re-asked per keystroke
@@ -64,7 +73,7 @@ async function arcLabelScores(si,child,head){
     // …and the reader's own word classes, as `tokenScores` above already sends: a model that READS
     // them (the generic parser behind every custom model) refuses a sentence that has none, and this
     // counterfactual is asked about a token the reader has just dragged — so the tags are right there.
-    let r; try{ r=await window.pywebview.api.arc_scores(s.tokens.map(t=>t.form||""),model,child,head,s.tokens.map(t=>trUpos(t))); }
+    let r; try{ r=await window.pywebview.api.arc_scores(s.tokens.map(t=>t.form||""),model,child,head,s.tokens.map(t=>trUpos(t)),pipeGlosses(s.tokens)); }
     catch(e){ r=null; }
     const out=(r&&r.scored&&r.labels)?r.labels:null;
     scoresPut(ARC_SCORES,k,out); return out; })();

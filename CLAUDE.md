@@ -147,7 +147,7 @@ moving anything.
 **Backend** (`app/`) — `__main__.py` (platform-neutral pywebview bootstrap) dispatching to
 `mac/`/`win/`/`linux/`; `api.py` (the bridge); `io_conllu.py`; `menu_spec.py`; `detect.py` +
 `convert.py` + `grammars.py` (formats); `parse.py` + `models_registry.py` + `extras.py` +
-`generic_models.py` (models);
+`generic_models.py` + `glosses.py` (models);
 `translit.py`, `macron.py`, `apte.py`, `wiktionary.py`, `vidyut_data.py`, `langid.py` (language
 services); `gloss_align.py` + `vectors.py` (glossing).
 
@@ -218,6 +218,10 @@ Break one of these and the failure is silent or misdiagnosed. Each is expanded i
   silently lifts everything below it out of line with its neighbours. **The relation LABEL is the standing
   exception** — no reserved slot, and the edge under it already carries the gesture that sets it, so an empty
   one draws nothing. Tried both ways; that is the settled one. → `diagram-rendering.md`
+- **What the generic parser's lexical channel is fed is decided in `app/glosses.py`, once.** The live parse
+  and the custom-model fitting run ask the same question of the same two tiers from opposite sides of the
+  bridge; a second copy of the rule in JS would fit a row under one reading of "the gloss" and parse it under
+  another. → `parsing-models.md`
 - **A custom model is one embedding ROW of one shared generic wheel, never a wheel of its own.** The
   pipeline is loaded once and every stored row written into it; a parse selects its model by stamping
   `Doc._.tb_lang` before the first component runs. Anything keyed on the package name alone (a cache,
