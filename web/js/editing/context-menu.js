@@ -674,7 +674,7 @@ function posSubItems(si,tokId,U){ const s=DOC[si], t=s&&s.tokens[tokId-1]; if(!t
   if(!feats.some(f=>subtypeValsAttested(f,U).length)) return posSubOtherItems(si,tokId,U);
   const curOf=f=>t.upos===U?(getFeat(t.feats,f)||""):"";
   const setSub=(f,v)=>{ closeCtx(); const before=t.feats; pushUndo(si);
-    if(t.upos!==U){ t.upos=U; clearSubjIfNotVA(t); }   // item 1: a tag change away from VERB/AUX drops any now-meaningless Subj
+    if(t.upos!==U){ t.upos=U; clearFeatsForUpos(t); }   // item 1: a tag change drops what the new class cannot carry — a now-meaningless Subj, and every feature the UD tables do not put on this class
     feats.forEach(o=>{ if(o!==f) t.feats=clearFeat(t.feats,o); });   // one subtype at a time — picking PRON.Dem drops a stale PRON.Int rather than leaving the token claiming both
     t.feats=(f&&v)?setFeat(t.feats,f,v):t.feats;
     syncXposMirror(t);   // covers both halves above — a UPOS change and/or the subtype FEATS just set
@@ -712,7 +712,7 @@ function posSubItems(si,tokId,U){ const s=DOC[si], t=s&&s.tokens[tokId-1]; if(!t
 function posSubOtherItems(si,tokId,U,back){ const s=DOC[si], t=s&&s.tokens[tokId-1]; if(!t) return [];
   const feats=subtypeFeatsFor(U); if(!feats.length) return [];
   const setSub=(f,v)=>{ closeCtx(); const before=t.feats; pushUndo(si);
-    if(t.upos!==U){ t.upos=U; clearSubjIfNotVA(t); }
+    if(t.upos!==U){ t.upos=U; clearFeatsForUpos(t); }
     feats.forEach(o=>{ if(o!==f) t.feats=clearFeat(t.feats,o); });
     t.feats=(f&&v)?setFeat(t.feats,f,v):t.feats;
     syncXposMirror(t); featsSyncGloss(t,before); markDirty(); preserveScroll(renderDoc); };   // …the SAME commit posSubItems makes, and it must stay that way: the two lists set the same thing
@@ -754,7 +754,7 @@ function posMenu(x,y,si,tokId,opts){ opts=opts||{}; const s=DOC[si]; if(!s)retur
   const subFor=U=>{ const n=posSubCount(U); return n?{fn:()=>posSubItems(si,tokId,U), count:n, weights:posSubW}:null; };   // item 4: every tag with subtypes gets a right-click submenu of them (item 29: and a badge saying how many; a tag with none no longer offers an empty flyout)
   const choose=p=>{ const posChanged=p!==tok.upos, hadSub=UPOS_SUBTYPE_FEATS.some(f=>getFeat(tok.feats,f));
     if(!posChanged&&!hadSub) return;   // same tag, no subtype to drop → nothing to do
-    const before=tok.feats, oldUpos=tok.upos; pushUndo(si); tok.upos=p; syncXposMirror(tok); clearSubjIfNotVA(tok);   // item 1: a tag change away from VERB/AUX drops any now-meaningless Subj
+    const before=tok.feats, oldUpos=tok.upos; pushUndo(si); tok.upos=p; syncXposMirror(tok); clearFeatsForUpos(tok);   // item 1: a tag change drops what the new class cannot carry — a now-meaningless Subj, and every feature the UD tables do not put on this class
     UPOS_SUBTYPE_FEATS.forEach(f=>tok.feats=clearFeat(tok.feats,f));   // item 6: selecting a PLAIN tag clears any dot-suffixed subtype
     featsSyncGloss(tok,before);
     if(posChanged) uposSyncGloss(tok,oldUpos);   // Task B: retarget the closed-class gloss prefix IN PLACE, immediately — never a wholesale MGloss rebuild (see uposSyncGloss's own note, js/io/bridge.js)

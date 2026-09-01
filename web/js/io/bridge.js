@@ -940,8 +940,16 @@ async function reparse(i){ const s=DOC[i]; if(!s||!s.tokens||!s.tokens.length)re
      questions, not theirs. It is also what the parse is worth — supplying FEATS alongside UPOS moved
      held-out Basque LAS 38.32 → 53.27. */
   const givenIn=pipeGiven(s.tokens);
+  /* …and the FEATS COLUMN AS IT STANDS, which a generic or custom model may only ADD to (app/parse.py's
+     `_feats_additive` decides which models that is, and holds the reasons). Sent even here, where the
+     command is a RESET and the confirm above has said the annotation goes: what a reset re-asks is the
+     MODEL's questions, and under that wheel the features are not one of them — a custom model is fitted
+     on this very column, so resetting it means replacing what the annotator typed with a lossy
+     re-derivation of what the annotator typed. The lemma, the tree, the word classes and every other
+     column still reset in full. */
+  const priorFeats=s.tokens.map(t=>t.feats||"");
   showBusy("Parsing…"); let r;
-  try{ r=await window.pywebview.api.parse_tokens(forms,model,upIn,pipeArms(),givenIn,pipeGlosses(s.tokens)); }catch(e){ toast("Parse failed: "+e); return; }finally{ hideBusy(); }
+  try{ r=await window.pywebview.api.parse_tokens(forms,model,upIn,pipeArms(),givenIn,pipeGlosses(s.tokens),priorFeats); }catch(e){ toast("Parse failed: "+e); return; }finally{ hideBusy(); }
   if(!r||!r.parsed||!r.tokens||r.tokens.length!==forms.length){ toast("Parse failed"+(r&&r.reason?": "+r.reason:"")); return; }   // a pipeline that rebuilt the Doc anyway must not be aligned against — nothing has been written yet, so there is nothing to roll back
   if(DOC[i]!==s||s.tokens.length!==forms.length) return;   // the document may have moved while the call was out
   const mine=captureAnnot(s);   // …and the annotator's own layered annotation, captured BEFORE the replacement (see restoreAnnot)
@@ -1462,9 +1470,34 @@ function setFeat(featsStr,name,val){ const cur=(featsStr&&featsStr!=="_")?featsS
   return cur.join("|")||"_"; }
 function clearFeat(featsStr,name){ const cur=(featsStr&&featsStr!=="_")?featsStr.split("|").filter(Boolean):[];
   return cur.filter(s=>s.slice(0,s.indexOf("="))!==name).join("|")||"_"; }
-// item 1: Subj only ever lives on a VERB/AUX (it marks a predicate whose subject is raised/shared) — call this
-// right after ANY UPOS change so a token retagged away from VERB/AUX can't keep a now-meaningless Subj value.
-function clearSubjIfNotVA(t){ if(t.upos!=="VERB"&&t.upos!=="AUX"&&raiseGet(t,"Subject")) raiseSet(t,"Subject",""); }   // Subject lives on a PREDICATE, so a token retagged away from VERB/AUX must not keep it
+/* ── A RETAG DROPS THE FEATURES THE NEW CLASS CANNOT CARRY ────────────────────────────────────────
+   On report ("retagging should remove incompatible features, in general"). Call right after ANY UPOS
+   change — this is the funnel all four retag sites already went through for `Subject` alone, and the
+   general rule belongs at the same point rather than at whichever of the four somebody remembers.
+   ⚠ THE ONE PLACE THIS APP MAY DELETE A FEATURE THE READER TYPED, and it is narrow on purpose: a
+   feature is a statement ABOUT A WORD CLASS, so `Tense=Past` on a token that has just stopped being a
+   verb is not annotation the retag preserved, it is annotation the retag contradicted. (`Case` is NOT
+   that: the table puts it on VERB as well, for the converbs and verbal nouns that inflect for it —
+   which is the whole reason the table answers this and a hand-written rule does not.) Contrast the
+   parser, which may never delete one at all (`prior_feats`, app/parse.py): the difference is whose
+   gesture it was. The reader retagged; nobody else gets to draw this conclusion for them.
+   ⚠ AND THE TABLE ANSWERS ONLY WHERE IT HAS AN OPINION. `featOnUpos` (js/grid/grid.js) is derived
+   from the UD validator's own permitted-features data, and a feature ABSENT from it is UNRESTRICTED,
+   never "no classes" — which is what keeps `Typo`, `Foreign`, `Shared`, `Deixis` and `ExtPos` (all
+   absent, all hand-placed or SUD's own) out of the way of this. An untagged token (`upos === ""`)
+   likewise loses nothing: nothing has been said about it to contradict.
+   ⚠ AND IT SAYS SO. Deleting hand-typed annotation silently is the fault this app has just spent a
+   release removing from the parser; doing it in the retag path instead would only move it. Returns
+   the pairs it dropped, in case a caller wants them for anything else. */
+function clearFeatsForUpos(t){ if(!t) return [];
+  if(t.upos!=="VERB"&&t.upos!=="AUX"&&raiseGet(t,"Subject")) raiseSet(t,"Subject","");   // Subject lives on a PREDICATE, so a token retagged away from VERB/AUX must not keep it (item 1: it marks a predicate whose subject is raised/shared)
+  if(!t.upos||typeof featOnUpos!=="function") return [];
+  const gone=(t.feats&&t.feats!=="_"?t.feats.split("|"):[]).filter(kv=>{ const i=kv.indexOf("=");
+    return i>0&&!featOnUpos(kv.slice(0,i),t.upos); });
+  gone.forEach(kv=>{ t.feats=clearFeat(t.feats,kv.slice(0,kv.indexOf("="))); });
+  if(gone.length&&typeof toast==="function")
+    toast(`Dropped ${gone.join(", ")} — not ${gone.length>1?`${t.upos} features`:`a ${t.upos} feature`}`);
+  return gone; }
 // a Shared=Yes dependent must stay attached to a genuine member of SOME coordination to keep the marker meaningful
 // — call this right after ANY reparent (t.head just changed) with the token's sentence, so a rehead onto a token
 // that isn't part of a coordination at all (or onto no token, e.g. head 0) drops the now-stale Shared=Yes.
@@ -2650,7 +2683,7 @@ async function scoredRelsForHead(si,tokId,headId){ if(!(hasBridge()&&model)) ret
   // reparse() states above: a model that reads word classes rather than predicting them gets the
   // reader's, or the backend declines the syntax and this tier has nothing to read.
   const upIn3=(PIPE_AVAIL&&PIPE_AVAIL.indexOf("upos")<0)?s.tokens.map(x=>x.upos||""):null;
-  let r; try{ r=await window.pywebview.api.parse_tokens(forms,model,upIn3,pipeArms(),pipeGiven(s.tokens),pipeGlosses(s.tokens)); }catch(e){ return []; }              // tier 3: no scores at all (Stanza) → the whole-tree agreement rule
+  let r; try{ r=await window.pywebview.api.parse_tokens(forms,model,upIn3,pipeArms(),pipeGiven(s.tokens),pipeGlosses(s.tokens),s.tokens.map(x=>x.feats||"")); }catch(e){ return []; }              // tier 3: no scores at all (Stanza) → the whole-tree agreement rule. The FEATS column travels for the same reason the word classes and the glosses do: it is an INPUT to the parse being asked about (a generic model merges it into the Doc before the parser runs), so a tree ranked without it describes a parse the reader cannot run
   if(!r||!r.parsed||!r.tokens||r.tokens.length!==s.tokens.length) return [];
   const p=r.tokens[tokId-1]; if(!p) return [];
   if(parseInt(p.head,10)!==headId) return [];                    // the parser is talking about a different edge
@@ -2741,7 +2774,13 @@ async function reparseTokenFields(si,tokIds,opts){
      it says so by asking for it. */
   const uposIn=opts.upos?null:s.tokens.map(t=>trUpos(t));
   showBusy("Parsing…"); let r;
-  try{ r=await window.pywebview.api.parse_tokens(forms,model,uposIn,pipeArms(),pipeGiven(s.tokens),pipeGlosses(s.tokens)); }catch(e){ return false; }finally{ hideBusy(); }
+  /* ⚠ AND THE FEATS COLUMN AS IT STANDS — an ADDITIVE column under a generic or custom model, which
+     may add a feature to a token and may never change or drop one (app/parse.py's `_feats_additive`).
+     This is the path that made it a report: every form edit and every retag runs a background regen
+     through here, so a wheel fitted on the reader's own morphology quietly rewrote it a few tokens at
+     a time. GESTURE_FEATS below is the older, narrower version of the same guarantee — three named
+     keys no parser predicts — and stays, because it holds for EVERY model rather than just this one. */
+  try{ r=await window.pywebview.api.parse_tokens(forms,model,uposIn,pipeArms(),pipeGiven(s.tokens),pipeGlosses(s.tokens),s.tokens.map(t=>t.feats||"")); }catch(e){ return false; }finally{ hideBusy(); }
   if(!r||!r.parsed||!r.tokens||r.tokens.length!==s.tokens.length) return false;   // belt and braces: a pipeline that rebuilt the Doc anyway must not be aligned against
   const targets=tokIds?new Set(tokIds):null;
   s.tokens.forEach((t,i)=>{ if(targets && !targets.has(i+1)) return; const p=r.tokens[i]; if(!p)return;

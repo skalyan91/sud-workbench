@@ -991,7 +991,8 @@ class Api:
 
     def parse_tokens(self, forms: list[str], model_id: str = "",
                      upos: list[str] | None = None, arms=None, given=None,
-                     glosses: list | None = None) -> dict:
+                     glosses: list | None = None,
+                     prior_feats: list[str] | None = None) -> dict:
         """Re-parse a sentence whose TOKENISATION IS FIXED — one token per entry of ``forms``.
 
         What the frontend needs after a Form or UPOS edit, where the heads, relations and annotation
@@ -1016,9 +1017,16 @@ class Api:
         custom-model FITTING path — which reads the same two tiers out of a training file's MISC,
         where the frontend is not involved at all — has to reach the same answer or the row is fitted
         under one regime and deployed under another.  Ignored by every other model: nothing but that
-        wheel registers the extension the values go on."""
+        wheel registers the extension the values go on.
+
+        ``prior_feats`` carries the FEATS column as it stands, one string per form, and is what makes
+        that column ADDITIVE under the generic wheel: a generic or custom model may add a feature to a
+        token and may never change or drop one the annotator has. Sent on every pre-tokenised call and
+        binding only for that one package — `parse._feats_additive` is where which-models is decided,
+        and its note is where the two reasons are. Distinct from ``given["feats"]``, which says the arm
+        is OFF and takes the morphologiser out of the run entirely."""
         return parse.parse_pretokenized(forms or [], model_id, upos or None, arms, given,
-                                        _english_glosses(glosses))
+                                        _english_glosses(glosses), prior_feats or None)
 
     def model_feats_inventory(self, model_id: str = "") -> dict:
         """``{FeatName: [values...]}`` the given model's own morphologizer can jointly emit — see

@@ -275,6 +275,44 @@ them ship an `EditTreeLemmatizer`, whose model predicts an edit tree from the to
 `token.pos_`. A wheel with a rule-based `Lemmatizer` gets it for free. `opts.upos` (the split-token path) is the
 one caller that wants the parser's own class instead, and it says so by asking for it.
 
+⚠ **AND IT DROPS THE FEATURES THE NEW CLASS CANNOT CARRY.** On report ("retagging should remove
+incompatible features, in general"). `clearFeatsForUpos` (js/io/bridge.js) is the generalisation of the
+`clearSubjIfNotVA` this app had for `Subject` alone — same funnel, same four retag sites (the POS menu, both
+subtype flyouts, the grid cell) — and it now also clears every feature `featOnUpos` says the new class does not
+take, so retagging a VERB carrying `Mood=Ind|Number=Sing|Tense=Past` to NOUN keeps the number and drops the mood
+and the tense rather than asserting either of a noun.
+
+What each class refuses is the table's answer, not a hand-written rule, and it is worth knowing that the answer is
+not the obvious one: **`Case` survives a retag to VERB** (converbs and verbal nouns inflect for it), while
+`PronType`, `NumType`, `Poss` and `NounClass` do not.
+
+| retagged to | drops |
+|---|---|
+| `VERB` | NounClass, NumType, Poss, PronType |
+| `NOUN` | Aspect, Evident, Mood, NumType, PronType, Reflex, Tense, Voice |
+| `ADJ` | Aspect, Clusivity, Evident, Mood, Person, Polite, Reflex, Tense, Voice |
+| `PRON` | Aspect, Degree, Evident, Mood, NumType, Tense, VerbForm, Voice |
+| `X` | everything the table scopes at all — an unanalysable token asserts nothing. `Foreign=Yes` and `Typo=Yes` survive it, being absent from the table |
+
+**This is the only place in the app that deletes a feature the reader typed, and the narrowness is the point.**
+A feature is a statement ABOUT A WORD CLASS, so a retag does not preserve `Case=Erg` on a token that has stopped
+being a noun — it contradicts it. The parser may never delete one at all (`prior_feats`, `parsing-models.md`);
+the difference is whose gesture it was, and nobody but the reader gets to draw this conclusion. Three restraints
+keep it there:
+
+* **The table answers only where it has an opinion.** A feature ABSENT from `FEAT_UPOS` is unrestricted, never
+  "no classes" — which is what keeps `Typo`, `Foreign`, `Shared`, `Deixis` and `ExtPos` (all hand-placed, or
+  SUD's own, or simply not the validator's to answer) clear of this altogether.
+* **An untagged token loses nothing.** `featOnUpos(f, "")` is true by construction: *Clear word class* says
+  nothing about the word, so there is nothing for a feature to contradict.
+* **It says what it dropped**, in a toast naming the pairs. Deleting hand-typed annotation silently is the fault
+  the `prior_feats` work has just removed from the parser; doing it in the retag path instead would only move it.
+
+⚠️ **ORDER MATTERS, AND IT IS ALREADY RIGHT.** The cleanup runs AT the retag, before the background
+`regenTok` → `reparseTokenFields` that follows it — so the re-parse is handed the CLEANED column as its
+`prior_feats` and never sees the contradicted feature at all. Run the other way round, the additive rule would
+faithfully preserve the very value the retag had just decided was wrong.
+
 ⚠ **AND THE MGloss FOLLOWS, BECAUSE `retargetGlossForFeatsChange` IS NOW SYMMETRIC.** It retargets a value that
 CHANGED and drops a feature that was REMOVED; the third case, inserting one that was ADDED, used to be left out on
 purpose — "never invent an abbreviation for a feature that had none before", on the reasoning that a category

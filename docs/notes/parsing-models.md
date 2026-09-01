@@ -606,3 +606,139 @@ skip says "the model files here are already the ones this download would write" 
 about an 81 MB lexicon sitting outside the wheel — which is EXACTLY the state of a machine whose
 Sanskrit model was installed before this app fetched one. Returning "Already up to date" without
 looking sends the reader away with the one thing they came for still missing.
+
+## FEATS is an ADDITIVE column under the generic wheel
+
+⚠ **A GENERIC OR CUSTOM MODEL MAY ADD A FEATURE TO A TOKEN AND MAY NEVER CHANGE OR DROP ONE.**
+Reported: "parse regeneration with a generic or custom model should never modify or delete from
+FEATS, only add to it." The pipeline arms above are about a column the reader has switched OFF; this
+is the same column with the arm ON, and the model still not being allowed the last word on a cell
+somebody has already answered.
+
+Two reasons, and they compound:
+
+* **A custom model is fitted on the annotator's own document.** Its FEATS are a lossy re-derivation
+  of the very column they would be overwriting — the round trip cannot add information and routinely
+  loses it. The feature typed once, on the one token in the file that attests it, is exactly the one
+  a row fitted on that file will not reproduce.
+* **The unfitted wheel is a cross-lingual guess**, predicting FEATS from UPOS and a language
+  embedding on a language it was never trained on. "Silence is the preferred failure for annotation"
+  governs what such a guess may write into an EMPTY cell; what it may do to a full one is not even
+  that question.
+
+What the reader sees, on their own Mwotlap sentence through their own custom model:
+
+| token | had | the model said | before | now |
+|---|---|---|---|---|
+| `van` | `Subcat=Tran` | `Subcat=Tran\|Tense=Pres\|VerbForm=Fin,Inf` | the model's | `Subcat=Tran\|Tense=Pres\|VerbForm=Fin,Inf` — the model's additions, their value |
+| `Bankis` | `Definite=Def` | *nothing* | **blank** | `Definite=Def` |
+
+⚠ **A MONOLINGUAL PARSER IS DELIBERATELY NOT SUBJECT TO THIS.** Trained on its own language's gold
+treebank, its FEATS are a second opinion worth having, and a re-parse forbidden to revise them would
+not be a re-parse. So the gate is the PACKAGE and not the engine: `custom:<slug>` and
+`sud:xx_sud_generic` both resolve to the one shared wheel (`_resolve_model`), and nothing else does.
+`_feats_additive` is the whole of that decision.
+
+⚠ **THE FRONTEND SENDS THE COLUMN; PYTHON DECIDES WHETHER IT BINDS.** All three pre-tokenised call
+sites (`reparse`, `reparseTokenFields`, `scoredRelsForHead`'s tier 3) pass `prior_feats` on every
+call, unconditionally. Two copies of "which models may overwrite the annotator" would drift, and the
+copy that drifted would do so silently, in the direction of deleting annotation — the same argument
+that keeps the lexical channel's input regime in `app/glosses.py` alone.
+
+⚠ **`prior_feats` IS NOT `given["feats"]`, and folding one into the other would break both.** `given`
+says *this arm is off, the column is mine*, which takes the morphologiser out of the run altogether;
+here the arm is ON, the model is asked for everything it has, and only its answer about a cell the
+reader has already filled is refused.
+
+⚠ **AND ONLY WHERE THE TOKENISATION IS FIXED.** A prior FEATS column is a per-token statement, so it
+binds where the tokens are the same tokens — which `parse_pretokenized` guarantees by construction
+and a re-tokenisation cannot. Editing the running sentence is a different gesture with its own
+preservation rules (`captureMarks`).
+
+**The merge happens TWICE, and the second time is not belt and braces.** `_prior_feats_on_doc` runs
+mid-pipeline, right after `_force_upos`, because the parser READS FEATS — that is `arm_deps` off the
+model's own encoder — and the annotator's features are the most valuable thing that can be handed to
+this wheel (LAS 38.32 → 53.27 on held-out Basque). Merging only at the end would keep their column
+intact and still hand the tree a morphology they had corrected; the head of `Bankis` moves between
+the two runs above, which is the whole point. `_merge_prior_feats` then has the last word on the
+token table, from the reader's own SUBSTRINGS: a pair that goes through spaCy's `set_morph` comes
+back re-ordered inside its own value (`Number=Sing,Plur` → `Number=Plur,Sing`), and re-ordering the
+annotator's column is a modification. It sorts case-insensitively, which is UD's rule and `setFeat`'s
+— spaCy sorts case-SENSITIVELY (`NumType|Number` where UD asks for `Number|NumType`), so a merged
+token can order differently from a purely model-tagged one in the same file.
+
+**What this rule costs, and what pays for it: a retag no longer re-derives the features it
+contradicts — so the RETAG removes them instead.** `_force_upos` exists to answer "what are this
+word's features AS a verb?", and under an additive column its answer only fills the names the reader
+has left empty; retagging a VERB carrying `Tense=Past` to NOUN would keep the tense and gain the
+nominal features around it. Superseded on report ("retagging should remove incompatible features, in
+general"): `clearFeatsForUpos` (js/io/bridge.js) now drops, at the moment of the retag, every feature
+the UD tables do not put on the new class — the generalisation of the `clearSubjIfNotVA` this app had
+for `Subject` alone, at the same funnel and at all four retag sites. The division that leaves is the
+right one and is worth stating as a pair:
+
+| gesture | may it delete a feature? |
+|---|---|
+| a parse under the generic wheel | **never.** It did not ask the question that would make the cell wrong |
+| the reader's own retag | **yes**, and only where the class contradicts the feature. `featOnUpos` answers, and a feature absent from its table is unrestricted rather than forbidden — which is what keeps `Typo`, `Foreign` and `Shared` out of it — and it says in a toast what it dropped |
+
+### …and a comma value is not a value it may write
+
+⚠ **`VerbForm=Fin,Inf` IS NOT A VALUE**, reported off a Mwotlap parse. UD writes a genuinely
+UNDERSPECIFIED cell as a disjunction of one feature's values, so the notation itself is legitimate —
+`Gender=Fem,Masc` on singular *they* is the classic case and is correct English annotation. What is
+not legitimate is a disjunction of categories that cannot both hold of one form.
+
+**The gate is the one the additive rule uses, and for the same reason.** The generic wheel's label
+set is the UNION OVER 80 TREEBANKS' annotation conventions, so a comma value it predicts was learned
+from a language that is not the one being parsed. A monolingual wheel is left alone: its own such
+label is its own treebank's convention for its own language, which is what that model is for.
+
+| where the wheel's comma values come from | example |
+|---|---|
+| UD_Afrikaans-AfriBooms | `VerbForm=Fin,Inf` — defensible THERE (the finite and infinitive forms are homophonous), and a statement about nothing at all in Mwotlap |
+| Romanian, Spanish | `Case=Acc,Nom` on clitics |
+| Finnish | `Derivation=Llinen,Vs`, `Clitic=Han,Ko` — suffix STACKING, so the comma reads *A and B* rather than *A or B*: the same notation carrying the opposite meaning |
+| Irish | `Form=Ecl,Emp` |
+| genuine syncretism | `Gender=Fem,Masc`, `Number=Plur,Sing`, `PronType=Int,Rel`, `Person=1,2,3` |
+
+**Measured over the two installed wheels** — and this is not a tail:
+
+| wheel | labels | with a comma value | distinct pairs |
+|---|---|---|---|
+| `en_sud_ewt_gum` | 677 | **1** (0.15 %) — `Gender=Fem,Masc` | 1 |
+| `xx_sud_generic` | 13 101 | **929** (7.09 %) | 51, over 18 features |
+
+Sweeping the 80 built-in language slots over one Mwotlap sentence, a multi-valued label WINS the
+argmax for **8 of them**, usually by a landslide: the `af` slot gives `van`
+`POS=VERB|Subcat=Tran|Tense=Pres|VerbForm=Fin,Inf` at **p = 0.9921**.
+
+⚠ **THE FEATURE GOES; A BRANCH IS NEVER PICKED.** Both ways of "picking one" were measured against
+those numbers and both are worse:
+
+* **Re-ask the model for its best SINGLE-VALUED label.** It answers with a different word class. On
+  `af`/`van` the best single-valued label is `AdpType=Prep|POS=ADP` at **p = 0.0016** — so a
+  99 %-confident VERB reading would be traded for a 0.16 % adposition to tidy one cell, and the UPOS
+  the caller SUPPLIED would be contradicted. (It is situational, not uniformly bad: on `ro`/`kē` the
+  single-valued fallback costs 0.3 %. Situational is not a rule.)
+* **Keep the first branch.** That invents the very distinction the label declines to make.
+
+Dropping the feature keeps everything the label DOES say — the class, the tense, the `Subcat` — and
+is silent about the one thing it does not. The reader can then type the value themselves, which the
+additive rule above protects from that moment on.
+
+⚠ **AND THE READER'S OWN COMMA VALUE IS NEVER TOUCHED.** `_drop_multivals` runs on the model's answer
+BEFORE `_merge_prior_feats` puts theirs back, so a `Gender=Fem,Masc` typed into a document survives
+every parse, exactly as any value they typed does. Verified both ways.
+
+⚠ **TWO FLAGS IN `parse_pretokenized`, NOT ONE.** The strip is about the wheel's own answer and
+applies whether or not the caller sent a column to protect; folding it into `additive` would have
+left `Fin,Inf` standing on exactly the sentence with no prior FEATS — a freshly inserted one, where
+every cell the parse fills is the parse's.
+
+⚠ **THE VALIDATOR DATA HAS NO COMMA VALUES AT ALL.** Checked across all 286 languages of
+`feats.json`, in every value list and every `byupos` key: zero. Romanian's `Case` node lists
+`["Acc","Dat","Gen","Nom","Voc"]` as atomic values with no `Acc,Nom` entry, though Romanian treebanks
+demonstrably use it. The validator composes multi-values at validation time by splitting on the
+comma — so any future code that checks a FEATS string against that file must split first, or all 929
+of these labels will fail lookup.

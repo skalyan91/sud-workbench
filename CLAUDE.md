@@ -239,6 +239,17 @@ Break one of these and the failure is silent or misdiagnosed. Each is expanded i
   that reads it — the parse reads theirs. Never blank, overwrite or ignore a column the caller handed
   in. This is the only ensemble here worth building: the annotator's own FEATS are worth +14.95 LAS
   on held-out Basque, where a second parser is worth nothing. → `parsing-models.md`
+- **FEATS is an ADDITIVE column under the generic wheel.** A generic or custom model may add a feature
+  to a token and may never change or drop one — its morphology is either a cross-lingual guess or a
+  lossy re-derivation of the annotator's own file, and neither may have the last word on a cell
+  somebody has already answered. A monolingual parser deliberately still may, so the gate is the
+  PACKAGE (`_feats_additive`). The frontend sends `prior_feats` on every pre-tokenised call; Python
+  alone decides whether it binds. **The RETAG is the one gesture that may delete a feature**, and only
+  the ones the new class cannot carry (`clearFeatsForUpos`, saying in a toast what it dropped) — the
+  difference is whose gesture it was. **And the wheel may not write a COMMA VALUE** — 7.1 % of its
+  labels carry one, every one learned from another of its 80 treebanks (`VerbForm=Fin,Inf` is
+  Afrikaans), so `_drop_multivals` drops the feature rather than picking a branch. A monolingual
+  wheel's own comma value stays, as does one the reader typed. → `parsing-models.md`, `editing.md`
 - **The generic parser reads UPOS as INPUT and refuses a Doc without it** (`sud_require_upos`; it
   used to invent one instead — `DET ADJ DET ADV DET ADV DET` for "The cat sat on the mat."). Set the
   classes on the Doc BEFORE the first component, drop the `upos` arm where there are none and let the

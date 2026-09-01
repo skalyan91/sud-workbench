@@ -197,7 +197,7 @@ function pickGhost(si,kind,tok,other){ selGhost={s:si,kind,tok,other:other==null
   if(conv==="brackets"){ preserveScroll(renderDoc); } else if(typeof applySel==="function") applySel(); }   // brackets has no live .sel toggle of its own (see pick()'s identical branch) — a full re-render is what settles the wash/.gsel there too
 // Delete/Backspace with a ghost edge selected (js/grid/columns.js's keydown handler): clears the ONE FEATS/MISC
 // value the selected ghost draws — Shared=Yes wholesale (clearFeat drops the whole key), or the MISC Subject key
-// (raiseSet …,"" — the same clear clearSubjIfNotVA/attachGenericSubj's toggle-off use) — through the SAME
+// (raiseSet …,"" — the same clear clearFeatsForUpos/attachGenericSubj's toggle-off use) — through the SAME
 // pushUndo/markDirty/preserveScroll(renderDoc) path every other mutation in this file uses, never a parallel ad
 // hoc write. Never touches the real (solid) edge either token otherwise participates in: only the one FEATS/MISC
 // key moves. Fires no pick() on any OTHER token (CLAUDE.md's "NO pick() ON ANY OF THOSE PATHS" for a menu-driven

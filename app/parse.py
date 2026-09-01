@@ -495,6 +495,138 @@ def _apply_arms(tokens: list[dict], arms: set, given: set = frozenset()) -> list
     return _punct_defaults(tokens, given)
 
 
+# ── FEATS IS AN ADDITIVE COLUMN UNDER THE GENERIC WHEEL ──────────────────────────────────────────
+# ⚠ **A GENERIC OR CUSTOM MODEL MAY ADD TO THE FEATURES IT IS HANDED AND MAY NOT CHANGE OR DROP ONE.**
+# Reported: a re-parse replaced hand-entered morphology with the wheel's own answer. That is wrong for
+# THIS wheel in a way it is not for a monolingual parser, and for two reasons that compound:
+#   · **A CUSTOM MODEL IS FITTED ON THE ANNOTATOR'S OWN DOCUMENT** (app/generic_models.py), so its
+#     FEATS are a lossy re-derivation of the very column it would be overwriting. That round trip
+#     cannot add information and routinely loses it — a feature the reader typed once, on the one
+#     token in the file that attests it, is exactly the one their row was not fitted to reproduce.
+#   · **THE UNFITTED WHEEL IS A CROSS-LINGUAL GUESS**, predicting FEATS from UPOS and a language
+#     embedding on a language it was never trained on. "Silence is the preferred failure for
+#     annotation" (CLAUDE.md) governs what such a guess may write into an empty cell; what it may do
+#     to a cell the annotator has already answered is not even that question.
+# A MONOLINGUAL PARSER IS DELIBERATELY NOT SUBJECT TO THIS. Trained on its own language's gold
+# treebank, its FEATS are a second opinion worth having, and a re-parse forbidden to revise them would
+# not be a re-parse. So the gate is the PACKAGE and not the engine: `custom:<slug>` and
+# `sud:xx_sud_generic` both resolve to the one shared wheel (`_resolve_model`), and nothing else does.
+#
+# ⚠ THE RULE IS DECIDED HERE, ONCE, AND NOT AT THE THREE CALL SITES. The frontend sends the column it
+# has (`prior_feats`) on every pre-tokenised call and this decides whether it binds — the same shape
+# `app/glosses.py` is held to for the lexical channel, and for the same reason: two copies of "which
+# models may overwrite the annotator" would drift, and the one that drifted would do so silently, in
+# the direction of deleting annotation.
+#
+# ⚠ AND ONLY WHERE THE TOKENISATION IS FIXED. A prior FEATS column is a per-token statement, so it
+# binds only where the tokens are the same tokens — which `parse_pretokenized` guarantees by
+# construction and a re-tokenisation (`parse`, `commitSentText`) cannot. Editing the running sentence
+# is a different gesture with its own preservation rules (`captureMarks`, js/io/bridge.js).
+def _feats_additive(package: str) -> bool:
+    """Whether this package may only ADD to the FEATS the caller handed it."""
+    from . import generic_models
+    return bool(package) and package == generic_models.GENERIC_PKG
+
+
+def _drop_multivals(tokens: list[dict]) -> list[dict]:
+    """Drop any FEATS pair whose VALUE is a comma-separated list, from the generic wheel only.
+
+    ⚠ ``VerbForm=Fin,Inf`` IS NOT A VALUE — reported off a Mwotlap parse. UD writes a genuinely
+    UNDERSPECIFIED cell as a disjunction of that feature's values (`Gender=Fem,Masc` on singular
+    *they* is the classic one, and is correct), so the notation is legitimate; what is not is a
+    disjunction of categories that cannot both hold of one form.
+
+    ⚠ **AND THE GATE IS THE SAME ONE THE ADDITIVE RULE USES, FOR THE SAME REASON.** The generic
+    wheel's label set is the UNION OVER 80 TREEBANKS' annotation conventions, so a multi-value it
+    predicts was learned from a language that is not the one being parsed: `Fin,Inf` is
+    UD_Afrikaans-AfriBooms (where the finite and infinitive forms are homophonous, so the convention
+    is defensible THERE and says nothing whatever about Mwotlap), `Case=Acc,Nom` is Romanian,
+    `Derivation=Llinen,Vs` and the `Clitic=` pairs are Finnish suffix stacking, `Form=Ecl,Emp` is
+    Irish. A MONOLINGUAL wheel is left alone: its one such label is its own treebank's convention for
+    its own language, which is exactly what that model is for.
+
+    Measured over the two installed wheels: `en_sud_ewt_gum` has **1 multi-valued label of 677**
+    (`Gender=Fem,Masc`, singular *they*); `xx_sud_generic` has **929 of 13 101** — 7.1 %, in 51
+    distinct pairs over 18 features. So this is not a tail: sweeping the 80 built-in language slots
+    over one Mwotlap sentence, a multi-valued label WINS the argmax for 8 of them, usually by a
+    landslide (`af` gives `VerbForm=Fin,Inf` p=0.9921 on `van`).
+
+    ⚠ **THE FEATURE GOES; A BRANCH IS NEVER PICKED.** Two ways of "picking one" were considered
+    against those numbers and both are worse:
+      · **Re-ask the model for its best SINGLE-VALUED label.** It answers with a different word class
+        — on `af`/`van` the best single-valued label is `AdpType=Prep|POS=ADP` at p=0.0016, so a
+        99 %-confident VERB reading would be traded for a 0.16 % adposition to tidy one cell, and
+        the UPOS the caller SUPPLIED would be contradicted.
+      · **Keep the first branch.** That invents the very distinction the label declines to make.
+    Dropping the feature keeps everything the label does say (the class, the tense, the Subcat) and
+    is silent about the one thing it does not — "silence is the preferred failure for annotation"
+    (CLAUDE.md), and the reader can type the value themselves, which the additive rule then protects.
+
+    ⚠ THE READER'S OWN COMMA VALUE IS NOT TOUCHED, because this runs on the MODEL's answer before
+    `_merge_prior_feats` puts theirs back. `Gender=Fem,Masc` typed into a document survives every
+    parse, as any value they typed does."""
+    for t in tokens:
+        pairs = [p for p in _feats_pairs(t.get("feats") or "") if "," not in p.split("=", 1)[1]]
+        if pairs != _feats_pairs(t.get("feats") or ""):
+            t["feats"] = "|".join(pairs)
+    return tokens
+
+
+def _feats_pairs(feats: str) -> list:
+    """``["Case=Erg", "Number=Sing"]`` — the pairs of a FEATS string, `_` and junk dropped."""
+    return [p for p in (feats or "").split("|") if "=" in p and not p.startswith("=")]
+
+
+def _merge_prior_feats(model_feats: str, prior: str) -> str:
+    """``model_feats`` with every pair of ``prior`` written back over it — add only.
+
+    ⚠ THE READER'S OWN TEXT, not a re-serialisation of it. A pair that goes through spaCy's
+    `set_morph` comes back re-ordered INSIDE its own value (`Number=Sing,Plur` → `Number=Plur,Sing`),
+    and this column is saved verbatim — byte-stability is the hard I/O requirement (CLAUDE.md), so a
+    merge that tidied the annotator's spelling would be exactly the modification it is here to
+    prevent. The prior's own substrings are therefore carried across untouched.
+
+    The ORDER is UD's — alphabetical, case-insensitive — which is also what `setFeat`
+    (js/io/bridge.js) sorts a hand-added feature by. spaCy sorts case-SENSITIVELY (`NumType|Number`
+    where UD asks for `Number|NumType`), so a merged token can order differently from a purely
+    model-tagged one in the same document. Following the reader's own convention is the right side of
+    that to be on, since half of this string is theirs."""
+    keep = _feats_pairs(prior)
+    if not keep:
+        return model_feats or ""
+    mine = {p.split("=", 1)[0] for p in keep}
+    out = [p for p in _feats_pairs(model_feats) if p.split("=", 1)[0] not in mine] + keep
+    out.sort(key=lambda p: p.split("=", 1)[0].lower())
+    return "|".join(out)
+
+
+def _prior_feats_on_doc(doc, prior_feats) -> None:
+    """The same merge applied to the Doc MID-PIPELINE, so everything downstream reads it too.
+
+    Not a second, cautious copy of the merge on the token table below — a different job. The
+    parser READS FEATS (that is `arm_deps` read off the model's own encoder), and the annotator's own
+    features are the single most valuable thing that can be handed to this wheel: ten held-out Basque
+    sentences through this app's scorer go LAS 38.32 → 53.27 when FEATS travel with UPOS. Merging only
+    at the end would keep their column intact and still hand the tree a morphology they had corrected.
+
+    Run right after the morphologiser — and after `_force_upos`, whose re-derivation for a chosen word
+    class is the model's half of the same cell."""
+    for i, prior in enumerate(prior_feats or ()):
+        if i >= len(doc):
+            break
+        pairs = _feats_pairs(prior)
+        if not pairs:
+            continue
+        got = doc[i].morph.to_dict()
+        for p in pairs:
+            k, _, v = p.partition("=")
+            got[k] = v
+        try:
+            doc[i].set_morph(got)
+        except Exception:  # noqa: BLE001 — a feature spelling spaCy will not intern is not worth losing the parse over
+            pass
+
+
 # ── CUSTOM MODELS: one shared wheel, one embedding row each ──────────────────────────────────────
 def _resolve_model(model_id: str) -> tuple:
     """``(engine, name, tb_lang)`` for any model id, custom ones included.
@@ -791,6 +923,8 @@ def _parse_spacy_sud(text: str, package: str, tb_lang=None,
     except Exception as exc:  # noqa: BLE001 — e.g. a raw-text tokeniser dependency isn't installed yet
         raise ParserUnavailable(str(exc)) from exc
     out, mwt = _spacy_doc_to_sud(doc, arms)
+    if _feats_additive(package):
+        _drop_multivals(out)      # a comma value learned from one of the wheel's other 80 languages
     return (_apply_arms(out, arms), mwt) if out else (whitespace_tokens(text), [])
 
 
@@ -1383,8 +1517,11 @@ def _parse_spacy_sud_many(texts: list[str], package: str, tb_lang=None,
     except Exception as exc:  # noqa: BLE001 — e.g. a raw-text tokeniser dependency isn't installed yet
         raise ParserUnavailable(str(exc)) from exc
     out = []
+    multi = _feats_additive(package)
     for text, doc in zip(texts, docs):
         toks, mwt = _spacy_doc_to_sud(doc, arms)
+        if multi:
+            _drop_multivals(toks)     # …the same, per text — see `_drop_multivals`
         out.append((_apply_arms(toks, arms), mwt) if toks else (whitespace_tokens(text), []))
     return out
 
@@ -1648,7 +1785,8 @@ def _force_upos(morphologizer, doc, upos, keep_feats=frozenset()) -> None:
 
 
 def parse_pretokenized(forms: list[str], model_id: str = "", upos: list[str] | None = None,
-                       arms=None, given=None, glosses: list[str] | None = None) -> dict:
+                       arms=None, given=None, glosses: list[str] | None = None,
+                       prior_feats: list[str] | None = None) -> dict:
     """Parse a sentence whose TOKENISATION IS ALREADY DECIDED — one token per entry of ``forms``.
 
     This is what "re-derive the model-derived fields for these tokens" needs, and it is not the same
@@ -1673,6 +1811,14 @@ def parse_pretokenized(forms: list[str], model_id: str = "", upos: list[str] | N
     ``upos`` — one word class per form, the READER's own tags — is what makes a retag mean something:
     the FEATS are re-derived for the class that was chosen and every component after the morphologizer
     sees it.  See `_force_upos`, which also states what a retag can and cannot move.
+
+    ``prior_feats`` — one FEATS string per form, the column AS IT STANDS — is what makes FEATS an
+    ADDITIVE column under the generic wheel: sent on every call, it binds only for the model that may
+    not overwrite the annotator (see `_feats_additive`, which is where that is decided and why).
+    It is not `given["feats"]` and must not be folded into it: `given` says "this arm is OFF, the
+    column is mine", which takes the morphologiser out of the run altogether — here the arm is ON,
+    the model is asked for everything it has, and only its answer about a cell the reader has
+    already filled is refused.
 
     Returns the same shape as :func:`parse` minus ``mwt``: the ranges belong to the caller's own
     table, and a re-parse that was forbidden to re-tokenise has nothing new to say about them."""
@@ -1730,14 +1876,26 @@ def parse_pretokenized(forms: list[str], model_id: str = "", upos: list[str] | N
         off, arms = _pipe_plan(nlp, arms, gset)
         keep = {i for i, v in enumerate((given or {}).get("feats") or ())
                 if v and v != "_"} if "feats" in gset else frozenset()
+        # FEATS the model may add to and may not change — see `_feats_additive` for which models, and why
+        # it is the package that decides rather than the caller. TWO flags, not one: the multi-value
+        # strip is about the WHEEL's own answer and applies whether or not the caller sent a column to
+        # protect, so folding it into `additive` would have left `VerbForm=Fin,Inf` standing on exactly
+        # the sentence with no prior FEATS at all — a freshly inserted one, where nobody has typed a
+        # thing yet and every cell the parse fills is the parse's.
+        generic = _feats_additive(name)
+        additive = generic and any(_feats_pairs(f) for f in (prior_feats or ()))
         for _pname, proc in nlp.pipeline:
             if _pname in off:
                 continue
             doc = proc(doc)
             if _pname == "morphologizer":
                 _force_upos(proc, doc, upos, keep)   # …and everything downstream now reads the READER's word class
+                if additive:
+                    _prior_feats_on_doc(doc, prior_feats)   # …and the reader's own features, which the parser after it READS
 
         tokens, _mwt = _spacy_doc_to_sud(doc, arms)
+        if generic:
+            _drop_multivals(tokens)   # …the MODEL's comma values, and only its own: the reader's go back on below
         tokens = _apply_arms(tokens, arms, gset)
         if len(tokens) != len(forms):
             # A component may still rebuild the Doc (clause_parser does); if one ever changes the
@@ -1771,6 +1929,13 @@ def parse_pretokenized(forms: list[str], model_id: str = "", upos: list[str] | N
             for tok, want in zip(tokens, (given or {}).get(arm) or ()):
                 if want and want != "_":
                     tok[col] = want
+        # …and the LAST word on FEATS, after every other hand has been on the column: the reader's own
+        # pairs, in the reader's own spelling. `_prior_feats_on_doc` has already merged the same values
+        # into the Doc, but what came back off it went through spaCy's serialisation on the way — which
+        # is a re-ordering, and re-ordering the annotator's column is a modification.
+        if additive:
+            for tok, prior in zip(tokens, prior_feats or ()):
+                tok["feats"] = _merge_prior_feats(tok.get("feats") or "", prior)
         return {"tokens": tokens, "parsed": True, "engine": "sud", "model": name,
                 **({"note": note} if note else {})}
     except ParserUnavailable as exc:

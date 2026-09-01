@@ -483,7 +483,7 @@ function renderGrid(si){
         const oldUpos=t.upos;
         if(key==="deprel"){ t.deprel=withDepBase(t.deprel,ctl.value); afterDeprelEdit(t,sent); }   // keep the "@deep" tail when the relation changes
         else if(key==="deep"){ t.deprel=withDepDeep(t.deprel,ctl.value); }                     // replace only the deep-feature tail
-        else if(key==="upos"){ t.upos=ctl.value; syncXposMirror(t); clearSubjIfNotVA(t); uposSyncGloss(t,oldUpos); }   // item 1: a tag change away from VERB/AUX drops any now-meaningless Subj; Task B: retarget the closed-class gloss prefix IN PLACE, immediately — never a wholesale MGloss rebuild
+        else if(key==="upos"){ t.upos=ctl.value; syncXposMirror(t); clearFeatsForUpos(t); uposSyncGloss(t,oldUpos); }   // item 1: a tag change drops what the new class cannot carry (a now-meaningless Subj, and every feature the UD tables do not put on this class); Task B: retarget the closed-class gloss prefix IN PLACE, immediately — never a wholesale MGloss rebuild
         else { t[key]=ctl.value;
           if(key==="head"){ if(!ctl.value.length) t.deprel="";   // detaching clears the relation with it — a deprel describes an EDGE; see clearHead's own note (js/editing/edit-ops.js), and note it must happen BEFORE afterHeadEdit or a detached root's "root" would be demoted to "udep" rather than cleared
             afterHeadEdit(t,sent); } }   // keep head 0 ⟺ deprel "root"

@@ -2,6 +2,46 @@
 
 All notable changes to SUD Workbench are documented in this file.
 
+## [Unreleased]
+
+### Fixed: your own features survive a re-parse
+
+- **A generic or custom model can now only add to FEATS, never change or delete a feature.** Re-parsing
+  a sentence, or the background refresh that follows a form or word-class edit, used to replace the
+  whole features column with the model's own answer — so a feature you had typed by hand was quietly
+  overwritten, or simply disappeared where the model had nothing to say about that token. Now the
+  model fills in the features you have left empty and leaves yours exactly as you wrote them.
+- **A parser trained on its own language still revises features as before.** The restriction is
+  specific to the generic parser and to the custom models built on it, for two reasons: a custom model
+  is fitted on your own annotation, so its features are a lossy re-derivation of the very column it
+  would overwrite; and an unfitted one is guessing at a language it was never trained on.
+- Your features are now also **read by the parser itself**, not merely restored afterwards — they go
+  into the sentence before the tree is built, which is where they are worth the most.
+
+### Fixed: the generic parser no longer writes another language's ambiguity into yours
+
+- **A feature value like `VerbForm=Fin,Inf` is no longer written at all.** The generic parser knows one
+  label set built from 80 treebanks, so a comma-separated value it predicts was learned from a language
+  that is not the one you are parsing — `Fin,Inf` comes from Afrikaans, where the finite and infinitive
+  forms are homophonous and the annotation makes sense. On your language it says nothing. The feature is
+  now left empty and everything else the parser had to say about the token is kept.
+- The feature is **dropped rather than resolved to one value**: picking a branch would invent the very
+  distinction the parser declined to make. Type the value you want and it will stay — the rule above
+  keeps a parse from touching it.
+- **A parser trained on one language still writes its own.** `Gender=Fem,Masc` on singular *they* is
+  correct English annotation, and so is a value you have typed yourself: neither is touched.
+
+### Changed: retagging a token drops the features its new class cannot carry
+
+- **Changing a token's word class now removes the features that word class does not take** — retag a verb
+  as a noun and its mood and tense go, while its number and case stay. This is the same permitted-features
+  table the FEATS menus are scoped by, so a feature dropped here is one those menus would not have offered
+  on the new class anyway. It applies wherever you retag: the diagram menu, either subtype flyout, or the
+  grid cell.
+- A **toast names what was dropped**, since these are features you may have typed yourself. Nothing is
+  dropped when you clear a word class outright, and features the table has no opinion about — `Typo`,
+  `Foreign`, and SUD's own `Shared` — always stay.
+
 ## [0.3.18] — 2026-08-31
 
 ### Changed: a custom model can be chosen for you
