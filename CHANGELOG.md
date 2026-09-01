@@ -2,7 +2,7 @@
 
 All notable changes to SUD Workbench are documented in this file.
 
-## [Unreleased]
+## [0.3.19] — 2026-09-01
 
 ### Fixed: your own features survive a re-parse
 
