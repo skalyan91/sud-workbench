@@ -484,7 +484,10 @@ async function attachAsSharedConjunct(si,depId,conjDepId){ const s=DOC[si]; if(!
     // itself. Resolved HERE, before the pick() below: in brackets, pick() re-renders the whole block (see its own
     // conv==="brackets" branch), and these three must be read off the tree the user actually tapped.
     const trEl=e.target.closest?e.target.closest(".tr-edit"):null, glEl=e.target.closest?e.target.closest(".gl-edit"):null,
-          gwEl=e.target.closest?e.target.closest("[data-gwtok]"):null;
+          lmEl=e.target.closest?e.target.closest(".lem-edit"):null,   // item 29: …and the lemma row, resolved HERE for the same reason as its neighbours: pick() re-renders a brackets block, and this must be read off the tree the reader actually tapped
+          gwEl=e.target.closest?e.target.closest("[data-gwtok]"):null,
+          plEl=e.target.closest?e.target.closest(".avm-plus"):null,   // item 30: the AVM's own "+" — resolved HERE with its neighbours because pick() re-renders a brackets block, so the tapped element has to be read off the tree the reader actually touched
+          poEl=e.target.closest?e.target.closest(POS_SEL):null;   // …and the POS row (POS_SEL, js/editing/context-menu.js — the one selector the right-click resolver uses too), resolved HERE for the same reason as the three above: pick() re-renders a brackets block, and this must be read off the tree the reader actually tapped
     if(!d.moved){   // A PLAIN TAP — and the gesture is only NOW known to be one, which is why this is where the token gets selected (the grab itself no longer does it; see the pointerdown above). scroll=false still: the grid row is revealed by scrollNearest immediately below instead, which is the same reveal pick()'s scroll=true path would do
       /* kind:"mwtgroup" — DO NOTHING. Before this gesture existed, a tap on the tie fell into the marquee-arm
          branch (ddNode/ddEdge never matched .mwt-g) and a no-movement pointerup ran the marquee's own deselect
@@ -497,6 +500,20 @@ async function attachAsSharedConjunct(si,depId,conjDepId){ const s=DOC[si]; if(!
          before. editMWTInline selects the component range itself (selectMWTRange), so nothing is lost by not
          picking here. Verified live via CDP — see the commit message. */
       if(d.kind==="mwtgroup") return;
+      /* ⚠ item 30 — A TAP ON THE AVM'S "+" DOES NOT SELECT, AND THAT IS WHAT STOPS IT FLICKERING.
+         Reported: "when I click on the plus, it flickers". `pick()` re-renders the block, which replaces
+         the `.avm-box` the pointer is over — and a REPLACED node is a new element whose `.avm-plus` starts
+         at `opacity:0` and only fades back up once `:hover` is re-evaluated against it. So the mark
+         vanished and faded in again under the reader's own click, every time.
+         Returning before the pick is the fix rather than papering over it with a class that survives the
+         render: the mark opens a MENU, and the menu is handed `d.si`/`d.tok` explicitly (as every row of it
+         then is, via `avmSetFeat`), so nothing downstream needs a selection. Not selecting is also the safe
+         side of CLAUDE.md's rule — a click MAY select, and nothing requires that it must.
+         Ahead of the pick, therefore, rather than in the `d.kind==="node"` branch below where the other tier
+         editors sit: those want the selection they are editing within, and this does not. */
+      if(plEl){ const b=plEl.getBoundingClientRect();
+        if(avmAddMenu(b.left+b.width/2,b.bottom,d.si,d.tok)) setAvmOpen(plEl);   // …and the matrix holds its grown shape while its own menu is up, across any re-render (setAvmOpen/clearAvmOpen, js/editing/context-menu.js)
+        return; }   // anchored to the MARK, not the pointer: a menu hinged off the thing that opened it, as every other affordance here opens one
       const tapId=d.kind==="head"?d.dep:(gwEl?+gwEl.getAttribute("data-gwtok"):d.tok);   // a goeswith CONTINUATION selects ITSELF, not the head whose group it is drawn inside
       pick(d.si,tapId,false,false);
       scrollNearest(document.querySelector(`#doc tr[data-s="${d.si}"][data-tok="${tapId}"]`));
@@ -509,6 +526,8 @@ async function attachAsSharedConjunct(si,depId,conjDepId){ const s=DOC[si]; if(!
         if(gwEl){ editNodeInline(d.si,tapTok,{x:e.clientX,y:e.clientY}); }   // a goeswith CONTINUATION's own form field, drawn inside the head's group — so d.tok (the group's data-tok) names the head, not the part actually tapped. Same shape as the .tr-edit/.gl-edit routing above: the group owns the drag, the tapped element decides which editor opens. The shared rows (translit/gloss/POS) carry no data-gwtok and so still edit the head, which is where the guideline puts every annotation anyway   (its own pick() is gone — the tap-branch pick above already resolved this id)
         else if(trEl) editTransInline(d.si,d.tok,{x:e.clientX,y:e.clientY});
         else if(glEl) editTier(d.si,d.tok,glEl.dataset.tier||"gloss",{x:e.clientX,y:e.clientY});
+        else if(lmEl) editLemmaInline(d.si,d.tok,{x:e.clientX,y:e.clientY},lmEl);   // item 29: the lemma row behaves like its neighbours — one tap opens its own field rather than falling through to the token's FORM editor. The element is passed through so the field opens over the row that was actually tapped
+        else if(poEl) editPosInline(d.si,d.tok,{x:e.clientX,y:e.clientY},poEl);   // the POS row behaves like its neighbours: one tap opens its own strict word-class field (editPosInline, js/editing/context-menu.js) rather than the token's FORM editor, which is what this branch used to fall through to — a tap on a word CLASS opened a field over the WORD. The element is passed through so a PROJECTED stemma's `.node-cat` opens over the node the reader tapped, not over the baseline row's `.tok-pos` for the same token. The selection is untouched: the tap's own pick() above has already run, exactly as it does for the form/translit/gloss rows
         else editNodeInline(d.si,d.tok,{x:e.clientX,y:e.clientY}); }
       return; }
     commitDrop(d,e.clientX,e.clientY); },true);

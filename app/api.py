@@ -1119,9 +1119,23 @@ class Api:
                # …and whether it reads the GLOSSES the annotator wrote (0.2.0's lexical channel).
                # The drawer greys its own Glossing arm on this: a gloss the app generated, handed
                # back to a parser that reads glosses, is the app quoting itself as evidence.
-               "reads_glosses": parse.reads_glosses(mid)}
+               "reads_glosses": parse.reads_glosses(mid),
+               # …and whether this model's FEATS column is ADDITIVE — i.e. whether the id resolves to
+               # the one shared generic wheel, as `sud:xx_sud_generic` or as a `custom:<slug>` row on
+               # it. `parse._feats_additive` is the whole of that decision and it stays in Python:
+               # the frontend asks the question too (a retag inherits the FEATS and glosses of the
+               # last token that was this word under this class — `mayInheritAnnotation`,
+               # js/io/bridge.js — precisely because such a model will not fill those cells itself),
+               # and a second copy of the rule in JS would drift silently in the direction of
+               # writing over annotation. Filled in below, where the id is resolved.
+               "feats_additive": False}
         try:
             engine, name, tb_lang = parse._resolve_model(mid)
+            # …the PACKAGE, never the id: both ids above name the same wheel (see _feats_additive).
+            # Set BEFORE the deps line, which loads a pipeline and may raise — this answer needs
+            # nothing loaded, and losing it to an unrelated failure would silently take the
+            # inheritance pass off under the very models it exists for.
+            out["feats_additive"] = engine == "sud" and parse._feats_additive(name)
             if engine == "sud" and name:
                 out["deps"] = parse.arm_deps(parse._load_spacy(name))
         except Exception:  # noqa: BLE001 — no deps is "nothing cascades", which greys nothing
@@ -2799,8 +2813,22 @@ class Api:
       r.appendChild(info);r.appendChild(right);return r;}
     function customRow(e){var r=document.createElement('div');r.className='row';r.setAttribute('data-mid',e.id);
       var info=document.createElement('div');info.className='mi';
-      var meta=[e.lang?('Language: '+e.lang):null,
-                e.basis==='file'?('Fitted on '+e.train_sents+' sentences'):'Not fitted'].filter(Boolean).join(' · ');
+      /* ⚠ ALL FOUR BASES, BECAUSE ONLY ONE OF THEM MEANS "NOT FITTED". This read
+         `basis==='file' ? … : 'Not fitted'`, which libelled two of the other three: a `fitted` row WAS
+         fitted (on the whole file — too few sentences to hold any back, which is what costs it a
+         measured score, not a fitting), and a `builtin` row is one of the 80 training languages' own
+         trained vector. Only `unfitted` is the all-zero spare row. That was merely untidy until the
+         untrained row stopped supplying FEATS at all (`parse._feats_muted`): "Not fitted" is now the
+         phrase that says a model writes no features, so a fitted model wearing it says something false
+         about what it will do. These four strings and `generic_models.caveat`'s four branches are the
+         same four states and have to agree; the caveat under this line is where each is explained at
+         length, so this stays a label. */
+      var basis=e.basis||'heldout';
+      var fitDesc=basis==='file'?('Fitted on '+e.train_sents+' sentences')
+                 :basis==='fitted'?('Fitted on all '+e.train_sents+' sentences')
+                 :basis==='builtin'?'Built-in language row'
+                 :'Not fitted — supplies no features';
+      var meta=[e.lang?('Language: '+e.lang):null, fitDesc].filter(Boolean).join(' · ');
       var sc=(e.uas!=null&&e.las!=null)?('<small class="sc">UAS <b>'+(+e.uas)+'</b> · LAS <b>'+(+e.las)+'</b></small>'):'';
       info.innerHTML='<span class="nm">'+esc(e.label||e.id)+'</span><small>'+esc(meta)+'</small>'+sc
         // ⚠ THE CAVEAT IS NOT OPTIONAL FURNITURE. These figures sit in the same column as every other
@@ -2953,7 +2981,11 @@ class Api:
       if(NEWLANG&&GENERIC&&(GENERIC.fitted_langs||[]).indexOf(NEWLANG)>=0){
         h.innerHTML="Without a file this model uses the row the generic parser already learnt for <b>"+esc(NEWLANG)+"</b>, one of its 80 training languages. It will parse — but the figures in the list will be the parser's held-out average over 20 <i>unseen</i> languages, not a measurement on your data.";
         return;}
-      h.innerHTML="Around <b>"+few+" annotated sentences</b> is enough to fit the language row, and "+min+" or more also buys a held-out UAS/LAS. Without any, the row is left unfitted — which upstream measured costing about 4 LAS against carrying no language channel at all, so the model will parse, badly.";}
+      // …and what an unfitted row will NOT do, beside how badly it does the rest. Its FEATS would be
+      // a guess about a language the parser has never seen, so `parse._feats_muted` drops them and the
+      // column comes back empty — which the reader is owed BEFORE they press Create, not after they
+      // notice. One sentence: the reason lives in `generic_models.caveat()`, which the row then shows.
+      h.innerHTML="Around <b>"+few+" annotated sentences</b> is enough to fit the language row, and "+min+" or more also buys a held-out UAS/LAS. Without any, the row is left unfitted — which upstream measured costing about 4 LAS against carrying no language channel at all, so the model will parse, badly, and will supply no features at all.";}
     function newLangLine(){
       var el=document.getElementById('newlang');
       if(!NEWLANG){ el.textContent=document.getElementById('newname').value.trim()?'Not a language name — that is fine, the model is simply called that.':''; return; }

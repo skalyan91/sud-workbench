@@ -33,6 +33,11 @@ it the next unforced `mglossRefill` — fired by any form or FEATS edit — sile
 MGloss stem that is not the Gloss underscored was somebody's), the `adoptStoredPicks` idiom. **That
 recovery also closes a bug older than this feature**: a hand-written MGloss stem was, after a
 save-and-reopen, replaced by the Gloss on the next form edit.
+⚠️ **AND IT RIDES WITH A COPIED Gloss TOO.** `inheritAnnotationForUpos` (js/io/bridge.js — a retag
+inherits what this word was last given under that class; see `editing.md`) copies `_glossLex` with
+the `Gloss` for exactly this reason, and copies `MSeg` and `MGloss` as a PAIR or not at all: MSeg is
+the segmentation MGloss is aligned to, so an MGloss arriving without it describes a division of the
+word that nothing in the document states.
 
 ⚠ **THE ATTACHMENT MARK IS A SEPARATOR ONCE A STEM EXISTS, NOT A WRAPPER** (`composeMGlossPrefill`),
 and this was a bug OLDER than the aligner that the aligner made ordinary. `mglossMarks` brackets the

@@ -129,7 +129,12 @@ magnification term, and `bot` is computed from `dfy`, so the reserve follows for
 accessors — `posRowTxt`/`trRowTxt` — feed every renderer, so a row states what it paints in one place. It
 replaces the glossing tiers' own `…`, which was already this and only for them; the transliteration row, the
 POS row and the AVM slot all drew literally nothing before. `"_"` is CoNLL-U's own empty field, so the diagram
-says what the file says. ⚠️ **THE STEMMA'S POS-AS-NODE LABEL IS THE ONE DELIBERATE EXCEPTION**: an untagged node
+says what the file says. ⚠️ **AND THE LEMMA ROW IS THE SECOND EXCEPTION, of a different shape again** — it keeps its reserved slot and
+draws NOTHING in it for a token whose lemma IS its form, because there the lemma is the word printed directly
+above and a placeholder would claim a missing annotation that is not missing. That row's own PRESENCE is per
+sentence as well (item 31), which is the same predicate under `some`. See "The lemma tier" below, and
+CLAUDE.md's own bullet.
+⚠️ **THE STEMMA'S POS-AS-NODE LABEL IS THE ONE DELIBERATE EXCEPTION**: an untagged node
 there keeps the literal `"X"` it has always shown, on instruction ("don't replace the X UPOS tag with an
 underscore"). A stemma of word classes draws its tags AS the tree's nodes, and a node is structure rather than a
 row that can be left blank. **Otherwise purely cosmetic**: not `.tr-edit`, no tooltip, nothing written back —
@@ -208,15 +213,229 @@ with zero-width TEXT nodes (`ZW`/`isZWNode`, `js/grid/grid.js`), which is right 
 editable caret anchor between `contentEditable=false` chips and strips them on serialize — and wrong for a
 plain text field, where a `<br>` cannot be committed by accident because it never enters `textContent`.
 
+## The lemma tier: present per sentence, painted per token
+
+`.tok-lemma` (SVG: `belowStack` + the hierarchy) / `.bwlemma` (wrapped brackets) / `.olemma` (outline), between
+the transliteration and the gloss tiers, in all five notations. On request: *"there should be a lemma tier in the
+diagrams, just below the tokens (or their transliterations) and formatted in small caps, but the lemma should only
+be shown for tokens that have inflectional features. These should be editable input fields."* Item 31 then made
+three corrections to it, all recorded below: *"the lemma should only be shown if it is different from the form"*,
+*"clicking on a hidden lemma should still bring up the input field"*, and *"if a sentence has no visible lemmas,
+the lemma tier itself should be hidden, unless a token is being edited, in which case it should slide into view."*
+
+⚠️ **ONE PREDICATE ASKED AT TWO SCOPES, WHICH IS WHAT KEEPS THE RESERVE AND THE DRAW IN STEP.** `lemmaShown(t)`
+answers it for a TOKEN; `lemmaRow(toks)` (js/core/prefs.js) asks the same predicate of a SENTENCE's display
+tokens — `toks.some(lemmaShown)`, exactly `hasTr(toks)`'s shape — and reaches `belowRows()` and so all thirteen
+`belowReserveH` sites, as its **fifth argument**. A sentence in which nothing shows a lemma reserves NO row and
+every stack in it closes up by one `belowGap()`; a sentence that shows one anywhere reserves the row for every
+token in it alike. CLAUDE.md's tier rule holds because a token that PAINTS implies a sentence that RESERVES.
+⚠️ **AND `lemmaRow()` USED TO TAKE NO ARGUMENT** — see this note's own earlier record, and prefs.js's, that a
+document-wide answer read from a global was the deliberate shape "because there are thirteen call sites and a
+reserve one of them forgets to grow is the silent misalignment the tier rule exists to prevent". That warning
+still stands and is what the parameter answers rather than ignores: every site already computes `hasTr(t)` from
+the array `lemmaRow(t)` needs, and a site that forgot would drop the row (visible in the first render) rather
+than misalign it.
+
+⚠️ **WITHIN A SENTENCE THAT HAS THE ROW, THE INK IS STILL GATED PER TOKEN, AND THAT SPLIT IS THE STANDING
+EXCEPTION.** `lemmaRowTxt()` (js/diagram/diagram-core.js) returns `""` — draw nothing — wherever `lemmaShown(t)`
+is false, so a token whose lemma is its own form keeps its reserved slot and leaves it blank while every row
+below it (the gloss tiers, the POS row, the AVM box) stays on one line across the sentence. What is skipped is
+the ink.
+
+⚠️ **AND NO `TIER_EMPTY` THERE, WHICH IS THE DEPARTURE.** The placeholder means "this row is visible and this
+token has NO VALUE for it". A token whose lemma equals its form has lost nothing — the lemma IS the form, printed
+directly above — so `_` would assert an absent annotation that is not absent, and the lemma itself would only
+repeat the word one line up. The relation LABEL is the app's other exception and it is a *different* one: that
+row has no reserved slot at all (see the note further down). This one keeps its slot and leaves it blank.
+⚠️ **AND UNDER THE PRESENT GATE `TIER_EMPTY` IS UNREACHABLE ON THIS ROW AT ALL** — superseding this note's own
+earlier "AN INFLECTED TOKEN WITH NO LEMMA STILL DRAWS `TIER_EMPTY`, on the standing rule". That was true while
+FEATS could admit a token the lemma column had not answered; with the gate asking about the lemma itself, no
+lemma means no ink and (absent another token) no row. The placeholder branch and the `.tier-empty` class it took
+at the three draw sites were deleted rather than left standing as unreachable code.
+
+⚠️ **THE GATE IS "THIS TOKEN HAS A LEMMA AND IT IS NOT THE FORM", ASKED DIRECTLY OF THE TWO COLUMNS** — and it
+was a FEATURE LIST for one round, which is worth recording because the growth of that list is the finding. It
+began as `hasInflFeat` (js/io/bridge.js), was narrowed to `AVM_GROUPS`' AGR+TAM ("by 'inflection' I meant only
+agreement and TAM features"), and then grew back one instruction at a time, each naming one more way a form can
+differ from its citation form:
+
+| opened the row | why |
+| --- | --- |
+| `AVM_GROUPS.AGR` — Person, Number, Gender, Clusivity | "only agreement and TAM features" |
+| `AVM_GROUPS.TAM` — Tense, Aspect, Mood, Evident | 〃 |
+| `Degree` | "I guess degree is also inflection" |
+| `Case` | "and case" |
+| `Voice` | "some languages have finite passive forms" — a synthetic passive is ONE token differing from its citation form by voice alone |
+| `VerbForm` ≠ `Fin` (the one entry gated on its VALUE — a non-finite form often carries `VerbForm` and nothing else) | "and also non-finite forms of verbs" |
+
+That table was an ever longer APPROXIMATION of a question the file can simply be ASKED, so
+`lemGateFeats`/`LEM_GATE_EXTRA`/`LEM_GATE_VAL` were deleted rather than left standing beside their replacement.
+`hasInflFeat` is STILL not edited to match: it answers a different question for a different caller (is this an
+inflected word form or a bound compound member, `msegFlagSent`). `isUninflectedForm`/`UNINFLECTED_FEATS` stays
+out for its own old reason — it answers "may a LEXICAL source write a gender onto this token", not "does this
+form differ from its lemma".
+⚠️ **WHAT THE MOVE BUYS BESIDES NOT NEEDING A NEXT ENTRY**, measured over `samples/` (tokens passing each gate):
+literary_chinese 42 → **1**, khc_test 50 → **0**, arabic_rtl 3 → **0**, english 42 → **20**, la_virgil 36 → 28,
+brihat_jataka 74 → 71. It reaches languages whose treebanks carry no FEATS at all, and it stops asserting "this
+form is not its citation form" of a token whose own file records the two as identical. The same figures by
+SENTENCE are what item 31's third change is for: khc_test 19 sentences → **0** with the row, literary_chinese 11
+→ **1**, english 8 → 8.
+⚠️ **THE COMPARISON IS EXACT AND CASE-SENSITIVE, AND THAT IS REPORTED RATHER THAN DECIDED HERE.** A
+sentence-initial `The` differs from `the`, so most sentences show a lemma on their first token: on
+`samples/english.conllu`, 20 of 81 tokens differ, **7 of those by case alone, 6 of the 7 the sentence's own first
+token**. Folding case would also hide a genuine `US`/`us`; which costs more is the reader's call.
+⚠️ **AND IT COMPARES THE STORED COLUMNS, NEVER WHAT IS ON SCREEN** — `t.lemma` against `t.form`, not `bform(t)`.
+The row paints the stored lemma (see below), and comparing against the rendered glyph would make the row appear
+and disappear with the reader's own script/romanisation choice.
+
+⚠️ **A BLANK SLOT IS STILL A TARGET** ("clicking on a hidden lemma should still bring up the input field"). An
+empty SVG `<text>` has no hit area and a zero-width HTML span has no box, so each notation draws a real one: a
+transparent `<rect class="lem-edit lem-hit">` in the SVG rows (`svgLemHit`, js/diagram/diagram-core.js — used by
+`belowStack` and by the hierarchy) and a min-width cell in the HTML ones. That is the `.avm-hit`/`.avm-add`
+idiom, taken for the reason it exists there. `fill:transparent`, **not** `fill:none` — a `none` fill is not
+hit-tested at all, which is the whole difference from the empty `<text>`. **Exactly one element per token wears
+`.lem-edit`**, or `lemmaElOf`'s `querySelector` would have to choose. The rect's box is the painted row's own
+crop box (`y−11`, 14 tall) and its width the token's form width floored at `LEM_HIT_MINW` 24px, so aiming at a
+blank slot means aiming exactly where the lemma would be; it is deliberately **not** pushed into `boxes`, which
+`fitTight` crops to — those describe ink.
+⚠️ **AND `rect.lem-hit` STATES THE ROW'S OWN FACE IN CSS.** `makeEditable`'s `applyFont` copies the family, size,
+weight, ink and `font-feature-settings` off the element the field opens over; a bare rect inherits none of
+`.tok-lemma`'s 15px/smcp, so the field would open — and caret — in a face the committed value is not painted in.
+The HTML cells keep `.bwlemma`/`.olemma` and need only the min-width. Measured in the shipping WKWebView (the
+engine that has to answer this, not Chrome): the rect over `dog` reports `font-feature-settings:"smcp"`, 15px,
+`"Noto Sans"` — the painted row's own three — with `fill: rgba(0, 0, 0, 0)` and a box of 27.52 × 14 (the form's
+own width; the one over lemma-less `ran` falls to the 24px floor), and the field opened on it comes up on the
+STORED `dog` with both the feature list and the size matching.
+
+⚠️ **AND THE ROW A LEMMA EDIT BRINGS IN** ("…unless a token is being edited, in which case it should slide into
+view"). The row's presence is computed at render time from the sentence's own tokens, so this is a FORCE for one
+sentence plus a re-render plus an animation — `lemRowForce` (js/diagram/diagram-core.js), called by
+`editLemmaInline` when it can find no element to lay a field over, and undone by that field's commit callback
+whatever the edit did.
+⚠️ **THE FORCE RIDES ON THE DISPLAY TOKEN ARRAY, NOT ON AN AMBIENT "CURRENT SENTENCE".** `displaySent` stamps
+`lemForce` on the array it returns, at both of its exits, and every reserve and draw site in all eight renderings
+already holds exactly that array — it is the `t` they hand `hasTr(t)`. So the forced state travels with the very
+data the reserve is computed from. (A property on an Array is invisible to `JSON.stringify`, so it reaches
+neither `diaContentSig` nor an undo snapshot nor the file — which matters, because with merge-punctuation OFF
+and no goeswith to fold, the "display" array IS `sent.tokens` itself. It is rewritten on every render, so it is
+never stale either.) Keyed on the SENTENCE OBJECT rather than its index:
+an index survives a document replace or an undo that swaps every object, and would force the row onto whatever
+sentence inherited the number.
+⚠️ **AND THE DIAGRAM CACHE HAS TO BE TOLD** — `invalidateDiaSentence(si)`, since the force is in neither half of
+DIA_CACHE's key. Deliberately not added to `diaFlagsSig`: that signature is global, so a per-sentence fact put in
+it would drop every other sentence's entry on every lemma edit. This is the same miss `show.lemma` made in that
+signature (below), and the same failure it produces: the row appears not to arrive at all.
+⚠️ **THE SLIDE ANIMATES LAYOUT, WHICH IS ITS HONEST COST.** The block genuinely gets taller — unlike the AVM's
+hover growth, which animates inside space `avmLayout` already reserved — and the row arrives in the MIDDLE of the
+below-stack, so the growth lands at the bottom of the `.diagram` box. `lemSlide` holds the following content
+where it was (a negative `margin-bottom` of the height just gained, measured across the re-render) and hides the
+gained strip (`clip-path` inset from the bottom), then transitions both to zero over 140ms: the stack slides down
+out from under the clip while the page closes in behind it. The clip is not decoration — with the negative margin
+alone the NEXT block paints over the arriving row for the whole transition, since two in-flow siblings paint in
+DOM order. `margin-bottom` is not a compositor property, so every following block in the render window
+re-lays-out on each frame; the alternative (a transform on every following sibling) trades that for a stacking
+context per block and has to be undone by hand. The way OUT is the mirror **without the clip** — by then the row
+has already gone, so there is nothing to reveal, and `none` → `inset(…)` is not an animatable pair, so writing
+one there would only add a property the engine declines to transition (probe: `animOut: ["margin-bottom"]`, one
+transition, against `animIn: ["clip-path","margin-bottom"]`). The gain is divided
+by `cssZoomOf()` (`getBoundingClientRect` is visual px, `margin-bottom` is authored inside `.sblock{zoom}`), and
+the cleanup is on a TIMER, not `transitionend`: two properties fire two events and a transition the engine
+declines to run fires none, which would leave the clip in place forever.
+⚠️ **AND THE COMMIT CALLBACK MUST NOT RENDER TWICE.** `lemRowForce` renders by itself, so the cancel branch of
+`editLemmaInline`'s callback (which used to call `preserveScroll(renderDoc)` unconditionally) now renders only
+when no force was undone. Measured before that fix: the second render replaced the very element `lemSlide` had
+written its from-state onto, so the departure animated for exactly as long as it took the next statement to run
+— the probe read `animOut: []` against `animIn: ["clip-path","margin-bottom"]`. Rendering twice was always
+wasteful; here it was also visible. ⚠️ **THE ONE RACE THAT REMAINS IS `commitLemmaEdit`'s**: on a commit whose
+new lemma is the form (so the row leaves), that function's own post-await re-render can cut the departure slide
+short. The end state is right either way, and the alternative — holding the row up until the bridge answers —
+would be a longer wrong.
+
+⚠️ **`prefers-reduced-motion` IS ASKED IN JS, not left to app.css's blanket `transition:none!important` under
+that query** — that rule would strip the transition but leave `lemSlide` writing a from-state that then never
+animates back, i.e. a permanently clipped block. Under reduced motion the row simply appears.
+
+⚠️ **AND MAKING THE ROW A PARAMETER FOUND A LATENT OVER-RESERVE.** `htmlTieBottom` (the MWT tie's OWN below-stack
+— surface form, transliteration, ExtPos label) calls `belowRows` too, and while that function read `lemmaRow()`
+out of a global it silently reserved a lemma row under every tie in the document whenever the tier was on. A tie
+spans a RANGE and has no lemma column at all, so it now passes `false` explicitly, and says so in place.
+
+⚠️ **⌘L AND "Edit lemma…" NOW PREFER THE INLINE FIELD** (`editLemmaAt`), falling back to the `editLemmaPrompt`
+popover only where it genuinely cannot open: the tier switched OFF in Show/Hide — a standing choice about every
+sentence, which an edit may not overrule — or a block that is not rendered. Both editors write the same column
+through the same `afterLemmaEdit`. No `pick()` on that path (CLAUDE.md).
+⚠️ **`tierNav`'s `paintsLem` SKIP IS DELIBERATELY LEFT AS IT WAS**: arrow/Tab navigation still steps OVER a
+token whose lemma equals its form, even though that token is now clickable. Not an oversight — it is the one
+inconsistency item 31 leaves, and it is the conservative direction (a keyboard walk along the row stops only
+where there is something to read).
+
+⚠️ **THE SMALL CAPS ARE `smcp`, NOT THE `c2sc` EVERY OTHER SMALL-CAPS REGISTER IN THIS APP USES.** `.tok-pos`,
+`.bwpos`, `.opos`, `.node-cat`, `.mwt-pos`, `.avm-attr` and `measGloss`'s Leipzig runs all set `c2sc`, which maps
+CAPITALS to small caps — right for a closed inventory of all-caps tags, and a **no-op on lowercase**. A lemma is
+ordinarily lowercase, so c2sc would have left this row in plain lower case. Measured in the shipping WKWebView
+against the real "Noto Sans" at 60px: `iii` 46.45 plain → **52.39** under smcp (small-cap I is far wider than
+lowercase i), `mmm` 168.31 → **132.48**, and `DOG` is **unchanged** by smcp (134.34) while c2sc takes it to
+108.38 — the same 108.38 that smcp gives `dog`. Two features, one set of glyphs, each reached from its own side.
+⚠️ **AND `font-feature-settings`, NOT `font-variant-caps:small-caps`.** The property matters twice over. First,
+`font-variant-caps` lets the engine SYNTHESISE small caps (scaled-down capitals) where the face has no `smcp`
+table — most of `--token-font`'s Noto stack — and a faked small cap is worse than none; `font-feature-settings`
+has no synthesis path, so a face without the feature simply paints the plain letters, which is also the right
+rendering for a caseless script (verified in WKWebView: Devanagari `गज` and Arabic `كتاب` measure identically
+with the feature on and off). Second, `font-feature-settings` is the only form the measurement channel speaks:
+`_measOne`'s third argument (`LEM_FEAT`) and `makeEditable`'s `applyFont`, which copies
+`getComputedStyle(row).fontFeatureSettings` onto the inline field and measures through it. A `font-variant-caps`
+row reads back "normal" there, so the field would paint in full lower case over a row set in small caps and its
+caret maths would run in a face the glyphs are not drawn in.
+⚠️ **THE MEASUREMENT FOLLOWS THE PAINT** at every site — `lemmaSlotW`, the crop boxes, the hit widths and the
+field all go through `meas(…, LEM_F, LEM_FEAT)`. Measured in WKWebView: the row's own `meas` 27.09 against the
+painted `getBBox()` 27.11, where the unfeatured measurement would have said 27.52. This is the same fault the
+word-class field had (measured plain, `NOUN` is 45.48px against 37.13px in c2sc).
+
+⚠️ **`show.lemma` HAD TO JOIN `diaFlagsSig` (js/core/document.js), AND FORGETTING IT WAS CAUGHT BY THE PROBE
+RATHER THAN BY READING.** A `show.` flag missing from the diagram cache's view signature does not draw wrong; it
+draws NOTHING NEW — the Show/Hide switch flips, `renderDoc` runs, and `diaSentence` hands back the node it built
+under the other setting. Measured before the fix: 3 `.lem-edit` elements before AND after unticking the tier, and
+`belowGap()` deltas of exactly 0 where they should have been 21.6. Same class of miss as the theme flip's.
+
+⚠️ **AND IN THE WRAPPED-BRACKETS FLEX COLUMN THE BLANK CELL IS STILL APPENDED.** `.bwund` is a flex column, so an
+omitted row is a missing flex item and every row under it in THAT token's stack rises one step while its
+neighbours' stay put — the very misalignment `--undpad`'s `belowReserveH` has already paid for. An EMPTY flex
+item has no line box and measures 0 tall, so `.bwlemma` states `min-height:18px`, which is `.bwund`'s own line
+step. Verified live: every `.bwlemma` cell 18px tall, painted or blank, and the `.bwpos` tops under all five
+seeded tokens within 0.00px of each other.
+⚠️ **AND ITEM 31 REVERSES THE OUTLINE'S OPPOSITE RULE.** That span used to be appended only where it painted —
+correct reasoning about ALIGNMENT (the outline's tiers run ALONG the row, so there is no column of rows under
+this one for an omitted span to lift, and an empty span with a leading margin merely opens a gap) — and it is
+overruled by "clicking on a hidden lemma should still bring up the input field": leaving the span out is the one
+thing that makes a hidden lemma unreachable in that notation, since nothing else in the row can be aimed at. The
+cost is exactly the gap the old note names (`.olemma`'s 8px inline margin plus `.lem-hit`'s 24px min-width), paid
+only in the sentences that have the row at all.
+
+⚠️ **THE HIERARCHY GAINS THE ROW TOO** (unlike the POS row, which that notation draws AS its nodes). Its three
+hand-written step expressions — the gloss tiers' `step`, the AVM's `nodeBot` and the goeswith slur's own — each
+take one more `belowGap()`, gated on `lemmaRow(t)` and NOT on the token, for the same reason `hasTr(t)` there is
+sentence-wide: a node that happened to paint nothing would pull its glosses up into this row's line.
+
+Verified across all eight renderings (stemma projected and POS-as-node, hierarchy, arcs flat and wrapped,
+brackets flat and wrapped, outline) in both kits, headless Chrome, and again in WKWebView. Item 31's own checks
+ride in the same probe (`lem_probe.py`): the gate per token in all eight; the POS row at one y across a sentence
+holding both painted and blank slots; a sentence with NO row whose stack is internally consistent, and the same
+sentence one differing lemma later, every stack stepped down by exactly `belowGap()`; a click on a blank slot
+opening the field on the STORED lemma over a `rect.lem-hit`, in the row's own face; and an edit in a row-less
+sentence bringing the row in (with both CSS transitions live) and taking it away again — plus the reduced-motion
+run, where the row arrives with no from-state and no animation at all.
+
 ## Right-clicking an AVM
 
 The AVM tier answers the same right-click (and double-click) gesture everywhere, through one resolver,
 `avmMenuAt`:
 
 - **On a row of an existing matrix** → `avmValueMenu`, that feature's own values. It now ends with the
-  **Add feature…** flyout as well, on request — the identical row the token menu offers (`addFeatureRow`,
+  **Add Feature…** flyout as well, on request — the identical row the token menu offers (`addFeatureRow`,
   reused rather than rebuilt, so the two gestures can only ever offer the same candidates through the same
-  `avmSetFeat` write). One flyout deep, which is all `openSub`'s singleton `ctx2` supports.
+  `avmSetFeat` write). One flyout deep, which is all `openSub`'s singleton `ctx2` supports — the way DOWN
+  from there to the rest of the UD inventory is a drill-down inside that one flyout, not a second layer
+  (`editing.md`).
 - **On the empty-tier placeholder** (`.avm-add` in the SVG notations, `.oavm-empty` in the outline) →
   `avmAddMenu`, which opens that same add-feature picker **directly as the menu**: there is no existing feature
   here to edit, so the list of what could be added *is* the whole menu. It returns false when nothing is
@@ -232,7 +451,9 @@ edge."* The reasoning is the difference between a ROW and a LABEL — a below-st
 emptiness needs explaining, where a label sits on an edge that is already drawn, already says which token
 attaches where, and already carries the gesture that sets the relation. An underscore floating over it adds a
 word to read and nothing to learn. So an empty relation paints nothing, and the label's reserved width goes on
-being measured off the relation itself (0 when there is none).
+being measured off the relation itself (0 when there is none). ⚠️ **CONTRAST THE LEMMA ROW**, which is the other
+tier that can paint nothing: it is a ROW, so it keeps its reserved slot and every stack stays aligned — only the
+ink is gated. The two exceptions differ in exactly that, and the difference is the whole reason both are allowed.
 
 ⚠️ **THE PLACEHOLDER'S TARGET IS A TRANSPARENT RECT, AND IT NEEDS `data-s`/`data-tok` OF ITS OWN.** The glyph is
 ~6px of ink at 10.5px, too small to aim at, so `drawAVM` wraps it in a `<g class="avm-add">` over an `.avm-hit`

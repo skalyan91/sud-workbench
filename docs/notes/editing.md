@@ -150,9 +150,33 @@ placeholder menu: the main list answers from evidence and stops there for a tagg
 a feature the class plainly takes — in a document that has not used it, under a model that never emits
 it — unreachable. `otherFeatureItems` (js/editing/context-menu.js) offers exactly those, filtered by
 `FEAT_UPOS`, so it is not the old unfiltered fallback under a new name: a PUNCT gets Deixis/DeixisRef,
-not Tense. It hangs off `avmAddMenu` rather than `addFeatureItems` because there is exactly **one**
-flyout layer (`ctx2`): a row carrying `sub:` inside a flyout would have to rebuild the element it
-lives in, and the token menu's own "Add feature…" already IS a flyout.
+not Tense.
+
+⚠️ **AND IT IS REACHED FROM THE FLYOUT TOO, BY DRILLING** — superseding this note's own earlier record
+that it "hangs off `avmAddMenu` rather than `addFeatureItems`". The constraint that forced that stands
+and always will: there is exactly **one** flyout layer (`ctx2`), so a row carrying `sub:` inside a
+flyout would have to rebuild the element it lives in, and the token menu's own "Add Feature…" already
+IS a flyout. What changed is the request — "the Add Feature flyout should itself have a flyout that
+shows the full POS-relevant UD inventory (minus the features already attested in the document)" — and
+the answer is the one the POS menu settled on for the identical problem: **"Other Feature…" REPLACES
+the flyout** (`reopenFeatSub` re-opens `ctx2` off its own `_owner` at its own `_colSize`, carrying the
+`subFit`/`subNoWrap` literals the element does not remember), and **"‹ Attested Features" comes back**.
+Deliberately the same gesture, and the same two labels one noun apart, as "Other Subtype…" /
+"‹ Attested Subtypes": a reader who has learnt one has learnt the other.
+
+⚠️ **NOTHING ATTESTED → THE FLYOUT *IS* THE OTHER LIST**, `posSubItems`' rule, and adopting it here
+re-opened a door the attested-only rule had quietly closed: a tagged token whose class this document
+attests nothing for used to get **no "Add Feature…" row at all**, so the features UD plainly gives that
+class were unreachable from the token menu. The honest-blank rule that empty list was justified by is
+about not INVENTING an inventory; the UD inventory for a word class is not invented. The two lists
+still partition — verified live on `samples/english.conllu`, a plural NOUN: 2 attested (feature,value)
+pairs, 113 in the other list, **0 in both**.
+
+⚠️ **THE DRILL IS WHY THE STALE-FLYOUT-CLASS BUG HAD TO GO FIRST.** Drilling walks a 3-row list → a
+114-row one (which earns the search band, `ctx-sub-srch`) → back to the 3-row one, all in the one
+element. Until `openSub`'s `render` learnt to drop that class, the trip back landed on a flyout with
+`padding-inline:0` and no `.ctx-sub-scroll` to carry the inset — rows flush against the glass. Measured
+after: 12px / 0px-with-a-12px-port / 12px across the three steps.
 
 ⚠️ **AND IT IS THE FIRST SUB ROW ON A FITTED MENU, WHICH MOVED `openSub`'s WIDTH CAP TWICE.** That cap
 is `max(parent, 224)`, and its own note said the 224 floor was safe because "only a `.defctx` menu can
@@ -308,10 +332,125 @@ keep it there:
 * **It says what it dropped**, in a toast naming the pairs. Deleting hand-typed annotation silently is the fault
   the `prior_feats` work has just removed from the parser; doing it in the retag path instead would only move it.
 
+⚠ **…AND THE SAME GESTURE FILLS WHAT THIS WORD WAS LAST GIVEN UNDER THAT CLASS.** On request: under a
+generic or custom model — or none — a token that GAINS a UPOS takes the FEATS and the glosses of the
+nearest earlier token with the same `form` and the same new `upos`, verbatim.
+`inheritAnnotationForUpos` (js/io/bridge.js) is a **SIBLING of `clearFeatsForUpos`, never a line
+inside it**: that function returns the pairs it dropped and has callers that need it to stay a pure
+question about the FEATS column, and the two are opposites worth keeping legible as a pair — the
+retag DELETES what the new class contradicts and FILLS what the annotator has already said about this
+very word under this very class.
+⚠️ **THE TWO ARE AT THE SAME FOUR SITES**, and it has to stay that way: the POS menu, both subtype
+flyouts and **the grid's own UPOS cell commit** (`commitCell`'s `key === "upos"` branch,
+js/grid/grid.js). A retag is one gesture whatever route it is made by, so a site that clears without
+filling would make the same click mean two different things depending on where the reader made it.
+The grid's line sits right after `uposSyncGloss(t, oldUpos)` — inside that cell's own undo snapshot,
+and ahead of the `regenTok` two lines below, exactly as the other three sit inside their `pushUndo`
+and ahead of theirs. (Superseded: this note recorded for one turn that the grid site was unwired,
+because that file was owned by another work stream while the rest landed. It is wired now.)
+
+* **The gate is the model, and it is decided in Python.** `PIPE_FEATS_ADDITIVE` is
+  `parse._feats_additive` reported over the bridge (`parsing-models.md`); the frontend gate is "no
+  model at all, OR that flag". Under a MONOLINGUAL wheel the pass is off, because there the parser's
+  own FEATS are a second opinion worth having and it will produce one for this token unasked —
+  carrying another token's column in over the top of that is the app arguing with the model on the
+  annotator's behalf. With no model it is on for the stronger reason: nothing else will ever fill
+  those cells.
+* **Nearest, not first**, searching backwards — this sentence's own earlier tokens, then whole
+  sentences to the top of the document. An annotator's answer about a word moves over a long
+  document (a sense split, a corrected convention) and the most recent one is the one they are
+  working to. The form is matched EXACTLY, case included: case is the one thing a sentence-initial
+  position changes without the word changing, and guessing which it was is the inference this pass
+  has no business making. Not the lemma either — it fires at the moment a class is set, when the
+  lemma column may be empty or may still be the previous class's.
+* **It may fill a blank and may never revise an answer.** Every copy is guarded on the target being
+  empty. FEATS travels whole or not at all (verbatim, as asked: a merge would compose a column no
+  annotator ever wrote, out of two tokens' worth of evidence about one).
+* ⚠️ **THE LEMMA JOINED THE PASS, AND IT IS THE ONE FILL THAT RUNS WITH NO SOURCE AT ALL.** On request:
+  *"for generic/custom models, lemmas should be auto-filled by copying the form, or by copying an existing
+  instance of the same form/UPOS combination from the same document."* The order is the request's own and
+  it is the order of diminishing evidence — an earlier token with this form under this class is the
+  ANNOTATOR'S answer about this very word, so it outranks the identity default; the form itself is what a
+  lemmatiser returns for a word that is its own citation form. Which is why this half runs BEFORE the
+  `!src` early return that every other half sits after: FEATS and the gloss tiers can only ever be
+  COPIED, so with no source there is nothing for them to do, where the lemma still has its fallback to
+  take. Still a fill and never a revision (`bare(t.lemma)`), and NOT gated on `show.lemma` — the tier is a
+  view of the column, and the column is filled on the same terms whether or not anyone is looking at it.
+* ⚠️ **AND A SECOND ENTRY POINT WAS NEEDED, BECAUSE A PARSE NEVER PASSES THROUGH THIS FUNNEL.** This
+  function answers "a token has just GAINED a word class"; a sentence delivered by a parse or an insert
+  arrives with its classes already on it and so would never have been reached — which is exactly the
+  "starting to annotate something that was previously blank" case the inheritance was asked for.
+  `lemmaFillSent(si)` (js/io/bridge.js) is the same fill applied token by token IN READING ORDER (so a
+  form repeated inside the newly inserted run inherits from its own first occurrence rather than each copy
+  defaulting separately), called from `insertParsed` and from `doInsert`'s parsed branch, inside the
+  insert's own `pushUndo` and ahead of `morphAfterReparse` — `msegPrefillParts` derives the segmentation
+  FROM the lemma. Deliberately NOT from a re-parse (⌘R is the reader asking for the MODEL's analysis of a
+  sentence already in the document) and NOT on open (filling every blank lemma in an opened treebank would
+  rewrite a file nobody had touched, and mark it dirty before the first edit).
+* ⚠️ **AND THE FORM-COPY IS NOT A GUESS DRESSED UP AS AN ANSWER**, which is the rule it has to answer to
+  (CLAUDE.md, "silence is the preferred failure for annotation"). `lemma = form` claims only that this word
+  form is its own citation form, which is true of most tokens in most documents — and the diagram's own
+  display gate is what keeps it honest on screen: the lemma row paints NOTHING for a token whose lemma IS its
+  form, so the identity default is silent on screen wherever it is merely a default.
+  ⚠️ **ITEM 31 SHARPENED THAT, AND ALSO TOOK AWAY THE HALF OF IT THIS NOTE USED TO RELY ON.** The gate was an
+  inflectional-FEATS one when the paragraph above was written, so an INFLECTED token whose lemma had been
+  defaulted to its own form still showed that form in the row, "where it reads as the unfinished annotation it
+  is". It no longer does: the gate is now `lemma ≠ form`, so a defaulted lemma is invisible on every token
+  rather than on most. What replaces the visible prompt is the blank slot's own transparent target — the row is
+  still there and still clickable, and in a sentence with no row at all ⌘L brings one in
+  (`docs/notes/diagram-rendering.md`). Silent where it is a default, one click from being corrected.
+* **`MSeg` and `MGloss` travel as a PAIR, both ways** — MSeg is the segmentation MGloss is aligned to,
+  so an MGloss without it describes a division of the word nothing in the document states. A token
+  carrying either already has a morphemic analysis and this pass does not complete somebody else's.
+  `_glossLex` rides with the `Gloss`, or the next unforced `mglossRefill` re-derives the stem from
+  the Gloss tier's FORM and puts `doubts` where `doubt` belongs (`glossing.md`). `_msegPre`/
+  `_mglossPre` are set to what was written, as every derived write sets them, or `morphEdited()`
+  reads this pass's own output as the annotator's hand.
+* ⚠️ **The gloss half answers to the reader's TICK (`PIPELINE.gloss`), NOT to `pipeOn("gloss")`** —
+  superseding this note's own earlier record that it was "gated a SECOND time, on the Glossing arm".
+  That gating was reported broken the same day: **"already-seen tokens still aren't having their
+  glosses auto-filled"**. `pipeEffective` switches the Glossing arm off BY ITSELF wherever the model
+  READS glosses (`modelReads`, js/core/prefs.js), and the model that reads them is `xx_sud_generic`
+  0.2.0 — the wheel behind every custom model, which is precisely what `mayInheritAnnotation` gates
+  this pass on. So the gloss half was dead code in the only configuration it exists for. Measured in
+  the live page, inheriting onto a repeated `dogs`/NOUN:
+
+  | configuration | glossing arm | inherited |
+  | --- | --- | --- |
+  | no model | on | `FEATS, Gloss, MGloss` |
+  | custom model (wheel 0.2.0 reads glosses) | **off** | `FEATS` only |
+  | custom model, after the fix | off | `FEATS, Gloss, MGloss` |
+  | custom model, reader unticked Glossing | off | `FEATS` only |
+
+  **The automatic off does not apply to this pass, and that is not a hole in it.** The arm goes off
+  under such a model to stop the app QUOTING ITSELF — a gloss this app composed or retrieved, handed
+  back to a parser that reads glosses as evidence, is the app's own guess returning as the
+  annotator's data. An inherited gloss is neither composed nor retrieved: it is the annotator's own
+  text, copied verbatim off a token they glossed themselves, under the same form and the same class.
+  **The reader's own untick still stops it**, because that says the different thing ("do not fill
+  glosses in for me"), which is about the gesture and not about the circularity. The FEATS half
+  answers to neither: that arm governs what the PARSER writes, and this is not the parser.
+* **It fires only on a genuine GAIN of a class** — never on the same-tag/clear-the-subtype path
+  `choose` already distinguishes, and never on *Clear word class* (`choose("")`), where there is no
+  class to have been seen under.
+* **And it says nothing**, on the same terms as `fillAutoGloss` and `morphPrefillSent`, which have
+  always filled these tiers silently: what it writes lands in the rows of the token just clicked, it
+  replaces nothing the reader can see, and ⌘Z takes it back with the retag because it runs inside the
+  caller's own `pushUndo`. A toast would queue behind `clearFeatsForUpos`' own — the two fire on one
+  gesture — and the silent-deletion rule this app has spent a release enforcing is about deleting
+  annotation, not about filling a blank.
+
 ⚠️ **ORDER MATTERS, AND IT IS ALREADY RIGHT.** The cleanup runs AT the retag, before the background
 `regenTok` → `reparseTokenFields` that follows it — so the re-parse is handed the CLEANED column as its
 `prior_feats` and never sees the contradicted feature at all. Run the other way round, the additive rule would
 faithfully preserve the very value the retag had just decided was wrong.
+⚠️ **AND THE INHERITANCE SITS BETWEEN `featsSyncGloss` AND `regenTok`.** After the
+sync, because that call retargets the abbreviations of the gloss the token ALREADY has for the FEATS
+change just made, and an inherited MGloss is already correct for the inherited FEATS — handing it to
+a sync keyed on `before` would retarget a value that had never held those features. Before the
+re-parse, because `reparseTokenFields` sends `prior_feats`: under the very models this pass is gated
+on, the inherited column then travels to the parser as the annotator's own and survives the re-parse
+additively, which is the whole of the FEATS-additive rule in `parsing-models.md`.
 
 ⚠ **AND THE MGloss FOLLOWS, BECAUSE `retargetGlossForFeatsChange` IS NOW SYMMETRIC.** It retargets a value that
 CHANGED and drops a feature that was REMOVED; the third case, inserting one that was ADDED, used to be left out on
@@ -419,6 +558,207 @@ here once the survivor has settled one member shorter. The survivor's `Unsandhie
 rewritten: a component's form IS its pausa, and the head's old value described one piece while now sitting
 on the merged whole — the stale `-tve` trap. Fire-and-forget off the bridge, exactly as `sandhiMwtForms`
 is; the concatenation stands in until it lands, and is the answer if it never does.
+
+## Typing a word class into the diagram
+
+⚠️ **THE RETAG NOW HAS TWO GESTURES, SO IT HAS EXACTLY ONE FUNCTION.** On request ("POS tags in diagrams should
+be input fields with strict autocompletion") the diagram's POS row became an inline editor as well as a menu
+target — and the sequence a retag entails (`pushUndo` → `upos` → `syncXposMirror` → `clearFeatsForUpos` → drop
+the `UPOS_SUBTYPE_FEATS` → `featsSyncGloss` → `uposSyncGloss` → `inheritAnnotationForUpos` → `markDirty` →
+`preserveScroll(renderDoc)` → `uposSyncTranslit` → `regenTok(regloss)`) is nine passes long, each ordered against
+the next for a reason recorded above. Two copies of it would write the same column and mean different things,
+invisibly: both set `upos` correctly and only the passes hanging off it would drift. `retagToken`
+(js/editing/context-menu.js) is that sequence, lifted verbatim out of `posMenu`'s own `choose`, and `choose` is
+now `p=>retagToken(si,tokId,p)` — the menu, the ✕ (`clearPos`, which is `choose("")`) and the typed field are one
+call site apart. **The subtype flyouts keep their own `setSub`**, deliberately: they set a FEATURE as well as a
+class and skip the re-parse for that reason (their own note says so), so they are not the same operation.
+
+⚠️ **THE GUARD IS PART OF THE FUNNEL, NOT OF THE CALLER.** `retagToken` returns immediately when the tag has not
+moved and there is no subtype to drop — no undo entry, no render, no re-parse. That is what makes "re-picking the
+current tag is a documented no-op" true of *typing* it as well, and it is the reason the field's proxy only
+REMEMBERS: `makeEditable` assigns `obj[key]=orig` back on a cancel, so a proxy that ran the function from its
+setter would fire on a cancelled edit and drop a dot-suffixed subtype off a field the reader had merely opened
+and shut. The write happens in the commit hook (`after`) instead.
+
+⚠️ **AND THE FIELD RIDES `makeEditable`'s UNDO ENTRY, WHICH IS WHY THE FUNNEL TAKES `snapshot:false`.**
+`makeEditable` snapshots the moment the field opens and pushes it on commit; a `pushUndo` inside `retagToken` as
+well would leave two entries for one retag and ⌘Z would need two presses. Same division the grid's UPOS cell has
+always made (`commitCell` owns its `pendingSnap`). Measured on the fixture: one accepted completion → `UNDO.length`
+1.
+
+### The gesture
+
+⚠️ **THE POS ROW OPENS ON THE GESTURE ITS NEIGHBOURS ALREADY ANSWER — A PLAIN CLICK/TAP — AND THAT TAKES NOTHING
+AWAY, BECAUSE WHAT IT REPLACES WAS A MIS-ROUTE.** `.tr-edit` opens the transliteration editor on one click and
+`.gl-edit` opens a gloss tier's; the POS row carried neither class, so a tap on it fell through to the group's
+default branch and opened the token's **FORM** editor — clicking a word CLASS opened a field over the WORD, in
+every notation. Two routes, because the diagram has two: the pointerup TAP branch (js/diagram/diagram-edit.js) for
+the four draggable notations, which must resolve the tapped element before `pick()` re-renders a brackets block,
+and the delegated `#doc` click handler (js/editing/context-menu.js) for the outline. **The selection is
+untouched** — the tap's own `pick()` already ran, exactly as it does for the form/translit/gloss rows, so
+CLAUDE.md's "only a click or a rectangle selects a node" is satisfied by the same click that opens the field.
+
+⚠️ **THE RIGHT-CLICK MENU IS UNTOUCHED AND THE DOUBLE-CLICK IS PRESERVED BY THE FIELD ITSELF.** `posMenu` carries
+three things a text field cannot: the subtype flyouts, the guidelines link and the model-probability row
+weighting. Right-clicking the tag still opens it (no field is open then, so nothing intercepts). The
+double-click needed a home: once a FIRST click opens the field, the second click lands on the `<input>` — which
+lives in `<body>`, so `#doc`'s `dblclick` handler can never see it and the gesture would simply have vanished.
+`makeEditable`'s `opts.dbl` answers a `mousedown` with `detail>=2` on the field by closing it and opening the
+menu. `detail` is the engine's own count of the click run (time + position, not target), so the second press
+reads 2 there exactly as it would have on the tag. **Only while the reader has not typed**: once there is text of
+their own in the field a double-click is a word selection, which is what an `<input>` is for.
+
+⚠️ **THE HIERARCHY IS NOT IN THE LIST, AND THAT IS ITS OWN CHOICE.** `tree` draws no per-node POS row at all
+(js/diagram/diagram-wrap.js says so in place: "hierarchy has no per-node POS row"), so there is nothing to click.
+The other five all draw one and all open the field: `.tok-pos` (arcs, flat brackets, a projected stemma),
+`.node-cat` (an UNWRAPPED POS-as-node stemma — with wrapping on, a stemma goes through `projWrapped`, whose
+token strip draws an ordinary `.tok-pos` and leaves the pinned tree's nodes bare, so `.node-cat` is the
+unwrapped renderer's alone), `.bwpos` (wrapped brackets, inside `.bwund` — NOT the `.bwannot` overlay, so
+it needs no `pointer-events` exemption), `.opos` (the outline, ghost rows included). **One selector,
+`POS_SEL`**, read by the right-click resolver (`posRelHit`), the tap resolver and the field's own element lookup
+(`posElOf`) alike: three gestures that must agree about what counts as "the POS row" or they answer on different
+tokens. `.mwt-pos` is deliberately absent — an ExtPos value is a statement about a whole expression and has its
+own menu.
+
+⚠️ **AND THE CLICKED ELEMENT IS PASSED THROUGH, NOT RE-LOOKED-UP.** A PROJECTED stemma draws both a `.node-cat`
+and a baseline `.tok-pos` for one token, and `tokGroupOf` prefers the content-bearing `.tok-group` — so a
+re-lookup would open the field over the baseline row for a click on the node. `editPosInline` takes the element
+the resolver actually hit; `posElOf` is the fallback for the keyboard route, which has no click to point at.
+
+⚠️ **THE POS ROW JOINS THE TIER NAVIGATION, LAST, GATED ON `show.pos`** — `navStack()` is
+`["form"] + belowTiers() + ["pos"]`, which is the order the diagram draws them in. The transliteration row is
+still deliberately absent: it is not always this token's own stored value (see `editTransInline`'s three
+branches). While the dropdown is open ↑/↓ belong to it rather than to tier navigation — the same trade the
+grid's Deep/DepRel cells and the MGloss editor already make — so Up/Down reach the neighbouring tiers from this
+row only after an Escape has closed the list. Tab still navigates whenever no row is highlighted.
+
+### Strict
+
+⚠️ **THE VOCABULARY IS CLOSED, SO THE FIELD REFUSES RATHER THAN INVENTS.** The discipline, and each half of it
+has a reason:
+
+* **The dropdown is the app's own** (`acShowGrouped`/`acFill`, js/grid/grid.js — the popup the DepRel and Deep
+  cells and the MGloss editor use), grouped by `UPOS_CATS` with each tag's expansion (`UPOS_INFO`) in the dimmed
+  right-hand column, exactly as the FEATS value lists carry theirs.
+* **It opens on the WHOLE inventory the moment the field does.** 17 rows of a closed vocabulary, and the reader
+  who clicked the tag came to change it. The grid's DepRel cell shows nothing on focus for an already-set cell —
+  its vocabulary is open and long, and it is answering a different question. Typing then filters:
+  case-insensitive PREFIX, falling back to SUBSTRING when the prefix matches nothing, minus the exact text
+  already typed — the two-stage match `acOpen`/`deprelAcOpen`/`openIeAC` all use.
+* **Enter or Tab on a highlighted row accepts AND commits** (Task A's rule one field over: accepting a suggestion
+  IS an accept-this-edit gesture). **Escape closes the list first and keeps the edit**; a second Escape reverts.
+* **A commit whose text is not an exact (case-insensitive) member is REFUSED.** Enter and Tab leave the field
+  open with the text intact and toast why; **a blur reverts** instead. That asymmetry is the point: holding the
+  keyboard hostage to make the reader fix a field they have already clicked out of is not a validation, it is a
+  trap, and it would fight this editor's own "what was clicked becomes the selection" contract. Measured: Enter
+  on `NOUNISH` leaves `upos` `NOUN`, the field open and focused, its text unchanged, and the toast up; blurring
+  from the same state leaves `upos` `NOUN` and closes.
+* **Case is the one mercy.** `verb` commits as `VERB` — the canonical spelling is the inventory's to supply,
+  which is the same courtesy every autocomplete here already extends by matching case-insensitively. The
+  keystrokes are NOT up-cased live: there is no precedent for it in this app, and rewriting `value` under the
+  caret fights a paste and an IME composition for no gain the guard does not already give.
+* ⚠️ **THE EMPTY STRING IS THE ONE NON-MEMBER THAT COMMITS.** An untagged token is a state this app deliberately
+  supports — *Clear word class* in the menu, `_` in the file, `TIER_EMPTY` in the diagram — so clearing the field
+  is how the reader untags, and `allowEmpty` is passed for exactly that. Measured: emptying the field leaves
+  `upos` `""` with FEATS and the glosses standing, which is what `choose("")` does.
+* ⚠️ **AND THE INVENTORY IS `SETTINGS.upos` PLUS THIS TOKEN'S OWN TAG** — the widening `optionMenu` states one
+  function up and for the same reason: a tag the FILE carries that the inventory does not list must still be
+  something this editor can put back. Closing a field on a value that has not moved never consults the guard at
+  all (`passesGuard`'s `v===orig` short-circuit), so an unfamiliar tag can never trap the reader either.
+
+⚠️ **THE THREE HOOKS LIVE IN `makeEditable`, NOT AT THE CALL SITE, AND THAT IS FORCED.** `opts.guard`,
+`opts.ac` and `opts.dbl` all have to sit inside that function's own listeners: a keydown listener added to the
+returned `<input>` afterwards runs AFTER the editor's own (at-target listeners fire in registration order,
+capture flag or not), so it would arrive to find Enter had already committed. The ↑/↓/Enter/Tab/Esc block is
+therefore the FIFTH copy of that pattern in the app and the first one any future constrained field gets for
+free.
+
+### What the probe found on the way — two races, both now fixed
+
+⚠️ **A RENDER ON A TIMER EATS ANY OPEN INLINE EDITOR.** Every inline editor in this app (the token form,
+the transliteration row, both gloss tiers, and now a typed word class) is an element placed over a node
+`renderDoc` replaces, so a rebuild blurs it — **and blur COMMITS** (`finish`). Two callers re-rendered on
+their own schedule rather than in response to an edit, and both are now guarded with `renderUnlessEditing`
+(js/ui/wiring.js), which the app already had for exactly this and which also hands the open field what the
+skipped render would have shown it (`INLINE_EDIT_SYNC`):
+
+* `js/lang/smp-shape.js`'s **HarfBuzz settle**, `preserveScroll(renderDoc)` on an 80 ms debounce. Diagnosed
+  over CDP by patching `renderDoc` and reading the stack:
+  `renderDoc ← preserveScroll (js/ui/wiring.js:34) ← js/lang/smp-shape.js`. It ate the form, transliteration
+  and gloss editors identically — not new, merely newly easy to hit.
+* `js/core/scroll.js`'s **ResizeObserver `_reflow`**, `preserveScroll(renderDoc)` on a 140 ms timer. This one
+  is **FLUENT-ONLY in practice** and is why both skins have to be run: with the POS field driven over CDP it
+  fired **20 times inside one typing sequence** on `?platform=win` and took five checks down with it (the
+  dropdown filter, the accepted completion, the inheritance, the undo count, the refusal staying open),
+  while the macOS run never tripped it once. The two kits give `#doc` different metrics, so a field or its
+  dropdown changes that box in one and not the other. `pick` is skipped with the render, since it exists to
+  restore a selection a re-render dropped and nothing was re-rendered.
+
+⚠️ **SKIPPING IS SUPERSEDED, NOT LOST, WHICH IS WHY IT IS SAFE HERE.** The worry against guarding the settle
+was that a skipped render would strand glyphs on the `foreignObject` fallback. It cannot: every editor's
+`finish` ends in `preserveScroll(renderDoc)` on **both** paths, commit and cancel, and the settle's
+`invalidateDiaCache()` has already run — so the very next render, which the closing field guarantees,
+rebuilds with the shapes warm. The same argument covers the reflow: the layout it wanted is rebuilt at the
+current size the moment the field closes. **Measured after both guards, with the probe's own external
+workaround removed: 22/22 on macOS and 22/22 on Fluent, and zero renders recorded while a field was open.**
+
+⚠️ **AND A LOAD-ORDER RACE — `msegFlagDoc is not defined`, THE VERY FAILURE MODE `CLAUDE.md` WARNS ABOUT.**
+Caught once in the Fluent half of the render smoke test and not reproduced on the next two runs, so it is
+timing-dependent: `renderDoc` (js/core/document.js) calls `msegFlagDoc`, declared in **js/io/bridge.js**
+(script 25 of the load order), while **js/core/scroll.js** (script 24) arms the `ResizeObserver` above whose
+`_reflow` fires a render on a 140 ms timer. On a slow enough load that timer wins, the render reaches a
+function whose file has not been evaluated yet, and the throw blanks the app. It is exactly the
+classic-script hazard the top-level rule names, reached by a TIMER rather than by a bare top-level call —
+which is why the "no eager forward-reference" reading of that rule does not catch it.
+
+**Fixed with the idiom the rule already prescribes, and AUDITED rather than patched where it was seen to
+throw.** `renderDoc`'s body was swept for every bare call into a later-loaded module; there were three, all
+now `typeof`-guarded: `msegFlagDoc` and `applyTransInsets` (js/io/bridge.js, script 25) and `validateAll`
+(js/editing/validation.js, script 15). `highlightFind` was already behind its own `typeof FIND` test, and
+`insertAt` sits inside a click handler, which cannot run that early. All three are cheap, idempotent derived
+passes, so a boot-time render that skips them is followed by a real one that does not.
+
+## Typing a lemma into the diagram
+
+⚠️ **THE LEMMA ROW IS AN INLINE FIELD LIKE ITS NEIGHBOURS, AND IT COMMITS THROUGH `commitLemmaEdit`, NOT
+THROUGH A SECOND PATH.** `editLemmaInline` (js/editing/context-menu.js) is `makeEditable` over the row the
+reader clicked, with `allowEmpty` and no `opts.guard`/`opts.ac`: the strictness the word-class field documents
+at length is about a CLOSED inventory, and a lemma has none. What it must not do is re-implement what a new
+lemma sets off — `afterLemmaEdit` (js/io/bridge.js) drops the stale lemma-romanisation, awaits the new one,
+rewrites MISC LTranslit and only THEN re-derives MSeg from it, and `mglossReslot` re-slots MGloss against the
+segmentation that produced. `commitLemmaEdit` (js/grid/grid.js) is where that sequence already lives, for the
+grid's own Lemma cell, and it deliberately does NOT render eagerly (its own note: nothing on screen can be
+right until the await lands). Both are true of this field too, and `makeEditable`'s `finish` has already
+rendered once and pushed the undo entry, so the whole edit is one ⌘Z.
+
+⚠️ **A PROXY, NOT `t` WITH KEY "lemma".** The stored column is `"_"` for an empty lemma; the field must show
+that as blank and a committed blank must go back as `"_"`. Same unwrapping the grid cell and
+`editLemmaPrompt` do at their own edges — and the same "open on what is STORED, never on what the row PAINTS"
+rule the MSeg and word-class editors state: a blank slot opens the field on whatever the lemma column holds,
+and an empty column opens an EMPTY field, because committing `_` as a lemma would put CoNLL-U's own empty
+marker in the column as if it were a word.
+
+⚠️ **`editLemmaPrompt` IS NOW A FALLBACK, AND ITS OWN NOTE IS SUPERSEDED IN STAGES.** That popover exists
+because "the lemma is drawn in no notation at all", so there was nothing to lay an inline field over. Item 29
+made that false for some tokens; item 31 made it false for nearly all of them — a blank slot carries a
+transparent target of its own, and a sentence with no row grows one for the duration of an edit
+(`lemRowForce`, `docs/notes/diagram-rendering.md`). So ⌘L and the token menu's "Edit lemma…" both go through
+`editLemmaAt`, which tries `editLemmaInline` first and falls back to this popover only where the inline field
+genuinely cannot open: **the tier switched off in Show/Hide** — a standing choice about every sentence, which
+an edit may not overrule — or a block that is not rendered at all. Both editors write the same column through
+the same `afterLemmaEdit`, so the fallback changes the surface and not the behaviour. It is also still what a
+selection made in the GRID reaches when the diagram cannot answer.
+
+⚠️ **AND THE LEMMA IS THE ONE TIER `tierNav` HAS TO STEP OVER.** Every other row of the below-stack is drawn
+for every token alike — that is the placeholder rule — so navigation could always assume a target existed.
+This one is reserved for every token in a sentence that has the row and painted only for some, so arrowing
+onto a blank slot would open a field over ink nobody can see. Both axes skip in the direction of travel
+(Up/Down past the row, Left/Right along it to the next token that paints one), and running out of stack or out
+of tokens returns exactly as before. `navStack(s)` takes the SENTENCE now (item 31 made the row's presence a
+per-sentence fact) and places the row between the form row and the gloss tiers, which is where every renderer
+draws it. ⚠️ **THE SKIP WAS LEFT AS IT WAS**, though item 31 has made a blank slot clickable: the two gestures
+now differ deliberately — a click aims at a specific slot, a keyboard walk along the row stops only where
+there is something to read. Recorded as the one inconsistency the change leaves, not as an oversight.
 
 ## Clearing a word class or a relation
 
@@ -529,7 +869,7 @@ unchanged (the negative block margin pays for the taller box). ⚠ IT IS DELIBER
 `fitTight` would then grow the diagram's crop around an invisible rectangle, adding whitespace under every
 token that has one.
 
-⚠️ **THE PLACEHOLDER'S MENU IS THE "Add feature…" FLYOUT, OPENED IN PLACE** — same items (both go through
+⚠️ **THE PLACEHOLDER'S MENU IS THE "Add Feature…" FLYOUT, OPENED IN PLACE** — same items (both go through
 `addFeatureItems`) and now the same SHAPE: one fitted column, `subFit`-style, never the balanced two-column
 layout `showCtx` switches to past 12 rows. On report ("right-clicking an AVM placeholder should ONLY bring up
 the contents of the Add feature submenu"): the content was already exactly that — verified in all five

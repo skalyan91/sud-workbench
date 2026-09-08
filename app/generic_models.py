@@ -231,6 +231,35 @@ def tb_lang_for(model_id: str) -> str | None:
     return m.get("slot") or slot_key(slug)
 
 
+def unfitted_slot(tb_lang) -> bool:
+    """Whether this ``Doc._.tb_lang`` names a custom model's UNFITTED spare row — an all-zero vector.
+
+    ⚠ **THE ONE PLACE THAT ANSWERS "HAS THIS MODEL BEEN TRAINED YET".**  `app/parse.py` asks it to
+    decide whether the wheel's own FEATS answer may reach the reader's document (`_feats_muted`), and
+    that decision is kept HERE, in Python, once — the shape `_feats_additive` and `app/glosses.py` are
+    both held to, and for the same reason: two copies of a rule about what a model may write over the
+    annotator would drift, and the copy that drifted would do so silently, in the direction of writing.
+
+    ⚠ **KEYED ON THE SLOT, NOT ON THE MODEL ID**, though the id is what a caller usually holds.  The
+    slot IS the resolution of the id for this question — `_resolve_model` hands `(engine, package,
+    tb_lang)` back precisely because "a custom model IS a SUD spaCy model, differing only in which
+    vector it reads", and the property being asked about is a property of that vector.  Every parse
+    path already carries the slot to the point where the answer is needed (`_parse_spacy_sud` and
+    `_parse_spacy_sud_many` take a package + a `tb_lang` and no id at all), so keying on the id would
+    have meant threading one back down into the two functions that were factored to be free of it.
+
+    ⚠ **AND ONLY `basis == "unfitted"` COUNTS.**  A `file`/`fitted` row was fitted on the reader's own
+    sentences and a `builtin` one is a training language's own vector; both are trained, and neither is
+    what :func:`caveat`'s last branch is about.  An index whose `basis` is missing or unrecognised
+    answers False — the mute withholds a model's answer, so it is applied where the zeroed row is
+    KNOWN, never on a guess about the store's shape."""
+    key = str(tb_lang or "")
+    if not key.startswith("custom:"):
+        return False              # a built-in language row, or no row selected at all
+    m = get(key.split(":", 1)[1])
+    return bool(m) and (m or {}).get("basis") == "unfitted"
+
+
 # ── the wheel ────────────────────────────────────────────────────────────────────────────────────
 def installed() -> bool:
     """Whether the generic wheel is on this machine — probed WITHOUT importing it (find_spec costs
@@ -568,8 +597,15 @@ def caveat(entry: dict) -> str:
                 f"trained on, so it parses with that language's own fitted embedding — but the "
                 f"figures shown are the parser's held-out average over {HELDOUT_LANGS} UNSEEN "
                 f"languages, not a measurement on your data.")
+    # ⚠ AND IT SAYS WHAT THE MODEL WILL NOT DO, not only how much worse it is at what it does. An
+    # untrained row's FEATS are a cross-lingual guess about a language the wheel has never seen, so
+    # `parse._feats_muted` drops them — the tree still comes back, the column comes back empty, and an
+    # annotator who is handed a blank FEATS column is owed the reason once, here, where the model is
+    # described. (Silence is the preferred failure for annotation; silence about the silence is not.)
     return (f"No training file, so the language embedding is an unfitted spare row — which upstream "
-            f"measured costing 4 LAS against carrying no language channel at all. The figures shown "
+            f"measured costing 4 LAS against carrying no language channel at all. It supplies no "
+            f"features: an untrained row's FEATS are a guess about a language it has never seen, so "
+            f"the column is left for you and only the tree is filled in. The figures shown "
             f"are the parser's held-out average over {HELDOUT_LANGS} unseen languages, not a "
             f"measurement on your data. Ten annotated sentences are enough to fit one.")
 

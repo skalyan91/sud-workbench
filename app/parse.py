@@ -445,9 +445,11 @@ def _punct_defaults(tokens: list[dict], given: set = frozenset()) -> list[dict]:
 
     · **EMPTY CELLS ONLY.** A tagger that called this token something else has said something about
       it, and this has not; the tagger wins. Nothing here ever overwrites.
-    · **NEVER A COLUMN THE CALLER HANDED IN** (`given`) — the same guard `_apply_arms` states just
-      above, for the same reason. An arm switched off is the annotator's, and a blank they left in
-      their own column may be deliberate.
+    · **NEVER A COLUMN THE CALLER HANDED IN** (`given`) — the same guard `_apply_arms` states, for
+      the same reason. An arm switched off is the annotator's, and a blank they left in their own
+      column IS an answer, not a gap: by the time this runs `_apply_arms` has just written that
+      blank back over whatever the model put there, and filling it here would put a value into the
+      one column this call was told to keep its hands off.
     · **THE RELATION ONLY WHERE THERE IS A HEAD TO CARRY IT** — never on a token whose head is 0,
       whose relation is `root` and stays `root`. The HEAD is left exactly as it was found: which
       token the punctuation hangs off is a real question about the sentence, and this answers only
@@ -469,21 +471,48 @@ def _punct_defaults(tokens: list[dict], given: set = frozenset()) -> list[dict]:
     return tokens
 
 
-def _apply_arms(tokens: list[dict], arms: set, given: set = frozenset()) -> list[dict]:
+def _apply_arms(tokens: list[dict], arms: set, given: set = frozenset(),
+                supplied: dict | None = None) -> list[dict]:
     """Empty the columns whose arm is off, in place.
 
     A disabled column comes back EMPTY rather than carrying the model's answer unshown: the token
     dicts are the document, they are what gets saved, and "the parser filled this in but the app is
-    hiding it" would be a lie the CoNLL-U file on disk then tells for ever."""
+    hiding it" would be a lie the CoNLL-U file on disk then tells for ever.
+
+    ``given`` names the arms the CALLER is supplying; ``supplied`` is those columns themselves, cell
+    for cell — the two are separate because `parse_pretokenized`'s `gset` also carries the retag's
+    `upos`, which arrives as its own argument and has no entry in the dict."""
     for key, col in _ARM_COLUMN.items():
+        if key in arms:
+            continue
         # ⚠ …BUT NEVER A COLUMN THE CALLER SUPPLIED. Blanking an off arm is right when the model
         # simply did not write it; here the ANNOTATOR wrote it, handed it in as input, and is about to
         # have this answer merged back over their own tokens. Emptying it would delete the very
         # annotation the parse was conditioned on — the same fault the `upos` restore below was
         # written for, arriving by a different door.
-        if key not in arms and key not in given:
+        if key not in given:
             for t in tokens:
                 t[col] = ""
+            continue
+        # ⚠ **AND "THE CALLER'S COLUMN" MEANS THE WHOLE COLUMN, BLANKS INCLUDED — WHICH IS WHY THIS
+        # WRITES RATHER THAN MERELY DECLINING TO BLANK.** Reported as "disabling Features in the
+        # Pipeline drawer doesn't prevent a generic or custom model from writing values to FEATS".
+        # The guard above was per-COLUMN and the leak was per-TOKEN: `pipeGiven` (js/core/prefs.js)
+        # sends a switched-off column as soon as ONE token in the sentence has a value there, so the
+        # whole column stopped being blanked while only its non-empty cells were restored below —
+        # every token the annotator had left EMPTY kept whatever the model wrote, and
+        # `reparseTokenFields` merged it straight back into the document. An empty cell in a column
+        # the annotator has taken over is an ANSWER ("nothing here"), not an absence of one; the
+        # model's guess may no more fill it than it may overwrite a full one. All four column arms
+        # were affected — FEATS is only where it was noticed, because that is the column a custom
+        # model is fitted on.
+        handed = (supplied or {}).get(key)
+        if handed is None:
+            continue        # in `given` with no column to restore FROM (the retag `upos`, whose own
+                            # argument is put back by `parse_pretokenized`): leave it exactly as found
+        for j, t in enumerate(tokens):
+            want = str(handed[j] or "") if j < len(handed) else ""
+            t[col] = "" if want == "_" else want   # `_` is CoNLL-U for empty, and empty is what it means here
     if "syntax" not in arms:
         # The same flat, unparsed shape `whitespace_tokens` produces — head 0 on the first token, no
         # relation on the rest — rather than heads left at whatever a skipped parser never wrote.
@@ -526,6 +555,53 @@ def _feats_additive(package: str) -> bool:
     """Whether this package may only ADD to the FEATS the caller handed it."""
     from . import generic_models
     return bool(package) and package == generic_models.GENERIC_PKG
+
+
+def _feats_muted(package: str, tb_lang) -> bool:
+    """Whether this model's OWN FEATS answer is dropped before it can reach the document.
+
+    ⚠ **AN UNTRAINED CUSTOM MODEL MAY NOT GENERATE FEATURES.** A custom model with no training file
+    for a language the wheel has never seen gets an all-zero spare row (`basis: "unfitted"`,
+    app/generic_models.py), and the morphologiser predicts FEATS from UPOS AND that embedding — so its
+    features are a pure cross-lingual guess about a language nothing in the pipeline has ever been
+    shown. "Silence is the preferred failure for annotation" (CLAUDE.md): an honest blank beats an
+    invented feature set, and this is the case where the model has no evidence at all to invent from.
+    The row is not merely uninformative either — upstream measured a zeroed row costing Georgian
+    4 LAS against carrying no language channel at all, so it is worse than nothing.
+
+    ⚠ **THIS IS A MUTE, NOT A STRUCK ARM, AND THAT DISTINCTION IS THE WHOLE DESIGN.** Taking `feats`
+    out of `model_arms` for such a model would take the TREE with it: `_pipe_plan`'s cascade drops any
+    arm whose prerequisites are gone, `arm_deps` says this wheel's parser READS the FEATS its own
+    morphologiser writes, and the component skip then removes the morphologiser too (it owns `upos`,
+    which `sud_require_upos` has already had struck, and `feats`). An unfitted model would stop parsing
+    altogether — while the Add-model sheet promises the opposite in as many words ("the model will
+    parse, badly"). So the morphologiser still RUNS and still feeds the parser internally, exactly as
+    it does today; what never happens is those guessed features landing in the reader's column.
+
+    ⚠ **AND IT IS ONE MORE CLAUSE OF THE RULE `_feats_additive` ALREADY STATES, deliberately placed
+    beside `_drop_multivals`.** All three are the same question — what of this wheel's FEATS answer may
+    stand — asked at finer and finer grain: a monolingual wheel's may stand whole; the generic wheel's
+    may not overwrite the annotator and may not carry a comma value; an UNTRAINED row's may not stand
+    at all. Applied at the same three sites, before every restore, so the annotator's own column is
+    untouched: `_apply_arms` still writes a switched-off column cell for cell, `given` is still
+    restored, and `_merge_prior_feats` still has the last word.
+
+    ⚠ **WHAT IS NOT MUTED IS `_prior_feats_on_doc`** — the MID-PIPELINE merge. That one feeds the
+    parser rather than the answer, and the annotator's own features are worth +14.95 LAS to this wheel
+    on held-out Basque whether or not the model is allowed to write a column of its own."""
+    from . import generic_models
+    return _feats_additive(package) and generic_models.unfitted_slot(tb_lang)
+
+
+def _mute_feats(tokens: list[dict]) -> list[dict]:
+    """Empty the FEATS the MODEL just wrote — see :func:`_feats_muted` for which models and why.
+
+    The whole column, blanks included, because at this point the whole column is the model's: the
+    annotator's own cells are put back afterwards by `_apply_arms` (an off arm) and
+    `_merge_prior_feats` (an on one), from what they handed in rather than from what survives here."""
+    for t in tokens:
+        t["feats"] = ""
+    return tokens
 
 
 def _drop_multivals(tokens: list[dict]) -> list[dict]:
@@ -925,6 +1001,12 @@ def _parse_spacy_sud(text: str, package: str, tb_lang=None,
     out, mwt = _spacy_doc_to_sud(doc, arms)
     if _feats_additive(package):
         _drop_multivals(out)      # a comma value learned from one of the wheel's other 80 languages
+    if _feats_muted(package, tb_lang):
+        # …and the WHOLE answer where the row was never fitted — see `_feats_muted`. Today this path
+        # reaches an already-empty column (a raw-text parse supplies no UPOS, so `_needs_given_upos`
+        # takes the morphologiser out of the run and there is nothing to mute), but the rule belongs
+        # wherever this wheel can produce a FEATS cell, not only where it currently does.
+        _mute_feats(out)
     return (_apply_arms(out, arms), mwt) if out else (whitespace_tokens(text), [])
 
 
@@ -1518,10 +1600,13 @@ def _parse_spacy_sud_many(texts: list[str], package: str, tb_lang=None,
         raise ParserUnavailable(str(exc)) from exc
     out = []
     multi = _feats_additive(package)
+    mute = _feats_muted(package, tb_lang)      # …asked ONCE for the batch: it reads the store off disk
     for text, doc in zip(texts, docs):
         toks, mwt = _spacy_doc_to_sud(doc, arms)
         if multi:
             _drop_multivals(toks)     # …the same, per text — see `_drop_multivals`
+        if mute:
+            _mute_feats(toks)         # …and the same again — see `_feats_muted`
         out.append((_apply_arms(toks, arms), mwt) if toks else (whitespace_tokens(text), []))
     return out
 
@@ -1864,7 +1949,7 @@ def parse_pretokenized(forms: list[str], model_id: str = "", upos: list[str] | N
                 tokens = convert.ud_to_sud([ud_sent])[0]["tokens"]
             except (convert.ConversionUnavailable, convert.ConversionError) as exc:
                 raise ParserUnavailable(str(exc)) from exc
-            return {"tokens": _apply_arms(tokens, arms, gset), "parsed": True,
+            return {"tokens": _apply_arms(tokens, arms, gset, given), "parsed": True,
                     "engine": "stanza", "model": name, **({"note": note} if note else {})}
         if engine != "sud":
             from . import models_registry
@@ -1874,6 +1959,13 @@ def parse_pretokenized(forms: list[str], model_id: str = "", upos: list[str] | N
         nlp = _load_spacy(name)
         doc = _given_doc(nlp, forms, tb_lang, upos, given, glosses)
         off, arms = _pipe_plan(nlp, arms, gset)
+        # ⚠ THE NON-EMPTY CELLS ONLY, AND THAT IS RIGHT EVEN THOUGH THE ARM MAY BE OFF. `_force_upos`
+        # writes to the DOC, where the question is what the components after it should READ, and by
+        # the time it runs the morphologiser has already put its own answer on every token this list
+        # does not name — so widening `keep` to the whole column would not withhold the model's guess
+        # from the parser, it would only withhold the RE-DERIVATION for the class the reader chose,
+        # which is worse. Nothing here can reach the answer: `_apply_arms` below rewrites an off
+        # column cell for cell from `given`, empty cells included.
         keep = {i for i, v in enumerate((given or {}).get("feats") or ())
                 if v and v != "_"} if "feats" in gset else frozenset()
         # FEATS the model may add to and may not change — see `_feats_additive` for which models, and why
@@ -1884,6 +1976,12 @@ def parse_pretokenized(forms: list[str], model_id: str = "", upos: list[str] | N
         # thing yet and every cell the parse fills is the parse's.
         generic = _feats_additive(name)
         additive = generic and any(_feats_pairs(f) for f in (prior_feats or ()))
+        # ⚠ AND A THIRD FLAG, NOT A NARROWING OF EITHER: an UNTRAINED row's FEATS are dropped whole,
+        # where `additive` refuses only the cells the reader has filled and `generic` only the comma
+        # values. See `_feats_muted` for why this is a mute of the ANSWER and not a struck arm — the
+        # morphologiser still runs here, and `_prior_feats_on_doc` below still hands the parser the
+        # annotator's own features, which is where most of this wheel's accuracy comes from.
+        muted = _feats_muted(name, tb_lang)
         for _pname, proc in nlp.pipeline:
             if _pname in off:
                 continue
@@ -1896,7 +1994,17 @@ def parse_pretokenized(forms: list[str], model_id: str = "", upos: list[str] | N
         tokens, _mwt = _spacy_doc_to_sud(doc, arms)
         if generic:
             _drop_multivals(tokens)   # …the MODEL's comma values, and only its own: the reader's go back on below
-        tokens = _apply_arms(tokens, arms, gset)
+        if muted:
+            # …and the MODEL's whole FEATS answer where its row was never fitted. BEFORE `_apply_arms`
+            # and both restores below, deliberately: everything the annotator handed in comes back
+            # after this line — a switched-off column cell for cell, a supplied column verbatim, and
+            # `_merge_prior_feats`' last word — so what this drops is the model's answer and nothing
+            # else. Verified: a token whose FEATS the reader typed still carries them after a re-parse
+            # under an unfitted model, and every other token comes back empty.
+            _mute_feats(tokens)
+        # …with the caller's own columns handed in, not merely their NAMES: an arm they switched off
+        # comes back cell for cell as they sent it (see `_apply_arms`, and the report behind it).
+        tokens = _apply_arms(tokens, arms, gset, given)
         if len(tokens) != len(forms):
             # A component may still rebuild the Doc (clause_parser does); if one ever changes the
             # count the caller must be told, not handed a table it cannot align.
@@ -1922,6 +2030,13 @@ def parse_pretokenized(forms: list[str], model_id: str = "", upos: list[str] | N
                     tok["upos"] = want
         # …and every other column the caller handed in, for the same reason: this call re-derives the
         # fields AROUND what the annotator owns and may never hand back less of it than it was given.
+        # ⚠ THIS IS NO LONGER WHERE AN OFF ARM IS RESTORED — `_apply_arms` above now writes the whole
+        # column, blanks included, and this loop repeats its non-empty half harmlessly. What is left
+        # to it is the arm that is ON and supplied anyway: `upos` under a retag, which `has_upos` puts
+        # into `gset` AND back into `arms`, so `_apply_arms` deliberately passes over it. Restoring
+        # only the non-empty cells is right THERE — an untagged token in a retag call is one the model
+        # was asked to tag — and was the whole of the bug when it was also the only restore an off arm
+        # got.
         for arm in gset:
             col = _ARM_COLUMN.get(arm)
             if not col:
@@ -1933,7 +2048,16 @@ def parse_pretokenized(forms: list[str], model_id: str = "", upos: list[str] | N
         # pairs, in the reader's own spelling. `_prior_feats_on_doc` has already merged the same values
         # into the Doc, but what came back off it went through spaCy's serialisation on the way — which
         # is a re-ordering, and re-ordering the annotator's column is a modification.
-        if additive:
+        # ⚠ …AND NOT AT ALL WHERE THE FEATS ARM IS OFF. There the column is already theirs, verbatim
+        # and cell for cell (`_apply_arms` above), and the only thing a merge could still do to it is
+        # RE-ORDER it: `_merge_prior_feats` sorts into UD's case-insensitive order, so a document
+        # whose FEATS were written in some other order would come back from a parse it had told not to
+        # touch that column with every such cell rewritten. `prior_feats` and `given["feats"]` are the
+        # same column read off the same tokens one line apart in js/io/bridge.js, so there is nothing
+        # in the prior for this to lose. The MID-PIPELINE merge is not gated with it and must not be:
+        # that one feeds the parser rather than the answer, and feeding it the annotator's features is
+        # worth +14.95 LAS on held-out Basque whether or not they are also writing the column.
+        if additive and not ("feats" in gset and "feats" not in arms):
             for tok, prior in zip(tokens, prior_feats or ()):
                 tok["feats"] = _merge_prior_feats(tok.get("feats") or "", prior)
         return {"tokens": tokens, "parsed": True, "engine": "sud", "model": name,

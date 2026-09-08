@@ -34,7 +34,26 @@ WHAT THIS MODULE'S OWN CODE DECIDES, AND WHAT IT DOES NOT
 -------------------------------------------------------------
 Three things are genuinely this module's own, not the aligner's or KaamelDict's:
   * WHICH of several pronunciations becomes the plain F-rung default — the one KaamelDict's own
-    ``prob`` column weighs highest (a straight ``max``, no linguistics involved).
+    ``prob`` column weighs highest, **and only where that column actually names one**.  ⚠ A straight
+    ``max`` was the first rule here and it was wrong in the one direction that matters: those
+    weights read as percentages and they are frequently a TIE (کرم is 32/32/32/4 — kerem, karam and
+    korom, and ``max`` returned whichever the CSV listed first) or absent altogether (آن carries no
+    ``prob`` at all, so every reading defaulted to 1.0 and the EZAFE form آنِ won by position).  A
+    tie broken by list order is an invented vocalisation of an ambiguous word, printed with the same
+    confidence as کِتاب, and this app would rather print nothing: so a reading is written only when
+    it holds a MAJORITY of the weight of the alternatives that aligned, and otherwise the F rung is
+    left EMPTY and `fa_vocalise.lookup` falls through to the bare form — which is a legitimate
+    spelling of the word, exactly what it does for a word the dictionary never held.  Costs 2.6 % of
+    entries (3,080 of 116,609; only 2.8 % have more than one pronunciation at all).  ⚠ It does NOT
+    second-guess a preference the dictionary DOES state: در is 10 % dar / 90 % dorr, which is
+    unhelpful for the commonest preposition in the language but is KaamelDict's own claim about the
+    word, not a coin this module tossed.  The reader's answer to a wrong reading is the same one the
+    CJK heteronyms have — the editable Stored transliteration (`translit.ambiguous` already names
+    Persian), whose correction is marked ``_trPick`` and survives a reparse.
+    ⚠ AND A P-RUNG ENTRY STILL ANSWERS ONE OF THESE.  `fa_vocalise.lookup` tries (form, UPOS) BEFORE
+    the bare form, so مرد — 50/50 and therefore no longer given a default — is still مَرد for a NOUN
+    and مُرد for a VERB.  Dropping the F rung takes away the guess a tagless caller got, not the
+    answer a tagged one gets.
   * WHICH homographs earn a POS-conditioned P-rung entry — only where the alternatives' POS labels
     genuinely DIFFER (a word tagged the same part of speech under every reading has nothing for
     UPOS to disambiguate, so an entry there would only ever match the one the plain F-rung already
@@ -78,6 +97,10 @@ from .paths import FA_VOCAB_DIR, ensure_dirs
 _CSV_URL = "https://huggingface.co/datasets/MahtaFetrat/KaamelDict/resolve/main/KaamelDict.csv"
 _SENTINEL = ".sud-fa-vocab-src"   # records which URL built what's on disk, the same "detect a stale/
                                   # partial fetch rather than assume" role app/grammars.py's own sentinel plays
+_RECIPE = "majority-default-v1"   # …and which set of BUILD-TIME DECISIONS built it (see the module
+#   docstring).  A lexicon written before the F rung stopped guessing at a tie still loads and still
+#   answers; it simply answers a few thousand ambiguous words with a coin-toss reading this build no
+#   longer writes, and nothing on disk would otherwise say so.  Bump this when a decision changes.
 
 # The standard UD/UPOS tagset (17 tags). KaamelDict's own POS column already uses these names for
 # every row that carries a genuine one; anything outside this set (``""``, ``"-"``, the rare
@@ -140,7 +163,7 @@ def install(progress=None) -> dict:
 
     note(40, "Aligning pronunciations…")
     try:
-        forms, pos_forms = _build_tables(raw, align, note)
+        forms, pos_forms, ambiguous = _build_tables(raw, align, note)
     except Exception as exc:  # noqa: BLE001 — a malformed row must not sink the whole build
         return {"error": f"could not build the lexicon: {exc}"}
     if not forms:
@@ -154,18 +177,26 @@ def install(progress=None) -> dict:
                             ensure_ascii=False).encode("utf-8"))
     os.replace(tmp, os.path.join(FA_VOCAB_DIR, "lut.json.gz"))   # atomic swap, as grammars.py's is
     with open(os.path.join(FA_VOCAB_DIR, _SENTINEL), "w", encoding="utf-8") as f:
-        f.write(_CSV_URL)
+        f.write(_CSV_URL + "\n" + _RECIPE)   # …the RECIPE beside the URL: the same CSV built through
+        #   a different set of build-time decisions is a different table, and a lexicon on disk from
+        #   before one of them changed is otherwise indistinguishable from a current one.
 
     _clear_render_cache()
-    note(100, f"Installed — {len(forms):,} words, {len(pos_forms):,} homograph readings")
-    return {"ok": True, "words": len(forms), "homographs": len(pos_forms)}
+    note(100, f"Installed — {len(forms):,} words, {len(pos_forms):,} homograph readings, "
+              f"{len(ambiguous):,} left unvocalised as ambiguous")
+    return {"ok": True, "words": len(forms), "homographs": len(pos_forms),
+            "ambiguous": len(ambiguous)}
 
 
-def _build_tables(csv_bytes: bytes, align, note) -> tuple[dict[str, str], dict[str, str]]:
+def _build_tables(csv_bytes: bytes, align, note) -> tuple[dict[str, str], dict[str, str], set[str]]:
     """The three build-time decisions this module owns — see the module docstring — over every row
-    of KaamelDict's CSV. Returns (F table, P table), both ``{key: vocalised}``."""
+    of KaamelDict's CSV. Returns (F table, P table, the words deliberately left with NO default),
+    the first two ``{key: vocalised}``.  The third is counted rather than written: it is the set the
+    build declined to guess at, and reporting it is how "silence" stays visible instead of looking
+    like a coverage gap."""
     forms: dict[str, str] = {}
     pos_forms: dict[str, str] = {}
+    ambiguous: set[str] = set()
     reader = csv.DictReader(io.StringIO(csv_bytes.decode("utf-8")))
     rows = list(reader)
     total = len(rows) or 1
@@ -200,9 +231,17 @@ def _build_tables(csv_bytes: bytes, align, note) -> tuple[dict[str, str], dict[s
             answered.append((vocalised, pos, prob))
         if not answered:
             continue
-        # F-rung default: the highest-weighted alternative KaamelDict's own `prob` names.
+        # F-rung default: the highest-weighted alternative KaamelDict's own `prob` names — WHERE IT
+        # NAMES ONE.  With several alternatives still standing, the weight has to be a majority of
+        # what the aligner accepted (the set actually being chosen between); a tie, or a row with no
+        # `prob` column at all, leaves the rung EMPTY and the lookup falls through to the bare form.
+        # See the module docstring's first bullet for why an invented reading is worse than none.
         best = max(answered, key=lambda t: t[2])
-        forms[grapheme] = best[0]
+        weight = sum(max(t[2], 0.0) for t in answered)
+        if len(answered) == 1 or best[2] > weight / 2:
+            forms[grapheme] = best[0]
+        else:
+            ambiguous.add(grapheme)
         # P-rung: only where the surviving alternatives' POS labels genuinely DIFFER — a homograph
         # the plain F-rung cannot already answer on its own (see the module docstring's second bullet).
         distinct_pos = {p for _, p, _ in answered if p in _UPOS}
@@ -210,24 +249,49 @@ def _build_tables(csv_bytes: bytes, align, note) -> tuple[dict[str, str], dict[s
             for vocalised, pos, _ in answered:
                 if pos in _UPOS:
                     pos_forms[grapheme + "|" + pos] = vocalised
-    return forms, pos_forms
+    return forms, pos_forms, ambiguous
 
 
 def _clear_render_cache() -> None:
-    """Drop `translit`'s memoised renderings of the ``vocalise`` scheme for Persian — same reasoning
-    as `app.macron`'s own `_clear_render_cache`: a document rendered before the lexicon arrived
-    would otherwise keep showing bare forms for the rest of the session."""
+    """Drop `translit`'s memoised renderings of Persian — same reasoning as `app.macron`'s own
+    `_clear_render_cache`: a document rendered before the lexicon arrived would otherwise keep
+    showing bare forms for the rest of the session.
+
+    ⚠ EVERY PERSIAN KEY, NOT JUST THE ``vocalise`` ONES.  This used to drop the Script scheme's
+    renderings alone, which was the whole of what the lexicon fed when it was written.  It is not
+    any more: the ROMANISATION is built from the vocalised form too (`translit._legacy`), and it
+    caches under the language's default scheme id — so after an install the transliteration row
+    kept spelling کتاب ktāb for the rest of the session while the Script row beside it had already
+    turned into کِتاب."""
     try:
         from . import translit
-        for k in [k for k in translit._CACHE if len(k) > 1 and k[1] == "vocalise"]:
+        stale = [k for k in translit._CACHE
+                 if (len(k) > 1 and k[1] == "vocalise")
+                 or translit._canon_lang(translit._norm(k[0])) == "fa"]
+        for k in stale:
             translit._CACHE.pop(k, None)
     except Exception:  # noqa: BLE001
         pass
 
 
+def built_recipe() -> str:
+    """The build recipe recorded beside the lexicon on disk, or "" (nothing installed, or a lexicon
+    from before the sentinel carried one).  ``!= _RECIPE`` means "still works, but a re-install would
+    build it by the current rules" — see `_RECIPE`."""
+    try:
+        with open(os.path.join(FA_VOCAB_DIR, _SENTINEL), encoding="utf-8") as fh:
+            parts = fh.read().split("\n")
+        return parts[1].strip() if len(parts) > 1 else ""
+    except OSError:
+        return ""
+
+
 def status() -> dict:
     """One row for the Manage Models UI (extras.status() builds its own from TIERS; this is the
     module-side answer the ``module`` tier contract asks for)."""
+    note = ("KaamelDict pronunciations, aligned onto Persian spelling (~10 MB download) — "
+            "needs the Persian model")
+    if available() and built_recipe() != _RECIPE:
+        note += " · built by an older recipe; re-install to rebuild it"
     return {"id": "fa_vocab", "label": "Persian vocalisation lexicon",
-            "note": "KaamelDict pronunciations, aligned onto Persian spelling (~10 MB download) — needs the Persian model",
-            "installed": available()}
+            "note": note, "installed": available()}

@@ -10,7 +10,10 @@ dedicated packages:
 * Cantonese  → ToJyutping (Jyutping).
 * Japanese   → Janome (kanji reading) + pykakasi (kana → phonemic Hepburn, long vowels doubled).
 * Korean     → hangul-romanize (wiktra's Korean modules don't run on Lua 5.5).
-* Persian    → DIN 31635 scholarly transliteration (with diacritics).
+* Persian    → DIN 31635, read as ORTHOGRAPHY rather than character by character (`_char_map_fa`),
+               over the VOCALISED form (`app/vocalise.py` + the fetched `fa_vocab` lexicon), so the
+               short vowels the script omits AND the long ones it writes with ا ی و both land:
+               کتاب → ketāb, ایران → īrān, خانه → ḵāne.
 * Hebrew     → ISO 259 scholarly transliteration (with diacritics).
 * everything else → wiktra, and if wiktra leaves it unchanged → uroman (ISI's Universal Romanizer).
 
@@ -1990,9 +1993,16 @@ def _uroman(text: str, lang: str = "") -> str:
 
 # Scholarly transliteration with diacritics for the unvocalised Semitic/Iranian scripts.
 # These are CONSONANTAL — short vowels the script omits stay absent — but any harakat/niqqud that
-# ARE written get transliterated (so a vocalised text shows its vowels).
+# ARE written get transliterated (so a vocalised text shows its vowels).  ⚠ For Arabic and Persian
+# the text that reaches them is ALWAYS vocalised where a lexicon can vocalise it (see `_legacy`), so
+# for those two "the vowels that are written" is a much larger set than the file's own spelling; only
+# Hebrew is still read straight off the page.
 
-# Persian, DIN 31635 (خانه → ḵānh, کتاب → ktāb)
+# Persian, DIN 31635.  ⚠ THE LETTER TABLE ONLY — it is read by `_char_map_fa` (below `_arabic_din`),
+# never by a bare `_char_map`, because a per-CHARACTER reading of Persian cannot spell the language's
+# LONG vowels: /ā ī ū/ are written with ا ی و and those same three letters are also the consonants
+# /ʾ y v/.  Its values for ا/و/ی/ه here are the ones the reader falls back to; which of them applies
+# is a question about the POSITION, and that is what `_char_map_fa` decides.
 _FA_MAP = {
     "ا": "ā", "آ": "ā", "أ": "ʾ", "إ": "ʾ", "ء": "ʾ", "ئ": "ʾ", "ؤ": "ʾ",
     "ب": "b", "پ": "p", "ت": "t", "ث": "s̱", "ج": "j", "چ": "č", "ح": "ḥ", "خ": "ḵ",
@@ -2109,6 +2119,187 @@ def _arabic_din(text: str) -> str:
         else:
             out.append(_char_map_ar(tok))
     return "".join(out)
+
+
+# ── Persian: `_FA_MAP` read as ORTHOGRAPHY rather than character by character ─────────────────
+# ⚠ A PER-CHARACTER READING OF PERSIAN LOSES EXACTLY THE VOWELS THIS ROW EXISTS TO SHOW.  Every
+# romanisation of Persian is built from the VOCALISED form (see `_legacy`), so the SHORT vowels a
+# lexicon entry supplies do arrive — کتاب → کِتاب → ketāb.  But Persian writes its LONG vowels with
+# the letters ا ی و, which are also the consonants /ʾ y v/, so `_char_map(text, _FA_MAP)` — which can
+# only give each letter one value — spelt every one of them as the consonant: ایران → āyrān (īrān),
+# دوست → dvst (dūst), بیرون → byrvn (bīrūn), خانه → ḵānh (ḵāne), است → āast (ast).  A word could
+# come back with its short vowels written and not one of its long ones, which is not a romanisation
+# of the word at all.
+#
+# ⚠ THE RULE IS READ OFF THE LEXICON, NOT INVENTED HERE.  Measured over all 109,801 entries of the
+# built `fa_vocab` table against KaamelDict's own pronunciations (app/fa_vocab.py builds one from the
+# other, so the two are the same statement of the word in two notations): **a harakah is ALWAYS a
+# short vowel, and a bare ا/ی/و is the long one**.  `fa_vocalise` writes مُرد for mord and leaves
+# دوست alone for dūst; دُولَت is dowlat (ḍamma + a bare و = the diphthong, NOT ū) and قُوَّت is
+# qovvat (a و carrying marks of its own is the consonant).  Everything below is that one rule plus
+# the four positions where ا/ی/و/ه are something other than what they usually are.  Scored the same
+# way — this romanisation folded to KaamelDict's phoneme alphabet (س/ص/ث all /s/, ه/ح both /h/, ʾ/ʿ
+# ignored) and compared whole-word against the dictionary's own reading:
+#     per-character `_char_map`, bare form  1.17 %      per-character, vocalised form  15.95 %
+#     this function, bare form              9.85 %      this function, vocalised form  86.95 %
+# The 13 % residue is the ORTHOGRAPHY's own ambiguity and no rule can reach it: a bare و is /u/ in
+# دوست and /o/ in آبجو with nothing on the page to separate them (48 % of what is left), and a bare
+# ی is /i/ in شیر and /ey/ in خیر (13 %).  The lexicon does not write those either — there is no
+# harakah for a vowel the mater letter is already carrying — so this is the point past which the
+# reader's own correction (the editable Stored transliteration; see `ambiguous`) is the only answer.
+_FA_SHORT = {"َ": "a", "ِ": "e", "ُ": "o"}          # fatḥa / kasra / ḍamma, in their PERSIAN values —
+#   e/o where Arabic has i/u, which is why `_AR_DIN` cannot be shared for these three.
+_FA_TANWIN = {"ً": "an", "ٌ": "on", "ٍ": "en"}
+_FA_LONG = "اآ"                 # the letters that can only ever be the long /ā/, never a glide
+_FA_SHADDA = "ّ"
+_FA_DAMMA = "ُ"                 # named because the ow diphthong tests for the MARK, not for its value
+# The shadda doubles a CONSONANT.  A vowel piece is never doubled, and the diphthong's "w" is a vowel
+# here (it is the second half of ow), so both are excluded by value rather than by re-deciding which
+# branch produced them.
+_FA_UNDOUBLED = frozenset({"", "a", "e", "o", "ā", "ī", "ū", "w"})
+
+
+def _fa_marks_vowel(marks: str) -> bool:
+    """Do this cluster's own combining marks spell a vowel?  (A shadda or a sukūn does not.)"""
+    return (any(k in marks for k in _FA_SHORT) or any(k in marks for k in _FA_TANWIN)
+            or "ٰ" in marks)
+
+
+def _char_map_fa(word: str) -> str:
+    """One Persian ORTHOGRAPHIC WORD romanised — see the note above for where the rules come from.
+
+    ``word`` must already be split at whitespace AND at the ZWNJ (`_persian_din` does both): every
+    position test below — word-initial ا, word-final ه — is about the orthographic word, and می‌رود
+    is two of them (mī + ravad), not one."""
+    clusters = _ar_clusters(word)   # base + its own combining marks as ONE unit.  Shared with Arabic
+    #   deliberately: the operation is a fact about the SCRIPT, not about either language.
+    n = len(clusters)
+    out: list[str] = []
+    prev_vowel = False   # did the previous cluster END in a vowel?  This one flag is the whole state
+    #   machine: ا/ی/و spell a vowel where the syllable is still owed one and a consonant where it is not.
+    prev_marks = ""
+    prev_silent_he = False   # …and the ONE place a following bare ا is a carrier: see the ه branch
+    i = 0
+    while i < n:
+        silent_he = False
+        cl = clusters[i]
+        b, m = cl[0], cl[1:]
+        nb = clusters[i + 1][0] if i + 1 < n else ""
+        nm = clusters[i + 1][1:] if i + 1 < n else ""
+        n2 = clusters[i + 2][0] if i + 2 < n else ""
+        piece, is_vowel = "", False
+        if _AR_DIAC_RE.match(b):
+            # A STRANDED HARAKAH, i.e. one written on the ZWNJ itself — how a compound's EZAFE is
+            # spelt (آب‌ِزَرد = āb-e zard).  The split above has just made it the head of a "word";
+            # dropped as an unmapped character it silently took the ezafe vowel with it.
+            for k in cl:
+                if k in _FA_SHORT:
+                    out.append(_FA_SHORT[k])
+                    prev_vowel = True
+            i += 1
+            continue
+        if b == "آ":
+            piece, is_vowel = "ā", True
+        elif b == "ا":
+            # ا IS A CARRIER AS OFTEN AS IT IS A VOWEL.  It writes /ā/ only where it is the vowel
+            # itself; word-initially, and after the silent he of an unjoined enclitic, it is the seat
+            # a vowel is written ON (اِسم esm, آراستهاَم ārāste-am) and must contribute nothing of its
+            # own — `āesm`/`ārāsthāam` were the old table's answers.
+            if _fa_marks_vowel(m):
+                piece = ""                                   # the harakah below IS the vowel
+            elif i == 0 and nb and nb in "وی":
+                piece = ""                                   # ای/او: the mater below IS the long vowel
+            elif prev_silent_he:
+                piece = ""                                   # …the enclitic's own carrier; see below
+            elif i == 0:
+                # Word-initial, unmarked: /a/, /e/ or /o/ and the page does not say which.  "a" is the
+                # commonest and, unlike the table's old "ā", is at least a vowel this letter can spell
+                # in this position — آ is how Persian writes initial /ā/.  Worth 0.02 % on the measure
+                # above (nothing turns on it there, since a vocalised word carries its harakah); it is
+                # the NO-LEXICON path this is chosen for, where every initial ا is bare.
+                piece, is_vowel = "a", True
+            else:
+                piece, is_vowel = "ā", True
+        elif b == "و":
+            if not m and i and clusters[i - 1][0] == "خ" and nb and nb in "اآی":
+                i += 1          # خوا/خوی — the silent wāw of خواب xāb, خواهر xāhar, خویش xīš
+                continue
+            cons = (bool(m) and m != _FA_SHADDA) or (nb in _FA_LONG if nb else False)
+            if _FA_DAMMA in prev_marks and not cons:
+                # ḍamma + a bare و is the DIPHTHONG (دُولَت dowlat, اُو ow, خودرُو ḵodrow) — the ḍamma
+                # has already written the "o", so this letter contributes only the off-glide.  The
+                # other two short vowels do NOT do this: fatḥa/kasra + و is a plain consonant
+                # (دَوات davāt, نِوِشت nevešt), which is why this is not a `_AR_MATRES`-style table.
+                piece, is_vowel = "w", True
+            elif cons or prev_vowel:
+                piece = "v"
+            else:
+                piece, is_vowel = "ū", True
+        elif b == "ی":
+            # …and ی takes the same test MINUS the "followed by ا" clause the و rule needs: two
+            # adjacent maters spell vowel-then-glide in the order they are written, so دیو is dīv and
+            # بوی is būy.  Reading a ی before ا as the glide instead (اِحتیاج → eḥtyāj) cost 1.24 %.
+            # WORD-INITIALLY it is always the consonant (یک yek, یا yā) — and, after the ZWNJ split,
+            # that is also the ezafe ی of کتابخانه‌ی, which as a vowel came back ketābḵāneī (+0.35 %).
+            cons = (bool(m) and m != _FA_SHADDA) or prev_vowel or i == 0
+            piece, is_vowel = ("y", False) if cons else ("ī", True)
+        elif b in ("ه", "ة"):
+            # THE SILENT HE — Persian's ordinary spelling of a final /e/ (خانه ḵāne, نامه nāme), which
+            # a per-character "h" turned into ḵānh.  It is silent only where the word owes a vowel:
+            # after a written short vowel it is a real /h/ (نَه nah, دَه dah) and so is a final ه after
+            # a long one (راه rāh, کوه kūh).  ⚠ AND THE ENCLITIC COUNTS AS FINAL: خانه‌ام is written
+            # both with and without its ZWNJ, and where the joiner is absent the following ا is still a
+            # carrier, not a letter that makes the ه medial (آراستهاَم is ārāste-am, not ārāsthām) —
+            # worth 10.69 % on the measure above (with the carrier below, 6.43 %), the two largest
+            # single rules here.
+            enclitic = nb == "ا" and (_fa_marks_vowel(nm) or n2 == "ی")
+            if (i == n - 1 or enclitic) and not m and not prev_vowel:
+                piece, is_vowel = "e", True
+                silent_he = enclitic   # …and THAT ا is then a carrier, which is the only position a
+                #   bare medial one is.  Scoped to exactly this: "a bare ا after any vowel is a
+                #   carrier" is the same rule stated one step too wide, and it eats the /ā/ of
+                #   خیابان (ḵībān for ḵīābān) to buy nothing this narrower one does not already have.
+            else:
+                piece = "h"
+        elif b in _FA_MAP:
+            piece = _FA_MAP[b]
+        elif b.isascii() or b.isspace() or b in "-–—.,;:!?()[]«»\"'":
+            piece = b
+        # else: an unmapped character is dropped, exactly as `_char_map` drops it
+        out.append(piece)
+        if _FA_SHADDA in m and piece not in _FA_UNDOUBLED:
+            out.append(piece)          # gemination: مُلّا mollā, سَلّار sallār
+        for k in m:
+            if k in _FA_SHORT:
+                out.append(_FA_SHORT[k])
+                is_vowel = True
+            elif k in _FA_TANWIN:
+                out.append(_FA_TANWIN[k])
+                is_vowel = True
+            elif k == "ٰ":
+                out.append("ā")
+                is_vowel = True
+        prev_vowel = is_vowel
+        prev_marks = m
+        prev_silent_he = silent_he
+        i += 1
+    return "".join(out)
+
+
+_FA_WORD_SEP = re.compile(r"([\s‌]+)")   # …and the ZWNJ is a WORD boundary here, not a character
+
+
+def _persian_din(text: str) -> str:
+    """`text` romanised word by word — the Persian counterpart of `_arabic_din`.
+
+    The ZWNJ separates two orthographic words (می‌رود = mī + ravad, خانه‌ها = ḵāne + hā) and every
+    position rule in `_char_map_fa` is stated about one of them, so it splits here rather than being
+    mapped to "" per character as `_FA_MAP` did.  It still CONTRIBUTES nothing to the output: the
+    two halves are written solid, which is what `_FA_MAP` already produced and what KaamelDict's own
+    pronunciations do."""
+    return "".join(w.replace("‌", "") if _FA_WORD_SEP.fullmatch(w) else _char_map_fa(w)
+                   for w in _FA_WORD_SEP.split(text))   # a separator run can hold both (" ‌"), so the
+    #   ZWNJ is removed FROM it rather than the whole run being dropped — that ate the space beside it
 
 
 # ── scheme registries: TRANSLITERATION (romanisation) vs ORTHOGRAPHY (display-only glyphs) ────
@@ -2367,7 +2558,13 @@ def _legacy(text: str, base: str, lang: str, upos: str = "", feats: str = "", le
     `vocalise.vocalise` degrades to the bare form when unavailable (no model installed, no lexicon
     tier, a lookup miss) or when `base` is neither "ar" nor "fa", so this substitution is always safe
     to make unconditionally: on a miss `text` is simply unchanged and every following branch behaves
-    exactly as it did before this existed."""
+    exactly as it did before this existed.
+    ⚠ FEEDING THE VOWELS IN IS ONLY HALF OF IT, AND PERSIAN NEEDED THE OTHER HALF.  `_arabic_din`
+    reads a vocalised string correctly (`_char_map_ar`'s matres/tāʾ-marbūṭa rules were added when this
+    landed); the Persian side was still a bare per-character table and spelt کِتاب ketāb while spelling
+    ایران āyrān, i.e. the short vowels arrived and the LONG ones — which Persian writes with ا ی و,
+    letters that are also consonants — did not.  `_char_map_fa` is that half; its own note carries the
+    rule and the measurements."""
     if base in ("ar", "fa"):
         from . import vocalise as _vocalise
         text = _vocalise.vocalise(base, text, upos, feats, lemma)
@@ -2378,7 +2575,7 @@ def _legacy(text: str, base: str, lang: str, upos: str = "", feats: str = "", le
     elif base in ("ko", "kor"):
         out = _korean(text)
     elif base in ("fa", "fas", "per"):
-        out = _char_map(text, _FA_MAP)
+        out = _persian_din(text)   # …and NOT `_char_map(text, _FA_MAP)`: see that function's own note
     elif base in ("he", "heb", "iw"):
         out = _char_map(text, _HE_MAP)
     else:   # wiktra as far as possible (Cyrillic, Greek, Devanagari, …)

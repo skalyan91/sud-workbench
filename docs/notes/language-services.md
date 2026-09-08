@@ -44,6 +44,51 @@
   the opposite of `afterFormEdit`, which drops it: a hand-picked reading is a statement about the FORM,
   and a retag does not change the form. `regenTok` cannot stand in for any of this — it is a no-op with
   no parser model, and romanisation runs without one.
+- **PERSIAN'S ROMANISATION SHOWS THE VOWELS, AND THAT TOOK TWO SEPARATE THINGS, NOT ONE.**
+  ⚠ The first was already here: **Arabic and Persian romanise the VOCALISED form**, always, whatever the
+  Script menu's "With vowels" toggle is doing to the original-script row (`_legacy`, and
+  `trNeedsMorph`/`trMorphKey` in js/lang/translit-load.js, which widen the transliteration BATCH KEY to
+  (form, upos, feats, lemma) for the same collision reason `orthoKeyOf` widens the Script row's — and are
+  deliberately NOT gated on `ORTHO_SCHEME`). The short vowels a lexicon supplies therefore arrived.
+  ⚠ The second is `translit._char_map_fa`, and without it the first bought only half a word:
+  **`_FA_MAP` is a per-CHARACTER table, and Persian cannot be read one character at a time**, because
+  ا ی و spell both the long vowels /ā ī ū/ and the consonants /ʾ y v/, and a table with one value per
+  letter has to pick. It picked the consonant, so a word came back with its SHORT vowels written and not
+  one of its long ones — کِتاب ketāb beside ایران āyrān, دوست dvst, بیرون byrvn, خانه ḵānh, است āast.
+  The rule the vocalised spelling encodes is **a harakah is always a short vowel and a bare ا/ی/و is the
+  long one** — read off all 109,801 entries of the built lexicon against KaamelDict's own pronunciations,
+  not invented here. Scored whole-word, this romanisation folded to KaamelDict's phoneme alphabet:
+  per-character 1.17 % bare / 15.95 % vocalised → **9.85 % bare / 86.95 % vocalised**. Four positions
+  carry it, each measured: the silent he (خانه ḵāne, and the ENCLITIC counts as word-final — آراستهاَم is
+  ārāste-am — worth 10.69 %, with the carrier ا it licenses worth 6.43 %), the ḍamma diphthong (دُولَت
+  dowlat, and only ḍamma: fatḥa/kasra + و is the plain consonant of دَوات davāt), the two-maters order
+  (دیو dīv but بوی būy — 1.38 %), and the silent wāw of خواب xāb (1.05 %). ⚠ **The ZWNJ is a WORD
+  BOUNDARY there, not a character** (`_persian_din`): every position rule is about the orthographic word,
+  and می‌رود is two of them. ⚠ **The 13 % residue is the orthography's own and no rule reaches it** — a
+  bare و is /u/ in دوست and /o/ in آبجو (48 % of what is left) and a bare ی is /i/ in شیر and /ey/ in خیر
+  (13 %); the lexicon does not write those either, since there is no harakah for a vowel the mater is
+  already carrying. Past that point the answer is the reader's own: `ambiguous()` already names Persian,
+  so the Stored transliteration is click-editable and the correction is `_trPick`.
+- `app/vocalise.py` + `app/fa_vocab.py` — the vocalisation itself; read that module's own docstring for
+  the two-components-one-façade shape. What belongs HERE is the one decision `fa_vocab` owns and the
+  reason it changed: **which of several KaamelDict pronunciations becomes the plain F-rung default.**
+  ⚠ It was a straight `max` over the CSV's `prob` column, and that column is frequently a TIE (کرم is
+  32/32/32/4 — kerem, karam and korom) or absent entirely (آن carries no `prob`, so every reading
+  defaulted to 1.0 and the EZAFE form آنِ won **by list position**). A tie broken by list order is an
+  invented vocalisation of an ambiguous word printed as confidently as کِتاب, so a reading is now written
+  only where it holds a **majority** of the weight of the alternatives that aligned; otherwise the rung is
+  left empty and `fa_vocalise.lookup` falls through to the bare form. Costs 1,789 of 109,801 entries and
+  fixes آن → ān, که → ke, کرم → krm (was āne / kah / kerem). ⚠ It does **not** second-guess a preference
+  the dictionary DOES state: در is 10 % dar / 90 % dorr, which is unhelpful for the commonest preposition
+  in the language but is KaamelDict's claim, not a coin this app tossed. ⚠ And it costs a tagless caller
+  only: `lookup` tries (form, UPOS) FIRST, so مرد is still مَرد for a NOUN and مُرد for a VERB, بعد baʿde
+  for an ADP and بَعد for a NOUN, and the frontend already sends the tag. ⚠ **A LEXICON ON DISK IS NOT
+  REBUILT BY EDITING THIS RULE** — `_RECIPE` is written into the sentinel beside the source URL and
+  `status()` says "built by an older recipe" when they disagree; the Manage Models row for an installed
+  tier carries no button, so a reader has to be told. ⚠ And `_clear_render_cache` drops **every Persian
+  key**, not the `vocalise`-scheme ones it was written for: the romanisation caches under the language's
+  DEFAULT scheme id, so after an install the transliteration row kept spelling کتاب ktāb for the rest of
+  the session while the Script row beside it had already become کِتاب.
 - `app/macron.py` — **LATIN VOWEL LENGTH IS A SCRIPT SCHEME, AND THIS FILE CALLS THE MODEL RATHER THAN
   BEING ONE.** `_SCRIPT_SCHEMES["la"] = [("macron", "With macrons")]` (app/translit.py) puts `divisa` →
   `dīvīsa` on the Script pill beside Sanskrit's Brahmic scripts: display only, so the running sentence

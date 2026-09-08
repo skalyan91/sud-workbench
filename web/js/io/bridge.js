@@ -195,13 +195,47 @@ function blankSent(){ return {sid:"s1",text:"",tokens:[tok("","","","","",0,"roo
 function migrateLegacySubj(t){ const old=getFeat(t.feats,"Subj"); if(!old) return;
   t.feats=clearFeat(t.feats,"Subj");
   if(!getFeat(t.misc,"Subject")) t.misc=setMiscKV(t.misc,"Subject",old); }
-function normSents(sents,base){ base=base||0; return sents.map((s,i)=>{
+/* ⚠ A DOCUMENT HAS ARRIVED AND ITS EMPTY LEMMAS HAVE NOT BEEN CONSIDERED YET. `normSents` only ARMS the
+   fill; `lemmaFillFromForms` below performs it, and the two are separate for a reason that is pure ordering:
+   at boot the document is loaded BEFORE the model is (js/core/init.js restores the sentences, then
+   `populateModels()` → `maybeAutoDetectLang()` → `syncPipeAvail()`), so a decision taken here would be taken
+   against whatever model happened to be selected a moment earlier — or none at all, which the gate reads as
+   "fill". Armed here, answered once the model is actually known. */
+let LEM_FILL_PENDING=false, LEM_FILLED=0;
+function normSents(sents,base){ base=base||0; LEM_FILL_PENDING=true; return sents.map((s,i)=>{
   if(s.sid==null) s.sid="s"+(base+i+1);
   if(typeof s.text==="string" && s.text.indexOf("\\n")>=0) s.text=s.text.replace(/\\n/g,"\n");   // item 13: a literal \n in `# text` is a preserved display line break → restore the real newline for the .stext (pre-wrap) display; re-serialised back to a literal \n by getDocJSON (byte-stable)
   (s.tokens||[]).forEach(t=>{ t.head=String(t.head==null?0:t.head);
     if(t.deps==null)t.deps="_"; if(t.misc==null)t.misc="_"; if(t.translit==null)t.translit=""; if(t.translitLemma==null)t.translitLemma="";
     migrateLegacySubj(t); });
   return s; }); }
+/* ⚠ EMPTY LEMMAS ARE FILLED FROM THEIR FORMS WHEN A DOCUMENT ARRIVES — AND ONLY UNDER A MODEL THAT WILL
+   NOT FILL THEM ITSELF. On instruction ("when a file is opened, any empty lemma values should be populated
+   from the Form column", then "fill only under a generic/custom/no model"). The gate is
+   `mayInheritAnnotation()` — the same one the retag's FEATS/gloss inheritance answers to — so this is the
+   lemma's half of one rule rather than a second rule about the same models: the generic wheel ships no
+   lemmatiser (`GENERIC_ARMS`), and with no model at all nothing else is coming either. A monolingual parser
+   WILL supply lemmas, and copying the form over the column it is about to fill would be this app answering a
+   question the model was asked.
+   ⚠ ONCE PER ARRIVAL, WHICH IS WHAT `LEM_FILL_PENDING` IS FOR. Called from two places that cannot be reduced
+   to one: the open paths (the model is already known and unchanged — an ordinary Open) and `syncPipeAvail`
+   (js/ui/wiring.js, the one function that ever learns what a model can do — which at BOOT runs after the
+   document has already loaded). Whichever gets there first answers; the flag stops the second from asking
+   again, and stops a later model switch mid-session from quietly filling a column the reader has been
+   looking at. Idempotent regardless: after a fill there are no empty lemmas left to find.
+   ⚠ AND IT IS AN EDIT, MARKED AS ONE. Everything else `normSents` does is round-trip-safe spelling; this
+   changes what the document SAYS, so `markDirty()` follows and the reader sees the unsaved marker rather
+   than having their next save quietly rewrite the file. CLAUDE.md's byte-stability rule is about open →
+   save with NO edits; this is an edit, and it says so.
+   Only where there is a FORM to copy: an empty token (an inserted placeholder row) keeps its `_`, since
+   "the lemma is the form" says nothing at all when there is no form. */
+function lemmaFillFromForms(){ if(!LEM_FILL_PENDING) return 0;
+  LEM_FILL_PENDING=false; LEM_FILLED=0;
+  if(typeof mayInheritAnnotation==="function" && !mayInheritAnnotation()) return 0;   // a monolingual parser supplies its own — see above
+  DOC.forEach(s=>(s.tokens||[]).forEach(t=>{
+    if((!t.lemma||t.lemma==="_")&&t.form){ t.lemma=t.form; LEM_FILLED++; } }));
+  if(LEM_FILLED){ markDirty(); if(typeof preserveScroll==="function"&&typeof renderDoc==="function") preserveScroll(renderDoc); }
+  return LEM_FILLED; }
 const isBlankDoc=()=>DOC.length===0||(DOC.length===1&&DOC[0].tokens.length<=1&&!(DOC[0].tokens[0]&&DOC[0].tokens[0].form));
 
 /* WHAT COUNTS AS A FILE-SPECIFIC DISPLAY SETTING, and therefore belongs in the reset below.
@@ -325,7 +359,7 @@ async function doOpen(){ if(!hasBridge())return toast("Open is available in the 
   if(!r.sentences||!r.sentences.length) return toast("No sentences in that file");
   DOC.length=0; resetUndo(); normSents(r.sentences).forEach(s=>DOC.push(s));   // item 3: a fresh file — clear the previous file's undo/redo history
   if(r.path&&hasBridge())try{window.pywebview.api.adopt_path(r.path);}catch(e){}
-  DOCNAME=r.name||DOCNAME; DOCPATH=r.path||""; markDirty(false);
+  DOCNAME=r.name||DOCNAME; DOCPATH=r.path||""; markDirty(false); setTimeout(lemmaFillFromForms,0);   // …then fill empty lemmas from their forms, if this model is one that will not (lemmaFillFromForms). A task later, so a language auto-detect that switches models on this very open answers the gate before it is asked
   setFormat(r.format||"SUD"); syncGlossTiersFromDoc(); syncDeprelVocabFromDoc(); detectXposMirrorsUpos(); syncDocFonts();   // item 1: derive the glossing tiers from THIS file, not the previous one
   refreshTransLangs(); renderTransDrawer();   // item 6: seed enabled translation languages from the opened file's # text_LANG (doOpen / openRecentFile skipped this → translations never showed on open)
   setTitle(); renderDoc(); clearSelToBlock(0,false); settleAlign();   // item 9: nothing selected; the reading focus starts on the first sentence and restoreScrollPos below owns where the viewport lands   // settleAlign: re-fit column widths against the settled layout
@@ -378,7 +412,7 @@ async function reloadFromDisk(silent){
   if(r.error){ toast("Reload failed: "+r.error); return false; }   // a file mid-write parses as garbage as often as not; the document on screen is left exactly as it was and the next write announces itself
   const at=Math.max(0,curBlock());   // the block being READ, captured before the document under it is replaced
   DOC.length=0; resetUndo(); normSents(r.sentences||[]).forEach(s=>DOC.push(s));   // the undo history described sentences that no longer exist — the same reasoning doOpen states
-  DOCNAME=r.name||DOCNAME; if(r.path)DOCPATH=r.path; markDirty(false);
+  DOCNAME=r.name||DOCNAME; if(r.path)DOCPATH=r.path; markDirty(false); setTimeout(lemmaFillFromForms,0);   // …the same fill the two Open paths run: a reload has brought a fresh document in
   setFormat(r.format||"SUD"); syncGlossTiersFromDoc(); syncDeprelVocabFromDoc(); detectXposMirrorsUpos(); syncDocFonts();
   refreshTransLangs(); renderTransDrawer();
   const i=Math.min(at,Math.max(0,DOC.length-1));
@@ -398,7 +432,7 @@ async function openRecentFile(path){ if(!hasBridge())return toast("Open is avail
   if(!r.sentences||!r.sentences.length) return toast("No sentences in that file");
   DOC.length=0; resetUndo(); normSents(r.sentences).forEach(s=>DOC.push(s));   // item 3: a fresh file — clear the previous file's undo/redo history
   if(r.path&&hasBridge())try{window.pywebview.api.adopt_path(r.path);}catch(e){}
-  DOCNAME=r.name||DOCNAME; DOCPATH=r.path||""; markDirty(false);
+  DOCNAME=r.name||DOCNAME; DOCPATH=r.path||""; markDirty(false); setTimeout(lemmaFillFromForms,0);   // …then fill empty lemmas from their forms, if this model is one that will not (lemmaFillFromForms). A task later, so a language auto-detect that switches models on this very open answers the gate before it is asked
   setFormat(r.format||"SUD"); syncGlossTiersFromDoc(); syncDeprelVocabFromDoc(); detectXposMirrorsUpos(); syncDocFonts();   // item 1: derive the glossing tiers from THIS file, not the previous one
   refreshTransLangs(); renderTransDrawer();   // item 6: seed enabled translation languages from the opened file's # text_LANG (doOpen / openRecentFile skipped this → translations never showed on open)
   setTitle(); renderDoc(); clearSelToBlock(0,false); settleAlign();   // item 9: as in doOpen — nothing selected, reading focus on the first sentence
@@ -513,12 +547,40 @@ function inInsertBatch(){ return typeof RENDER_HOLD==="number" && RENDER_HOLD>0;
    what this sentence is", and it earns its two-phase reveal (tokens first, tree after) precisely
    because the reader is waiting on one sentence. A batch has already found out, and has nothing to
    reveal progressively. */
+/* ── item 29: THE SAME LEMMA FILL, OVER A WHOLE FRESHLY-DELIVERED SENTENCE ─────────────────────────
+   ⚠ WHY A SECOND ENTRY POINT AT ALL. `inheritAnnotationForUpos` is the funnel for "this token has just
+   GAINED a word class", and it is the right home for the per-token case — but a sentence that arrives
+   from a PARSE or an INSERT arrives with its classes already on it and never passes through that funnel,
+   so the fill would simply never run for the tokens that most need it (a newly added sentence is exactly
+   the "starting to annotate something that was previously blank" case the inheritance was asked for).
+   This is that same fill, applied token by token in reading order.
+   ⚠ IN READING ORDER, WHICH IS LOAD-BEARING: `annotInheritSource` searches BACKWARDS, so a token filled
+   earlier in this very pass is available as a source to a later one — a form repeated inside the newly
+   inserted run inherits from its own first occurrence rather than each copy defaulting separately.
+   ⚠ THE CALLER OWNS THE UNDO ENTRY AND THE DIRTY FLAG, exactly as `inheritAnnotationForUpos` requires of
+   its own callers: every call site below sits inside the insert's own pushUndo and is followed by that
+   site's own markDirty, so ⌘Z takes the insert and the lemmas it brought with it as ONE step.
+   ⚠ AND IT IS CALLED FROM THE INSERT PATHS ONLY — never from a re-parse, and never on OPEN. A re-parse
+   is the reader asking for the MODEL's analysis of a sentence that is already in the document, and a
+   document that is merely open has not been added to or started; filling every blank lemma in an opened
+   treebank would rewrite a file nobody had touched and mark it dirty before the first edit. The two live
+   entry points (this, and the retag funnel) are exactly the scope the inheritance request itself names.
+   Returns how many lemmas it filled. */
+function lemmaFillSent(si){ if(!mayInheritAnnotation()) return 0;
+  const s=DOC[si], t=s&&s.tokens; if(!t) return 0;
+  let n=0;
+  for(let k=1;k<=t.length;k++){ const tk=t[k-1]; if(!tk||(tk.lemma&&tk.lemma!=="_")) continue;
+    const src=annotInheritSource(si,k);   // null the moment this token has no `upos` (its own first test), which is also what makes this cheap over an untagged whitespace insert
+    const lem=(src&&src.lemma&&src.lemma!=="_")?src.lemma:(tk.form||"");
+    if(lem){ tk.lemma=lem; n++; } }
+  return n; }
 function insertParsed(index,text,res){
   const toks=((res&&res.tokens)||[]).map(t=>({...t,head:String(t.head)}));
   const sid=autoInsertSid(index);
   const b={sid,text:(text||"").trim(),tokens:toks.length?toks:buildTokens(text)};
   const mwt=(res&&res.mwt)||[]; if(mwt.length) b.mwt=mwt;
   DOC.splice(index,0,b); cascadeSids(index); sel={s:index,t:0};
+  lemmaFillSent(index);   // item 29: the LEMMA column, which the generic wheel ships no lemmatiser for (GENERIC_ARMS) and so leaves empty — see lemmaFillSent's own note. Inside the batch's one undo entry, like everything else here, and BEFORE the morphemic seed below because msegPrefillParts derives the segmentation FROM the lemma
   morphAfterReparse(b);   // seed MSeg/MGloss from the FEATS this parse produced, as doInsert does
   markDirty(); }
 const _doInsert=doInsert;
@@ -544,6 +606,7 @@ doInsert=async function(index,text){
     const bt=document.getElementById("busyText"); if(bt)bt.textContent="Parsing…"; let r;
     try{ r=await window.pywebview.api.parse_text(text,model,pipeArms()); }catch(e){ hideBusy(); return toast("Parse failed: "+e); }finally{ hideBusy(); }
     const b=DOC[index]; b.tokens=r.tokens.map(t=>({...t,head:String(t.head)})); b.mwt=r.mwt||[]; if(!b.mwt.length)delete b.mwt;
+    lemmaFillSent(index);   // item 29: the single-sentence twin of insertParsed's own call — same funnel, same undo entry (pushUndo above), and it runs BEFORE morphAfterReparse because msegPrefillParts derives the segmentation FROM the lemma
     morphAfterReparse(b);   // an inserted sentence's tokens carry no MSeg/MGloss either — seed both tiers from the FEATS this parse produced, so a new block doesn't sit tierless among sentences that all have them (same undo entry as the insert)
     renderDiagramIncremental(index);   // as in applySentText's parsed branch — the freshly parsed block converges on its tree instead of sitting blank
     markDirty(); renderDoc(); pick(index,0,!inInsertBatch());   // …and again once the parse lands: the block stays the selection (see above)
@@ -1498,6 +1561,137 @@ function clearFeatsForUpos(t){ if(!t) return [];
   if(gone.length&&typeof toast==="function")
     toast(`Dropped ${gone.join(", ")} — not ${gone.length>1?`${t.upos} features`:`a ${t.upos} feature`}`);
   return gone; }
+/* ── …AND A RETAG INHERITS WHAT THIS WORD WAS LAST GIVEN UNDER THAT CLASS ─────────────────────────
+   On request: "when a generic or custom model (or no model) is enabled, then whenever the user adds
+   new sentences (or starts annotating one that was previously blank), as soon as they add a UPOS for
+   a token, then if that token has already been seen in a previous sentence with the same UPOS, its
+   FEATS and glosses (if any) should be copied verbatim."
+
+   ⚠ A SIBLING OF `clearFeatsForUpos`, NEVER A LINE INSIDE IT. That function returns the pairs it
+   dropped and is called by paths that need it to stay a pure question about the FEATS column
+   (js/grid/grid.js's cell commit among them); the two run back to back at the same funnel, and
+   keeping them apart is what lets a caller take one without the other. They are also opposites, and
+   that is the point of the pair: the retag DELETES what the new class contradicts and FILLS what the
+   annotator has already said about this very word under this very class.
+
+   ⚠ THE GATE IS THE MODEL, AND IT IS DECIDED IN PYTHON. `PIPE_FEATS_ADDITIVE` (js/core/prefs.js) is
+   `parse._feats_additive` reported over the bridge — the canonical "this is the shared generic wheel,
+   or a custom row on it" test — and no copy of that rule lives here, per CLAUDE.md. With NO model the
+   answer is the same for a stronger reason: nothing else is ever going to fill those cells. Under a
+   monolingual wheel the pass is OFF, because there the parser's own FEATS are a second opinion worth
+   having and it will produce one for this token unasked; carrying another token's column in over the
+   top of that would be the app arguing with the model on the annotator's behalf.
+
+   ⚠ IT MAY FILL A BLANK AND MAY NEVER REVISE AN ANSWER. An inherited value is a CLAIM ABOUT THIS
+   TOKEN, inferred from a different one — good enough to offer where the reader has said nothing, and
+   not good enough to overrule them. So every copy below is guarded on the target being empty, and
+   FEATS is taken whole or not at all (asked for verbatim: a merge would compose a column no annotator
+   ever wrote, from two tokens' worth of evidence about one).
+
+   ⚠ AND IT SAYS NOTHING. No toast, deliberately, on the same terms as `fillAutoGloss` and
+   `morphPrefillSent`, which have always filled these same tiers silently: what is written lands in
+   the rows of the token the reader just clicked, it replaces nothing they can see, and ⌘Z takes it
+   back with the retag because it runs inside the caller's own pushUndo. A toast per retag would
+   queue behind `clearFeatsForUpos`'s own — the two fire on one gesture — and the rule this app has
+   spent a release enforcing is about deleting annotation silently, not about filling a blank. */
+function mayInheritAnnotation(){ return !model || PIPE_FEATS_ADDITIVE; }
+/* THE NEAREST EARLIER TOKEN THAT IS THIS WORD UNDER THIS CLASS: the same `form` AND the same (just
+   set) `upos`, searched BACKWARDS — this sentence's own earlier tokens first, then whole sentences
+   back to the top of the document. NEAREST rather than first: an annotator's answer about a word can
+   change over a long document (a sense split, a corrected convention), and the most recent one is the
+   one they are currently working to. The form is matched EXACTLY, case included — case is the one
+   thing a form carries that a sentence-initial position can change without the word changing, and
+   guessing which of those two it was is exactly the kind of inference this pass has no business
+   making. Deliberately NOT the lemma either: this fires at the moment a class is set, when the lemma
+   column may be empty or may be the previous class's. */
+function annotInheritSource(si,tokId){ const s0=DOC[si], t=s0&&s0.tokens&&s0.tokens[tokId-1];
+  if(!t||!t.upos||!t.form) return null;
+  for(let sj=si;sj>=0;sj--){ const s=DOC[sj]; if(!s||!s.tokens) continue;
+    for(let i=(sj===si?tokId-2:s.tokens.length-1);i>=0;i--){ const o=s.tokens[i];
+      if(o&&o!==t&&o.form===t.form&&o.upos===t.upos) return o; } }
+  return null; }
+/* Call right after a UPOS change to a NON-EMPTY class, inside the caller's own pushUndo/markDirty and
+   BEFORE its regenTok — which matters: `reparseTokenFields` sends `prior_feats`, so under the very
+   models this pass is gated on, the FEATS copied here travel to the parser as the annotator's own and
+   survive the re-parse additively (see docs/notes/parsing-models.md). Returns what it filled, in case
+   a caller wants it. */
+function inheritAnnotationForUpos(si,tokId){ if(!mayInheritAnnotation()) return [];
+  const s=DOC[si], t=s&&s.tokens&&s.tokens[tokId-1]; if(!t) return [];
+  const src=annotInheritSource(si,tokId);
+  const bare=v=>!v||v==="_", got=[];
+  /* ── item 29: THE LEMMA, AND THE ONE FILL THAT RUNS WITH NO SOURCE AT ALL ────────────────────────
+     On request: "for generic/custom models, lemmas should be auto-filled by copying the form, or by
+     copying an existing instance of the same form/UPOS combination from the same document."
+     ⚠ THE ORDER IS THE REQUEST'S OWN, and it is the order of DIMINISHING evidence: an earlier token
+     with this form under this word class is the ANNOTATOR'S own answer about this very word, so it
+     outranks the identity default; the form itself is what a lemmatiser returns for a word that is its
+     own citation form, and is the only answer available when nothing in the document has been given
+     one. `annotInheritSource` already finds exactly the first of those — the same lookup, and the same
+     "nearest earlier, exact form, exact class" reasoning, as the FEATS and gloss halves below.
+     ⚠ SO THIS RUNS BEFORE THE `!src` RETURN, unlike everything under it. The two halves have different
+     shapes: FEATS and the gloss tiers can only ever be COPIED, so with no source there is nothing for
+     them to do, where the lemma has a source-free fallback and must still take it.
+     ⚠ AND IT IS STILL A FILL, NEVER A REVISION — `bare(t.lemma)` — on the same terms the block comment
+     above states for every other column: an inherited or defaulted value is good enough where the
+     reader has said nothing and not good enough to overrule them.
+     ⚠ WHY THE FORM-COPY IS AN HONEST DEFAULT AND NOT A GUESS DRESSED UP AS ONE (CLAUDE.md, "silence is
+     the preferred failure for annotation"): `lemma = form` says only "this word form is its own
+     citation form", which is TRUE of the great majority of tokens in most documents and is exactly what
+     the diagram's lemma row then declines to print — the display gate paints nothing for a token whose
+     lemma IS its form (lemmaRowTxt, js/diagram/diagram-core.js), so a defaulted lemma is silent on
+     screen, which is the honest rendering of a default.
+     ⚠ item 31 SHARPENED THAT AND TOOK AWAY ITS SECOND HALF. While the gate was an inflectional-FEATS
+     one, an INFLECTED token whose lemma had been defaulted to its own form still SHOWED that form in
+     the row, "where it reads as the unfinished annotation it is" — this note's own earlier record. With
+     the gate now asking `lemma !== form`, a defaulted lemma is invisible on every token rather than on
+     most. What replaces the visible prompt is the blank slot's own transparent target: the row is still
+     there and still one click from a field, and in a sentence with no row at all ⌘L brings one in
+     (lemRowForce, js/diagram/diagram-core.js).
+     ⚠ NOT GATED ON `show.lemma`. The tier is a VIEW of the LEMMA column; the column is data, and it is
+     filled (or not) on the same terms whether or not anybody is currently looking at it. */
+  if(bare(t.lemma)){ const lem=(src&&!bare(src.lemma))?src.lemma:(t.form||"");
+    if(lem){ t.lemma=lem; got.push("Lemma"); } }
+  if(!src) return got;
+  if(bare(t.feats)&&!bare(src.feats)){ t.feats=src.feats; got.push("FEATS"); }   // VERBATIM, as asked: the whole column or none of it
+  /* ⚠ THE GLOSS HALF ANSWERS TO THE READER'S TICK, NOT TO `pipeOn("gloss")` — and the difference is
+     the whole feature. Reported: "already-seen tokens still aren't having their glosses auto-filled".
+     `pipeEffective` turns the Glossing arm OFF BY ITSELF wherever the model READS glosses
+     (`modelReads`, js/core/prefs.js) — and the model that reads them is `xx_sud_generic` 0.2.0, i.e.
+     the generic wheel behind every custom model, i.e. EXACTLY the models `mayInheritAnnotation` gates
+     this pass on. So gating on the effective arm made the gloss half dead code in the only
+     configuration it exists for: measured in the live page, a custom model inherited `['FEATS']` and
+     no tiers at all, while no-model inherited `['FEATS','Gloss','MGloss']`.
+     ⚠ AND THE AUTOMATIC OFF DOES NOT APPLY HERE, WHICH IS WHY THIS IS NOT A HOLE IN IT. That arm goes
+     off under such a model to stop the app QUOTING ITSELF: a gloss this app composed or retrieved,
+     handed back to a parser that reads glosses as evidence, is the app's own guess returning as the
+     annotator's data. An inherited gloss is not composed and not retrieved — it is the annotator's own
+     text, copied verbatim off a token they glossed themselves, under the same form and the same word
+     class. Propagating what they wrote is not the app quoting itself.
+     ⚠ THE READER'S OWN UNTICK STILL STOPS IT, because that one says something different: "do not fill
+     glosses in for me", which is about the gesture rather than about the circularity. `PIPELINE.gloss`
+     is the tick as they left it, before `pipeEffective` folds the model's reading into it. */
+  if(typeof PIPELINE==="object" && PIPELINE && PIPELINE.gloss===false) return got;
+  const g=tierText(src,"gloss");
+  if(g&&!tierText(t,"gloss")){ t.misc=setMiscKV(t.misc,TIER_MISC.gloss,g);
+    // …and the aligner's recorded lemma with it, or the next unforced mglossRefill re-derives the
+    // morphemic stem from the Gloss tier's FORM and quietly puts `doubts` where `doubt` belongs
+    // (mglossLexFor, and docs/notes/glossing.md's note on why the two tiers hold different words).
+    if(src._glossLex) t._glossLex=src._glossLex;
+    got.push("Gloss"); }
+  /* ⚠ MSeg AND MGloss TRAVEL AS A PAIR, both ways. MSeg is the segmentation MGloss is ALIGNED TO, so
+     an MGloss arriving without it describes a division of the word that nothing in the document
+     states, and an MSeg without its MGloss leaves a segmented row with nothing glossing it. The
+     emptiness test is therefore over both: a token carrying either one already has a morphemic
+     analysis of its own, and this pass does not get to complete somebody else's. */
+  const ms=tierText(src,"mseg"), mg=tierText(src,"mgloss");
+  if((ms||mg)&&!tierText(t,"mseg")&&!tierText(t,"mgloss")){
+    // The baselines go with the values, exactly as every other derived write sets them: without one
+    // `morphEdited()` reads this pass's own output as the annotator's hand and raises the tier-
+    // deletion warning over a row nobody has touched.
+    if(ms){ t.misc=setMiscKV(t.misc,TIER_MISC.mseg,ms); t._msegPre=ms; }
+    if(mg){ t.misc=setMiscKV(t.misc,TIER_MISC.mgloss,mg); t._mglossPre=mg; }
+    got.push("MGloss"); }
+  return got; }
 // a Shared=Yes dependent must stay attached to a genuine member of SOME coordination to keep the marker meaningful
 // — call this right after ANY reparent (t.head just changed) with the token's sentence, so a rehead onto a token
 // that isn't part of a coordination at all (or onto no token, e.g. head 0) drops the now-stale Shared=Yes.
@@ -1934,9 +2128,12 @@ function glossKeyOf(s){ if(!s||!s.tokens) return "";
        document is glossed" true. ⚠ Seeding these too was the first cut, and it made setTier's call a
        silent no-op: every key already matched, so the pass found no work and the tier came up empty.
    The asymmetry is the whole rule: an empty tier is filled, a written one is left to its own evidence. */
-function glossSeedKeysFromDoc(){ DOC.forEach(s=>{
-  const has=(s.tokens||[]).some(t=>miscKV(t.misc,"Gloss")||miscKV(t.misc,"MGloss"));
-  s._glossKey=has?glossKeyOf(s):""; }); }
+/* Does this sentence already carry glosses somebody wrote — whoever that was? The lexical tier or the
+   morphemic one; either is an answer already on offer. One predicate, because two places ask it and they
+   must agree: the seeding below (which records the question those glosses answer) and `fillAutoGloss`
+   (which now declines to overwrite them at all — see its own note). */
+function sentHasGloss(s){ return !!s&&(s.tokens||[]).some(t=>miscKV(t.misc,"Gloss")||miscKV(t.misc,"MGloss")); }
+function glossSeedKeysFromDoc(){ DOC.forEach(s=>{ s._glossKey=sentHasGloss(s)?glossKeyOf(s):""; }); }
 /* ⚠ RECOVER `_glossLex` ON OPEN, AND CLOSE A BUG THAT PREDATES THIS FEATURE. `_glossLex` is in-memory,
    so a save-and-reopen loses it — and morphSeedBaselineFromDoc above then sets `_mglossPre` to the
    STORED MGloss, which is what licenses an unforced mglossRefill to run and recompute the stem from the
@@ -1984,7 +2181,21 @@ window.__autoGlossUnblock=function(){ AUTOGLOSS_BLOCKED=false; _autoGlossToasted
 async function fillAutoGloss(){
   if(!hasBridge()||!(GLOSS_ON||MORPH_ON)||AUTOGLOSS_BLOCKED) return false;
   if(typeof pipeOn==="function"&&!pipeOn("gloss")) return false;
-  const jobs=[]; DOC.forEach((s,i)=>{ const k=glossKeyOf(s); if(k&&k!==s._glossKey) jobs.push({i,k}); });
+  /* ⚠ A SENTENCE THAT ALREADY HAS A GLOSS IS NOT RE-GLOSSED, EVER — on instruction ("disable the
+     auto-glossing via sentence alignment if the sentence already has a non-empty gloss"). The seeding on
+     open (`glossSeedKeysFromDoc`) already spared such a sentence from being re-glossed as COLLATERAL of an
+     edit elsewhere; what it did not spare it from was its OWN question moving — correct the translation, or
+     re-attach a token, and the aligner came back and overwrote glosses a person had written. This pass
+     overwrites rather than merges, so there is no version of that which is safe.
+     ⚠ THE KEY IS RECORDED ON THE WAY PAST, not just skipped: `_glossKey` means "the question these glosses
+     answer", and leaving it stale would have every later pass re-ask about a sentence whose answer is never
+     going to change. Recording it also keeps the two paths saying the same thing — this is precisely what
+     the seeding does on open, applied to a sentence that has gained its glosses since.
+     What still gets glossed is what always did: a sentence with an EMPTY tier. That asymmetry is the whole
+     rule (see glossSeedKeysFromDoc) — an empty tier is filled, a written one is left to its own evidence. */
+  const jobs=[]; DOC.forEach((s,i)=>{ const k=glossKeyOf(s); if(!k||k===s._glossKey) return;
+    if(sentHasGloss(s)){ s._glossKey=k; return; }
+    jobs.push({i,k}); });
   if(!jobs.length) return false;
   /* ⚠ THE FIRST CALL OF A SESSION CAN STILL BE THE SLOW ONE, AND IT SAYS SO. Profiled: loading the
      English spaCy model is 8.44s, spawning grew's OCaml backend 0.65s, and the whole pass once both

@@ -44,7 +44,23 @@ function maybeShiftWindow(){
   computeWindow(anchor); preserveScroll(renderDoc);
 }
 let rzT,_docW=0,_docH=0;   // re-render when the document viewport changes size — live window resizes AND the post-load titlebar/window reflow that would otherwise leave the first paint's alignment stale (a window "resize" event doesn't always fire for the reflow, so observe the element directly)
-function _reflow(){ clearTimeout(rzT); rzT=setTimeout(()=>{ const s=sel.s,t=sel.t; preserveScroll(renderDoc); if(s>=0&&s<DOC.length)pick(s,t,false); },140); }
+/* ⚠ …BUT NOT WHILE AN INLINE FIELD IS OPEN, OR THE REFLOW CLOSES IT UNDER THE READER. Every inline
+   editor (the token form, the transliteration row, both gloss tiers, a typed word class) is an element
+   over a node this render replaces, so the rebuild blurs it — and blur COMMITS. Measured with the POS
+   field driven over CDP: on the FLUENT skin this fired 20 times inside one typing sequence and took
+   five checks down with it (the dropdown filter, the accepted completion, the inheritance, the undo
+   count, the refusal staying open), while the macOS skin never tripped it at all — the two kits give
+   #doc different metrics, so a field or its dropdown changes that box in one and not the other. A
+   Fluent-only regression invisible from the macOS run is exactly what CLAUDE.md says to check both
+   skins for.
+   SKIPPING rather than deferring is right here because the skip is superseded, not lost: every
+   editor's `finish` ends in `preserveScroll(renderDoc)` on both paths, commit and cancel, so the
+   layout this reflow wanted is rebuilt at the CURRENT size the moment the field closes. `pick` is
+   skipped with it — it exists to restore a selection the re-render dropped, and nothing was
+   re-rendered. Same guard, and the same reasoning, as the HarfBuzz settle in js/lang/smp-shape.js. */
+function _reflow(){ clearTimeout(rzT); rzT=setTimeout(()=>{ const s=sel.s,t=sel.t;
+  const rendered=(typeof renderUnlessEditing==="function")?renderUnlessEditing():(preserveScroll(renderDoc),true);
+  if(rendered&&s>=0&&s<DOC.length)pick(s,t,false); },140); }
 if(typeof ResizeObserver!=="undefined"){
   new ResizeObserver(es=>{ const r=es[0].contentRect, w=Math.round(r.width), h=Math.round(r.height); if(w===_docW&&h===_docH)return; _docW=w; _docH=h; _reflow(); }).observe(document.getElementById("doc"));
 } else addEventListener("resize",_reflow);   // fallback for environments without ResizeObserver

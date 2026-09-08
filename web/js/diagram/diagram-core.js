@@ -447,6 +447,29 @@ function magOpacityDia(mag){ return mag>0 ? 1-OPACITY_K_DIA*Math.log(mag) : 1; }
 function magOpacityRun(mag){ return mag>0 ? 1-OPACITY_K_RUN*Math.log(mag) : 1; }    // running sentence: half the diagram's offset — 3.00% lighter at 1.5× (exact), ~5.1% at 2×
 _lazyFont("WORD_F",()=>magFont(15)); _lazyFont("NODE_F",()=>magFont(14));
 _lazyFont("POS_F",()=>'15px '+LIVE_TOKEN_STACK); _lazyFont("GRID_F",()=>'462 13px '+LIVE_MONO_STACK); _lazyFont("HEAD_F",()=>'500 11px '+uiFont()); _lazyFont("HEAD_F_REQ",()=>'700 11px '+uiFont());   // TWO heading faces now, because the band is drawn in two weights: HEAD_F is the OPTIONAL columns' SF Pro Medium (500) and HEAD_F_REQ the obligatory ID/Form columns' Bold (700) — see `table.grid th` / `table.grid th.th-req` in styles/app.css. scanColW/pillColW pick per column; measuring every heading with one weight under-sized ID and Form by the Medium→Bold width difference   // HEAD_F is the GRID HEADING face, and its only consumers are scanColW/pillColW (js/grid/grid.js). It must match `table.grid th` in styles/app.css exactly, which is now title case in the UI font at 11px/590 — NOT --token-font, so it is the one string here built off uiFont() (js/core/platform.js, which resolves --ui-font to a plain family list; a canvas font string can't carry a var()) rather than off LIVE_TOKEN_STACK, and refreshFontStacks' token/mono-stack invalidation therefore doesn't apply to it. uiFont() caches its own DOM read, so calling it from a lazy getter costs nothing after the first   // POS tags: same size + weight (normal, i.e. no weight token here) as the transliteration (TRANS_F) — upright rather than italic; c2sc small-caps do the visual "tag" styling now, not a bumped weight/shrunk size. GRID_F: weight curve @12.65px (matches table.grid's own CSS weight — was unweighted/400, measuring narrower than the grid actually renders)
+/* item 29 — THE LEMMA ROW'S FACE, and the ONE OpenType feature in this app that is `smcp` rather than `c2sc`.
+   Every OTHER small-caps register here (.tok-pos/.bwpos/.opos/.node-cat/.mwt-pos, .avm-attr, measGloss's
+   Leipzig abbreviation runs) sets `c2sc`, which maps CAPITALS to small caps — right for a closed inventory of
+   all-caps tags, and a NO-OP on lowercase text. A lemma is ordinarily lowercase (`go`, `کتاب`), so c2sc would
+   have left this row in plain lower case and the request ("formatted in small caps") unmet. `smcp` is the
+   feature that maps lowercase to small caps, so that is the one this row paints and measures in.
+   ⚠ AND font-feature-settings, NOT `font-variant-caps:small-caps`, for two independent reasons:
+     · SYNTHESIS. `font-variant-caps` lets the engine FAKE small caps by scaling capitals where the face has
+       no smcp table — which is most non-Latin faces in --token-font's Noto stack, and a scaled-down capital
+       is exactly the "something the face fakes badly" this row must not degrade to. `font-feature-settings`
+       has no synthesis path: a face without `smcp` simply paints the plain letters, which is the honest
+       fallback (and the right rendering for a script that has no small-caps forms at all — Devanagari,
+       Arabic, Han: they have no case, so there is nothing to map and nothing changes).
+     · THE MEASUREMENT CHANNEL. `_measOne`'s third argument and `makeEditable`'s `applyFont` (which copies
+       `getComputedStyle(row).fontFeatureSettings` onto the inline field and measures through it) both speak
+       font-feature-settings and nothing else; a `font-variant-caps` row would read back "normal" there, so
+       the field would paint in full lower case over a row drawn in small caps and the caret maths would be
+       computed in a face the glyphs are not drawn in — CLAUDE.md's "a measurement must follow the paint",
+       which is the very rule the word-class field broke earlier (measured plain, NOUN is 45.48px against
+       37.13px in c2sc). LEM_FEAT below is that same string in `_measOne`'s own `;font-feature-settings:…`
+       form, so the row, its width reserve, its hit box and its field all key one measurement. */
+_lazyFont("LEM_F",()=>'15px '+LIVE_TOKEN_STACK);   // the transliteration/POS row's size and weight (15px normal, the tracking curve's own reference size → no letter-spacing), set upright; the small-caps register comes from LEM_FEAT, not from a size/weight bump
+const LEM_FEAT=";font-feature-settings:'smcp' 1";   // measure in the face the row paints in (.tok-lemma/.bwlemma/.olemma, styles/app.css) — and routed through _measOne's HarfBuzz branch for free, exactly as .avm-attr's own c2sc measurement is
 _lazyFont("TRANS_F",()=>'italic 15px '+LIVE_TOKEN_STACK); _lazyFont("TRANS_UP_F",()=>'15px '+LIVE_TOKEN_STACK); _lazyFont("MWT_F",()=>WORD_F);   /* the MWT surface form measures/renders exactly like a normal token form (WORD_F, 15px). TRANS_UP_F: the same row set UPRIGHT — what a Foreign=Yes token's transliteration renders in (see trFont/.frn-up) */
 // item 22, round 2: the AVM tier's own measurement fonts — Latin annotation like POS_F, so LIVE_TOKEN_STACK
 // but never magFont()'d (no --script-mag: an ornamental script's magnification is a token-glyph thing, not
@@ -914,6 +937,248 @@ const TIER_EMPTY="_";
 // shown at all; these only answer what goes in it.
 function posRowTxt(t){ return posDisp(t)||TIER_EMPTY; }
 function trRowTxt(t){ return trTxt(t)||TIER_EMPTY; }
+/* ── item 29 (+ item 31): THE LEMMA ROW — PRESENT PER SENTENCE, PAINTED PER TOKEN ─────────────────
+   On request: "there should be a lemma tier in the diagrams, just below the tokens (or their
+   transliterations)"; then, item 31, three corrections to it — "the lemma should only be shown if it
+   is DIFFERENT from the form", "clicking on a hidden lemma should still bring up the input field",
+   and "if a sentence has no visible lemmas, the lemma tier itself should be hidden, unless a token is
+   being edited, in which case it should slide into view".
+
+   ⚠ ONE PREDICATE, ASKED AT TWO SCOPES, WHICH IS WHAT KEEPS THE RESERVE AND THE DRAW IN STEP.
+   `lemmaShown(t)` (below) answers it for a TOKEN; `lemmaRow(toks)` (js/core/prefs.js) asks the same
+   predicate of a SENTENCE's display tokens (`toks.some(lemmaShown)`) — exactly the shape `hasTr(toks)`
+   beside it has always had — and reaches belowRows() and so all thirteen belowReserveH sites. So a
+   sentence in which nothing shows a lemma reserves NO row and every stack in it closes up by one
+   belowGap(), while a sentence that shows one anywhere reserves the row for every token in it alike.
+   CLAUDE.md's tier rule (the reserve and the draw must ask the SAME question) holds because a token
+   that PAINTS implies a sentence that RESERVES: the row-level question is the token-level one under
+   `some`, not a second, looser question that could disagree with it.
+
+   ⚠ WITHIN A SENTENCE THAT HAS THE ROW THE INK IS STILL GATED PER TOKEN, and that split is the
+   standing exception. `lemmaRowTxt()` returns "" for a token whose lemma is its own form, so its slot
+   is reserved and left blank while its neighbours' below-stacks stay on one line. What is skipped is
+   the DRAW, never the step.
+
+   ⚠ AND NOTHING IS DRAWN IN A BLANK SLOT — no TIER_EMPTY. A genuine departure from the placeholder
+   rule stated a few lines up (and in CLAUDE.md), departed from for the reason that rule exists: the
+   placeholder says "this row is visible and this token has NO VALUE for it", and a token whose lemma
+   equals its form has lost no annotation — the lemma IS the word printed directly above, so `_` would
+   assert an absence that is not one, and the lemma itself would merely repeat the word. The relation
+   LABEL is the app's other standing exception and it is a DIFFERENT one: that row has no reserved slot
+   at all. This one keeps its slot and leaves it blank.
+   ⚠ AND UNDER THE PRESENT GATE A LEMMA-LESS TOKEN CANNOT REACH THIS ROW AT ALL: no lemma means nothing
+   to differ from the form, so no ink — and, unless some other token in the sentence has one, no row.
+   The feature gate this replaces could admit a token on its FEATS alone and then draw TIER_EMPTY into
+   its slot; that case went with it, so nothing on this row paints the placeholder any more. (The
+   `.tier-empty` class it used to take at the three draw sites went too, rather than being left standing
+   as an unreachable branch.)
+
+   ⚠ A BLANK SLOT IS STILL A TARGET — item 31: "clicking on a hidden lemma should still bring up the
+   input field". An empty SVG `<text>` has no hit area and a zero-width HTML span has no box, so each
+   notation draws a real one instead: a transparent `<rect class="lem-hit">` in the SVG rows (belowStack
+   below, and the hierarchy in js/diagram/diagram-wrap.js) and a min-width cell in the HTML ones
+   (`.bwlemma`/`.olemma`, styles/app.css). That is the `.avm-hit`/`.avm-add` idiom, taken for the same
+   reason it exists there — the ink is too small (here, absent) to aim at. It carries `.lem-edit` like a
+   painted row, so the existing routing (the tap branch in js/diagram/diagram-edit.js, the `#doc` click
+   handler in js/editing/context-menu.js) and `lemmaElOf` resolve it with no new resolver. ⚠ EXACTLY ONE
+   of the two is ever in the DOM for a given token — `lemmaElOf` is a `querySelector(".lem-edit")` and
+   would otherwise have to choose between them.
+
+   ⚠ AND THE ROW PAINTS THE STORED LEMMA, not a romanisation of it. `translitLemma`/MISC LTranslit exist,
+   but the lemma is a COLUMN of the file and this row is the diagram's view of that column — the same
+   thing the grid's Lemma cell and editLemmaPrompt both show, and what the inline field commits back. A
+   token's script/romanisation choice is a property of the reader (see PREFS.ortho/translit's own note);
+   the lemma is not. */
+function lemmaText(t){ const v=t&&t.lemma; return (v&&v!=="_")?v:""; }   // CoNLL-U's "_" is the empty column, not a lemma — the same unwrapping the grid's own lemOf and editLemmaPrompt do
+/* ⚠ THE GATE IS "THIS TOKEN HAS A LEMMA AND IT IS NOT THE FORM", ASKED DIRECTLY OF THE TWO COLUMNS —
+   SUPERSEDING THE FEATURE LIST THAT STOOD HERE FOR ONE ROUND, on instruction ("the lemma should only be
+   shown if it is different from the form"). That list is worth recording because its GROWTH is the
+   finding. It began as `hasInflFeat` (js/io/bridge.js), was narrowed to AVM_GROUPS' AGR+TAM ("by
+   'inflection' I meant only agreement and TAM features"), and then grew back one instruction at a time —
+   `Degree` ("I guess degree is also inflection"), `Case` ("and case"), `Voice` ("some languages have
+   finite passive forms"), and a value-gated `VerbForm≠Fin` ("and also non-finite forms of verbs") —
+   each addition naming one more way a word form can differ from its citation form. It was an ever
+   longer APPROXIMATION of a question the file can simply be ASKED, and this is that question. So
+   `lemGateFeats`/`LEM_GATE_EXTRA`/`LEM_GATE_VAL` are deleted rather than left standing beside their own
+   replacement.
+   ⚠ WHAT THE MOVE BUYS BESIDES NOT NEEDING A NEXT ENTRY, measured over samples/: it reaches languages
+   whose treebanks carry no FEATS at all (literary_chinese: 42 tokens passed the feature gate and 1 has a
+   lemma differing from its form; khc_test: 50 against 0), and it stops asserting "this form is not its
+   citation form" of a token whose own file records the two as identical (english: 42 → 20).
+   ⚠ THE COMPARISON IS EXACT AND CASE-SENSITIVE, deliberately and on report rather than by oversight: a
+   sentence-initial `The` differs from `the`, so most sentences show a lemma on their first token
+   (samples/english.conllu: 20 of 81 tokens differ, 7 of those by case alone, 6 of the 7 the sentence's
+   own first token). Folding case would ALSO hide a genuine `US`/`us`, so which of the two costs more is
+   the reader's call and not this function's; it is reported, not decided here.
+   ⚠ AND IT COMPARES THE STORED COLUMNS, never what is on screen. The row paints `t.lemma` (see the note
+   above), so the question it answers has to be about `t.lemma` and `t.form`: under a script or
+   romanisation scheme the glyph above is a RENDERING (bform), and comparing against that would make the
+   row appear and disappear with the reader's own display choice. */
+/* ⚠ THE INITIAL LETTER'S CASE DOES NOT COUNT AS A DIFFERENCE, and only the initial's. On instruction
+   ("fold case only for initial letters"), after the exact comparison was measured on
+   samples/english.conllu: 20 of 81 tokens differed, SEVEN of them by case alone, and six of those seven
+   were their own sentence's first token — so three quarters of that file's sentences drew a lemma row
+   saying `the` under `The`, which is a fact about where the word sits, not about the word.
+   ⚠ THE REST OF THE STRING STAYS CASE-SENSITIVE, which is the whole reason this is not a
+   `toLowerCase()` on both sides: `US`/`us` is a genuinely different word from a genuinely different
+   lemma and must still show, and so must `iPhone`/`iphone`. Folding wholesale would have bought the
+   sentence-initial tidiness by hiding real annotation — the trade this app refuses everywhere else.
+   ⚠ A CODE POINT, NOT A UTF-16 UNIT: `charAt(0)` splits a surrogate pair, so a form outside the BMP
+   would have had half a character folded against half of another. Cased scripts are all BMP today, so
+   this costs nothing and cannot be wrong later.
+   ⚠ AND `toLowerCase`, NOT `toLocaleLowerCase`: the locale-aware form differs for Turkish dotted/
+   dotless I, and this is asked of every token of every language in a document that has ONE lemma
+   column, not per-language. Where the two disagree the plain form folds LESS (Turkish `İ` lowercases
+   to `i` + a combining dot, which will not match a bare `i`), so the failure is a row that appears
+   rather than one that hides an edit — the right way round for annotation. */
+function initialFold(a,b){ if(a===b) return true;
+  const ca=a.codePointAt(0), cb=b.codePointAt(0);
+  if(ca===undefined||cb===undefined) return false;
+  const la=ca>0xFFFF?2:1, lb=cb>0xFFFF?2:1;
+  return a.slice(la)===b.slice(lb) &&
+         String.fromCodePoint(ca).toLowerCase()===String.fromCodePoint(cb).toLowerCase(); }
+function lemmaShown(t){ const l=lemmaText(t); const f=(t&&t.form)||"";
+  return !!l && !initialFold(l,f); }
+function lemmaRowTxt(t){ return lemmaShown(t)?lemmaText(t):""; }   // "" ⇒ this token's reserved slot is left blank, and given a transparent target instead (see the note above); every caller tests the string rather than re-asking lemmaShown
+/* ── item 31: THE ROW A LEMMA EDIT BRINGS IN ──────────────────────────────────────────────────────
+   "…unless a token is being edited, in which case it should slide into view." The row's presence is
+   computed at RENDER time out of the sentence's own tokens, so "bring it in" can only mean: force the
+   answer for ONE sentence, re-render that sentence, and animate the height it gained. There is no
+   cheaper truth on offer — the block genuinely gets taller, unlike the AVM's hover growth, which
+   animates inside space `avmLayout` has already reserved.
+   ⚠ THE FORCE RIDES ON THE DISPLAY TOKEN ARRAY, not on an ambient "the sentence being rendered".
+   `displaySent` stamps `lemForce` on the array it returns (at BOTH of its exits), and every reserve and
+   draw site in all eight renderings already holds exactly that array — it is the `t` they hand
+   `hasTr(t)`. So the forced state travels with the very data the reserve is computed from and cannot
+   fall out of step with it, which an ambient flag read at thirteen sites could.
+   ⚠ AND IT IS KEYED ON THE SENTENCE OBJECT, not on its index: an index survives a document replace, an
+   undo or a sentence insert — all of which swap or renumber the objects — and would then force the row
+   onto whatever sentence inherited the number. An identity that no longer matches simply forces nothing.
+   ⚠ THE DIAGRAM CACHE HAS TO BE TOLD. DIA_CACHE keys on (the sentence's own JSON, diaFlagsSig()) and
+   this force is in neither, so without invalidating, renderDoc hands back the node it built under the
+   other answer and the row appears not to arrive at all — the exact miss `show.lemma` made in
+   diaFlagsSig, which the tier's own probe caught and reading did not. Invalidated for THIS sentence
+   only, and deliberately NOT added to diaFlagsSig: that signature is global, so a per-sentence fact put
+   in it would drop every other sentence's entry on every lemma edit. */
+let LEM_FORCE_SENT=null;   // the ONE sentence object whose lemma row is forced on for the duration of an edit, or null
+function lemForced(sent){ return !!sent && LEM_FORCE_SENT===sent; }
+function lemBlockEl(si){ return document.querySelector('#doc .sblock[data-i="'+si+'"]'); }
+/* THE SLIDE, and what it costs — decided rather than assumed, since this is the one animation in the app
+   that cannot be a transform on a static box:
+     · The row appears in the MIDDLE of the below-stack (under the transliteration, over the gloss tiers),
+       so everything below it steps down and the growth lands at the BOTTOM of the diagram box.
+     · So: hold the following content exactly where it was (a negative `margin-bottom` of the height just
+       gained) and hide the gained strip (`clip-path` inset from the bottom), then transition BOTH to zero.
+       The stack slides down out from under the clip while the page closes in behind it. The clip is not
+       decoration: with the negative margin alone the NEXT block paints over the arriving row for the whole
+       transition, since two in-flow siblings paint in DOM order.
+     · ⚠ IT ANIMATES LAYOUT, which is the honest cost: `margin-bottom` is not a compositor property, so
+       every following block in the render window re-lays-out on each frame of it. At 140ms over a window
+       of ~31 blocks that is affordable; the alternative (a transform on every following sibling) trades
+       the relayout for a stacking context per block and has to be undone by hand afterwards, which is
+       worse for the same money.
+     · The way OUT is the mirror WITHOUT the clip: by then the row is already gone, so there is nothing to
+       reveal and the space simply closes over the same 140ms.
+     · A ZOOMED BLOCK: getBoundingClientRect() is in VISUAL px while `margin-bottom` is authored inside
+       `.sblock{zoom:var(--fs)}`, so the gain is divided by cssZoomOf() — CLAUDE.md's standing rule about
+       the two unit families, and `FS` is deliberately not used (see cssZoomOf's own note).
+     · prefers-reduced-motion is asked HERE and not left to app.css's blanket `transition:none!important`
+       under that query: that rule would strip the transition but leave this function setting a from-state
+       that then never animates back, i.e. a row permanently clipped. Under reduced motion the row simply
+       appears. */
+const LEM_SLIDE_MS=140;
+function lemSlide(el,gain){ if(!el||!(Math.abs(gain)>0.5)) return;
+  if(window.matchMedia&&matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+  const z=(typeof cssZoomOf==="function")?cssZoomOf(el):1, d=gain/(z||1), mb=parseFloat(getComputedStyle(el).marginBottom)||0;
+  /* ⚠ THE CLIP IS FOR THE ARRIVAL ONLY, and asked as a variable rather than written on both ends: on the way OUT
+     there is nothing to reveal (the row has already gone), and `clip-path` has no from-value to interpolate from
+     — `none` → `inset(…)` is not an animatable pair, so writing it there would create a property the engine
+     silently declines to transition. Probe, on the departure: `animOut: ["margin-bottom"]`, one transition, which
+     is exactly the number this should make. */
+  const clip=gain>0;
+  el.style.marginBottom=(mb-d)+"px";
+  if(clip) el.style.clipPath="inset(0 0 "+d+"px 0)";
+  el.getBoundingClientRect();   // flush the from-state: without a forced style resolution between the two writes the engine coalesces them and nothing transitions at all
+  el.style.transition="margin-bottom "+LEM_SLIDE_MS+"ms ease"+(clip?", clip-path "+LEM_SLIDE_MS+"ms ease":"");
+  el.style.marginBottom=mb+"px"; if(clip) el.style.clipPath="inset(0 0 0 0)";
+  setTimeout(()=>{ el.style.transition=""; el.style.marginBottom=""; el.style.clipPath=""; },LEM_SLIDE_MS+60); }   // …on a timer rather than on `transitionend`: two properties fire two events, and a transition the engine declines to run at all (an interrupted render, a display change mid-flight) fires none — leaving the clip in place forever
+/* Turn the force on/off for ONE sentence and animate the difference. Returns whether it actually moved,
+   so a caller can tell "the row is there now" from "there was nothing to do".
+   ⚠ THE "IS THE ROW ALREADY THERE" TEST ASKS THE RENDERED DOM (`.lem-edit` anywhere in this block), not
+   lemmaRow(s.tokens): the caller's real question is whether there is an element to lay a field over, and
+   the row is computed off the DISPLAY tokens (merged punctuation, folded goeswith), not off these.
+   ⚠ AND A HIDDEN TIER IS NEVER FORCED ON. `show.lemma` off is the reader's own standing choice about
+   every sentence; an edit is not permission to overrule it. Those callers fall back to the popover
+   editor (editLemmaPrompt), which is what it has always been for. */
+function lemRowForce(si,on){
+  const s=(typeof DOC!=="undefined")&&DOC[si], want=on?(s||null):null;
+  if(LEM_FORCE_SENT===want) return false;
+  if(on){ if(!s||!show.lemma) return false; const b0=lemBlockEl(si); if(b0&&b0.querySelector(".lem-edit")) return false; }
+  const d0=(el=>el&&el.querySelector(".diagram"))(lemBlockEl(si)), h0=d0?d0.getBoundingClientRect().height:0;
+  LEM_FORCE_SENT=want;
+  if(typeof invalidateDiaSentence==="function") invalidateDiaSentence(si);
+  if(typeof preserveScroll==="function"&&typeof renderDoc==="function") preserveScroll(renderDoc);
+  const d1=(el=>el&&el.querySelector(".diagram"))(lemBlockEl(si));
+  if(d1&&h0) lemSlide(d1,d1.getBoundingClientRect().height-h0);   // measured across the re-render, since the row's height is belowGap() in whatever face/magnification this document renders at — never a constant
+  return true; }
+/* ⚠ THE FORCE IS RELEASED WHEN THE READER LEAVES THE FIELDS, NOT WHEN ONE FIELD CLOSES. On instruction
+   ("if, when focus moves off the forms, the lemma tier is still empty (or trivial), it should be
+   re-hidden") — and it has to be deferred and global, not per-editor, because of what Tab does:
+   `makeEditable`'s commit fires as the NEXT field is opening, so an editor that dropped its own force
+   there would pull the row out from under the field the reader had just tabbed into. Form → form,
+   form → lemma and lemma → lemma all walk that path.
+   So: ask on the next tick whether ANY inline field is open (`INLINE_EDIT_OPEN`, js/core/prefs.js — the
+   flag `renderUnlessEditing` already reads), and drop whatever force is standing only when none is. One
+   global question rather than a count, because there is one `LEM_FORCE_SENT` and one field at a time.
+   "Still empty (or trivial)" needs no test of its own: `lemRowForce(si,false)` re-renders, and the row
+   survives exactly when `lemmaRow()` says a lemma differs from its form. */
+/* ⚠ AND THE DELAY SPANS A CLICK, WHICH ONE TICK DOES NOT. Reported: clicking into the lemma row of a
+   just-revealed tier dismissed the tier instead of opening the field. The sequence is the reason, and no
+   amount of "check whether a field is open" fixes it on its own — MOUSEDOWN blurs the field that forced
+   the row (arming this), the timer then fires in the very next task, and the CLICK that would have opened
+   the lemma editor only arrives after that, by which time the row it was aimed at has been rendered away.
+   A tick is simply shorter than a click. 250ms comfortably spans mousedown→mouseup→click for any ordinary
+   press, and it costs nothing when the reader really is leaving: the row is on its way out either way, a
+   quarter-second later.
+   ⚠ AND IT IS CANCELLABLE, which is what makes the delay a mechanism rather than a guess: any editor
+   OPENING calls `lemForceHold`, so the row is kept the moment something claims it rather than because the
+   timer had not got round to it yet. Acquire/release, with the timer only deciding how long to wait for an
+   acquisition that may never come. */
+let LEM_RELEASE_T=null, LEM_PRESS_IN=false;
+function lemForceHold(){ if(LEM_RELEASE_T){ clearTimeout(LEM_RELEASE_T); LEM_RELEASE_T=null; } }
+/* ⚠ A PRESS INSIDE THE FORCED BLOCK OWNS THE DECISION, WHICH IS WHAT MAKES THIS NOT A RACE. The timer
+   alone says "wait 250ms and see"; that is a guess about how long a click takes, and a slow press —
+   or one whose editor opens on `pointerup` rather than on `click`, as the diagram's own drag-tap does —
+   loses it. So the press itself is watched, in capture, ahead of every other listener:
+     · inside the forced block → hold, and refuse to arm anything until the press is over. Whatever the
+       press turns out to open gets its chance to claim the row (`lemForceHold`, called by every editor
+       as it opens).
+     · outside it → release now. The reader has left; there is nothing to wait for.
+   `pointerup` then re-asks: if the press opened an editor, `INLINE_EDIT_OPEN` says so and the row stays;
+   if it opened nothing, the ordinary delayed release runs. The timer survives as the answer for the
+   gesture with no press at all — Escape, or a Tab that walks off the end. */
+function lemPressInForced(e){ if(!LEM_FORCE_SENT||typeof DOC==="undefined") return false;
+  const si=DOC.indexOf(LEM_FORCE_SENT); if(si<0) return false;
+  const blk=lemBlockEl(si); return !!(blk&&e&&e.target&&blk.contains&&blk.contains(e.target)); }
+if(typeof document!=="undefined"){
+  document.addEventListener("pointerdown",e=>{ LEM_PRESS_IN=false;
+    if(!LEM_FORCE_SENT) return;
+    if(lemPressInForced(e)){ LEM_PRESS_IN=true; lemForceHold(); } else lemForceRelease(); },true);
+  document.addEventListener("pointerup",()=>{ if(!LEM_PRESS_IN) return; LEM_PRESS_IN=false;
+    setTimeout(lemForceRelease,0); },true); }   // …the press is over: if it opened a field the release finds INLINE_EDIT_OPEN and does nothing
+function lemForceRelease(){ if(LEM_PRESS_IN) return;   // a press inside the block is still down — it decides on the way up
+  lemForceHold(); LEM_RELEASE_T=setTimeout(()=>{ LEM_RELEASE_T=null;
+    if(typeof INLINE_EDIT_OPEN!=="undefined"&&INLINE_EDIT_OPEN) return;   // …the chain continues; the next field's own close asks again
+    /* ⚠ AND NOT WHILE ANYTHING AT ALL HAS THE KEYBOARD. `INLINE_EDIT_OPEN` knows only about `makeEditable`'s
+       own fields; the GRID's cells are plain `.cin` inputs and its FEATS column a contenteditable pill field,
+       and none of them set that flag. This release ends in a `renderDoc`, which rebuilds those cells — so a
+       release firing while somebody is typing in the grid would take the field out from under them, caret and
+       all, 250ms after they pressed somewhere outside the block. Asked of `document.activeElement` rather than
+       of a second flag, so it covers every editable in the app, including any added later. */
+    const ae=document.activeElement;
+    if(ae&&(ae.tagName==="INPUT"||ae.tagName==="TEXTAREA"||ae.isContentEditable)) return;
+    if(!LEM_FORCE_SENT||typeof DOC==="undefined") return;
+    const si=DOC.indexOf(LEM_FORCE_SENT); if(si>=0) lemRowForce(si,false); },250); }
 /* ⚠ AND THE RELATION LABEL IS DELIBERATELY NOT ONE OF THESE, on instruction ("empty relation labels should
    simply disappear, since they can always be set by right-clicking the dependency edge"). It was given the
    placeholder for one round and taken back off: unlike a below-stack row, a label has no reserved slot whose
@@ -932,6 +1197,19 @@ function glossSlotW(t){ let w=0; belowTiers().forEach(tier=>{ const dtxt=tierDis
 // gloss, commonly runs WIDER than its own token — "Definite" alone is longer than "The") crowds or overlaps
 // its neighbour exactly the way an unreserved gloss row used to.
 function avmSlotW(t){ const b=avmLayout(t); return b?b.w:(show.avm?avmEmptyW():0); }   // item 28: the tier is on and this token has no FEATS → the placeholder's own width, so the slot it is painted into is reserved like any other row's
+// item 29: the lemma row's own width, the same role glossSlotW/avmSlotW play for their tiers — folded into
+// every slot-width max so a lemma longer than its form can't crowd the neighbouring token. 0 when the tier is
+// off AND when this token draws nothing into its reserved row (lemmaRowTxt ""), which is the one place the
+// display gate legitimately reaches a WIDTH: an unpainted row has no ink to reserve horizontal room for, and
+// unlike the vertical reserve nothing downstream is aligned against it.
+// ⚠ MEASURED THROUGH LEM_FEAT, or the slot is sized for glyphs the row does not paint — smcp substitutes
+// NARROWER forms, exactly as c2sc does for the POS row (CLAUDE.md, "a measurement must follow the paint").
+// ⚠ item 31: `show.lemma` ALONE, not lemmaRow(t) — this is the ONE lemma site with no sentence in hand, and it
+// does not need one: a token that PAINTS a lemma is itself the proof that its sentence reserves the row
+// (lemmaRow is `some(lemmaShown)` over exactly these tokens), and a token that paints nothing returns 0 either
+// way. The transparent hit target the blank slot now carries deliberately contributes NO width: it is a hit
+// area, not ink, and widening a neighbour's column for it would move the diagram around invisible boxes.
+function lemmaSlotW(t){ if(!show.lemma) return 0; const s=lemmaRowTxt(t); return s?meas(s,LEM_F,LEM_FEAT):0; }
 /* MEASUREMENTS ARE CACHED, because the same handful of strings is measured over and over: one load of
    the sample document makes 4,985 calls with 183 DISTINCT (text, font, extra-css) triples, and a
    notation switch 6,883 with 325 — 96% repeats. Each miss is a real cost: the body below writes into
@@ -1956,7 +2234,7 @@ function _measOneUncached(s,f,extraCss){
      what the HarfBuzz shape will actually paint than the unjoined SVG advance ever was. */
   if(smpUnshaped(s)||arabicUnshaped(s)){ const c=_measDOM(s,f); if(c>0) return c; }
   return w; }
-function meas(s,f){ return _measOne(s,f); }
+function meas(s,f,extraCss){ return _measOne(s,f,extraCss); }   /* extraCss is PASSED THROUGH rather than dropped, so a caller painting with an OpenType feature can measure in it: `_measOne` has always taken it (avmLayout's c2sc attr labels and measGloss's abbreviation runs both use it), and only this two-argument front door stood between it and everyone else. Reached for by the inline editors (makeEditable's applyFont, js/editing/context-menu.js), which copy a row's font-feature-settings onto the field and have to size and caret-place it in the face it is drawn in — CLAUDE.md's "a measurement must follow the paint". Additive: every existing two-argument call keys the cache exactly as before (`extraCss||""`). */
 // Gloss/MGloss-aware measurement: setGlossText wraps every Leipzig abbreviation run (glossAbbrSegments) in its own
 // .glabbr tspan, which turns on font-feature-settings "c2sc"/"onum" (small caps from capitals + old-style figures)
 // — a plain meas() call measures the whole string at the tier's ordinary (non-c2sc) advance widths, which the font's
@@ -2390,6 +2668,7 @@ function refreshFontStacks(){
        With it, that same diff is empty. */
     d.style.setProperty("--script-brk-pos",TOK_MAG>1?"relative":"static"); }
   POS_F='15px '+LIVE_TOKEN_STACK; GRID_F='462 13px '+LIVE_MONO_STACK; HEAD_F='500 11px '+uiFont(); HEAD_F_REQ='700 11px '+uiFont();   // HEAD_F/HEAD_F_REQ ride along on this refresh only for uniformity — it is built off --ui-font, not off either LIVE_ stack (see its lazy definition above), so nothing this function reacts to can actually change it
+  LEM_F='15px '+LIVE_TOKEN_STACK;   // item 29: the lemma row, refreshed with the rest of the token-stack faces (its small-caps register is LEM_FEAT, an OpenType feature rather than a face, so nothing about it moves with the stack)
   MWT_F=WORD_F;   // TRANS_F/TRANS_UP_F used to be set on this line; they are now set earlier, beside TR_ROW_DESC, which measures one of them — see its note
   GRID_ITAL_F='italic 462 13px '+LIVE_MONO_STACK;
   GLOSS_F=weightCurve(13.2)+' 13.2px '+LIVE_TOKEN_STACK; MSEG_F='italic 15px '+LIVE_TOKEN_STACK; MSEG_UP_F='15px '+LIVE_TOKEN_STACK; MGLOSS_F=weightCurve(13.2)+' 13.2px '+LIVE_TOKEN_STACK;
@@ -3385,7 +3664,16 @@ function ascent(f){_cv.font=f; const m=_cv.measureText("Ábgjyd漢"); return m.a
 function belowGap(){ return 18+descent(POS_F)+(TOK_MAG>1?descent(WORD_F)*(1-1/TOK_MAG):0); }
 // how many rows sit below the glyph line (translit + gloss/mgloss tiers + POS) — the ANNOTATION rows,
 // never the glyph row itself, which is why n can be 0 (a token with translit/glosses/POS all off).
-function belowRows(hasTr,tierCount,hasPos){ return (hasTr?1:0)+tierCount+(hasPos?1:0); }
+// item 29: …plus the LEMMA row, which sits between the transliteration and the gloss tiers.
+// ⚠ item 31: NOW A PARAMETER (`hasLem`), reversing this note's own earlier record that reading `lemmaRow()`
+// with no argument was the deliberate choice. That was right while the row's presence was a document-wide
+// switch; it became wrong the moment the row started varying per SENTENCE ("if a sentence has no visible
+// lemmas, the lemma tier itself should be hidden"). It is a parameter for exactly the reason `hasTr` is one:
+// the question is about a SENTENCE, this function is handed a token count and nothing else, and every one of
+// the thirteen call sites already computes `hasTr(t)` from the very array `lemmaRow(t)` needs. Within a
+// sentence that has the row it still counts for EVERY token alike — the display gate skips the DRAW, never
+// the row (lemmaRowTxt's note above).
+function belowRows(hasTr,tierCount,hasPos,hasLem){ return (hasTr?1:0)+(hasLem?1:0)+tierCount+(hasPos?1:0); }
 // total vertical reserve those rows need: n·belowGap() for the n row-to-row steps, plus STACKED_GAP
 // exactly once (n>0) — see its own note at refreshFontStacks() for what it replaces and why once, not per row.
 // item 22: +avmH (the AVM box's own reserved height for whichever token(s) this call is sizing for — 0 for a
@@ -3397,7 +3685,11 @@ function belowRows(hasTr,tierCount,hasPos){ return (hasTr?1:0)+tierCount+(hasPos
 // space between the POS tag and the AVM, so that it matches the space above the POS tag") — belowGap() IS
 // that space (the same row-to-row step every other below-stack row is seeded by), so this reuses it rather
 // than re-deriving a second number that could drift from it.
-function belowReserveH(hasTr,tierCount,hasPos,avmH){ const n=belowRows(hasTr,tierCount,hasPos); return n*belowGap()+(n>0?STACKED_GAP:0)+(avmH>0?avmH+avmTopGap():0); }   // avmTopGap() matches belowStack's own clearance step above the AVM box exactly — see its own note
+// item 31: hasLem is the FIFTH parameter, after avmH — appended rather than slotted in beside hasTr/hasPos so
+// that the four existing arguments keep their positions and no call site can silently pass an AVM height into
+// a boolean slot. Every site passes lemmaRow(t) for it; see belowRows above for why it stopped being read
+// from a no-argument global.
+function belowReserveH(hasTr,tierCount,hasPos,avmH,hasLem){ const n=belowRows(hasTr,tierCount,hasPos,hasLem); return n*belowGap()+(n>0?STACKED_GAP:0)+(avmH>0?avmH+avmTopGap():0); }   // avmTopGap() matches belowStack's own clearance step above the AVM box exactly — see its own note
 /* ── item 22, round 2: THE AVM TIER's OWN RENDERING, REDRAWN AS NATIVE SVG — no <foreignObject>. Round 1 was
    a real HTML/CSS box (nested borders read as brackets) painted inside a foreignObject, measured off-screen
    via a hidden #doc-mounted div. That measured centred to sub-pixel precision under headless Chrome — but the
@@ -3436,6 +3728,8 @@ function belowReserveH(hasTr,tierCount,hasPos,avmH){ const n=belowRows(hasTr,tie
    against it, so the spine is back on .mwt-tie-h and the serifs on .mwt-tie, restoring round 2's original
    pairing (and with it mwtTie's own unrotated one, and .mwt-grid-tie's) as the ONE convention every "this
    marks a multi-word/multi-part span" bracket in the app now shares. */
+const AVM_PLUS_R=3.5;        // the add-feature mark's arm — half its width AND half its height (drawAVM). =AVM_BRK_W, the bottom serif's own length, so the bar spans exactly two ticks' worth; kept as its own name because what depends on it is the MARK, not the bracket
+const AVM_PAD_B=2*AVM_PLUS_R+2;   // …and the room the box makes for it below its last row: the mark's full diameter plus one AVM_ROW_GAP of clearance above the upper arm (spelt as the literal 2 because AVM_ROW_GAP is declared on the next line)
 const AVM_ROW_GAP=2, AVM_PAD_V=2, AVM_COL_GAP=4.014, AVM_PAD_L=6.1, AVM_PAD_R=5.283, AVM_BRK_W=3.5, AVM_BRK_EXT=0.5625;   // CURRENT STATE (round 6, this session — see its own paragraph below, after round 5's AVM_COL_GAP note): AVM_PAD_L/AVM_PAD_R are DELIBERATELY EQUAL-GAP, re-confirmed on report ("left looks smaller than right — did something regress?"). Round 4 (below) first equalised them at 6.1/7 (2.591px/2.587px on the "conceived"/Voice=Pass calibration row) — that pairing DRIFTED apart numerically since (to 2.600px/4.317px, a real ~1.72px gap, root-caused to a glyph-side-bearing effect on "Pass"'s own painted ink vs its reserved advance, NOT to the casing halo added in the interim, which round 6's own live ablation test disproved as a cause). AVM_PAD_R alone moved (7→5.283, isolated to the right gap only, same derivation round 4 used for AVM_PAD_L) to re-equalise: 2.5999755859375px/2.5999755859375px, exact bit-for-bit parity, stable across 15 repeat live reads. Round 4/5's own numbers below describe THEIR moment, not today's; do not read them as current.
 /* RE-INVESTIGATED AGAIN, DEEPER THAN c6bca96, ON REPORT ("its AVM padding is not even like it is in LTR")
    ARRIVING AFTER c6bca96's OWN "already correct, no code change" — that conclusion is REAFFIRMED here, but
@@ -3819,7 +4113,19 @@ function avmLayout(t){ const feats=(t&&t.feats)||""; if(!feats||feats==="_"||!sh
   // +2*avmBrkInkDx(): the box's own outer edges (x0/x1, drawAVM) sit AVM_BRK_W in from where the bracket's
   // REAL ink ends (see avmBrkInkDx's own note) — reserve has to grow by that same real offset on both sides,
   // once each, or attrX/valX (below) would end up positioned past the box's own reserved width.
-  const w=AVM_PAD_L+AVM_PAD_R+attrW+AVM_COL_GAP+valW+2*avmBrkInkDx(), h=AVM_PAD_V*2+rows.length*lineH+Math.max(0,rows.length-1)*AVM_ROW_GAP;
+  /* ⚠ THE BOX IS DEEPER THAN ITS ROWS, AND THE EXTRA IS THE "+"'s OWN BAND. On report ("the AVM brackets
+     need to extend further down, so there is a decent amount of space above the plus sign"): the mark is
+     drawn ON the bottom rule (drawAVM), so with a symmetric AVM_PAD_V its upper arm reached up to within
+     ~2px of the last row's ink and read as part of that row rather than as a control under the matrix.
+     Growing `h` is the whole fix and the right one — it is what moves `y1`, and `y1` is what the bottom
+     serifs, the spines and the plus are all drawn from, so the brackets lengthen and the mark travels with
+     them by construction. The rows do not move: `ry` is anchored to `y0` and the pad above it.
+     DERIVED FROM THE MARK, never a loose number: AVM_PAD_B is the plus's own diameter (2×AVM_PLUS_R) plus a
+     row gap, so the arm occupies its half and a row's worth of clearance is left above it. Tie the two
+     together and a future change to the mark's size cannot silently re-cramp the box it sits on. Every
+     reserve follows automatically — `avmHeight` returns this `h`, and `belowReserveH`/--undpad/stackBot all
+     read that one function. */
+  const w=AVM_PAD_L+AVM_PAD_R+attrW+AVM_COL_GAP+valW+2*avmBrkInkDx(), h=AVM_PAD_V*2+AVM_PAD_B+rows.length*lineH+Math.max(0,rows.length-1)*AVM_ROW_GAP;
   const box={rows,attrW,lineH,w,h};
   _avmCache.set(feats,box);
   return box; }
@@ -3896,6 +4202,27 @@ function drawAVM(svg,cx,y0,t,si,tokId,boxes){ const L=avmLayout(t);
     boxes&&boxes.push({x:cx,y:y0+ascent(AVM_VAL_F)-4,hx:avmEmptyW()/2,hy:7});
     return y0+eh; }
   const x0=cx-L.w/2, x1=cx+L.w/2, y1=y0+L.h;
+  /* ⚠ ONE GROUP FOR THE WHOLE MATRIX, SO `:hover` HAS SOMETHING TO SCOPE TO — and one transparent surface
+     inside it, because otherwise the gesture cannot be completed. An SVG `<g>` is hovered when one of its
+     PAINTED children is, and the inside of this box is empty: the reader would hover a row, watch the +
+     appear below the last one, move the pointer down towards it, cross the unpainted gap on the way — and
+     the + would vanish under their hand. The surface spans the GROWN box (y0..y1, the reserved height), so
+     the bottom band the + lives in is part of the hover region before the + is visible in it.
+     First child, so everything paints over it; `.avm-hit`'s own transparent-fill trick, one level out. It
+     changes hit-testing over the matrix's padding — which the per-row `.avm-hit` rects already did for the
+     row bands — and a click landing on it bubbles to the token group exactly as a click on that padding
+     always has. */
+  /* ⚠ `.avm-open` (the matrix holding its grown shape while its own menu is up) is set on this node by
+     whoever opened the menu and cleared by `closeCtx` — NOT re-derived here from a remembered token. It was,
+     for one round, and it could not work: `displaySent` hands the renderers COPIES of the token dicts
+     (measured — `identityHolds:false`, same form, different object), so there is nothing here to compare a
+     remembered token against. What made a node-borne class survivable instead was removing the renders that
+     were replacing the node: the HarfBuzz settle used to repaint the whole document when a MENU's own new
+     glyphs shaped (js/lang/smp-shape.js), four times per tap. */
+  const box=E("g",{class:"avm-box"});
+  box.style.setProperty("--avm-grow",AVM_PAD_B+"px");   // …the distance the bottom rule travels, published to CSS from the ONE constant that defines it, so the animation cannot drift from the geometry
+  box.appendChild(E("rect",{class:"avm-hit avm-hover",x:x0,y:y0,width:x1-x0,height:y1-y0}));
+  svg.appendChild(box); svg=box;   // …every appendChild below lands in the box: the brackets, the rows and the +
   // round 4 — the bracket: mwtTie's own 3-segment tie shape, once per side, turned 90° — casing (one combined
   // L path), spine (long, THIN — .mwt-tie-h) and two short serifs (FULL weight — .mwt-tie). Back to round 2's
   // original pairing (see the box comment above const AVM_PAD_L/AVM_PAD_R for the measured, side-by-side reason): this
@@ -3905,11 +4232,105 @@ function drawAVM(svg,cx,y0,t,si,tokId,boxes){ const L=avmLayout(t);
   // stroke fully covers the corner the thinner spine's reaches — the same invariant mwtTie's own end-pins
   // follow (the full-weight stroke overshoots the thin one), carried by the serifs again now that they hold
   // the full-weight class.
-  [[x0,x0+AVM_BRK_W],[x1,x1-AVM_BRK_W]].forEach(([xEdge,xIn])=>{
-    svg.appendChild(E("path",{class:"mwt-tie-cas",d:`M ${xIn} ${y0} L ${xEdge} ${y0} L ${xEdge} ${y1} L ${xIn} ${y1}`}));
-    svg.appendChild(E("path",{class:"mwt-tie-h",d:`M ${xEdge} ${y0} L ${xEdge} ${y1}`}));
+  /* ⚠ TWO BOTTOMS, AND ONLY ONE OF THEM IS PAINTED AT A TIME. On request ("the plus sign — and extra height
+     — should only appear when hovering the AVM"): at rest the matrix closes just under its last row (`yRest`)
+     and carries no mark; on hover the spines run on to `y1`, the bottom serifs move down with them, and the +
+     appears on the new rule. Both states are DRAWN, once, and CSS shows one — `.avm-rest` and `.avm-grow`,
+     toggled by `.avm-box:hover` (styles/app.css). SVG path data cannot be animated or swapped by CSS, and the
+     alternative — re-rendering the sentence on mouseenter and again on mouseleave — would put a full
+     `renderDoc` behind every pointer movement across a diagram.
+     ⚠ THE RESERVE STAYS TALL, AND THAT IS DELIBERATE. `avmLayout`'s `h` still includes AVM_PAD_B, so the room
+     the grown bracket needs is reserved whether or not it is painted, and hovering shifts NOTHING: the
+     matrix grows into space that is already its own. Reserving the SHORT height instead would have made the
+     pointer crossing any AVM push every block below it down the page — and, where the AVM is the last row of
+     the below-stack, would have let the grown bracket paint outside the crop `fitTight` computed for it and
+     simply be clipped away. The cost is ~9px of empty space under a resting matrix; the alternative is a
+     document that moves when you look at it.
+     ⚠ AND `y1` IS STILL THE ONE NUMBER EVERY GROWN PART IS DRAWN FROM — the extension, the moved serifs and
+     the + alike — so "aligned with the bottom ticks" goes on being true by construction rather than by a
+     second measurement. */
+  const yRest=y1-AVM_PAD_B;
+  const sides=[[x0,x0+AVM_BRK_W],[x1,x1-AVM_BRK_W]];
+  const growSpine=(cls,xEdge)=>{ const e=E("path",{class:cls,d:`M ${xEdge} ${yRest} L ${xEdge} ${y1}`});
+    /* `scaleY` about its own top, so the animation is a line getting LONGER rather than a line being
+       redrawn — and a vertical stroke is the one shape scaleY does not distort, since its thickness is an X
+       quantity (which is exactly why the RULE below translates instead of scaling: a horizontal stroke under
+       scaleY would thin and thicken as it moved). The origin is written in user units from here rather than
+       left to `transform-box:fill-box`: this path's bounding box has ZERO WIDTH, and a zero-area box is the
+       case engines disagree about. */
+    e.style.transformOrigin=xEdge+"px "+yRest+"px"; return e; };
+  /* ⚠ EVERY CASING FIRST, THEN EVERY INK — AND NOT ONE PASS PER SIDE. Reported as "the brackets now have
+     gaps… seems like a casing issue", and it was exactly that: paint order. `.mwt-tie-cas` is a 5px
+     BACKGROUND-COLOURED halo and `.mwt-tie-h` is a hairline spine, so a casing appended after the spine
+     erases 2.5px of it — and splitting the old single L-shaped casing into three animatable pieces (fixed,
+     spine extension, bottom rule) put two of those pieces after the ink they sit behind. The bottom rule's
+     casing then wiped the spine's last 2.5px while the serif drawn on top restored only its own ~1px, which
+     is the gap: one per side, just above the bottom serif, appearing exactly when the bracket was split.
+     The original code never had to think about this — it had ONE casing per side and appended the ink right
+     after it — but with the casing in pieces the invariant has to be stated rather than inherited: all of the
+     halo, then all of the ink. */
+  sides.forEach(([xEdge,xIn])=>{
+    svg.appendChild(E("path",{class:"mwt-tie-cas",d:`M ${xIn} ${y0} L ${xEdge} ${y0} L ${xEdge} ${yRest}`}));
+    svg.appendChild(growSpine("mwt-tie-cas avm-grow-spine",xEdge));
+    svg.appendChild(E("path",{class:"mwt-tie-cas avm-grow-rule",d:`M ${xEdge} ${y1} L ${xIn} ${y1}`})); });
+  sides.forEach(([xEdge,xIn])=>{
     const ext=xIn>xEdge?-AVM_BRK_EXT:AVM_BRK_EXT;
-    svg.appendChild(E("path",{class:"mwt-tie",d:`M ${xIn} ${y0} L ${xEdge+ext} ${y0} M ${xEdge+ext} ${y1} L ${xIn} ${y1}`})); });
+    svg.appendChild(E("path",{class:"mwt-tie-h",d:`M ${xEdge} ${y0} L ${xEdge} ${yRest}`}));   // the fixed spine, down to the RESTING bottom
+    svg.appendChild(E("path",{class:"mwt-tie",d:`M ${xIn} ${y0} L ${xEdge+ext} ${y0}`}));      // …and the top serif, which never moves
+    svg.appendChild(growSpine("mwt-tie-h avm-grow-spine",xEdge));                              // the extension that grows out of it
+    /* …and the bottom rule, drawn ONCE at the grown position and TRANSLATED UP to the resting one until the
+       matrix is hovered. Two copies of the serif — one at each bottom, swapped by visibility — was the first
+       shape of this and is gone: with the rule as a single thing that MOVES there is nothing to keep in step,
+       no cross-fade at a shared position to get right, and the resting state is the grown state minus one
+       transform. */
+    svg.appendChild(E("path",{class:"mwt-tie avm-grow-rule",d:`M ${xEdge+ext} ${y1} L ${xIn} ${y1}`})); });
+  /* ⚠ item 30 — THE "+" THAT ADDS A FEATURE, SITTING ON THE MATRIX'S OWN BOTTOM RULE. On request ("each AVM
+     should have a plus sign at the bottom, perfectly aligned with the brackets' bottom ticks, which when
+     clicked brings up the new-feature context menu"). Until now the add-feature picker was reachable only by
+     right-clicking — from the token menu's "Add Feature…" row, or straight from the `.avm-add` placeholder a
+     FEATURELESS token draws — so a token that already had a matrix had no visible affordance for gaining
+     another feature at all.
+     ⚠ ALIGNED MEANS COLLINEAR WITH THE BOTTOM SERIFS, WHICH IS WHY IT IS DRAWN HERE AND NOT MEASURED LATER.
+     The loop just above puts both bottom serifs on `y1` exactly (`M ${xIn} ${y1} L ${xEdge+ext} ${y1}`), so
+     the plus's own horizontal bar is drawn at `y1` too — the same number, off the same variable, in the same
+     function. Anything reconstructed from a bounding box afterwards would be a second derivation of a
+     quantity that is already in hand, and would drift the first time the box grew a stroke or a halo.
+     Centred on `cx`, i.e. in the gap BETWEEN the two serifs, so the three marks read as one rule.
+     ARM LENGTH = AVM_BRK_W, the serif's own length, so the bar spans exactly two ticks' worth and the mark
+     belongs to the bracket's register rather than announcing itself. It carries the bracket's own classes —
+     `.mwt-tie` for the ink (full weight, the serifs' own class) and `.mwt-tie-cas` for the casing halo — so it
+     cannot drift from them in colour, weight or halo: there is no second set of values to keep in step.
+     ⚠ THE HIT RECT IS THE REAL TARGET, on the same argument `.avm-add`'s own note makes one branch up: the
+     mark is ~7px of ink and nobody can aim at that. Transparent, and NOT pushed into `boxes` — fitTight would
+     grow the crop around an invisible rectangle and add whitespace under every AVM. The INK's box is pushed,
+     because the bar's lower arm is the one thing that reaches past `y1` (by AVM_BRK_W) and the crop does owe
+     that a margin. The tier's reserved HEIGHT is deliberately not grown for it: `avmHeight` is what every
+     stack below measures against, the AVM is the last row of that stack, and the overhang is a stroke's worth
+     of ink the crop already accounts for — growing the reserve would push every diagram's whole below-stack
+     down by 3.5px to make room for a mark drawn on a line that already exists. */
+  const plusR=AVM_PLUS_R, plusD=`M ${cx-plusR} ${y1} L ${cx+plusR} ${y1} M ${cx} ${y1-plusR} L ${cx} ${y1+plusR}`;
+  /* ⚠ THE MARK FADES; IT DOES NOT TRAVEL. On instruction ("when an AVM shrinks on mouseout, its plus sign
+     should fade, not move; and likewise on mouseover"). It carried `avm-grow-rule` for one round, so it
+     slid down with the bottom rule it sits on — which looked like the mark being dragged out from under
+     the matrix and pushed back in. It is drawn at the GROWN rule's own y and stays there: on the way in it
+     fades up while the rule arrives beneath it, on the way out it fades away while the rule leaves. The
+     alignment claim is unaffected — the mark is still drawn from `y1`, the same number the grown serifs
+     are, so it is collinear with them for the whole time it is visible. */
+  /* ⚠ `.ctxtrigger` IS LOAD-BEARING, NOT DECORATION. `ctxDismissOutside` (js/editing/context-menu.js)
+     closes the shared #ctx on any press outside it, and that includes the very press that opened this one:
+     the mark opens the menu on POINTERUP, and the `click` that follows a moment later dismissed it again —
+     measured, menu true after pointerup and false after the click. It did not do this while the tap still
+     ran `pick()`, because the re-render THAT caused meant press and release had different targets and no
+     click was dispatched at all (editing.md's "a click is not guaranteed to exist"); taking the render away
+     to stop the flicker took the accidental suppression with it. The class is the app's own answer, worn by
+     `#fmtPill` for exactly this, and it also makes a second click on the mark toggle the menu shut. */
+  const pg=E("g",{class:"avm-plus ctxtrigger",tabindex:"0"});
+  if(si!=null&&tokId!=null){ pg.setAttribute("data-s",si); pg.setAttribute("data-tok",tokId); }   // …the same pair `.avm-add` carries, and for the same reason: the wrapped-bracket overlay's <svg> hangs off the block, so `tokFromEl` has no token ancestor to walk up to
+  pg.appendChild(E("rect",{class:"avm-hit",x:cx-11,y:y1-8,width:22,height:16}));
+  pg.appendChild(E("path",{class:"mwt-tie-cas",d:plusD}));
+  pg.appendChild(E("path",{class:"mwt-tie",d:plusD}));
+  svg.appendChild(pg);
+  boxes&&boxes.push({x:cx,y:y1,hx:plusR,hy:plusR});
   // attrX anchors against x0+AVM_BRK_W+avmBrkInkDx() — the bracket's REAL ink edge (see avmBrkInkDx's own
   // note), not the bare nominal x0+AVM_BRK_W a stroke's own cap style could in principle bleed past. Today
   // dx=0 (butt caps), so this is arithmetically identical to the old x0+AVM_PAD_L formula; it stops being a
@@ -4019,6 +4440,16 @@ function avmInline(t){ if(!show.avm) return null;   // gated the same way avmLay
     item.appendChild(val);
     item.appendChild(document.createTextNode("]"));
     span.appendChild(item); });
+  /* item 30 — THE OUTLINE'S TWIN OF THE MATRIX "+", so the affordance is not one notation short. Its
+     placement rule cannot be the SVG one and is not meant to be: there are no drawn bottom ticks here to be
+     collinear with (this AVM is a run of inline `[ATTR val]` items whose brackets are literal characters),
+     and an inline run has no "bottom" either. What carries across is what the mark MEANS — one visible way
+     to add a feature, in every notation — so it goes where the run ENDS, which is where a reader looking to
+     add one more item would put it. Same `.avm-plus` class as the SVG mark, deliberately: `avmMenuAt`
+     (js/editing/context-menu.js) already resolves that one selector, and the outline's own single-click
+     route reads it too, so neither had to learn a second name for the same thing. */
+  const plus=document.createElement("span"); plus.className="avm-plus oavm-plus ctxtrigger";   // …`.ctxtrigger` for the same reason the SVG mark wears it: the click that opens the menu must not be the press that dismisses it plus.textContent="+";
+  plus.tabIndex=0; plus.title="Add a feature"; span.appendChild(plus);
   return span; }
 function xHeight(f){_cv.font=f; const m=_cv.measureText("x"); return m.actualBoundingBoxAscent||6;}   // the x-height of a (POS) glyph — subtracted from the inter-tier step to seat the MWT bracket (POS tags now render via c2sc small caps, whose visual height sits at x-height, not full cap height)
 // sizeSid() — the JS width-measurement this comment described — is GONE: .sid-in is a contenteditable
@@ -4183,9 +4614,15 @@ function cjkPunctSide(form){ const f=String(form||""); if(!f) return "";
    annotation token list so arcs/nodes/columns ignore it) but keep it, per host, as a `hangs` satellite entry
    {form, sp, orig}. Heads are remapped. Returns the display tokens plus map[displayIndex] = original token index
    (for selection sync with the grid); each hang carries its own original index for the satellite's selection. */
+/* item 31: the lemma-row FORCE is stamped onto the display token ARRAY on the way out of here, at both exits —
+   see lemRowForce's own note for why it rides on the data rather than on an ambient "current sentence". This is
+   the one place both paths converge, and the array it stamps is precisely the `t` every renderer hands
+   `hasTr(t)`/`lemmaRow(t)`. A property on an Array (not on D) because lemmaRow's argument IS the array, kept
+   parallel with hasTr's. */
+function lemStamp(D,sent){ if(D&&D.tokens) D.tokens.lemForce=lemForced(sent); return D; }   // ⚠ with merge-punctuation OFF and nothing to fold, this array IS sent.tokens — which is safe for the two reasons the note gives: an Array PROPERTY is invisible to JSON.stringify (so it reaches neither the content signature nor an undo snapshot nor the file), and it is rewritten on every render (so it can never be stale)
 function displaySent(sent){
   const rtl=sentRTL(sent), mwt=sent.mwt||[];
-  if(!show.mergePunct){ const D0=foldGoesWith({tokens:sent.tokens, map:sent.tokens.map((_,i)=>i), rtl, mwt}); D0.xpos=extPosSpans(D0); return D0; }   // the goeswith fold runs on BOTH paths — it is the relation's rendering, not an option
+  if(!show.mergePunct){ const D0=foldGoesWith({tokens:sent.tokens, map:sent.tokens.map((_,i)=>i), rtl, mwt}); D0.xpos=extPosSpans(D0); return lemStamp(D0,sent); }   // the goeswith fold runs on BOTH paths — it is the relation's rendering, not an option
   const t=sent.tokens, disp=[], oldToDisp=new Array(t.length).fill(-1);
   /* item 2 — a punctuation token folds onto a neighbour. WHICH neighbour is decided by the mark's own GLYPH where
      that glyph states a side, then by SPACING, and by the dependency edge only when neither says:
@@ -4225,7 +4662,7 @@ function displaySent(sent){
     return Object.assign({},d.tok,{head:String(nh),hangs:d.hangs,leads:d.leads,mform:d.tok.form}); });   // form stays host-only (mform===form); each hang/lead entry carries its glyph + original index for the satellite render + selection
   // remap MWT ranges onto the surviving display indices
   const dmwt=mwt.map(m=>{ const f=oldToDisp[m.from-1], to=oldToDisp[m.to-1]; return (f>=0&&to>=0)?Object.assign({},m,{from:f+1,to:to+1,_from:m.from,_to:m.to}):null; }).filter(Boolean);   // _from/_to = the ORIGINAL token ids (from/to are remapped to display order): _from for the edit lookup, _to so the tie can recognise the COMPONENT RANGE selRange holds — selRange is always in original ids (item 8, mwtTieSelected)
-  const D=foldGoesWith({tokens, map:disp.map(d=>d.orig), rtl, mwt:dmwt}); D.xpos=extPosSpans(D); return D;   // item 1: ExtPos brackets are derived from the DISPLAY tokens (whose heads displaySent has just remapped), so a merged-punctuation view brackets exactly the tokens it actually draws. The goeswith fold runs FIRST for the same reason: a bracket must span the tokens actually drawn
+  const D=foldGoesWith({tokens, map:disp.map(d=>d.orig), rtl, mwt:dmwt}); D.xpos=extPosSpans(D); return lemStamp(D,sent);   // item 1: ExtPos brackets are derived from the DISPLAY tokens (whose heads displaySent has just remapped), so a merged-punctuation view brackets exactly the tokens it actually draws. The goeswith fold runs FIRST for the same reason: a bracket must span the tokens actually drawn
 }
 /* Fold every goeswith CONTINUATION off the display token list onto the word it continues, mirroring the fold
    above (a folded token keeps a place in `map`, pointing at the display index that now draws it, so the grid
@@ -4343,7 +4780,7 @@ function linear(sent, depAbove){const gap=8,pad=2,SP=meas(" ",WORD_F),tk=sent.to
   // sit in their own independent row and shouldn't stretch a tie meant to visually group surface-form parts)
   const wform=tk.map(t=>fmeas(t,WORD_F));
   // slot = widest of word and (when shown) POS/transliteration/above-token deprel; uniform spacing → same minimum gap as tokens
-  const w=tk.map((t,i)=>Math.max(wform[i], show.pos?meas(posDisp(t),POS_F):0, trLayer()?meas(trTxt(t),trFont(t)):0, depAbove?meas(t.deprel||"",POS_F):0, glossSlotW(t), avmSlotW(t), 16));   // item 13: fold in the gloss-tier rows so a wide gloss can't crowd/overlap its neighbour. item 22: +AVM, same reasoning
+  const w=tk.map((t,i)=>Math.max(wform[i], show.pos?meas(posDisp(t),POS_F):0, trLayer()?meas(trTxt(t),trFont(t)):0, depAbove?meas(t.deprel||"",POS_F):0, glossSlotW(t), avmSlotW(t), lemmaSlotW(t), 16));   // item 13: fold in the gloss-tier rows so a wide gloss can't crowd/overlap its neighbour. item 22: +AVM, same reasoning. item 29: +the lemma row, same reasoning again — a lemma commonly runs LONGER than the inflected form above it (“went”/“go” is the friendly case; “better”/“good”, “militum”/“miles” are not), so an unreserved lemma row overlaps its neighbour exactly the way an unreserved gloss row used to
   const hg=tk.map(t=>tailW(t,WORD_F));   // real-width room reserved to each host's inline-end for its folded punctuation (node centre c[i] stays on the host, so arc endpoints are unchanged)
   const ld=tk.map(t=>leadW(t,WORD_F));   // item 2: room reserved at the host's inline-START for right-merging punctuation that leads it
   // Subject=Generic: reserve a virtual ∅-token band just BEFORE this token's own slot (not widening the slot itself,
@@ -4417,7 +4854,7 @@ function tidyLayout(size,root,childrenOf,{lw,hgw,ldw,elw,SPW,NGAP}){
    invariant after moving nodes around, and a second literal there could drift from this one. */
 const STEMMA_PAD=2;
 function stemmaLayout(sent,catNodes,posBelow){const pad=STEMMA_PAD, SP=meas(" ",WORD_F)+8;   // gap matches arc view; slot also fits the baseline POS tag so they don't crowd
-  const lw=sent.tokens.map(t=>Math.max(fmeas(t,WORD_F),catNodes?meas(posDisp(t)||"X",POS_F):fmeas(t,NODE_F), posBelow?meas(posRowTxt(t),POS_F):0, trLayer()?meas(trTxt(t),trFont(t)):0, glossSlotW(t), avmSlotW(t)));   // item 13: include the gloss-tier width so glosses stay spaced. item 22: +AVM, same reasoning
+  const lw=sent.tokens.map(t=>Math.max(fmeas(t,WORD_F),catNodes?meas(posDisp(t)||"X",POS_F):fmeas(t,NODE_F), posBelow?meas(posRowTxt(t),POS_F):0, trLayer()?meas(trTxt(t),trFont(t)):0, glossSlotW(t), avmSlotW(t), lemmaSlotW(t)));   // item 13: include the gloss-tier width so glosses stay spaced. item 22: +AVM, same reasoning. item 29: +the lemma row, same reasoning again (see linear()'s own copy of this max)
   const c=[], ldw=[]; let x=pad; sent.tokens.forEach((t,i)=>{ const lead=genericSubjGapW(sent.tokens,i,catNodes?POS_F:NODE_F)+leadW(t,NODE_F); ldw.push(lead); x+=lead; c.push(x+lw[i]/2); x+=lw[i]+tailW(t,NODE_F)+SP; });   // reserve inline-START room for right-merging leads (item 2) + inline-end room for trailing satellites; node centre stays on the host (arc endpoints unchanged). Subject=Generic: a virtual ∅-token band inserted just before, same idea as linear()
   const total=x-SP+pad;
   /* `ldw` is that inline-START reserve, kept PER NODE rather than being consumed into `x` and forgotten: it is
@@ -4427,10 +4864,77 @@ function stemmaLayout(sent,catNodes,posBelow){const pad=STEMMA_PAD, SP=meas(" ",
 }
 function mirror(c,total){ if(RTL) for(let i=0;i<c.length;i++) c[i]=total-c[i]; }   // in-place RTL flip of x-centres
 /* transliteration + POS stacked below a word baseline; returns the bottom y (pushes hit-boxes) */
+/* ── item 31: THE TARGET OVER A BLANK LEMMA SLOT (the SVG notations — belowStack below, and the hierarchy in
+   js/diagram/diagram-wrap.js, which is the other place this row is drawn into an <svg>) ────────────────────
+   "Clicking on a hidden lemma should still bring up the input field." There is no ink to click, so the target
+   is a transparent rect — the app's own idiom for exactly this (`.avm-hit` under every AVM row, `.avm-add`'s
+   own note on why its hit area dwarfs its 6px of ink). `fill:transparent`, NOT `fill:none`: a `none` fill is
+   not hit-tested at all, which is the whole difference between this and an empty <text>.
+   ⚠ IT CARRIES `.lem-edit` AND NOTHING ELSE OF THE ROW'S — no `.tok-lemma`. The class list is what the click
+   routing and `lemmaElOf` resolve, and it is also what `makeEditable`'s applyFont copies the field's face,
+   size and `font-feature-settings` off; `.lem-hit` therefore states the row's own font (styles/app.css) so the
+   field opens in the face the committed value will be painted in, exactly as it does over a painted row.
+   ⚠ THE BOX IS THE PAINTED ROW'S OWN CROP BOX (y−11, 14 tall — i.e. `{y:y-4,hy:7}` written out), so aiming at
+   a blank slot means aiming exactly where the lemma would be if there were one. Its WIDTH is the token's own
+   form width (floored at 24px, the same floor the stemma's baseline hit uses): the column the reader would
+   point at, and never wider than the token's own `.tok-hit`, so it cannot steal a neighbour's click.
+   ⚠ AND IT IS NOT PUSHED INTO `boxes`. Those crop boxes are what fitTight() sizes the viewBox from, and they
+   must describe INK — growing the drawing to fit an invisible rect is how a diagram gains margins nobody can
+   see. It sits inside space the row's own belowGap() step has already reserved, so it cannot be clipped. */
+const LEM_HIT_MINW=24;
+/* ⚠ THE BLANK SLOT'S TARGET IS THE BOX A PAINTED LEMMA WOULD HAVE, and its VERTICAL extent has to be
+   derived from the row's own font metrics rather than picked. Reported as "the lemma input for hidden
+   lemmas is too low compared to the input for unhidden ones", and measured: the painted `<text>` at this
+   baseline reports a client box of top y−16, height 20, while this rect was y−11, height 14 — 2px lower
+   at its centre and 6px shorter. `makeEditable` centres the field on its target's box and takes its
+   height from it (`max(16, r.height+2)`), so the field inherited both errors: it opened 2px low and 6px
+   short of the one a visible lemma opens.
+   `ascent`/`descent` of `LEM_F` are the same pair the row's own layout steps by, so the blank slot and
+   the painted row now report the SAME box by construction — not by a constant that happened to match at
+   one font size and would drift the moment the tier's size or face moved. */
+/* ⚠ THE SLOT'S VERTICAL BOX IS MEASURED, NOT DERIVED — because the number that has to match is the one
+   the ENGINE reports for a painted `<text>`, and nothing else predicts it. `makeEditable` positions the
+   field by `getBoundingClientRect()` on whatever it is opening over, so the blank slot's rect has to report
+   the box a real lemma reports or the field lands somewhere a visible one does not. Two attempts, both
+   measured, both kept here because each looks right until it is compared:
+     · `y−11`, height 14 (a number that fitted the row): the field opened **2px low and 6px short**.
+     · `y−ascent(LEM_F)`, height `ascent+descent`: better — 0.72px low, 2.25px short — but still wrong,
+       because this app's `ascent`/`descent` are the metrics its LAYOUT steps by and the engine's text box
+       is not the same quantity (17.76 against 20.00 at 15px).
+   So the box is taken from a real `<text>` in the shared measuring SVG (`_mtxt`, the same element `meas`
+   uses), once per font string, and cached. `up` is how far its top sits above the baseline — which is what
+   the caller has — and `h` its full height. Restores the element as found, exactly as `trackEmOf`'s own
+   probe beside it does, since `_measOneUncached` may be part way through its own use of it. */
+let _lemBox=null, _lemBoxFor="";
+function lemBoxMetrics(){ const f=LEM_F+"|"+LEM_FEAT;
+  if(_lemBox&&_lemBoxFor===f) return _lemBox;
+  const keepCss=_mtxt.style.cssText, keepTxt=_mtxt.textContent;
+  try{ _measMount();
+    _mtxt.style.cssText="white-space:pre;font:"+LEM_F+LEM_FEAT; _mtxt.setAttribute("y","100"); _mtxt.textContent="Hxg";
+    const r=_mtxt.getBoundingClientRect(), o=_msvg.getBoundingClientRect();
+    const baseline=100+(o.top);   // the element's own y, in the same client space the rect is in
+    if(r.height>0){ _lemBox={up:baseline-r.top, h:r.height}; _lemBoxFor=f; }
+  }catch(e){ /* an engine that will not measure keeps the derived fallback below */ }
+  finally{ _mtxt.style.cssText=keepCss; _mtxt.textContent=keepTxt; _mtxt.removeAttribute("y"); }
+  return _lemBox||{up:ascent(LEM_F),h:ascent(LEM_F)+descent(LEM_F)}; }
+function svgLemHit(g,x,y,tk){ const w=Math.max(LEM_HIT_MINW,fmeas(tk,WORD_F)), b=lemBoxMetrics();
+  g.appendChild(E("rect",{class:"lem-edit lem-hit",x:x-w/2,y:y-b.up,width:w,height:b.h})); }
 function hasTr(toks){ return trLayer() && toks.some(x=>trTxt(x)); }   // the transliteration row is active (romanisation, or originals under an orthography) → reserve it for every token (keeps POS aligned)
-function belowStack(g,x,y0,tk,boxes,trRow){ let y=y0+STACKED_GAP;   // trRow: reserve the transliteration row even for a token that has none (so POS stays aligned across the sentence). +STACKED_GAP seeds the ONE gap from the glyph baseline to whichever row is drawn FIRST below it; every later belowGap() step in this function is the plain, un-bumped one
+function belowStack(g,x,y0,tk,boxes,trRow,lemRow){ let y=y0+STACKED_GAP;   // item 31: lemRow — the sentence's own answer to lemmaRow(t), passed in for exactly the reason trRow is (this function sees ONE token, and the row is a fact about the SENTENCE); every call site already computes hasTr(t) from the same array   // trRow: reserve the transliteration row even for a token that has none (so POS stays aligned across the sentence). +STACKED_GAP seeds the ONE gap from the glyph baseline to whichever row is drawn FIRST below it; every later belowGap() step in this function is the plain, un-bumped one
   const showTr = trRow!=null ? trRow : (trLayer() && !!trTxt(tk));
   if(showTr){ y+=belowGap(); const rt=trTxt(tk), rd=trRowTxt(tk); const e=E("text",{class:"translit"+tierEmptyCls(rt)+frnUp(tk),x:x,y:y,"text-anchor":"middle"}); e.textContent=rd; if(rt&&trRowEdit())e.classList.add("tr-edit"); g.appendChild(e); boxes&&boxes.push({x,y:y-4,hx:meas(rd,trFont(tk))/2,hy:7}); svgSeamMark(g,tk,x,y,meas(rd,trFont(tk))/2,trFont(tk),boxes,null,"translit"); }   /* item 28: the row is reserved for the whole sentence (trRow), so a token with nothing to romanise paints TIER_EMPTY into it rather than leaving the gap; NOT .tr-edit (a placeholder is cosmetic — there is no romanisation under it to open), and the seam mark is measured off the painted string exactly as the gloss tiers below measure theirs off theirs, for the same reason: the seam is a fact about the WORD, not about this row\'s coverage of it. */   // Item 8: the translit row gains the SAME descender-matched top gap the POS row carries (+descent(POS_F), the label-font descender) so the row above's descenders don't crowd it; .tr-edit → click-to-edit the romanisation, or the STORED transliteration behind it (see trRowEdit). The romanisation is a WORD-LIKE row, so it carries the seam mark too — a word broken across tokens reads as broken on every row that spells it out
+  /* item 29: THE LEMMA ROW — below the transliteration, above the gloss tiers, on request ("just below the
+     tokens (or their transliterations)"). `y` ALWAYS takes the step when the SENTENCE has the row (lemRow,
+     item 31): within such a sentence the slot is reserved for every token alike (belowRows), and skipping the
+     step for a token that paints nothing is exactly the fault item 28 fixed for the POS row — everything below
+     it would sit one belowGap() higher than its neighbours'. Only what goes IN the slot is conditional.
+     `.lem-edit` marks the row the click-to-edit handler may open a field on (the .tr-edit/.gl-edit convention),
+     and item 31 puts it on the BLANK slot too — through a transparent rect, since an empty <text> has no hit
+     area at all ("clicking on a hidden lemma should still bring up the input field"). */
+  if(lemRow){ y+=belowGap(); const lt=lemmaRowTxt(tk);
+    if(lt){ const e=E("text",{class:"tok-lemma lem-edit",x:x,y:y,"text-anchor":"middle"}); e.textContent=lt; g.appendChild(e);
+      boxes&&boxes.push({x,y:y-4,hx:meas(lt,LEM_F,LEM_FEAT)/2,hy:7}); }   // LEM_FEAT on the crop box too: fitTight() sizes the wrapped SVG's viewBox off these, and a box measured in the unfeatured face would reserve for wider glyphs than smcp paints
+    else svgLemHit(g,x,y,tk); }
   belowTiers().forEach(tier=>{ y+=belowGap(); const txt=tierDisp(tk,tier)/* the DISPLAY text, not the stored one — under Latin's macron Script scheme the MSeg row paints the macronised segmentation while MISC keeps the bare one (tierDisp, js/core/prefs.js); "" either way, so the gl-empty test below is unaffected */, dtxt=txt||TIER_EMPTY; const e=E("text",{class:"gloss gl-edit"+frnUp(tk),x:x,y:y,"text-anchor":"middle","data-tier":tier,tabindex:"0"}); setGlossText(e,tier,dtxt); if(!txt)e.classList.add("gl-empty"); g.appendChild(e);
     /* ⚠ THE SAME FONT AND THE SAME measGloss() THE SEAM MARK BELOW ALREADY USES — this box feeds fitTight()
        (js/diagram/diagram-core.js), which resizes the wrapped SVG's own viewBox to its drawn content, so a
@@ -4674,7 +5178,12 @@ function rowTies(D,s0,e0){ const reb=o=>({...o,from:o.from-s0,to:o.to-s0});
 function htmlTieBottom(r){ const PIN=6, STEP=belowGap(), lead=5+tieLead();
   if(r.kind==="gw") return lead+r.dy+gwDepth();                            // the tie has no label under it — it reaches only as far as the glyph's own ink
   if(r.kind==="xpos") return lead+r.dy+PIN+mwtFormLead();                  // the ExtPos value IS the label
-  const n=belowRows((trLayer()&&trTxt(r)),0,!!r.pos);
+  /* ⚠ item 31: `false` FOR THE LEMMA ROW, EXPLICITLY — an MWT tie draws a surface form, its transliteration and
+     an ExtPos label, and no lemma row at all (there is no lemma column for a RANGE). It used to reserve one
+     anyway, silently: `belowRows` read `lemmaRow()` out of a global, so switching the lemma tier on added a
+     whole belowGap() of dead space under every tie in the document. Making the row a parameter is what made
+     that visible; stating it here is what keeps it stated. */
+  const n=belowRows((trLayer()&&trTxt(r)),0,!!r.pos,false);
   return lead+r.dy+PIN+mwtFormLead()+n*STEP+(n>0?STACKED_GAP:0); }         // MWT surface form, then its transliteration row, then any ExtPos annotation — STACKED_GAP once (belowReserveH's math), for the same reason belowStack seeds it once rather than per row. mwtFormLead(), not a bare 20: this RESERVES the room positionBracketAnnots' fyb (document.js) actually DRAWS into, and that draw site grows with a magnified script's ascent (INDIC_SCRIPTS/ORNAMENTAL_SCRIPTS) — a fixed 20 here under-reserved exactly that excess, which is what let the drawn form's ink lift clear of its own reservation (see the note on `fyb` in document.js for the live-measured report this pairs with)
 function mwtDepth(D){ return tieLayout(D).depth; }   // extra vertical room the bracket stack needs below the below-stack bottom. Item 1 made this tier-aware — one entry per bracket TIER, each as deep as the deepest label that tier carries (an MWT surface form, plus its transliteration row and/or an ExtPos annotation) — so an ExtPos bracket that pushes an overlapping MWT tie down a tier also grows every reserve that folds in mwtDepth (arcsWrapped's per-row tieBot, projWrapped, belowH) in lockstep. With a single plain MWT tie and no ExtPos it returns exactly the former fixed 39+descent(POS_F)−xHeight(POS_F) (39 with no POS row), +belowGap() for a transliteration row — the seating those constants were tuned for is unchanged.
 

@@ -217,7 +217,22 @@ Break one of these and the failure is silent or misdiagnosed. Each is expanded i
   a draw site that asks whether THIS token has something skips a step the reserve already paid for and
   silently lifts everything below it out of line with its neighbours. **The relation LABEL is the standing
   exception** — no reserved slot, and the edge under it already carries the gesture that sets it, so an empty
-  one draws nothing. Tried both ways; that is the settled one. → `diagram-rendering.md`
+  one draws nothing. Tried both ways; that is the settled one. **The LEMMA row is the second exception, and it
+  is a different shape**: it keeps its reserved slot for every token in a sentence that has the row and simply
+  draws NOTHING in it for a token whose lemma **is** its own form (`lemmaShown` — "this token has a lemma and
+  it is not the same string as the form", compared exactly and case-sensitively against the STORED columns).
+  Such a token's lemma is not missing — it *is* the form printed directly above it — so `_` there would assert
+  an absent annotation that is not absent, and the lemma itself would only repeat the word. **The row's own
+  presence is per SENTENCE** (`lemmaRow(t)`, the `hasTr(t)` shape, reaching `belowReserveH` as its fifth
+  argument at every one of the thirteen sites): a sentence in which nothing shows a lemma has no row at all,
+  which is the same predicate under `some`, so the reserve and the draw still ask one question. **A blank slot
+  is still clickable** — a transparent `.lem-hit` rect (SVG) or a min-width cell (HTML) carrying `.lem-edit` —
+  and opening the editor in a sentence with no row **forces the row in for the duration of the edit**
+  (`lemRowForce`, stamped on the display token array by `displaySent`, animated by a margin+clip slide).
+  ⚠ The gate was an inflectional-FEATS list for one round and moved because the list kept growing: the
+  question it approximated ("does this form differ from its citation form?") can simply be asked.
+  `hasInflFeat` still answers a different question for `msegFlagSent` and is not edited to match.
+  → `diagram-rendering.md`
 - **What the generic parser's lexical channel is fed is decided in `app/glosses.py`, once.** The live parse
   and the custom-model fitting run ask the same question of the same two tiers from opposite sides of the
   bridge; a second copy of the rule in JS would fit a row under one reading of "the gloss" and parse it under
@@ -250,6 +265,15 @@ Break one of these and the failure is silent or misdiagnosed. Each is expanded i
   labels carry one, every one learned from another of its 80 treebanks (`VerbForm=Fin,Inf` is
   Afrikaans), so `_drop_multivals` drops the feature rather than picking a branch. A monolingual
   wheel's own comma value stays, as does one the reader typed. → `parsing-models.md`, `editing.md`
+- **An UNTRAINED custom row may not write FEATS at all** (`_feats_muted`): a custom model made with no
+  training file, for a language the wheel has never seen, holds an all-zero embedding row, and the
+  morphologiser predicts FEATS from UPOS *and that row* — so its features are a guess about a language
+  nothing in the pipeline has been shown, and the zeroed row was measured costing 4 LAS against having
+  no language channel at all. **It is a MUTE of the answer, never a struck arm**: taking `feats` out of
+  `model_arms` would take the TREE with it (the cascade drops the parser, which reads those FEATS, and
+  the component skip then drops the morphologiser), and an untrained model is meant to parse — badly,
+  as the Add-model sheet says — not to stop. The mute drops the MODEL's answer only; every column the
+  annotator handed in comes back after it. → `parsing-models.md`
 - **The generic parser reads UPOS as INPUT and refuses a Doc without it** (`sud_require_upos`; it
   used to invent one instead — `DET ADJ DET ADV DET ADV DET` for "The cat sat on the mat."). Set the
   classes on the Doc BEFORE the first component, drop the `upos` arm where there are none and let the

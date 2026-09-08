@@ -148,7 +148,20 @@ function extraRow(t){ const row=document.createElement("div"); row.className="mo
   const info=document.createElement("div"); info.className="mi";
   info.innerHTML=`<span>${esc(t.label||t.id)}</span>${t.note?`<small>${esc(t.note)}</small>`:""}`;
   const right=document.createElement("div"); right.style.display="flex"; right.style.alignItems="center"; right.style.gap="8px";
-  if(t.installed){ const tag=document.createElement("span"); tag.className="pill"; tag.textContent="Installed ✓"; right.appendChild(tag); }
+  /* ⚠ AN INSTALLED DATA TIER CAN STILL BE OUT OF DATE, AND THE ROW HAD NO WAY TO SAY SO OR TO FIX IT.
+     A pip tier is either there or not, but a DATA tier's asset is BUILT on this machine — so when the
+     build rule changes, every copy made under the old one keeps answering with the old values and the
+     row went on saying nothing but "Installed ✓", with no button to press. Reported through the
+     Persian vocalisation lexicon: its build learnt to refuse a reading the dictionary does not
+     actually choose between, and an already-installed lexicon carried on giving the guesses. `stale`
+     is `extras.status()`'s own comparison of the recipe the asset was built by against the current one
+     (app/extras.py) — a flag, not a sentence to parse — and the note beside it is the module's own
+     explanation. Re-uses `installExtra` verbatim rather than adding a second path: a rebuild IS the
+     install, and the tier's own installer already replaces what is there. */
+  if(t.installed&&t.stale){ const b=document.createElement("button"); b.className="tbtn"; b.textContent="Rebuild";
+    b.title="This was built by an older recipe — rebuild it to pick up the current one";
+    b.onclick=()=>installExtra(t,row,b); right.appendChild(b); }
+  else if(t.installed){ const tag=document.createElement("span"); tag.className="pill"; tag.textContent="Installed ✓"; right.appendChild(tag); }
   else { const b=document.createElement("button"); b.className="tbtn primary"; b.textContent="Install"; b.onclick=()=>installExtra(t,row,b); right.appendChild(b); }
   row.appendChild(info); row.appendChild(right); return row; }
 // Turns `btn` into its OWN progress indicator — a left-to-right fill — instead of a separate bar

@@ -48,7 +48,13 @@ function makeCtxButton(it,isSub){ const b=document.createElement("button"); if(i
     b.onmouseenter=()=>{ clearTimeout(b._subHov); b._subHov=setTimeout(()=>raise(false),140); };
     b.onmouseleave=()=>{ clearTimeout(b._subHov); };   // cancels only a PENDING open — an already-raised flyout survives the pointer leaving, per the note below
   }
-  else { b.onclick=()=>{ if(!it.keepOpen) closeCtx(); it.fn&&it.fn(); };            // left-click → the row's own action (for a relation, selecting it clears any deep feature). ⚠ keepOpen: a row that REPLACES this flyout's own contents rather than picking anything (posSubItems' "Other subtype…") — closing first would take the parent menu the reopen positions against with it
+  /* ⚠ THE EVENT REACHES THE ROW'S ACTION, AND `keepOpen` MAY BE A FUNCTION OF IT. Both exist for one caller:
+     a FEATS value row commits differently under a modifier (plain click replaces the value, ⌘/Ctrl-click adds
+     it to a UD multi-value — see avmValueMenu), and the two want opposite dismissal behaviour, since replacing
+     ends the gesture and combining is the middle of one. Additive: every existing row ignores the argument and
+     passes a plain boolean. */
+  else { b.onclick=e=>{ const keep=(typeof it.keepOpen==="function")?it.keepOpen(e):it.keepOpen;
+      if(!keep) closeCtx(); it.fn&&it.fn(e); };            // left-click → the row's own action (for a relation, selecting it clears any deep feature). ⚠ keepOpen: a row that REPLACES this flyout's own contents rather than picking anything (posSubItems' "Other subtype…") — closing first would take the parent menu the reopen positions against with it
     // item 3: mousing away from a flyout must NOT dismiss it — a flyout closes only on an explicit action (a click
     // elsewhere, Escape, a selection, or reopening it). (Previously hovering a sibling top-level row closed it.)
     if(it.subWeights) b._subw=it.subWeights;   // item 29: the ranking THIS row's flyout is to be faded by — read by openSub once the flyout is on screen (weightSubRows)
@@ -220,7 +226,16 @@ function openSub(btn,items,fit,colSize,noWrap,focusSearch){ _subLoadToken++; con
     const foot=document.createElement("div"); foot.className="ctx-sub-footer"; if(prevHr)foot.appendChild(prevHr); foot.appendChild(guide);   // moves prevHr+guide OUT of ctx2 into foot
     const scroll=document.createElement("div"); scroll.className="ctx-sub-scroll"; while(ctx2.firstChild) scroll.appendChild(ctx2.firstChild);   // everything remaining scrolls
     ctx2.appendChild(scroll); ctx2.appendChild(foot); ctx2.classList.add("ctx-sub-foot"); };
-  const render=arr=>{ ctx2.classList.remove("ctx-sub-foot"); ctx2.dir=ctx.dir; renderMenu(ctx2,(arr||[]).map(normItem),false,undefined,true); ctx2.classList.add("show"); weightSubRows(subW);   // item 29: fade the flyout's own rows by this row's ranking, at EVERY render (an async `items` re-renders through here too)
+  /* ⚠ BOTH LIFT CLASSES COME OFF HERE, and the second one is a bug fix: `ctx-sub-srch` was added by
+     liftSearch and never removed by anything. Both classes zero the flyout's own `padding-inline` and
+     move the 12px inset onto the `.ctx-sub-scroll`/band children the lift builds (base-chrome.css,
+     fluent-chrome.css) — so a class surviving the `renderMenu` below, which wipes exactly those
+     children, leaves the NEXT flyout's rows flush against the glass with no horizontal padding at all.
+     ONE ctx2 serves every flyout in the app, so it only takes one long list (the feature menu's
+     "Add feature…", 122 rows, well past SUB_SEARCH_MIN) to strand the class on every shorter flyout
+     opened after it — which is why it shows up as "the feature menu's flyouts have no padding" rather
+     than as one menu misdrawing. `ctx-sub-foot` was already removed for the same reason. */
+  const render=arr=>{ ctx2.classList.remove("ctx-sub-foot","ctx-sub-srch"); ctx2.dir=ctx.dir; renderMenu(ctx2,(arr||[]).map(normItem),false,undefined,true); ctx2.classList.add("show"); weightSubRows(subW);   // item 29: fade the flyout's own rows by this row's ranking, at EVERY render (an async `items` re-renders through here too)
     /* ⚠ …UNLESS THE CAP WOULD MAKE ROWS WRAP, for a flyout whose caller says its rows are LABELS
        (`subNoWrap`). On report — "don't cap the width if it would lead to line wrapping". Measured:
        "Other feature…" wants 280px and was held to its parent's 148px, wrapping 38 of its 122 rows
@@ -300,7 +315,19 @@ function showCtx(x,y,items,twoCol,rtlArg,fit){ const norm=items.map(normItem);
   const w=ctx.offsetWidth, h=ctx.offsetHeight;
   let left = rtl ? x-w : x;   // RTL → the menu opens to the bottom-left of the cursor
   ctx.style.left=Math.max(8,Math.min(left,innerWidth-w-8))+"px"; ctx.style.top=Math.max(menuTopBound(),Math.min(y,innerHeight-h-8))+"px"; }   // menuTopBound (js/core/scroll.js): a bare 8 now — this app no longer offers macOS window tabbing, so there is no native tab bar left for a menu to be drawn under
-function closeCtx(){ ctx.classList.remove("show"); closeSub(); void ctx.offsetHeight;   // same forced-reflow fix as closeSub, for ctx's own backdrop-filter layer
+/* ⚠ A MATRIX HOLDS ITS GROWN SHAPE WHILE ITS OWN MENU IS UP. Reported as the "+" flickering on click, and
+   this is the half of that a render count cannot see: the add-feature menu opens BELOW the mark, but
+   `showCtx` flips it above where there is no room underneath — and a menu covering the matrix takes the
+   pointer off it, so `.avm-box:hover` stops matching, the brackets shrink and the mark fades out from under
+   the very menu it opened. `.avm-open` is the same idea the Fluent kit already states for a toolbar button
+   ("an OPEN menu keeps the hover fill so the button reads as the flyout's anchor"), one control along.
+   Cleared HERE because `closeCtx` is the one funnel every dismissal goes through — Escape, a pick, a click
+   outside, or another menu taking over #ctx — exactly as the Format pill's own flag beside it is. Swept by
+   class rather than remembered in a variable: the flag lives on a node a re-render may replace, so the only
+   honest question at dismissal time is "whatever is wearing this now, take it off". */
+function clearAvmOpen(){ document.querySelectorAll(".avm-open").forEach(e=>e.classList.remove("avm-open")); }
+function setAvmOpen(el){ const bx=el&&el.closest&&el.closest(".avm-box,.oavm"); if(bx) bx.classList.add("avm-open"); }   // …the SVG matrix or the outline's own run; `clearAvmOpen` sweeps by the class rather than by which notation drew it
+function closeCtx(){ ctx.classList.remove("show"); closeSub(); void ctx.offsetHeight; clearAvmOpen();   // same forced-reflow fix as closeSub, for ctx's own backdrop-filter layer
   if(typeof setPillMenuOpen==="function") setPillMenuOpen("fmtPill",false); }   // the Format pill borrows this shared #ctx for its own menu (fmtMenu, js/io/formats.js) and its chevron has to point back UP however the menu was dismissed — Escape, a pick, a click outside, or another menu stealing #ctx. Unconditional and idempotent: for every OTHER #ctx menu the pill is already un-flagged, so clearing it again costs a no-op class toggle. typeof-guarded because this file loads before js/ui/wiring.js, which defines the helper — harmless at runtime (closeCtx only ever runs from a handler, long after both are defined), but the guard is what the codebase's forward-reference rule asks for
 /* ⚠ CAPTURE PHASE, AND EXCLUDING THE MENU SYSTEM — the same shape (and the same reason) as the
    contextmenu handler just below. This was a bare bubble-phase `addEventListener("click",closeCtx)`,
@@ -393,6 +420,14 @@ function tokFromEl(el){ const g=el.closest&&el.closest("[data-s]"); if(!g)return
 // UPOS full names + categories (for menu expansions and grouping)
 const UPOS_INFO={ADJ:"adjective",ADP:"adposition",ADV:"adverb",AUX:"auxiliary",CCONJ:"coordinating",DET:"determiner",INTJ:"interjection",NOUN:"noun",NUM:"numeral",PART:"particle",PRON:"pronoun",PROPN:"proper noun",PUNCT:"punctuation",SCONJ:"subordinating",SYM:"symbol",VERB:"verb",X:"other"};
 const UPOS_CATS=[["Open class",["NOUN","PROPN","VERB","ADJ","ADV","INTJ"]],["Nominals",["DET","NUM","PRON"]],["Obliques",["ADP","CCONJ","SCONJ"]],["Miscellaneous",["AUX","PART"]],["Other",["PUNCT","SYM","X"]]];
+/* THE POS ROW'S DRAWN ELEMENT, ACROSS THE NOTATIONS — the twin of FORM_SEL below. `.tok-pos` is the arc/tree/
+   flat-bracket (and projected-stemma) row belowStack draws, `.node-cat` the stemma's POS-as-node label, `.opos`
+   the outline's inline span (its ghost rows carry it too), `.bwpos` the wrapped-bracket span inside `.bwund`.
+   Deliberately NOT `.mwt-pos`: that is an ExtPos value under a bracket, a statement about a whole expression,
+   and it has its own menu (extPosMenu). ONE selector, read by the right-click resolver (posRelHit), the tap
+   resolver (js/diagram/diagram-edit.js) and the inline editor's own element lookup (posElOf) alike — three
+   gestures that must agree about what counts as "the POS row" or they will answer on different tokens. */
+const POS_SEL=".tok-pos,.node-cat,.opos,.bwpos";
 // SUD relation glosses + categories
 const DEPREL_INFO={root:"root",subj:"subject",udep:"unspecified","comp:obj":"object","comp:obl":"oblique","comp:pred":"predicative","comp:aux":"auxiliary","comp:cleft":"cleft",comp:"complement",mod:"modifier","mod@relcl":"rel. clause",det:"determiner",clf:"classifier",cc:"coordinator",conj:"conjunct","conj:coord":"coordination","conj:appos":"apposition","conj:dicto":"disfluency",flat:"flat",compound:"compound",list:"list",goeswith:"goes with",orphan:"orphan",parataxis:"parataxis","parataxis:parenth":"⁓etical","parataxis:insert":"insertion",dislocated:"dislocated",discourse:"discourse",vocative:"vocative",punct:"punctuation",unk:"unknown"};   // short glosses so the menu expansions don't cross the two-column midline
 const DEPREL_CATS=(()=>{   // each mSUD "/m" relation is interleaved right after its non-"/m" counterpart, within its category (the /m entries only surface for mSUD docs — the vocabulary passed to the menu/grid gates them)
@@ -673,12 +708,7 @@ function posSubItems(si,tokId,U){ const s=DOC[si], t=s&&s.tokens[tokId-1]; if(!t
      have to send them here again. */
   if(!feats.some(f=>subtypeValsAttested(f,U).length)) return posSubOtherItems(si,tokId,U);
   const curOf=f=>t.upos===U?(getFeat(t.feats,f)||""):"";
-  const setSub=(f,v)=>{ closeCtx(); const before=t.feats; pushUndo(si);
-    if(t.upos!==U){ t.upos=U; clearFeatsForUpos(t); }   // item 1: a tag change drops what the new class cannot carry — a now-meaningless Subj, and every feature the UD tables do not put on this class
-    feats.forEach(o=>{ if(o!==f) t.feats=clearFeat(t.feats,o); });   // one subtype at a time — picking PRON.Dem drops a stale PRON.Int rather than leaving the token claiming both
-    t.feats=(f&&v)?setFeat(t.feats,f,v):t.feats;
-    syncXposMirror(t);   // covers both halves above — a UPOS change and/or the subtype FEATS just set
-    featsSyncGloss(t,before); markDirty(); preserveScroll(renderDoc); };   // item 10: NO regenTok — this is a feature edit, and reparsing would overwrite the very feature just set (and any other hand-edited ones)
+  const setSub=(f,v)=>{ closeCtx(); retagSubtype(si,tokId,U,f,v); };   // …the one shared commit (above), which the typed field reaches too — see retagSubtype for why it is not `retagToken` plus a feature
   const items=[];
   // item 18: narrowed to ATTESTED values (attestedFeatVals, js/grid/grid.js) — the same call
   // acValItems/glossAbbrMenu already route through, which this submenu had been left reading
@@ -698,7 +728,7 @@ function posSubItems(si,tokId,U){ const s=DOC[si], t=s&&s.tokens[tokId-1]; if(!t
      A "Back" row returns, so the drill-down is not a one-way door. */
   const other=posSubOtherItems(si,tokId,U);
   if(other.length){ if(items.length) items.push(null);
-    items.push({label:"Other subtype…", keepOpen:true, fn:()=>{ const owner=ctx2._owner, cs=ctx2._colSize;
+    items.push({label:"Other Subtype…", keepOpen:true, fn:()=>{ const owner=ctx2._owner, cs=ctx2._colSize;
       if(owner) openSub(owner,()=>posSubOtherItems(si,tokId,U,true),false,cs,false,true); }}); }
   // item 3 — the guidelines link for the subtype the token CURRENTLY carries, pinned STICKY to the flyout bottom (no clear button — a plain-tag pick from the parent menu already clears the subtype)
   let setF=null,setV=""; feats.forEach(f=>{ const v=curOf(f); if(v){ setF=f; setV=v; } });
@@ -711,11 +741,7 @@ function posSubItems(si,tokId,U){ const s=DOC[si], t=s&&s.tokens[tokId-1]; if(!t
    that has never used it. `back` adds the row that returns to the attested list. */
 function posSubOtherItems(si,tokId,U,back){ const s=DOC[si], t=s&&s.tokens[tokId-1]; if(!t) return [];
   const feats=subtypeFeatsFor(U); if(!feats.length) return [];
-  const setSub=(f,v)=>{ closeCtx(); const before=t.feats; pushUndo(si);
-    if(t.upos!==U){ t.upos=U; clearFeatsForUpos(t); }
-    feats.forEach(o=>{ if(o!==f) t.feats=clearFeat(t.feats,o); });
-    t.feats=(f&&v)?setFeat(t.feats,f,v):t.feats;
-    syncXposMirror(t); featsSyncGloss(t,before); markDirty(); preserveScroll(renderDoc); };   // …the SAME commit posSubItems makes, and it must stay that way: the two lists set the same thing
+  const setSub=(f,v)=>{ closeCtx(); retagSubtype(si,tokId,U,f,v); };   // …the SAME commit posSubItems makes, and now literally the same function
   const items=[];
   feats.forEach(f=>{ const vals=subtypeValsOther(f,U); if(!vals.length) return;
     const cur=t.upos===U?(getFeat(t.feats,f)||""):"";
@@ -726,9 +752,82 @@ function posSubOtherItems(si,tokId,U,back){ const s=DOC[si], t=s&&s.tokens[tokId
      TAIL and appended after the groups. Pushed at the front it still rendered at the bottom — with its
      own separator below it rather than above, which is the only part a reader would have noticed. So
      it is written where it lands, and the separator reads correctly. */
-  if(back&&items.length) items.push(null,{label:"‹ Attested subtypes", keepOpen:true, fn:()=>{ const owner=ctx2._owner, cs=ctx2._colSize;
+  if(back&&items.length) items.push(null,{label:"‹ Attested Subtypes", keepOpen:true, fn:()=>{ const owner=ctx2._owner, cs=ctx2._colSize;
     if(owner) openSub(owner,()=>posSubItems(si,tokId,U),false,cs,false,true); }});
   return items; }
+/* ── THE RETAG, IN ONE PLACE ───────────────────────────────────────────────────────────────────────
+   Every consequence of setting a token's word class from the DIAGRAM, in the order they have to run.
+   It was `posMenu`'s own `choose` until the POS row became typeable as well: two gestures that set the
+   same column had to stop being two copies of this sequence, or a tag typed into the inline field would
+   quietly mean something different from the identical tag picked off the menu — and the difference would
+   be invisible, since both write `upos` correctly and only the SIX passes hanging off it would diverge.
+   The order is load-bearing and is argued at each step in `docs/notes/editing.md`:
+     · the FEATS cleanup runs AT the retag, so the background re-parse below is handed the CLEANED column
+       as its `prior_feats` and never sees the feature the new class contradicts;
+     · `inheritAnnotationForUpos` sits AFTER `featsSyncGloss` (an inherited MGloss is already correct for
+       the inherited FEATS — a sync keyed on `before` would retarget a value that never held them) and
+       BEFORE `regenTok` (so the inherited column travels to the parser as the annotator's own);
+     · `uposSyncTranslit` goes before `regenTok`, whose own translit pass is reached on only one path.
+   The GUARD is part of the funnel too: a commit that neither moves the tag nor drops a subtype does
+   NOTHING AT ALL — no undo entry, no re-render, no re-parse — which is what makes re-picking (or
+   re-typing) the current tag the documented no-op both gestures promise.
+   ⚠ opts.snapshot===false → THE CALLER HAS ALREADY SNAPSHOTTED THIS GESTURE. The inline field
+   (editPosInline below) rides makeEditable's own undo entry, taken the moment the field opened; a
+   `pushUndo` here as well would leave TWO entries describing one retag and ⌘Z would need two presses to
+   get back. Same division the grid's UPOS cell already makes — `commitCell` owns its `pendingSnap` and
+   runs these steps inside it. Everything else about the two paths is identical, deliberately.
+   Returns true when it actually changed something. */
+/* ⚠ SETTING A CLASS **AND** A SUBTYPE IS ITS OWN COMMIT, and this is the one copy of it. Factored out of
+   `posSubItems`/`posSubOtherItems`'s own `setSub` when the typed word-class field learnt to accept
+   `PRON.Dem` (on request, "the POS input field should also show POS subtypes") — three call sites setting a
+   dot-suffixed tag three ways is exactly how the flyout and the field would come to mean different things.
+   ⚠ IT IS NOT `retagToken` PLUS A FEATURE, and must not become that: `retagToken` ends in `regenTok`, and a
+   re-parse would re-derive FEATS over the very subtype just chosen (item 10's own note on this line). A
+   subtype is a FEATURE edit that happens to carry a class with it, so it commits like the feature edits
+   around it — no reparse — while a bare tag keeps the full retag cascade.
+   `feats` is the whole subtype set for the class, so picking PRON.Dem drops a stale PRON.Int rather than
+   leaving the token claiming both. */
+function retagSubtype(si,tokId,U,f,v,opts){ const s=DOC[si], t=s&&s.tokens[tokId-1]; if(!t) return false;
+  const feats=subtypeFeatsFor(U), before=t.feats, gained=!!U&&t.upos!==U;
+  if(!(opts&&opts.snapshot===false)) pushUndo(si);   // …`snapshot:false` for a caller riding its own undo entry (the typed field, through makeEditable) — the same division `retagToken` makes, and without it one commit cost the reader two ⌘Z
+  if(t.upos!==U){ t.upos=U; clearFeatsForUpos(t); }   // a tag change drops what the new class cannot carry
+  feats.forEach(o=>{ if(o!==f) t.feats=clearFeat(t.feats,o); });
+  t.feats=(f&&v)?setFeat(t.feats,f,v):t.feats;
+  syncXposMirror(t);                                  // covers both halves: the class and the subtype FEATS
+  featsSyncGloss(t,before);
+  if(gained) inheritAnnotationForUpos(si,tokId);      // …AFTER featsSyncGloss — see posSubItems' own note on the order
+  markDirty(); preserveScroll(renderDoc); return true; }
+/* Every dot-suffixed tag a class can wear, as the field's own vocabulary: `{label:"PRON.Dem", feat, val}`.
+   The CEILING (what UD defines for the class), not only what this document attests — the flyout splits those
+   two because it is a menu you read, and this is a field you type into, where a completion that refuses a
+   real UD tag because nobody has used it yet is just a wrong answer. Title-case values, matching the menu's
+   own spelling; the ROW paints them uppercase (posDisp) and the guard folds case anyway. */
+function subtypeOptionsFor(U){ const out=[];
+  if(!U) return out;
+  subtypeFeatsFor(U).forEach(f=>{ (subtypeValsCeiling(f,U)||[]).forEach(v=>{
+    out.push({label:U+"."+subtypeSuffix(f,v), feat:f, val:v}); }); });
+  return out; }
+function retagToken(si,tokId,p,opts){ const s=DOC[si], tok=s&&s.tokens[tokId-1]; if(!tok) return false;
+  const posChanged=p!==tok.upos, hadSub=UPOS_SUBTYPE_FEATS.some(f=>getFeat(tok.feats,f));
+  if(!posChanged&&!hadSub) return false;   // same tag, no subtype to drop → nothing to do
+  const before=tok.feats, oldUpos=tok.upos;
+  if(!(opts&&opts.snapshot===false)) pushUndo(si);
+  tok.upos=p; syncXposMirror(tok); clearFeatsForUpos(tok);   // item 1: a tag change drops what the new class cannot carry — a now-meaningless Subj, and every feature the UD tables do not put on this class
+  UPOS_SUBTYPE_FEATS.forEach(f=>tok.feats=clearFeat(tok.feats,f));   // item 6: setting a PLAIN tag clears any dot-suffixed subtype
+  featsSyncGloss(tok,before);
+  if(posChanged) uposSyncGloss(tok,oldUpos);   // Task B: retarget the closed-class gloss prefix IN PLACE, immediately — never a wholesale MGloss rebuild (see uposSyncGloss's own note, js/io/bridge.js)
+  /* …and a token that has just GAINED a class inherits the FEATS and glosses this word was last
+     given under it (inheritAnnotationForUpos, js/io/bridge.js). `posChanged && p` is the gate the
+     request names: never on the same-tag/clear-the-subtype path the guard above already distinguishes,
+     and never on "Clear word class" — `p===""`, where there is no class to have been seen under
+     (the typed field reaches that same state by clearing the input). Inside the caller's undo entry,
+     so ⌘Z takes the retag and what it brought with it as ONE step, and BEFORE the regenTok below,
+     whose `prior_feats` then carries the inherited column to the parser as the annotator's own. */
+  if(posChanged&&p) inheritAnnotationForUpos(si,tokId);
+  markDirty(); preserveScroll(renderDoc);
+  if(posChanged) uposSyncTranslit(si,tokId);   // the romanisation and script glyph are asked for a form AS a part of speech, so a retag makes both stale — refreshed HERE rather than left to regenTok below, which reaches its own translit pass on only one of its paths (no model / a misaligned re-parse skip it entirely). BEFORE regenTok so the fast language-driven refresh lands first, exactly as afterFormEdit orders the same two; regenTok's trailing pass then finds every value current and rewrites what is already there
+  if(posChanged) regenTok(si,tokId,{regloss:true});   // regloss: the re-parse re-derives the FEATS for the chosen class, so the MGloss has to gain the categories that class brought with it and not merely lose the old one's (mglossFillFromFeats, js/io/bridge.js) — uposSyncGloss above has already moved the AUX/DET prefix, which is the one piece UPOS drives on its own.   // only a genuine POS change reparses; a same-tag "clear subtype" must not (item 10)
+  return true; }
 // right-click a POS tag → pick a UPOS (all shown, grouped by class). With opts.ext it is the SAME menu, only
 // SCOPED to the external POS of a multi-token expression (item 2): the chosen tag lands in ExtPos on the head
 // of the selection, not in UPOS, and NOUN/VERB/… are all offered (ExtPos may be any word class).
@@ -752,15 +851,7 @@ function posMenu(x,y,si,tokId,opts){ opts=opts||{}; const s=DOC[si]; if(!s)retur
   const posSubW=(typeof tokenScores!=="function")?null:(async()=>{
     const sc=await tokenScores(si); return (sc&&sc.upos_sub&&sc.upos_sub[tokId-1])||null; })();
   const subFor=U=>{ const n=posSubCount(U); return n?{fn:()=>posSubItems(si,tokId,U), count:n, weights:posSubW}:null; };   // item 4: every tag with subtypes gets a right-click submenu of them (item 29: and a badge saying how many; a tag with none no longer offers an empty flyout)
-  const choose=p=>{ const posChanged=p!==tok.upos, hadSub=UPOS_SUBTYPE_FEATS.some(f=>getFeat(tok.feats,f));
-    if(!posChanged&&!hadSub) return;   // same tag, no subtype to drop → nothing to do
-    const before=tok.feats, oldUpos=tok.upos; pushUndo(si); tok.upos=p; syncXposMirror(tok); clearFeatsForUpos(tok);   // item 1: a tag change drops what the new class cannot carry — a now-meaningless Subj, and every feature the UD tables do not put on this class
-    UPOS_SUBTYPE_FEATS.forEach(f=>tok.feats=clearFeat(tok.feats,f));   // item 6: selecting a PLAIN tag clears any dot-suffixed subtype
-    featsSyncGloss(tok,before);
-    if(posChanged) uposSyncGloss(tok,oldUpos);   // Task B: retarget the closed-class gloss prefix IN PLACE, immediately — never a wholesale MGloss rebuild (see uposSyncGloss's own note, js/io/bridge.js)
-    markDirty(); preserveScroll(renderDoc);
-    if(posChanged) uposSyncTranslit(si,tokId);   // the romanisation and script glyph are asked for a form AS a part of speech, so a retag makes both stale — refreshed HERE rather than left to regenTok below, which reaches its own translit pass on only one of its paths (no model / a misaligned re-parse skip it entirely). BEFORE regenTok so the fast language-driven refresh lands first, exactly as afterFormEdit orders the same two; regenTok's trailing pass then finds every value current and rewrites what is already there
-    if(posChanged) regenTok(si,tokId,{regloss:true}); };   // regloss: the re-parse re-derives the FEATS for the chosen class, so the MGloss has to gain the categories that class brought with it and not merely lose the old one's (mglossFillFromFeats, js/io/bridge.js) — uposSyncGloss above has already moved the AUX/DET prefix, which is the one piece UPOS drives on its own.   // only a genuine POS change reparses; a same-tag "clear subtype" must not (item 10). regenSecondaries' OWN gloss-touch is now itself non-destructive in place too (Task B) — see its own note
+  const choose=p=>retagToken(si,tokId,p);   // …the SHARED funnel above, never a second copy of it: the typed POS field (editPosInline) commits through the very same call, so a retag cannot mean one thing when picked and another when typed
   /* CLEAR THE WORD CLASS — `choose("")`, the very function every tag row calls, so clearing goes down the one
      path that already knows what a retag entails (drop the dot-suffix subtypes, re-sync XPOS where it mirrors,
      drop a Subject that only a VERB/AUX can carry, retarget the closed-class gloss prefix, re-ask the parser for
@@ -822,7 +913,7 @@ function nodeTokenMenu(x,y,si,tokId){ const s=DOC[si]; if(!s)return; const rtl=s
     combineItems.unshift([`Group ${selRange.from}–${selRange.to} as MWT`,"⌘G",()=>addMWT(si,selRange.from,selRange.to)]); }
   const items=[
     ["Edit token","↩",()=>editNodeInline(si,tokId)],
-    ["Edit lemma…","⌘L",()=>editLemmaPrompt(si,tokId)],   // the accelerator is named now that ⌘L is the ONLY gesture besides this row — the double-click that used to open it is gone   // item 4: the same editor a double-click on the token opens — that gesture has nothing on screen to advertise it, so the command needs a menu row of its own. Ellipsis, unlike "Edit token" above: this one opens a popover rather than editing in place, which is what the ellipsis means on macOS
+    ["Edit lemma…","⌘L",()=>editLemmaAt(si,tokId)],   // the accelerator is named now that ⌘L is the ONLY gesture besides this row — the double-click that used to open it is gone   // item 4: the same editor a double-click on the token opens — that gesture has nothing on screen to advertise it, so the command needs a menu row of its own. Ellipsis, unlike "Edit token" above: this one opens a popover rather than editing in place, which is what the ellipsis means on macOS
     // set/edit MISC CorrectForm independent of Typo (parity fix): omitted on a goeswith head, mirroring
     // correctFormShown's own exclusion there (diagram-core.js) — that token's CorrectForm means something else
     // structurally (the joined halves, already shown by the slur) and is never drawn as a correction.
@@ -1029,7 +1120,7 @@ function bracketTokenEl(e){
 function posRelHit(target){ if(!target||!target.closest) return null;
   let relEl=target.closest(".lbl,.orel,.bwrel");
   if(relEl && !(relEl.textContent||"").trim()) relEl=null;   // a reserved (blank " ") .bwrel row — an interrupter's or root-neighbour's placeholder — is NOT a deprel label; fall through to the token menu
-  const posEl=relEl?null:target.closest(".tok-pos,.node-cat,.opos,.bwpos");
+  const posEl=relEl?null:target.closest(POS_SEL);
   /* item 29 — …AND THE EDGE ITSELF, on request ("right-clicking a dependency edge with no relation should bring
      up the deprel context menu"). It is the only way in once the label is gone: an EMPTY relation draws no label
      at all (that is the settled behaviour — see diagram-rendering.md), so there was nothing left to right-click.
@@ -1113,10 +1204,19 @@ function avmValueMenu(x,y,si,tokId,key){
   const s=DOC[si]; if(!s) return false; const t=s.tokens[tokId-1]; if(!t) return false;
   const members=(typeof AVM_GROUPS==="object"&&AVM_GROUPS[key])?AVM_GROUPS[key].filter(f=>getFeat(t.feats,f)!=null):[key];
   const items=[];
+  /* ⚠ THE MODIFIER IS ANNOUNCED, because a gesture nothing on screen names is one nobody discovers and
+     everybody triggers by accident — the same reasoning that removed the double-tap lemma gesture
+     (js/diagram/diagram-edit.js). One hint for the whole menu rather than one per feature block: renderMenu
+     pins a `note` above the groups, so it reads as a statement about the menu, which is what it is. Added
+     only where there are value rows for it to be about. */
+  let hinted=false;
+  const hintCombine=()=>{ if(hinted) return; hinted=true;
+    items.push({note:"⌘-click a value to combine it with the others (UD writes those Feat=A,B)"}); };
   members.forEach(feat=>{
     const cur=getFeat(t.feats,feat);
     const vals=(typeof attestedFeatVals==="function"?attestedFeatVals(feat):null)||UD_FEATS[feat]||[];
     if(!vals.length && !cur) return;   // nothing to pick AND nothing to clear
+    if(vals.length>1) hintCombine();
     const desc=(typeof FEATS_VDESC==="object"&&FEATS_VDESC&&FEATS_VDESC[feat])||{};
     items.push({header:feat});
     // BUGFIX (parity audit): alternates are only worth OFFERING when there's more than one candidate to pick
@@ -1128,7 +1228,19 @@ function avmValueMenu(x,y,si,tokId,key){
     // offered instead of declining outright"). The two checks are now separate: `vals.length>1` still gates the
     // picker rows (nothing to switch a single-candidate feature TO — re-picking the one listed value was already
     // a no-op, avmSetFeat returns early when next===t.feats), while Clear is gated on `cur` alone.
-    if(vals.length>1) vals.forEach(v=>items.push({label:v, expand:desc[v]||"", check:v===cur, opt:true, fn:()=>avmSetFeat(si,tokId,feat,v)}));
+    /* ⚠ ⌘/Ctrl-CLICK COMBINES; A PLAIN CLICK REPLACES. UD writes several values of one feature as a comma
+       list — `Voice=Cau,Pass`, `Case=Acc,Dat` — and any feature may take one (see the note above
+       `featValList`, js/grid/grid.js). The modifier is what tells the two gestures apart, and it is the
+       modifier rather than a toggling menu because replacing a value is the common case and must stay one
+       click. The menu STAYS OPEN for a combining click (`keepOpen` reads the same event), since choosing two
+       values is one thought; a replacing click closes it as it always has.
+       The tick asks MEMBERSHIP, so a token already carrying `Cau,Pass` shows both rows ticked rather than
+       neither — which is what it did when the check was `v===cur` against a comma string. */
+    const combine=e=>!!(e&&(e.metaKey||e.ctrlKey));
+    const isOn=v=>(typeof featHasVal==="function")?featHasVal(cur,v):v===cur;
+    if(vals.length>1) vals.forEach(v=>items.push({label:v, expand:desc[v]||"", check:isOn(v), opt:true,
+      keepOpen:combine,
+      fn:e=>combine(e)?avmToggleFeat(si,tokId,feat,v):avmSetFeat(si,tokId,feat,v)}));
     // "Other …" flyout — candidates are UD_FEATS[feat] MINUS whatever `vals` (just above) already offered as an
     // alternate row, i.e. genuinely new-to-this-menu values only. Deliberately complementing `vals` itself rather
     // than recomputing "attested" from scratch: `vals` already IS attestedFeatVals(feat), doc-wide (not UPOS-
@@ -1144,7 +1256,8 @@ function avmValueMenu(x,y,si,tokId,key){
     const otherCands=(UD_FEATS[feat]||[]).filter(v=>!vals.includes(v));
     let sep=false; const closeGrp=()=>{ if(!sep){ items.push(null); sep=true; } };   // one shared `null` before whichever of Other/Clear appears first — same "sits flush, un-ticked, at the flyout's own level" convention Clear alone used to open on its own
     if(otherCands.length){ closeGrp();
-      items.push({label:"Other "+feat+"…", sub:()=>otherCands.map(v=>({label:v, expand:shortVDesc(desc[v]||""), fn:()=>avmSetFeat(si,tokId,feat,v)})), subFit:true}); }   // shortVDesc, not the raw gloss: this is a NESTED sub flyout same as addFeatureItems' own, and a long raw FEATS_VDESC entry wraps its row character-by-character there (see addFeatureItems' own comment on the exact same bug) — same fix applies here
+      items.push({label:"Other "+feat+"…", sub:()=>otherCands.map(v=>({label:v, expand:shortVDesc(desc[v]||""), check:isOn(v), opt:true, keepOpen:combine,
+        fn:e=>combine(e)?avmToggleFeat(si,tokId,feat,v):avmSetFeat(si,tokId,feat,v)})), subFit:true}); }   // …and the flyout's rows answer the modifier too: a value being rarer in this document is no reason for it to behave differently from the ones above   // shortVDesc, not the raw gloss: this is a NESTED sub flyout same as addFeatureItems' own, and a long raw FEATS_VDESC entry wraps its row character-by-character there (see addFeatureItems' own comment on the exact same bug) — same fix applies here
     if(cur){ closeGrp(); items.push({label:"Clear "+feat, fn:()=>avmSetFeat(si,tokId,feat,null)}); } });
   /* …and the row menu can also ADD a feature this token doesn't carry yet, on request ("right-clicking in a
      nonempty AVM should also allow for adding features"). Exactly the row the token menu already offers
@@ -1240,7 +1353,21 @@ function avmFeatRank(f){
   const gi=R[f]; return [2, gi==null?1e6:gi, f]; }
 function avmFeatCmp(a,b){ const x=avmFeatRank(a), y=avmFeatRank(b);
   return (x[0]-y[0])||(x[1]-y[1])||x[2].localeCompare(y[2]); }
-function addFeatureItems(si,tokId){
+/* Re-open the ONE flyout element off the row that opened it, with a different list in it — the
+   drill-down `posSubItems`/`posSubOtherItems` already use, and for the identical reason: there is
+   exactly one flyout layer (`ctx2`), so a row INSIDE a flyout cannot own a `sub:` of its own without
+   rebuilding the element it lives in. `ctx2._owner` is that row in the parent menu and `ctx2._colSize`
+   how it was sized, both remembered by `openSub` for exactly this. `fit`/`noWrap` are passed as the
+   literals the feature rows are opened with (`subFit`/`subNoWrap` on the "Add Feature…" row) rather
+   than read back off the element, which remembers neither: reopening without them would drop the
+   flyout back to the shared 224px floor and wrap the long value labels the noWrap opt-in exists for.
+   focusSearch, because a click on a drill row is as deliberate as a click on the row that opened the
+   flyout — and both these lists are long enough to earn the search band (SUB_SEARCH_MIN). */
+function reopenFeatSub(items){ const owner=ctx2._owner; if(owner) openSub(owner,items,true,ctx2._colSize,true,true); }
+/* `drill` — build this list for a FLYOUT rather than for a top-level menu, i.e. give it the way down to
+   `otherFeatureItems`. Off for `avmAddMenu`, which is itself a top-level menu and so can (and does) hang
+   that list off a real `sub:` row instead. */
+function addFeatureItems(si,tokId,drill){
   const s=DOC[si], t=s&&s.tokens[tokId-1]; if(!t) return [];
   const cands=Object.keys(UD_FEATS).filter(f=>!AVM_EXCLUDE.has(f)&&getFeat(t.feats,f)==null).sort(avmFeatCmp);   // …in the AVM tier's own order — see avmFeatRank
   /* One pass over the candidate features with whatever narrowing the caller hands in — `vals(f)` is the ONLY
@@ -1265,15 +1392,40 @@ function addFeatureItems(si,tokId){
      "this class takes no features here" — and the gesture falls through to the token menu rather than opening a
      picker of things that cannot apply. That is the same judgement as the annotation rules in CLAUDE.md: an
      honest blank beats an invented feature set. */
-  if(t.upos) return scoped;
-  if(scoped.length) return scoped;
-  return build(f=>UD_FEATS[f]||[]);   // untagged AND nothing attested anywhere (a fresh document, no model): the inventory itself is all there is to offer
+  const list=t.upos?scoped:(scoped.length?scoped:build(f=>UD_FEATS[f]||[]));   // untagged AND nothing attested anywhere (a fresh document, no model): the inventory itself is all there is to offer
+  if(!drill) return list;
+  /* ⚠ …AND THE REST OF WHAT UD GIVES THIS CLASS, ONE ROW DOWN — on request ("the Add Feature flyout
+     should itself have a flyout that shows the full POS-relevant UD inventory, minus the features
+     already attested in the document"). It REPLACES this flyout rather than opening inside it, which
+     is forced and not chosen (see `reopenFeatSub`); a "‹ Attested Features" row comes back, so the
+     drill-down is not a one-way door. Exactly the shape "Other subtype…" already has in the POS
+     flyout, deliberately — the two menus ask the same question of two inventories, and a reader who
+     has learnt one has learnt the other.
+     ⚠ NOTHING ATTESTED → THIS FLYOUT *IS* THE OTHER LIST, the same rule `posSubItems` settled on: a
+     flyout whose only row is "Other Feature…" asks the reader to confirm that an empty list is empty,
+     and there is nothing to go BACK to, so that list arrives with no back row either. This also
+     re-opens a door the attested-only rule had closed: a tagged token whose class this document
+     attests nothing for used to get no "Add Feature…" row at all (`addFeatureRow`'s guard), so the
+     features UD plainly gives that class were unreachable from the token menu. The honest-blank rule
+     that empty list was justified by (CLAUDE.md) is about not INVENTING an inventory; the UD
+     inventory for a word class is not invented. */
+  const other=otherFeatureItems(si,tokId);
+  if(!other.length) return list;
+  if(!list.length) return other;
+  return list.concat([null,{label:"Other Feature…", keepOpen:true, fn:()=>reopenFeatSub(()=>otherFeatureItems(si,tokId,true))}]);   // keepOpen: the row's own click must not close the menu standing behind this flyout
 }
 // the nodeTokenMenu row itself — omitted entirely when every standard feature is already set (same guard
 // shape as markFeatRow just above it), so the menu never grows for a token with nothing left to add.
 function addFeatureRow(si,tokId){
-  const items=addFeatureItems(si,tokId);
-  return items.length ? [{label:"Add feature…", sub:()=>addFeatureItems(si,tokId), subFit:true, subNoWrap:true}] : []; }   // the same list one menu up, so the same rule about wrapping
+  // …and the guard asks the DRILL question, because the drill list is now part of what this row opens:
+  // a token whose class attests nothing still has the UD inventory for that class behind this row (see
+  // addFeatureItems' own note), and omitting the row would put it back out of reach. TITLE CASE, on
+  // request, and with it the three rows of the same family below/above ("Other Feature…", "Other
+  // Subtype…" and the two ways back): macOS titles a menu item, and these four are one gesture wearing
+  // four labels. Not swept across every other row in the app in the same breath — the ones that read as
+  // sentences ("Clear word class", "Insert token above") are a separate question and not this request.
+  return addFeatureItems(si,tokId,true).length
+    ? [{label:"Add Feature…", sub:()=>addFeatureItems(si,tokId,true), subFit:true, subNoWrap:true}] : []; }   // the same list one menu up, so the same rule about wrapping
 // item 3 — shared by BOTH triggers below (right-click and double-click), so the two gestures can't come to
 // different conclusions about what was hit. A combined AGR/TAM row's own value carries one [data-subfeat]
 // span/tspan per member (drawAVM/avmInline, diagram-core.js). Landing on one of THOSE scopes the menu to that
@@ -1305,10 +1457,16 @@ function addFeatureRow(si,tokId){
    from, at the feature level — so this is not the old unfiltered fallback under a new name: Tense is
    still not offered on a PUNCT. A feature the table has no opinion about (Abbr, Typo, Foreign) is
    offered on any class, which is what "no opinion" has to mean.
-   ⚠ TOP-LEVEL MENUS ONLY, hence its place here rather than inside addFeatureItems. There is exactly
-   ONE flyout layer (`ctx2`, openSub), so a row carrying `sub:` inside a flyout would have to rebuild
-   the very element it lives in. The token menu's own "Add feature…" IS such a flyout; this menu is
-   opened straight into #ctx by a right-click on the placeholder, so its rows can own flyouts. */
+   ⚠ SUPERSEDED — "TOP-LEVEL MENUS ONLY, hence its place here rather than inside addFeatureItems".
+   The constraint behind that is unchanged and permanent: there is exactly ONE flyout layer (`ctx2`,
+   openSub), so a row carrying `sub:` inside a flyout would have to rebuild the very element it lives
+   in, and the token menu's own "Add Feature…" IS such a flyout. What has changed is that this list is
+   no longer reachable ONLY from a top-level menu — "the Add Feature flyout should itself have a flyout
+   that shows the full POS-relevant UD inventory". A flyout still cannot nest, so it DRILLS instead:
+   `addFeatureItems(si,tokId,true)` ends in an "Other Feature…" row that re-opens the one flyout off
+   its own owner with this list in it, and this list ends in the way back (`back`). Which of the two
+   shapes a caller gets is which question it is in a position to ask: this menu is opened straight into
+   #ctx by a right-click on the placeholder, so its rows can still own real flyouts and it keeps them. */
 /* ⚠ THE UD INVENTORY FOR THE CLASS, MINUS WHAT THE MAIN LIST IS ALREADY OFFERING. Settled after three
    readings of it, and the two rejected ones are kept here because each looks right until it is used:
      · per FEATURE — carrying only features with NO attestation at all for the class. The narrowing it
@@ -1325,7 +1483,7 @@ function addFeatureRow(si,tokId){
    with nothing left over is omitted entirely. The other filters are the word class (`featOnUpos`), the
    AVM's own excluded keys, and a feature already set on this token — which the row above the
    placeholder is what edits. */
-function otherFeatureItems(si,tokId){ const s=DOC[si], t=s&&s.tokens[tokId-1]; if(!t) return [];
+function otherFeatureItems(si,tokId,back){ const s=DOC[si], t=s&&s.tokens[tokId-1]; if(!t) return [];
   const up=t.upos||"";
   const cands=Object.keys(UD_FEATS).filter(f=>!AVM_EXCLUDE.has(f) && getFeat(t.feats,f)==null
       && (typeof featOnUpos!=="function"||featOnUpos(f,up)))
@@ -1336,12 +1494,20 @@ function otherFeatureItems(si,tokId){ const s=DOC[si], t=s&&s.tokens[tokId-1]; i
     const desc=(typeof FEATS_VDESC==="object"&&FEATS_VDESC&&FEATS_VDESC[f])||{};
     out.push({header:f});
     vv.forEach(v=>out.push({label:v, expand:shortVDesc(desc[v]||""), fn:()=>avmSetFeat(si,tokId,f,v)})); });
+  /* ⚠ THE WAY BACK GOES LAST, and it is written last because renderMenu would put it there anyway: a
+     row preceding the first `header` belongs to no group, and every groupless row is collected into the
+     TAIL and appended after the groups. Pushed at the front it still rendered at the bottom — with its
+     separator below it rather than above. (The identical note, and the identical row, sit on
+     `posSubOtherItems`; the two drill-downs are deliberately the same gesture.) Only where a caller
+     asked for it: the AVM placeholder menu hangs this list off a real `sub:` row, and a flyout that can
+     simply be dismissed has nothing to go back TO. */
+  if(back&&out.length) out.push(null,{label:"‹ Attested Features", keepOpen:true, fn:()=>reopenFeatSub(()=>addFeatureItems(si,tokId,true))});
   return out; }
 function avmAddMenu(x,y,si,tokId){ const s=DOC[si]; if(!s) return false;
   const items=addFeatureItems(si,tokId);
   const other=otherFeatureItems(si,tokId);
   if(other.length){ if(items.length) items.push(null);   // a separator only where there is something above it to separate from
-    items.push({label:"Other feature…", sub:()=>otherFeatureItems(si,tokId), subFit:true, subNoWrap:true}); }
+    items.push({label:"Other Feature…", sub:()=>otherFeatureItems(si,tokId), subFit:true, subNoWrap:true}); }
   if(!items.length) return false;
   /* ⚠ ONE COLUMN, FITTED — the SAME shape the "Add feature…" flyout has in the token menu, on request
      ("right-clicking an AVM placeholder should ONLY bring up the contents of the Add feature submenu"). The
@@ -1351,7 +1517,13 @@ function avmAddMenu(x,y,si,tokId){ const s=DOC[si]; if(!s) return false;
      place. `false` for twoCol, `true` for fit — `subFit:true` is what addFeatureRow passes for the flyout. */
   showCtx(x,y,items, false, sentRTL(s), true); return true; }
 function avmMenuAt(e,x,y){
-  const addEl=e.target.closest&&e.target.closest(".avm-add,.oavm-empty");
+  /* `.avm-plus` joins the two placeholders here rather than getting a resolver of its own: all three ask
+     the identical question ("what could this token gain?") and answer it with the identical menu, and the
+     one that is NOT a placeholder — the + on a matrix that already has rows — is the reason the row-level
+     `.avm-row` branch below must not claim it first (it would offer that FEATURE's values instead). It is
+     also why the + is matched BEFORE `.avm-row`: in the SVG notations the two are siblings inside one token
+     group, and `closest` would happily find either. */
+  const addEl=e.target.closest&&e.target.closest(".avm-add,.oavm-empty,.avm-plus");
   if(addEl){ const atk=tokFromEl(addEl); if(atk) return avmAddMenu(x,y,atk.si,atk.tokId); }
   const avmEl=e.target.closest&&e.target.closest(".avm-row"); if(!avmEl) return false;
   const tk=tokFromEl(avmEl); if(!tk) return false;
@@ -1452,9 +1624,21 @@ document.getElementById("doc").addEventListener("dblclick",e=>{
 // handled here alongside the tier/translit/MWT-form editors, none of which are draggable either.
 document.getElementById("doc").addEventListener("click",e=>{
   if(e.target.closest(".node,.tok-group,.bwtok")) return;   // these three classes only ever exist inside a draggable notation (stemma/tree/arcs/brackets) — pointerup above already opens the right editor for whatever was actually clicked (form vs. a nested tier), and DSUPPRESS's timing isn't reliable enough to trust this click won't ALSO fire and reopen a second, wrong editor
+  /* item 30 — the AVM's "+" answers a PLAIN CLICK, which is the whole point of drawing an affordance:
+     every other route to the add-feature picker is a right-click. This is the OUTLINE's route (.oavm-plus);
+     the four draggable notations reach the same menu from the tap branch in js/diagram/diagram-edit.js,
+     which has to resolve the tapped element before pick() re-renders. It goes AHEAD of the `.avm-row`
+     return below — in the outline the + is a sibling of the rows inside one `.oavm`, and that return would
+     otherwise swallow the click as "an AVM row is menu-only". */
+  const apEl=e.target.closest(".avm-plus");
+  if(apEl){ const tk=tokFromEl(apEl); if(tk){ e.preventDefault(); const b=apEl.getBoundingClientRect();
+    if(avmAddMenu(b.left+b.width/2,b.bottom,tk.si,tk.tokId)) setAvmOpen(apEl);   // …and the matrix stays grown, or the outline's + stays up, while its own menu is open
+    return; } }   // anchored to the mark, not the pointer — a menu hinged off the thing that opened it
   if(e.target.closest(".avm-row")) return;   // item 3: an AVM row (outline's own — the SVG notations already returned above, via .node/.tok-group/.bwtok) is edited through its right-click/double-click MENU only, never inline text entry; with no exclusion here a plain single click fell through to the generic `.oline` branch below and opened the TOKEN's form editor instead — which also broke the double-click trigger just above, since its first click was busy replacing the row with an <input> before the second click could land on the same element
   const trEl=e.target.closest(".tr-edit"); if(trEl){ const tk=tokFromEl(trEl); if(tk){ e.preventDefault(); editTransInline(tk.si,tk.tokId,{x:e.clientX,y:e.clientY}); return; } }   // edit the romanisation shown under a token — or, where the romanisation is non-deterministic, the STORED transliteration it is derived from (trRowEdit decides when the row carries .tr-edit at all)
-  const glEl=e.target.closest(".gl-edit"); if(glEl){ const tk=tokFromEl(glEl); if(tk){ e.preventDefault(); editTier(tk.si,tk.tokId,glEl.dataset.tier||"gloss",{x:e.clientX,y:e.clientY}); return; } }   // edit a gloss / morphemic tier → MISC
+  const glEl=e.target.closest(".gl-edit"); if(glEl){ const tk=tokFromEl(glEl); if(tk){ e.preventDefault(); editTier(tk.si,tk.tokId,glEl.dataset.tier||"gloss",{x:e.clientX,y:e.clientY}); return; } }
+  const lmEl=e.target.closest(".lem-edit"); if(lmEl){ const tk=tokFromEl(lmEl); if(tk){ e.preventDefault(); editLemmaInline(tk.si,tk.tokId,{x:e.clientX,y:e.clientY},lmEl); return; } }   // item 29: the lemma row answers the same single click its neighbours do. This is the OUTLINE's route (.olemma); the four draggable notations reach the same function from the tap branch in js/diagram/diagram-edit.js, which resolves the tapped element before pick() re-renders — exactly as .tr-edit/.gl-edit/POS_SEL above already do   // edit a gloss / morphemic tier → MISC
+  const poEl=e.target.closest(POS_SEL); if(poEl){ const tk=tokFromEl(poEl); if(tk){ e.preventDefault(); editPosInline(tk.si,tk.tokId,{x:e.clientX,y:e.clientY},poEl); return; } }   // …and the POS row, on the same single click its neighbours already answer (editPosInline). This is the OUTLINE's route (.opos) — the four draggable notations reach the same function from the tap branch in js/diagram/diagram-edit.js, which has to resolve the tapped element before pick() re-renders. It goes AHEAD of the generic .oline branch below, which used to claim this click and open the token's FORM editor: clicking a word class opened a field over the WORD
   const mwtEl=e.target.closest(".mwt-form,.mwt-tr-edit"); if(mwtEl&&mwtEl.hasAttribute("data-mwtfrom")){ e.preventDefault();
     editMWTInline(+mwtEl.getAttribute("data-s"), +mwtEl.getAttribute("data-mwtfrom"),{x:e.clientX,y:e.clientY}); return; }   // EITHER tie row opens the same editor, and editMWTInline (via mwtElOf) decides which element the field actually opens OVER — under iastFormEdit() the IAST row, else the glyph. That is the same one-way-in shape a single token has: editNodeInline takes every click on a token and routes it onto the transliteration row when the glyph is a derived rendering (see its own iastFormEdit branch), rather than making the caller know which row is editable. An earlier version made the glyph SELECT-ONLY under a Sanskrit script, on the reasoning that a derived glyph must not be edited — true of the glyph, but the user still expects the click to reach the field the glyph was rendered from, exactly as it does on a single token. Selecting the component range is not lost: editMWTInline does it first, for every entry point including the right-click menu.   // This branch was dead until mwtTie stopped attaching its own stopPropagation()-ing click listener to the same element — the tie label never reached this delegated handler at all, so the only way in was the right-click menu. Both rows are plain <text> inside the tie's own .mwt-g group (item 8's per-tie selection wrapper) — never inside .node/.tok-group/.bwtok, which is what the pointerup tap path above keys off, so it can't ALSO open an editor for them (no double-open). The data-mwtfrom guard skips the untagged rows the si==null render path draws.
   const cfEl=e.target.closest(".cform"); if(cfEl){ const tk=tokFromEl(cfEl); if(tk){ e.preventDefault(); editCorrectFormInline(tk.si,tk.tokId,{x:e.clientX,y:e.clientY}); return; } }   // item 6: click the correct-form companion → edit MISC CorrectForm in place (data-s/data-tok are set on the element itself, so tokFromEl resolves it directly whether the element is bare-SVG or nested in .oline)
@@ -1498,15 +1682,116 @@ function editTransInline(si,tokId,clickXY){ const s=DOC[si]; if(!s||tokId<1||tok
       const t=s.tokens[tokId-1]; t.misc=setMiscKV(t.misc,"Translit",t.translit||""); t._trMisc=!!(t.translit); markDirty(); preserveScroll(renderDoc); },   // persist the edit to MISC Translit (a manual edit is authoritative)
     sentRTL(s), ()=>transElOf(si,tokId), null, false, clickXY); }
 // inline-edit a token's gloss / morphemic tier on a diagram → the tier's MISC attribute (a proxy maps the "v" key onto MISC so the live preview reads/writes the same store)
+/* ── item 29: TYPING A LEMMA ON THE DIAGRAM ────────────────────────────────────────────────────────
+   The lemma row is an inline field like every other row of the below-stack: the same gesture (a plain
+   click/tap — see the `.lem-edit` routing in the #doc click handler below and in js/diagram/diagram-edit.js's
+   tap branch), the same editor (makeEditable), and the same navigation stack (navStack/tierNav).
+   ⚠ IT IS FREE TEXT, so there is no `opts.guard` and no `opts.ac` — the discipline editPosInline documents
+   at length above is about a CLOSED inventory, and a lemma has none. `allowEmpty` IS passed: an empty lemma
+   is a state CoNLL-U spells `_` and this app already supports everywhere else (editLemmaPrompt's own "Leave
+   blank for none"), so clearing the field is how a reader withdraws one.
+   ⚠ AND IT COMMITS THROUGH `commitLemmaEdit` (js/grid/grid.js) — the SAME funnel the grid's own Lemma cell
+   goes through, not a second path. That function is where the whole asynchronous cascade a new lemma sets
+   off is sequenced: afterLemmaEdit (js/io/bridge.js) drops the stale lemma-romanisation, awaits the new one,
+   rewrites MISC LTranslit and only THEN re-derives MSeg from it, and mglossReslot re-slots MGloss against
+   the segmentation that produced — all inside the ONE undo step makeEditable's `finish` has already pushed.
+   Note what it deliberately does NOT do: an eager re-render. Its own note explains why (nothing on screen
+   can be right until the await lands), and that reasoning survives this row existing — the lemma the reader
+   just typed is already on screen in the field they typed it in, and makeEditable's finish() renders once by
+   itself before `after` is called.
+   ⚠ THE FIELD OPENS ON WHAT IS STORED, never on what the row paints — the same rule editPosInline and the
+   MSeg editor state. A blank slot opens the field on whatever the lemma COLUMN holds — the form it equals,
+   or nothing at all where the column is empty — never on the ink, because there is none. (Under the item-29
+   gate this paragraph named TIER_EMPTY, which that row can no longer paint: see lemmaRowTxt's own note.)
+   Committing "_" as a lemma would put CoNLL-U's own empty marker in the column as if it were a word.
+   ⚠ item 31 REVERSES THIS NOTE'S OWN "A TOKEN WHOSE ROW IS BLANK HAS NO FIELD AT ALL". It followed from the
+   display gate (lemmaRowTxt, js/diagram/diagram-core.js) — no ink to lay a field over, nothing to hide
+   underneath it — and it is answered rather than argued with: a blank slot now carries a transparent target of
+   its own (`.lem-hit`), so there IS something to lay the field over and something to hide, on instruction
+   ("clicking on a hidden lemma should still bring up the input field"). What survives of the old reading is
+   the SENTENCE case: a sentence in which nothing shows a lemma has no row at all, and there the field is given
+   one — see lemRowForce below/in diagram-core.js. editLemmaPrompt remains the fallback for what neither can
+   reach: a hidden tier (the reader's own Show/Hide choice), and a selection whose block is not on screen. */
+function lemmaElOf(si,tokId){ const g=tokGroupOf(si,tokId);
+  return g?g.querySelector(".lem-edit"):null; }   // one class across all three renderings (.tok-lemma SVG, .bwlemma wrapped brackets, .olemma outline) — and, since item 31, on the transparent `.lem-hit` target a blank slot carries, which is why exactly ONE element per token may wear it
+/* Returns whether a field was actually opened, so a caller with a fallback (editLemmaAt below) can tell "the
+   row is there and the field is up" from "nothing here could be edited in place".
+   ⚠ THE FORCED ROW IS UNDONE BY THE COMMIT CALLBACK, whatever the edit did — including a cancel, and including
+   a commit whose new lemma keeps the row alive on its own merits (there the slide measures 0 and does nothing).
+   `forced` is captured per call: two lemma edits can never be open at once (makeEditable's own INLINE_EDIT_OPEN
+   contract), so the flag needs no stack. */
+function editLemmaInline(si,tokId,clickXY,el){ const s=DOC[si]; if(!s||tokId<1||tokId>s.tokens.length)return false; const t=s.tokens[tokId-1];
+  if(typeof lemForceHold==="function") lemForceHold();   // …claim the forced row before the release that the blur just armed can take it away (see lemForceRelease)
+  el=el||lemmaElOf(si,tokId);
+  let forced=false;
+  if(!el && typeof lemRowForce==="function"){ forced=lemRowForce(si,true); if(forced) el=lemmaElOf(si,tokId); }   // item 31: no row in this sentence → bring one in (and slide it in), then look again in the DOM the re-render just built
+  if(!el){ if(forced&&typeof lemForceRelease==="function") lemForceRelease(); return false; }
+  /* A PROXY, not `t` itself with key "lemma": the stored column is "_" for an empty lemma and the field must
+     show that as blank, and a committed blank must go back as "_" rather than "". Same unwrapping the grid's
+     own cell and editLemmaPrompt do at their own edges. */
+  const proxy={ get v(){ return (t.lemma&&t.lemma!=="_")?t.lemma:""; }, set v(val){ t.lemma=val||"_"; } };
+  makeEditable(el, proxy, "v",
+    /* item 31: the forced row goes back out FIRST — ahead of commitLemmaEdit's own asynchronous cascade, so the
+       two are not both rebuilding this block. A no-op when the committed lemma now differs from the form: the
+       row stays on its own merits and the slide measures 0.
+       ⚠ AND lemRowForce ALREADY RENDERS, so the no-op branch below must not render AGAIN — measured: the second
+       preserveScroll(renderDoc) replaced the very element lemSlide had just written its from-state onto, so the
+       departure animated in Chrome for exactly as long as it took the next statement to run (probe:
+       `animOut: []` against `animIn: ["clip-path","margin-bottom"]`). Rendering twice was always wasteful; here
+       it was also visible. */
+    /* ⚠ THE RELEASE IS DEFERRED HERE TOO, and for the same reason it is in the form editor: tabbing along
+       the row fires THIS commit while the next field is opening, so dropping the force now would collapse
+       the row under the field the reader just moved into. `lemForceRelease` asks on the next tick whether
+       any field is still open. `willRelease` keeps the original no-double-render care intact: where a
+       release is coming, its own re-render is the one that should land — a second one here replaced the
+       element `lemSlide` had written its from-state onto and the departure never animated. */
+    changed=>{ const willRelease=(typeof LEM_FORCE_SENT!=="undefined"&&LEM_FORCE_SENT===s);
+      if(typeof lemForceRelease==="function") lemForceRelease();
+      if(!changed){ if(!willRelease) preserveScroll(renderDoc); return; }   // an opened-and-closed field writes nothing and marks nothing dirty — the same no-op contract editTransInline and the gloss tiers keep
+      markDirty();
+      if(typeof commitLemmaEdit==="function") commitLemmaEdit(si,tokId,t);   // guarded like the other cross-module calls here: commitLemmaEdit lives in js/grid/grid.js
+      else preserveScroll(renderDoc); },
+    sentRTL(s), ()=>lemmaElOf(si,tokId), d=>tierNav(si,tokId,"lemma",d), true, clickXY);
+  return true; }
+/* ── item 31: THE ONE WAY IN, and which editor answers ─────────────────────────────────────────────────────
+   ⌘L and the token menu's "Edit lemma…" used to go straight to the popover (editLemmaPrompt), because when
+   that row was drawn for only some tokens there was often nothing to lay a field over. There nearly always is
+   now — every token in a sentence with the row has a target, and a sentence WITHOUT the row grows one for the
+   duration of the edit — so both gestures try the inline field first and fall back to the popover only where
+   it genuinely cannot open: the tier switched off in Show/Hide (never overruled: that is a standing choice
+   about every sentence, and an edit is not permission to ignore it), or a block that is not currently
+   rendered. Both editors write the same column through the same afterLemmaEdit, so the fallback is a change of
+   surface, not of behaviour. ⚠ NO pick() ON THIS PATH — a menu command may not make a selection on the
+   reader's behalf (CLAUDE.md); it edits whatever is already selected. */
+function editLemmaAt(si,tokId,clickXY,anchor){ if(editLemmaInline(si,tokId,clickXY)) return; editLemmaPrompt(si,tokId,clickXY,anchor); }
 function tierElOf(si,tokId,tier){ const g=tokGroupOf(si,tokId);
   return g?g.querySelector(`.gl-edit[data-tier="${tier}"]`):null; }
 // item 4: the navigable vertical stack for arrow/Tab cell navigation — the token FORM row is the TOPMOST tier,
 // then the present gloss tiers (gloss / mseg / mgloss). Up/Down step through this stack at one token column.
-function navStack(){ return ["form"].concat(belowTiers()); }
-function editCell(si,tokId,tier,clickXY){ if(tier==="form") editNodeInline(si,tokId,clickXY); else editTier(si,tokId,tier,clickXY); }   // "form" → the surface-form editor, else the gloss-tier editor
-function tierNav(si,tokId,tier,d){ const s=DOC[si]; if(!s)return; const stack=navStack(); const ti=stack.indexOf(tier); if(ti<0)return; let nt=tier, nk=tokId;
+/* item 31: navStack takes the SENTENCE now, because the lemma row's presence does (lemmaRow, js/core/prefs.js).
+   ⚠ IT ASKS THE RAW `s.tokens`, NOT THE DISPLAY TOKENS the renderers stamp and measure — this is arrow/Tab
+   navigation over the DOCUMENT's own tokens, and it has no display sentence in hand. The two can disagree only
+   where a token that shows a lemma is folded out of the display (a merged punctuation mark, a goeswith
+   continuation), which would put "lemma" in the stack for a sentence whose row is not drawn; tierNav's own
+   paintsLem test below then steps over every token in it, so the step is skipped rather than opening a field on
+   nothing. `lemForced` is OR-ed in for the mirror case: the force is stamped on the display array, so the raw
+   one cannot see the row an open edit has just brought in. */
+function navStack(s){ return ["form"].concat((lemmaRow(s&&s.tokens)||(typeof lemForced==="function"&&lemForced(s)))?["lemma"]:[]).concat(belowTiers()).concat(show.pos?["pos"]:[]); }   // item 29: …and the LEMMA row between the form and the gloss tiers, which is where every renderer draws it, gated on the same lemmaRow() every reserve reads. A token that paints nothing there is stepped OVER rather than stopped at — see tierNav below   // …and the POS row LAST, which is where the diagram draws it (below the gloss tiers) and only while it is shown — the same `show.pos` gate belowStack and every reserve already ask. The transliteration row is still deliberately absent: it is not always this token's own stored value (see editTransInline's three branches)
+function editCell(si,tokId,tier,clickXY){ if(tier==="form") editNodeInline(si,tokId,clickXY); else if(tier==="pos") editPosInline(si,tokId,clickXY); else if(tier==="lemma") editLemmaInline(si,tokId,clickXY); else editTier(si,tokId,tier,clickXY); }   // "form" → the surface-form editor, "pos" → the strict word-class field, else the gloss-tier editor
+function tierNav(si,tokId,tier,d){ const s=DOC[si]; if(!s)return; const stack=navStack(s); const ti=stack.indexOf(tier); if(ti<0)return; let nt=tier, nk=tokId;
+  /* ⚠ THE LEMMA ROW IS WALKED LIKE ANY OTHER, BLANK SLOTS INCLUDED — superseding this note's own earlier
+     record that navigation stepped OVER a token whose lemma is not painted. That skip was written on the
+     reading that "a click aims at one slot, a keyboard walk stops only where there is something to read",
+     and the reader has corrected it: "tabbing on a lemma input field should navigate to the adjacent lemma
+     field even if it is hidden". It is the better rule, and not only by instruction — the blank slot is
+     EDITABLE (item 31 gave it a target of its own), so a walk that refuses to stop there cannot reach the
+     one state the row exists to let you change: a lemma that is currently the same as its form. Tab was the
+     only way to move along the row without aiming, and it skipped exactly the cells with nothing to aim at.
+     Nothing else here changes: the row is still reserved for every token of a sentence that HAS it, so a
+     stop is always over a real slot, and Up/Down still cannot land on the row in a sentence that has none
+     (navStack leaves "lemma" out of the stack entirely there). */
   if(d.tier){ const j=ti+d.tier; if(j<0||j>=stack.length)return; nt=stack[j]; }   // Up/Down: across tiers (incl. the form row), same token
-  if(d.tok){ const k=tokId+d.tok; if(k<1||k>s.tokens.length)return; nk=k; }        // Left/Right/Tab: token-wise along the tier
+  if(d.tok){ const k=tokId+d.tok; if(k<1||k>s.tokens.length)return; nk=k; }       // Left/Right/Tab: token-wise along the tier, whether or not this one paints
   if(nt===tier && nk===tokId)return;
   if(nk!==tokId) pick(si,nk,false,false);   // keep the selection highlight (grid row + diagram token) in step with the editor AS it moves between tokens — editNodeInline/editTier only call pick() from their COMMIT callback (blur/Enter), which doesn't fire again until you leave the field, so without this the highlight lagged one token behind the editor while you kept arrowing/tabbing through
   revealTok(si,nk);   // item 6: …and bring that token into view BEFORE the field opens over it. Order matters: makeEditable's place() measures the element's rect once on open, and its elClippedOut() check HIDES the field outright while the element is scrolled out of its own .diagram — so Tab-ing along a wide unwrapped diagram used to walk the editor off the edge and then make it disappear, rather than scrolling after it
@@ -1590,12 +1875,117 @@ function editTier(si,tokId,tier,clickXY){ const s=DOC[si]; if(!s||tokId<1||tokId
     markDirty(); preserveScroll(renderDoc); };
   if(tier!=="mseg") makeGlossEditableSC(el, proxy, "v", after, sentRTL(s), ()=>tierElOf(si,tokId,tier), d=>tierNav(si,tokId,tier,d), clickXY, tier==="mgloss"?tk:null, glossTierAbbr(tier));   // live c2sc small-caps on its Leipzig abbreviations as the user types — on BOTH gloss tiers, matching how both now render (setGlossText); MSeg is word text, not a gloss, so it keeps the plain <input> editor. Task C: the trailing token is the MGloss abbreviation-autocomplete's UPOS context (AMBIG_UPOS) — passed ONLY for "mgloss" (a lexical Gloss definition isn't built from Leipzig abbreviations, so it gets no dropdown)
   else makeEditable(el, proxy, "v", after, sentRTL(s), ()=>tierElOf(si,tokId,tier), d=>tierNav(si,tokId,tier,d), true, clickXY); }   // item 2: allowEmpty → a gloss/MSeg value can be deleted (cleared), unlike a Form
+/* ── TYPING A WORD CLASS ────────────────────────────────────────────────────────────────────────────
+   The POS row is an inline field like every other row of the below-stack, opened by the SAME gesture
+   (a plain click/tap — see the .tr-edit/.gl-edit routing in the #doc click handler above and in
+   js/diagram/diagram-edit.js's tap branch), positioned by the SAME editor (makeEditable), and it commits
+   through the SAME funnel the menu does (retagToken). What it adds is a STRICT completion: the word-class
+   inventory is closed, so the field completes from it and refuses anything else.
+
+   THE DISCIPLINE, stated once:
+     · The dropdown is the app's own (acShowGrouped, js/grid/grid.js), grouped by UPOS_CATS and carrying
+       each tag's expansion (UPOS_INFO) in the dimmed right-hand column, exactly as the FEATS value lists do.
+     · It opens on the WHOLE inventory the moment the field does — 17 rows of a closed vocabulary, and the
+       reader who clicked the tag came to change it. (The grid's DepRel cell shows nothing on focus for an
+       already-set cell; its vocabulary is open and long, and it is answering a different question.)
+       Typing then filters it: case-insensitive PREFIX, falling back to SUBSTRING when the prefix matches
+       nothing — the same two-stage match acOpen/deprelAcOpen/openIeAC all use — minus the exact text
+       already typed, since there is nothing there to complete.
+     · The field paints in the ROW's own register, small caps and all: every POS rendering in the app sets
+       `font-feature-settings:"c2sc" 1`, and `applyFont` now carries that (and measures in it) so the tag
+       does not jump to full capitals under the caret and back again on commit.
+     · CHOOSING A ROW SUBMITS — by click as well as by ↑/↓ then Enter/Tab. The vocabulary is closed, so a
+       chosen row is the answer rather than a starting point, and asking for a second gesture to confirm it
+       repeats one the reader has already made. (The grid's DepRel/Deep cells keep the fill-only behaviour:
+       their vocabulary is open, and a completion there is genuinely a starting point.)
+     · ↑/↓ move the highlight; Enter or Tab on a highlighted row accepts it AND commits (makeEditable's
+       opts.ac.commit — the grid's DepRel rule); Escape closes the list, a second Escape reverts the field.
+     · A commit whose text is not an exact (case-insensitive) member of the inventory is REFUSED. Enter and
+       Tab leave the field open with the text intact and say why; a blur reverts. Case is the one mercy:
+       `noun` commits as `NOUN`, because the canonical spelling is the inventory's to supply — the same
+       courtesy every autocomplete in this app already extends by matching case-insensitively.
+     · ⚠ THE EMPTY STRING IS THE ONE NON-MEMBER THAT COMMITS. An untagged token is a state this app
+       deliberately supports — "Clear word class" in the menu, `_` in the file, TIER_EMPTY in the diagram —
+       so clearing the field is how the reader untags, and `allowEmpty` is passed for exactly that.
+     · ⚠ AND THE INVENTORY IS `SETTINGS.upos` PLUS THIS TOKEN'S OWN CURRENT TAG. The same widening
+       `optionMenu` states one function up and for the same reason: a tag the FILE carries that the
+       inventory does not list must still be something this editor can put back, or half-deleting it would
+       strand the reader on a value they can no longer retype. (Closing the field on an untouched value
+       never consults the guard at all — see passesGuard.) */
+function posElOf(si,tokId){ const g=tokGroupOf(si,tokId);
+  return g?((g.matches&&g.matches(POS_SEL))?g:g.querySelector(POS_SEL)):null; }   // tokGroupOf already prefers the CONTENT-bearing group, which is what keeps a wrapped stemma/hierarchy off the pinned tree's bare hit-circle (see its own note)
+function editPosInline(si,tokId,clickXY,el){ const s=DOC[si]; if(!s||tokId<1||tokId>s.tokens.length)return; const tk=s.tokens[tokId-1];
+  el=el||posElOf(si,tokId); if(!el)return;   // `el` is passed by the click paths so the field opens over the element that was actually tapped — in a PROJECTED stemma both a `.node-cat` and a `.tok-pos` exist for one token, and posElOf would hand back the baseline row's for a click on the node
+  /* The field opens on what is STORED, not on what the row PAINTS — the same rule the MSeg editor follows
+     under Latin's macron scheme. An untagged token paints `TIER_EMPTY` in most notations and the literal
+     "X" as a stemma NODE (diagram-rendering.md's one deliberate exception), and both open an EMPTY field:
+     the placeholder is cosmetic, and committing "X" for a token nobody has classified would put a real UD
+     tag in the file that no reader chose. */
+  /* ⚠ THE VOCABULARY IS THE CLASSES **AND THEIR SUBTYPES**, on request ("the POS input field should also
+     show POS subtypes"). A dot-suffixed tag is what the row already PAINTS (`posDisp` → `PRON.DEM`) and what
+     the right-click flyout already sets, so a field that could not type one could not say what the row in
+     front of the reader was saying. `subtypeOptionsFor` walks every class, so `PRON.Dem` completes whether or
+     not the token is currently a PRON — retagging and subtyping in one gesture, which is exactly what the
+     flyout does when you pick a subtype under a different class.
+     Order matters for the dropdown: each class is followed by its own subtypes, so the list reads as a class
+     with its refinements rather than an alphabet of dotted strings. */
+  const subOpts=[]; SETTINGS.upos.forEach(U=>{ (subtypeOptionsFor(U)||[]).forEach(o=>subOpts.push(o)); });
+  const subBy={}; subOpts.forEach(o=>{ subBy[o.label.toLowerCase()]=o; });
+  const vocab=[]; SETTINGS.upos.forEach(U=>{ vocab.push(U);
+    subOpts.forEach(o=>{ if(o.label.slice(0,U.length+1)===U+".") vocab.push(o.label); }); });
+  if(tk.upos&&!vocab.includes(tk.upos)) vocab.push(tk.upos);
+  /* …opens on the DOTTED form when the token wears one — what the row says and what the reader is editing —
+     but in the VOCABULARY's own spelling, not the row's. `posDisp` uppercases the suffix so it sits in the
+     tag's small-caps register (`PRON.DEM`); the field is text the reader edits and completes against, and it
+     would be odd to open on a spelling its own list does not contain. Falls back to the painted form for a
+     subtype this build's tables do not define, which is then pushed into the vocabulary so it stays editable
+     rather than being silently refused by the guard. */
+  const disp=posDisp(tk)||tk.upos||"";
+  const cur=vocab.find(v=>v.toLowerCase()===disp.toLowerCase())||disp;
+  if(cur&&!vocab.some(v=>v.toLowerCase()===cur.toLowerCase())) vocab.push(cur);
+  const guard=v=>{ if(!v) return "";   // clearing the field untags the token — the one non-member that commits
+    const m=vocab.find(u=>u.toLowerCase()===v.toLowerCase());
+    if(m) return m;   // canonicalise to the inventory's own spelling
+    toast(`“${v}” is not a word class — choose one from the list`); return null; };
+  let first=true;
+  const acOpen=(inp,pick)=>{ if(document.activeElement!==inp){ if(_acInput===inp) acCloseSoon(); return; }
+    const all=first; first=false;
+    const q=all?"":inp.value.trim().toLowerCase();
+    let ms=!q?vocab.slice():vocab.filter(v=>v.toLowerCase().startsWith(q));
+    if(q&&!ms.length) ms=vocab.filter(v=>v.toLowerCase().includes(q));
+    if(q) ms=ms.filter(v=>v.toLowerCase()!==q);   // nothing to complete to the exact text already typed — but the FIRST open browses the whole set, current tag included
+    if(!ms.length){ if(_acInput===inp) acCloseSoon(); return; }
+    const set=new Set(ms), placed=new Set(), groups=[];
+    UPOS_CATS.forEach(([name,members])=>{ const items=members.filter(m=>set.has(m)); items.forEach(m=>placed.add(m));
+      if(items.length) groups.push({title:name,items}); });
+    const rest=ms.filter(v=>!placed.has(v)); if(rest.length) groups.push({title:"Other",items:rest});   // a tag outside UPOS_CATS (this token's own out-of-inventory one) files where the menu files it
+    acShowGrouped(inp,groups,pick||null,v=>UPOS_INFO[v]||""); };   // `pick` (makeEditable's own) → choosing a row FILLS AND COMMITS, on request: the word-class vocabulary is closed, so a chosen row is the answer and not a starting point. Falls back to acFill's default path if a caller ever opens this without one
+  /* THE FIELD IS BOUND TO A PROXY THAT ONLY REMEMBERS. makeEditable writes obj[key] on the way out and
+     pushes its own undo entry; the retag itself has to run in `after`, through retagToken, so the whole
+     cascade (FEATS cleanup, gloss retarget, inheritance, translit, re-parse) is the menu's cascade and not a
+     second copy. Writing it from the SETTER instead would fire on a CANCEL too — makeEditable assigns `orig`
+     back unconditionally when nothing changed — and retagToken's own subtype guard would then quietly drop a
+     dot-suffixed subtype on a field the reader had merely opened and closed. */
+  let want=null;
+  const proxy={ get v(){ return cur; }, set v(val){ want=val; } };
+  makeEditable(el, proxy, "v",
+    /* ⚠ WHICH COMMIT depends on whether a SUBTYPE was typed, and the two are genuinely different edits:
+       a bare tag runs the whole retag cascade (`retagToken`, ending in a re-parse), while a dot-suffixed one
+       runs `retagSubtype` — the flyout's own commit, which sets the feature and deliberately does NOT
+       reparse, because the parse would re-derive FEATS over the subtype just chosen. Matched case-
+       insensitively against the same table the vocabulary was built from, so "pron.dem" lands on PRON.Dem. */
+    changed=>{ if(!changed) return;
+      const o=subBy[String(want||"").toLowerCase()];
+      if(o) retagSubtype(si,tokId,o.label.slice(0,o.label.length-subtypeSuffix(o.feat,o.val).length-1),o.feat,o.val,{snapshot:false});
+      else retagToken(si,tokId,want,{snapshot:false}); },   // no render on a no-op: makeEditable's finish() has already run preserveScroll(renderDoc) and there is nothing further to show
+    sentRTL(s), ()=>posElOf(si,tokId), d=>tierNav(si,tokId,"pos",d), true, clickXY,
+    {guard, ac:{open:acOpen,commit:true}, dbl:(x,y)=>posMenu(x,y,si,tokId)}); }   // dbl: the row's own double-click still opens the FULL menu — the subtype flyouts, the guidelines link and the model-probability weighting have no text-field equivalent and are not being traded away for one
 // nearest character boundary, as an index into `text`, to a LOCAL x-offset (0 = the start of the rendered run) —
 // walks cumulative substring widths via the same canvas metric (meas) the field itself was sized/centred with, so
 // it lines up with what's actually on screen. Used to drop the caret where the field was clicked, not select-all.
-function caretIndexForX(text,fontStr,localX){ if(localX<=0) return 0;
-  const total=meas(text,fontStr); if(localX>=total) return text.length;
-  let prev=0; for(let i=1;i<=text.length;i++){ const w=meas(text.slice(0,i),fontStr); if(w>=localX) return (localX-prev<w-localX)?i-1:i; prev=w; }
+function caretIndexForX(text,fontStr,localX,extraCss){ if(localX<=0) return 0;   // extraCss: the caller's own OpenType feature list, so the walk below measures in the face the run is DRAWN in (see makeEditable's applyFont)
+  const total=meas(text,fontStr,extraCss); if(localX>=total) return text.length;
+  let prev=0; for(let i=1;i<=text.length;i++){ const w=meas(text.slice(0,i),fontStr,extraCss); if(w>=localX) return (localX-prev<w-localX)?i-1:i; prev=w; }
   return text.length; }
 // a small field positioned exactly over the token's own text element (which is centred), styled to read as the text itself.
 // true when `el` is currently scrolled fully out of sight behind SOME clipping ancestor (an .overflow:auto/hidden
@@ -1661,7 +2051,26 @@ document.addEventListener("pointerdown",e=>{ window.LAST_POINTER_EL=e.target; wi
 // actually changing anything: a CANCELLED edit still ran hideOrig, so its cached node is just as stale.
 function hideOrig(el){ if(el.namespaceURI===SVGNS){ el.style.fill="transparent"; el.style.stroke="transparent"; } else el.style.color="transparent";
   const blk=el.closest&&el.closest(".sblock[data-i]"); if(blk&&typeof invalidateDiaSentence==="function") invalidateDiaSentence(+blk.getAttribute("data-i")); }
-function makeEditable(el,obj,key,after,rtl,relocate,nav,allowEmpty,caretHint){ if(!el)return; let orig=obj[key]||""; const pre=snap();
+/* `opts` (all optional) — the three hooks a CONSTRAINED field needs, added for the diagram's POS row and
+   written here rather than at that one call site because each of them has to sit INSIDE this function's own
+   listeners to work at all:
+     · opts.guard(v) → the value to commit (canonicalised if it likes), or null to REFUSE the commit. Called
+       only when the trimmed text has actually MOVED off `orig` — a value that has not moved is not a commit,
+       so a field opened on a value the guard would reject (a tag the FILE carries that is not in the
+       inventory) can still be closed unchanged. A refusal on a DELIBERATE commit (Enter, Tab/arrow tier-nav)
+       leaves the field OPEN with the text intact so it can be corrected; on a BLUR, a right-click handoff or
+       a Shift+arrow selection it REVERTS instead — keeping focus in a field the reader has just clicked out
+       of would trap them and would fight this editor's own "what was clicked becomes the selection"
+       contract below. The guard says WHY (a toast); this function only obeys.
+     · opts.ac → {open(inp), commit} wires the app's shared floating dropdown (acEl/acShowGrouped/acFill,
+       js/grid/grid.js) onto this field. `open` is called on the initial focus and on every input; the
+       ↑/↓/Enter/Tab/Esc block below is the SAME one the grid's Deep and DepRel cells and the MGloss editor
+       already carry, hoisted in here so it is written once for every future field rather than a fifth time.
+       `commit:true` → accepting a row also commits the edit, exactly as the grid's DepRel cell does
+       ("accepting a suggestion IS an accept-this-edit gesture").
+     · opts.dbl(x,y) → what a SECOND click on the open field means. See its own note further down. */
+function makeEditable(el,obj,key,after,rtl,relocate,nav,allowEmpty,caretHint,opts){ if(!el)return; let orig=obj[key]||""; const pre=snap();
+  opts=opts||{};
   INLINE_EDIT_OPEN=true;   // …and cleared in `finish` below, so a background re-render cannot pull the caret out of this field (see the flag in js/core/prefs.js)
   /* THE FIELD UPDATES UNDER THE CARET when the value beneath it moves — a background pass changing the very
      thing being edited (the re-parse revising a lemma, a Sanskrit re-fuse respelling a form) would otherwise
@@ -1681,9 +2090,23 @@ function makeEditable(el,obj,key,after,rtl,relocate,nav,allowEmpty,caretHint){ i
     if(ss!=null){ try{ inp.setSelectionRange(Math.min(ss,v.length),Math.min(se==null?ss:se,v.length)); }catch(e){} }
     if(typeof reflow==="function") reflow(); return true; };
   const inp=document.createElement("input"); inp.className="nodeedit"+(key==="form"?formDeco(obj):""); inp.value=orig;   // item 4: while editing a token FORM, keep its Typo strikethrough on the edit field so the marker doesn't blink off mid-edit (the Foreign italics come across via applyFont, which copies the form's computed font-style)
-  let fontStr; const applyFont=e=>{ const cs=getComputedStyle(e);   // `e` lives inside .sblock{zoom:var(--fs)} but `inp` is appended to <body>, OUTSIDE that zoomed context — so the size has to be converted by hand, or the field renders at a different size from the diagram text it is covering
+  let fontStr, featCss=""; const applyFont=e=>{ const cs=getComputedStyle(e);   // `e` lives inside .sblock{zoom:var(--fs)} but `inp` is appended to <body>, OUTSIDE that zoomed context — so the size has to be converted by hand, or the field renders at a different size from the diagram text it is covering
     const sizePx=visualFontPx(e)+"px";   // js/core/document.js — computed × cssLenScale × zoom, the last two PROBED because Chrome and WebKit report an SVG length inside a zoomed subtree differently. This used to be a bare `×FS`, which is right in Chrome and lands back on the UNZOOMED size in WebKit (see cssLenScale's note): the field opened at 100 % over a diagram drawn at 160 %
     inp.style.fontFamily=cs.fontFamily; inp.style.fontSize=sizePx; inp.style.fontWeight=cs.fontWeight; inp.style.fontStyle=cs.fontStyle; fontStr=cs.fontStyle+" "+cs.fontWeight+" "+sizePx+" "+cs.fontFamily;
+    /* ⚠ …AND THE ROW'S OWN OPENTYPE FEATURES, for the same reason it takes the row's face, weight and
+       tracking: the field must read while typing exactly as the row will once committed. Reported of the
+       word-class field — every POS rendering in the app (`.tok-pos`, `.bwpos`, `.opos`, `.node-cat`,
+       `.mwt-pos`) paints `font-feature-settings:"c2sc" 1`, so a tag sits in small caps everywhere until you
+       click it, at which point it jumped to full capitals under the caret and back again on commit.
+       ⚠ AND THE MEASUREMENT GOES WITH IT — CLAUDE.md's "a measurement must follow the paint", which here is
+       not a nicety: c2sc substitutes NARROWER glyphs, so measuring the field's width and its click-to-caret
+       index in the unfeatured face would size the box for text wider than the text drawn in it and land the
+       caret progressively further off across the run. `meas` forwards this to `_measOne`, whose `extraCss`
+       is the same channel avmLayout already measures its own c2sc labels through (js/diagram/diagram-core.js).
+       A row with no features computes to "normal" and contributes nothing, so every other field is unchanged. */
+    const ffs=cs.fontFeatureSettings;
+    if(ffs&&ffs!=="normal"){ inp.style.fontFeatureSettings=ffs; featCss=";font-feature-settings:"+ffs; }
+    else { inp.style.fontFeatureSettings=""; featCss=""; }
     // …and the row's INK, which .nodeedit's own `color:var(--text)` would otherwise override. Without this the
     // transliteration row (.translit/.otrans — italic, --dia-muted) visibly jumped to full-strength body text the
     // moment it was clicked into, on single tokens and on an MWT's IAST row alike. Read off the edited element
@@ -1712,7 +2135,7 @@ function makeEditable(el,obj,key,after,rtl,relocate,nav,allowEmpty,caretHint){ i
     };
   applyFont(el);
   const w0=Math.max(30,el.getBoundingClientRect().width+16);   // never shrink the field below the initial content width
-  const place=()=>{ const r=el.getBoundingClientRect(), h=Math.max(16,r.height+2), cx=r.left+r.width/2, w=Math.max(w0, meas(inp.value,fontStr)+18);
+  const place=()=>{ const r=el.getBoundingClientRect(), h=Math.max(16,r.height+2), cx=r.left+r.width/2, w=Math.max(w0, meas(inp.value,fontStr,featCss)+18);
     inp.style.width=w+"px"; inp.style.height=h+"px"; inp.style.left=(cx-w/2)+"px"; inp.style.top=(r.top+r.height/2-h/2)+"px";
     inp.style.padding=inp.value?"0":"0 2px";   // zero horizontal padding once there's real text to align flush with the diagram — an EMPTY field has no text to align, so it keeps a little breathing room around the bare caret instead of collapsing the click target right down to it
     inp.style.visibility=elClippedOut(el)?"hidden":""; };   // the token being edited can scroll out of view behind a capped .diagram/.gwrap or the outer .doc without losing focus (browsers don't blur on scroll-out) — hide the field rather than let it float over content it no longer sits above
@@ -1724,10 +2147,10 @@ function makeEditable(el,obj,key,after,rtl,relocate,nav,allowEmpty,caretHint){ i
     if(caretHint.at==="start") idx=0;
     else if(caretHint.at==="end") idx=inp.value.length;
     else if(typeof caretHint.at==="number") idx=Math.max(0,Math.min(inp.value.length,caretHint.at));   // clamp: the field you're arriving at may be shorter than the one you left
-    else { const r=inp.getBoundingClientRect(), tw=meas(inp.value,fontStr);   // the field is centred and often wider than its own text (room to grow while typing) — locate the actual text run within it first
+    else { const r=inp.getBoundingClientRect(), tw=meas(inp.value,fontStr,featCss);   // the field is centred and often wider than its own text (room to grow while typing) — locate the actual text run within it first
       const textLeft=r.left+(r.width-tw)/2, textRight=textLeft+tw;
       const localX=rtl?(textRight-caretHint.x):(caretHint.x-textLeft);   // RTL: index 0 sits at the visual RIGHT edge
-      idx=caretIndexForX(inp.value,fontStr,localX); }
+      idx=caretIndexForX(inp.value,fontStr,localX,featCss); }
     try{ inp.setSelectionRange(idx,idx); }catch(_){ inp.select(); } }
   else inp.select();
   /* Task A — LOCAL only, until commit. This used to write obj[key]=inp.value and preserveScroll(renderDoc) — a
@@ -1740,13 +2163,61 @@ function makeEditable(el,obj,key,after,rtl,relocate,nav,allowEmpty,caretHint){ i
      too: it existed to re-find `el` after a renderDoc rebuilt it out from under the field, which no longer
      happens mid-edit — see finish() below, which still does both the write and the render, exactly once. */
   const reflow=()=>{ place(); };
-  const finish=save=>{ if(inp._closed)return; inp._closed=true; const v=inp.value.trim(), changed=save&&(v||allowEmpty)&&v!==orig;   // item 2: gloss/morphemic tiers pass allowEmpty → an emptied value COMMITS (clears the tier) instead of reverting; the Form editor keeps allowEmpty falsy, so a form can't be blanked
+  /* THE STRICT GATE — see opts.guard's own note at the top of this function. Returns true when the field may
+     close on a save. `v===orig` short-circuits it: closing a field on the value it opened with commits
+     nothing, so a guard has nothing to refuse and must not be given the chance to trap the reader in a field
+     they never edited. A refusal is REPORTED BY THE GUARD, not here — this function knows nothing about what
+     the field's vocabulary is or what to call it. */
+  const passesGuard=()=>{ if(typeof opts.guard!=="function") return true;
+    const v=inp.value.trim(); if(v===orig) return true;
+    const g=opts.guard(v); if(g==null) return false;
+    if(g!==inp.value) inp.value=g;   // the guard may CANONICALISE (case, spacing) — what it hands back is what commits
+    return true; };
+  const finish=save=>{ if(inp._closed)return; inp._closed=true; if(typeof acClose==="function"&&_acInput===inp) acClose();   // the shared dropdown belongs to this field for exactly as long as the field exists
+    const v=inp.value.trim(), changed=save&&(v||allowEmpty)&&v!==orig;   // item 2: gloss/morphemic tiers pass allowEmpty → an emptied value COMMITS (clears the tier) instead of reverting; the Form editor keeps allowEmpty falsy, so a form can't be blanked
     obj[key]=changed?v:orig;   // commit the trimmed value, or revert the live edits on cancel/no-op
     if(changed){ UNDO.push(pre); if(UNDO.length>80)UNDO.shift(); REDO.length=0; updateUndoUI(); markDirty(); }   // one undo step for the whole edit (the snapshot from before it began)
     INLINE_EDIT_OPEN=false; INLINE_EDIT_SYNC=null;   // BEFORE the render below: that one is this edit's own consequence and must run
     document.removeEventListener("scroll",place,{capture:true}); inp.remove(); preserveScroll(renderDoc); if(after)after(changed); };   // pass `changed` so a commit-only hook (e.g. MGloss→FEATS back-fill) can distinguish a real commit from a cancel/no-op
   inp.addEventListener("input",reflow);
+  /* opts.ac — the app's SHARED completion dropdown on this field. Opened on the initial focus (which has
+     already happened above, so it is called directly rather than waited for) and re-filtered on every input;
+     `focus` is bound as well for a refocus that comes back to a field still standing (acFill's own
+     inp.focus(), a menu row's mousedown). Nothing else in here changes: the dropdown is a floating element of
+     its own and this field goes on being an ordinary <input> underneath it. */
+  /* ⚠ …AND SELECTING A COMPLETION SUBMITS, WHICHEVER WAY IT IS SELECTED. Reported of the word-class
+     field: Enter/Tab on a highlighted row committed (the keydown branch below), but CLICKING a row only
+     filled the field — `acFill`'s default path sets `inp.value`, fires `input` and stops there, which is
+     right for the grid's Deep cell (an open vocabulary, where a completion is a starting point) and wrong
+     for a closed one, where choosing the row IS the answer and a second gesture to confirm it is a step
+     the reader has already taken. The two paths now end in the same place.
+     Handed to the OPENER rather than wired here, because the opener is what calls `acShowGrouped` and
+     `onPick` is its third argument; `opts.ac.open` may ignore it, which is what every caller that wants
+     the fill-only behaviour does (it is an optional second parameter, so existing openers are unchanged).
+     Through `passesGuard()` like every other commit — the row came from the guard's own vocabulary, so
+     this can only refuse if a caller offers rows it would not itself accept. */
+  const acPick=v=>{ inp.value=v;
+    if(opts.ac&&opts.ac.commit&&passesGuard()){ finish(true); return; }
+    inp.dispatchEvent(new Event("input",{bubbles:true})); };   // …and with no commit contract, exactly acFill's own default
+  if(opts.ac&&typeof opts.ac.open==="function"){
+    inp.addEventListener("input",()=>opts.ac.open(inp,acPick));
+    inp.addEventListener("focus",()=>opts.ac.open(inp,acPick));
+    opts.ac.open(inp,acPick); }
   inp.addEventListener("keydown",ev=>{
+    /* …AND THE DROPDOWN OWNS ↑/↓/Enter/Tab/Esc WHILE IT IS OPEN ON THIS FIELD — ahead of the tier-nav and
+       Enter/Escape handling below, exactly as the grid's Deep/DepRel cells (js/grid/grid.js) and the MGloss
+       editor (makeGlossEditableSC) already order the same two. Written HERE rather than at the call site
+       because a listener added afterwards, on the same element, runs after this one and would arrive to find
+       Enter had already committed the field (at-target listeners fire in registration order, capture flag or
+       not). ESCAPE CLOSES THE LIST FIRST and leaves the edit open — the grid's own rule, and the only
+       reading that lets a reader dismiss a list they did not want without losing what they had typed. */
+    if(opts.ac&&_acMenu&&_acMenu.classList.contains("show")&&_acInput===inp){
+      if(ev.key==="ArrowDown"){ ev.preventDefault(); ev.stopPropagation(); acHi((_acIdx+1)%_acItems.length); return; }
+      if(ev.key==="ArrowUp"){ ev.preventDefault(); ev.stopPropagation(); acHi((_acIdx-1+_acItems.length)%_acItems.length); return; }
+      if((ev.key==="Enter"||ev.key==="Tab")&&_acIdx>=0){ ev.preventDefault(); ev.stopPropagation(); acFill(_acItems[_acIdx]);
+        if(opts.ac.commit&&passesGuard()) finish(true);   // Task A's rule, one field over: accepting a suggestion IS an "accept this edit" gesture. Through the guard like any other commit — the row it filled came from the guard's own vocabulary, so this can only refuse if a caller offers rows it would not accept
+        return; }
+      if(ev.key==="Escape"){ ev.preventDefault(); ev.stopPropagation(); acClose(); return; } }
     if(nav){   // item 4: gloss-tier cell navigation — commit the current cell, then focus the target cell
       const collapsed=inp.selectionStart===inp.selectionEnd;   // item 4: a real caret, NOT the whole-item selection a double-click opens with
       const atStart=collapsed && inp.selectionStart===0;         // only step to the previous token when the caret is genuinely collapsed at the left edge — from a full selection, ArrowLeft first collapses to that edge (the browser default), it doesn't jump tokens
@@ -1756,16 +2227,18 @@ function makeEditable(el,obj,key,after,rtl,relocate,nav,allowEmpty,caretHint){ i
       // own Shift+arrow logic. The caret must be collapsed at the matching edge, exactly like the nav case below.
       if(ev.shiftKey && (ev.key==="ArrowRight"||ev.key==="ArrowLeft")){
         const fwd=(ev.key==="ArrowRight")!==!!rtl, atEdge=fwd?atEnd:atStart;
-        if(atEdge && sel.s>=0 && sel.t>0){ ev.preventDefault(); ev.stopPropagation(); finish(true); extendSelToward(fwd?1:-1); return; } }
+        if(atEdge && sel.s>=0 && sel.t>0){ ev.preventDefault(); ev.stopPropagation(); if(!passesGuard()) inp.value=orig;   // a selection gesture is not a commit: a refused value reverts here rather than pinning the reader in the field
+          finish(true); extendSelToward(fwd?1:-1); return; } }
       let d=null;   // arrow-triggered nav carries a caret hint (Tab intentionally doesn't — it still selects all on arrival, unchanged)
       if(ev.key==="Tab") d={tok:ev.shiftKey?-1:1};
       else if(ev.key==="ArrowUp") d={tier:-1, caret:inp.selectionStart};   // vertical: preserve the column (character offset), like a text editor
       else if(ev.key==="ArrowDown") d={tier:1, caret:inp.selectionStart};
       else if(ev.key==="ArrowRight" && atEnd) d={tok:1, caret:"start"};   // horizontal: land at the near edge of the field you're entering
       else if(ev.key==="ArrowLeft" && atStart) d={tok:-1, caret:"end"};
-      if(d){ ev.preventDefault(); ev.stopPropagation(); finish(true); nav(d); return; }
+      if(d){ ev.preventDefault(); ev.stopPropagation(); if(!passesGuard()) return;   // DELIBERATE: a refused value keeps the field open, with the text left to correct — Tab/arrow away is a commit like any other
+        finish(true); nav(d); return; }
     }
-    if(ev.key==="Enter"){ev.preventDefault(); finish(true);} else if(ev.key==="Escape"){ev.preventDefault(); finish(false);} ev.stopPropagation(); });
+    if(ev.key==="Enter"){ev.preventDefault(); if(passesGuard()) finish(true);} else if(ev.key==="Escape"){ev.preventDefault(); finish(false);} ev.stopPropagation(); });   // Escape never consults the guard: reverting is exactly what it is for
   /* item 5 — A BLUR THAT NOTHING ELSE ACCOUNTED FOR IS A CLICK AWAY, and a click away from the diagram's
      editing is a click away from the token: the selection goes with it. Every DELIBERATE exit closes the field
      itself first (Enter and Escape call finish() in the keydown handler, Tab/arrow navigation calls it before
@@ -1795,6 +2268,7 @@ function makeEditable(el,obj,key,after,rtl,relocate,nav,allowEmpty,caretHint){ i
       else if(si0>=0 && tgt.closest("#doc")) want={s:si0}; }   // inside the document but not resolvable to a block → keep the sentence we were editing
     // …and remember whether the click landed on an editable SENTENCE LINE, so the caret can be restored into it
     const lineTag=(wasOpen&&tgt&&tgt.closest)?(tgt.closest(".stext[contenteditable]")?".stext[contenteditable]":(tgt.closest(".strans-orig")?".strans-orig":null)):null;
+    if(wasOpen && !passesGuard()) inp.value=orig;   // a REFUSED value REVERTS on a blur (see opts.guard's note): the reader has clicked somewhere else, and holding the keyboard hostage to make them fix a field they have left is not a validation, it is a trap — the guard's own toast is what tells them nothing was written. Gated on wasOpen, or an already-closed field (Enter/Escape/nav/the double-click handoff, all of which finish() first) would re-run the guard on the way out and toast a second time
     finish(true);
     if(!wasOpen) return;
     if(want&&want.t>0&&typeof pick==="function") pick(want.s,want.t,false,false);
@@ -1823,9 +2297,24 @@ function makeEditable(el,obj,key,after,rtl,relocate,nav,allowEmpty,caretHint){ i
       if(pt&&typeof caretAtPoint==="function") caretAtPoint(el2,pt.x,pt.y); },0); });
   // item 6: right-clicking the active inline editor opens the TOKEN menu (not the browser's native field menu) —
   // commit the edit first, then open it for the token being edited (the current selection).
-  inp.addEventListener("contextmenu",ev=>{ ev.preventDefault(); ev.stopPropagation(); const cs=sel.s, ct=sel.t; finish(true);
+  inp.addEventListener("contextmenu",ev=>{ ev.preventDefault(); ev.stopPropagation(); const cs=sel.s, ct=sel.t;
+    if(!passesGuard()) inp.value=orig;   // reaching for a MENU is not a commit either — same reading as the blur above
+    finish(true);
     if(cs>=0&&ct>0) nodeTokenMenu(ev.clientX,ev.clientY,cs,ct); });
-  return inp; }   // the field itself, for a caller that wants to reach it after openingblclick
+  /* ⚠ …AND A SECOND CLICK ON THE FIELD IS STILL WHATEVER THE ROW UNDER IT ANSWERS ON A DOUBLE-CLICK.
+     The POS row has always opened its menu on a double-click as well as on a right-click (the posRelHit
+     trigger further up), and once a FIRST click opens this field the second one lands on the <input> — which
+     is appended to <body>, so the #doc dblclick handler can never see it and the gesture would simply have
+     disappeared. `detail` is the browser's own count of the click run (time + position, not target), so the
+     second press reads 2 here exactly as it would have on the tag.
+     ONLY WHILE THE READER HAS NOT TYPED: once there is text of their own in the field, a double-click is a
+     word selection, which is what an <input> is for and what they will be reaching for. `finish(false)`
+     rather than a commit, because nothing has been typed by construction. */
+  if(typeof opts.dbl==="function") inp.addEventListener("mousedown",ev=>{
+    if(ev.detail<2||inp.value!==orig) return;
+    ev.preventDefault(); ev.stopPropagation(); const x=ev.clientX, y=ev.clientY;
+    finish(false); opts.dbl(x,y); });
+  return inp; }   // the field itself, for a caller that wants to reach it after opening
 /* bindLemmaDblclick WAS HERE — a native dblclick inside an open form field opened the lemma editor,
    the counterpart to a double-tap on the token itself. Both gestures are gone: ⌘L reaches the same
    editor from the keyboard and the token context menu names it, neither of which needs the reader to
@@ -1896,6 +2385,25 @@ function makeGlossEditableSC(el,obj,key,after,rtl,relocate,nav,caretHint,mglossT
   const place=()=>{ const r=el.getBoundingClientRect(), h=Math.max(16,r.height+2), cx=r.left+r.width/2, w=Math.max(w0, meas(box.textContent,fontStr)+18);
     box.style.width=w+"px"; box.style.height=h+"px"; box.style.left=(cx-w/2)+"px"; box.style.top=(r.top+r.height/2-h/2)+"px";
     box.style.padding=box.textContent?"0":"0 2px";   // see makeEditable's place() for why — zero once there's real text, a little breathing room around the bare caret when empty
+    /* ⚠ AND AN EMPTY BOX IS NOT A FLEX CONTAINER, WHICH IS THE OTHER HALF OF "no caret in an empty
+       gloss field" — reported again after the `<br>` and the collapsed selection had both been fixed.
+       `.nodeedit.glabbrbox` is `display:flex` (app.css) to stand in for an input's vertical centring,
+       and a flex container BLOCKIFIES EVERY CHILD: confirmed live in WKWebView, the lone `<br>` this
+       field adds when empty reports `display:block` — it has become a flex ITEM, not a line break, so
+       the container has no inline formatting context and no line box, and a caret placed at (box, 0)
+       has nothing to sit on. That is why the `<br>` remedy worked where it was first measured and not
+       here: `.sid-in`, `.bm-id` and `.tg-text` (keepEmptyCaret, js/core/document.js) are all plain
+       BLOCKS, and this is the one field of the family that centres with flex.
+       So the empty state joins that family — block, with the box's own height as the line-height,
+       which is the same vertical centring by another route (and `.nodeedit`'s `text-align:center`
+       already does the horizontal half that `justify-content` was doing). The flex centring comes
+       back the moment there is text to centre, which is the only state it was ever needed for: the
+       partial small-caps run this editor exists to paint cannot exist in an empty field.
+       ⚠ Re-applied on every `place()`, not once at open: `reflow` calls `place()` on every input, so
+       the box switches back and forth as the reader types the first character and deletes it again. */
+    const bare=!box.textContent;
+    box.style.display=bare?"block":"";
+    box.style.lineHeight=bare?h+"px":"";
     box.style.visibility=elClippedOut(el)?"hidden":""; };   // see makeEditable's place() for why
   document.addEventListener("scroll",place,{capture:true,passive:true});   // see makeEditable's place() for why: position:fixed appended outside the diagram's own inner-scrolling .doc needs re-placing on every ancestor scroll, caught via capture (scroll doesn't bubble)
   place();
@@ -1908,7 +2416,20 @@ function makeGlossEditableSC(el,obj,key,after,rtl,relocate,nav,caretHint,mglossT
     } else if(document.caretRangeFromPoint){ const rg=document.caretRangeFromPoint(caretHint.x,caretHint.y);   // WebKit/Chromium hit-test straight into the box's live text/.glabbr nodes — exact, no manual measuring needed
       if(rg && box.contains(rg.startContainer)){ const sel=window.getSelection(); sel.removeAllRanges(); sel.addRange(rg); _placedAtClick=true; } }
   }
-  if(!_placedAtClick){ const range=document.createRange(); range.selectNodeContents(box); const sel=window.getSelection(); sel.removeAllRanges(); sel.addRange(range); }   // select-all on open, like inp.select() — keyboard-triggered opens with no hint at all, or caretRangeFromPoint missing/out of bounds
+  /* ⚠ …AND AN EMPTY FIELD TAKES A CARET, NOT AN EMPTY SELECTION. Reported: "empty gloss input fields
+     don't show a caret". Select-all is right for a field with text in it and is a no-op statement
+     about one without: `selectNodeContents` over the bare `<br>` above leaves the selection
+     NON-COLLAPSED, and an engine paints a caret only for a collapsed one — a highlight is what it
+     paints instead, and this one is 0px wide. Measured on the empty lexical-gloss row: focused,
+     `textContent` "", one selection rect 0×18, `isCollapsed` FALSE. So the field took typing and
+     showed nothing, which is the same symptom the `<br>` above was added to cure and only half of
+     its cause: the missing line box was one half, an uncollapsed selection sitting on it the other.
+     `.bm-id` already draws this line (focusBoundId, js/core/document.js: "empty field → a caret, not
+     an empty selection") — the same remedy, in the same shape, at the editor that had not had it.
+     Collapse to the START, so the caret sits on the box's first line rather than after the `<br>`. */
+  if(!_placedAtClick){ const range=document.createRange(); range.selectNodeContents(box);
+    if(!box.textContent) range.collapse(true);
+    const sel=window.getSelection(); sel.removeAllRanges(); sel.addRange(range); }   // select-all on open, like inp.select() — keyboard-triggered opens with no hint at all, or caretRangeFromPoint missing/out of bounds
   /* Task A — LOCAL only, until commit: this used to write obj[key]=text and preserveScroll(renderDoc) — a FULL
      #doc rebuild — on every single keystroke, which is exactly what made typing an MGloss in the diagram also
      retype the grid cell underneath it in real time (and, since preserveScroll(renderDoc) touches the WHOLE
@@ -2054,9 +2575,29 @@ function formElOf(si,tokId){
   return node ? (node.matches(FORM_SEL)?node:(node.querySelector(FORM_SEL)||node)) : null; }
 function editNodeInline(si,tokId,clickXY){ const s=DOC[si]; if(!s||tokId<1||tokId>s.tokens.length)return;
   if(iastFormEdit() && transElOf(si,tokId)){ editTransInline(si,tokId,clickXY); return; }   // Item 10: the script glyph is display-only — route form editing onto the IAST transliteration row (which is bound to the token form). Only when that row is actually present; otherwise fall through to the plain form editor below.
+  /* ⚠ THE ROW COMES IN **BEFORE** THE ELEMENT IS RESOLVED, and that order is the whole of a bug this had
+     for one round: `lemRowForce` re-renders the block, so a node captured ahead of it is DETACHED by the
+     time the field opens over it — the field then measures a stale box and lands away from the form the
+     reader clicked. Force first, then ask the freshly-built DOM where the form is. */
+  if(typeof lemForceHold==="function") lemForceHold();        // …and claim it, for the same reason the lemma editor does
+  if(typeof lemRowForce==="function") lemRowForce(si,true);   // …no-op when the row is already drawn, or when `show.lemma` is off (the reader's own standing choice, which an edit does not overrule)
   const el=formElOf(si,tokId);
-  if(!el){ const c=document.querySelector(`[data-si="${si}"][data-ti="${tokId-1}"][data-col="form"]`); if(c)c.focus(); return; }   // no visible node → fall back to the grid cell
-  makeEditable(el, s.tokens[tokId-1], "form", changed=>afterDiagramFormEdit(si,tokId,changed), sentRTL(s), ()=>formElOf(si,tokId), d=>tierNav(si,tokId,"form",d), false, clickXY); }   // item 4: the form row joins the gloss-tier arrow/Tab navigation. afterDiagramFormEdit = pick + the ITRANS→IAST pass + afterFormEdit, shared with the IAST-row route above
+  if(!el){ const c=document.querySelector(`[data-si="${si}"][data-ti="${tokId-1}"][data-col="form"]`); if(c)c.focus(); if(typeof lemForceRelease==="function") lemForceRelease(); return; }   // no visible node → fall back to the grid cell (and let go of the row we just brought in)
+  /* ⚠ A FORM EDIT BRINGS THE LEMMA ROW IN TOO, on instruction ("when the lemma tier is empty, it should come
+     out of hiding when the user is editing token forms"). The row hides for a sentence in which no lemma
+     differs from its form — and editing a FORM is precisely the gesture that can make one differ, so the row
+     the reader is about to need is the one currently not there. It also puts "lemma" back in `navStack`
+     (through `lemForced`), which is what lets Tab/↓ reach the lemma from the form field at all: without the
+     force there is no row in the stack to step onto.
+     `lemRowForce` answers false when there is nothing to do — the row is already drawn, or `show.lemma` is
+     off, which is the reader's own standing choice and not an edit's to overrule — so the common case costs
+     one test. Taken back out FIRST in the commit, ahead of `afterDiagramFormEdit`'s own cascade, exactly as
+     the lemma editor orders the same pair; if the edit has made the lemma differ, the re-render inside
+     `lemRowForce` keeps the row on its own merits and the slide measures 0. */
+  makeEditable(el, s.tokens[tokId-1], "form",
+    changed=>{ if(typeof lemForceRelease==="function") lemForceRelease();   // …on the NEXT TICK, so tabbing on to another field keeps the row (see lemForceRelease)
+      afterDiagramFormEdit(si,tokId,changed); },
+    sentRTL(s), ()=>formElOf(si,tokId), d=>tierNav(si,tokId,"form",d), false, clickXY); }   // item 4: the form row joins the gloss-tier arrow/Tab navigation. afterDiagramFormEdit = pick + the ITRANS→IAST pass + afterFormEdit, shared with the IAST-row route above
 // ── inline-editing a multi-word token's surface form on a diagram ───────────────────────────────────────────
 // Reached by a plain left-click on a drawn tie row (the delegated handler above) or by the tie's right-click
 // menu. `fromId` is always the ORIGINAL token id, which is what data-mwtfrom carries even in a display-folded
@@ -2125,6 +2666,16 @@ function editCorrectFormInline(si,tokId,clickXY){ const s=DOC[si]; const t=s&&s.
    lay it over and nothing to hide; anchoring it to the form instead would mean a field that displays
    one thing while editing another, and would have to fight the form editor for the same pixels (a
    single click already opens that one there — see the double-tap route in js/diagram/diagram-edit.js).
+   ⚠ item 29 SUPERSEDES THE PREMISE OF THAT PARAGRAPH FOR SOME TOKENS, AND THIS FUNCTION STAYS FOR THE
+   REST. There IS a lemma row in every notation now (belowStack/.bwlemma/.olemma), and where it paints,
+   the ordinary inline editor is what opens on it — editLemmaInline above, laid over that row exactly as
+   the reasoning here says an inline editor must be. But the row is deliberately BLANK for a token with
+   no lemma differing from its form (lemmaRowTxt, js/diagram/diagram-core.js), where nothing is drawn.
+   ⚠ AND item 31 NARROWS THIS FUNCTION'S REMIT AGAIN, to a genuine fallback. A blank slot now carries a
+   transparent target, and a sentence with no row grows one for the duration of an edit, so "Edit lemma…"/⌘L go
+   through editLemmaAt: the inline field first, this popover only where that cannot open — the tier switched
+   OFF in Show/Hide (a standing choice an edit may not overrule), or a block that is not rendered at all. Both
+   editors write the same column and both go through afterLemmaEdit.
    textPrompt is the shape this app already uses to ask for a value ABOUT a token that isn't on screen
    — the correct-form prompt — and its title names the token, which an unanchored field must.
    The commit is the standard editor contract: pushUndo() before mutating, markDirty() after, and
@@ -2157,7 +2708,7 @@ function editLemmaPrompt(si,tokId,clickXY,anchor){ const s=DOC[si], t=s&&s.token
 // selection-driven wrapper for the Edit-menu "Edit Lemma…" item / its ⌘L key-equivalent — same "no anchor,
 // no click point" call editLemmaPrompt already falls back to gracefully (centred popover), matching how
 // convertTokenMWT below drives openConvertMWT from the menu with neither
-window.editLemmaShortcut=()=>{ if(sel.s>=0&&sel.t>0)editLemmaPrompt(sel.s,sel.t); };
+window.editLemmaShortcut=()=>{ if(sel.s>=0&&sel.t>0)editLemmaAt(sel.s,sel.t); };   // item 31: …through editLemmaAt, which prefers the inline field over the row (bringing the row in if this sentence has none) and falls back to this popover — see its own note
 // shared block-control definitions [iconKey, label, shortcut, action, danger] — used by both the per-block buttons and the block context menu
 function SCTRL(i){ return [
   // grouped thematically (Jupyter cell-toolbar order): insertion, movement, duplication, annotation/parse, output, deletion last

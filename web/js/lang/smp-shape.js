@@ -278,5 +278,45 @@ function smpNotePending(promise){
        depends on just landed — so the drop belongs beside it rather than in a caller that would have to
        remember. Cheap: it costs a rebuild of the render window's own sentences, once per settled batch. */
     if(typeof invalidateDiaCache==="function") invalidateDiaCache();
-    if(typeof DOC!=="undefined"&&DOC.length&&typeof preserveScroll==="function"&&typeof renderDoc==="function") preserveScroll(renderDoc);
+    /* ⚠ …BUT NOT WHILE A FIELD IS OPEN, OR THE SETTLE CLOSES IT UNDER THE READER. This is a whole-#doc
+       rebuild on an 80 ms debounce fired by shapes landing, and every inline editor in the app —
+       the token form, the transliteration row, both gloss tiers, and now a typed word class — is an
+       element appended to <body> over a node this render replaces: the rebuild blurs it, and blur
+       COMMITS (makeEditable/makeGlossEditableSC's `finish`). Caught while a POS field was being
+       driven over CDP: `renderDoc ← preserveScroll (js/ui/wiring.js) ← this settle`, closing a field
+       the reader was still typing in.
+       `renderUnlessEditing` (js/ui/wiring.js) is the guard the app already has for exactly this, and
+       it also hands the open field the value the skipped render would have shown it
+       (INLINE_EDIT_SYNC). SKIPPING is safe HERE — which it would not be for a cache drop — because
+       every editor's `finish` ends in `preserveScroll(renderDoc)` on EITHER path, commit and cancel
+       alike, and `invalidateDiaCache()` has already run one line up: the drop stands, and the very
+       next render rebuilds with the shapes warm. So the settle is deferred to the edit's own closing
+       render rather than lost, and the "glyphs stranded on the foreignObject fallback" failure the
+       note above root-caused cannot come back through this door.
+       Guarded by `typeof` like its neighbours: this file is script 9 and wiring.js is script 19, so
+       the name is not in scope at load — only when this timer actually fires, long after. Falls back
+       to the unconditional render if it is somehow absent, which is the behaviour this had before. */
+    /* ⚠ …AND NOT WHILE A MENU IS OPEN EITHER, WHICH IS THE OTHER HALF OF THE SAME RULE. Reported as the
+       AVM's "+" flickering on click, and traced here: opening a menu puts NEW GLYPHS on screen (feature
+       names, values), those shape, and this settle then repaints the WHOLE DOCUMENT underneath the open
+       menu — four times in the 700ms after one tap, measured by stack. Every one of those replaces the
+       nodes the reader is pointing at, so a hover state restarts, a `:hover`-revealed control fades out
+       and back in, and any class an opener put on a node is gone. The cost is not only the flicker: it is
+       a full renderDoc per menu opening, for glyphs that are not even in the document.
+       DEFERRED, NOT DROPPED — the settle is re-armed rather than skipped, because unlike an inline editor
+       (whose `finish` always ends in a render) a menu's dismissal renders NOTHING, so a skipped settle
+       here would strand the document on its foreignObject fallback until something else happened to
+       repaint. Re-arming keeps asking until the menu is gone and then does the repaint it owed.
+       `.ctx.show` covers both the menu and its one flyout (`#ctx`/`ctx2` share the class); `.acmenu.show`
+       is the shared completion dropdown, which is open exactly while a field is being typed into. */
+    const menuUp=()=>!!document.querySelector(".ctx.show,.acmenu.show");
+    const paint=()=>{
+      /* …and the batch is already consumed by the time we get here, so a deferral re-runs only THIS step.
+         It re-uses `_smpSettle` deliberately: if a new shape lands while we are waiting, `smpNotePending`
+         clears this timer and arms its own, which asks the same question again on the way out. */
+      if(menuUp()){ clearTimeout(_smpSettle); _smpSettle=setTimeout(paint,120); return; }
+      if(typeof DOC!=="undefined"&&DOC.length&&typeof preserveScroll==="function"&&typeof renderDoc==="function"){
+        if(typeof renderUnlessEditing==="function") renderUnlessEditing();
+        else preserveScroll(renderDoc); } };
+    paint();
   },80); }

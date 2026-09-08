@@ -319,6 +319,10 @@ that names one field is the case this protects.
 carrying no language channel at all. So a model with no training file whose language IS one of the 80
 uses the built-in row (`basis: "builtin"`, `slot` = the plain code, no row of its own to write);
 anything else gets a spare row, zeroed, and a caveat that says what that costs.
+**And it costs more than LAS: such a model supplies no FEATS at all** — see "An untrained row may not
+generate features" at the end of the additive-FEATS section below, which is where the mute lives and
+why it is not a struck arm. `generic_models.unfitted_slot` is the one place that answers whether a
+row has been trained yet.
 
 ## Pipeline arms
 
@@ -369,6 +373,50 @@ what is blanked — and `have` — is there a value here for a component to read
 cascade actually asks. `parse_pretokenized` takes a `given` dict of those columns
 (`_GIVEN_SETTER`), `_apply_arms` never blanks one, `_force_upos` never overwrites a supplied FEATS,
 and the answer hands each back verbatim beside the form and the UPOS.
+
+⚠ **AND "THE COLUMN" MEANS THE WHOLE COLUMN, BLANKS INCLUDED — WHICH IS WHERE IT LEAKED (0.3.20).**
+Reported as "disabling Features in the Pipeline drawer doesn't prevent a generic or custom model from
+writing values to FEATS". The guard above was per-COLUMN and the leak was per-TOKEN. `pipeGiven`
+(js/core/prefs.js) sends a switched-off column as soon as ONE token in the sentence has a value there
+(`if(col.some(v=>v&&v!=="_"))`), so a routine column is full-length with most cells empty; `_apply_arms`
+then stopped blanking it altogether, and the only restore that followed wrote back the annotator's
+NON-empty cells. Every token whose cell they had left empty kept whatever the model wrote, and
+`reparseTokenFields` merged it straight into the document. **An empty cell in a column the annotator
+has taken over is an ANSWER, not a gap.** All four column arms were affected — FEATS is where it was
+noticed, because that is the column a custom model is fitted on. `_apply_arms` now takes the `given`
+columns themselves beside their names and writes an off arm's column cell for cell (`_` = empty, a
+short column's tail empty), which is also why the two parameters stay separate: `gset` carries the
+retag's `upos`, which arrives as its own argument with no entry in the dict and must be left for the
+`if upos:` restore to write.
+
+⚠ **THE COMPONENT RAN; ITS ANSWER SURVIVED.** `_pipe_plan` was not the fault and could not have been:
+a component goes off only when EVERY arm it owns is off, and the morphologiser owns `upos` as well —
+which `has_upos` has just switched ON for the very same call. Measured, on a six-token Mwotlap
+sentence with `arms` lacking `feats`, `given["feats"]` filled on 2 of 6 and `prior_feats` the same
+column:
+
+| | `_pipe_plan` skips | morphologiser runs | FEATS on the 4 empty cells, before | after |
+| --- | --- | --- | --- | --- |
+| `custom:mwotlap` | *(nothing)* | yes | `Case=Gen\|Number=Sing\|PartForm=Pres\|VerbForm=Part\|Voice=Act`, … | *(empty)* |
+| `sud:en_sud_ewt_gum` | *(nothing)* | yes | `Mood=Ind\|Number=Sing\|Person=3\|Tense=Pres\|VerbForm=Fin`, … | *(empty)* |
+
+The two cells the annotator HAD filled came back as they sent them either way, and the raw-text paths
+(`parse`, `parse_many`, `_parse_spacy_sud*`) were never affected — they pass no `given` at all, so the
+old branch blanked the column correctly; verified unchanged.
+
+⚠ **AND THE ADDITIVE MERGE IS SKIPPED WHERE THE FEATS ARM IS OFF.** With the column already restored
+cell for cell, `_merge_prior_feats` could no longer re-introduce a model pair — but it could still
+RE-ORDER the annotator's own, since it sorts into UD's case-insensitive order, so a document whose
+FEATS were written in some other order would come back rewritten by a parse it had told not to touch
+that column. `prior_feats` and `given["feats"]` are the same column read off the same tokens one line
+apart in js/io/bridge.js, so the skip loses nothing. **The MID-PIPELINE merge (`_prior_feats_on_doc`)
+is deliberately NOT skipped with it**: that one feeds the parser rather than the answer, and feeding it
+the annotator's features is worth +14.95 LAS whether or not they are also writing the column. The
+narrow condition — `feats` in `gset` and not in `arms` — matters: an arm the CASCADE took off is not
+one the annotator supplied, and there the merge is still what puts their column back after `_apply_arms`
+has blanked it. `_force_upos`'s `keep` is likewise left at the non-empty cells: it writes to the DOC,
+where the question is what the components after it should read, and the morphologiser has already put
+its own answer on every token `keep` does not name.
 
 ⚠ **AND THAT IS THE ONLY ENSEMBLE HERE WORTH BUILDING.** Measured on ten held-out Basque sentences
 through this app's own scorer: UPOS alone → LAS **38.32**; UPOS + the annotator's FEATS → **53.27**
@@ -467,6 +515,35 @@ loaded pipeline's own component names — so a wheel that gains or loses a compo
 table anywhere to edit. Without that intersection a model with no UPOS tagger returns whatever its
 morphologiser guessed, in a column the app then saves as annotation. `sentence` is the one exemption:
 its absence routes to the rule splitter, not to an unsplit paragraph.
+
+⚠️ **AND THE FRONTEND HAD NEVER BEEN TOLD ABOUT THAT EXEMPTION**, so for as long as the two lists have
+existed they have disagreed. Reported as "if a generic/custom/null model is enabled, then adding a
+multi-sentence text should first split the text into sentences". `pipeEffective` (js/core/prefs.js)
+forced every arm the model lacks off — `sentence` included — so `pipeArms()` dropped it, and
+`sentencize` opens with "sentence splitting OFF means ONE sentence, not split some other way".
+The whole paste came back as **one block**, and `__insertPastedText`'s own `localSentSplit` fallback
+never ran, because a ONE-ELEMENT list is not an empty one. Measured on
+`The cat sat on the mat. "Really?" he said (twice). Then it stopped.` through a custom model:
+
+| arms sent | `parse.sentencize` |
+| --- | --- |
+| `tokenise feats syntax` (before) | 1 sentence — the whole paragraph |
+| `tokenise sentence feats syntax` (after) | 4 — `…mat.` / `"Really?"` / `he said (twice).` / `Then it stopped.` |
+
+`PIPE_FALLBACK_ARMS` is now the frontend's mirror of `_FALLBACK_ARMS` and **the two have to agree**;
+each names the other in place. `tokenise` is in NEITHER, for the reason the "not equally good"
+paragraph above records — an arm belongs there where the fallback is AS GOOD, not merely where one
+exists. **With no model at all the split already worked and was not touched**: `model_arms("")`
+returns `[]`, which `syncPipeAvail` reads as the question having failed → `PIPE_AVAIL = null` →
+"assume all" (verified before and after: identical `pipeArms()`).
+
+⚠️ **AND THE DRAWER FOLLOWS THE PARSE RATHER THAN THE MODEL.** A fallback arm can no longer paint
+`.armoff` (`fellback`, `paintPipe`): a row that is disabled and still doing something is the same
+drift in the other direction, and disabling this one would make "treat this paragraph as one
+sentence" inexpressible under every custom model at once — the tick is the only way to say it. It
+stays live, and what the model's absence changes goes in the TOOLTIP, the treatment the
+`upos`/`reads_upos` row already gets ("This model has no sentence splitter — the app's own rule
+splitter does it. Untick to keep each paragraph whole.", `PIPE_FALLBACK_WHY`, js/ui/wiring.js).
 
 ⚠ **AND THE GENERIC PARSER READS UPOS AS INPUT, WHICH CHANGES WHAT A RAW-TEXT PARSE MAY CLAIM.**
 "You supply UPOS; the wheel supplies everything else" — tagging is lexical and upstream measured that
@@ -639,6 +716,56 @@ not be a re-parse. So the gate is the PACKAGE and not the engine: `custom:<slug>
 `sud:xx_sud_generic` both resolve to the one shared wheel (`_resolve_model`), and nothing else does.
 `_feats_additive` is the whole of that decision.
 
+⚠️ **AND THE FRONTEND ASKS THAT SAME QUESTION RATHER THAN ANSWERING IT.** A second reader wanted it —
+the retag's "inherit what this word was last given under this class" pass (`mayInheritAnnotation`,
+js/io/bridge.js; see `editing.md`), which fires exactly where the model will NOT fill those cells for
+itself. ⚠️ **THE LEMMA IS THE THIRD COLUMN ON THAT PASS, AND `GENERIC_ARMS` IS WHY.** The shared generic
+wheel ships a morphologiser and a parser and NO LEMMATISER, so under it (and under every custom row on
+it) the LEMMA column comes back empty for good — `p["lemma"]` is simply absent, which `reparseTokenFields`
+reads as "this model says nothing here" and leaves alone, exactly as an absent key must be read. On
+request, the frontend fills it instead: an earlier same-form/same-UPOS lemma from this document if the
+annotator has given one, else the form itself. Same gate, same reasoning — under a MONOLINGUAL wheel the
+pass is off because that model has a lemmatiser and will answer for itself, and arguing with it on the
+annotator's behalf is exactly what `_feats_additive` exists to prevent elsewhere. The one thing to know
+from this side: the fill is written BEFORE `regenTok`, so it travels to the next parse as the
+annotator's own column, and nothing in the wheel will overwrite it.
+
+⚠️ **AND MAKING THAT LAST CLAUSE TRUE TOOK A FIX TO `pipeGiven`, WHICH THE LEMMA TIER IS SIMPLY THE FIRST
+THING TO HAVE CAUGHT.** `_apply_arms` BLANKS the column of every arm that is off — deliberately ("hiding
+it would be a lie the CoNLL-U file on disk then tells for ever") — and the one thing that stops it is
+`if key not in given`. `pipeGiven` (js/core/prefs.js) used to send only the columns something in the
+model READS (`PIPE_DEPS`), which is right about `given`'s first job and misses that second one. And
+`parse.arm_deps('custom:mwotlap')` is **`{}`** — the generic wheel declares no reads at all — so under
+the model family this pass exists for, `pipeGiven` sent NOTHING, and LEMMA and XPOS came back `""` on
+every background re-parse and were written straight over the reader's own values by
+`reparseTokenFields`'s `if(p[k]!=null)` (`""` is not null). FEATS and UPOS escaped only because each has
+a channel of its own (`prior_feats`; `upos` as its own argument). Measured against the real wheel:
+
+```
+parse.parse_pretokenized(["dogs","ran"], "custom:mwotlap", upos=["NOUN","VERB"],
+                         arms=["feats","syntax","tokenise"])
+  → lemma '' , lemma ''
+…the same call with given={"lemma":["dog","run"]}
+  → lemma 'dog', lemma 'run'
+```
+
+The gate is now the arm alone: a COLUMN arm the model is not writing, with something in it, is a column
+the annotator has taken over. Sending one the pipeline never reads costs a list of strings across the
+bridge; not sending it cost the column. **It also feeds the wheel's own lexical channel**, which is the
+happy part: `GenericEmbed.v3` fills that channel from a lemma or `Token._.gloss` under
+`vectors_fill='auto'`, and the "a doc had either a lemma or Token._.gloss on no token, so the channel is
+OOV throughout it" warning that the un-given call emits stops once the lemmas travel. So `Api.model_arms` reports `feats_additive` beside `reads_upos`/`reads_glosses`, resolved
+with `parse._resolve_model` and asked of `parse._feats_additive`, and `PIPE_FEATS_ADDITIVE`
+(js/core/prefs.js) holds it. A copy of the rule in JS would have been a second answer to
+"which models may overwrite the annotator", and the copy that drifted would do so silently.
+⚠️ **It is NOT gated on the arms list arriving** — the treatment `reads_glosses` gets, not
+`reads_upos`'s: this is a fact about which PACKAGE the id names, answerable with no pipeline loaded
+at all, where `reads_upos` is read off the loaded pipeline's own components and so fails with the
+same question the arms list does. It is also set BEFORE the `arm_deps` line inside `model_arms`' own
+`try`, which loads a pipeline and may raise: losing this answer to an unrelated failure would take
+the inheritance off under precisely the models it exists for. Verified through `Api.model_arms`:
+`custom:mwotlap` → `True`, `sud:en_sud_ewt_gum` → `False`, `""` → `False`.
+
 ⚠ **THE FRONTEND SENDS THE COLUMN; PYTHON DECIDES WHETHER IT BINDS.** All three pre-tokenised call
 sites (`reparse`, `reparseTokenFields`, `scoredRelsForHead`'s tier 3) pass `prior_feats` on every
 call, unconditionally. Two copies of "which models may overwrite the annotator" would drift, and the
@@ -742,3 +869,74 @@ every cell the parse fills is the parse's.
 demonstrably use it. The validator composes multi-values at validation time by splitting on the
 comma — so any future code that checks a FEATS string against that file must split first, or all 929
 of these labels will fail lookup.
+
+### …and an untrained row may not generate features at all
+
+⚠ **A CUSTOM MODEL THAT HAS NOT BEEN TRAINED YET SUPPLIES NO FEATS.** Reported in as many words. The
+`basis: "unfitted"` state is a model created with no training file for a language the wheel has never
+seen (`generic_models.create`'s last branch): it gets one of the 32 spare embedding rows, **zeroed**.
+The morphologiser predicts FEATS from UPOS *and that embedding*, so its answer is a pure cross-lingual
+guess about a language nothing in the pipeline has ever been shown — and the zeroed row is not even
+neutral, upstream having measured it costing Georgian **4 LAS against carrying no language channel at
+all**. "Silence is the preferred failure for annotation" (CLAUDE.md): an honest blank beats an invented
+feature set, and this is the one row with no evidence whatever to invent from.
+
+⚠ **IT IS A MUTE OF THE ANSWER, NOT A STRUCK ARM, AND THAT IS THE WHOLE DESIGN.** The obvious
+implementation — drop `feats` from `model_arms` for an unfitted model — takes the TREE with it, and was
+traced before it was written: `_pipe_plan`'s cascade drops any arm whose prerequisites are gone,
+`arm_deps` says this wheel's parser READS the FEATS its own morphologiser writes, and the
+component-skip then removes the morphologiser too (it owns only `upos`, which `sud_require_upos` has
+already had struck, and `feats`). An unfitted model would stop parsing altogether — while the
+Add-model sheet promises the opposite in as many words ("the model will parse, badly"). So
+`parse._feats_muted` leaves the run exactly as it is: the morphologiser still runs, still feeds the
+parser, and `_prior_feats_on_doc` still hands it the annotator's own features (+14.95 LAS on held-out
+Basque, and worth just as much to a model that is writing no column of its own). What never happens is
+those guessed features landing in the reader's document.
+
+⚠ **THREE CLAUSES OF ONE RULE, AT THE SAME THREE SITES.** `_feats_additive` / `_drop_multivals` /
+`_feats_muted` ask the same question at finer and finer grain — what of this wheel's FEATS answer may
+stand? A monolingual wheel's may stand whole; the generic wheel's may not overwrite the annotator and
+may not carry a comma value; an **untrained row's may not stand at all**. `_mute_feats` therefore sits
+beside `_drop_multivals` at every site that has one: `_parse_spacy_sud`, `_parse_spacy_sud_many` and
+`parse_pretokenized`. The two raw-text sites reach an already-empty column today (a raw-text parse
+supplies no UPOS, so `_needs_given_upos` takes the morphologiser out of the run and there is nothing
+to mute) and are kept anyway — the rule belongs wherever this wheel can produce a FEATS cell, not only
+where it currently does.
+
+⚠ **AND THE ORDER IS LOAD-BEARING: THE MUTE DROPS THE MODEL'S OWN ANSWER AND NOTHING ELSE.** It runs
+BEFORE every restore in `parse_pretokenized` — `_apply_arms` writing a switched-off column cell for
+cell, the `given` loop, the caller's `upos`, and `_merge_prior_feats`' last word — so the annotator's
+own column comes back untouched from what they handed in rather than from what survives the mute.
+Measured on the reported six-token Mwotlap sentence through `custom:mwotlap` (`basis: "unfitted"`,
+stored vectors all zero), with the reader's UPOS supplied:
+
+| token | before | after |
+| --- | --- | --- |
+| `Nēk` (PRON) | `Case=Nom\|Number=Plur\|Person=3\|PronType=Prs` | *(empty)* |
+| `van` (VERB), `prior_feats` = `Subcat=Tran` | `Subcat=Tran` | `Subcat=Tran` |
+| `Bankis` (PROPN), `prior_feats` = `Definite=Def\|Gender=Fem,Masc` | as typed | as typed, comma value and all |
+| every head and relation | `subj root udep comp:obj mod punct` | **identical** |
+
+The whole of the diff over the same run against `custom:tukang-besi-north` (`basis: "fitted"`),
+`sud:en_sud_ewt_gum` and a `basis: "builtin"` model made for `de` was **nothing** — the German row
+still writes `Case=Nom|Definite=Def|Gender=Masc|Number=Sing|PronType=Art` on `Der`, which is what a
+trained row is for.
+
+⚠ **THE PREDICATE IS KEYED ON THE SLOT, NOT ON THE MODEL ID**, and lives in `generic_models` with
+`basis` rather than in `parse.py` — the same shape `_feats_additive` and `app/glosses.py` are held to,
+because two copies of a rule about what a model may write over the annotator would drift, silently, in
+the direction of writing. The slot IS the resolution of the id for this question: `_resolve_model`
+hands back `(engine, package, tb_lang)` precisely because "a custom model IS a SUD spaCy model,
+differing only in which vector it reads", the property asked about is a property of that vector, and
+every parse path already carries the slot to the point where the answer is needed —
+`_parse_spacy_sud`/`_parse_spacy_sud_many` take a package and a `tb_lang` and no id at all, so keying
+on the id would have meant threading one back into the two functions that were factored to be free of
+it. Only `basis == "unfitted"` counts; a missing or unrecognised `basis` answers False, because the
+mute withholds a model's answer and is applied where the zeroed row is KNOWN.
+
+⚠ **AND THE REFUSAL IS VISIBLE, ONCE, WHERE THE MODEL IS DESCRIBED.** An annotator who expects
+features and gets a blank column is owed the reason, and "silence is the preferred failure for
+annotation" does not extend to silence about the silence. Two sentences, no new surface:
+`generic_models.caveat()`'s unfitted branch (which the Model Manager row, the in-page sheet's row and
+the Add-model preview all already show) now says it supplies no features and why, and the Add-model
+sheet's `newFileHint` (app/api.py) says so before Create rather than after the reader notices.

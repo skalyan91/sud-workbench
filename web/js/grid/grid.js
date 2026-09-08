@@ -483,7 +483,14 @@ function renderGrid(si){
         const oldUpos=t.upos;
         if(key==="deprel"){ t.deprel=withDepBase(t.deprel,ctl.value); afterDeprelEdit(t,sent); }   // keep the "@deep" tail when the relation changes
         else if(key==="deep"){ t.deprel=withDepDeep(t.deprel,ctl.value); }                     // replace only the deep-feature tail
-        else if(key==="upos"){ t.upos=ctl.value; syncXposMirror(t); clearFeatsForUpos(t); uposSyncGloss(t,oldUpos); }   // item 1: a tag change drops what the new class cannot carry (a now-meaningless Subj, and every feature the UD tables do not put on this class); Task B: retarget the closed-class gloss prefix IN PLACE, immediately — never a wholesale MGloss rebuild
+        else if(key==="upos"){ t.upos=ctl.value; syncXposMirror(t); clearFeatsForUpos(t); uposSyncGloss(t,oldUpos);
+          /* …and the FOURTH retag site inherits what this word was last given under this class, on the
+             same terms as the three in js/editing/context-menu.js: only on a GENUINE gain of a class
+             (never on clearing one — there is nothing to have been seen under), inside this cell's own
+             undo snapshot above, and ahead of the regenTok below, whose `prior_feats` then carries the
+             inherited column to the parser as the annotator's own. A retag is the same gesture whether
+             it is made in the grid or in the diagram, so it cannot mean two different things. */
+          if(t.upos&&t.upos!==oldUpos) inheritAnnotationForUpos(si,i+1); }   // item 1: a tag change drops what the new class cannot carry (a now-meaningless Subj, and every feature the UD tables do not put on this class); Task B: retarget the closed-class gloss prefix IN PLACE, immediately — never a wholesale MGloss rebuild
         else { t[key]=ctl.value;
           if(key==="head"){ if(!ctl.value.length) t.deprel="";   // detaching clears the relation with it — a deprel describes an EDGE; see clearHead's own note (js/editing/edit-ops.js), and note it must happen BEFORE afterHeadEdit or a detached root's "root" would be demoted to "udep" rather than cleared
             afterHeadEdit(t,sent); } }   // keep head 0 ⟺ deprel "root"
@@ -890,6 +897,31 @@ function avmStruct(t){ const feats=(t&&t.feats)||""; if(!feats||feats==="_") ret
 // narrowed UD_FEATS list, UD's canonical order), but writing UD Feat=Val straight to FEATS instead of a Leipzig
 // abbreviation into MGloss: this tier IS FEATS, so an edit here is exactly the FEATS-column edit a hand-typed
 // one would be, sharing its single undo entry the same way.
+/* ⚠ FEATURES A TOKEN MAY CARRY SEVERAL VALUES OF AT ONCE. On request ("allow a verb to simultaneously have
+   multiple voices, if this is allowed in UD") — and it is: the CoNLL-U format spec permits a comma-separated
+   multi-value, and `Voice=Cau,Pass` is its own worked example, a causative-passive of the kind Turkish forms
+   productively. Alphabetically sorted, which is what UD writes and what its validator expects (and what the
+   generic wheel's own `VerbForm=Fin,Inf` — the multi-value `_drop_multivals` refuses to invent, app/parse.py
+   — looks like when a treebank has one).
+   ⚠ EVERY FEATURE, NOT A NAMED LIST — asked for first as "allow a verb to simultaneously have multiple
+   voices", then corrected to the general rule. UD puts no per-feature restriction on this: the comma value is
+   how the standard writes both a genuine COMBINATION (`Voice=Cau,Pass`) and a SYNCRETISM the annotator
+   declines to resolve (`Case=Acc,Dat` on a German form that is both, `Gender=Fem,Masc`, `VerbForm=Fin,Inf`).
+   A list of "features allowed to combine" would have been this app inventing a restriction the standard does
+   not have — and whoever hit the second entry would have had to add it.
+   ⚠ SO THE GESTURE CARRIES THE DISTINCTION INSTEAD OF A TABLE. A plain click still REPLACES, because that is
+   the common case and making every row a toggle would cost it: switching Gender from Fem to Masc would take
+   two clicks and pass through `Gender=Fem,Masc` on the way, which is a different claim about the token.
+   ⌘/Ctrl-click combines. The menu says so in a hint row rather than leaving a modifier to be discovered —
+   "a gesture nothing on screen announces is one nobody discovers and everybody triggers by accident". */
+function featValList(v){ return String(v||"").split(",").map(x=>x.trim()).filter(Boolean); }
+function featHasVal(cur,v){ return featValList(cur).indexOf(v)>=0; }
+/* Add or remove ONE value of a multi-valued feature, leaving the others alone; clearing the last one clears
+   the feature. Sorted on the way out so `Pass,Cau` and `Cau,Pass` cannot both exist in one document. */
+function avmToggleFeat(si,tokId,feat,val){ const s=DOC[si]; if(!s)return; const t=s.tokens[tokId-1]; if(!t)return;
+  const have=featValList(getFeat(t.feats,feat));
+  const next=have.indexOf(val)>=0?have.filter(x=>x!==val):have.concat([val]);
+  avmSetFeat(si,tokId,feat,next.length?next.sort().join(","):null); }
 function avmSetFeat(si,tokId,feat,val){ const s=DOC[si]; if(!s)return; const t=s.tokens[tokId-1]; if(!t)return;
   const next=val?setFeat(t.feats,feat,val):clearFeat(t.feats,feat);
   if(next===t.feats) return;

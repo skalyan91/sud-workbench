@@ -192,9 +192,38 @@ def available(feature: str) -> bool:
 
 
 def status() -> list[dict]:
-    """One row per tier for the Manage Models UI."""
-    return [{"id": k, "label": v["label"], "note": v.get("note", ""),
-             "installed": available(k)} for k, v in TIERS.items()]
+    """One row per tier for the Manage Models UI.
+
+    ⚠ **A DATA TIER ANSWERS FOR ITS OWN ROW, THE SAME WAY IT ALREADY ANSWERS `available()`.** The row
+    was built purely from the static `TIERS` entry, which can only say what the tier IS and never what
+    the copy on THIS machine happens to be — and a data tier's asset is BUILT, so it can be present and
+    still be out of date. That is not hypothetical: `fa_vocab`'s build rule changed (a majority test
+    replacing a `max` over KaamelDict's probability column, which had been silently picking a reading
+    out of a three-way tie), and every lexicon built before it keeps returning the old vocalisations
+    with nothing anywhere saying so. `app/fa_vocab.py`'s own `status()` compares the recipe the asset
+    was built by against the current one and says "built by an older recipe" when they differ; this is
+    what lets that sentence reach the reader.
+    ``stale`` is that comparison as a FLAG rather than as prose, because the UI has to do something
+    with it (offer a rebuild — see `extraRow`, js/io/models.js) and parsing the note to find out would
+    be reading a sentence for a fact. A tier that does not answer, or a pip tier with no module at all,
+    keeps exactly the static row it had."""
+    out = []
+    for k, v in TIERS.items():
+        row = {"id": k, "label": v["label"], "note": v.get("note", ""), "installed": available(k)}
+        try:
+            mod = _data_module(v)
+            own = mod.status() if (mod is not None and hasattr(mod, "status")) else None
+            if mod is not None and own:
+                row["note"] = own.get("note") or row["note"]
+                row["label"] = own.get("label") or row["label"]
+                recipe = getattr(mod, "_RECIPE", None)
+                built = getattr(mod, "built_recipe", None)
+                row["stale"] = bool(row["installed"] and recipe is not None and callable(built)
+                                    and built() != recipe)
+        except Exception:  # noqa: BLE001 — a tier that cannot describe itself keeps its static row
+            pass
+        out.append(row)
+    return out
 
 
 def install(feature: str, progress=None) -> dict:

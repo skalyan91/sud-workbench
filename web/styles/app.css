@@ -570,6 +570,66 @@
      the diagram's 15px reference reads visibly lighter at a flat 400 unless the weight is bumped to
      compensate, exactly as every other small annotation row in this file already does. */
   .avm-row{cursor:pointer}
+  /* item 30 — the AVM's "+" (drawAVM, js/diagram/diagram-core.js): a mark on the matrix's own bottom rule
+     that opens the add-feature picker. It needs no ink rule of its own — it is drawn with the BRACKET's
+     classes (.mwt-tie over .mwt-tie-cas), so its weight, colour and casing halo are the serifs' own and
+     cannot drift from them. What it needs is to read as a control: the pointer, and a hover that answers.
+     The hover brightens the whole group rather than the path, so the halo tracks the ink instead of showing
+     through it. `pointer-events:all` on the group covers the transparent rect the same way `.avm-row`
+     already relies on for its own .avm-hit. */
+  /* ⚠ THE GROWN BOTTOM AND THE "+" ARE HOVER-ONLY, on request ("the plus sign — and extra height — should
+     only appear when hovering the AVM"). Both states are in the DOM (drawAVM cannot swap path data from CSS,
+     and re-rendering the sentence on every mouseenter would put a full renderDoc behind pointer movement),
+     so this is which of the two is painted. `visibility`, not `display`/`opacity`: a hidden element is not
+     hit-testable either, so the resting + cannot be clicked by accident, and unlike `opacity:0` it costs no
+     compositing layer per matrix. Nothing MOVES on hover — avmLayout reserves the grown height whether or
+     not it is painted (see drawAVM), so the matrix grows into space that is already its own.
+     `:focus-within` keeps the keyboard route honest: the + carries a tabindex, and a focused control that
+     cannot be seen is worse than none. */
+  /* ⚠ THE MATRIX GROWS ON HOVER, AND THE GROWTH IS ANIMATED — on request, in two steps ("the plus sign, and
+     extra height, should only appear when hovering the AVM", then "the height increase should be animated").
+     TWO MOVING PARTS, and each is animated by the property it can be animated by without distorting:
+       · `.avm-grow-spine` — the spine's extension, `scaleY` about its own top. A vertical stroke's thickness
+         is an X quantity, so scaling Y lengthens the line and leaves the weight alone.
+       · `.avm-grow-rule` — the bottom serifs and the + that rides on them, TRANSLATED. A horizontal stroke
+         under `scaleY` would thin and thicken as it moved, so the rule is drawn once at its grown position
+         and held up by exactly the distance it will travel (`--avm-grow`, published by drawAVM from the
+         AVM_PAD_B that defines the geometry — one number, not two).
+     SVG path data is not what is being animated, deliberately: `d` is transitionable in these engines but
+     the two states differ in structure, and re-rendering the sentence on mouseenter would put a full
+     renderDoc behind pointer movement across a diagram.
+     ⚠ NOTHING REFLOWS. `avmLayout` reserves the grown height whether or not it is painted, so this animates
+     inside space the matrix already owns — no block below it moves, and the pointer cannot chase a box that
+     is running away from it. */
+  .avm-grow-spine{transform:scaleY(0); transition:transform .16s cubic-bezier(.2,.7,.3,1)}
+  .avm-box:hover .avm-grow-spine,.avm-box:focus-within .avm-grow-spine,.avm-box.avm-open .avm-grow-spine{transform:scaleY(1)}
+  .avm-grow-rule{transform:translateY(calc(-1 * var(--avm-grow,9px))); transition:transform .16s cubic-bezier(.2,.7,.3,1)}
+  .avm-box:hover .avm-grow-rule,.avm-box:focus-within .avm-grow-rule,.avm-box.avm-open .avm-grow-rule{transform:translateY(0)}
+  /* ⚠ THE MARK FADES IN PLACE — it does NOT carry `.avm-grow-rule`, and that is the instruction, not an
+     oversight: "when an AVM shrinks on mouseout, its plus sign should fade, not move; and likewise on
+     mouseover". Sliding it with the rule read as the mark being dragged out from under the matrix. Drawn at
+     the grown rule's own y, it simply appears there and goes away there, while the rule travels underneath
+     it. The 60ms delay stays on the way IN (the rule sets off first, the mark catches up) and there is none
+     on the way out, so the mark is gone before the rule has finished retreating rather than hanging in
+     empty space below a matrix that has already closed. */
+  .avm-plus{cursor:pointer; pointer-events:none; opacity:0; transition:opacity .1s ease}
+  .avm-box:hover .avm-plus,.avm-box:focus-within .avm-plus,.avm-box.avm-open .avm-plus{opacity:1; pointer-events:all; transition:opacity .1s ease .06s}
+  /* …and none of it for a reader who has asked the OS for less motion: the resting and hovered states are
+     both correct on their own, so dropping the transition costs nothing but the movement between them. */
+  @media (prefers-reduced-motion:reduce){
+    .avm-grow-spine,.avm-grow-rule,.avm-plus{transition:none} }
+  .avm-plus:hover .mwt-tie,.avm-plus:focus-visible .mwt-tie{stroke:var(--accent)}
+  /* …and the outline's twin, which is an HTML span rather than two SVG paths: it takes the AVM's own
+     inline register (the attr/val colour and size beside it) instead of the bracket classes it cannot wear. */
+  /* …and the outline's twin fades on the same timing. `opacity`, not `visibility`, so it matches the SVG
+     mark's arrival — with `pointer-events:none` at rest doing what `visibility:hidden` did for hit-testing,
+     and the span keeping its place in the run either way, so nothing reflows when it appears. */
+  .oavm-plus{opacity:0; pointer-events:none; transition:opacity .1s ease .06s}
+  .oavm:hover .oavm-plus,.oavm:focus-within .oavm-plus,.oavm.avm-open .oavm-plus{opacity:1; pointer-events:auto}   /* …and it stays up while its own menu is open, exactly as the SVG mark does (clearAvmOpen, js/editing/context-menu.js) */
+  .oavm-plus{margin-inline-start:4px; color:var(--tie-hue); font-family:var(--token-font); font-size:10.5px;
+    font-weight:571; cursor:pointer; user-select:none}
+  .oavm-plus:hover,.oavm-plus:focus-visible{color:var(--accent)}
+  .avm-plus:focus-visible{outline:none}   /* the accent stroke above IS the focus indication — an SVG outline would box the transparent hit rect, not the mark */
   .avm-hit{fill:transparent}   /* still the row's real click/right-click target (see .bwannot .avm-row's own note below) — only the hover FILL is gone, on report */
   .avm-attr{font-family:var(--token-font); font-size:10.5px; font-weight:571; letter-spacing:.0285em;   /* tracking curve @10.5px — see .omwtcomp's identical value/comment. On report ("AVM left padding too large"): avmLayout's own attrW measurement (diagram-core.js) runs through _measOne, which ALWAYS folds trackCurve's letter-spacing into the reserved width regardless of caller — so the reserve already assumed this tracking existed; painting without it left the glyphs narrower than the space measured for them, reading as extra clearance between the bracket and the ink */ font-feature-settings:"c2sc" 1; fill:var(--tie-hue); unicode-bidi:isolate;
     paint-order:stroke; stroke:var(--casing); stroke-width:2.1px; stroke-linejoin:round}   /* casing halo, on report ("the AVM attrs and vals should be cased, just like the brackets and everything else") — every other diagram glyph/label carries this background-matching stroke (paint-order:stroke, painted BEHIND the fill) so text stays legible crossing an arc/wash; .avm-attr/.avm-val were the one label pair in the diagram with none. Reference element: .tok-pos, NOT .tok-word — .avm-attr already matches .tok-pos glyph-for-glyph in every OTHER register (c2sc small-caps "matching .tok-pos's identical convention", fill:var(--tie-hue) "matches the POS tag's (.tok-pos, --tie-hue) it sits beside" — both quotes from this rule's own colour-unification comment above), so its casing should track .tok-pos's casing too, not the plain-token-form casing .tok-word happens to use for unrelated reasons (a wider stroke there compensates for --script-mag zoom headroom .avm-attr never has). .tok-pos's own casing is stroke-width:3px (app.css, .tok-pos rule above) — scaled to the AVM tier by the SAME ratio this file already applies to every other 15px-reference quantity carried onto the 10.5px AVM box: AVM_BRK_W=3.5 is documented (diagram-core.js, the AVM constants comment) as literally "5 × (10.5/15)", i.e. size × (AVM_size/TOK_REF_SIZE). Applying that identical derivation here: 3 × (10.5/15) = 2.1. (weightCurve() — the OTHER tier-scaled quantity these rules already carry, 571 for font-weight — is a curve, not a flat ratio, so it isn't the model for this one; a stroke WIDTH is a plain linear geometry quantity like AVM_BRK_W, not a legibility-compensation curve like weightCurve(), so the flat-ratio precedent is the right one to follow.) Path-swap check (smpReshape/smpSwapPath, diagram-core.js): .avm-attr's `<text>` IS routed through the HarfBuzz c2sc swap (FFS_SHAPE_CLASSES=["avm-attr"]) and repainted as a `<path>` — verified live (zoomed screenshot) that paint-order/stroke/stroke-width behave identically on the swapped path as they would on the original text: smpSwapPath copies every attribute except x/y/text-anchor (so `class="avm-attr"` survives onto the `<path>` unchanged and this rule still matches it), sets no inline fill/stroke/style of its own, and _glyphSVGPath re-emits each glyph's own closed-subpath outline commands untouched (no fill-rule/clip-rule override anywhere in this file, so the default nonzero winding renders small-caps bowls/counters, e.g. "P"/"R"/"O", as holes exactly as the un-swapped .tok-pos text would) — the halo renders as a clean, unbroken outline, not a broken/self-intersecting one. */
@@ -582,6 +642,49 @@
     paint-order:stroke; stroke:var(--casing); stroke-width:2.1px; stroke-linejoin:round}   /* casing halo — same 2.1px derivation as .avm-attr's own (see its comment): .avm-val shares .avm-attr's reference (.tok-pos) and colour (--tie-hue) exactly, so it takes the identical stroke. UNLIKE .avm-attr, .avm-val's `<text>` never goes through smpReshape/smpSwapPath at all — it carries no font-feature-settings override (2e73d4f's own documented scope: the HarfBuzz c2sc/onum swap is keyed to FFS_SHAPE_CLASSES=["avm-attr"] plus measGloss's c2sc/onum runs, and re-checked current code confirms .avm-val is not in that list and has no feature-settings of its own) and its value text carries no SMP codepoints either, so it never trips the codepoint-based SMP_RE trigger. It stays plain native `<text>`, so this stroke rule needs no swap-path verification — an ordinary CSS paint-order stroke on ordinary SVG text. Value colour matches the POS tag's (.tok-pos, --tie-hue) it sits beside. Both attr and val now render in --tie-hue at full opacity — UNIFIED on report ("I want the attrs and values to have the same colour—preferably the same colour as the POS tags"): the attr label no longer stays on the muted --dia-muted register above it once did; see .avm-attr's own comment for why the opacity had to unify too, not just the fill token. Weight was a flat 700 (unnecessarily bold, on report); 571 is weightCurve(10.5) (js/diagram/diagram-core.js) — same as .avm-attr beside it — so it reads at the size-appropriate weight the curve gives every other tier, not an emphasis bump */
   .translit{font-size:15px; fill:var(--dia-muted); font-style:italic; font-family:var(--token-font); text-anchor:middle; letter-spacing:.02em;   /* same size as the form/script above it */   /* italic tracking bump (ITALIC_TRACK, diagram-core.js) — trackCurve(15)=0 (reference size), so this IS the italic term alone; kept in sync with _measOneUncached's italicTrackOf() by hand, per the tracking-curve convention */
     paint-order:stroke; stroke:var(--casing); stroke-width:3px; stroke-linejoin:round}
+  /* ── item 29: THE LEMMA ROW ────────────────────────────────────────────────────────────
+     Between the transliteration and the gloss tiers, in all five notations: `.tok-lemma` is the SVG row
+     (belowStack + the hierarchy, js/diagram/), `.bwlemma` the wrapped-brackets flex row and `.olemma` the
+     outline's inline one. Three names, one register — the transliteration's own size, family and muted ink
+     (15px, --token-font, --dia-muted), set UPRIGHT rather than italic, with `smcp` doing the whole of the
+     "this is a lemma, not a word form" signalling.
+     ⚠ `smcp`, NOT the `c2sc` every OTHER small-caps register in this file sets (.tok-pos/.bwpos/.opos/
+     .node-cat/.mwt-pos, .avm-attr, the .glabbr runs). c2sc maps CAPITALS to small caps — right for an
+     all-caps tag, and a NO-OP on the lowercase a lemma ordinarily is. smcp is the lowercase→small-caps
+     mapping, so it is the one that makes this row read as small caps at all.
+     ⚠ AND `font-feature-settings`, NOT `font-variant-caps:small-caps`, which is the property that would
+     SYNTHESISE small caps (scaled-down capitals) where the face has no smcp table. Most of --token-font's
+     Noto stack is exactly that case, and a faked small cap is worse than none. A face without the feature
+     simply paints the plain letters here, which is also the correct rendering for a script that HAS no
+     small-caps forms — Devanagari, Arabic and Han have no case at all, so nothing maps and nothing changes.
+     It is also the only form the measurement channel speaks (LEM_FEAT / _measOne's third argument, and
+     makeEditable's applyFont, which copies this very declaration onto the inline field so the field paints
+     and carets in the face the row is drawn in) — CLAUDE.md's "a measurement must follow the paint".
+     No letter-spacing: 15px is the tracking curve's own reference size (trackCurve(15)=0), the same reason
+     .tok-pos states beside it. The casing halo matches .translit's own 3px, the row it sits directly under. */
+  .tok-lemma{font-size:15px; fill:var(--dia-muted); font-family:var(--token-font); text-anchor:middle; font-feature-settings:"smcp" 1;
+    paint-order:stroke; stroke:var(--casing); stroke-width:3px; stroke-linejoin:round}
+  /* …and the POS row, which is an editable field too now (editPosInline): on report ("POS annotations should
+     show the insert cursor on hover"). POS_SEL's own four selectors, spelled out here because CSS has no way
+     to share the JS constant — they must stay in step with `POS_SEL` (js/editing/context-menu.js). */
+  .tok-pos,.node-cat,.opos,.bwpos{cursor:text}
+  .lem-edit{cursor:text}   /* click-to-edit, the same affordance .tr-edit/.gl-edit/.cform advertise: clicking opens a field, not a button */
+  /* ── item 31: THE TARGET OVER A BLANK LEMMA SLOT ───────────────────────────────────────────────────────
+     "Clicking on a hidden lemma should still bring up the input field." Three notations, two shapes: an SVG
+     `<rect class="lem-edit lem-hit">` (svgLemHit, js/diagram/diagram-core.js — belowStack and the hierarchy),
+     and an empty `.bwlemma`/`.olemma` span carrying the same pair.
+     ⚠ `fill:transparent`, NOT `fill:none` — a `none` fill is not hit-tested at all, which is the whole point
+     of the rect over an empty `<text>`. Exactly what `.avm-hit` above states, for exactly that reason.
+     ⚠ AND IT STATES THE ROW'S OWN FACE. `makeEditable`'s applyFont copies the family, size, weight, ink and
+     `font-feature-settings` off the element the field opens over (see its own note, and CLAUDE.md's "a
+     measurement must follow the paint"): a bare rect would inherit none of `.tok-lemma`'s smcp/15px, so the
+     field would open in the wrong face AND caret in it. The HTML spans take theirs from `.bwlemma`/`.olemma`,
+     which they still carry, so only the SVG rect needs it restated here.
+     ⚠ min-width IS WHAT MAKES THE HTML CELLS CLICKABLE AT ALL: `.bwund` is `align-items:center`, so an empty
+     flex item is 0 wide whatever its min-height, and an empty inline span in the outline has no box either.
+     24px matches LEM_HIT_MINW, the floor the SVG rect uses — one target size across the notations. */
+  rect.lem-hit{fill:transparent; font-family:var(--token-font); font-size:15px; font-feature-settings:"smcp" 1}
+  .bwlemma.lem-hit,.olemma.lem-hit{min-width:24px}
   .mwt-tie,.mwt-tie-h{fill:none; stroke:color-mix(in srgb, var(--tie-hue), var(--content-bg) var(--edge-mix))}   /* surface-form tie under a multi-word token, coloured like an "other"-relation arc: same color-mix(--c-other, --content-bg, --edge-mix) formula arcInk() applies to a relColor(), so the bracket reads as the SAME ink as a neutral arc/arrowhead instead of the plainer --dia-muted (still true as a claim about HUE, but the LIGHTNESS gap it leans on has narrowed a lot since --dia-muted became black-at-50 % flattened: OKLab L .508 → .600 against --c-other's .655, i.e. Δ.147 → Δ.055. Re-measure before citing this as a contrast argument) */
   .mwt-tie{stroke-width:var(--arc-stroke)}   /* the vertical end-pins keep the full --arc-stroke weight */
   .mwt-tie-h{stroke-width:calc(var(--arc-stroke) * .75)}   /* the horizontal bar is drawn thinner than the pins: per psychophysics (the horizontal–vertical illusion), a horizontal line reads heavier than a vertical one of identical physical width, so it needs LESS width to read as the same weight */
@@ -638,12 +741,13 @@
   .bwannot{position:absolute; left:0; top:0; z-index:2; pointer-events:none; overflow:visible}   /* interrupter arcs + MWT ties, over the text */   /* the blanket pointer-events:none is protecting the TOKENS UNDERNEATH: positionBracketAnnots sizes this one <svg> to the ENTIRE .bwrap box (width=max(clientWidth,scrollWidth), height=scrollHeight) and lays it over the flowed text at z-index:2, so an inline SVG's own replaced box would otherwise hit-test across the whole wrapped diagram and swallow every click meant for a .bwtok/.bwbr beneath it — not merely the clicks that land on an arc or a tie */
   .bwannot .mwt-form,.bwannot .mwt-tr-edit{pointer-events:auto}   /* …EXCEPT the two rows of an MWT tie, which carry the same {data-s, data-mwtfrom} click-to-edit contract the SVG notations' mwtTie does (see positionBracketAnnots in js/core/document.js and the delegated #doc click/contextmenu handlers): with the blanket rule inherited they never reached those handlers, so the wrapped-brackets notation silently had no way to edit an MWT surface form at all. Safe against the swallowing above because SVG `pointer-events:auto` on a <text> resolves to visiblePainted — it hit-tests only where the GLYPHS are actually painted, so the overlay stays transparent everywhere else, including over the .mwt-cas backing (still `none`) that sits directly behind .mwt-form */
   .bwannot .avm-add{pointer-events:auto}   /* item 28: the EMPTY AVM slot's placeholder is a right-click target too (avmMenuAt → the add-feature picker), so it needs the same exemption from .bwannot's blanket pointer-events:none the real rows get below */
+  .bwannot .avm-box{pointer-events:auto}   /* ⚠ THE SAME EXCEPTION THE ROW RULE BELOW MAKES, AND FOR THE SAME BLANKET RULE — extended to the matrix's own hover surface (drawAVM's `.avm-hover`), without which the hover-only "+" would be unreachable in THIS notation alone: `.bwannot{pointer-events:none}` inherits straight down onto it, so `.avm-box:hover` would never match and the mark would never appear. `.avm-plus`'s own `pointer-events:all` is not enough on its own — the mark is `visibility:hidden` until the BOX is hovered, and a hidden element cannot be hovered into existence by itself. */
   .bwannot .avm-row{pointer-events:auto}   /* item 1 (right-click report): the SAME gap the MWT-form rule above already fixes once, missed for the AVM tier when it moved into this overlay (item 25/4) — an AVM row here is a real `<g class="avm-row" data-s data-tok>` (drawAVM, diagram-core.js; positionBracketAnnots passes si0/oid explicitly, exactly so a click resolves without an ancestor to walk to), and `.avm-hit` (app.css, above) is its dedicated transparent hit-rect — but with NO exception here, the blanket `.bwannot{pointer-events:none}` inherited straight down onto both, so neither the hover fill NOR a click/contextmenu ever reached them: the event passed through to whatever sits behind the overlay instead, and `.avm-row`'s own click handler (context-menu.js) never fired at all, silently. This was the true cause of "right-click doesn't work on the AVM in wrapped brackets" — not a tokFromEl/resolution bug (avmValueMenu's si/tokId args are already correct and unconditional here; they just never got called). `pointer-events:auto` on the row is enough — `.avm-attr`/`.avm-val`/`.avm-hit`/the new per-value tspans (item 2) all inherit it from their own parent `<g>`, the same one-level-down inheritance the MWT-form rule above already relies on, and `.avm-hit`'s `fill:transparent` (not `none`) still hit-tests under the resulting `visiblePainted`, exactly as its own comment already documented assuming a reachable event that, in this one view, was never arriving. Flat (unwrapped) brackets was never affected — it paints straight into `svg.tree` (no `.bwannot`, no blanket rule at all), the same path stemma/arcs already use, which is why this bug read as bracket-specific rather than universal. */
   /* the flat-matching 10px base top (above) is already enough headroom for a first line's interrupter arcs; reserveBracketArcRoom() tops it up ON DEMAND to fit the first line's tallest within-line bump (+ its labels), so no fixed .hasint guess is needed */
   .bwrap.hasmwt{padding-bottom:67px} /* room below the last line for MWT surface-form ties: base + tie/surface-form/translit; item 4 dropped the tie body by descent(POS_F) (~3px) so this grows 64→67px */
   .bwtok{position:relative; z-index:0; display:inline-block; box-sizing:border-box; vertical-align:baseline; text-align:center; line-height:1.15; border-radius:5px; padding:var(--relpad,0) 3px var(--undpad,0); margin:0 1px}   /* the form is the only IN-FLOW child, so the token baselines on the form — exactly like the brackets and the unwrapped view; relation (above) + POS/translit (below) are absolutely positioned in reserved padding, so toggling them never shifts the form baseline. z-index:0 (was auto) makes this ITS OWN stacking context — load-bearing for .pcand/.dtarget/.findtok's ::before wash below, whose z-index:-1 needs to sink behind .bwform without also sinking behind an UNRELATED ancestor further up the tree (auto here would let it) */
   .bwtok .bwrel,.bwtok .bwpos,.bwtok .otrans,.bwtok .gloss,.bwtok .bwund{margin:0}   /* item 4: reset .gloss's margin-inline-start:8px too — inside the centred .bwund flex column that inline margin pushed the gloss rows off-centre (it was reset for .bwpos/.otrans but not .gloss) */
-  .bwund .otrans,.bwund .gloss[data-tier="mseg"]{position:relative; top:-1px; font-size:15px}   /* item 5: the MSeg row is now 15px like the translit, so it takes the SAME -1px line-box lift the 15px translit gets — landing its baseline at the same form+18+descent(POS_F) step, i.e. the space above MSeg matches the space above the transliteration */   /* item 2: the wrapped-bracket transliteration row matches the SVG .translit's 15px (was 14px → read smaller/darker than the unwrapped-bracket translit). The outline's own .otrans stays 14px (matches its 14px .oform). At 15px the row seats ~1px lower in the 18px below-stack line, so the lift is -1px (was -2px at 14px) to land the translit baseline at the SAME form+18+descent(POS_F) the unwrapped belowStack uses. NOTE: this seat is engine-sensitive (HTML line-box baseline) — verify/tune in the app's WebKit. */
+  .bwund .otrans,.bwund .gloss[data-tier="mseg"],.bwund .bwlemma{position:relative; top:-1px; font-size:15px}   /* item 29: the lemma row is 15px like the translit and MSeg beside it, so it takes the SAME -1px line-box lift — landing its baseline on the same form+18+descent(POS_F) step the unwrapped belowStack draws it at */   /* item 5: the MSeg row is now 15px like the translit, so it takes the SAME -1px line-box lift the 15px translit gets — landing its baseline at the same form+18+descent(POS_F) step, i.e. the space above MSeg matches the space above the transliteration */   /* item 2: the wrapped-bracket transliteration row matches the SVG .translit's 15px (was 14px → read smaller/darker than the unwrapped-bracket translit). The outline's own .otrans stays 14px (matches its 14px .oform). At 15px the row seats ~1px lower in the 18px below-stack line, so the lift is -1px (was -2px at 14px) to land the translit baseline at the SAME form+18+descent(POS_F) the unwrapped belowStack uses. NOTE: this seat is engine-sensitive (HTML line-box baseline) — verify/tune in the app's WebKit. */
   .bwund{position:absolute; left:0; right:0; top:calc(100% + 1.77px + var(--und-extra,0px)); white-space:nowrap;   /* --und-extra is TOK_TR_GAP (js/diagram/diagram-core.js), set beside --undpad in bracketsWrapped: the form→transliteration gap widening flat brackets makes at its belowStack seed. 0px outside lzh, i.e. the offset this rule has always had. */ display:flex; flex-direction:column; align-items:center; line-height:18px}   /* POS/transliteration, directly below the FORM (nested in it) so they centre under the form, not the wider slot; top nudge + 18px line rows put the first below-row's baseline a measured 18px under the form baseline (matching the flat brackets' belowStack first-row step) and step subsequent rows by 18px, matching the unwrapped brackets' belowStack (+18 per row). Correction item 1: the seat was +2.9px but measured ~1.13px too low (wrapped POS/translit/gloss sat lower than the unwrapped SVG belowStack); reduced to +1.77px so the first below-row baseline lands at the flat +18 and every wrapped below-row (POS/translit/gloss) aligns with unwrapped brackets. item 25/9: not enough space was being reserved for MSeg, causing it to wrap — .bwund is `left:0;right:0`, i.e. sized to .bwform's OWN width (its offsetParent), never the wider wordW(i)-reserved CELL that glossSlotW already folds MSeg's real width into (bracketsWrapped, diagram-wrap.js): the reservation was always correct, but nothing stopped the browser wrapping a below-row's own text once it exceeded the (often much narrower) form's width inside this absolutely-positioned container. nowrap here (inherited by every below-row: .gloss/.otrans/.bwpos alike, none of which set their own white-space) lets each row's real, already-reserved width simply overflow .bwund's narrow box instead of line-wrapping inside it; align-items:center still centres it under the form either way */
   .bwtok.leadhead{text-align:start}   /* head alone on a wrapped line → its form sits flush against the cell's own START edge (KEEPS the base rule's normal 3px padding-inline-start — do not zero it: that padding, plus the cell's 1px margin, is exactly "the word's own leading margin/padding" every other bracket→word transition gets for free, and it's what lines this cell up with a sibling flatInto'd line's own "[" at the same indent — see diagram-wrap.js line()/formSlack). Was padding-inline-start:0 with the pad glyphs themselves doctored (one real " " appended after the last invisible "[") to fake this gap back in; that broke the invariant that a pad run's width at a given level is the SAME on every line, so a leadhead line drifted ~one glyph-width out of alignment with its own siblings at the identical indent. The relation and POS stay centred under the form (their own centring is unaffected) */
   .bwtok.sel .bwform{color:var(--accent)}   /* selection = accent text only, no background and no weight bump (matches unwrapped brackets — see the "selected token text" note below) */
@@ -671,6 +775,18 @@
   .bwclose{font-family:var(--token-font); font-size:13.5px; font-weight:444;   /* weight curve @13.5px */ letter-spacing:.0084em;   /* tracking curve @13.5px */ color:var(--muted); margin-inline-end:3px; unicode-bidi:isolate}   /* head repeated (muted) beside a closing bracket */
   .bwrel{position:absolute; left:0; right:0; top:0; text-align:center; font-family:var(--token-font); font-size:11px; font-weight:545;   /* weight curve @11px, matching .lbl — was a flat 600 */ letter-spacing:.0248em;   /* tracking curve @11px, matching .lbl/.orel */ color:var(--dia-muted); unicode-bidi:isolate}   /* relation, in the reserved space above the form */
   .bwform{position:relative; z-index:3; display:inline-block; font-family:var(--token-font); font-size:calc(15px * var(--script-mag,1) * var(--frn-scale,1)); font-weight:var(--script-wght,400); opacity:var(--script-op,1); color:var(--text); margin:0; unicode-bidi:isolate}   /* opacity: offsets a magnified script's own un-lightened weight — see magOpacityDia's note, js/diagram/diagram-core.js. SAME 15px as the unwrapped brackets' WORD_F — wrapping must not shrink the form. z-index:3 (Item 23 + Item 28) → the form paints ABOVE the deprel label (.bwrel, below), any neighbour's annotation, AND the .bwannot interrupter-arc/MWT overlay (z-index:2), so where a wide label/POS or an arc meets a token the TOKEN glyph wins (the arc tucks behind the glyph; its casing/halo behaviour is otherwise unchanged). Positioning context for the relation (above) and POS/translit (below), so they track the form, not the slot */
+  /* item 29: the wrapped-brackets LEMMA row — .tok-lemma's register (see its own rule above for why smcp
+     rather than c2sc, and why the feature is set through font-feature-settings), in HTML: `color` rather
+     than `fill`, and the casing halo comes from the shared text-shadow rule further down rather than from a
+     paint-order stroke. No margin-inline-start (unlike .bwpos's 6px): .bwund centres each row on its own
+     text, and an inline margin would push this one off that centre — the same reset .bwtok .gloss needed.
+     ⚠ min-height IS LOAD-BEARING, and it is the HTML half of this tier's display-gate exception. An
+     uninflected token paints nothing here, but its span is still appended (bracketsWrapped, js/diagram/
+     diagram-wrap.js) because .bwund is a flex COLUMN — omit the item and every row below it in THAT token's
+     stack rises one step while its neighbours' stay put, which is exactly the misalignment --undpad's own
+     belowReserveH has already paid for. An EMPTY flex item has no line box and so measures 0 tall, so the
+     height has to be stated: 18px is .bwund's own line-height, i.e. what a filled row of this size occupies. */
+  .bwlemma{font-family:var(--token-font); font-size:15px; font-weight:400; font-feature-settings:"smcp" 1; color:var(--dia-muted); min-height:18px; unicode-bidi:isolate}
   .bwpos{font-family:var(--token-font); font-size:15px; font-weight:400; font-feature-settings:"c2sc" 1; color:var(--tie-hue); margin-inline-start:6px; unicode-bidi:isolate}   /* size/weight now matches the transliteration (15px normal) with c2sc small caps, mirroring .tok-pos/.opos/.node-cat. No letter-spacing: 15px is the tracking curve's reference size (0). cpsp dropped — see .tok-pos. Item 2: the LUMINANCE (colour) also matches the unwrapped-bracket POS — --c-other (the palette's neutral member at the subj/comp/mod deprel L), exactly as .opos/.tok-pos use — so wrapped-bracket POS tags read at the same lightness as the flat-bracket ones instead of the plainer --dia-muted (still true as a claim about HUE, but the LIGHTNESS gap it leans on has narrowed a lot since --dia-muted became black-at-50 % flattened: OKLab L .508 → .600 against --c-other's .655, i.e. Δ.147 → Δ.055. Re-measure before citing this as a contrast argument) */
   /* SELECTED TOKEN TEXT IS ACCENT-COLOURED, NEVER BOLDER. The accent carries the selection on its own, and the
      weight bump this used to add (font-weight:640) could not be made to pay for itself: every renderer lays its
@@ -957,8 +1073,8 @@
      .dim-out was a blanket opacity the outside level still reached it (any element, no rule needed), but the
      periphery's ink rules matched only `.dim-peri .cform`, and a root-drawn companion has no .dim-peri ancestor,
      so a peripheral companion stayed at full ink. */
-  .dim-peri .translit,.dim-peri .otrans,.dim-peri .gloss,.dim-peri .gw-tie,
-  .dim-out .translit,.dim-out .otrans,.dim-out .gloss,.dim-out .gw-tie,
+  .dim-peri .translit,.dim-peri .otrans,.dim-peri .gloss,.dim-peri .tok-lemma,.dim-peri .olemma,.dim-peri .bwlemma,.dim-peri .gw-tie,
+  .dim-out .translit,.dim-out .otrans,.dim-out .gloss,.dim-out .tok-lemma,.dim-out .olemma,.dim-out .bwlemma,.dim-out .gw-tie,
   .dim-peri .seam-mark:not(.sel):not(.dim-peri):not(.dim-out)[data-seam-row="translit"],.dim-peri .seam-mark:not(.sel):not(.dim-peri):not(.dim-out)[data-seam-row="mgloss"],
   .dim-out .seam-mark:not(.sel):not(.dim-peri):not(.dim-out)[data-seam-row="translit"],.dim-out .seam-mark:not(.sel):not(.dim-peri):not(.dim-out)[data-seam-row="mgloss"],
   .seam-mark.dim-peri:not(.sel)[data-seam-row="translit"],.seam-mark.dim-peri:not(.sel)[data-seam-row="mgloss"],
@@ -1296,7 +1412,7 @@
   .leader-casing{fill:none; stroke:var(--casing); stroke-width:4.3px; stroke-linecap:round}   /* Item 4: a lifted deprel label's leader casing on the shared --casing, matching the arc stroke and the label halo, so the whole arc+label unit shares one halo colour */
   .softcase{--occlude:color-mix(in srgb, var(--washcol, var(--content-bg)) 15%, var(--focus-ground, var(--content-bg)));   /* the ground the wash sits ON is the block's own, so inside a focused block this picks up its 5 % accent tint via --focus-ground (.sblock.sel-block) rather than fading toward the plain page — see the residue note in the .dim-* block above for why it can't just be var(--occlude) here */
     --washcase:color-mix(in srgb, var(--occlude), var(--casing-lift) 22%)}   /* occlusion = wash; --washcase = the wash-tinted text halo (lifted --occlude). The box keeps the AMBIENT --casing (background, or the sel-block tint); only the FORM text the span wash actually covers tints to --washcase (below). NOTE the contract this states is about the HALO TINT alone, and only that: the wash tints the halo of the subtree's FORMS and of the brackets over them, never the halo of the deprel/POS/translit annotations or of the arcs. It is no longer a statement about what a selection recolours at large — a selection now also accents the selected token's POS and incoming deprel, and recedes the rest of the sentence on two levels (see the .dim-peri/.dim-out note above). Those ride `color`/`fill`/`opacity`; the halo colours here are untouched by them, which is why the two can coexist. */
-  .bwform,.bwrel,.bwpos,.bwbr,.bwclose,.bwtok .otrans,.bwtok .gloss,.bwrap .punctsat{
+  .bwform,.bwrel,.bwpos,.bwbr,.bwclose,.bwtok .otrans,.bwtok .gloss,.bwtok .bwlemma,.bwrap .punctsat{
     text-shadow:0 0 2px var(--casing),0 0 2px var(--casing),0 0 3px var(--casing)}   /* item 4: give the gloss/mseg/mgloss tier rows (.bwtok .gloss) the SAME --casing halo the translit (.otrans) and POS already carry, so every wrapped-bracket tier stays legible over a crossing arc */   /* wrapped-bracket text casing halo (HTML → no paint-order stroke), matching the flat-brackets/.oline look and keeping text crisp over the wash/selection/hover bands. Uses the ambient default --casing everywhere; the subtree form + brackets override to --washcase below */
   .bwtok.inspan .bwform,.bwbr.inspan{
     text-shadow:0 0 2px var(--washcase),0 0 2px var(--washcase),0 0 3px var(--washcase)}   /* ONLY the selected subtree's form + brackets — the text the span wash covers — take the wash-tinted halo; the deprel (.bwrel), POS (.bwpos) and translit (.otrans) annotations keep their own default-casing rule above (their explicit text-shadow overrides the tinted one this inherits into .bwund) */
@@ -1441,6 +1557,7 @@
      convention rather than silently adopting the form's own base. 0 at TOK_MAG 1, i.e. the flat 14px this
      selector inherits. */
   .bwrap .punctsat{font-size:calc(15px * var(--script-mag,1))}   /* …15px, matching .bwform beside it — the outline's own .punctsat is 14px because .oform is, and this override (added when wrapped-brackets punctuation was found not to scale with magnification at all) carried that 14 across to a row whose host form is 15. A satellite is drawn glued to its host's form and has to be set in the same size as it; at 2× the 1px difference paints as 2. */
+  .olemma{font-family:var(--token-font); font-size:14px; font-feature-settings:"smcp" 1; color:var(--dia-muted); margin-inline-start:8px; unicode-bidi:isolate}   /* item 29: the outline's own lemma cell — .otrans's inline register beside it (14px to match this notation's 14px .oform, its 8px inline gap, the same muted ink), upright, with smcp for the small-caps tier (see .tok-lemma's rule for why that feature and not c2sc). Appended only where it paints: the outline's tiers run ALONG the row, so nothing is stacked under this one for an omitted span to lift */
   .otrans{font-style:italic; color:var(--dia-muted); font-size:14px; letter-spacing:.0255em;   /* tracking curve @14px (.0055em) + italic bump (ITALIC_TRACK, diagram-core.js — kept in sync with _measOneUncached's italicTrackOf() by hand) */ margin-inline-start:8px; unicode-bidi:isolate; font-family:var(--token-font)}   /* same size as the form beside it */
   /* item 7: under a script orthography the translit row shows the ORIGINAL (CJK) script — italics are for romanisation only */
   /* ⚠ …AND THE TRACKING COMES OFF WITH THEM, for the reason the .tok-ital/.frn-up pair above states at
@@ -1534,14 +1651,14 @@
   .gl-empty,.tier-empty{opacity:1}   /* item 28/29: THE EMPTY-VALUE PLACEHOLDER — the "_" (TIER_EMPTY, js/diagram/diagram-core.js) a visible tier paints where this token has no value: the gloss tiers' own, of longer standing, plus the transliteration row, the POS row and the AVM slot, which used to draw nothing there at all. ⚠ FULLY OPAQUE, on request ("use fully-opaque underscores, not semitransparent ones") — it was `opacity:.4` (the value the gloss tiers' own "…" had carried), which is the one thing this rule ever did. The classes STAY: they are what every renderer marks a placeholder with (and what the render smoke tests count), and an opacity here would be the wrong lever anyway — it would have to fade with whatever register its own row is painted in, which is exactly what NOT setting a colour of its own already achieves. */
   text.gl-edit:hover,.gloss.gl-edit:hover{opacity:1}   /* hover reveals an empty gloss's placeholder at full opacity — but NO accent recolour (accent is for selection only, below) */
   /* the transliteration + gloss/morphemic tiers take the accent colour ONLY when their token is selected (single .sel or multi-select .rng) — not on hover */
-  .node.sel .translit,.node.sel .otrans,.node.sel .gloss,
-  .tok-group.sel .translit,.tok-group.sel .otrans,.tok-group.sel .gloss,
-  .oline.sel .translit,.oline.sel .otrans,.oline.sel .gloss,
-  .bwtok.sel .otrans,.bwtok.sel .gloss,
-  .node.rng .translit,.node.rng .otrans,.node.rng .gloss,
-  .tok-group.rng .translit,.tok-group.rng .otrans,.tok-group.rng .gloss,
-  .oline.rng .translit,.oline.rng .otrans,.oline.rng .gloss,
-  .bwtok.rng .otrans,.bwtok.rng .gloss{fill:var(--accent); color:var(--accent)}
+  .node.sel .translit,.node.sel .otrans,.node.sel .gloss,.node.sel .tok-lemma,
+  .tok-group.sel .translit,.tok-group.sel .otrans,.tok-group.sel .gloss,.tok-group.sel .tok-lemma,
+  .oline.sel .translit,.oline.sel .otrans,.oline.sel .gloss,.oline.sel .olemma,
+  .bwtok.sel .otrans,.bwtok.sel .gloss,.bwtok.sel .bwlemma,
+  .node.rng .translit,.node.rng .otrans,.node.rng .gloss,.node.rng .tok-lemma,
+  .tok-group.rng .translit,.tok-group.rng .otrans,.tok-group.rng .gloss,.tok-group.rng .tok-lemma,
+  .oline.rng .translit,.oline.rng .otrans,.oline.rng .gloss,.oline.rng .olemma,
+  .bwtok.rng .otrans,.bwtok.rng .gloss,.bwtok.rng .bwlemma{fill:var(--accent); color:var(--accent)}   /* item 29: the lemma row joins the muted annotation tiers it is set in the register of — one name per notation (.tok-lemma SVG, .olemma outline, .bwlemma wrapped brackets) */
   .opos{font-family:var(--token-font); font-size:15px; font-weight:400; font-feature-settings:"c2sc" 1; color:var(--tie-hue); margin-inline-start:9px; unicode-bidi:isolate}   /* matches the transliteration's size/weight (15px normal), c2sc small caps for the tag register; luminance matches --c-other (the subj/comp/mod deprel L). No letter-spacing: 15px is the tracking curve's reference size (0). cpsp dropped — see .tok-pos */
   /* item 22/3: the LINEARISED AVM (avmInline, js/diagram/diagram-core.js) — outline lays every tier inline
      along one row rather than stacking them below the token, so the stacked notations' own bracket box (drawAVM)
@@ -1836,10 +1953,10 @@
   #doc.zone-grid .tok-group.sel .baseword{fill:var(--accent-dim)}                          /* focus in the grid → low-chroma-blue the diagram node */
   #doc.zone-grid .oline.sel .oform,
   #doc.zone-grid .bwtok.sel .bwform{color:var(--accent-dim)}
-  #doc.zone-grid .node.sel .translit,#doc.zone-grid .node.sel .otrans,#doc.zone-grid .node.sel .gloss,
-  #doc.zone-grid .tok-group.sel .translit,#doc.zone-grid .tok-group.sel .otrans,#doc.zone-grid .tok-group.sel .gloss,
-  #doc.zone-grid .oline.sel .translit,#doc.zone-grid .oline.sel .otrans,#doc.zone-grid .oline.sel .gloss,
-  #doc.zone-grid .bwtok.sel .otrans,#doc.zone-grid .bwtok.sel .gloss{fill:var(--accent-dim); color:var(--accent-dim)}   /* mirrors the general .sel accent rule above (lines ~811-818), just dimmed — so the transliteration/gloss tiers match the token's own low-chroma colour when the GRID (not the diagram) holds focus */
+  #doc.zone-grid .node.sel .translit,#doc.zone-grid .node.sel .otrans,#doc.zone-grid .node.sel .gloss,#doc.zone-grid .node.sel .tok-lemma,
+  #doc.zone-grid .tok-group.sel .translit,#doc.zone-grid .tok-group.sel .otrans,#doc.zone-grid .tok-group.sel .gloss,#doc.zone-grid .tok-group.sel .tok-lemma,
+  #doc.zone-grid .oline.sel .translit,#doc.zone-grid .oline.sel .otrans,#doc.zone-grid .oline.sel .gloss,#doc.zone-grid .oline.sel .olemma,
+  #doc.zone-grid .bwtok.sel .otrans,#doc.zone-grid .bwtok.sel .gloss,#doc.zone-grid .bwtok.sel .bwlemma{fill:var(--accent-dim); color:var(--accent-dim)}   /* mirrors the general .sel accent rule above (lines ~811-818), just dimmed — so the transliteration/gloss tiers match the token's own low-chroma colour when the GRID (not the diagram) holds focus */
   #doc.zone-grid .node.sel .node-cat,#doc.zone-grid .tok-group.sel .tok-pos,
   #doc.zone-grid .oline.sel .opos,#doc.zone-grid .bwtok.sel .bwpos{fill:var(--accent-dim); color:var(--accent-dim)}
   #doc.zone-grid .arc.sel .lbl,#doc.zone-grid .edge-g.sel .lbl,#doc.zone-grid .tok-group.sel .lbl{fill:var(--accent-dim)}

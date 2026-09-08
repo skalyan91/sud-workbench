@@ -1273,7 +1273,12 @@ let DIA_CACHE=new Map();   // si → {csig, m:Map(conv → {sig,node})}
 // options, included unconditionally rather than only when conv==="stemma" — simpler than a per-conv-conditional
 // signature, and a toggle of either is rare enough that invalidating a tree/arcs/brackets/outline entry it can't
 // possibly affect costs nothing worth avoiding. show.*: pos/labels/colour/arrows/extRel/wrap/translit/mergePunct,
-// every `show.` this app's 3 diagram files read (grepped, not guessed). GLOSS_ON/_VIS, MORPH_ON/_VIS: belowTiers().
+// every `show.` this app's 3 diagram files read (grepped, not guessed) — item 29 added show.lemma to both that list and
+// this one, and OMITTING IT WAS CAUGHT BY THE TIER'S OWN CDP PROBE, not by reasoning: a `show.` flag missing from
+// this signature does not draw wrong, it draws NOTHING NEW — the Show/Hide switch flipped, renderDoc ran, and
+// diaSentence handed back the very node it had built under the other setting, so the tier appeared not to toggle
+// at all (measured: 3 `.lem-edit` elements before AND after unticking it). The same class of miss as the theme
+// flip's own (colourTokensChanged, js/ui/colours.js). GLOSS_ON/_VIS, MORPH_ON/_VIS: belowTiers().
 function diaFlagsSig(){
   // "|", not "" — a bare join() concatenates adjacent NUMBERS (FS/AVAILW/idW) with no boundary between them, so
   // e.g. FS=1,AVAILW=23 and FS=12,AVAILW=3 both join to "123": two genuinely different view-states producing the
@@ -1282,7 +1287,7 @@ function diaFlagsSig(){
   // an unambiguous field separator.
   return [FS,AVAILW,idW,DOCLANG,TRANSLIT_SCHEME,ORTHO_SCHEME,STORED_SCHEME,
     stemmaProj?1:0,stemmaCat?1:0,
-    show.pos?1:0,show.labels?1:0,show.colour?1:0,show.arrows?1:0,show.extRel?1:0,show.wrap?1:0,show.translit?1:0,show.mergePunct?1:0,show.avm?1:0,
+    show.pos?1:0,show.labels?1:0,show.colour?1:0,show.arrows?1:0,show.extRel?1:0,show.wrap?1:0,show.translit?1:0,show.mergePunct?1:0,show.avm?1:0,show.lemma?1:0,
     GLOSS_ON?1:0,GLOSS_VIS?1:0,MORPH_ON?1:0,MORPH_VIS?1:0
   ].join("|");
 }
@@ -1848,7 +1853,21 @@ function renderDoc(){
   if(RENDER_HOLD>0){ RENDER_PENDING=true; return; }   // batched — see the note above
   if(typeof refreshFontStacks==="function") refreshFontStacks();   // diagram-core.js: re-reads #doc's LIVE --token-font/--mono-font (a scheme-scoped override, e.g. Ranjana, may have changed it since the last render) into LIVE_TOKEN_STACK/LIVE_MONO_STACK and every measurement font string derived from them (WORD_F, GLOSS_F, …), ONCE per render rather than per meas() call. Must run before computeColW() (→ marginNumWidth) and before anything below that measures token width, or this render would still lay out against the PREVIOUS scheme's metrics. Guarded (as document.js already guards TOKEN_STACK-dependent reads elsewhere) for any harness that renders before diagram-core.js has loaded
   if(typeof _avmCache!=="undefined") _avmCache.clear();   // item 22: avmLayout's cache is keyed on the FEATS string alone, which stays correct across a FEATS edit for free (a new string ⇒ a new key) but NOT across a zoom/CSS change that alters the AVM box's measured size without touching any token's FEATS — cheapest correct fix is dropping it once per render, the same moment refreshFontStacks above re-reads live metrics for the same reason
-  msegFlagDoc();   // what an MWT grouping implies about its members — the MSeg tier's decorative continuation mark, and in Sanskrit a featureless non-final member's Compound=Yes. A dozen scattered operations move those ranges (grouping, ungrouping, splitting, flattening, inserting/deleting a token, an auto-regroup after a parse), so deriving it HERE, once, at the single point they all funnel through, is what keeps it from ever going stale; it's idempotent and cheap, and marks nothing dirty of its own accord — see msegFlagSent
+  /* ⚠ GUARDED BECAUSE renderDoc CAN RUN BEFORE THE LATER SCRIPTS HAVE LOADED. Caught as an
+     intermittent `ReferenceError: msegFlagDoc is not defined` in one headless run of the smoke test
+     and not in the two after it — the classic-script hazard CLAUDE.md names, reached by a TIMER
+     rather than by eager top-level code: js/core/scroll.js (script 24) arms a ResizeObserver whose
+     `_reflow` fires `preserveScroll(renderDoc)` on a 140 ms timer, and this file is script 14 while
+     `msegFlagDoc`/`applyTransInsets` live in js/io/bridge.js (25) and `validateAll` in
+     js/editing/validation.js (15). Classic scripts do not hoist across files, so a render that lands
+     inside that window throws — and the throw blanks the whole document, which is exactly the failure
+     that looks like a crash rather than a load-order bug. All three are cheap, idempotent, derived
+     passes and a boot-time render that skips them is followed by a real one, so `typeof` is the whole
+     remedy — the idiom CLAUDE.md prescribes for precisely this. Audited rather than patched where it
+     was seen to throw: these are ALL of renderDoc's unguarded calls into a later-loaded module
+     (`highlightFind` is already behind its own `typeof FIND` test, and `insertAt` is inside a click
+     handler, which cannot run this early). */
+  if(typeof msegFlagDoc==='function') msegFlagDoc();   // what an MWT grouping implies about its members — the MSeg tier's decorative continuation mark, and in Sanskrit a featureless non-final member's Compound=Yes. A dozen scattered operations move those ranges (grouping, ungrouping, splitting, flattening, inserting/deleting a token, an auto-regroup after a parse), so deriving it HERE, once, at the single point they all funnel through, is what keeps it from ever going stale; it's idempotent and cheap, and marks nothing dirty of its own accord — see msegFlagSent
   computeWindow(curBlock());   // recentre the rendered window on whatever sentence the reader is on — see the virtualization note above buildBlock. MUST run before computeColW(): that scans the CURRENT window (js/grid/grid.js), so the window has to be known first
   pruneDiaCache(winLo,winHi);   // drop every cached diagram outside the range this render is about to (re)build — see the "NOTATION-SWITCH DIAGRAM CACHE" note above buildBlock. AFTER computeWindow (winLo/winHi just moved), BEFORE the buildBlock loop below reads the cache
   computeColW();
@@ -1918,7 +1937,7 @@ function renderDoc(){
      translations grid measured at its full pre-inset width (measured on a two-language block: 158px tall at
      1115px wide, 194px once inset to 821px) and so over-granted the diagram and grid by the difference, letting
      the block overrun the viewport it was supposed to fit. One sweep here serves both passes. */
-  applyTransInsets();
+  if(typeof applyTransInsets==='function') applyTransInsets();   // …see the load-order note above
   const _rendered=host.querySelectorAll(".sblock");
   /* ── THE 60/40 RESERVATION IS OF WHAT THE DIAGRAM AND GRID CAN ACTUALLY HAVE, PER BLOCK ────────────────────
      --cap-dia / --cap-grid were 60 % and 40 % of `dh` — the whole document viewport — which over-reserves by
@@ -1990,7 +2009,7 @@ function renderDoc(){
   if(PAGED) host.querySelectorAll(":scope > .docsheet").forEach(sh=>{
     if(sh.lastElementChild&&sh.lastElementChild.classList.contains("addsent")) return;   // the button is the sheet's own bottom edge there, exactly as `:last-child` used to decide
     const bs=sh.querySelectorAll(".sblock"); if(bs.length) bs[bs.length-1].classList.add("lastblock"); });
-  applySel(); validateAll();
+  applySel(); if(typeof validateAll==='function') validateAll();   // …see the load-order note above
   /* item 4: how many documents and paragraphs the file holds, each shown only if it MARKS any. A `# newdoc` opens
      a document, so n marks = n documents when the first sentence carries one, and n+1 when it does not — the
      sentences before the first mark are a document too, an unnamed one, and leaving them out would report a count

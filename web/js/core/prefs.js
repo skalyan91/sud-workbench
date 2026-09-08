@@ -38,13 +38,13 @@ function prefTranslit(lang){ const t=PREFS.translit;
 function prefStored(lang){ return (PREFS.stored&&PREFS.stored[lang])||""; }
 let _prefsT=null;
 function savePrefs(){ if(!hasBridge())return;
-  PREFS.show={colour:show.colour,labels:show.labels,pos:show.pos,arrows:show.arrows,mergePunct:show.mergePunct,wrap:show.wrap,grids:show.grids,avm:show.avm}; PREFS.notation=notation; PREFS.paged=PAGED; PREFS.autoregen=AUTOREGEN; PREFS.pipeline=Object.assign({},PIPELINE);
+  PREFS.show={colour:show.colour,labels:show.labels,pos:show.pos,arrows:show.arrows,mergePunct:show.mergePunct,wrap:show.wrap,grids:show.grids,avm:show.avm,lemma:show.lemma}; PREFS.notation=notation; PREFS.paged=PAGED; PREFS.autoregen=AUTOREGEN; PREFS.pipeline=Object.assign({},PIPELINE);
   clearTimeout(_prefsT); _prefsT=setTimeout(()=>{ try{ window.pywebview.api.save_prefs(PREFS); }catch(e){} },300); }   // debounced
 async function loadPrefs(){ if(!hasBridge())return; let p; try{ p=await window.pywebview.api.get_prefs(); }catch(e){ return; } if(!p||typeof p!=="object")return;
   PREFS.ortho=(p.ortho&&typeof p.ortho==="object")?p.ortho:{}; PREFS.translit=(p.translit&&typeof p.translit==="object")?p.translit:{}; PREFS.stored=(p.stored&&typeof p.stored==="object")?p.stored:{};
   PREFS.glossMap=(p.glossMap&&typeof p.glossMap==="object")?p.glossMap:{}; if(typeof rebuildGlossMaps==="function")rebuildGlossMaps();   // item 13: restore custom gloss↔FEATS mappings and rebuild the effective + inverse maps
   PREFS.gridCols=(p.gridCols&&typeof p.gridCols==="object")?p.gridCols:{};   // the grid's pinned column choices. No per-key validation: colPin tests `typeof p[k]==="boolean"` at every read, so a junk value from a hand-edited prefs file reads as "never chose" and the width rule simply takes the column back
-  if(p.show&&typeof p.show==="object"){ ["colour","labels","pos","arrows","mergePunct","wrap","grids","avm"].forEach(k=>{ if(typeof p.show[k]==="boolean") show[k]=p.show[k]; }); }
+  if(p.show&&typeof p.show==="object"){ ["colour","labels","pos","arrows","mergePunct","wrap","grids","avm","lemma"].forEach(k=>{ if(typeof p.show[k]==="boolean") show[k]=p.show[k]; }); }
   if(typeof p.notation==="string"&&p.notation){ notation=p.notation; }
   if(typeof p.paged==="boolean"){ PAGED=p.paged; }   // only an explicit stored choice moves it off the paged default
   if(typeof p.autoregen==="boolean"){ AUTOREGEN=p.autoregen; }   // …same shape: only an explicit stored choice moves it off the ON default, so a prefs file written before this existed leaves it on
@@ -99,7 +99,7 @@ let MODELLANG={};   // language code → an installed model id, for auto-selecti
 // Language authority order (see maybeAutoDetectLang): (1) a filename `<langcode>_…` prefix pins the
 //  language and overrides everything; else (2) the Kyoto XPOS ⇒ lzh heuristic; else (3) fastText. The chosen
 //  language drives the parser via applyLang(lang,true)→syncModelToLang.
-let show={graphs:true,grids:false,colour:true,labels:true,pos:true,arrows:false,mergePunct:true,translit:false,wrap:true,extRel:true,avm:true};   // translit starts OFF — turned on by the status-bar transliteration menu when a scheme is picked. extRel = Shared=Yes/Subject-raising ghost edges (dashed, decorative), on by default. avm (item 22) starts ON, on request (item 23) — this default is just the FIRST-EVER-LAUNCH value; loadPrefs() below already overwrites it from a returning reader's own saved choice the moment a bridge exists, so this only governs a fresh install/browser-preview session. grids starts OFF, on request, now that the diagram itself has closed the gaps (FEATS add/clear, DEPREL free-text, MWT group drag, NewPar, CorrectForm) that used to make the grid load-bearing for everyday editing — a dedicated titlebar button (js/ui/wiring.js toggleGrids) opens it on demand
+let show={graphs:true,grids:false,colour:true,labels:true,pos:true,arrows:false,mergePunct:true,translit:false,wrap:true,extRel:true,avm:true,lemma:true};   // lemma (item 29) starts ON, on request ("there should be a lemma tier in the diagrams") — same "first-ever-launch value only" status as avm beside it: loadPrefs() overwrites it from the reader's own saved choice the moment a bridge exists   // translit starts OFF — turned on by the status-bar transliteration menu when a scheme is picked. extRel = Shared=Yes/Subject-raising ghost edges (dashed, decorative), on by default. avm (item 22) starts ON, on request (item 23) — this default is just the FIRST-EVER-LAUNCH value; loadPrefs() below already overwrites it from a returning reader's own saved choice the moment a bridge exists, so this only governs a fresh install/browser-preview session. grids starts OFF, on request, now that the diagram itself has closed the gaps (FEATS add/clear, DEPREL free-text, MWT group drag, NewPar, CorrectForm) that used to make the grid load-bearing for everyday editing — a dedicated titlebar button (js/ui/wiring.js toggleGrids) opens it on demand
 // Document-level glossing TIERS (item 4). Visibility flags; the data lives in MISC and round-trips there.
 //  · GLOSS_ON  → a single Gloss tier (MISC Gloss), one editable row per token.
 //  · MORPH_ON  → a morphemic gloss: TWO tiers, morpheme segmentation (MISC MSeg) + morpheme gloss (MISC MGloss),
@@ -109,6 +109,26 @@ let GLOSS_VIS=true, MORPH_VIS=true;   // item 3: tier VISIBLE (Show/Hide drawer)
 const TIER_MISC={gloss:"Gloss",mseg:"MSeg",mgloss:"MGloss"};   // tier id → MISC attribute
 function belowTiers(){ const t=[]; if(GLOSS_ON&&GLOSS_VIS)t.push("gloss"); if(MORPH_ON&&MORPH_VIS){ t.push("mseg"); t.push("mgloss"); } return t; }   // ordered below-token tiers, gated on CREATED (…_ON) + VISIBLE (…_VIS)
 function belowTierN(){ return (GLOSS_ON&&GLOSS_VIS?1:0)+(MORPH_ON&&MORPH_VIS?2:0); }   // how many extra rows the below-stack reserves
+/* item 29 — THE LEMMA ROW'S OWN GATE. It sits between the transliteration and the gloss tiers (see
+   belowStack, js/diagram/diagram-core.js), so it is a row of the below-stack like any other.
+   ⚠ item 31: IT IS PER SENTENCE NOW, AND TAKES THE SENTENCE'S DISPLAY TOKENS — SUPERSEDING this note's
+   own earlier record that a document-wide answer read with no argument was the deliberate shape. On
+   instruction: "if a sentence has no visible lemmas, the lemma tier itself should be hidden." That is
+   EXACTLY `hasTr(toks)`'s shape a few lines away in diagram-core.js, and it is taken deliberately: the
+   reserve and the draw must ask one question, and here the sentence-wide question (`some(lemmaShown)`)
+   is the per-token one (`lemmaShown`) under `some`, so a token that paints cannot fail to have a row.
+   The earlier argument for a no-argument global — thirteen belowReserveH call sites, and a reserve one
+   of them forgets to grow is the silent misalignment CLAUDE.md's tier rule exists to prevent — still
+   stands as a WARNING and is answered by making `hasLem` a required parameter of belowReserveH rather
+   than a defaulted one: every site has the array in hand already (it is what it passes `hasTr`), and a
+   site that forgot would drop the row rather than misalign it, which is visible in the first render.
+   `hasPos` stays a parameter for its own reason (the hierarchy passes false — it draws the word class AS
+   the node); this one is now a parameter for a different reason again.
+   ⚠ AND THE FORCE (an open lemma edit in a sentence with no row of its own) rides on the ARRAY, stamped
+   by displaySent — see lemRowForce, js/diagram/diagram-core.js. Read here rather than OR-ed in by each
+   caller so that "does this sentence have the row?" has exactly one answer, whatever put it there.
+   See lemmaRowTxt (js/diagram/diagram-core.js) for what an individual token paints into it. */
+function lemmaRow(toks){ return !!show.lemma && !!toks && (toks.lemForce===true || (typeof lemmaShown==="function" && toks.some(lemmaShown))); }   // lemmaShown is script 10 (diagram-core.js) and this is script 3, so the name is not in scope at LOAD — every call here happens at render time, but the guard costs nothing and states that
 /* ── DOCUMENT AND PARAGRAPH BOUNDARIES (universaldependencies.org/format.html) ─────────────────────────────────
    A corpus file is a sequence of DOCUMENTS made of PARAGRAPHS made of sentences, and UD records that structure in
    three places rather than one:
@@ -583,6 +603,25 @@ let AUTOREGEN=true;
    tokenisation and the rule splitter for sentences. What is missing is the model's opinion. */
 const PIPE_ARMS=["tokenise","sentence","lemma","upos","xpos","feats","syntax","sudmisc","translit","gloss"];
 const PIPE_BACKEND=["tokenise","sentence","lemma","upos","xpos","feats","syntax","sudmisc"];   // …the eight the bridge is told about
+/* ⚠ AN ARM WITH A FALLBACK IS NEVER FORCED OFF BY THE MODEL LACKING IT — THE APP ALWAYS HAS AN
+   ANSWER FOR IT. The tick means "split this into sentences", and the app splits: by the model where
+   it has a splitter, by `parse._rule_sentencize` where it has not. Forcing it off because the model
+   ships no `senter` said the opposite — `pipeArms()` dropped `sentence`, and `parse.sentencize`
+   opens with "sentence splitting OFF means ONE sentence, not split some other way" — so a
+   multi-sentence paste under the generic wheel (and so under EVERY custom model, which share it)
+   came back as one enormous block, and `__insertPastedText`'s own `localSentSplit` fallback never
+   ran because a one-element list is not an empty one.
+   ⚠ THIS LIST MIRRORS `_FALLBACK_ARMS` IN app/parse.py AND THE TWO HAVE TO AGREE. The backend has
+   exempted `sentence` from its own narrowing (`_effective_arms`) since that narrowing existed, on
+   exactly this reasoning — "a reader who leaves the box ticked is asking for sentences, not for the
+   model specifically". The frontend was the half that had not been told.
+   ⚠ AND `tokenise` IS DELIBERATELY NOT IN IT, on either side: its fallback is a whitespace split,
+   which loses every punctuation boundary in the sentence and has nowhere to record `SpaceAfter` —
+   measured, and the reason the generic wheel now reports the arm at all rather than relying on the
+   fallback (see GENERIC_ARMS, app/generic_models.py, and docs/notes/parsing-models.md's "those two
+   fallbacks are not equally good"). An arm belongs here where the fallback is AS GOOD, not merely
+   where one exists. */
+const PIPE_FALLBACK_ARMS=["sentence"];
 let PIPELINE={}; PIPE_ARMS.forEach(a=>{ PIPELINE[a]=true; });
 /* Arms the CURRENT model implements. ⚠ **null MEANS "DON'T KNOW" AND IS THE ONLY SAFE UNKNOWN** —
    every reader treats it as "assume all", so nothing greys before the answer lands.
@@ -596,6 +635,20 @@ let PIPELINE={}; PIPE_ARMS.forEach(a=>{ PIPELINE[a]=true; });
 let PIPE_AVAIL=null;
 let PIPE_READS_UPOS=false;   // the model takes the word classes as INPUT (the generic parser does) — see paintPipe, js/ui/wiring.js
 let PIPE_READS_GLOSS=false;  // …and the GLOSSES the annotator wrote (0.2.0's lexical channel) — which is why this app's own gloss generation stops there; see pipeEffective below and paintPipe
+/* ⚠ WHETHER THIS MODEL'S FEATS COLUMN IS ADDITIVE — i.e. whether the model id resolves to the ONE
+   shared generic wheel, either as `sud:xx_sud_generic` itself or as a `custom:<slug>` row on it.
+   `app/parse.py`'s `_feats_additive(package)` is the whole of that decision and it STAYS there:
+   CLAUDE.md's rule is that a second copy of it in JS would drift, and would drift silently in the
+   direction of deleting annotation. `Api.model_arms` reports it beside `reads_upos`/`reads_glosses`;
+   syncPipeAvail (js/ui/wiring.js) stores it here. What reads it is `mayInheritAnnotation`
+   (js/io/bridge.js) — the retag's "copy this word's FEATS and glosses from where it was last seen"
+   pass, which is exactly the case where the model will not fill those cells for itself.
+   ⚠ NOT GATED ON `got`, and that follows PIPE_READS_GLOSS rather than PIPE_READS_UPOS. This is a
+   fact about which PACKAGE the id names (`_resolve_model` → `_feats_additive`), answerable with no
+   pipeline loaded at all, so an arms list that failed to arrive says nothing about it either way.
+   `reads_upos` is gated precisely because it IS read off the loaded pipeline's components — the same
+   question the arms list is, so one failing means both failed. */
+let PIPE_FEATS_ADDITIVE=false;
 let PIPE_DEPS={};      // {arm: [arms it reads]} for the CURRENT model — the cascade. Model-specific: xx_sud_generic's parser reads the FEATS its morphologiser just wrote; en_sud_ewt_gum's parser runs BEFORE its morphologiser and reads neither. Both answers come from Api.model_arms, which reads them off the loaded pipeline
 /* ── THE CASCADE ───────────────────────────────────────────────────────────────────────────────────
    Switching an arm off makes everything that READS it inert too, so a reader never gets an answer
@@ -623,8 +676,10 @@ function pipeEffective(){ if(_pipeEff) return _pipeEff;
     const ticked=PIPELINE[a]!==false;
     // A BACKEND arm the model does not implement is off whatever the tick says. The two
     // frontend-only arms (translit, gloss) are never the model's to lack, so availability
-    // never applies to them — see PIPE_BACKEND.
-    const modelHas=(PIPE_AVAIL===null)||(PIPE_BACKEND.indexOf(a)<0)||(PIPE_AVAIL.indexOf(a)>=0);
+    // never applies to them — see PIPE_BACKEND — and neither do the FALLBACK arms, which the app
+    // answers for itself when the model cannot (PIPE_FALLBACK_ARMS above; the same exemption
+    // `_effective_arms` makes in app/parse.py, and the two lists must agree).
+    const modelHas=(PIPE_AVAIL===null)||(PIPE_BACKEND.indexOf(a)<0)||(PIPE_FALLBACK_ARMS.indexOf(a)>=0)||(PIPE_AVAIL.indexOf(a)>=0);
     /* ⚠ AND THE GLOSSING ARM IS OFF WHERE THE MODEL READS GLOSSES, whatever the tick says — the same
        "off, not merely unticked" the line above applies to a component the model has not got, for a
        different and stronger reason. `xx_sud_generic` 0.2.0 takes an English gloss per token as a
@@ -652,14 +707,31 @@ function pipeEffective(){ if(_pipeEff) return _pipeEff;
 function pipeArms(){ const w=pipeEffective().writes; return PIPE_BACKEND.filter(a=>w[a]); }
 function pipeOn(arm){ return pipeEffective().writes[arm]!==false; }
 /* The columns the annotator is handing in for this parse: every COLUMN arm the model is not writing,
-   taken off the tokens the caller already has. Only arms something in THIS model actually READS are
-   worth sending (the values of `PIPE_DEPS`) — anything else would be data the pipeline never looks
-   at. `upos` still travels separately where it is the retag constraint; the backend folds the two
-   together (`parse.parse_pretokenized`). Null when there is nothing to say. */
+   taken off the tokens the caller already has. `upos` still travels separately where it is the retag
+   constraint; the backend folds the two together (`parse.parse_pretokenized`). Null when there is
+   nothing to say.
+   ⚠ IT USED TO SEND ONLY THE COLUMNS SOMETHING IN THIS MODEL READS (the values of `PIPE_DEPS`), on the
+   reasoning that "anything else would be data the pipeline never looks at". That reasoning is sound
+   about the FIRST of `given`'s two jobs and misses the second, which is the one CLAUDE.md states:
+   `_apply_arms` (app/parse.py) BLANKS the column of every arm that is off — "hiding it would be a lie
+   the CoNLL-U file on disk then tells for ever" — and the single thing that stops it is `if key not in
+   given`. So a column nothing reads was not merely "not sent"; it came back EMPTY and
+   `reparseTokenFields` wrote that empty over the reader's own value (`if(p[k]!=null)` — "" is not
+   null). Measured against the real wheel: `parse.parse_pretokenized(['dogs','ran'], 'custom:mwotlap',
+   upos=[…], arms=['feats','syntax','tokenise'])` returns `lemma: ''` for both tokens, and the same
+   call with `given={'lemma':['dog','run']}` returns them intact.
+   ⚠ AND `PIPE_DEPS` IS `{}` FOR THE GENERIC WHEEL (`parse.arm_deps('custom:mwotlap')`, live), so under
+   the model family this app cares most about the old gate sent NOTHING AT ALL — LEMMA and XPOS were
+   blanked on every background re-parse, silently, including the lemma the retag had just inherited
+   (item 29). FEATS and UPOS escaped only because each has a channel of its own (`prior_feats`, and
+   `upos` as its own argument). Found by the lemma tier, which is simply the first thing in this app
+   that DRAWS the lemma column and so the first that could see it go.
+   The gate is therefore the arm alone: a COLUMN arm the model is not writing, with something in it, is
+   a column the annotator has taken over — CLAUDE.md, "never blank, overwrite or ignore a column the
+   caller handed in". Sending one the pipeline never reads costs a list of strings across the bridge. */
 function pipeGiven(tokens){ if(!tokens||!tokens.length) return null;
-  const reads=new Set(); for(const a in PIPE_DEPS)(PIPE_DEPS[a]||[]).forEach(r=>reads.add(r));
   const w=pipeEffective().writes, out={};
-  PIPE_COLUMN.forEach(a=>{ if(w[a]||!reads.has(a))return;
+  PIPE_COLUMN.forEach(a=>{ if(w[a])return;
     const col=tokens.map(t=>String((a==="upos"?t.upos:a==="xpos"?t.xpos:a==="lemma"?t.lemma:t.feats)||""));
     if(col.some(v=>v&&v!=="_")) out[a]=col; });
   return Object.keys(out).length?out:null; }
@@ -793,8 +865,13 @@ const isPunct=t=>famOf(t.deprel)==="punct"||t.upos==="PUNCT";
 
 function famOf(r){return (r||"").split(/[:@\/]/)[0];}   // base of a relation (comp:obj / subj@expl / comp:obj/m → comp / subj / comp)
 // does a "|"-joined FEATS string carry this exact Feat=Val pair? (setFeat/clearFeat below add/remove one; this checks one)
+/* ⚠ MEMBERSHIP, NOT STRING EQUALITY, because a UD value may be a COMMA LIST. `Definite=Cons,Def` on a
+   syncretic form still HAS `Definite=Cons`, and an exact comparison answered no — silently, and to callers
+   who are asking a yes/no question about the token (`isUninflectedForm`'s construct-state test among them).
+   Single-valued cells take the same path and answer identically; the split only ever has one part for them. */
 function hasFeat(featsStr,name,val){ if(!featsStr||featsStr==="_")return false;
-  return featsStr.split("|").some(kv=>{const i=kv.indexOf("="); return i>=0&&kv.slice(0,i)===name&&kv.slice(i+1)===val;}); }
+  return featsStr.split("|").some(kv=>{const i=kv.indexOf("="); if(i<0||kv.slice(0,i)!==name) return false;
+    return kv.slice(i+1).split(",").some(x=>x.trim()===val); }); }
 function getFeat(featsStr,name){ if(!featsStr||featsStr==="_")return null;   // NAME NOTWITHSTANDING, this parses any `|`-joined k=v column — FEATS and MISC share that syntax, so the raising accessors below read MISC through it rather than duplicating the loop
   for(const kv of featsStr.split("|")){ const i=kv.indexOf("="); if(i>=0&&kv.slice(0,i)===name) return kv.slice(i+1); } return null; }
 /* ── SUD'S `Subject` FEATURE LIVES IN MISC, NOT FEATS ─────────────────────────────────────────────────────────

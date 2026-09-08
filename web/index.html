@@ -221,6 +221,8 @@
             <div class="drawer-group-h">Annotations</div>
             <label class="chk"><input type="checkbox" data-t="colour" checked>Relation colours</label>
             <label class="chk"><input type="checkbox" data-t="labels" checked>Relation labels</label>
+            <!-- item 29: the lemma tier. Listed ABOVE the word-class row to match where the diagram stacks the two (lemma between the transliteration and the glosses, POS below them). The title states the display gate, which is otherwise the one thing about this tier a reader could mistake for a bug: an uninflected token's row is reserved and deliberately left blank — see lemmaRowTxt, js/diagram/diagram-core.js. -->
+            <label class="chk" title="Each token's lemma, in small caps — shown only for tokens that carry inflectional features (elsewhere the lemma is the word form itself)"><input type="checkbox" data-t="lemma" checked>Lemmas</label>
             <label class="chk"><input type="checkbox" data-t="pos" checked>Part-of-speech tags</label>
             <label class="chk" title="An HPSG-style attribute-value matrix of each token's FEATS, below its POS tag"><input type="checkbox" data-t="avm" checked>Feature matrices</label>
             <label class="chk"><input type="checkbox" data-t="arrows">Semantic arrows</label>

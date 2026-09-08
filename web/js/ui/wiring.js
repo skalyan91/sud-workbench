@@ -122,7 +122,15 @@ applyPageMode();   // initial state (before prefs land — loadPrefs re-applies 
   function poke(){ if(!hasBridge())return; clearTimeout(poke._t); poke._t=setTimeout(()=>{ try{window.pywebview.api.remeasure_titlebar();}catch(e){} },60); }
   if(window.ResizeObserver){ const ro=new ResizeObserver(poke); ro.observe(f); const rt=document.querySelector(".tbright"); if(rt)ro.observe(rt); }
   const sb=document.querySelector(".statusbar");   // language / translit / format changes surface in the status bar → refresh the meta line
-  if(sb&&window.MutationObserver){ new MutationObserver(()=>updateFileBlock()).observe(sb,{childList:true,subtree:true,characterData:true}); }
+  /* ⚠ GUARDED LIKE THE LINE BELOW IT, AND FOR THE SAME REASON — which that line's own comment already
+     states and this one was missing: `updateFileBlock` lives in js/io/bridge.js, script 25, and this file is
+     19. The direct call was guarded; the OBSERVER's callback was not, and an observer fires whenever the
+     status bar mutates — including during boot, before that file has been evaluated. Caught as an
+     intermittent `ReferenceError: updateFileBlock is not defined` in the mac half of the render smoke test
+     (and not the win half of the same run), which is the classic-script hazard CLAUDE.md names arriving
+     through a THIRD door: not eager top-level code, not a timer, but a MutationObserver. */
+  if(sb&&window.MutationObserver){ new MutationObserver(()=>{ if(typeof updateFileBlock==="function") updateFileBlock(); })
+      .observe(sb,{childList:true,subtree:true,characterData:true}); }
   if(typeof updateFileBlock==="function")updateFileBlock();   // updateFileBlock lives in js/bridge.js (loaded later); js/init.js runs the boot call once every module is defined
 })();
 // titlebar display mode (right-click the bar → Icon and Text / Icon Only / Text Only), persisted in prefs
@@ -347,10 +355,16 @@ async function syncPipeAvail(){ const pop=document.getElementById("pipePop"); if
       // (js/core/prefs.js) for what reading it as one did to the drawer.
       const got=r&&Array.isArray(r.arms)&&r.arms.length?r.arms:null;
       PIPE_AVAIL=got; PIPE_DEPS=(got&&r.deps)||{}; PIPE_READS_UPOS=!!(got&&r.reads_upos);
-      PIPE_READS_GLOSS=!!(r&&r.reads_glosses); }   // …NOT gated on `got`: a model reading glosses is a fact about the pipeline, not about the arm list having arrived
-    catch(e){ PIPE_AVAIL=null; PIPE_DEPS={}; PIPE_READS_UPOS=false; PIPE_READS_GLOSS=false; } }
-  else { PIPE_AVAIL=null; PIPE_DEPS={}; PIPE_READS_UPOS=false; PIPE_READS_GLOSS=false; }
-  pipeInvalidate(); paintPipe(); }
+      PIPE_READS_GLOSS=!!(r&&r.reads_glosses);   // …NOT gated on `got`: a model reading glosses is a fact about the pipeline, not about the arm list having arrived
+      PIPE_FEATS_ADDITIVE=!!(r&&r.feats_additive); }   // …nor is this, and for a stronger version of the same reason: it is a fact about which PACKAGE the id resolves to, answerable with no pipeline loaded at all (see PIPE_FEATS_ADDITIVE, js/core/prefs.js)
+    catch(e){ PIPE_AVAIL=null; PIPE_DEPS={}; PIPE_READS_UPOS=false; PIPE_READS_GLOSS=false; PIPE_FEATS_ADDITIVE=false; } }
+  else { PIPE_AVAIL=null; PIPE_DEPS={}; PIPE_READS_UPOS=false; PIPE_READS_GLOSS=false; PIPE_FEATS_ADDITIVE=false; }
+  pipeInvalidate(); paintPipe();
+  /* …and now that this model's capabilities are known, answer the pending open-time lemma fill. This is the
+     ONE function that ever learns what a model can do, and at boot it runs AFTER the document has loaded
+     (js/core/init.js), so for a restored session it is the only place the question can be answered
+     correctly. A no-op unless a document has just arrived — see LEM_FILL_PENDING, js/io/bridge.js. */
+  if(typeof lemmaFillFromForms==="function") lemmaFillFromForms(); }
 /* THE DRAWER SHOWS TWO DIFFERENT KINDS OF "THIS ARM IS DOING NOTHING", and conflating them would
    answer the wrong question:
      · `.armoff`   — the MODEL has no such component. Disabled, because there is nothing to choose.
@@ -361,6 +375,11 @@ async function syncPipeAvail(){ const pop=document.getElementById("pipePop"); if
    With NO model at all neither is painted: there is no model whose absence to report, and ten dimmed
    rows would say "this app cannot do these things" rather than "choose a model first". The Model pill
    beside it is where that is already said. */
+/* What stands in for each FALLBACK arm the model has not got (PIPE_FALLBACK_ARMS, js/core/prefs.js).
+   The row's own base title in index.html already says the same thing about the tick being off ("Off
+   (or absent) — the app's own rule splitter does it"); this is the ABSENT half of that sentence, said
+   at the moment it applies. A tooltip and not a dimming, because the row is still live. */
+const PIPE_FALLBACK_WHY={sentence:"This model has no sentence splitter — the app's own rule splitter does it. Untick to keep each paragraph whole."};
 function paintPipe(){ const pop=document.getElementById("pipePop"); if(!pop)return;
   const avail=(!model||PIPE_AVAIL===null)?null:PIPE_AVAIL, eff=pipeEffective();
   // `writes` is what the model fills in; `have` is what there is a value for at all, the annotator's
@@ -368,13 +387,23 @@ function paintPipe(){ const pop=document.getElementById("pipePop"); if(!pop)retu
   // unticking Features no longer silences Syntax, because unticking it means you are supplying them.
   pop.querySelectorAll("input[data-arm]").forEach(cb=>{ const arm=cb.dataset.arm;
     const missing=!!avail && PIPE_BACKEND.indexOf(arm)>=0 && avail.indexOf(arm)<0;   // the two frontend-only arms (translit, gloss) are never the model's to lack
+    /* ⚠ …AND A FALLBACK ARM IS NEVER "MISSING", BECAUSE IT IS NEVER ABSENT. `pipeEffective` keeps
+       `sentence` on whatever the model ships (PIPE_FALLBACK_ARMS, js/core/prefs.js — the mirror of
+       `_FALLBACK_ARMS` in app/parse.py), so a row painted `.armoff` here would be disabled and still
+       doing something, which is the drawer and the parse disagreeing in the other direction. It stays
+       ENABLED and tickable — the tick is the reader's only way to say "this paragraph is one
+       sentence", and taking it away under a model that ships no `senter` would make that
+       inexpressible for every custom model at once. What the model's absence changes is WHO splits,
+       and that is a tooltip line, not a disabled row. */
+    const fellback=missing && PIPE_FALLBACK_ARMS.indexOf(arm)>=0;
     // …and the one frontend arm a MODEL can take over: where it reads glosses, this app must not
     // write them (pipeEffective, js/core/prefs.js). Painted like a missing component — disabled,
     // because there is nothing to choose — with its own reason below.
     const taken=arm==="gloss" && !!model && PIPE_READS_GLOSS;
-    const inert=!missing && !taken && !!model && cb.checked && !eff.writes[arm];
-    cb.disabled=missing||taken; const lab=cb.closest("label.chk"); if(!lab)return;
-    lab.classList.toggle("armoff",missing||taken); lab.classList.toggle("arminert",inert);
+    const off=missing&&!fellback;   // …the rows that really are disabled: an absence with nothing standing in for it
+    const inert=!off && !taken && !!model && cb.checked && !eff.writes[arm];
+    cb.disabled=off||taken; const lab=cb.closest("label.chk"); if(!lab)return;
+    lab.classList.toggle("armoff",off||taken); lab.classList.toggle("arminert",inert);
     /* ⚠ THE REASON GOES IN THE TOOLTIP, NEVER INTO THE ROW. It used to be appended after the label
        through a `::after`, which meant unticking one box GREW two other rows and resized the popover
        under the pointer, mid-click — the reader's next click landed somewhere they had not aimed at.
@@ -389,6 +418,12 @@ function paintPipe(){ const pop=document.getElementById("pipePop"); if(!pop)retu
     // the deal it offers — a bare grey row says "this app cannot tag", when what is true is "you tag,
     // and the rest follows".
     if(missing&&arm==="upos"&&PIPE_READS_UPOS) why="You supply these — the model reads them rather than predicting them.";
+    /* …and the third row of that shape: an arm the model has not got that the APP answers anyway.
+       A bare grey row would say "you cannot have sentences under this model", where what is true is
+       "the app splits them instead, and your tick still decides whether anything splits at all".
+       Keyed per arm rather than written once, because PIPE_FALLBACK_ARMS names what SUBSTITUTES for
+       each absence and those substitutes are not the same sentence — see its own note. */
+    else if(fellback) why=PIPE_FALLBACK_WHY[arm]||"This model has no such component — the app answers for it.";
     // The same shape of statement one arm along, and the same reason for making it: a bare grey row
     // would read as "this app cannot gloss", where what is true is "your glosses are this model's
     // input, so it will not write over them with guesses of its own".
