@@ -2,6 +2,61 @@
 
 All notable changes to SUD Workbench are documented in this file.
 
+## [0.3.20] — 2026-09-08
+
+### New: a lemma tier in the diagram
+
+- **The diagram now has a lemma row**, just below the tokens (or below their transliterations),
+  set in small caps. A lemma is shown only where it **differs from the form**, so a language that
+  inflects little shows almost none of them and the diagram stays as tall as it was.
+- **Every lemma is editable in place**, shown or not: click where a hidden lemma would be and the
+  field opens there. Tab moves along the row through the hidden ones too, so a whole sentence can
+  be lemmatised without reaching for the mouse.
+- **A sentence with nothing to show hides the row entirely**, and slides it back into view the
+  moment you start editing a form or a lemma — the reveal does not take the focus off the form
+  field you are typing in, and the row hides itself again when you leave if it is still empty.
+- Small caps are **folded on initial letters only**, so an all-caps lemma keeps its shape.
+
+### New: a plus sign on every feature matrix
+
+- **Hover a feature matrix and it grows to open a gap above a plus sign**, aligned with the bottom
+  ticks of its brackets. Clicking the plus opens the same menu that adds a feature, without going
+  through the token's context menu first.
+- The growth is animated, and the plus **fades in and out rather than moving**, so the matrix does
+  not appear to jump as the pointer crosses it.
+
+### New: a feature can hold more than one value
+
+- **⌘-click a value in the feature menu to combine it with the value already there**, wherever UD
+  permits a comma value — `Voice=Cau,Pass` on a single verb, `Case=Acc,Dat` on a single noun. The
+  values are kept in alphabetical order, as UD asks, and the menu says so in a hint row.
+- Plain clicking still replaces, which is what you want nearly all of the time.
+
+### New: what a word class inherits from the tokens before it
+
+Under the generic parser, a custom model, or no model at all — the three cases where nothing else
+is going to fill the column for you:
+
+- **Setting a token's word class copies the features and gloss** from the nearest earlier token in
+  the document with the same form and the same class. Annotate *walked* once and the next *walked*
+  arrives annotated.
+- **Lemmas fill themselves in** from the form, or from an earlier instance of the same form and
+  class, and **opening a file fills any empty lemma from the Form column**.
+- **Pasting several sentences at once splits them into sentences**, keeping each one's final
+  punctuation, rather than making one long sentence of the lot.
+
+### Fixed
+
+- **Switching Features off in the Pipeline drawer now really stops a generic or custom model
+  writing features.** The column was guarded as a whole but leaked token by token; the arm now
+  writes the features you supplied back cell for cell.
+- **Persian is transliterated with its vocalisation**, not merely its orthography.
+- **The inline word-class field offers the subtypes**, not only the seventeen bare classes.
+- **Word-class annotations show the insert cursor** when you hover them, like every other field.
+- **The feature flyouts have their horizontal padding back** in the shipped app.
+- **Automatic glossing by sentence alignment stands down when the sentence already has a gloss**,
+  instead of writing over one you have.
+
 ## [0.3.19] — 2026-09-01
 
 ### Fixed: your own features survive a re-parse
