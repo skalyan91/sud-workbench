@@ -9,16 +9,21 @@
 ## Modules, load order, and the one real hazard
 
 `web/index.html` is a ~190-line skeleton that loads the `iso639-3.js` data table,
-`macos-kit/toast.js`, and **26 app modules as ordered classic `<script>` tags** (not ES modules),
-plus the dev-only fixture. They share ONE page-global scope, so every top-level `let`/`const`/
-`function` is visible across files with no `import`/`export` and no `window.*` threading.
+`chrome-kit/js/platform.js` (from the `chrome-kit` submodule — see `docs/notes/chrome-kits.md`),
+`js/ui/toast.js`, and **26 app modules as ordered classic `<script>` tags** (not ES modules), plus
+the dev-only fixture. They share ONE page-global scope, so every top-level `let`/`const`/`function`
+is visible across files with no `import`/`export` and no `window.*` threading.
 
 Modules live in `web/js/`: **core/** (state, prefs, document, undo, scroll, init), **diagram/**
 (diagram-core, -render, -wrap, -edit), **grid/** (grid, columns), **editing/** (edit-ops,
 context-menu, validation), **io/** (bridge, formats, models), **lang/** (translit, translit-load,
 readings, fontload),
-**ui/** (sheets, wiring, find, colours). The `<script>` load order in `index.html` interleaves the
-folders and is **not** derivable from the folder names — read it before moving anything.
+**ui/** (sheets, wiring, find, colours, toast). Two of the modules `index.html` loads —
+`platform.js` and `menubar.js` — actually live outside `web/js/`, in the `chrome-kit` submodule
+(`web/chrome-kit/js/`): they're the reusable half of the frontend, extracted so other pywebview apps
+can reuse them, and the load order below still treats them as ordinary classic scripts sharing the
+same global scope. The `<script>` load order in `index.html` interleaves the folders and is **not**
+derivable from the folder names — read it before moving anything.
 
 **The one real hazard:** classic scripts do not hoist function declarations across files, so *eager
 top-level code (an IIFE, a boot `requestAnimationFrame`, a bare call) must never forward-reference a

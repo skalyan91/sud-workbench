@@ -33,6 +33,14 @@ set -euo pipefail
 
 PROJECT="$(cd "$(dirname "$0")/../.." && pwd)"
 HERE="$(cd "$(dirname "$0")" && pwd)"
+# web/chrome-kit/ is a git submodule (github.com/skalyan91/pywebview-chrome-kit) — an unchecked-out
+# clone has an EMPTY chrome-kit/ (no error, no missing-directory failure), which would silently ship
+# an app with no window chrome at all rather than fail the build. Check a file every platform keeps
+# (chrome-shared/ is never stripped) rather than trusting the directory to be non-empty.
+[ -f "$PROJECT/web/chrome-kit/chrome-shared/base-tokens.css" ] || {
+  echo "!! web/chrome-kit/ submodule not checked out — run: git submodule update --init" >&2
+  exit 1
+}
 OUT_DIR="${1:-$PROJECT/dist}"
 VERSION="0.3.14"                       # kept in step with make_bootstrap_app.sh / make_win_app.py's own VERSION
 PKG="sud-workbench"
@@ -150,6 +158,9 @@ for d in app web; do
   cp -R "$PROJECT/$d" "$APPSRC/$d"
 done
 find "$APPSRC" -name '__pycache__' -type d -prune -exec rm -rf {} + 2>/dev/null || true
+# web/chrome-kit/ is a git submodule; its checkout carries a .git FILE (pointing back at this repo's
+# .git/modules/), meaningless once copied out on its own — strip it same as __pycache__.
+rm -f "$APPSRC/web/chrome-kit/.git"
 
 # The OTHER two platforms' chrome kits are not shipped. index.html picks exactly one kit at load
 # from <html data-platform>, and "linux" always resolves to adwaita-kit (see web/index.html's own
@@ -158,8 +169,11 @@ find "$APPSRC" -name '__pycache__' -type d -prune -exec rm -rf {} + 2>/dev/null 
 # mac-tokens.css's --sf-* masks are real SF Symbols rendered to base64 PNG, licensed by Apple for
 # apps on Apple platforms, not for redistribution inside a Linux package. win11-kit/ is dropped for
 # size only (its Fluent UI System Icons are MIT and would travel fine).
-rm -rf "$APPSRC/web/macos-kit" "$APPSRC/web/win11-kit"
-[ ! -e "$APPSRC/web/macos-kit" ] && [ ! -e "$APPSRC/web/win11-kit" ]   # fail the build if either survived
+# Both kits now live inside the chrome-kit git submodule (web/chrome-kit/, see docs/notes/chrome-kits.md) —
+# $APPSRC is a plain `cp -R` of the working tree above, so the submodule's checked-out content came
+# along with it; stripping still targets the two directories by their (unchanged) names inside it.
+rm -rf "$APPSRC/web/chrome-kit/macos-kit" "$APPSRC/web/chrome-kit/win11-kit"
+[ ! -e "$APPSRC/web/chrome-kit/macos-kit" ] && [ ! -e "$APPSRC/web/chrome-kit/win11-kit" ]   # fail the build if either survived
 
 # Drop the browser design-mode fixture — identical sed to make_bootstrap_app.sh's strip_dev_fixture
 # (same build host, same BSD sed; this script runs on the maintainer's Mac, same as the other two

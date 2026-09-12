@@ -34,7 +34,7 @@ IS_LINUX = sys.platform.startswith("linux")
 
 # The UI font stack for the CHILD windows (Help / About / Models / Gloss Mappings / Insert /
 # Toolbox). Those windows are generated HTML with no stylesheet of their own — they never load
-# web/macos-kit or web/win11-kit — so the stack has to be chosen here, in Python, from the platform
+# web/chrome-kit/macos-kit or web/chrome-kit/win11-kit — so the stack has to be chosen here, in Python, from the platform
 # the process is running on rather than from a CSS media query. `system-ui` alone was rejected: it
 # resolves to the right face on both, but the explicit fallbacks are what keep an older WebView2 /
 # WKWebView from dropping to Times.
@@ -695,7 +695,7 @@ class Api:
 
     # ── conditional Edit-menu items ──────────────────────────────────────────
     def menu_spec(self) -> dict:
-        """The menu table as JSON, for the Windows in-window menu bar (web/js/ui/menubar.js).
+        """The menu table as JSON, for the Windows in-window menu bar (web/chrome-kit/js/menubar.js).
 
         The SAME table app/__main__.py's build_menu turns into an NSMenu and app/mac/shell.py wires
         with key equivalents — so a row added in app/menu_spec.py appears on both platforms with one
@@ -2363,7 +2363,7 @@ class Api:
         return """
     /* --label-* is the macOS 26 kit's Labels ramp (secondary fills a Form Row's Subtitle, quinary strokes its
        divider). Restated here rather than shared: a child window is its OWN document and never loads
-       web/macos-kit/mac-tokens.css, so the two copies have to be kept in step by hand — see that file's block
+       web/chrome-kit/macos-kit/mac-tokens.css, so the two copies have to be kept in step by hand — see that file's block
        for the dark-mode reasoning behind the .55 and .10 lifts. */
     :root{--bg:#fbfbfd;--fg:#1d1d1f;--muted:#68686e;--accent:#0a84ff;--field:#fff;--good:#248a3d;
           --line:rgba(0,0,0,.14);--hover:rgba(0,0,0,.05);--head:rgba(0,0,0,.55);

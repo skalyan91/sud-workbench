@@ -156,10 +156,10 @@ exactly this file for "the apt/dnf/pacman lines once that phase lands"). Two way
   format conversion degrade cleanly to a toast, and every **Stanza** model is inert too, since
   Stanza emits UD and this app stores SUD (`parse._parse_stanza_ud_to_sud` needs the conversion
   grammar on every parse).
-- **`web/macos-kit/`** — 12 of `mac-tokens.css`'s `--sf-*` masks are real SF Symbols rendered to
+- **`web/chrome-kit/macos-kit/`** — 12 of `mac-tokens.css`'s `--sf-*` masks are real SF Symbols rendered to
   base64 PNG, licensed by Apple for apps on Apple platforms. Same reason the Windows build excludes
   it.
-- **`web/win11-kit/`** — dropped for size only (its Fluent UI System Icons are MIT and would travel
+- **`web/chrome-kit/win11-kit/`** — dropped for size only (its Fluent UI System Icons are MIT and would travel
   fine); `web/index.html`'s own platform-detection script sends `"linux"` to `adwaita-kit/` and can
   never reach it anyway.
 - Non-core script fonts — same `CORE_FONTS` list, same reasoning, as `make_bootstrap_app.sh`/

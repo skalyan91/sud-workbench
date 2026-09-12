@@ -2,7 +2,7 @@
 
 macOS puts the menu in the system menu bar (an ``NSMenu`` built by ``build_menu`` in
 ``app/__main__.py`` and re-wired by ``app/mac/shell.py``); Windows draws it *inside* the window
-(``web/js/ui/menubar.js``, fed this same table as JSON by :meth:`app.api.Api.menu_spec`).  Before
+(``web/chrome-kit/js/menubar.js``, fed this same table as JSON by :meth:`app.api.Api.menu_spec`).  Before
 this module existed the two would have been a hand-kept copy of each other — the titles lived in
 ``build_menu``, the key equivalents / SF Symbols / conditional + checkable sets in a 78-entry
 ``specs`` dict inside ``_wire_menu``, and a THIRD copy of the visibility rules in
@@ -37,7 +37,7 @@ from .paths import APP_DATA
 
 # ── accelerator vocabulary ───────────────────────────────────────────────────
 # Modifiers are named, never encoded: AppKit wants NSEventModifierFlag* ints, the web layer wants
-# "⇧⌘" glyphs (which js/core/platform.js then localises to "Ctrl+Shift+…"), and neither
+# "⇧⌘" glyphs (which web/chrome-kit/js/platform.js then localises to "Ctrl+Shift+…"), and neither
 # representation can be the stored one without dragging that platform's headers into this file.
 MODS = ("cmd", "shift", "ctrl", "alt")
 
@@ -56,7 +56,7 @@ def accel_label(key: str | None, mods=()) -> str:
     """The macOS-glyph spelling of one accelerator ("⇧⌘N", "⌃⌘←", "⌘⌫"), or "".
 
     Deliberately produced in macOS notation even for the Windows menu bar: ``accel()`` in
-    ``js/core/platform.js`` already rewrites glyph runs into "Ctrl+Shift+N" for the ~200 tooltips
+    ``web/chrome-kit/js/platform.js`` already rewrites glyph runs into "Ctrl+Shift+N" for the ~200 tooltips
     the app writes that way, so emitting the same notation here means the menu bar's labels go
     through the ONE translator rather than a second, divergent one."""
     if not key:
@@ -77,11 +77,11 @@ def item(title, js=None, *, key=None, mods=(), win_key=None, win_mods=None, sf=N
 
     ``win_key``/``win_mods`` REBIND the row on Windows only, and exist for one reason: macOS names
     four modifiers and Windows three, so ⌃⌘ and ⌥⌘ both have to land on Ctrl+Alt (see the mapping
-    note in js/core/platform.js).  Six of the arrow rows below are one half of a ⌃⌘/⌥⌘ PAIR, and
+    note in web/chrome-kit/js/platform.js).  Six of the arrow rows below are one half of a ⌃⌘/⌥⌘ PAIR, and
     without an override the pair would arrive at the same Windows chord and both fire.  The override
     is per-item on purpose — the generic ⌃→Alt mapping stays exactly as it is for the five ⌃⌘ letter
     shortcuts, which collide with nothing.  ``win_accel`` is written in the same macOS glyph
-    notation as ``accel``, because it overrides the CHORD, not the notation: js/ui/menubar.js prints
+    notation as ``accel``, because it overrides the CHORD, not the notation: web/chrome-kit/js/menubar.js prints
     it through the one translator (``accel()``) and matches keystrokes against the same string, so
     the label and the handler cannot disagree."""
     wk = win_key if win_key is not None else key
@@ -494,7 +494,7 @@ def toggle_fs_toolbar_mirror() -> bool:
 # has bitten this table twice (the ⌥⌘F and ⌃⌘G notes above are both post-mortems), and both times the
 # dead row was a CONDITIONAL one, so the clash only showed itself when a particular selection made
 # the row visible.  Two runs, because the two platforms spend different chords: macOS as written,
-# Windows after ⌘→Ctrl and ⌃/⌥ BOTH → Alt (js/core/platform.js `_MOD_WIN`; the ⌥⌘/⌃⌘ collapse is
+# Windows after ⌘→Ctrl and ⌃/⌥ BOTH → Alt (web/chrome-kit/js/platform.js `_MOD_WIN`; the ⌥⌘/⌃⌘ collapse is
 # forced — five ⌘-families over there, four here).
 #
 # A shared chord is only reported where BOTH rows can be visible at once.  FIVE pairs share one on
@@ -546,7 +546,7 @@ def audit_accelerators() -> list[str]:
 
 # ── JSON for the frontend ────────────────────────────────────────────────────
 def as_json(order: list[str] | None = None) -> list[dict]:
-    """The table as plain JSON for ``web/js/ui/menubar.js`` (served by ``Api.menu_spec``).
+    """The table as plain JSON for ``web/chrome-kit/js/menubar.js`` (served by ``Api.menu_spec``).
 
     Only the fields the web layer can act on are sent — the SF Symbol names would be dead weight in
     a window that has no AppKit to render them."""

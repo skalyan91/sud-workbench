@@ -10,6 +10,14 @@
 set -euo pipefail
 
 PROJECT="$(cd "$(dirname "$0")/.." && pwd)"
+# web/chrome-kit/ is a git submodule (github.com/skalyan91/pywebview-chrome-kit) — an unchecked-out
+# clone has an EMPTY chrome-kit/ (no error, no missing-directory failure), which would silently ship
+# an app with no window chrome at all rather than fail the build. Check a file every platform keeps
+# (chrome-shared/ is never stripped) rather than trusting the directory to be non-empty.
+[ -f "$PROJECT/web/chrome-kit/chrome-shared/base-tokens.css" ] || {
+  echo "!! web/chrome-kit/ submodule not checked out — run: git submodule update --init" >&2
+  exit 1
+}
 OUT_DIR="${1:-$PROJECT/dist}"
 APP="$OUT_DIR/SUD Workbench.app"
 RES="$APP/Contents/Resources"
@@ -51,6 +59,9 @@ for d in app web; do
   [ -e "$PROJECT/$d" ] && cp -R "$PROJECT/$d" "$RES/appsrc/$d"
 done
 find "$RES/appsrc" -name '__pycache__' -type d -prune -exec rm -rf {} + 2>/dev/null || true
+# web/chrome-kit/ is a git submodule; its checkout carries a .git FILE (pointing back at this repo's
+# .git/modules/), meaningless once copied out on its own — strip it same as __pycache__.
+rm -f "$RES/appsrc/web/chrome-kit/.git"
 
 # The OTHER platform's chrome kit is not shipped. index.html picks exactly one kit at load from
 # <html data-platform>, so win11-kit/ can never be reached in a macOS bundle. Dropped for size only
@@ -58,8 +69,8 @@ find "$RES/appsrc" -name '__pycache__' -type d -prune -exec rm -rf {} + 2>/dev/n
 # macos-kit/ for a stronger reason: 12 of mac-tokens.css's --sf-* masks are real SF Symbols rendered
 # to base64 PNG, which Apple licenses for apps on Apple platforms, not for redistribution inside a
 # Windows application. See packaging/windows/make_win_app.py.
-rm -rf "$RES/appsrc/web/win11-kit"
-[ ! -e "$RES/appsrc/web/win11-kit" ]   # fail the build if it survived
+rm -rf "$RES/appsrc/web/chrome-kit/win11-kit"
+[ ! -e "$RES/appsrc/web/chrome-kit/win11-kit" ]   # fail the build if it survived
 
 # Drop the browser design-mode fixture: the file itself, plus its <script> tag and the HTML comment
 # above it, so the bundled index.html doesn't 404 on a script that is no longer there. Source tree

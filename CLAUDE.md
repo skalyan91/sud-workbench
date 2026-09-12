@@ -20,7 +20,7 @@ this file covers how to work on it.
 **Two platforms, one document renderer.** macOS is tuned against the macOS 26 "Tahoe" Figma kit
 and the HIG; Windows against the official Windows UI Kit and — far more usefully — the
 **MIT-licensed WinUI 3 theme resources** (`microsoft/microsoft-ui-xaml`), which state as
-machine-readable XAML what Apple only writes in prose. Values in `web/win11-kit/` are *derived
+machine-readable XAML what Apple only writes in prose. Values in `web/chrome-kit/win11-kit/` are *derived
 from those files*, not eyeballed: if you change one, cite the dictionary it came from. Anything
 Microsoft does not publish (ThemeShadow's blur/offset/alpha, Mica's recipe, the shell
 caption-button size, the focus-ring thicknesses) is marked `APPROX` in place — **don't quietly
@@ -36,7 +36,9 @@ spec and untested** — see `docs/notes/packaging.md`.
 .venv/bin/python -m app                        # or: … -m app samples/english.conllu
 SUD_DEBUG=1 .venv/bin/python -m app            # opens the WebKit inspector
 
-# Fresh environment
+# Fresh environment (web/chrome-kit/ is a git submodule — the window chrome; the app renders with
+# no chrome at all if it's left uninitialised, so this comes before the first run, not just packaging)
+git submodule update --init
 python3.12 -m venv .venv && .venv/bin/pip install -r requirements.txt
 
 # Build the shipping bundle (also run automatically — see "Automatic rebuild" below)
@@ -83,7 +85,9 @@ Three checks stand in for one; run all three after non-trivial edits.
    fails to load doesn't blank the app — it silently fills the SVG with `NaN` geometry. Those four
    tokens are required of any kit, not optional.
 3. **Real boot** — `timeout 8 .venv/bin/python -m app samples/english.conllu` should exit 124
-   (i.e. it was still running), with every `web/js/**` module served HTTP 200.
+   (i.e. it was still running), with every `web/js/**` module served HTTP 200 — and, since the app
+   also loads scripts from the submodule, `web/chrome-kit/js/**` too (fails closed if the submodule
+   was never checked out: see `docs/notes/chrome-kits.md`).
 
 ⚠️ **Chrome is not sufficient on its own for anything measuring text.** The two engines disagree
 about `getComputedStyle` inside a zoomed SVG subtree, and WebKit does not shape supplementary-plane
@@ -140,9 +144,13 @@ suffix, doc-level scheme choices in `# key = value` comments (`_META_KEYS`).
 classic `<script>` tags** (not ES modules) that share ONE page-global scope. Modules sit in
 `web/js/`: **core/** (state, prefs, document, undo, scroll, init), **diagram/** (-core, -render,
 -wrap, -edit), **grid/**, **editing/** (edit-ops, context-menu, validation), **io/** (bridge,
-formats, models, scores), **lang/** (translit, translit-load, readings, fontload), **ui/**. The
-load order interleaves the folders and is **not** derivable from the folder names — read it before
-moving anything.
+formats, models, scores), **lang/** (translit, translit-load, readings, fontload), **ui/** (sheets,
+wiring, find, colours, toast). Two more — `platform.js` and `menubar.js` — load as the same kind of
+classic script but live in the **`chrome-kit` git submodule** (`web/chrome-kit/js/`), alongside the
+`chrome-shared`/`macos-kit`/`win11-kit`/`adwaita-kit` chrome kits it also carries: see
+`docs/notes/chrome-kits.md`, and run `git submodule update --init` after cloning. The load order
+interleaves the folders and is **not** derivable from the folder names — read it before moving
+anything.
 
 **Backend** (`app/`) — `__main__.py` (platform-neutral pywebview bootstrap) dispatching to
 `mac/`/`win/`/`linux/`; `api.py` (the bridge); `io_conllu.py`; `menu_spec.py`; `detect.py` +
@@ -162,7 +170,7 @@ Read the note before editing the subsystem.
 | [`parser-scores.md`](docs/notes/parser-scores.md) | `analysis_scores`: recovering a ranking from a transition-based parser, the three relation tiers, cache keying, menu-row weighting |
 | [`diagram-rendering.md`](docs/notes/diagram-rendering.md) | Arc fanning across a wrap, `belowGap()`, WebKit's SMP shaping fault and the `foreignObject` swap, the daṇḍa satellite, seam marks |
 | [`scripts-and-fonts.md`](docs/notes/scripts-and-fonts.md) | The foreign-word mark, ornamental scripts at double size, script-switch ordering, hanging scripts, the `--script-*` tokens |
-| [`chrome-kits.md`](docs/notes/chrome-kits.md) | The two kits and how one is chosen, `js/core/platform.js`, modifier arithmetic, which file a chrome rule belongs in |
+| [`chrome-kits.md`](docs/notes/chrome-kits.md) | The two kits and how one is chosen, `web/chrome-kit/js/platform.js`, modifier arithmetic, which file a chrome rule belongs in |
 | [`native-shell.md`](docs/notes/native-shell.md) | pywebview threading deadlocks, menu-wiring retry, several windows in one process, on-disk file watching, why there is no window tabbing |
 | [`formats-conversion.md`](docs/notes/formats-conversion.md) | UD/SUD/mSUD detection, the fetched grew grammars and backend, what DEPS is read for on import |
 | [`parsing-models.md`](docs/notes/parsing-models.md) | The two engines, the four sources of MWT ranges, SUD's own MISC layer, `AUTOREGEN`, Reset Parse, the model registry and extras tiers, **custom models** (one embedding row each) and the **pipeline arms** |
@@ -204,7 +212,7 @@ Break one of these and the failure is silent or misdiagnosed. Each is expanded i
 - **Don't vendor what isn't licensed to ship.** The grew backend (CeCILL), the `.grs` grammars (no
   declared licence), Morpheus (CC BY-SA) and the vidyut kosha are all **fetched on demand onto the
   user's own machine**. Each bundle ships only its own chrome kit, and for Windows and Linux that
-  is a licensing rule, not a size one (`macos-kit/` carries real SF Symbols). →
+  is a licensing rule, not a size one (`web/chrome-kit/macos-kit/` carries real SF Symbols). →
   `packaging.md`, `formats-conversion.md`
 - **DEPS is not part of SUD**, and this app does not write it. A UD import reads it for the two
   constructs the app already models, then clears it. → `formats-conversion.md`

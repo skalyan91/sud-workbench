@@ -86,17 +86,22 @@ dot-below letters. No glyph outline was drawn, no new glyph was added, and no ot
 `ttx` dump of each against the unpatched file. Every letterform on screen, small-capped or not, is
 still Noto Sans's own design.
 
-## Chrome kits — `web/macos-kit/`, `web/win11-kit/`
+## Chrome kits — `web/chrome-kit/macos-kit/`, `web/chrome-kit/win11-kit/`
 
 The app ships two chrome kits and loads exactly one, chosen at page load from `<html
-data-platform>`. Their icon sets are unrelated in provenance.
+data-platform>`. Their icon sets are unrelated in provenance. Both kits (plus `chrome-shared/` and
+`adwaita-kit/`) live in the `web/chrome-kit/` git submodule
+([skalyan91/pywebview-chrome-kit](https://github.com/skalyan91/pywebview-chrome-kit)), extracted
+from this app so the same chrome can dress other pywebview apps — that repo carries its own copy of
+this section (paths adjusted) in its own `THIRD-PARTY-NOTICES.md`, since the licensing obligations
+below travel with the code, not with this repo specifically.
 
 | Component | Where | Upstream | Licence |
 |---|---|---|---|
-| Fluent UI System Icons | `win11-kit/fluent-tokens.css` — 38 of 40 `--sf-*` masks | [microsoft/fluentui-system-icons](https://github.com/microsoft/fluentui-system-icons) @ `a9e7f2d7bd8a` | MIT |
-| WinUI 3 theme resources | `win11-kit/*.css` — colours, radii, metrics, timings | [microsoft/microsoft-ui-xaml](https://github.com/microsoft/microsoft-ui-xaml) | MIT |
-| Lucide | `macos-kit/mac-tokens.css` and `win11-kit/fluent-tokens.css` — the hand-drawn `--sf-*` masks | [lucide-icons/lucide](https://github.com/lucide-icons/lucide) | ISC |
-| SF Symbols | `macos-kit/mac-tokens.css` — 12 `--sf-*` masks, base64 PNG | Apple | see below |
+| Fluent UI System Icons | `chrome-kit/win11-kit/fluent-tokens.css` — 38 of 40 `--sf-*` masks | [microsoft/fluentui-system-icons](https://github.com/microsoft/fluentui-system-icons) @ `a9e7f2d7bd8a` | MIT |
+| WinUI 3 theme resources | `chrome-kit/win11-kit/*.css` — colours, radii, metrics, timings | [microsoft/microsoft-ui-xaml](https://github.com/microsoft/microsoft-ui-xaml) | MIT |
+| Lucide | `chrome-kit/macos-kit/mac-tokens.css` and `chrome-kit/win11-kit/fluent-tokens.css` — the hand-drawn `--sf-*` masks | [lucide-icons/lucide](https://github.com/lucide-icons/lucide) | ISC |
+| SF Symbols | `chrome-kit/macos-kit/mac-tokens.css` — 12 `--sf-*` masks, base64 PNG | Apple | see below |
 
 - Fluent UI System Icons and the WinUI theme resources are both Copyright (c) Microsoft
   Corporation, MIT. From `microsoft-ui-xaml` **no code is copied — values only**, read out of
@@ -122,16 +127,16 @@ for the packaging-time-render migration).
 
 Apple licenses SF Symbols for use in apps **on Apple platforms**; reproducing the artwork inside a
 Windows or Linux build is not covered. So `packaging/windows/make_win_app.py` **excludes
-`web/macos-kit/` from the Windows payload**, and `packaging/linux/make_deb.sh`/`make_rpm.sh` do the
-same for Linux — both fail the build if it survives. The Fluent kit supplies all 41 masks from
-MIT-licensed sources for Windows, so nothing is lost there. Linux's `adwaita-kit/` needs the same 41
-mask *names* without depending on `macos-kit/` (which it can't reach once that directory is
-stripped) — `web/chrome-shared/` is the fix: it carries everything `macos-kit/mac-tokens.css`/
-`mac-chrome.css` used to declare directly except the eight real SF Symbols, which it replaces with
-Fluent equivalents (same MIT source as `win11-kit/`), and no platform's build strips it. See
-`web/chrome-shared/README.md`.
-`packaging/make_bootstrap_app.sh` drops `web/win11-kit/` from the macOS bundle symmetrically,
-though that one is for size alone: MIT would have travelled fine.
+`web/chrome-kit/macos-kit/` from the Windows payload**, and `packaging/linux/make_deb.sh`/
+`make_rpm.sh` do the same for Linux — both fail the build if it survives. The Fluent kit supplies
+all 41 masks from MIT-licensed sources for Windows, so nothing is lost there. Linux's
+`web/chrome-kit/adwaita-kit/` needs the same 41 mask *names* without depending on `macos-kit/`
+(which it can't reach once that directory is stripped) — `web/chrome-kit/chrome-shared/` is the fix:
+it carries everything `macos-kit/mac-tokens.css`/`mac-chrome.css` used to declare directly except
+the eight real SF Symbols, which it replaces with Fluent equivalents (same MIT source as
+`win11-kit/`), and no platform's build strips it. See `web/chrome-kit/chrome-shared/README.md`.
+`packaging/make_bootstrap_app.sh` drops `web/chrome-kit/win11-kit/` from the macOS bundle
+symmetrically, though that one is for size alone: MIT would have travelled fine.
 
 ## Data — `app/data/`
 

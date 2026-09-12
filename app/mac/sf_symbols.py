@@ -61,7 +61,9 @@ import base64
 import os
 
 WEB_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "web")
-OUT_PATH = os.path.join(WEB_DIR, "macos-kit", "mac-tokens-sf.generated.css")
+# macos-kit/ now lives inside the chrome-kit submodule (web/chrome-kit/, see docs/notes/chrome-kits.md) --
+# still git-ignored there (chrome-kit/.gitignore carries the matching entry), same reasoning as above.
+OUT_PATH = os.path.join(WEB_DIR, "chrome-kit", "macos-kit", "mac-tokens-sf.generated.css")
 
 # token -> (SF Symbol name, point size, NSFontWeight* name). See module docstring for provenance.
 SYMBOLS: dict[str, tuple[str, float, str]] = {

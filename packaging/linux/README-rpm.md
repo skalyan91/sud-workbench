@@ -157,7 +157,8 @@ about the output `.rpm` is container-specific). The script:
 1. Stages `app/`, `web/` into a clean tree (`grammars/` is deliberately not part of it any more —
    see `app/grammars.py`), applying the same trims every platform's
    build already applies — `__pycache__` stripped, the *other two* platforms' chrome kits dropped
-   (`macos-kit/`, `win11-kit/` — Linux ships only `web/adwaita-kit/`), the browser design-mode
+   (`macos-kit/`, `win11-kit/`, both inside the `web/chrome-kit/` submodule — Linux ships only
+   `web/chrome-kit/adwaita-kit/`), the browser design-mode
    fixture (`js/dev-fixture.js` + its `<script>` tag) stripped, `web/fonts/` trimmed to the same
    four CORE faces the macOS/Windows builds ship.
 2. Tars that tree as `Source0`, derives the `hicolor` icon set from

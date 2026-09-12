@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import sys
 
-WINDOW_BG_DARK = "#1e1e1e"    # == --win-bg in web/macos-kit/mac-tokens.css's dark block (and Fluent's)
+WINDOW_BG_DARK = "#1e1e1e"    # == --win-bg in web/chrome-kit/macos-kit/mac-tokens.css's dark block (and Fluent's)
 WINDOW_BG_LIGHT = "#ffffff"   # == --win-bg in the light :root of both kits
 
 

@@ -66,7 +66,25 @@ survives. For macOS dropping `win11-kit/` is a size decision. For Windows *and L
 `macos-kit/` is a **licensing** one: eight of `mac-tokens.css`'s `--sf-*` masks are real SF Symbols
 (rendered at packaging time now, not committed — see `app/mac/sf_symbols.py`), and Apple licenses
 those for apps on *Apple* platforms. The Fluent kit supplies all 41 masks from MIT sources on
-Windows, so nothing is lost there. See `THIRD-PARTY-NOTICES.md`.
+Windows, so nothing is lost there. See `THIRD-PARTY-NOTICES.md`. Both kits now live inside
+`web/chrome-kit/` (a git submodule — see the next note); the strip commands and existence checks in
+all four scripts target `web/chrome-kit/macos-kit`/`web/chrome-kit/win11-kit`, not the bare
+`web/macos-kit`/`web/win11-kit` these paragraphs otherwise describe.
+
+⚠️ **`web/chrome-kit/` is a git submodule, and an uninitialised one is an EMPTY directory — no error,
+no missing-path failure.** A `cp -R`/`copytree` of `web/` off a clone that never ran
+`git submodule update --init` would silently produce a bundle with no window chrome at all, and
+every existence-check above (`[ ! -e … ]`, `os.path.exists(...)`) would report success, because none
+of them distinguish "correctly stripped" from "never existed to begin with". Each of the four
+packaging entry points (`make_bootstrap_app.sh`, `make_deb.sh`, `make_rpm.sh`, `make_win_app.py`)
+therefore asserts a file every platform's build keeps (`chrome-kit/chrome-shared/base-tokens.css`,
+never stripped by any of them) exists in the SOURCE tree before copying anything, and fails with an
+actionable `git submodule update --init` message if it doesn't — a build-time instance of the same
+"fail if a required directory doesn't survive" pattern the chrome-kit strip already used, run before
+copying instead of after. The submodule's checkout also carries a `.git` FILE (pointing back at this
+repo's `.git/modules/web/chrome-kit`), stripped from every payload alongside `__pycache__` since it
+means nothing once copied out on its own. See `docs/notes/chrome-kits.md` for what's inside the
+submodule and why it was split out.
 
 ⚠️ **AND `xx_sud_generic` MAY NEVER ENTER A BUNDLE**, for the same class of reason and a stricter one.
 `make_portable.sh` pip-installs the model wheels it distributes straight into the app it ships, so a

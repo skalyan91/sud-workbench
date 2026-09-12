@@ -345,6 +345,12 @@ def main() -> int:
                  os.path.join(HERE, "launcher.c"), os.path.join(HERE, "launcher.vbs"),
                  os.path.join(HERE, "sud-workbench.iss")]
     required += [os.path.join(HERE, s) for s in SETUP_SCRIPTS]
+    # web/chrome-kit/ is a git submodule (github.com/skalyan91/pywebview-chrome-kit) — an
+    # unchecked-out clone has an EMPTY chrome-kit/ (no missing-directory failure on its own), which
+    # would silently ship an app with no window chrome at all rather than fail the build. Check a
+    # file every platform keeps (chrome-shared/ is never stripped) rather than trust the directory
+    # to be non-empty.
+    required += [os.path.join(PROJECT, "web", "chrome-kit", "chrome-shared", "base-tokens.css")]
     missing = [p for p in required if not os.path.exists(p)]
     if missing:
         print("!! missing sources:", file=sys.stderr)
@@ -352,6 +358,8 @@ def main() -> int:
             print(f"     {b.rel(p)}", file=sys.stderr)
         if os.path.join(PROJECT, "packaging", "icon-flat", "appicon-flat.ico") in missing:
             print("   (run: packaging/build_flat_icon.py ico)", file=sys.stderr)
+        if os.path.join(PROJECT, "web", "chrome-kit", "chrome-shared", "base-tokens.css") in missing:
+            print("   (run: git submodule update --init)", file=sys.stderr)
         return 1
     for f in CORE_FONTS:
         fp = os.path.join(PROJECT, "web", "fonts", f)
@@ -374,7 +382,9 @@ def main() -> int:
     b.mkdir(payload)
     appsrc = os.path.join(payload, "appsrc")
     b.mkdir(appsrc)
-    skip_pycache = lambda p: os.path.basename(p) == "__pycache__"
+    # web/chrome-kit/ is a git submodule; its checkout carries a .git FILE (pointing back at this
+    # repo's .git/modules/), meaningless once copied out on its own — strip it same as __pycache__.
+    skip_pycache = lambda p: os.path.basename(p) in ("__pycache__", ".git")
     # THE OTHER PLATFORM'S CHROME KIT IS NOT SHIPPED. index.html picks exactly one kit at load from
     # <html data-platform>, so macos-kit/ is dead weight in a Windows bundle — but the reason it is
     # EXCLUDED rather than merely unused is licensing: 12 of mac-tokens.css's --sf-* masks are real
@@ -382,6 +392,9 @@ def main() -> int:
     # Reproducing them inside a Windows application is not covered. The Fluent kit carries its own
     # MIT-licensed Fluent UI System Icons for all 38, so nothing is lost. The macOS build excludes
     # win11-kit/ symmetrically (see make_bootstrap_app.sh) — there for size alone, MIT travelling fine.
+    # macos-kit/ now lives inside web/chrome-kit/ (see docs/notes/chrome-kits.md); the basename check
+    # below still catches it regardless of depth — shutil.copytree's ignore callback fires at every
+    # directory level, not just the top of the tree.
     skip_win = lambda p: skip_pycache(p) or os.path.basename(p) == "macos-kit"
     for d in SRC_TREES:
         b.copytree(os.path.join(PROJECT, d), os.path.join(appsrc, d),
@@ -393,7 +406,7 @@ def main() -> int:
             note="← dev-fixture stripped", crlf=False)
     b.remove(os.path.join(appsrc, "web", "js", "dev-fixture.js"), note="(browser design-mode fixture)")
 
-    if not b.dry and os.path.exists(os.path.join(appsrc, "web", "macos-kit")):
+    if not b.dry and os.path.exists(os.path.join(appsrc, "web", "chrome-kit", "macos-kit")):
         raise SystemExit("!! macos-kit/ survived into the Windows payload — refusing to build "
                          "(it carries base64-rendered SF Symbols; see the skip_win note above)")
 

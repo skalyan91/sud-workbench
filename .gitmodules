@@ -1,0 +1,3 @@
+[submodule "web/chrome-kit"]
+	path = web/chrome-kit
+	url = https://github.com/skalyan91/pywebview-chrome-kit.git

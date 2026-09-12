@@ -58,7 +58,7 @@ there is a check for this; keep it passing.
 `app/menu_spec.py` is the **single source of truth** for the ~78-item menu: titles, JS calls,
 accelerators, SF Symbol *and* Fluent icon names, and the visibility/checkable flags. `build_menu()`
 and macOS's `_wire_menu` read it; `Api.menu_spec()` serves the same table as JSON to
-`web/js/ui/menubar.js`, which draws the in-window bar Windows needs (macOS uses the real `NSMenu`,
+`web/chrome-kit/js/menubar.js`, which draws the in-window bar Windows needs (macOS uses the real `NSMenu`,
 so that module is inert there). Add a command **once**, in the spec.
 
 ⚠️ Windows needs **no** analogue of the macOS drag view: setting WebView2's

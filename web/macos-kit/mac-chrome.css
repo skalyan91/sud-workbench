@@ -1,9 +1,0 @@
-/*@module macos-kit/mac-chrome.css*/
-/* Every rule this file used to declare directly now lives in ../chrome-shared/base-chrome.css,
-   verbatim and unchanged — this file never had any literal Apple-specific content of its own, only
-   rules built from custom properties (mac-tokens.css/chrome-shared/base-tokens.css), so moving it
-   out whole cost nothing. Split out for the same reason mac-tokens.css's own header explains:
-   adwaita-kit/ (Linux) needs this file's rules too, and packaging/linux/make_deb.sh/make_rpm.sh
-   deliberately strip this directory (macos-kit/) for the SF-Symbols licensing reason those scripts
-   document — a file OUTSIDE macos-kit/ is what lets adwaita-kit/ depend on it safely. */
-@import url("../chrome-shared/base-chrome.css");

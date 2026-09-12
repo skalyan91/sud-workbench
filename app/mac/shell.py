@@ -300,7 +300,7 @@ def refresh_recent_menu(window, api):
 # reconciling the options bar with a tab bar, is a separate, older removal (see git history) — the
 # ordering problem it solved does not exist any more either, since there is no tab bar to reconcile
 # anything with. `.viewbar`'s `top` is back to the plain, untabbed expression it would have had if the
-# tab bar had never existed (web/macos-kit/mac-chrome.css).
+# tab bar had never existed (web/chrome-kit/macos-kit/mac-chrome.css).
 
 
 def _enable_first_mouse():
@@ -1101,7 +1101,7 @@ def _unify_titlebar_on_show(window, api=None):
             if cv is None or close is None:
                 return None
             # THE LIGHTS SIT LOWER THAN THE OS PUTS THEM, and that is also what makes the title bar taller: the web
-            # bar's min-height is calc(--lights-cy * 2) (macos-kit/mac-chrome.css), so the centre published below is
+            # bar's min-height is calc(--lights-cy * 2) (chrome-kit/macos-kit/mac-chrome.css), so the centre published below is
             # the ONE number that sets both.  The spec is _LIGHT_TOP px of air ABOVE the buttons; the bar that falls
             # out of it is 2 x (top + height/2), i.e. 52px for macOS's 12px buttons.
             #
@@ -1619,7 +1619,7 @@ def _unify_titlebar_on_show(window, api=None):
         # item 7: the Layout pill, upgraded the same way but through the CSS VARIABLE rather than __setSfSymbol —
         # that helper carries a hard-coded {which → one selector} map (js/io/bridge.js), so a second element wearing
         # the same glyph would need a second entry, whereas both pill segments already read `--m:var(--sf-paged|
-        # unpaged)`. Overriding those two vars on documentElement (inline style beats the :root rule in macos-kit/mac-tokens.css)
+        # unpaged)`. Overriding those two vars on documentElement (inline style beats the :root rule in chrome-kit/macos-kit/mac-tokens.css)
         # upgrades every element that reads them, and leaves the hand-drawn masks in mac-tokens.css as the browser-design-mode
         # fallback exactly as before — same fall-through as __setSfSymbol's, one level up.
         sf_paged, sf_unpaged = _file_icon.get("sf_paged"), _file_icon.get("sf_unpaged")

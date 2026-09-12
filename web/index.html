@@ -10,20 +10,23 @@
    later reordered. There is no build step to resolve this at package time.
    Detection order: an explicit ?platform= — browser design mode, and the ONLY way the Windows or
    Linux skin can be reviewed from a Mac — then the real user agent. Python gets no vote: it can
-   inject only after load, which is far too late to choose a stylesheet. js/core/platform.js reads
-   the result back off <html data-platform> so look and behaviour cannot disagree.
+   inject only after load, which is far too late to choose a stylesheet. chrome-kit/js/platform.js
+   reads the result back off <html data-platform> so look and behaviour cannot disagree.
    "linux" loads adwaita-kit — a PLACEHOLDER kit (not sourced from libadwaita the way win11-kit was
-   sourced from WinUI 3; see adwaita-kit/README.md), picked over silently falling through to "mac"
-   (the previous behaviour here) so a real Linux user agent stops loading macOS's traffic lights and
-   glass toolbar with no native chrome behind them. */
+   sourced from WinUI 3; see chrome-kit/adwaita-kit/README.md), picked over silently falling through
+   to "mac" (the previous behaviour here) so a real Linux user agent stops loading macOS's traffic
+   lights and glass toolbar with no native chrome behind them.
+   The four kit directories (chrome-shared/macos-kit/win11-kit/adwaita-kit) live in the
+   `chrome-kit` git submodule (github.com/skalyan91/pywebview-chrome-kit) — extracted from this app
+   so the same chrome can dress other pywebview apps. See docs/notes/chrome-kits.md. */
 (function(){
   var q=/[?&]platform=(mac|win|linux)\b/.exec(location.search);
   var ua=(navigator.userAgentData&&navigator.userAgentData.platform)||navigator.platform||"";
   var p=q?q[1]:(/win/i.test(ua)?"win":/linux/i.test(ua)?"linux":"mac");
   document.documentElement.dataset.platform=p;
-  var kit=p==="win"?["win11-kit/fluent-tokens.css","win11-kit/fluent-chrome.css"]
-         :p==="linux"?["adwaita-kit/adwaita-tokens.css","adwaita-kit/adwaita-chrome.css"]
-                     :["macos-kit/mac-tokens.css","macos-kit/mac-chrome.css"];
+  var kit=p==="win"?["chrome-kit/win11-kit/fluent-tokens.css","chrome-kit/win11-kit/fluent-chrome.css"]
+         :p==="linux"?["chrome-kit/adwaita-kit/adwaita-tokens.css","chrome-kit/adwaita-kit/adwaita-chrome.css"]
+                     :["chrome-kit/macos-kit/mac-tokens.css","chrome-kit/macos-kit/mac-chrome.css"];
   for(var i=0;i<kit.length;i++) document.write('<link rel="stylesheet" href="'+kit[i]+'">');
 })();
 </script>
@@ -443,7 +446,7 @@
 <script src="iso639-3.js"></script>
 <!-- platform.js FIRST: PLATFORM/IS_WIN/accel/cmdKey are read by almost every module below, and a
      classic script cannot forward-reference a later file. It reads the <head> script's decision. -->
-<script src="js/core/platform.js"></script>
+<script src="chrome-kit/js/platform.js"></script>
 <script src="js/ui/toast.js"></script>
 <script src="js/core/state.js"></script>
 <script src="js/lang/translit.js"></script>
@@ -480,7 +483,7 @@
 <script src="js/lang/fontload.js"></script>
 <!-- Windows only: the in-window menu bar, since there is no NSMenu off macOS. Inert on macOS (every
      entry point returns on !IS_WIN). No eager top-level code, so its position here is free. -->
-<script src="js/ui/menubar.js"></script>
+<script src="chrome-kit/js/menubar.js"></script>
 <!-- browser design mode only: seeds DOC so the renderers have something to draw with no bridge.
      packaging/make_*.sh delete the file AND strip this pair of lines from the bundled index.html. -->
 <script src="js/dev-fixture.js"></script>

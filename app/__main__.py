@@ -244,7 +244,7 @@ def _setup_window(window, api) -> None:
         from .win import shell as win_shell
         win_shell.install(window, api)
         # The in-window menu bar rebuilds its Open Recent flyout from api.recent_files() each time it
-        # opens (js/ui/menubar.js), so there is nothing to retain and nothing to refresh here — the
+        # opens (web/chrome-kit/js/menubar.js), so there is nothing to retain and nothing to refresh here — the
         # native-NSMenu bookkeeping mac/shell.py needs exists only because pywebview has no rebuild API.
     elif IS_LINUX:
         from .linux import shell as linux_shell
@@ -381,7 +381,7 @@ def main(argv: list[str] | None = None):
         except Exception:  # noqa: BLE001
             pass
         # Dev-convenience on-demand render (mirrors app/fonts.py's own cached-fetch shape): a packaged
-        # build already carries web/macos-kit/mac-tokens-sf.generated.css (packaging/render_sf_symbols.py
+        # build already carries web/chrome-kit/macos-kit/mac-tokens-sf.generated.css (packaging/render_sf_symbols.py
         # ran at build time), but a plain `.venv/bin/python -m app` from source has never triggered that
         # script, so the titlebar's undo/redo/zoom/actual-size/help/grid/open icons would otherwise be
         # blank mask images. Must run BEFORE create_window below — mac-tokens.css's own @import resolves
@@ -466,7 +466,7 @@ def main(argv: list[str] | None = None):
     # The DECLARATIVE menu is macOS-only. It is the same table either way (app/menu_spec.py), but on
     # Windows the menu is drawn by the web layer INSIDE the title bar, and handing pywebview a menu
     # there would additionally raise a native WinForms MenuStrip band above the page — two menu bars,
-    # one of them un-styleable. Api.menu_spec() serves that same table to js/ui/menubar.js instead.
+    # one of them un-styleable. Api.menu_spec() serves that same table to web/chrome-kit/js/menubar.js instead.
     # NO DEFAULT MENUS. pywebview's cocoa backend builds its own View and Edit menus on top of
     # whatever menu it is handed (_recreate_menus → _add_view_menu / _add_edit_menu, platforms/
     # cocoa.py), gated on this one setting, which defaults to True. app/menu_spec.py declares an Edit

@@ -30,6 +30,14 @@ set -euo pipefail
 export COPYFILE_DISABLE=1
 
 PROJECT="$(cd "$(dirname "$0")/../.." && pwd)"
+# web/chrome-kit/ is a git submodule (github.com/skalyan91/pywebview-chrome-kit) — an unchecked-out
+# clone has an EMPTY chrome-kit/ (no error, no missing-directory failure), which would silently ship
+# an app with no window chrome at all rather than fail the build. Check a file every platform keeps
+# (chrome-shared/ is never stripped) rather than trusting the directory to be non-empty.
+[ -f "$PROJECT/web/chrome-kit/chrome-shared/base-tokens.css" ] || {
+  echo "!! web/chrome-kit/ submodule not checked out — run: git submodule update --init" >&2
+  exit 1
+}
 HERE="$PROJECT/packaging/linux"
 IMAGE="fedora:41"
 OUT_DIR="$HERE/build"
@@ -79,6 +87,9 @@ for d in app web; do
   cp -R "$PROJECT/$d" "$STAGE_ROOT/$d"
 done
 find "$STAGE_ROOT" -name '__pycache__' -type d -prune -exec rm -rf {} + 2>/dev/null || true
+# web/chrome-kit/ is a git submodule; its checkout carries a .git FILE (pointing back at this repo's
+# .git/modules/), meaningless once copied out on its own — strip it same as __pycache__.
+rm -f "$STAGE_ROOT/web/chrome-kit/.git"
 
 # Only the Linux chrome kit belongs in a Linux package — same "ship only your own kit" rule
 # make_bootstrap_app.sh (drops win11-kit/) and make_win_app.py (drops macos-kit/, for the SF-Symbols
@@ -87,8 +98,8 @@ find "$STAGE_ROOT" -name '__pycache__' -type d -prune -exec rm -rf {} + 2>/dev/n
 # dropping macos-kit/ here is the SAME licensing reason as the Windows build (12 of mac-tokens.css's
 # --sf-* masks are real SF Symbols Apple licenses for Apple platforms only); dropping win11-kit/ is
 # size only, exactly as on macOS.
-rm -rf "$STAGE_ROOT/web/macos-kit" "$STAGE_ROOT/web/win11-kit"
-[ ! -e "$STAGE_ROOT/web/macos-kit" ] && [ ! -e "$STAGE_ROOT/web/win11-kit" ]   # fail the build if either survived
+rm -rf "$STAGE_ROOT/web/chrome-kit/macos-kit" "$STAGE_ROOT/web/chrome-kit/win11-kit"
+[ ! -e "$STAGE_ROOT/web/chrome-kit/macos-kit" ] && [ ! -e "$STAGE_ROOT/web/chrome-kit/win11-kit" ]   # fail the build if either survived
 
 # Drop the browser design-mode fixture — same sed-based strip as make_bootstrap_app.sh, verbatim, so
 # the two builds can never disagree about what they removed.

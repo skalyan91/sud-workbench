@@ -36,9 +36,13 @@ Setup output isn't produced yet); Linux ships a `.deb` and a Fedora `.rpm`.
 
 ## Run
 
-The app runs on **Python 3.12** (spaCy/stanza/torch wheels are unreliable on 3.14):
+The app runs on **Python 3.12** (spaCy/stanza/torch wheels are unreliable on 3.14). `web/chrome-kit/`
+is a git submodule (the window chrome — see "Layout" below) and the app renders with no chrome at
+all if it's left empty, so init it before first run — `git clone --recurse-submodules` up front
+avoids the separate step:
 
 ```sh
+git submodule update --init          # only needed if you didn't clone with --recurse-submodules
 python3.12 -m venv .venv
 .venv/bin/pip install -r requirements.txt
 .venv/bin/python -m app                 # or: .venv/bin/python -m app samples/english.conllu
@@ -393,8 +397,10 @@ web/  index.html        DOM skeleton; loads the modules below as ordered classic
       js/editing/       token/sentence operations, context menus, validation
       js/io/            the pywebview bridge, format conversion, model manager
       js/lang/          transliteration and glossing
-      js/ui/            sheets, wiring, find, colours
-      macos-kit/        reusable macOS chrome (tokens, title bar/pills/menus CSS, toast)
+      js/ui/            sheets, wiring, find, colours, toast
+      chrome-kit/       git submodule (github.com/skalyan91/pywebview-chrome-kit): the reusable
+                        macOS/Windows/Linux chrome kits (tokens, title bar/pills/menus CSS), plus
+                        js/platform.js and js/menubar.js — see docs/notes/chrome-kits.md
       styles/           app.css, fonts.css        fonts/  bundled Noto script fonts
 packaging/              .app bundle builders + icon pipeline
 samples/                example SUD / mSUD .conllu — REPO ONLY, never bundled into the app

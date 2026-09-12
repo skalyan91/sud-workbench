@@ -3,9 +3,10 @@
 full story (which SF Symbols, why they moved out of mac-tokens.css, and the render technique).
 
 Run this BEFORE copying web/ into a bundle (make_bootstrap_app.sh / make_portable.sh both do,
-right at the top) so the copy picks up a freshly-generated web/macos-kit/mac-tokens-sf.generated.css
-along with everything else. Also safe to run by hand after touching app/mac/sf_symbols.py's own
-SYMBOLS table, or just to refresh the dev-tree copy.
+right at the top) so the copy picks up a freshly-generated
+web/chrome-kit/macos-kit/mac-tokens-sf.generated.css along with everything else. Also safe to run
+by hand after touching app/mac/sf_symbols.py's own SYMBOLS table, or just to refresh the dev-tree
+copy.
 
 Usage:  .venv/bin/python packaging/render_sf_symbols.py
 """

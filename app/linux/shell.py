@@ -10,13 +10,13 @@ chrome plan). Two things happen here:
 
   * ``read_theme_colors()`` reads the ACTIVE GTK3 theme's resolved colours via
     ``Gtk.StyleContext.lookup_color`` and pushes them into the page's CSS custom properties
-    (``window.__setGtkTheme``, web/js/core/platform.js), overriding web/adwaita-kit's static,
+    (``window.__setGtkTheme``, web/chrome-kit/js/platform.js), overriding web/chrome-kit/adwaita-kit's static,
     sourced-but-not-live Adwaita snapshot with whatever the user's actual GTK3 theme resolves to.
     Event-driven (``Gtk.Settings`` `notify::` signals), not polled — unlike ``app/win/shell.py``'s
     registry poll, GTK genuinely fires a change notification.
   * A real native ``Gtk.MenuBar`` is built from ``app/menu_spec.py`` — the SAME declarative table
     macOS's `NSMenu` (``app/mac/shell.py``) and Windows' in-window bar
-    (``web/js/ui/menubar.js``) both read, so a row added there appears on all three platforms with
+    (``web/chrome-kit/js/menubar.js``) both read, so a row added there appears on all three platforms with
     one edit. Attaching it requires restructuring pywebview's own GTK widget tree (see
     ``_install_menu_bar`` below) — the one piece of this file coupled to pywebview's current
     internals rather than a stable public API, called out there in detail.
@@ -187,10 +187,10 @@ def _install_theme_watcher(window) -> None:
 
 # ── native menu bar ────────────────────────────────────────────────────────────
 # Built from app/menu_spec.py — the SAME declarative table app/mac/shell.py's NSMenu wiring and
-# web/js/ui/menubar.js (Windows' in-window bar) both read, so a row added there appears on all
+# web/chrome-kit/js/menubar.js (Windows' in-window bar) both read, so a row added there appears on all
 # three platforms with one edit. This is the THIRD consumer, not a new design.
 
-# GTK modifier-name vocabulary -> Gdk.ModifierType attribute name. Mirrors web/js/core/platform.js's
+# GTK modifier-name vocabulary -> Gdk.ModifierType attribute name. Mirrors web/chrome-kit/js/platform.js's
 # _MOD_WIN table exactly (same reasoning: Linux uses the same Ctrl-based convention as Windows, so
 # menu_spec's win_key/win_mods — already collision-resolved for the six ⌃⌘/⌥⌘ arrow-row pairs that
 # would otherwise land on the same Windows/Linux chord — are what this reads, never key/mods, which
