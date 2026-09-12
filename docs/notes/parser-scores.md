@@ -101,6 +101,13 @@ reader is deciding something (a PP's two sites, a relativiser's, a coordination'
 look busier would mean inventing mass for attachments the model never entertained. `.pcand` uses the same
 accent ink as `.dtarget` and is deliberately weaker — candidates against the choice — which is also why its
 rules come FIRST in `app.css`: the two match at equal specificity and the drop target must win outright.
+
+⚠️ **`sc.heads` BRIEFLY GAINED A FOURTH CONSUMER, RETRACTED.** A pass asking each of a re-headed token `t`'s
+DIRECT dependents whether it would rather stay under `t` or bypass `t` for wherever `t` just went
+(`reheadDependents`/`reheadDependentsBatch`, js/io/bridge.js) lived here briefly and is gone: retracted on
+report ("dependents of the existing root should remain as dependents of that node") — a token's dependents
+are never moved just because the token itself was re-headed, in `setAsRoot` or anywhere else. `sc.heads`
+keeps its three consumers above; see `editing.md`'s `setAsRoot` note for the corrected rule.
 ⚠️ **`color-mix()` with a `calc()` percentage was probed in both engines** before being relied on (Chrome, both
 kits, and the shipping WKWebView all resolve it, and `--phl:0` lands exactly on the untouched ink) — a dropped
 declaration here would be invisible, not an error. A root candidate is not drawn: there is no node to light.

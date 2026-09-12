@@ -157,7 +157,17 @@ function bracketsWrapped(si){
   const brk=(txt,col,owner)=>{ const s=document.createElement("span"); s.className="bwbr"+(owner!=null&&selDesc.has(owner)?" inspan":""); s.style.color=col; s.textContent=txt; if(owner!=null){s.style.cursor="pointer"; s.dataset.s=si; s.dataset.owner=OID(owner); s.addEventListener("click",()=>pick(si,OID(owner)));} return s; };
   const closeHead=i=>{ const s=document.createElement("span"); s.className="bwclose"; s.textContent=bform(t[i])+gwOf(t[i]).map(p=>bform(p.tok)).join(""); return s; };   // the head repeated (muted) beside a closing bracket on its own line (host form only, no folded punctuation). A goeswith word is repeated WHOLE and unslurred: this is a reminder of which constituent just closed, not a second rendering of the word
   const repOff=reportOffsets(D);   // item 7: per-token reported-speech offsets
-  const wordSpan=i=>{ const grp=document.createElement("span"); grp.className="bwtok"+(sel.s===si&&sel.t===OID(i)?" sel":""); grp.dataset.s=si; grp.dataset.tok=OID(i); grp.style.cursor="pointer"; grp.style.width=wordW(i)+"px"; grp.addEventListener("click",()=>pick(si,OID(i)));   // reserve the widest-row width (rel/POS/translit are absolute, so JS sizes the box as the flex column did before) — a firm `width` (not `minWidth`): wordW already reserves the BOLD width too, so the box never needs to grow when a token is selected; it bolds in place, centred, exactly like unwrapped brackets
+  const wordSpan=i=>{ const grp=document.createElement("span"); grp.className="bwtok"+(sel.s===si&&sel.t===OID(i)?" sel":""); grp.dataset.s=si; grp.dataset.tok=OID(i); grp.style.width=wordW(i)+"px"; grp.addEventListener("click",()=>pick(si,OID(i)));   // reserve the widest-row width (rel/POS/translit are absolute, so JS sizes the box as the flex column did before) — a firm `width` (not `minWidth`): wordW already reserves the BOLD width too, so the box never needs to grow when a token is selected; it bolds in place, centred, exactly like unwrapped brackets
+    // ⚠ NO LONGER `grp.style.cursor="pointer"` — `.bwtok` is wrapped-brackets' own whole-token wrapper (the
+    // real click TARGET for selecting the token, like `.tok-hit`/`.tok-wash` in the SVG notations, or `.oline`
+    // in the outline), and per the same general instruction that stripped those ("I only want the actual,
+    // individual annotation elements … to have special cursors, not the area between or around them") a
+    // wrapper cedes its cursor to whatever specific element paints in front of it. This inline style was the
+    // one place that instruction hadn't reached: `.oline`'s blanket cursor lived in CSS and was found by grep,
+    // this one was set only here in JS and was missed by the same search. `.bwform` now carries its own
+    // `cursor:text`/`cursor:pointer` rule (app.css, beside `.baseword`/`.oform`), so the form itself is
+    // unaffected — only the padding/gap around it (and any below-stack cell with nothing else painted in it)
+    // loses the pointer it should never have shown. Selecting the token on click is unchanged either way.
     // item 25/8: --ownpad, on report ("token wash in brackets view is still not restricted to the token's own
     // AVM depth"). --undpad (set once above, for the whole box) is deliberately the ROW-WIDE max — every
     // .bwtok's STRUCTURAL padding-bottom has to agree so the below-stack rows (POS/gloss/translit) line up
@@ -1002,7 +1012,7 @@ function arcsWrapped(si){
       g.appendChild(f); gwFormSVG(g,f,tk,X,wyD,WORD_F,"tok-word",si,loB);   // goeswith: continuation parts beside the head (see gwFormSVG); the slur comes from this row's own tie layer (mwtTie below)
       if(gwOf(tk).length) g.setAttribute("data-gw",[OID(i)].concat(gwOf(tk).map(p=>p.oid)).join(" "));
       svgMarks(g,X,wyD,tk,WORD_F); svgFormSeamMark(g,tk,X,wyD,WORD_F,loB);   // Item 11: form appended LAST → paints on TOP of the POS/translit stack; item 4: marks in front, then the seam mark off the form's inline end
-      g.style.cursor="pointer"; g.addEventListener("click",()=>pick(si,OID(i)));
+      /* wrapper: no blanket cursor of its own now — see .tok-hit/.tok-wash's note above and docs/notes/diagram-rendering.md's cursor item */ g.addEventListener("click",()=>pick(si,OID(i)));
       g.addEventListener("mouseenter",()=>dim(si,OID(i))); g.addEventListener("mouseleave",()=>dim(si,null)); svg.appendChild(g);
       boxes.push({x:X,y:wy-8,hx:lw/2+((i===r.s||i===r.e)?Math.ceil(4*FS):0),hy:12});   // Item 10 / item 4: reserve casing/Noto fudge for the row's END slots (LTR rightmost = r.e, RTL rightmost = r.s), SCALED by the block zoom (×FS), so the widest row's last token — form, POS, relation label and casing halo — never clips at the fitTight viewBox edge even magnified by zoom:var(--fs)
       drawHangsSVG(svg,tk,X,wyD,WORD_F,"tok-word",si,loB,OID(i)); drawLeadsSVG(svg,tk,X,wyD,WORD_F,"tok-word",si,loB,OID(i)); });   // folded punctuation (and item 6's correct form) beside the word
@@ -1238,7 +1248,7 @@ function projWrapped(si,kind){
       g.appendChild(f); gwFormSVG(g,f,tk,X,wy,WORD_F,"tok-word",si,null);   // goeswith: continuation parts beside the head; the slur comes from this row's tie layer (mwtTie below)
       if(gwOf(tk).length) g.setAttribute("data-gw",[OID(i)].concat(gwOf(tk).map(p=>p.oid)).join(" "));
       svgMarks(g,X,wy,tk,WORD_F); svgFormSeamMark(g,tk,X,wy,WORD_F,null);   // Item 11: form appended LAST; item 4: marks in front, then the seam mark off the form's inline end
-      g.style.cursor="pointer"; g.addEventListener("click",()=>pick(si,OID(i))); rsvg.appendChild(g);
+      /* wrapper: no blanket cursor of its own now — see .tok-hit/.tok-wash's note above and docs/notes/diagram-rendering.md's cursor item */ g.addEventListener("click",()=>pick(si,OID(i))); rsvg.appendChild(g);
       drawHangsSVG(rsvg,tk,X,wy,WORD_F,"tok-word",si,null,OID(i)); drawLeadsSVG(rsvg,tk,X,wy,WORD_F,"tok-word",si,null,OID(i)); });   // folded punctuation (and item 6's correct form) beside the word
     if(deprelsAbove) r.idx.forEach(i=>{ const dep=t[i].deprel||(parseInt(t[i].head,10)===0?"root":""); if(!dep)return;   // deprels that couldn't fit in the tree, shown above their token
       const lg=E("g",{class:"edge-g","data-s":si,"data-dep":OID(i)}); drawLabel(lg,r.LX(i),yDep,dep,relColor(dep));
@@ -1311,7 +1321,7 @@ function wpDraw(box){ const wp=box._wp; if(!wp) return;
     return Math.max(1,Math.min(10,minD/2,NX(i),bw-NX(i))); });   // floored at 1 (not the original 2) so this clamp can actually bind for a node flush against the edge — a floor of 2 would silently override a sub-2 clamp back up past the very boundary it exists to respect
   for(let i=0;i<wp.nodes.length;i++){ const g=E("g",{class:"node"+(sel.s===wp.si&&sel.t===wp.oid[i]?" sel":""),"data-s":wp.si,"data-tok":wp.oid[i]});
     g.appendChild(E("circle",{class:"tok-hit tok-wash",cx:NX(i),cy:NY(i),r:hitR[i]}));   // node point = its own wash region
-    g.style.cursor="pointer"; g.addEventListener("click",()=>pick(wp.si,wp.oid[i])); svg.appendChild(g); }
+    /* wrapper: no blanket cursor of its own now — see .tok-hit/.tok-wash's note above and docs/notes/diagram-rendering.md's cursor item */ g.addEventListener("click",()=>pick(wp.si,wp.oid[i])); svg.appendChild(g); }
   // edge labels: horizontal only, centred on each edge (the layout was already spread so they don't overlap)
   if(wp.showLbl) wp.edges.forEach(e=>{ const g=E("g",{class:"edge-g"+(sel.s===wp.si&&sel.t===wp.oid[e.d]?" sel":""),"data-s":wp.si,"data-dep":wp.oid[e.d],"data-head":wp.oid[e.h]});
     drawLabel(g,(NX(e.d)+NX(e.h))/2,(NY(e.d)+NY(e.h))/2,e.rel,relColor(e.rel));
@@ -1639,7 +1649,7 @@ function tree(si){
       const STEP=belowGap(), nodeBot=dropYD+(trTxt(t[i])?STEP:0)+(lemmaRow(t)?STEP:0)+belowTierN()*STEP;   // item 29: +the lemma row's own step, or the slur hangs one row up inside the stack it is meant to sit under   // this node's OWN below-stack bottom — the hierarchy has no shared word row, so each node stacks its rows itself   // measured off the DRAWN stack, so the slur hangs the same distance under the (lowered) rows
       gwSlurSVG(svg,x[i]-tw/2,x[i]+tw/2,nodeBot+5+tieLead(),si,ids,loB); }   // the hierarchy draws no ties at all (an MWT has no place in a dependency tree), so the slur is seated here directly — by the SAME "+5, then tieLead()" rule mwtTie is handed in every other notation, just measured from this node's own stack bottom
     svgMarks(g,x[i],nyD,t[i],NODE_F);   /* …and NO seam mark on a hierarchy node, nor on its transliteration/gloss rows above — see the two calls removed there. Every node here is placed by depth and this notation draws no reading-order word row at all, so there is no row on which a "the word continues into the next token" mark would mean anything. On request, with the stemma's own nodes (diagram-render.js) and the outline's rows (below). */   // Item 11: node form appended LAST → paints on TOP of the translit/gloss stack; item 4: marks in front of it, then the seam mark off its inline end
-    g.style.cursor="pointer"; g.addEventListener("click",()=>pick(si,OID(i))); svg.appendChild(g);
+    /* wrapper: no blanket cursor of its own now — see .tok-hit/.tok-wash's note above and docs/notes/diagram-rendering.md's cursor item */ g.addEventListener("click",()=>pick(si,OID(i))); svg.appendChild(g);
     drawHangsSVG(svg,t[i],x[i],nyD,NODE_F,"node-lbl",si,loB,OID(i)); drawLeadsSVG(svg,t[i],x[i],nyD,NODE_F,"node-lbl",si,loB,OID(i));   // folded punctuation as separate selectable satellites beside the node
     boxes.push({x:x[i],y:nyL-5,hx:tw/2+2,hy:9+NODE_ASC_EXTRA});}   // …on the LAYOUT level: holding the root's crop here while its glyph draws lower is what opens the headroom above it   // tree() has no catNodes/POS-as-node mode — every node here is bform(), always at NODE_F — see NODE_ASC_EXTRA's own note
   fitTight(svg,boxes);   // crop tight top, matching the stemma
@@ -1870,7 +1880,7 @@ function brackets(si){
       g.appendChild(f); gwFormSVG(g,f,t[it.i],it.x,wyD,WORD_F,"tok-word",si,loB);   // goeswith: continuation parts beside the head; the slur comes from the tie layer (mwtTie below)
       if(gwOf(t[it.i]).length) g.setAttribute("data-gw",[OID(it.i)].concat(gwOf(t[it.i]).map(p=>p.oid)).join(" "));
       svgMarks(g,it.x,wyD,t[it.i],WORD_F); svgFormSeamMark(g,t[it.i],it.x,wyD,WORD_F,loB);   // Item 11: form appended LAST → paints on TOP of the POS/translit stack; item 4: marks in front, then the seam mark off the form's inline end
-      g.style.cursor="pointer"; g.addEventListener("click",()=>pick(si,OID(it.i))); svg.appendChild(g);
+      /* wrapper: no blanket cursor of its own now — see .tok-hit/.tok-wash's note above and docs/notes/diagram-rendering.md's cursor item */ g.addEventListener("click",()=>pick(si,OID(it.i))); svg.appendChild(g);
       boxes.push({x:it.x,y:wy-8,hx:it.w/2,hy:12});
       drawHangsSVG(svg,t[it.i],it.x,wyD,WORD_F,"tok-word",si,loB,OID(it.i)); drawLeadsSVG(svg,t[it.i],it.x,wyD,WORD_F,"tok-word",si,loB,OID(it.i));   // folded punctuation (and item 6's correct form) beside the word, before the following close bracket
     } else if(it.t==="g"){   // Subject=Generic: the ∅ — a real seq slot, drawn like any bracketed single-token dependent (its own label above, its own glyph on the word row), dimmed via .ghost-g. NEVER highlighted via the predicate's own selection — the predicate is this relation's HEAD, not its dependent, and the ∅ dependent has no real token of its own to select instead
@@ -1993,7 +2003,13 @@ function outline(si){const D=displaySent(DOC[si]), t=D.tokens, n=t.length, OID=k
     belowTiers().forEach(tier=>{ const txt=tierDisp(t[i],tier); const gs=document.createElement("span"); gs.className="gloss gl-edit"+(txt?"":" gl-empty")+frnUp(t[i]); gs.dataset.tier=tier; gs.tabIndex=0; setGlossText(gs,tier,txt||TIER_EMPTY); row.appendChild(gs); });   // tierDisp, not tierText: what the row PAINTS (under Latin's macron scheme the MSeg row shows the macronised segmentation while MISC keeps the bare one — see tierDisp, js/core/prefs.js)   // gloss / morphemic tiers, between translit and POS (outline lays these out inline)
     const pos=document.createElement("span"); pos.className="opos"+tierEmptyCls(t[i].upos); pos.textContent=posRowTxt(t[i]); if(t[i].upos)pos.title=posTitle(t[i].upos); row.appendChild(pos);   // item 28: the outline paints this tier for every row, so an untagged token paints TIER_EMPTY rather than an empty span
     { const av=avmInline(t[i]); if(av) row.appendChild(av); }   // item 22/3: the linearised AVM, last on the row — after POS, matching the stacked notations' own "AVM sits below the POS row" ordering
-    row.style.cursor="pointer"; row.addEventListener("click",()=>pick(si,OID(i)));
+    /* ⚠ NO LONGER `row.style.cursor="pointer"` — `.oline` is the outline's own whole-token wrapper (the
+       CSS rule beside its class declaration, app.css, already dropped the equivalent blanket rule; this
+       inline JS style was the same violation restated in the other language and was missed by a search
+       that only grepped the stylesheet). Its own annotation elements (`.oform`, `.opos`, `.olemma` via
+       `.lem-edit`, `.otrans` via `.tr-edit`, the AVM via `.avm-row`) all carry their own cursor already,
+       so removing this leaves them unaffected and only takes the pointer off the row's padding/gaps. */
+    row.addEventListener("click",()=>pick(si,OID(i)));
     box.appendChild(row);   // MWTs are omitted from the outline — no good way to place them in a dependency tree
     kids[i].slice().sort((a,b)=>a-b).forEach(c=>w(c,d+1,chain,myReps));
     ghostsAt[i].forEach(({gi,rel,kind})=>{ const grow=document.createElement("div"); grow.className="oline oline-ghost"+(inSel(gi)?" sel":"");   // item 3: highlighted like a real row when ITS token is the current selection

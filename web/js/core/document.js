@@ -1740,6 +1740,23 @@ function buildBlock(i,ctx){ const s=DOC[i];
       e.preventDefault(); });
     b.addEventListener("click",e=>{ if(e.target.closest(".sctrl")||e.target.closest("input")||e.target.closest("select")||e.target.closest(".gridbox")||e.target.closest(".sid-in"))return;   // .sid-in: a contenteditable span, not an <input> — its own mousedown/click stopPropagation already keeps events from reaching here (see buildBlock), but excluded here too for anything that reaches this handler by another path
       if(e.target.closest(".node,.tok-group,.arc,.edge-g,.oline,.brk,.bwtok,.bwbr,.mwt-form"))return;   // a token/bracket/MWT-tie handles its own selection
+      /* item 32 — AND SO DOES AN AVM AFFORDANCE, found live while testing the empty-placeholder "+" in
+         WRAPPED brackets specifically: `.bwannot` (the AVM's own overlay `<svg>` in this notation, built a
+         few hundred lines below) is appended straight to THIS block, not nested inside any `.bwtok` the
+         exclusion above already covers — the same structural fact `.avm-add`'s own note in drawAVM
+         (diagram-core.js) and `.bwannot .avm-row`'s own note (styles/app.css) both already record for
+         right-click. Left unexcluded, a click on `.avm-add`/`.avm-box`/`.avm-plus`/`.avm-row` opened the
+         add-feature menu (avmMenuAt, resolved at #doc, further out) exactly as intended, AND ALSO bubbled
+         on to THIS handler — nothing here had stopped it — which read the click as empty diagram space and
+         called `pick(i,0,false)` regardless. Harmless in every OTHER notation, where pick() only toggles a
+         `.sel` class live; in brackets pick() ends in `preserveScroll(renderDoc)` UNCONDITIONALLY (its own
+         comment: "re-flow so the bolded word gets its width"), so this stray call re-rendered the whole
+         block underneath the very menu that had just opened — a full `.bwannot` rebuild, replacing the
+         node the reader's pointer was on, measured live via a patched `pick`/`renderDoc` pair over CDP
+         (before this line: pickCalls 1, renderCalls 1, "same node" false; after: 0/0/true). Confirmed
+         PRE-EXISTING for the populated matrix's own `.avm-plus` too — not something this item's empty-
+         placeholder work introduced, just never exercised by a real click on it before. */
+      if(e.target.closest(".avm-add,.avm-box,.avm-plus,.avm-row"))return;
       /* SHIFT EXTENDS A SENTENCE RANGE instead of deselecting. It is checked before pick() because pick
          clears the range (an ordinary click starts a new selection, as it does in every list), and because
          a shift-click must not also deselect the token — the range is a selection OF SENTENCES and leaving
@@ -1748,6 +1765,7 @@ function buildBlock(i,ctx){ const s=DOC[i];
       pick(i,0,false); });   // clicked empty diagram space → deselect any node
     b.addEventListener("contextmenu",e=>{ if(e.target.closest(".gridbox")||e.target.closest(".sctrl")||e.target.closest("input")||e.target.closest("select")||e.target.closest(".sid-in"))return;   // grid/controls have their own menus; .sid-in gets the browser's own contenteditable context menu, same as an <input> would have
       if(e.target.closest(".lbl,.orel,.tok-pos,.node-cat,.opos,.node,.tok-group,.oline,.bwtok,.mwt-form,.mwt-tr"))return;   // labels + nodes handled at the doc level   /* .mwt-form/.mwt-tr joined the list: the delegated handler on #doc raises the MWT's own menu for both rows, but THIS listener is on the .sblock and therefore runs FIRST (bubbling reaches the block before the document), so without the exclusion every right-click on a multi-word token built the whole sentence menu and threw it away a moment later — and, while sentMenu was broken, threw a TypeError on the way */
+      if(e.target.closest(".avm-add,.avm-box,.avm-plus,.avm-row"))return;   // item 32 — the SAME gap the left-click exclusion two blocks up just named, for the identical reason this rule already gives .mwt-form/.mwt-tr right above: `.bwannot` (the AVM's wrapped-brackets overlay) sits outside every element this list already excludes, so without this a right-click on an AVM affordance built the whole SENTENCE menu here and then had #doc's avmMenuAt immediately replace it with the correct one — the exact wasted-menu churn this listener's own note already documents for the MWT tie, now closed for the AVM tier too
       e.preventDefault(); sentMenu(e.clientX,e.clientY,i); });   // right-click anywhere else in the block → the block menu
     // (the boundary's own heading was built and appended to its section ABOVE this block — see the sectioning
     //  note at the top of this loop. It used to be an absolutely-positioned child of the block; a sticky box

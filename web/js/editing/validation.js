@@ -22,9 +22,16 @@ function afterHeadEdit(t,s,defer){ if(parseInt(t.head,10)===0) t.deprel=withDepB
      own `head` has not been zeroed yet — and headSyncDeprel's own "has the document moved?" re-read
      would then discard the answer it just paid for. (2) ONE RENDER: each call ends in
      renderUnlessEditing(), and renderDoc is the expensive thing in this app. The caller runs the list
-     through `headSyncDeprels` once the whole structural edit has landed and been drawn. */
-  if(s && typeof headSyncDeprel==="function"){ const si=DOC.indexOf(s), tokId=s.tokens.indexOf(t)+1;
-    if(si>=0&&tokId>0){ if(defer) defer.push(tokId); else headSyncDeprel(si,tokId); } } }   // …and a token that is ALREADY a goeswith continuation, dragged onto a new head, is a continuation of THAT word now: its dependents follow it there (see normGoesWith). Not a no-op even though the relation didn't change — the head did, and every consequence below hangs off the head
+     through `headSyncDeprels` once the whole structural edit has landed and been drawn.
+
+     ⚠ THIS IS ABOUT `t`'s OWN RELATION ONLY, NEVER ABOUT WHAT HANGS OFF `t`. A prior round of this
+     function briefly asked the identical question one level down too — whether `t`'s own dependents
+     should keep `t` as their head or bypass it for wherever `t` just went — and that turned out to be a
+     misreading of the request that prompted it: retracted on report ("forget my earlier rule about
+     reassigning the head of a token… dependents of the existing root should remain as dependents of
+     that node"). A token's dependents are not asked to move just because the token itself did. */
+  if(s){ const si=DOC.indexOf(s), tokId=s.tokens.indexOf(t)+1;
+    if(si>=0&&tokId>0){ if(defer) defer.push(tokId); else if(typeof headSyncDeprel==="function") headSyncDeprel(si,tokId); } } }   // …and a token that is ALREADY a goeswith continuation, dragged onto a new head, is a continuation of THAT word now: its dependents follow it there (see normGoesWith). Not a no-op even though the relation didn't change — the head did, and every consequence below hangs off the head
 function afterDeprelEdit(t,s){ if(depBase(t.deprel)==="root"){ t.head="0"; if(s){ syncSharedFeat(t,s); syncSubjectFeat(t,s); } } else if(parseInt(t.head,10)===0) t.deprel=withDepBase(t.deprel,"root");
   normGoesWith(t,s); }
 /* ── ASSIGNING `goeswith` NORMALISES THE DEPENDENT ─────────────────────────────────────────────────────────────

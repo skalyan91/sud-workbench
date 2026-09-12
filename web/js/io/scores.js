@@ -3,7 +3,7 @@
    Every model in the pipeline scores a whole INVENTORY and the editor has only ever drawn the winner:
    one head per token, one relation per edge, one word class per token. The ranking underneath is
    computed on the way and thrown away. This module is the frontend's access to it — one bridge call
-   per sentence (`Api.token_scores` → app/parse.py's `analysis_scores`), cached, feeding four places:
+   per sentence (`Api.token_scores` → app/parse.py's `analysis_scores`), cached, feeding these places:
 
      · the drag highlight — every head the parser weighed for the dragged token, lit in proportion
        (js/diagram/diagram-edit.js)
@@ -95,8 +95,21 @@ function bestScoredRel(map){ let best="", bp=0;
    js/io/bridge.js), and "the top-ranked one is refused" is a reason to look at the runner-up rather than to
    give up. Same `scoreRealRel` filter bestScoredRel applies — a `||` composite is never a relation the
    editor may adopt, however the caller walks the list — so `bestScoredRel(m)` is exactly
-   `rankedScoredRels(m)[0]||""` and the two cannot disagree about what is expressible. */
-function rankedScoredRels(map){ return Object.keys(map||{}).filter(r=>scoreRealRel(r)&&map[r]>0).sort((a,b)=>map[b]-map[a]); }
+   `rankedScoredRels(m)[0]||""` and the two cannot disagree about what is expressible.
+   ⚠ `root` IS NEVER A CANDIDATE HERE, on report ("the deprel [from a demoted root to the new one] should
+   be assigned based on what the parser scores most highly, and it cannot remain as `root`"). This
+   function's own caller (`scoredRelsForHead`, js/io/bridge.js) only ever asks about a REAL, non-zero
+   `headId` — it refuses to run at all otherwise (`!(headId>=1)`) — so every map handed to `rankedScoredRels`
+   describes an arc to an actual token, never to the synthetic head 0 that `root` alone describes. Nothing
+   downstream can tell the difference on its own: `depIsError` (js/diagram/diagram-edit.js) deliberately
+   never flags `root` as an error, because it has no `headId` to judge that against and a GENUINE root
+   relation is never invalid — so a stray `root` mass in the model's own per-arc distribution for a real
+   head (rare, but not impossible) would otherwise sail straight through headSyncDeprel/relForNewHead's own
+   validator check and get written onto a token whose head is not 0, breaking the "head 0 ⟺ deprel root"
+   invariant every other part of this app assumes holds absolutely. Filtered at THIS single choke point
+   (both of `scoredRelsForHead`'s two callers of this function funnel through it) rather than taught to
+   every caller separately. */
+function rankedScoredRels(map){ return Object.keys(map||{}).filter(r=>scoreRealRel(r)&&map[r]>0&&depBase(r)!=="root").sort((a,b)=>map[b]-map[a]); }
 /* P(relation) for one token under ONE head, pooled to the BASE relation — which is the same pooling
    the relation menu's submenus do (a row's deep-feature flyout holds `mod@relcl` under `mod`), so the
    menu and this agree by construction rather than by coincidence. */

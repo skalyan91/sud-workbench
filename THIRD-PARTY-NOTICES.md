@@ -56,8 +56,35 @@ their one differing copyright line, so a single bundled copy correctly covers bo
 text itself is fetched from upstream and shipped alongside the fonts at `web/fonts/OFL.txt`, since
 OFL's own condition 2 expects "each copy" of the redistributed font to be accompanied by "the above
 copyright notice and this license" (rather than just a link to it). The OFL permits bundling and
-redistribution with software; it forbids selling the fonts on their own, and it requires that any
-**modified** version be renamed. Neither font is modified here.
+redistribution with software; it forbids selling the fonts on their own, and its condition 3
+requires renaming only a Modified Version that uses a **Reserved Font Name** — a name the upstream
+`OFL.txt` declares as such, immediately after the copyright statement.
+
+⚠ **`notosans.ttf` IS NOW A MODIFIED VERSION, AND WAS CHECKED AGAINST THAT CLAUSE BEFORE BEING
+RENAMED — OR NOT.** Its upstream (`notofonts/latin-greek-cyrillic`) `OFL.txt` copyright line reads
+only "Copyright 2022 The Noto Project Authors (…)" with **no Reserved Font Name declared anywhere
+in the file** (confirmed by fetching that file directly, not assumed from precedent) — nameID 7's
+"Noto is a trademark of Google LLC." is a trademark notice, not an OFL Reserved Font Name
+declaration, and the two are different mechanisms under this licence. Condition 3 therefore does
+not restrict this derivative at all, and the family/full name (`name` IDs 1/4, "Noto Sans"/"Noto
+Sans Regular") are kept exactly as upstream so `@font-face{font-family:"Noto Sans"; …}` in
+`web/styles/fonts.css` and the `"Noto Sans"` string that leads every `--token-font` stack keep
+matching this file with no CSS change. What *did* change, to document the derivation honestly even
+though nothing in the licence compels it: the version string (ID 5) and unique identifier (ID 3)
+now record "SUD Workbench smcp patch" so the modified binary doesn't read as a pristine upstream
+build if it's ever extracted on its own. Copyright (ID 0) and the licence description/URL (IDs
+13/14) are untouched, and `web/fonts/OFL.txt` (condition 2's "this license" alongside the font)
+still applies and still covers it, since the OFL's own condition 5 requires the Font Software,
+modified or not, to stay under this exact licence — which it does; nothing here relicenses it.
+
+**The edit itself** (see `docs/notes/scripts-and-fonts.md`, "The Lemma row's `smcp` gap…") adds
+four entries to one existing GSUB `ccmp` (glyph composition/decomposition) lookup — decomposing
+the precomposed ṭ/ṇ/ṛ/ḥ (U+1E6D/1E47/1E5B/1E25) glyphs into base letter + combining dot-below,
+exactly mirroring the decomposition Noto Sans's own table already applies to ṣ/ṃ and four Vietnamese
+dot-below letters. No glyph outline was drawn, no new glyph was added, and no other table
+(`glyf`/`hmtx`/`cmap`/`GDEF`/`GPOS`/`post`/`maxp`) changed byte-for-byte — verified by diffing a
+`ttx` dump of each against the unpatched file. Every letterform on screen, small-capped or not, is
+still Noto Sans's own design.
 
 ## Chrome kits — `web/macos-kit/`, `web/win11-kit/`
 

@@ -463,3 +463,269 @@ carries `data-s`/`data-tok` when the caller has them: in **wrapped brackets** th
 no token ancestor to walk up to. That overlay is `pointer-events:none` wholesale, so `.bwannot .avm-add` takes
 the same explicit exemption `.bwannot .avm-row` does, or the right-click never reaches it.
 
+## The empty placeholder answers hover and a left click too (item 32)
+
+On request: *"AVMs should unfold to show the '+' whenever the bounding box of the unfolded AVM is hovered.
+Also, blank FEATS values should change from '_' to '+' on mouseover and be clickable just like the AVM '+'."*
+Before this item the empty-AVM placeholder (`.avm-add`'s bare `TIER_EMPTY` text, `.oavm-empty`'s outline twin)
+had none of the populated matrix's hover/focus/click affordance — this brings it to parity.
+
+⚠️ **THE LITERAL READING IS THE RIGHT ONE, because a placeholder has no bracket to unfold.** A populated
+matrix "unfolds" by growing a bracket that has no equivalent on a placeholder — there is nothing here to grow
+(the note two sections up: "no bracket — an empty pair reads as a matrix whose contents went missing"). So the
+natural equivalent of "unfold to show the +" for THIS case is exactly the user's other sentence taken
+literally: the same glyph position swaps `"_"` → `"+"`. Two elements at the identical x/y, CSS choosing which
+paints (`.avm-add-under`/`.avm-add-plus` in SVG, `.oavm-empty-under`/`.oavm-empty-plus` in the outline,
+`styles/app.css`) — the same "both states drawn, CSS toggles opacity" idiom `.avm-grow-spine`/`.avm-grow-rule`
+already use for the bracket's own rest/grown pair, chosen over rewriting `textContent` on hover because an SVG
+attribute cannot be eased by a CSS transition and two elements' opacity can. Triggers are the identical trio:
+`:hover`, `:focus-within` (the placeholder's own group carries the tabindex, and `:focus-within` matches an
+element that IS `:focus`, not only one with a focused descendant — no separate `:focus` rule needed), and
+`.avm-open` (set/cleared by `setAvmOpen`/`clearAvmOpen`, extended to look for `.avm-add`/`.oavm-empty` too, so
+the mark stays up while its own menu is open exactly as the populated mark's does).
+
+⚠️ **NO GROWTH, AND NOTHING FOR THE HOVER REGION TO GET WRONG.** Per the user's own "bounding box of the
+*unfolded* AVM" wording — the populated case's own hit-rect is already sized to the GROWN box specifically so
+the pointer never falls outside it chasing the revealed mark. The placeholder has no grown state to reserve
+for: one line of text at rest, one line of text hovered, identical footprint either way — so the existing
+`.avm-hit` rect (already sized to the row's own reserved height, `eh+8`, on the same "hit surface = the row,
+not the ink" argument its own note above makes) already covers the only state there is. Confirmed, not assumed
+— there is no separate GROWN geometry in this design for a hit-region to under- or over-shoot.
+
+⚠️ **THE OUTLINE'S TWIN NEEDED AN "ADDS NO WIDTH" TECHNIQUE, NOT A NEW ONE.** `avmInline`'s empty span is now a
+wrapper (`.oavm-empty`, `position:relative`) holding two children: `.oavm-empty-under` in normal flow (so the
+row still sizes to it, unchanged) and `.oavm-empty-plus` (`position:absolute; inset:0`, flex-centred) laid over
+it — the same "an absolutely-positioned mark shares a cell without widening the row" idiom `.gw-h`'s own note
+already documents in this file, applied to a second case rather than invented for this one.
+
+⚠️ **LEFT CLICK REUSES `.avm-plus`'S OWN NO-`pick()` MACHINERY, EXTENDED RATHER THAN DUPLICATED.**
+`diagram-edit.js`'s pointerup tap branch resolves `plEl` as `.avm-plus,.avm-add` now (one lookup, both marks);
+`context-menu.js`'s plain "click" listener (the route wrapped-brackets' and the outline's own marks take,
+since their overlay/row isn't part of the node drag-tap system) resolves `.avm-plus,.avm-add,.oavm-empty` the
+same way. Both still return before any `pick()`/render, exactly as the flicker note by that branch already
+requires — the empty placeholder gets the identical guarantee the populated mark has always had, through the
+identical code path, not a parallel one.
+
+⚠️ **ITEM 4's OWN QUESTION — "IS THE POPULATED CASE ACTUALLY FINE?" — FOUND A REAL, PRE-EXISTING BUG, IN THE
+ONE NOTATION WHOSE AVM OVERLAY SITS OUTSIDE THE NODE IT ANNOTATES.** Verified live over CDP (patched
+`pick`/`renderDoc`, `CSS.forcePseudoState` for the hover, real synthetic clicks for the rest): a click on the
+EXISTING, shipped `.avm-plus` in **wrapped brackets** opened the add-feature menu correctly AND ALSO called
+`pick(i,0,false)` — deselecting and, since `pick()` ends in `preserveScroll(renderDoc)` unconditionally for
+`conv==="brackets"`, re-rendering the whole block underneath the just-opened menu, replacing the very node the
+pointer was on (measured: pickCalls 1, renderCalls 1, "same node" false). Root cause: `.bwannot` (the AVM's own
+overlay `<svg>` in this one notation) is appended straight to the `.sblock`, not nested inside any `.bwtok` —
+so a click on an AVM affordance inside it fell through the BLOCK's own "click on empty diagram space →
+deselect" listener (`js/core/document.js`, `b.addEventListener("click",...)`), whose exclusion list named
+every OTHER selectable class (`.node,.tok-group,.arc,.edge-g,.oline,.brk,.bwtok,.bwbr,.mwt-form`) but no AVM
+one. Not something this item's empty-placeholder work introduced — the populated `.avm-plus` has had this gap
+since the AVM tier moved into the wrapped-brackets overlay; nothing had clicked it there in a way that
+surfaced it before. Fixed by adding `.avm-add,.avm-box,.avm-plus,.avm-row` to that exclusion list, and to the
+block's own `contextmenu` listener beside it (the identical gap, one gesture over — right-click already ended
+up correct because `avmMenuAt` at `#doc` runs after and wins, but not before this block's own handler had
+already built and thrown away a whole SENTENCE menu first, the exact wasted-churn failure mode that listener's
+own comment already documents for `.mwt-form`/`.mwt-tr`). After the fix: pickCalls 0, renderCalls 0, same node
+true, in both the empty placeholder AND the populated matrix, in wrapped brackets. Every other notation was
+already fine — stemma/arcs/tree/flat-brackets nest the AVM inside `.node`/`.tok-group`, which this listener's
+existing exclusion already covered, and outline's row carries no such background-deselect listener at all.
+
+Verified live (CDP, `samples/dev-fixture` sentences and cross-checked against a `samples/english.conllu`
+FEATS-blank-token count): rest/hover/focus/blur/left-click/right-click behaviour correct in all five
+notations, flat AND wrapped brackets, for both an empty placeholder and (as a regression check) a populated
+matrix — 66 assertions, 0 failures after the document.js fix above.
+
+## Item 33 — the empty mark becomes the populated mark, and the wash joins the trigger
+
+On request: *"The empty-AVM plus sign should be the same size as the visible-AVM plus sign, and should have
+the blue highlight on hover. Also, the empty-AVM placeholder should be invisible."* and *"AVMs should expand
+to show the plus sign whenever the token wash is hovered, not just the AVM."* Refines item 32 immediately
+above — that note stays in place; this one supersedes only the MECHANISM item 32 built, not the reasoning
+about hit-rect sizing, right-click resolution, or the wrapped-brackets `.bwannot` gap it records.
+
+⚠ **THE FIX FOR "SAME SIZE" WAS TO STOP DRAWING A SECOND MARK, NOT TO RESIZE THE FIRST ONE.** Item 32's empty
+placeholder drew a 10.5px font glyph `"+"` (`.avm-add-plus`); the populated matrix's own mark
+(`AVM_PLUS_R=3.5`, drawn with the bracket's `.mwt-tie`/`.mwt-tie-cas` classes) is a hand-drawn 7×7 cross-hair
+stroke path — a different mark by construction, not merely a mis-tuned size. `drawAvmPlus(svg,cx,y,si,tokId)`
+(`js/diagram/diagram-core.js`, immediately above `drawAVM`) is now the ONE place this mark is drawn — both
+`drawAVM`'s populated branch (`cx,y1`, the bracket's own bottom rule) and its `!L` empty branch (`cx,
+y0+ascent(AVM_VAL_F)`, the placeholder's own glyph baseline — there is no bottom rule for a one-line
+placeholder to sit on) call it, so a future change to what this mark looks like cannot land on one call site
+and not the other. Verified live (CDP, forced `:focus-within`, `prefers-reduced-motion:reduce` emulated — see
+below for why): the populated and empty marks' own `path.mwt-tie` report **identical** `strokeWidth` (1.5px),
+`stroke` colour, and `getBBox()` (7×7) — not merely "look similar", measured equal.
+
+⚠ **THE OUTLINE'S TWIN DIDN'T NEED A SIZE FIX AT ALL, ONLY A HOVER-COLOUR ONE** — checked live rather than
+assumed: `.oavm-empty`'s font-face declarations (10.5px/571/`--tie-hue`) already matched `.oavm-plus`'s own
+exactly, because item 32 built the empty case's font-glyph mark by copying the populated mark's own face in
+the first place. What the empty case's `.oavm-empty-plus` never had was `.oavm-plus:hover,.oavm-plus:
+focus-visible{color:var(--accent)}` — a class name away, not a broken rule. The fix is the SAME "reuse the
+class, not the declaration" move as the SVG side: `avmInline`'s empty branch now gives its "+" span
+`class="oavm-plus oavm-empty-plus"` — `.oavm-plus` supplies the face AND the hover-accent rule for free,
+`.oavm-empty-plus` keeps only the positioning half (`position:absolute;inset:0`, the same "shares a cell
+without widening the row" trick `.gw-h` already uses). Only the REVEAL TRIGGER needed restating
+(`.oavm-empty:hover .oavm-plus,…{opacity:1}`, app.css) — it is keyed to the ANCESTOR wrapper class, and
+`.oavm-empty` is a different class from `.oavm`, so that one rule could not come for free the way the face
+and the hover-colour did.
+
+⚠ **"INVISIBLE AT REST" IS A DELIBERATE, EXPLICIT OVERRIDE OF THIS FILE'S OWN TIER_EMPTY CONVENTION, FOR THIS
+ONE TIER'S HOVER AFFORDANCE ROW ALONE.** "The empty-value placeholder" section above states the general rule
+("a tier that is visible but has no value for this token draws TIER_EMPTY, not nothing") and CLAUDE.md states
+it too. This item removes TIER_EMPTY from the AVM's own empty-placeholder mark specifically, ON REQUEST, and
+does not touch any other tier's handling — the transliteration row, the POS row, the gloss tiers and every
+other reader of `TIER_EMPTY`/`tierEmptyCls` are untouched. With the mark now genuinely `drawAvmPlus`'s own
+reused `.avm-plus`/`.oavm-plus` (already `opacity:0` at rest by construction, the same as the populated
+mark's own resting state), there is nothing left for the old "_"→"+" crossfade to crossfade FROM, so
+`.avm-add-under`/`.avm-add-plus`/`.oavm-empty-under` and their CSS are deleted outright rather than left as
+unreachable code. Verified live: the empty placeholder's own `<g class="avm-add">` paints only `rect`/`g`/
+`rect`/`path`/`path` — no `<text>` node at all, at any time — and the outer row-sized `.avm-hit` rect (24px
+wide, unaffected by this item) still carries the row's own reserved footprint into `boxes` so `fitTight`'s
+crop keeps including this row exactly as it did when an underscore occupied it.
+⚠ **KEYBOARD FOCUS STILL REVEALS IT** — confirmed live (`:focus-within` on the `.avm-add`/`.oavm-empty`
+wrapper, `.avm-plus`/`.oavm-plus`'s own `tabindex="0"`): a tab-focused empty placeholder is not left
+invisible and undiscoverable, exactly the concern that motivated checking this.
+⚠ **RIGHT-CLICK IS UNCHANGED, CONFIRMED RATHER THAN ASSUMED**: `avmMenuAt` resolves `.avm-add`/`.oavm-empty`
+by CLASS, not by what is painted inside them, so nothing here could have broken it — verified live, the
+add-feature picker opens identically before and after this item, on both the mark's own resolution path and
+the row's wider one.
+
+⚠ **THE `:has()` TRIGGER IS ADDITIVE, KEYED TO `.tok-group`/`.node` — TRACED LIVE, NOT ASSUMED FROM THE
+SOURCE.** `.tok-wash` (the per-token hover/drag-target highlight) is a sibling of `.avm-box`/`.avm-add`, not
+an ancestor, so `:hover` on the wash alone never reached the AVM's own reveal rules — only hovering the
+AVM's own tight row did, even though the wash is already sized to geometrically reach through the whole
+below-stack including the AVM row. This file's own `:has()` idiom (`.shead:has(.stext-stacked)`,
+`#findBar:has(#findPanel:not([hidden]))`) fits directly: the common ancestor that wraps BOTH the wash and the
+AVM turns out to be one of exactly two classes, confirmed against the real rendered DOM (CDP) rather than
+inferred from the JS source alone —
+`.tok-group` (stemma's projected baseline row, both arc views, flat and wrapped) and `.node` (the hierarchy,
+`tree()` in diagram-wrap.js, which is the SAME function for both flat and wrapped). Four new rules
+(`.tok-group:has(.tok-wash:hover) .avm-grow-spine`/`…avm-grow-rule`/`…avm-plus`, and `.node:has(…)` twins)
+sit ALONGSIDE the existing `.avm-box:hover …`/`.avm-add:hover …` triggers — direct hover on the AVM's own row
+keeps working exactly as before, since a hover landing there never actually reaches `.tok-wash` itself (the
+AVM's own hit-rect is painted OVER the wash at the rows it occupies, so the two triggers cover disjoint
+pointer positions and never double-fire for the same point).
+Verified live (CDP, `CSS.forcePseudoState` forcing `:hover` on the wash element specifically — see the
+methodology note below): forcing `:hover` on `.tok-wash` reveals `.avm-plus` (`opacity:1; pointer-events:
+all`) for BOTH a populated matrix and an empty placeholder, in stemma, arcs AND the hierarchy alike; forcing
+`:hover` on an unrelated element (the sentence's own root `<svg>`) leaves it at rest (`opacity:0`); forcing
+`:hover` directly on `.avm-box`/`.avm-add` still reveals it too (the regression check).
+⚠ **NOT ADDED FOR WRAPPED BRACKETS, NOR FOR FLAT BRACKETS, NOR FOR OUTLINE — CONFIRMED LIVE, NOT ASSUMED.**
+`document.querySelectorAll('#doc .tok-wash').length` is **0** in all three (checked live, switching the
+document's own live `conv`/`show.wrap`). Wrapped brackets' reason is structural, not merely "no wash exists
+today": `.bwannot` (the AVM's overlay `<svg>`) is built ONE PER SENTENCE and appended as a sibling of every
+`.bwtok` in that block (`positionBracketAnnots`, js/core/document.js) rather than nested inside any one
+token's own element — there is no PER-TOKEN common ancestor for `:has()` to scope to even if a wash existed,
+and the only ancestor shared by both at all (`.bwrap`) holds every token in the sentence, which would reveal
+every AVM in the block at once rather than just the hovered one. Flat brackets and outline simply have no
+wash-shaped hover surface at all (flat brackets draws a `.span-hit` per BRACKET SPAN, not per token; outline
+is plain HTML inline flow with no per-token hit-rect) — so, per the same principle this file already applies
+to a tier with no analogue, nothing was invented for them. All three keep `.avm-box:hover`/`.avm-add:hover`
+(`.oavm:hover`/`.oavm-empty:hover` for outline) as their only trigger, exactly as before.
+⚠ **PERFORMANCE, MEASURED RATHER THAN ASSERTED**: the 8-sentence fixture renders 128 `.tok-wash` elements;
+a full pass reading `getBoundingClientRect()` + a forced `getComputedStyle()` read across every one of them
+(deliberately worse than what one real mouse-move triggers, which recalculates style ONCE per move, not once
+per token) measured **0.4 ms total** in the live app (`performance.now()`, CDP). No visible jank at this
+document's scale; a much larger document would be the thing to re-measure before trusting this further.
+
+⚠ **METHODOLOGY NOTE, WORTH RECORDING FOR THE NEXT SESSION THAT REACHES FOR CDP HOVER VERIFICATION**: neither
+`Input.dispatchMouseEvent("mouseMoved", …)` NOR `CSS.forcePseudoState` reliably produced a visible/computed
+change on the FIRST attempt in this Chrome build (152), in headless OR real windowed mode, even on a
+trivial, unrelated test page — `element.matches(':hover')` (or `:focus`) could read true while
+`getComputedStyle` still reported the resting value. Root-caused to a genuine ANIMATION-CLOCK problem, not a
+CSS or JS defect: a property under an active CSS `transition` (this app's `.avm-plus{opacity:0;transition:
+opacity .1s ease}` among them) does not visibly resolve unless a real frame is produced, and this exact
+class of "no rAF/frame pump" gap is already documented in this file's own WKWebView note above ("
+`requestAnimationFrame` never fires in that hidden window") — headless Chrome under CDP-driven synthetic
+input turned out to have an analogous gap. `Emulation.setEmulatedMedia({features:[{name:
+"prefers-reduced-motion",value:"reduce"}]})` removes the transition (this file's own CSS already drops it
+under that query) and made every subsequent `:focus`/`:focus-within`/forced-`:hover` check resolve
+immediately and reliably; `CSS.forcePseudoState` also needed a *fast* `DOM.getDocument` → `DOM.querySelector`
+→ `CSS.forcePseudoState` sequence, because this app runs an unrelated, pre-existing periodic `renderDoc()`
+(measured live: ~6 calls/second with NO interaction at all, unrelated to this item and not investigated
+further here) that replaces the very nodes a slower round-trip would still be holding a now-stale id for.
+
+## Item 34 — the wash trigger, reverted
+
+Item 33's `:has(.tok-wash:hover)` broadening (above) is **removed**, on explicit follow-up instruction: "make
+the AVMs unfold only upon hovering the bounding box of their unfolded state, not the whole token wash." Item
+33 had read the ORIGINAL request's own wording — "whenever the bounding box of the unfolded AVM is hovered" —
+as license to widen the trigger to the token's whole wash; this follow-up says plainly that the bounding box
+meant is the AVM's OWN unfolded box, not the token's. Nothing else needed to change: `.avm-box:hover`/
+`.avm-add:hover` (and their `:focus-within`/`.avm-open` twins) were ALWAYS already sized to that box —
+`.avm-box`'s own hit-rect spans `y0..y1`, the GROWN/reserved height, per its own note earlier in this file —
+so removing the four `:has()` rules alone restores exactly the behaviour asked for, with no compensating
+change anywhere else. Everything ELSE item 33 did — `drawAvmPlus`'s one shared mark definition, the
+invisible-at-rest empty placeholder, the accent-on-hover parity between the populated and empty marks —
+stands untouched; this reverts ONLY the wash broadening described in item 33's own section above (left in
+place as the record of why it was tried and what was found, per this file's own "extend a note, don't
+replace what it records" convention).
+
+## Item 35 — only the annotation elements carry a cursor; every whole-token wrapper is a second offender
+
+On request, generalising two earlier steps this same session (`.tok-wash` then `.tok-hit` lost their own
+`cursor:pointer`, app.css ~line 550) into a stated principle: *"I only want the actual, individual
+annotation elements (token, lemma, POS, AVM) to have special cursors, not the area between or around
+them."* The two earlier steps were themselves fine — `.tok-hit`/`.tok-wash` really are "the area
+between/around", not an annotation element — but auditing every notation against the STATED principle
+found the SAME violation standing in five more places, one of them hiding in a way a stylesheet-only
+search cannot see.
+
+⚠ **REMOVING `.tok-hit`/`.tok-wash`'s OWN CSS RULE CHANGED NOTHING OBSERVABLE, AND THE REASON IS WHY THIS
+ITEM EXISTS.** Both rects sit INSIDE a `<g class="tok-group">` (stemma's baseline row and node, arcs flat
+and wrapped, wrapped-stemma's row and its own mini tree-nodes, the hierarchy, flat brackets — eight
+creation sites across `diagram-render.js`/`diagram-wrap.js`) or `<g class="node">`, and every one of those
+EIGHT wrapper groups was ALSO carrying `g.style.cursor="pointer"` — set once, inline, in JS, at the same
+site that wires the group's own `click→pick()` selection handler. `cursor` is inherited, so once the
+rects' own rule was gone the computed value at any point inside the group simply fell through to this
+ancestor's inline style — still "pointer", unchanged, at every pixel of the token's bounding box that no
+more specific descendant painted over. Confirmed live (CDP, `getComputedStyle` at a point sampled just
+inside a token's wash box that overlaps none of `.tok-word`/`.tok-pos`/`.lem-edit`/`.translit`/`.avm-row`):
+`pointer`, `rect.tok-hit tok-wash`, in EVERY SVG notation, BEFORE this item's fix — proving the two earlier
+steps had not actually changed what the reader saw hovering that space, only which rule supplied the value.
+The outline's `.oline` had the identical second life: app.css's own `.oline{cursor:pointer}` was removed as
+this session's map predicted, but `row.style.cursor="pointer"` (outline(), `diagram-wrap.js`) — the SAME
+whole-row wrapper, set inline at its own `click→pick()` wiring, exactly the `.tok-group` pattern above —
+was missed by a search that only grepped the stylesheet, and kept the row reading `pointer` regardless.
+Wrapped brackets' `.bwtok` had the same thing (`grp.style.cursor="pointer"` in `wordSpan()`,
+`diagram-wrap.js`) and is the one instance this session's own map anticipated checking for live rather than
+assuming clean ("Check whether `.bwtok` currently carries ANY cursor rule").
+
+**The fix, everywhere, is the same one-line deletion**: drop the inline `X.style.cursor="pointer";`
+assignment on the wrapper group/row itself, leaving its `click`/`addEventListener` wiring untouched — the
+token/row is still the click TARGET (selecting it, or the drag surface for reheading), only the CURSOR that
+volunteers this ahead of the click is gone, exactly the trade the `.tok-hit`/`.tok-wash` note above already
+states. Ten sites in total needed it: the eight `.tok-group`/`.node` creation sites (`diagram-render.js`
+lines 205, 310, 585; `diagram-wrap.js` lines 1015, 1251, 1324, 1652, 1883) plus `.bwtok` and `.oline`
+(`diagram-wrap.js`, both already noted above). Every genuine annotation-level click target was left alone
+BY THE SAME PRINCIPLE that removed the wrappers' own rule — a real, tightly-fitted, individually
+selectable mark keeps its pointer exactly as `.avm-row`/`.punctsat`/`.bwbr`(with an owner)/`.edge-g`/
+`ghost-g` (`wireGhostClick`) already did: none of those are "the area between or around", they ARE the
+thing a reader is aiming at, so none of their cursor rules were touched.
+
+⚠ **AND TWO GENUINE GAPS NEEDED THEIR OWN NEW RULE, NOT JUST A DELETION** — `.oform` (outline's form) and
+`.bwform` (wrapped brackets' form) had NEVER been given a cursor rule of their own; they had been reading
+`text` (or, under Sanskrit script display, the wrong value entirely) purely by inheriting it from their
+now-fixed wrapper. Both join the existing `.baseword,.tok-word,.node-lbl,.mwt-form{cursor:text}` rule
+(app.css ~1630) and its `#doc.script-form` pointer override (~1649) explicitly — `SEAM_ROW_SEL`
+(`diagram-core.js`) already treats `.oform`/`.bwform` as the same "form" tier as those four, so this
+merely gives the two elements their own explicit answer to a question the file was already treating them
+as being asked. `.olemma`/`.bwlemma` needed NO new rule: both carry the `lem-edit` class unconditionally in
+JS (`ls.className="olemma lem-edit"+…`/`"bwlemma lem-edit"+…`) whether or not the row paints a value, so
+`.lem-edit{cursor:text}` was already reaching them regardless of the wrapper. `.otrans`/`.opos` likewise
+needed nothing: `.opos` was already in the shared POS list, and `.otrans` only ever carries `.tr-edit` when
+genuinely editable (the same rule the SVG `.translit` row follows) — a placeholder translit row has never
+had a cursor of its own in any notation, and this item does not add one (no new interactivity, matching
+the file's own standing instruction not to invent any).
+
+Verified live (CDP, headless Chrome, bare AND `?platform=win`; a token forced to carry FEATS, a
+form-differing lemma, a POS tag, and a transliteration — `samples/`' dev-fixture Arabic sentence, token 2):
+in every one of stemma/arcs/tree/brackets-flat/brackets-wrapped/outline, `getComputedStyle` at the form,
+lemma, POS (absent by design only in the hierarchy — see below), AVM and translit each read their own
+correct value (`text`/`text`/`text`/`pointer`/`text`), and a point sampled inside the token's own wrapper
+that lands on none of them reads the AMBIENT `auto` in every case, not `pointer`. `#doc.script-form`
+correctly flips `.oform`/`.bwform` (and the pre-existing four) to `pointer` and reverts to `text` the
+moment the class is removed. ⚠ **THE HIERARCHY DRAWS NO SEPARATE POS ROW AT ALL, AND THIS PRE-DATES THE
+ITEM** — `tree()`'s own `belowReserveH(…,false,…)` hard-codes the POS argument to `false` with the comment
+"POS itself gets no explicit slot in this reserve"; a token's word class is simply never painted as its
+own row in this one notation, so there is nothing there for a cursor rule to reach, and the probe
+correctly finds zero `.node-cat`/`.tok-pos`-family elements for it — not a regression, a structural fact
+about the notation confirmed live rather than assumed.
+

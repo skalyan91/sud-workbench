@@ -2898,6 +2898,7 @@ async function scoredRelsForHead(si,tokId,headId){ if(!(hasBridge()&&model)) ret
   if(!r||!r.parsed||!r.tokens||r.tokens.length!==s.tokens.length) return [];
   const p=r.tokens[tokId-1]; if(!p) return [];
   if(parseInt(p.head,10)!==headId) return [];                    // the parser is talking about a different edge
+  if(depBase(p.deprel)==="root") return [];                       // headId is checked >=1 at the top of this function, so a WELL-FORMED tree never actually labels this edge `root` — belt-and-braces against the same invariant rankedScoredRels' own note guards for tiers 1/2, in case a parser this app hasn't seen yet ever hands back an inconsistent tree
   return p.deprel?[p.deprel]:[]; }
 /* …AND THE BEST OF THEM THE VALIDATOR WILL ACTUALLY ACCEPT ON THAT HEAD, as a BASE relation (the
    caller re-attaches its own `@deep` tail — that tail is the reader's and no re-heading may take it).
@@ -2946,6 +2947,13 @@ async function headSyncDeprels(si,ids){ let hit=false;
   for(const id of (ids||[])){ if(await headSyncDeprel(si,id,true)) hit=true; }
   if(hit) renderUnlessEditing();
   return hit; }
+/* ⚠ REMOVED — a background pass (`reheadDependents`/`reheadDependentsBatch`) briefly lived here that asked
+   the parser whether a re-headed token's OWN dependents should keep it as their head or bypass it for its
+   new head. Retracted on report ("forget my earlier rule about reassigning the head of a token… dependents
+   of the existing root should remain as dependents of that node") — a token's dependents are never moved
+   just because the token itself was, in any re-heading command, `setAsRoot` included. See `headSyncDeprels`
+   just above for the one question that DOES still get asked after a re-heading: the re-headed token's OWN
+   relation, never its dependents'. */
 const GESTURE_FEATS=["Shared","Typo","Foreign"];   // FEATS keys settable only via a drag gesture or keyboard shortcut — a token re-parse must preserve them, same as Gloss/MSeg/MGloss. (Subject was here too until it moved to MISC; it is preserved by the `keep` list below instead — see raiseGet/raiseSet, js/core/prefs.js.) Typo/Foreign joined this list because a POS edit's per-token regen (regenTok→reparseTokenFields) was silently dropping them: no tokeniser or parser predicts either — see the near-identical _MARK_FEATS/captureMarks note above for why a HAND-PLACED mark must survive any parser round-trip — but until now only "Shared" was captured into keepFeats below, so the parser's own (Typo/Foreign-less) FEATS string overwrote t.feats wholesale on every POS change and neither mark came back.
 /* ⚠ SUD'S OWN MISC LAYER IS DERIVED FROM A TREE — AND THIS FUNCTION THROWS THE PARSER'S TREE AWAY.
    The released SUD parsers now predict Idiom/InIdiom/Subject/Reported (app/parse.py's _SUD_MISC_KEYS), and every

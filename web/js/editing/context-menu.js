@@ -2,7 +2,10 @@
 /* context menus */
 const ctx=document.getElementById("ctx");
 const ctx2=document.createElement("div"); ctx2.className="ctx ctx-sub"; document.body.appendChild(ctx2);   // one nested flyout for "Other ▸"
-// item forms accepted: null → separator; [label,kbd,fn,danger] tuple; {header} → section label; {label,expand,kbd,fn,danger,sub,disabled}
+// item forms accepted: null → separator (closes the current .catgrp, rule lands in the tail); {rule:true} → separator that
+// stays INSIDE the currently-open group instead of closing it (falls back to the plain-null tail behaviour when no group is
+// open) — see renderMenu's own comment on why the two cannot be merged; [label,kbd,fn,danger] tuple; {header} → section
+// label; {label,expand,kbd,fn,danger,sub,disabled}
 function normItem(it){ return (it==null||Array.isArray(it)) ? (it&&{label:it[0],kbd:it[1],fn:it[2],danger:it[3]}) : it; }
 function makeCtxButton(it,isSub){ const b=document.createElement("button"); if(it.danger)b.className="danger"; if(it.opt)b.classList.add("opt");
   if(it.optval!=null) b.dataset.optval=it.optval;   // the row's own VALUE (a relation, a UPOS) — how weightMenuRows finds it again once the pipeline's ranking arrives
@@ -69,6 +72,15 @@ function renderMenu(host,items,twoCol,rtl,isSub){ host.innerHTML="";
   const closeGrp=()=>{ if(grp){ groups.push({el:grp,rows:gr}); grp=null; gr=0; } };
   items.forEach(it=>{
     if(it==null){ closeGrp(); tail.push(document.createElement("hr")); return; }
+    /* ⚠ {rule:true} — A DIVIDER THAT DOES NOT CLOSE THE GROUP, unlike plain `null` just above. Added for
+       avmValueMenu's and addFeatureItems' per-feature "Other <feat>…"/"Clear <feat>" rows: those want a rule
+       between a feature's value rows and its own Other/Clear rows, WITHOUT ending that feature's `.catgrp` box
+       early — plain `null` was doing double duty (append an <hr>, AND close `grp`) and the second half is what
+       sent every feature's Other/Clear down into `tail`, i.e. below every group instead of inside its own. When
+       a group is open the rule joins it (and counts toward `gr`, same as any other row, so the two-column
+       balance in the twocolwrap branch below still sees this feature's true row count); with no group open it
+       degrades to the exact plain-null tail behaviour, so it's harmless to use outside a header block too. */
+    if(it.rule){ const hr=document.createElement("hr"); if(grp){ grp.appendChild(hr); gr++; } else tail.push(hr); return; }
     if(it.note!=null){ closeGrp(); const n=document.createElement("div"); n.className="note"; n.textContent=it.note; head.push(n); head.push(Object.assign(document.createElement("hr"),{className:"note-rule"})); return; }   // e.g. the deprel menu's "right-click for deep features" hint. item 1: every hint gets a horizontal rule below it, separating it from the rows
     if(it.header!=null){ closeGrp(); grp=document.createElement("div"); grp.className="catgrp"; const h=document.createElement("div"); h.className="hdr"; h.textContent=it.header; grp.appendChild(h); gr=1; return; }
     if(it.input){ closeGrp(); const row=document.createElement("div"); row.className="ctxinput"; const inp=document.createElement("input");
@@ -326,7 +338,7 @@ function showCtx(x,y,items,twoCol,rtlArg,fit){ const norm=items.map(normItem);
    class rather than remembered in a variable: the flag lives on a node a re-render may replace, so the only
    honest question at dismissal time is "whatever is wearing this now, take it off". */
 function clearAvmOpen(){ document.querySelectorAll(".avm-open").forEach(e=>e.classList.remove("avm-open")); }
-function setAvmOpen(el){ const bx=el&&el.closest&&el.closest(".avm-box,.oavm"); if(bx) bx.classList.add("avm-open"); }   // …the SVG matrix or the outline's own run; `clearAvmOpen` sweeps by the class rather than by which notation drew it
+function setAvmOpen(el){ const bx=el&&el.closest&&el.closest(".avm-box,.oavm,.avm-add,.oavm-empty"); if(bx) bx.classList.add("avm-open"); }   // …the SVG matrix, the outline's own run, or (item 32) either notation's EMPTY placeholder — `.avm-open` is what holds its "+" up (or its grown bracket) while the menu it opened is still on screen; `clearAvmOpen` sweeps by the class rather than by which notation drew it
 function closeCtx(){ ctx.classList.remove("show"); closeSub(); void ctx.offsetHeight; clearAvmOpen();   // same forced-reflow fix as closeSub, for ctx's own backdrop-filter layer
   if(typeof setPillMenuOpen==="function") setPillMenuOpen("fmtPill",false); }   // the Format pill borrows this shared #ctx for its own menu (fmtMenu, js/io/formats.js) and its chevron has to point back UP however the menu was dismissed — Escape, a pick, a click outside, or another menu stealing #ctx. Unconditional and idempotent: for every OTHER #ctx menu the pill is already un-flagged, so clearing it again costs a no-op class toggle. typeof-guarded because this file loads before js/ui/wiring.js, which defines the helper — harmless at runtime (closeCtx only ever runs from a handler, long after both are defined), but the guard is what the codebase's forward-reference rule asks for
 /* ⚠ CAPTURE PHASE, AND EXCLUDING THE MENU SYSTEM — the same shape (and the same reason) as the
@@ -922,16 +934,19 @@ function nodeTokenMenu(x,y,si,tokId){ const s=DOC[si]; if(!s)return; const rtl=s
     // the RAW DOC token, which never carries _gw, so gwOf on it is always [] and the row would never be hidden.
     // isGwHeadId(s,id) is the raw-token equivalent (the same one the grid's own formDeco call uses for this).
     ...(isGwHeadId(s,tokId)?[]:[["Edit correct form…",null,()=>editCorrectFormPrompt(si,tokId)]]),
+    // on request: Mark as…/Set as root/Paragraph starts here moved up to sit right after the Edit rows —
+    // properties of the TOKEN ITSELF (its marks, its root-ness, its paragraph boundary), read before the
+    // structural commands (Split/Merge, Move, Insert, Select head) below. "Add feature…" is dropped from
+    // this menu outright, not moved — the AVM's own "+" placeholder is the entry point for that now.
+    null, ...markFeatRow(si,tokId),
+    ["Set as root","⌃⌘R",()=>setAsRoot(si,tokId)],
+    // item 2 of the parity fix: MISC NewPar=Yes, matching the grid's own tokenMenu row (same label/shortcut/
+    // checkmark, same shared toggleTokNewPar) — grouped with Set as root exactly as the grid groups it.
+    {label:"Paragraph starts here", kbd:"⌥⇧⌘P", check:isNewParTok(s.tokens[tokId-1]), fn:()=>toggleTokNewPar(si,tokId)},
     null, ...combineItems,
     null, ...moveItems(si,tokId,false),
     null, ...insertItems(si,tokId,false),
     null, ...headItems(si,tokId),
-    null, ...markFeatRow(si,tokId),
-    null, ...addFeatureRow(si,tokId),
-    null, ["Set as root","⌃⌘R",()=>setAsRoot(si,tokId)],
-    // item 2 of the parity fix: MISC NewPar=Yes, matching the grid's own tokenMenu row (same label/shortcut/
-    // checkmark, same shared toggleTokNewPar) — grouped with Set as root exactly as the grid groups it.
-    {label:"Paragraph starts here", kbd:"⌥⇧⌘P", check:isNewParTok(s.tokens[tokId-1]), fn:()=>toggleTokNewPar(si,tokId)},
     null, ["Delete token","⌘⌫",()=>deleteToken(si,tokId-1),true],
   ];
   const rdRow=(typeof readingsMenuItem==="function")?readingsMenuItem(si,tokId,()=>nodeTokenMenu(x,y,si,tokId)):null;   // CJK heteronyms (js/lang/readings.js) — null unless this language has alternative readings AND this token actually has more than one
@@ -1199,7 +1214,10 @@ function setGlossAbbrevAt(si,tokId,idx,ab){ const s=DOC[si]; if(!s)return; const
    is the SAME picker repeated once per feature the token currently has SET within that group (Person's own
    header + values, then Number's, …) — one flat multi-section list, not a second level of submenu — so
    "3.Sing.Fem" stays a single fused DISPLAY value while every one of the features fused into it is still
-   independently, fully editable. */
+   independently, fully editable.
+   ⚠ EVERY BLOCK BELOW IS BUILT BY avmFeatBlockItems, shared with addFeatureItems' own "+" menu (just past
+   strictAttestedVals, further down this file) — see that function's own docstring for why, and for the
+   samples/english.conllu trace that confirms the two menus really did diverge before this was one function. */
 function avmValueMenu(x,y,si,tokId,key){
   const s=DOC[si]; if(!s) return false; const t=s.tokens[tokId-1]; if(!t) return false;
   const members=(typeof AVM_GROUPS==="object"&&AVM_GROUPS[key])?AVM_GROUPS[key].filter(f=>getFeat(t.feats,f)!=null):[key];
@@ -1208,57 +1226,27 @@ function avmValueMenu(x,y,si,tokId,key){
      everybody triggers by accident — the same reasoning that removed the double-tap lemma gesture
      (js/diagram/diagram-edit.js). One hint for the whole menu rather than one per feature block: renderMenu
      pins a `note` above the groups, so it reads as a statement about the menu, which is what it is. Added
-     only where there are value rows for it to be about. */
+     only where there are value rows for it to be about.
+     ⚠ KEPT SHORT, on report ("the help text stretches the menu horizontally"): `.ctx .note` only gets its
+     width CAPPED to the group width in the two-column layout (renderMenu's own note, further down this
+     file) — an ordinary single-column feature menu (almost every one of these: a handful of AGR/TAM values)
+     has nothing capping it, so a long note simply widened the whole menu to keep itself on one line rather
+     than wrapping under `white-space:normal`. The full "(UD writes those Feat=A,B)" aside explained the
+     SERIALIZATION, not the gesture, and was the part doing that — dropped rather than kept and wrapped, so
+     the fix is the row this note actually needs to be, not a second capping mechanism for one hint.
+     addFeatureItems' own "+" menu owns an IDENTICAL closure rather than sharing this one (see its own build())
+     — one instance per MENU, not one for the whole file, is the actual requirement ("at most once per menu"),
+     and the two menus are never open at the same time to have shared state be worth the coupling. */
   let hinted=false;
   const hintCombine=()=>{ if(hinted) return; hinted=true;
-    items.push({note:"⌘-click a value to combine it with the others (UD writes those Feat=A,B)"}); };
-  members.forEach(feat=>{
-    const cur=getFeat(t.feats,feat);
-    const vals=(typeof attestedFeatVals==="function"?attestedFeatVals(feat):null)||UD_FEATS[feat]||[];
-    if(!vals.length && !cur) return;   // nothing to pick AND nothing to clear
-    if(vals.length>1) hintCombine();
-    const desc=(typeof FEATS_VDESC==="object"&&FEATS_VDESC&&FEATS_VDESC[feat])||{};
-    items.push({header:feat});
-    // BUGFIX (parity audit): alternates are only worth OFFERING when there's more than one candidate to pick
-    // between — that's what `vals.length>1` was actually testing for. It used to ALSO gate the Clear row below,
-    // which conflated "is there an alternative value" with "is this feature genuinely set" — a feature whose
-    // attested set has narrowed to exactly one value (permanently true for Reflex=Yes/Abbr=Yes; commonly true
-    // early in annotation for any feature the document has so far only used one value of) silently lost its
-    // Clear option, contradicting this function's own comment above ("a single clear-this-feature option is
-    // offered instead of declining outright"). The two checks are now separate: `vals.length>1` still gates the
-    // picker rows (nothing to switch a single-candidate feature TO — re-picking the one listed value was already
-    // a no-op, avmSetFeat returns early when next===t.feats), while Clear is gated on `cur` alone.
-    /* ⚠ ⌘/Ctrl-CLICK COMBINES; A PLAIN CLICK REPLACES. UD writes several values of one feature as a comma
-       list — `Voice=Cau,Pass`, `Case=Acc,Dat` — and any feature may take one (see the note above
-       `featValList`, js/grid/grid.js). The modifier is what tells the two gestures apart, and it is the
-       modifier rather than a toggling menu because replacing a value is the common case and must stay one
-       click. The menu STAYS OPEN for a combining click (`keepOpen` reads the same event), since choosing two
-       values is one thought; a replacing click closes it as it always has.
-       The tick asks MEMBERSHIP, so a token already carrying `Cau,Pass` shows both rows ticked rather than
-       neither — which is what it did when the check was `v===cur` against a comma string. */
-    const combine=e=>!!(e&&(e.metaKey||e.ctrlKey));
-    const isOn=v=>(typeof featHasVal==="function")?featHasVal(cur,v):v===cur;
-    if(vals.length>1) vals.forEach(v=>items.push({label:v, expand:desc[v]||"", check:isOn(v), opt:true,
-      keepOpen:combine,
-      fn:e=>combine(e)?avmToggleFeat(si,tokId,feat,v):avmSetFeat(si,tokId,feat,v)}));
-    // "Other …" flyout — candidates are UD_FEATS[feat] MINUS whatever `vals` (just above) already offered as an
-    // alternate row, i.e. genuinely new-to-this-menu values only. Deliberately complementing `vals` itself rather
-    // than recomputing "attested" from scratch: `vals` already IS attestedFeatVals(feat), doc-wide (not UPOS-
-    // scoped) same as every other row in this feature's own block, so the complement is guaranteed disjoint from
-    // what's already listed — including the edge case where attestedFeatVals falls back to the FULL UD list
-    // (nothing attested anywhere yet): in that case every value is already offered above, so otherCands is
-    // correctly empty and no "Other" row appears, rather than uselessly re-listing the same values a second time.
-    // NOT UPOS-scoped like strictAttestedVals/addFeatureItems: those narrow which FEATURE applies to a word class
-    // at all (a distinction UD_FEATS has no data for at the VALUE level — it's a flat Feat→[Vals] table with no
-    // per-UPOS breakdown), a different question from "which values of a feature this token already carries are
-    // new to the document" — and this row lives in the SAME per-feat block as the doc-wide `vals` rows above it,
-    // so switching conventions mid-block would make the two lists inconsistent with each other for no reason.
-    const otherCands=(UD_FEATS[feat]||[]).filter(v=>!vals.includes(v));
-    let sep=false; const closeGrp=()=>{ if(!sep){ items.push(null); sep=true; } };   // one shared `null` before whichever of Other/Clear appears first — same "sits flush, un-ticked, at the flyout's own level" convention Clear alone used to open on its own
-    if(otherCands.length){ closeGrp();
-      items.push({label:"Other "+feat+"…", sub:()=>otherCands.map(v=>({label:v, expand:shortVDesc(desc[v]||""), check:isOn(v), opt:true, keepOpen:combine,
-        fn:e=>combine(e)?avmToggleFeat(si,tokId,feat,v):avmSetFeat(si,tokId,feat,v)})), subFit:true}); }   // …and the flyout's rows answer the modifier too: a value being rarer in this document is no reason for it to behave differently from the ones above   // shortVDesc, not the raw gloss: this is a NESTED sub flyout same as addFeatureItems' own, and a long raw FEATS_VDESC entry wraps its row character-by-character there (see addFeatureItems' own comment on the exact same bug) — same fix applies here
-    if(cur){ closeGrp(); items.push({label:"Clear "+feat, fn:()=>avmSetFeat(si,tokId,feat,null)}); } });
+    items.push({note:"⌘-click to combine values"}); };
+  // A standalone or group row only ever reaches THIS menu already SET — `members` is built from getFeat!=null
+  // for a group, and a standalone row simply has no `.avm-row` to right-click otherwise (avmMenuAt, further
+  // down) — so avmFeatBlockItems' `set` branch is the only one this call site ever exercises; `null` for
+  // `notSetVals` is never actually invoked, it is there only because the shared signature also has to serve
+  // addFeatureItems' unset case. `drill:false` because this menu is always the top-level ctx (see the item
+  // 22/23 docstring above) and so can always give "Other <feat>…" a real `sub:` of its own.
+  members.forEach(feat=>items.push(...avmFeatBlockItems(si,tokId,t,feat,hintCombine,false,null)));
   /* …and the row menu can also ADD a feature this token doesn't carry yet, on request ("right-clicking in a
      nonempty AVM should also allow for adding features"). Exactly the row the token menu already offers
      (addFeatureRow, just below) — reused rather than rebuilt, so the two gestures can only ever offer the same
@@ -1271,6 +1259,135 @@ function avmValueMenu(x,y,si,tokId,key){
   if(!items.length) return false;
   showCtx(x,y,items, items.length>12, sentRTL(s), true);   // fit → shrink to the widest row (.ctx.defctx, same mechanism the status-bar Format menu uses): AVM feature/value labels ("Sing"/"Plur"/"Fem"…) are short, and the shared 224px floor left visible empty space on the right of a typical few-row menu. Safe with the twoCol branch too — a >12-item combined AGR/TAM group's two columns are already sized off their own widest row (renderMenu's twocolwrap), so the floor was never doing useful work there either
   return true; }
+/* ── ONE PER-FEATURE AVM BLOCK — extracted this session out of avmValueMenu (just above) and addFeatureItems
+   (further down, past strictAttestedVals), which had drifted into near-duplicates of exactly this shape: on
+   report ("clicking the + on a plural-marked noun should show the same menu that right-clicking the Plural
+   value does"), the "+" menu (addFeatureItems' own build()) turned out to EXCLUDE every feature already set
+   on the token (`getFeat(t.feats,f)==null` in its `cands` filter, since fixed just below on this same feature),
+   so an already-set feature had no block there at all, however the reader reached it. And even where the two
+   copies DID cover the same feature, they had already needed the identical fix made twice, independently, in
+   this same session — the {rule:true}-belongs-below-Other/Clear placement, marked SUPERSEDED/SUPERSEDED AGAIN
+   on addFeatureItems' predecessor code — which is exactly the "a second copy of a rule drifts" failure mode
+   this extraction exists to close off: there is now exactly one place that decides what a feature's own block
+   looks like, so the two menus cannot show different content for the same feature on the same token again.
+
+   `cur=getFeat(t.feats,feat)` is the one branch point, and it is a fact about the TOKEN, not about which entry
+   point is asking — "is this feature set" is the same question whether a right-click landed on an existing
+   row or a "+" click walked the candidate list.
+     SET (cur!=null): values come from attestedFeatVals(feat) — DOC-WIDE, never UPOS-scoped — exactly what
+     this block already used back when it lived inside avmValueMenu alone. "The '+' menu should show the same
+     menu right-click shows" is a claim about a SET feature (a right-click only ever lands on a row that
+     already exists), so honouring it means the SAME sourcing, not a UPOS-narrowed one. Traced against
+     samples/english.conllu to confirm this actually matters here, not just in the abstract: Number is
+     Sing/Plur either way on NOUN specifically (both attested for that class, so a NOUN alone wouldn't have
+     shown the bug) — but ADJ, AUX and DET each attest ONLY Sing for Number in that same file. An ADJ token
+     already carrying Number=Sing, sourced through strictAttestedVals("Number","ADJ") the way addFeatureItems
+     used to source every row regardless of whether the feature was set, would offer Sing alone as its
+     "alternative" — silently hiding the Plur a right-click on that very AVM row already offers. Rows get a
+     checkmark against the current value(s), ⌘/Ctrl-click COMBINES a value in rather than replacing
+     (avmToggleFeat — see the note above featValList, js/grid/grid.js, for why UD allows a feature to carry
+     several values at once), and "Clear <feat>" is offered. Value rows are only drawn when there's more than
+     one candidate (vals.length>1): re-picking a feature's only possible value is a no-op, avmSetFeat returns
+     early when next===t.feats.
+     NOT SET (cur==null): values come from `notSetVals(feat)` — the caller's own UPOS-scoped
+     strictAttestedVals, or its untagged/fresh-document fallbacks — UNCHANGED, because "which features a word
+     class could plausibly take at all" is a real, deliberately narrower question this block does not
+     relitigate (CLAUDE.md: an honest blank beats an invented feature set; see strictAttestedVals' own note,
+     just below). Rows are plain — no checkmark (there is no current value to check against), no ⌘-click
+     combine, no Clear (nothing yet to clear) — every row is a first-time avmSetFeat write, and EVERY candidate
+     value is shown regardless of count: picking a word class's one attested value is a real state change, not
+     the no-op a re-pick would be. That is the one place this function still asks "is this set" beyond `cur`
+     itself, and it is a genuine semantic difference (a fresh pick vs. a no-op re-pick), not a leftover
+     per-caller branch — verified by reading avmToggleFeat's own definition (js/grid/grid.js): toggling a value
+     ON when nothing was set before works fine on its own terms (`have` starts `[]`, `next` becomes `[val]`),
+     so nothing WOULD break by letting an unset feature combine too — it is withheld anyway, because "the '+'
+     menu should show the same menu right-click shows" is a claim about a feature right-click can reach at
+     all (a SET one), and offering more than that for a feature nothing has attested yet is exactly the
+     over-offering the silence-is-the-preferred-failure rule warns against, not a gap this task asked to close.
+   `hintCombine` is a caller-owned closure — one "⌘-click to combine values" note per MENU, not per feature —
+   so avmValueMenu's own multi-feature group (Person then Number, one flat list) and addFeatureItems' own
+   multi-feature candidate list can each still show it at most once, in front of whichever feature's block
+   first has more than one alternative.
+   `drill` decides how "Other <feat>…" opens: a real `sub:` when this block is rendered top-level (avmValueMenu
+   always passes false; so does addFeatureItems when avmAddMenu is the one rendering it) or `reopenFeatSub`
+   when addFeatureItems is already living inside the token menu's own "Add Feature…" flyout (see
+   addFeatureItems' own note, further down, on why one flag answers this at every depth). "Clear <feat>" needs
+   no such fork: it is a plain committing row with no `sub:` of its own in either caller, so it drops in
+   unmodified wherever this block is used.
+   shortVDesc, not the raw FEATS_VDESC entry, for every `expand` here — not only in the nested "Other…"
+   flyouts. addFeatureItems' own copy of this block can render either top-level (avmAddMenu) or one flyout
+   deep (drill=true), and a long raw description wraps its row character-by-character in the narrower nested
+   case (addFeatureItems' historical note on this exact bug, preserved further down); avmValueMenu is always
+   top-level and could in principle have kept the untruncated form for its OWN top rows, but sharing one row
+   shape between both callers is the entire point of this extraction. */
+function avmFeatBlockItems(si,tokId,t,feat,hintCombine,drill,notSetVals){
+  const cur=getFeat(t.feats,feat);
+  const set=cur!=null;
+  const vals=set
+    ? ((typeof attestedFeatVals==="function"?attestedFeatVals(feat):null)||UD_FEATS[feat]||[])
+    : notSetVals(feat);
+  if(!vals.length && !set) return [];   // nothing to pick AND nothing to clear
+  const desc=(typeof FEATS_VDESC==="object"&&FEATS_VDESC&&FEATS_VDESC[feat])||{};
+  const out=[{header:feat}];
+  /* ⚠ ⌘/Ctrl-CLICK COMBINES; A PLAIN CLICK REPLACES. UD writes several values of one feature as a comma
+     list — `Voice=Cau,Pass`, `Case=Acc,Dat` — and any feature may take one (see the note above `featValList`,
+     js/grid/grid.js). The modifier is what tells the two gestures apart, and it is the modifier rather than a
+     toggling menu because replacing a value is the common case and must stay one click. The menu STAYS OPEN
+     for a combining click (`keepOpen` reads the same event), since choosing two values is one thought; a
+     replacing click closes it as it always has. The tick asks MEMBERSHIP, so a token already carrying
+     `Cau,Pass` shows both rows ticked rather than neither. Only reachable when `set` — see the docstring
+     above for why an unset feature stays a plain commit. */
+  const combine=e=>!!(e&&(e.metaKey||e.ctrlKey));
+  const isOn=v=>set&&(typeof featHasVal==="function"?featHasVal(cur,v):v===cur);
+  if(set){
+    // BUGFIX (parity audit, predates this extraction): alternates are only worth OFFERING when there's more
+    // than one candidate to pick between. This used to ALSO gate the Clear row below, conflating "is there an
+    // alternative value" with "is this feature genuinely set" — a feature whose attested set has narrowed to
+    // exactly one value (permanently true for Reflex=Yes/Abbr=Yes) silently lost its Clear option. The two
+    // checks stay separate: `vals.length>1` gates the picker rows, Clear is gated on `cur` alone, below.
+    if(vals.length>1){ hintCombine();
+      vals.forEach(v=>out.push({label:v, expand:shortVDesc(desc[v]||""), check:isOn(v), opt:true, keepOpen:combine,
+        fn:e=>combine(e)?avmToggleFeat(si,tokId,feat,v):avmSetFeat(si,tokId,feat,v)})); }
+  } else {
+    // NOT gated on vals.length>1 — see the docstring above: a word class's one attested value is a real first
+    // pick for an unset feature, not a no-op the way re-picking a set feature's only value would be.
+    vals.forEach(v=>out.push({label:v, expand:shortVDesc(desc[v]||""), fn:()=>avmSetFeat(si,tokId,feat,v)}));
+  }
+  // "Other <feat>…" — UD's own inventory minus whatever `vals` just offered as a row, i.e. genuinely
+  // new-to-this-menu values only. Deliberately complementing `vals` itself rather than recomputing "attested"
+  // from scratch, so the complement is guaranteed disjoint from what's already listed regardless of which
+  // branch built `vals` above (doc-wide attestedFeatVals for a set feature, the caller's notSetVals(feat) for
+  // an unset one) — including the edge case where attestedFeatVals falls back to the FULL UD list (nothing
+  // attested anywhere yet): every value is already offered above, so otherCands is correctly empty and no
+  // "Other" row appears, rather than uselessly re-listing the same values a second time.
+  const otherCands=(UD_FEATS[feat]||[]).filter(v=>!vals.includes(v));
+  if(otherCands.length){
+    const rows=set
+      ? ()=>otherCands.map(v=>({label:v, expand:shortVDesc(desc[v]||""), check:isOn(v), opt:true, keepOpen:combine,
+          fn:e=>combine(e)?avmToggleFeat(si,tokId,feat,v):avmSetFeat(si,tokId,feat,v)}))   // …and the flyout's rows answer the modifier too: a value being rarer in this document is no reason for it to behave differently from the ones above
+      : ()=>otherCands.map(v=>({label:v, expand:shortVDesc(desc[v]||""), fn:()=>avmSetFeat(si,tokId,feat,v)}));
+    // TOP-LEVEL VS NESTED — the SAME fork addFeatureItems' own "Other Feature…" row makes a few dozen lines
+    // down, read off the SAME `drill` flag: a real `sub:` when this block can own a flyout of its own
+    // (avmValueMenu, always; or addFeatureItems rendered straight into #ctx by avmAddMenu), `reopenFeatSub`
+    // when addFeatureItems is already the content of the token menu's own one-deep "Add Feature…" flyout and a
+    // further `sub:` here would have nowhere to open.
+    out.push(drill
+      ? {label:"Other "+feat+"…", keepOpen:true,
+          fn:()=>reopenFeatSub(()=>rows().concat([null,{label:"‹ Attested Features", keepOpen:true,
+            fn:()=>reopenFeatSub(()=>addFeatureItems(si,tokId,true))}]))}
+      : {label:"Other "+feat+"…", sub:rows, subFit:true});
+  }
+  if(cur) out.push({label:"Clear "+feat, fn:()=>avmSetFeat(si,tokId,feat,null)});
+  // {rule:true}, NOT plain `null` — a bare null also closes THIS feature's `.catgrp` (renderMenu's closeGrp),
+  // which would dump the rule, and whatever the caller pushes next, into the shared tail below every group
+  // instead of under this feature's own header. Below Other/Clear, not above: on request ("the Other/Clear
+  // blocks should have a separator below them, but not above"), they read as a continuation of this feature's
+  // own rows, and the rule marks the end of the WHOLE block, right before the next feature's own header. This
+  // exact placement was fixed identically, and independently, in both of this function's two predecessor
+  // copies in the same session before this extraction existed — precisely the drift a shared function stops.
+  if(otherCands.length||cur) out.push({rule:true});
+  return out;
+}
 /* ── parity audit fix: the AVM tier's missing "create a NEW feature" gesture. avmValueMenu just above only
    ever EDITS a feature already present in FEATS — avmStruct (js/grid/grid.js) only ever emits a row for a
    feature already set, so a token with feats="_" draws no AVM box at all, and there is nothing to right-click.
@@ -1278,10 +1395,15 @@ function avmValueMenu(x,y,si,tokId,key){
    a token gain its FIRST value for any standard UD/SUD feature it doesn't carry yet, on a token with or
    without an existing AVM box, by reading t.feats directly rather than going through avmStruct/avmLayout.
    Scoped to the exact same standard feature set the AVM tier itself draws from (UD_FEATS minus AVM_EXCLUDE,
-   js/grid/grid.js) — no arbitrary/custom key, on request — and further narrowed to features NOT already set:
-   an already-set one is edited through its own AVM row instead (avmValueMenu above), via the SAME avmSetFeat
-   write either way, so behaviour (FEATS serialization, syncXposMirror, undo, dirty-marking, re-render) stays
-   identical to every other FEATS edit path.
+   js/grid/grid.js) — no arbitrary/custom key, on request.
+   ⚠ SUPERSEDED — "further narrowed to features NOT already set: an already-set one is edited through its own
+   AVM row instead" was true until this same session's parity fix (on report: "clicking the + on a
+   plural-marked noun should show the same menu that right-clicking the Plural value does"). An already-set
+   feature is EDITED through its own AVM row (`avmValueMenu` above), same as always — but it now ALSO gets a
+   block here, so the two paths can never show different content for it (see avmFeatBlockItems' own docstring,
+   and addFeatureItems' cands note, both above). Every write, either way, is still the SAME avmSetFeat call, so
+   behaviour (FEATS serialization, syncXposMirror, undo, dirty-marking, re-render) stays identical to every
+   other FEATS edit path — that half of the original claim was never in question and still holds.
    ONE FLYOUT, header-grouped by feature (mirrors posSubItems' own dot-suffix picker, a few hundred lines up) —
    not a chained "pick the feature, THEN pick the value" pair of flyouts: the context-menu system supports only
    one nested flyout (openSub's singleton ctx2), so a `sub` row rendered INSIDE that flyout has nowhere further
@@ -1366,23 +1488,47 @@ function avmFeatCmp(a,b){ const x=avmFeatRank(a), y=avmFeatRank(b);
 function reopenFeatSub(items){ const owner=ctx2._owner; if(owner) openSub(owner,items,true,ctx2._colSize,true,true); }
 /* `drill` — build this list for a FLYOUT rather than for a top-level menu, i.e. give it the way down to
    `otherFeatureItems`. Off for `avmAddMenu`, which is itself a top-level menu and so can (and does) hang
-   that list off a real `sub:` row instead. */
+   that list off a real `sub:` row instead. ⚠ THE SAME FLAG ALSO DECIDES HOW EVERY PER-FEATURE "Other <feat>…"
+   ROW GETS TO ITS OWN FLYOUT (real `sub:` vs. reopening ctx2) — that per-feature row is now built by
+   `avmFeatBlockItems` (just above avmValueMenu, earlier in this file, and shared with avmValueMenu itself —
+   see its own docstring), which reads `drill` straight through from here. One signal answers both questions
+   because they are the same question asked at two different depths: "is this list, right now, living inside
+   the one flyout layer or not." */
 function addFeatureItems(si,tokId,drill){
   const s=DOC[si], t=s&&s.tokens[tokId-1]; if(!t) return [];
-  const cands=Object.keys(UD_FEATS).filter(f=>!AVM_EXCLUDE.has(f)&&getFeat(t.feats,f)==null).sort(avmFeatCmp);   // …in the AVM tier's own order — see avmFeatRank
-  /* One pass over the candidate features with whatever narrowing the caller hands in — `vals(f)` is the ONLY
-     thing that differs between the three stages below, so they cannot drift in how they build a row.
-     ⚠ shortVDesc, NOT the raw FEATS_VDESC entry, on report ("not enough space for the labels to not wrap"): the
-     cause was never the flyout's width but this row's own `expand`. posSubItems (above, the pattern this whole
-     flyout mirrors) had already solved it — "a SHORT expansion that can't cross the one-column midline". A long
-     raw description (NounClass's run to a full sentence, e.g. "Bantu class 12 (singular: small things,
-     diminutives)") squeezed the row's own .mlbl flex column to near-zero and wrapped the LABEL character by
-     character — measured live: "Bantu12"'s .mlbl at width:0, height:112px, one character per line. */
-  const build=vals=>{ const out=[];
-    cands.forEach(f=>{ const vv=vals(f); if(!vv.length) return;
-      const desc=(typeof FEATS_VDESC==="object"&&FEATS_VDESC&&FEATS_VDESC[f])||{};
-      out.push({header:f});
-      vv.forEach(v=>out.push({label:v, expand:shortVDesc(desc[v]||""), fn:()=>avmSetFeat(si,tokId,f,v)})); });
+  /* ⚠ CANDS NOW INCLUDES EVERY SET FEATURE TOO, not only the not-yet-set ones — on report ("clicking the +
+     on a plural-marked noun should show the same menu that right-clicking the Plural value does"): this list
+     used to filter OUT anything already set (`getFeat(t.feats,f)==null`), so an already-set feature had NO
+     block here at all, however the reader reached it — right-clicking the drawn AVM row was the only way in.
+     An already-set feature has already had the "does this word class take this feature" question answered —
+     by the annotator or a prior parse — so it now earns a block unconditionally, the same way avmValueMenu
+     never asks that question at all (a right-click only ever lands on a row that already exists).
+     Simply DROPPING the `==null` half of the old filter is what expresses "(every feature already set) ∪
+     (every UPOS-appropriate not-yet-set feature, exactly as today)" in one line: avmFeatBlockItems' own
+     `cur!=null` branch is what makes a SET feature's block unconditional and an UNSET one still gated on
+     strictAttestedVals/its fallbacks below, so the union does not need spelling out twice here. AVM_EXCLUDE
+     keeps filtering BOTH halves, unchanged: an excluded feature is never an AVM row regardless of set/unset.
+     ⚠ STILL FLAT, ON PURPOSE — AVM_GROUPS (Person/Number/… fused into one combined AVM row, js/grid/grid.js)
+     is never consulted here, exactly as before this change: "+" isn't tied to any one drawn row the way a
+     right-click is, so there is no natural combined KEY for it to dispatch on — it offers Person and Number
+     as two separate headers whether or not either is already set, exactly as it always offered them
+     separately when neither was set. Only avmValueMenu's own combined-row right-click (the AVM_GROUPS[key]
+     branch) ever shows one fused picker for a whole group. */
+  const cands=Object.keys(UD_FEATS).filter(f=>!AVM_EXCLUDE.has(f)).sort(avmFeatCmp);   // …in the AVM tier's own order — see avmFeatRank
+  /* One pass over the candidate features, building each one's block through avmFeatBlockItems (shared with
+     avmValueMenu) — `vals(f)` is the ONLY thing that differs between the three stages below, and it is
+     consulted ONLY for a feature this token does NOT yet carry (avmFeatBlockItems' own `notSetVals`
+     parameter): a feature that IS set sources its values from attestedFeatVals, doc-wide, regardless of which
+     stage is asking — see avmFeatBlockItems' own docstring for why "the same menu right-click shows" requires
+     that. `hintCombine` is local to EACH `build()` call (never shared across the scoped/fallback stages below,
+     since only one of the two ever becomes `list`), so the "⌘-click to combine values" note — now reachable
+     from THIS menu too, for any set feature with more than one attested value — appears at most once per
+     menu, in front of whichever feature's block first has one to show. Exactly avmValueMenu's own rule,
+     relevant here for the first time now that a set feature's block (and its combine gesture) can appear in
+     this list at all. */
+  const build=vals=>{ const out=[]; let hinted=false;
+    const hintCombine=()=>{ if(hinted) return; hinted=true; out.push({note:"⌘-click to combine values"}); };
+    cands.forEach(f=>out.push(...avmFeatBlockItems(si,tokId,t,f,hintCombine,drill,vals)));
     return out; };
   const scoped=build(f=>strictAttestedVals(f,t.upos||null));
   /* ⚠ A TAGGED TOKEN STOPS HERE, EMPTY OR NOT, on request ("only features that are compatible with the UPOS
@@ -1391,7 +1537,13 @@ function addFeatureItems(si,tokId,drill){
      document-wide question is the honest one. An empty list for a tagged token is therefore a real answer —
      "this class takes no features here" — and the gesture falls through to the token menu rather than opening a
      picker of things that cannot apply. That is the same judgement as the annotation rules in CLAUDE.md: an
-     honest blank beats an invented feature set. */
+     honest blank beats an invented feature set.
+     ⚠ "EMPTY" NOW MEANS SOMETHING NARROWER THAN IT USED TO: `scoped` can no longer come back empty merely
+     because this word class attests nothing worth ADDING — every feature the token already carries still
+     contributes its own block regardless of `t.upos` (avmFeatBlockItems' `set` branch ignores `vals(f)`
+     entirely), so `scoped` is empty only for a tagged token that is BOTH bare of standard FEATS AND whose
+     class attests nothing this document or model has seen. The rule itself is unchanged — a tagged token
+     still never falls back to the unscoped inventory below — only what "empty" can mean has narrowed. */
   const list=t.upos?scoped:(scoped.length?scoped:build(f=>UD_FEATS[f]||[]));   // untagged AND nothing attested anywhere (a fresh document, no model): the inventory itself is all there is to offer
   if(!drill) return list;
   /* ⚠ …AND THE REST OF WHAT UD GIVES THIS CLASS, ONE ROW DOWN — on request ("the Add Feature flyout
@@ -1414,8 +1566,14 @@ function addFeatureItems(si,tokId,drill){
   if(!list.length) return other;
   return list.concat([null,{label:"Other Feature…", keepOpen:true, fn:()=>reopenFeatSub(()=>otherFeatureItems(si,tokId,true))}]);   // keepOpen: the row's own click must not close the menu standing behind this flyout
 }
-// the nodeTokenMenu row itself — omitted entirely when every standard feature is already set (same guard
-// shape as markFeatRow just above it), so the menu never grows for a token with nothing left to add.
+// the nodeTokenMenu row itself — omitted entirely when addFeatureItems has nothing to open at all (same guard
+// shape as markFeatRow just above it), so the menu never grows for a token with nothing behind this row.
+// ⚠ "NOTHING TO OPEN" NO LONGER MEANS ONLY "nothing left to ADD" — since addFeatureItems' own cands widened to
+// include every SET feature too (its own note, above), this flyout now also carries a block for anything the
+// token already carries, so it stays offered for a token whose class has nothing further to add but that DOES
+// carry standard FEATS: the row still opens to something (edit/Clear an existing feature), which is exactly
+// what "nothing to open" should mean here, not "nothing new to add" — the guard formula (`.length`) needed no
+// change, only this comment, which used to describe a narrower question than the one the guard now answers.
 function addFeatureRow(si,tokId){
   // …and the guard asks the DRILL question, because the drill list is now part of what this row opens:
   // a token whose class attests nothing still has the UD inventory for that class behind this row (see
@@ -1629,10 +1787,19 @@ document.getElementById("doc").addEventListener("click",e=>{
      the four draggable notations reach the same menu from the tap branch in js/diagram/diagram-edit.js,
      which has to resolve the tapped element before pick() re-renders. It goes AHEAD of the `.avm-row`
      return below — in the outline the + is a sibling of the rows inside one `.oavm`, and that return would
-     otherwise swallow the click as "an AVM row is menu-only". */
-  const apEl=e.target.closest(".avm-plus");
+     otherwise swallow the click as "an AVM row is menu-only".
+     ⚠ item 32 ADDS `.avm-add`/`.oavm-empty` TO THE SAME LOOKUP: the EMPTY placeholder answers the identical
+     plain click now too, and this listener is where it has to be resolved for exactly the notations
+     diagram-edit.js's own `plEl` doesn't reach — wrapped brackets' `.avm-add` lives in the `.bwannot`
+     overlay, appended to the block rather than nested inside `.bwtok`, so it never matches the early
+     `.node,.tok-group,.bwtok` return above and falls through to here, same as `.avm-plus` already does in
+     that notation; the OUTLINE's `.oavm-empty` was never inside any of those three either. The four
+     DRAGGABLE notations' own `.avm-add` (stemma/arcs/tree/flat-brackets, nested inside `.node`/`.tok-group`)
+     are excluded by that same early return and reach diagram-edit.js's `plEl` instead — one placeholder,
+     resolved exactly once, by whichever listener its notation's markup actually reaches. */
+  const apEl=e.target.closest(".avm-plus,.avm-add,.oavm-empty");
   if(apEl){ const tk=tokFromEl(apEl); if(tk){ e.preventDefault(); const b=apEl.getBoundingClientRect();
-    if(avmAddMenu(b.left+b.width/2,b.bottom,tk.si,tk.tokId)) setAvmOpen(apEl);   // …and the matrix stays grown, or the outline's + stays up, while its own menu is open
+    if(avmAddMenu(b.left+b.width/2,b.bottom,tk.si,tk.tokId)) setAvmOpen(apEl);   // …and the matrix stays grown, or the "+" (populated or placeholder) stays up, while its own menu is open
     return; } }   // anchored to the mark, not the pointer — a menu hinged off the thing that opened it
   if(e.target.closest(".avm-row")) return;   // item 3: an AVM row (outline's own — the SVG notations already returned above, via .node/.tok-group/.bwtok) is edited through its right-click/double-click MENU only, never inline text entry; with no exclusion here a plain single click fell through to the generic `.oline` branch below and opened the TOKEN's form editor instead — which also broke the double-click trigger just above, since its first click was busy replacing the row with an <input> before the second click could land on the same element
   const trEl=e.target.closest(".tr-edit"); if(trEl){ const tk=tokFromEl(trEl); if(tk){ e.preventDefault(); editTransInline(tk.si,tk.tokId,{x:e.clientX,y:e.clientY}); return; } }   // edit the romanisation shown under a token — or, where the romanisation is non-deterministic, the STORED transliteration it is derived from (trRowEdit decides when the row carries .tr-edit at all)
@@ -1949,11 +2116,26 @@ function editPosInline(si,tokId,clickXY,el){ const s=DOC[si]; if(!s||tokId<1||to
     toast(`“${v}” is not a word class — choose one from the list`); return null; };
   let first=true;
   const acOpen=(inp,pick)=>{ if(document.activeElement!==inp){ if(_acInput===inp) acCloseSoon(); return; }
-    const all=first; first=false;
+    const wasFirst=first; first=false;
+    /* ⚠ THE INITIAL OPEN IS GATED ON WHETHER THE FIELD ALREADY HOLDS A COMPLETE TAG, on request ("the POS
+       input field should only show the autocomplete menu while typing, or if the current value is not a
+       complete POS tag (including an empty value)"). This call fires the instant the field is created (and
+       again on "focus", both effectively at open time — makeEditable, further down this file) — before that
+       fix, THIS was the call that unconditionally browsed the whole vocabulary regardless of what the field
+       already held, so opening on an ALREADY-tagged token (the common case) threw a full list up over a
+       value the reader had not touched and might not want to change at all. `cur` (this function's own
+       normalisation, above — `orig`/`inp.value` opens on it) is ALWAYS a member of `vocab` once non-empty
+       (lines above push it in if the build's own tables didn't already have it), so "complete" here reduces
+       to "non-empty" in practice — but is asked as real vocabulary membership, not a bare emptiness check,
+       so it stays correct if that normalisation ever changes. An incomplete/empty value still opens the
+       guided browse immediately, exactly as before; typing afterward re-invokes this with `wasFirst` false,
+       taking the normal per-keystroke branch below either way. */
+    if(wasFirst && inp.value.trim() && vocab.some(v=>v.toLowerCase()===inp.value.trim().toLowerCase())) return;
+    const all=wasFirst;
     const q=all?"":inp.value.trim().toLowerCase();
     let ms=!q?vocab.slice():vocab.filter(v=>v.toLowerCase().startsWith(q));
     if(q&&!ms.length) ms=vocab.filter(v=>v.toLowerCase().includes(q));
-    if(q) ms=ms.filter(v=>v.toLowerCase()!==q);   // nothing to complete to the exact text already typed — but the FIRST open browses the whole set, current tag included
+    if(q) ms=ms.filter(v=>v.toLowerCase()!==q);   // nothing to complete to the exact text already typed — the FIRST open browses the whole set too (q=="" then), but ONLY when there was nothing complete to gate it on already (see the guard just above)
     if(!ms.length){ if(_acInput===inp) acCloseSoon(); return; }
     const set=new Set(ms), placed=new Set(), groups=[];
     UPOS_CATS.forEach(([name,members])=>{ const items=members.filter(m=>set.has(m)); items.forEach(m=>placed.add(m));
@@ -1979,7 +2161,7 @@ function editPosInline(si,tokId,clickXY,el){ const s=DOC[si]; if(!s||tokId<1||to
       if(o) retagSubtype(si,tokId,o.label.slice(0,o.label.length-subtypeSuffix(o.feat,o.val).length-1),o.feat,o.val,{snapshot:false});
       else retagToken(si,tokId,want,{snapshot:false}); },   // no render on a no-op: makeEditable's finish() has already run preserveScroll(renderDoc) and there is nothing further to show
     sentRTL(s), ()=>posElOf(si,tokId), d=>tierNav(si,tokId,"pos",d), true, clickXY,
-    {guard, ac:{open:acOpen,commit:true}, dbl:(x,y)=>posMenu(x,y,si,tokId)}); }   // dbl: the row's own double-click still opens the FULL menu — the subtype flyouts, the guidelines link and the model-probability weighting have no text-field equivalent and are not being traded away for one
+    {guard, ac:{open:acOpen,commit:true}, dbl:(x,y)=>posMenu(x,y,si,tokId), extraFeat:"'smcp' 1"}); }   // both smcp AND c2sc (applyFont's own note above): c2sc alone (the row's computed style) small-caps only the capitals actually on screen, but the reader may still be typing lower/mixed case before autocomplete or commit upper-cases it   // dbl: the row's own double-click still opens the FULL menu — the subtype flyouts, the guidelines link and the model-probability weighting have no text-field equivalent and are not being traded away for one
 // nearest character boundary, as an index into `text`, to a LOCAL x-offset (0 = the start of the rendered run) —
 // walks cumulative substring widths via the same canvas metric (meas) the field itself was sized/centred with, so
 // it lines up with what's actually on screen. Used to drop the caret where the field was clicked, not select-all.
@@ -2103,9 +2285,19 @@ function makeEditable(el,obj,key,after,rtl,relocate,nav,allowEmpty,caretHint,opt
        index in the unfeatured face would size the box for text wider than the text drawn in it and land the
        caret progressively further off across the run. `meas` forwards this to `_measOne`, whose `extraCss`
        is the same channel avmLayout already measures its own c2sc labels through (js/diagram/diagram-core.js).
-       A row with no features computes to "normal" and contributes nothing, so every other field is unchanged. */
+       A row with no features computes to "normal" and contributes nothing, so every other field is unchanged.
+       ⚠ `opts.extraFeat` ADDS TO THAT, rather than replacing it, for the one field that needs a second
+       feature the row's own computed style can't supply: the word-class field (`opts.extraFeat:"'smcp' 1"`,
+       set at its makeEditable call below). c2sc small-caps CAPITALS — right for the tag once committed,
+       which is always upper-case — but says nothing about the letters the reader is mid-typing before
+       autocomplete/commit upper-cases them; `smcp`, the LEMMA row's own feature (diagram-core.js's LEM_FEAT
+       note on why lower-case needs the other one), covers exactly that gap. Both together read as small
+       caps regardless of the case actually on screen at any one keystroke — the same reasoning that already
+       combines two features for the Leipzig abbreviation runs (`"c2sc" 1,"onum" 1"`, app.css). */
     const ffs=cs.fontFeatureSettings;
-    if(ffs&&ffs!=="normal"){ inp.style.fontFeatureSettings=ffs; featCss=";font-feature-settings:"+ffs; }
+    let ff=(ffs&&ffs!=="normal")?ffs:"";
+    if(opts.extraFeat) ff=ff?ff+","+opts.extraFeat:opts.extraFeat;
+    if(ff){ inp.style.fontFeatureSettings=ff; featCss=";font-feature-settings:"+ff; }
     else { inp.style.fontFeatureSettings=""; featCss=""; }
     // …and the row's INK, which .nodeedit's own `color:var(--text)` would otherwise override. Without this the
     // transliteration row (.translit/.otrans — italic, --dia-muted) visibly jumped to full-strength body text the

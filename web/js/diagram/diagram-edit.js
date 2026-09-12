@@ -486,8 +486,9 @@ async function attachAsSharedConjunct(si,depId,conjDepId){ const s=DOC[si]; if(!
     const trEl=e.target.closest?e.target.closest(".tr-edit"):null, glEl=e.target.closest?e.target.closest(".gl-edit"):null,
           lmEl=e.target.closest?e.target.closest(".lem-edit"):null,   // item 29: …and the lemma row, resolved HERE for the same reason as its neighbours: pick() re-renders a brackets block, and this must be read off the tree the reader actually tapped
           gwEl=e.target.closest?e.target.closest("[data-gwtok]"):null,
-          plEl=e.target.closest?e.target.closest(".avm-plus"):null,   // item 30: the AVM's own "+" — resolved HERE with its neighbours because pick() re-renders a brackets block, so the tapped element has to be read off the tree the reader actually touched
-          poEl=e.target.closest?e.target.closest(POS_SEL):null;   // …and the POS row (POS_SEL, js/editing/context-menu.js — the one selector the right-click resolver uses too), resolved HERE for the same reason as the three above: pick() re-renders a brackets block, and this must be read off the tree the reader actually tapped
+          plEl=e.target.closest?e.target.closest(".avm-plus,.avm-add"):null,   // item 30/32: the AVM's own "+" (a populated matrix's mark, OR the empty-AVM placeholder answering the identical gesture now — see drawAVM's own note) — resolved HERE with its neighbours because pick() re-renders a brackets block, so the tapped element has to be read off the tree the reader actually touched
+          poEl=e.target.closest?e.target.closest(POS_SEL):null,   // …and the POS row (POS_SEL, js/editing/context-menu.js — the one selector the right-click resolver uses too), resolved HERE for the same reason as the three above: pick() re-renders a brackets block, and this must be read off the tree the reader actually tapped
+          frmEl=e.target.closest?e.target.closest(FORM_SEL):null;   // …and the FORM itself (FORM_SEL, js/editing/context-menu.js), on report ("selecting the token hit box shouldn't place the cursor in the token input field; only clicking in the token input field should do so") — see the `else` branch below, which used to open the form editor on ANY tap this list's other checks hadn't already claimed, including one that landed on the token's own `.tok-hit`/`.tok-wash` (its general selection surface, not the form glyph)
     if(!d.moved){   // A PLAIN TAP — and the gesture is only NOW known to be one, which is why this is where the token gets selected (the grab itself no longer does it; see the pointerdown above). scroll=false still: the grid row is revealed by scrollNearest immediately below instead, which is the same reveal pick()'s scroll=true path would do
       /* kind:"mwtgroup" — DO NOTHING. Before this gesture existed, a tap on the tie fell into the marquee-arm
          branch (ddNode/ddEdge never matched .mwt-g) and a no-movement pointerup ran the marquee's own deselect
@@ -510,9 +511,17 @@ async function attachAsSharedConjunct(si,depId,conjDepId){ const s=DOC[si]; if(!
          then is, via `avmSetFeat`), so nothing downstream needs a selection. Not selecting is also the safe
          side of CLAUDE.md's rule — a click MAY select, and nothing requires that it must.
          Ahead of the pick, therefore, rather than in the `d.kind==="node"` branch below where the other tier
-         editors sit: those want the selection they are editing within, and this does not. */
+         editors sit: those want the selection they are editing within, and this does not.
+         ⚠ item 32 EXTENDS THIS TO `.avm-add` FOR THE SAME REASON: the empty-AVM placeholder now answers a
+         plain left click too ("blank FEATS values should… be clickable just like the AVM '+'"). One `plEl`
+         lookup covers both marks (`.avm-plus,.avm-add`, above) rather than a second parallel branch, since
+         both open the identical menu the identical way and neither wants a selection.
+         ⚠ item 33 made this doubly true rather than obsolete it: the empty placeholder's own mark is now
+         literally the SAME `.avm-plus` element `drawAvmPlus` (diagram-core.js) draws for a populated matrix
+         too, so a re-render replacing it is exactly the ORIGINAL claim two paragraphs up, not a separate one
+         needing its own class name any more. */
       if(plEl){ const b=plEl.getBoundingClientRect();
-        if(avmAddMenu(b.left+b.width/2,b.bottom,d.si,d.tok)) setAvmOpen(plEl);   // …and the matrix holds its grown shape while its own menu is up, across any re-render (setAvmOpen/clearAvmOpen, js/editing/context-menu.js)
+        if(avmAddMenu(b.left+b.width/2,b.bottom,d.si,d.tok)) setAvmOpen(plEl);   // …and the matrix holds its grown shape (or the empty placeholder its "+") while its own menu is up, across any re-render (setAvmOpen/clearAvmOpen, js/editing/context-menu.js)
         return; }   // anchored to the MARK, not the pointer: a menu hinged off the thing that opened it, as every other affordance here opens one
       const tapId=d.kind==="head"?d.dep:(gwEl?+gwEl.getAttribute("data-gwtok"):d.tok);   // a goeswith CONTINUATION selects ITSELF, not the head whose group it is drawn inside
       pick(d.si,tapId,false,false);
@@ -528,7 +537,16 @@ async function attachAsSharedConjunct(si,depId,conjDepId){ const s=DOC[si]; if(!
         else if(glEl) editTier(d.si,d.tok,glEl.dataset.tier||"gloss",{x:e.clientX,y:e.clientY});
         else if(lmEl) editLemmaInline(d.si,d.tok,{x:e.clientX,y:e.clientY},lmEl);   // item 29: the lemma row behaves like its neighbours — one tap opens its own field rather than falling through to the token's FORM editor. The element is passed through so the field opens over the row that was actually tapped
         else if(poEl) editPosInline(d.si,d.tok,{x:e.clientX,y:e.clientY},poEl);   // the POS row behaves like its neighbours: one tap opens its own strict word-class field (editPosInline, js/editing/context-menu.js) rather than the token's FORM editor, which is what this branch used to fall through to — a tap on a word CLASS opened a field over the WORD. The element is passed through so a PROJECTED stemma's `.node-cat` opens over the node the reader tapped, not over the baseline row's `.tok-pos` for the same token. The selection is untouched: the tap's own pick() above has already run, exactly as it does for the form/translit/gloss rows
-        else editNodeInline(d.si,d.tok,{x:e.clientX,y:e.clientY}); }
+        /* ⚠ `frmEl` GATES THIS, ON REPORT — it did not used to: this was a bare `else`, opening the FORM
+           editor on ANY tap none of the rows above claimed, which included one that landed on the token's
+           own general selection surface (`.tok-hit`/`.tok-wash`) rather than on the form glyph itself —
+           "selecting the token hit box shouldn't place the cursor in the token input field; only clicking
+           in the token input field should do so." The selection from `pick()` above still happens either
+           way; only the FIELD (and the caret it places at the click's own x) is now conditioned on the tap
+           having actually landed on `FORM_SEL` (the form text element — see its own declaration, above). A
+           tap on the row's padding/background now does nothing further than select the token, matching every
+           other sub-row's own "this row's editor opens only when THIS row was tapped" rule immediately above. */
+        else if(frmEl) editNodeInline(d.si,d.tok,{x:e.clientX,y:e.clientY}); }
       return; }
     commitDrop(d,e.clientX,e.clientY); },true);
   docEl.addEventListener("pointerup",e=>{ if(!MARQ)return; const m=MARQ; endMarquee();   // item 1: finalise a marquee (its own listener so it never contends with the node/edge drag pointerup above)

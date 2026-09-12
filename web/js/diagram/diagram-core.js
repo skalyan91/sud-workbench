@@ -4194,13 +4194,79 @@ function drawAVM(svg,cx,y0,t,si,tokId,boxes){ const L=avmLayout(t);
        adding whitespace under every token that has one — the ink's own box, pushed below, is what the crop owes
        a margin to. */
     const eh=avmEmptyH(), hw=Math.max(avmEmptyW()+16,24);
-    const g=E("g",{class:"avm-add",tabindex:"0"});
+    /* item 33 — refining item 32 immediately above (left in place; this supersedes only the MECHANISM, not
+       the reasoning about hit-rect sizing or the hover region, both still true). On request: "the empty-AVM
+       plus sign should be the same size as the visible-AVM plus sign, and should have the blue highlight on
+       hover. Also, the empty-AVM placeholder should be invisible." Item 32's own font-glyph "+" (10.5px,
+       `.avm-add-plus`) reads as a visibly different mark from the populated matrix's own hand-drawn 7×7
+       cross-hair stroke (AVM_PLUS_R, the bracket's own `.mwt-tie`/`.mwt-tie-cas` ink, further down this
+       function) — different size, different stroke weight, no casing halo. The fix stops drawing a SECOND
+       kind of mark here: `drawAvmPlus` (just above this function) is now the ONE definition of what this
+       mark looks like, called from both this branch and the populated one, so the two cannot drift apart
+       again — the same "one definition, two call sites" principle this session's own `avmFeatBlockItems`
+       extraction already applied elsewhere (CLAUDE.md). Anchored at (cx, y0+ascent(AVM_VAL_F)) — the exact
+       baseline TIER_EMPTY used to sit on — since a one-line placeholder has no bottom bracket rule the way
+       the populated mark has y1.
+       ⚠ AND THE UNDERSCORE ITSELF IS GONE, on the second half of the same request. This is a DELIBERATE,
+       EXPLICIT override of this file's own TIER_EMPTY convention (CLAUDE.md: "a tier that is visible but has
+       no value for this token draws TIER_EMPTY, not nothing") for THIS ONE tier's hover/click affordance row
+       alone — not a precedent for any other tier's empty-value handling, which this change does not touch.
+       `drawAvmPlus`'s own mark is already `opacity:0` at rest (`.avm-plus`, app.css) and reveals on hover/
+       focus/open exactly like the populated matrix's mark — so once the underscore is gone there is nothing
+       left to crossfade FROM, and the `.avm-add-under`/`.avm-add-plus` crossfade this item introduced is
+       gone with it (no longer reachable). The `.avm-hit` rect below still carries the ROW's own reserved
+       footprint into `boxes` (unchanged from item 28/32) so fitTight's crop still includes this row even
+       though nothing paints in it at rest — the crop is sized to the RESERVE, not to ink, on the same
+       argument the populated mark's own note (further down) already makes for not pushing ITS box in. */
+    const g=E("g",{class:"avm-add ctxtrigger",tabindex:"0"});   // .ctxtrigger: the SAME exclusion `.avm-plus` wears (context-menu.js's ctxDismissOutside), so the very click that opens the menu below doesn't immediately close it again — see that class's own note
     if(si!=null&&tokId!=null){ g.setAttribute("data-s",si); g.setAttribute("data-tok",tokId); }
     g.appendChild(E("rect",{class:"avm-hit",x:cx-hw/2,y:y0-5,width:hw,height:eh+8}));
-    const e=E("text",{class:"avm-empty tier-empty",x:cx,y:y0+ascent(AVM_VAL_F),"text-anchor":"middle",direction:"ltr"});
-    e.textContent=TIER_EMPTY; g.appendChild(e); svg.appendChild(g);
+    drawAvmPlus(g,cx,y0+ascent(AVM_VAL_F),si,tokId,hw/2,(eh+8)/2);   // hw/(eh+8): the SAME half-extents this row's own outer avm-hit rect above uses, so the mark's own hover/accent target matches the row the reader already aimed at — see drawAvmPlus's own note on why the default (11/8) stays small for the populated case instead
+    svg.appendChild(g);
+    // …the ROW's own reserved footprint, not the mark's own — the mark is invisible at rest (see above) and
+    // is deliberately not pushed into `boxes` on its own account, for the same reason the populated mark's
+    // own note (further down) gives: fitTight would grow the diagram's static crop around a mark that is
+    // invisible except while hovered, adding whitespace under every untagged token in the document.
     boxes&&boxes.push({x:cx,y:y0+ascent(AVM_VAL_F)-4,hx:avmEmptyW()/2,hy:7});
     return y0+eh; }
+/* item 33 — THE "+" MARK ITSELF, FACTORED OUT so there is exactly one definition of what it looks like.
+   Two crossed strokes, drawn in the bracket's own ink (`.mwt-tie` over `.mwt-tie-cas`) so weight, colour and
+   casing halo can never drift from the brackets beside it — the same reason the populated branch (further
+   down) always drew it this way. Called both by the empty placeholder above (`cx, y0+ascent(AVM_VAL_F)`,
+   its own glyph baseline — there is no bottom bracket rule for a one-line placeholder to sit on) and by a
+   populated matrix's own bottom-rule mark (`cx, y1`) — one function, one shape, two callers, so the "same
+   size, same weight, same hover colour" parity the two are meant to have cannot be lost the way copying the
+   fragment a second time would risk. `svg` is whatever `<g>`/`<svg>` the caller is appending into; `cx,y` is
+   wherever the caller wants the mark CENTRED — this function has no opinion on that. Returns the `<g>` so a
+   caller that wants to push it into `boxes` (the populated branch does, on `AVM_PLUS_R`; the placeholder
+   deliberately does not — see its own note) can do so with the identical radius either way. */
+function drawAvmPlus(svg,cx,y,si,tokId,hw,hh){
+  const plusR=AVM_PLUS_R, plusD=`M ${cx-plusR} ${y} L ${cx+plusR} ${y} M ${cx} ${y-plusR} L ${cx} ${y+plusR}`;
+  /* ⚠ `.ctxtrigger` IS LOAD-BEARING, NOT DECORATION. `ctxDismissOutside` (js/editing/context-menu.js)
+     closes the shared #ctx on any press outside it, and that includes the very press that opened this one:
+     the mark opens the menu on POINTERUP, and the `click` that follows a moment later dismissed it again —
+     measured, menu true after pointerup and false after the click. The class is the app's own answer, worn
+     by `#fmtPill` for exactly this, and it also makes a second click on the mark toggle the menu shut. */
+  const pg=E("g",{class:"avm-plus ctxtrigger",tabindex:"0"});
+  if(si!=null&&tokId!=null){ pg.setAttribute("data-s",si); pg.setAttribute("data-tok",tokId); }   // …the same pair `.avm-add` carries, and for the same reason: the wrapped-bracket overlay's <svg> hangs off the block, so `tokFromEl` has no token ancestor to walk up to
+  /* ⚠ `hw`/`hh` (half-width/half-height) ARE THE MARK'S OWN HIT-RECT, DEFAULTED TO THE OLD 11/8 — kept
+     small for the POPULATED matrix (the default, no arguments passed at that call site, further down this
+     function), where the mark sits on the bracket's own bottom rule among other rows and a big hit-rect
+     would compete with the row just above it. On request ("increase the size of the hover target for the
+     plus sign for empty AVMs"): an empty placeholder's own call site (drawAVM's `!L` branch, above) passes
+     the SAME half-extents its row's own outer `avm-hit` rect already uses, so the mark's specific
+     ACCENT-ON-HOVER target (`.avm-plus:hover .mwt-tie{stroke:accent}`, only true while hovering THIS
+     element, not merely its sibling row-rect or ancestor `.avm-add`) now covers the same generous area the
+     row's own reveal-the-mark and click-to-open targets already do, rather than a fiddly 22×16 island inside
+     a much bigger row the reader has already correctly aimed at. Both targets stay UNPUSHED from `boxes`
+     either way (see this mark's own crop note, and the row's), so making one bigger costs no whitespace. */
+  const rw=hw||11, rh=hh||8;
+  pg.appendChild(E("rect",{class:"avm-hit",x:cx-rw,y:y-rh,width:rw*2,height:rh*2}));
+  pg.appendChild(E("path",{class:"mwt-tie-cas",d:plusD}));
+  pg.appendChild(E("path",{class:"mwt-tie",d:plusD}));
+  svg.appendChild(pg);
+  return pg;
+}
   const x0=cx-L.w/2, x1=cx+L.w/2, y1=y0+L.h;
   /* ⚠ ONE GROUP FOR THE WHOLE MATRIX, SO `:hover` HAS SOMETHING TO SCOPE TO — and one transparent surface
      inside it, because otherwise the gesture cannot be completed. An SVG `<g>` is hovered when one of its
@@ -4211,7 +4277,22 @@ function drawAVM(svg,cx,y0,t,si,tokId,boxes){ const L=avmLayout(t);
      First child, so everything paints over it; `.avm-hit`'s own transparent-fill trick, one level out. It
      changes hit-testing over the matrix's padding — which the per-row `.avm-hit` rects already did for the
      row bands — and a click landing on it bubbles to the token group exactly as a click on that padding
-     always has. */
+     always has.
+     ⚠ …BUT y1 ALONE UNDER-SHOT THE MARK ITSELF, on report ("the hover target for unfolding the AVM is only
+     the bounding box of the AVM brackets; it should include the space taken up by the vertical bar of the
+     plus sign"). `drawAvmPlus` draws its own small hit-rect centred ON y1 (`y-8` to `y+8`, further down this
+     function) — the mark's cross-hair is CENTRED on the bracket's bottom rule, not sitting entirely above it
+     — so its lower half (y1 to y1+8) falls OUTSIDE this box's own `y0..y1` surface. That sliver is a
+     genuine descendant of this SAME `<g>` (drawAvmPlus appends into whatever `svg` is handed it, and this
+     box is `svg` for everything below), so hovering it DOES keep `:hover` true once the reader is already
+     inside the box — but at REST `.avm-plus` is `pointer-events:none` (CSS; it only turns on once
+     `.avm-box:hover` is already true), so a pointer arriving at that sliver FROM OUTSIDE the box entirely —
+     approaching the AVM from the row below, aiming for where the + will appear — hits nothing at all: not
+     this surface (which stopped at y1) and not the mark's own hit-rect (inert until the box is already
+     hovered). The surface below is therefore extended by 8 — the same literal `drawAvmPlus` sizes its own
+     hit-rect's half-height with (`y-8` to `y+8`, further down this function; not AVM_PLUS_R-derived there
+     either, so restated here rather than computed, and the two must be kept in step by hand) — so the
+     reader can enter hover FROM that direction too, not only from above. */
   /* ⚠ `.avm-open` (the matrix holding its grown shape while its own menu is up) is set on this node by
      whoever opened the menu and cleared by `closeCtx` — NOT re-derived here from a remembered token. It was,
      for one round, and it could not work: `displaySent` hands the renderers COPIES of the token dicts
@@ -4221,7 +4302,7 @@ function drawAVM(svg,cx,y0,t,si,tokId,boxes){ const L=avmLayout(t);
      glyphs shaped (js/lang/smp-shape.js), four times per tap. */
   const box=E("g",{class:"avm-box"});
   box.style.setProperty("--avm-grow",AVM_PAD_B+"px");   // …the distance the bottom rule travels, published to CSS from the ONE constant that defines it, so the animation cannot drift from the geometry
-  box.appendChild(E("rect",{class:"avm-hit avm-hover",x:x0,y:y0,width:x1-x0,height:y1-y0}));
+  box.appendChild(E("rect",{class:"avm-hit avm-hover",x:x0,y:y0,width:x1-x0,height:y1-y0+8}));   // +8: the "+" mark's own hit-rect (drawAvmPlus) is centred ON y1, not entirely above it — see this function's own note, above, on why y1 alone left its lower half unreachable from outside the box
   svg.appendChild(box); svg=box;   // …every appendChild below lands in the box: the brackets, the rows and the +
   // round 4 — the bracket: mwtTie's own 3-segment tie shape, once per side, turned 90° — casing (one combined
   // L path), spine (long, THIN — .mwt-tie-h) and two short serifs (FULL weight — .mwt-tie). Back to round 2's
@@ -4308,7 +4389,6 @@ function drawAVM(svg,cx,y0,t,si,tokId,boxes){ const L=avmLayout(t);
      stack below measures against, the AVM is the last row of that stack, and the overhang is a stroke's worth
      of ink the crop already accounts for — growing the reserve would push every diagram's whole below-stack
      down by 3.5px to make room for a mark drawn on a line that already exists. */
-  const plusR=AVM_PLUS_R, plusD=`M ${cx-plusR} ${y1} L ${cx+plusR} ${y1} M ${cx} ${y1-plusR} L ${cx} ${y1+plusR}`;
   /* ⚠ THE MARK FADES; IT DOES NOT TRAVEL. On instruction ("when an AVM shrinks on mouseout, its plus sign
      should fade, not move; and likewise on mouseover"). It carried `avm-grow-rule` for one round, so it
      slid down with the bottom rule it sits on — which looked like the mark being dragged out from under
@@ -4316,21 +4396,18 @@ function drawAVM(svg,cx,y0,t,si,tokId,boxes){ const L=avmLayout(t);
      fades up while the rule arrives beneath it, on the way out it fades away while the rule leaves. The
      alignment claim is unaffected — the mark is still drawn from `y1`, the same number the grown serifs
      are, so it is collinear with them for the whole time it is visible. */
-  /* ⚠ `.ctxtrigger` IS LOAD-BEARING, NOT DECORATION. `ctxDismissOutside` (js/editing/context-menu.js)
-     closes the shared #ctx on any press outside it, and that includes the very press that opened this one:
-     the mark opens the menu on POINTERUP, and the `click` that follows a moment later dismissed it again —
-     measured, menu true after pointerup and false after the click. It did not do this while the tap still
-     ran `pick()`, because the re-render THAT caused meant press and release had different targets and no
-     click was dispatched at all (editing.md's "a click is not guaranteed to exist"); taking the render away
-     to stop the flicker took the accidental suppression with it. The class is the app's own answer, worn by
-     `#fmtPill` for exactly this, and it also makes a second click on the mark toggle the menu shut. */
-  const pg=E("g",{class:"avm-plus ctxtrigger",tabindex:"0"});
-  if(si!=null&&tokId!=null){ pg.setAttribute("data-s",si); pg.setAttribute("data-tok",tokId); }   // …the same pair `.avm-add` carries, and for the same reason: the wrapped-bracket overlay's <svg> hangs off the block, so `tokFromEl` has no token ancestor to walk up to
-  pg.appendChild(E("rect",{class:"avm-hit",x:cx-11,y:y1-8,width:22,height:16}));
-  pg.appendChild(E("path",{class:"mwt-tie-cas",d:plusD}));
-  pg.appendChild(E("path",{class:"mwt-tie",d:plusD}));
-  svg.appendChild(pg);
-  boxes&&boxes.push({x:cx,y:y1,hx:plusR,hy:plusR});
+  /* ⚠ `.ctxtrigger` IS LOAD-BEARING, NOT DECORATION — see `drawAvmPlus`'s own note (above) for why: the
+     mark opens its menu on POINTERUP, and the class is what stops the `click` that follows from immediately
+     closing it again. It did not do this while the tap still ran `pick()`, because the re-render THAT
+     caused meant press and release had different targets and no click was dispatched at all (editing.md's
+     "a click is not guaranteed to exist"); taking the render away to stop the flicker took the accidental
+     suppression with it. */
+  /* item 33 — DRAWN BY `drawAvmPlus` NOW, not inline: the identical mark the empty placeholder above draws,
+     factored out so the two cannot drift apart in size, weight or colour again (see that function's own
+     note, just above this one in source order). Nothing else here changes — `y1`, the bracket's own bottom
+     rule, is still the one number the mark, the grown serifs and the extension are all drawn from. */
+  drawAvmPlus(svg,cx,y1,si,tokId);
+  boxes&&boxes.push({x:cx,y:y1,hx:AVM_PLUS_R,hy:AVM_PLUS_R});
   // attrX anchors against x0+AVM_BRK_W+avmBrkInkDx() — the bracket's REAL ink edge (see avmBrkInkDx's own
   // note), not the bare nominal x0+AVM_BRK_W a stroke's own cap style could in principle bleed past. Today
   // dx=0 (butt caps), so this is arithmetically identical to the old x0+AVM_PAD_L formula; it stops being a
@@ -4420,7 +4497,33 @@ function avmInline(t){ if(!show.avm) return null;   // gated the same way avmLay
      inline register. Its own class rather than .oavm: that one carries the outer bracket pair as ::before/
      ::after, and an empty bracket pair reads as a feature structure whose contents went missing — the same
      reason drawAVM's SVG placeholder is drawn bare. */
-  if(!struct.length){ const e=document.createElement("span"); e.className="oavm-empty tier-empty"; e.textContent=TIER_EMPTY; return e; }
+  /* item 33 — refining item 32 immediately above (left in place; this supersedes only the MECHANISM). On
+     request: "the empty-AVM plus sign should be the same size as the visible-AVM plus sign, and should have
+     the blue highlight on hover; the empty-AVM placeholder should be invisible." `.oavm-empty`'s own face
+     rule (app.css) ALREADY matched `.oavm-plus`'s size/weight/colour exactly (both 10.5px/571/--tie-hue,
+     measured — not assumed — per this item's own instruction), so the size half of the parity needed no
+     change; what was missing was the ACCENT-ON-HOVER rule and the underscore that should no longer be
+     there. Both are fixed by giving this "+" the SAME `.oavm-plus` class the populated matrix's own mark
+     wears (instead of the item-32 `.oavm-empty-plus` face), so the existing
+     `.oavm-plus:hover,.oavm-plus:focus-visible{color:accent}` rule (app.css) applies for free — one face,
+     one hover rule, two call sites, the outline's own twin of the `drawAvmPlus` parity the SVG notations
+     get. `.oavm-empty-plus` STAYS as a SECOND class on the same span, now carrying only the POSITIONING
+     half (`position:absolute;inset:0`, the same "shares a cell without widening the row" idiom `.gw-h`
+     already uses), not a duplicate face.
+     ⚠ AND THE UNDERSCORE IS GONE, on the second half of the same request — a DELIBERATE, EXPLICIT override
+     of this file's own TIER_EMPTY convention (CLAUDE.md: "a tier that is visible but has no value for this
+     token draws TIER_EMPTY, not nothing") for THIS ONE tier's hover affordance alone, not a precedent for
+     any other tier's empty-value handling, which this change does not touch. With no more underscore to
+     fade FROM there is no more crossfade to run — the mark is simply invisible at rest (`.oavm-plus`'s own
+     `opacity:0`, already true for the populated case) and reveals on hover/focus/open exactly as the
+     populated matrix's own outline twin already does. `.ctxtrigger` stays on the wrapper for the same reason
+     `.avm-add`/`.oavm-plus` wear it: the click that opens the menu must not be the press `ctxDismissOutside`
+     uses to close it again. `tabIndex=0` on the wrapper gives the keyboard route the SVG placeholder already
+     has via its own group's tabindex — with nothing painted at rest, a tab-focused placeholder still needs
+     `:focus-within` to reveal it, exactly as the populated case's own mark does. */
+  if(!struct.length){ const e=document.createElement("span"); e.className="oavm-empty ctxtrigger"; e.tabIndex=0;
+    const plus=document.createElement("span"); plus.className="oavm-plus oavm-empty-plus"; plus.textContent="+"; e.appendChild(plus);
+    return e; }
   const span=document.createElement("span"); span.className="oavm";
   struct.forEach((it,i)=>{ if(i) span.appendChild(document.createTextNode(" "));
     const item=document.createElement("span"); item.className="oavm-item avm-row"; item.dataset.feat=it.group||it.feat; item.tabIndex=0;

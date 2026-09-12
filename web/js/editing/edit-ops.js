@@ -383,35 +383,33 @@ function moveTokenSpatial(si,tokId,dir){ const s=DOC[si]; if(!s)return; const id
 function moveTokenIndex(si,tokId,delta){ const s=DOC[si]; if(!s)return; const idx=tokId-1, n=s.tokens.length;
   if(delta<0){ if(idx<=0)return toast("Already at the edge"); reorderToken(si,idx,idx-1); }
   else { if(idx>=n-1)return toast("Already at the edge"); reorderToken(si,idx,idx+2); } }
-// make `tokId` the root: the old root and everything that hung off it re-attach to the new root, which then anchors the sentence
+// make `tokId` the root: the old root re-attaches to it (nothing else moves) and it then anchors the sentence
 function setAsRoot(si,tokId){ const s=DOC[si]; if(!s||tokId<1||tokId>s.tokens.length)return; const toks=s.tokens, xt=toks[tokId-1];
   if(parseInt(xt.head,10)===0 && depBase(xt.deprel)==="root")return toast("Already the root");
   const oldRoot=toks.findIndex(t=>parseInt(t.head,10)===0)+1;   // 1-based (0 = none)
   pushUndo(si); if(typeof touchColW==="function") touchColW(si,si+1);
-  /* ⚠ EVERY EDGE THIS COMMAND MOVES GOES THROUGH afterHeadEdit, WHICH IT USED TO BYPASS ENTIRELY.
+  /* ⚠ ONLY THE OLD ROOT ITSELF MOVES — on report, retracting an earlier, broader rule that also
+     migrated the old root's own dependents onto the new root. "Dependents of the existing root should
+     remain as dependents of that node": a token that hung off the old root before this command is
+     still exactly as true a statement about that token now — the old root did not stop being what it
+     was to ITS OWN dependents just because something else stopped being the sentence's root. Only the
+     old root's edge to the (former) top of the tree has genuinely changed, since that edge did not
+     exist before this command and its `root` relation cannot possibly still apply now that it isn't one.
+     ⚠ EVERY EDGE THIS COMMAND MOVES STILL GOES THROUGH afterHeadEdit, WHICH IT USED TO BYPASS ENTIRELY.
      afterHeadEdit (js/editing/validation.js) documents itself as "the one funnel every head change
      passes through … the diagram drag, the grid's Head cell, Find & Replace over Head,
      setAsRoot/stepHead" — and setAsRoot was the one of those that did not, having open-coded the two
      invariants it could see (syncSharedFeat, and the old root's `root` → `udep` demotion) and none of
      the rest. What it therefore lost was the third thing that funnel does: RE-ASKING THE PARSER FOR
-     THE RELATION, because a relation describes an EDGE and every edge listed below has just acquired
-     a different head. The reader clicks ONE node, but the old root and each of its dependents are
-     re-attached with a label chosen for the head they no longer have — most visibly the old root
-     itself, whose `udep` is a placeholder rather than an analysis. Now each of them is asked the same
-     three-tier question a hand-dragged arc is (js/io/scores.js), validated the same way, and it costs
-     nothing here but the argument.
-     ⚠ WHICH TOKENS ARE THOSE is read off the mutation itself rather than re-derived: the two branches
-     below are already exactly "the tokens whose head this command changes", so `resync` is filled
-     where the head is written and cannot fall out of step with a later change to the re-rooting rule
-     the way a separately-computed old-head/new-head diff could. NB that set is NOT the classic
-     root-to-node path reversal — this command re-parents the old root and its dependents onto the new
-     root and leaves the intervening chain alone (a token deeper in it keeps the head it had, and so
-     keeps a relation that is still true of it).
-     ⚠ DEFERRED, not fired per token: see afterHeadEdit's own note on `defer` — a call fired from the
-     first branch would be asking about a tree whose new root still has a head. */
+     THE RELATION, because a relation describes an EDGE and the old root's edge has just acquired a
+     different head — its `udep` is a placeholder rather than an analysis, so it is asked the same
+     three-tier question a hand-dragged arc is (js/io/scores.js), validated the same way, and (per the
+     instruction this answers) it CANNOT be left/re-settled as `root` — that relation is now the new
+     root's alone. `resync` holds the one token this command actually re-heads.
+     ⚠ DEFERRED, not fired inline: see afterHeadEdit's own note on `defer` — a call fired before the new
+     root's own `head` is zeroed would be asking about a tree that is still half-mutated. */
   const resync=[];
-  toks.forEach((t,i)=>{ const id=i+1; if(id===tokId)return; if(parseInt(t.head,10)===oldRoot){ t.head=String(tokId); afterHeadEdit(t,s,resync); } });   // migrate the old root's dependents onto the new root
-  if(oldRoot && oldRoot!==tokId){ const or=toks[oldRoot-1]; or.head=String(tokId); afterHeadEdit(or,s,resync); }   // the old root now hangs off the new one — afterHeadEdit is what demotes its `root` to `udep`
+  if(oldRoot && oldRoot!==tokId){ const or=toks[oldRoot-1]; or.head=String(tokId); afterHeadEdit(or,s,resync); }   // the old root now hangs off the new one — afterHeadEdit is what demotes its `root` to `udep`; headSyncDeprels below then asks the parser what it should really say
   xt.head="0"; afterHeadEdit(xt,s);   // …and what makes the new root's relation `root`. NOT deferred and not in `resync`: head 0 is the one case answered by a rule rather than by evidence, which is what headSyncDeprel's own `want>=1` guard says, so this call is a no-op past the invariant
   // Task B: no regenTok — re-rooting is purely structural and must never trigger a gloss/MGloss recompute (see
   // the matching note on setDiagramHead, js/diagram/diagram-edit.js).

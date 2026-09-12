@@ -191,3 +191,153 @@ be a line. Re-rendered against the app's own bundled faces at 64px, Noto Sans Na
 consonant's head-stroke at ONE height (a dashed shirorekha) and Noto Sans Gujarati tops every letter flat
 at one height. Both consumers move for them: the running line by the numbers above, and the brackets by
 +1.01px (Gujarati) / +1.43px (Nandinagari), the same register as Devanagari's own documented +0.99px.
+
+## The Lemma row's `smcp` gap is inside Noto Sans itself, not a missing feature
+
+⚠ **CONFIRMED LIVE, PER CODEPOINT: NOTO SANS'S OWN `smcp` TABLE IS INCONSISTENT ACROSS ONE NARROW
+RANGE, AND THAT — NOT A MISSING FEATURE OR A WRONG FALLBACK FACE — IS WHY ṭ/ṇ/ṛ/ḥ DON'T SMALL-CAP IN
+THE LEMMA ROW.** Reported as "ṣ, ṭ, ṇ don't show up in small caps"; checked with `hb-shape
+--features=+smcp` and `hb-view` (real HarfBuzz, the shaping engine behind both Chrome and WebKit)
+against the actual bundled `web/fonts/notosans.ttf` — the literal file `--token-font` names first.
+Per CSS font-matching, the first family in a stack with a cmap entry for a codepoint wins
+regardless of THAT family's own feature coverage (item 29's comment above already states this
+principle for the synthesis question; it applies here too), so Noto Sans is unconditionally the
+face painting every one of these codepoints in every notation and in every skin — no fallback
+further down `--token-font`, in any order, is ever reached for them, because Noto Sans's cmap
+already has a glyph for all five. Per codepoint:
+- ṣ (U+1E63) and ṃ (U+1E43) DO small-cap correctly. Noto Sans's own GSUB decomposes the precomposed
+  glyph into base letter + combining dot-below (`s.sc`/`m.sc` + `dotbelowcomb`, the mark landing at
+  its OWN small-cap-specific attachment offset, not the plain glyph's one — confirmed in the raw
+  `hb-shape` output, `s.sc=0+453|dotbelowcomb=0@72,0+0` against the plain glyph's `s=0+479|
+  dotbelowcomb=0@59,0+0`) before `smcp` fires, so the base letter takes its designed small-cap form
+  and the mark rides correctly positioned under it. This is why the user's own report, read closely,
+  doesn't actually include ṣ misbehaving — it (and ṃ) already render right.
+- ṭ, ṇ, ṛ, ḥ (U+1E6D, U+1E47, U+1E5B, U+1E25) do NOT. Each stays a single precomposed glyph
+  (`uni1E6D` etc.) with no decomposition path and no dedicated small-cap glyph of its own in the
+  `smcp` lookup, so the plain lowercase form paints — exactly the "honest fallback" LEM_FEAT's own
+  comment already argues for a face with NO smcp table at all. Except this isn't that case: the
+  face HAS smcp, broadly (336 glyphs, covering the macrons ā/ī/ū and Extended-A diacritics like
+  ś/ñ the user did NOT report a problem with) — it simply never had small-cap forms engineered for
+  this one sub-block of Latin Extended Additional, the retroflex/vocalic-r/visarga marks IAST needs
+  and evidently not a block Noto Sans's own small-caps pass prioritised.
+⚠ **NOT FIXABLE FROM THIS SIDE OF THE FONT, CODE-ONLY.** Tried feeding the NFD-decomposed sequence
+(base letter + U+0323 combining dot-below) directly, hoping to land on the SAME decomposed-then-smcp
+path that already saves ṣ/ṃ — with the `ccmp` feature explicitly turned off too, in case that lookup
+was what recomposed it. `hb-shape` recomposes `t`+U+0323 straight back to the single `uni1E6D` glyph
+either way. This is Unicode NFC normalisation happening inside the shaping engine itself — a step
+every correct text shaper performs, on the bundled HarfBuzz here and inside the browser alike — not
+a GSUB feature the app can toggle off, so there is no character sequence the app could hand the
+DOM/canvas that dodges it.
+⚠ **NOT FIXABLE BY REORDERING THE EXISTING STACK.** Checked every already-bundled file under
+`web/fonts/`: the ~170 script-specific Noto Sans faces have no Latin cmap entries at all (never
+reached for these codepoints regardless of stack order); `notosans-italic.ttf` and
+`notosansmono.ttf` share the identical `smcp` table and the identical gap. `notosansdisplay.ttf`
+sits in the directory unwired — no `@font-face` names it (dead weight, or a leftover from
+generating the 171-family `--token-font` list, which folds "Noto Sans Display" in among the script
+names though it names an optical-size cut, not a script) — and, checked anyway, carries the exact
+same unfixed gap, so wiring it up would not have helped either.
+⚠ **A GENUINE FIX EXISTS BUT NEEDS A NEW FILE, SO THIS STOPS AT A RECOMMENDATION, NOT A CHANGE** —
+per this task's own instruction not to vendor a font unilaterally. Two candidates, both verified
+live rather than taken on reputation:
+  - **SIL's Andika** (OFL — the same licence family already vendored here for Nithya Ranjana and the
+    core Noto set; a sans serif built specifically for broad-Unicode linguistic transcription work,
+    unlike Google Fonts' own stripped builds of Cardo/Gentium Plus/Old Standard TT/EB Garamond and
+    eight other classicist-reputation faces checked the same way, EVERY one of which ships with NO
+    `smcp` feature at all in its Google Fonts build). Andika's `smcp` table fully covers the entire
+    IAST retroflex/vocalic-r/visarga set — verified with the same `hb-view` render. Visually close to
+    Noto Sans at a glance (same test word rendered in both, comparable x-height and weight) but not
+    identical, so mixing it in — even scoped to only the four failing glyphs via a
+    `unicode-range`-restricted `@font-face`, the same mechanism `SUD Kai SC`/`SUD Kai TC` already use
+    for the Chinese italic swap, subsetted to the handful of codepoints actually needed rather than
+    the ~800 KB Regular file, and wired into a font stack DEDICATED to the lemma row rather than the
+    global `--token-font` (this row is the only place the gap is visible; every other row's
+    rendering of these same characters is already correct today and has no reason to move) — still
+    draws a visible seam at exactly those four glyphs.
+  - **macOS's own San Francisco** (`-apple-system`, already the stack's tail fallback) ALSO fully
+    covers this block — checked directly against every SF cut installed on this machine (SF Pro, SF
+    Compact, SF Compact Rounded, New York, in every weight). This would need no vendoring at all, but
+    reaching it needs the identical `unicode-range` trick pointed at `local()` instead of a bundled
+    file, is macOS-only (no Windows verification is possible from here, and per this project's own
+    Windows caveats a Segoe UI equivalent is unconfirmed), and WebKit's `local()` matching against
+    Apple's system-UI family names is known to be restricted in some contexts for privacy reasons —
+    a real risk this note doesn't resolve.
+  Either path is a genuine visual design decision (whose retroflex-consonant letterforms sit beside
+  Noto's own, whether the seam is worth it) that this research pass is deliberately leaving to the
+  maintainer rather than making unilaterally.
+⚠ **SO THE HONEST ANSWER TODAY IS THE ONE THE CODE ALREADY ARGUES, WITH ONE CORRECTION.** LEM_FEAT's
+own comment ("a face without smcp simply paints the plain letters, which is the honest fallback")
+describes a face with NO smcp table; this is a face WITH one that simply never had these four
+glyphs added to it. The fallback is still honest — no synthesis, no invented shape — but its visual
+result is a genuinely MIXED register within one word (most letters small-capped, four glyphs left
+at plain height) rather than the clean "whole word either way" the comment's argument pictures.
+No code was changed by this investigation.
+
+⚠ **FIXED, ON REQUEST TO VENDOR A PATCHED FONT — BY EXTENDING THE FONT'S OWN EXISTING `ccmp`
+LOOKUP, NOT BY DRAWING NEW GLYPHS.** The investigation above already named the mechanism (Noto Sans
+decomposes ṣ/ṃ before `smcp` fires); the fix is to give ṭ/ṇ/ṛ/ḥ the identical treatment inside the
+SAME font, using fontTools (`.venv` already had it — `pip install fonttools` was not needed; it is
+pulled in as a dependency of something else already in `requirements.txt`, confirmed by `import
+fontTools` succeeding unmodified). `web/fonts/notosans.ttf`'s `GSUB` table, feature `ccmp`, lookup
+index 6 (a `MultipleSubst`, i.e. GSUB type 2 — a single input glyph rewritten to a sequence of
+output glyphs), already carried exactly ten entries decomposing precomposed dot-below letters —
+`uni1E43→[m,dotbelowcomb]` and `uni1E63→[s,dotbelowcomb]` among them (the two working cases), plus
+four Vietnamese ones (e/i/o/u-with-dot-below) and one dotless-i case — and was simply missing the
+four this task asked about. Added, verbatim, following the exact shape of the existing entries:
+`uni1E6D→[t,dotbelowcomb]`, `uni1E47→[n,dotbelowcomb]`, `uni1E5B→[r,dotbelowcomb]`,
+`uni1E25→[h,dotbelowcomb]` (`t`/`n`/`r`/`h` + U+0323, the correct Unicode canonical decomposition
+of each of ṭ/ṇ/ṛ/ḥ). Nothing else in the lookup, and no other lookup, table, or glyph, was touched.
+⚠ **THIS SIDESTEPS THE NFC-RECOMPOSITION PROBLEM THE EARLIER ATTEMPT HIT, AND THAT WAS VERIFIED
+LIVE, NOT ASSUMED.** The rejected app-side attempt fed HarfBuzz an NFD character sequence (base +
+U+0323) and got it recomposed back to the single precomposed glyph before shaping — Unicode
+normalisation acting on the INPUT CHARACTER STREAM, upstream of any GSUB feature, so no GSUB toggle
+could dodge it. `ccmp` is a different mechanism at a different stage: the app still sends the
+single precomposed codepoint (ṭ, U+1E6D), `cmap` maps it to the single glyph `uni1E6D` exactly as
+before, and ONLY THEN does the `ccmp` feature rewrite that GLYPH into the two-glyph sequence — by
+which point Unicode normalisation has already happened and does not run again. This is precisely
+how ṣ/ṃ were already working, so making the four broken codepoints go through the same table
+predicts they will succeed by the same mechanism, and `hb-shape` confirms it: `hb-shape
+--features=+smcp` against the PATCHED file now answers `t.sc=0+448|dotbelowcomb=0@74,0+0` for ṭ
+(was `uni1E6D=0+361`, a single unsplit glyph), and the analogous correct decomposition+small-cap
+substitution for ṇ/ṛ/ḥ — matching ṣ/ṃ's own already-working shape exactly, glyph-class for
+glyph-class. No GPOS edit was needed at all: `t.sc`/`n.sc`/`r.sc`/`h.sc` already carry their OWN
+mark-attachment anchor for `dotbelowcomb` distinct from plain `t`/`n`/`r`/`h`'s anchor (confirmed in
+the `hb-shape` output — e.g. ṭ's mark lands at `@74,0` under `t.sc` vs `@151,0` under plain `t`),
+because Noto Sans's small-caps pass had already engineered those anchors for OTHER purposes (they
+sit on the same small-cap base letters `ccmp` already decomposes OTHER dot-below and dot-above
+letters onto). The fix therefore needed exactly one table edit and zero new glyphs.
+⚠ **VERIFIED AS A DIFF, NOT JUST A SUCCESS CASE**: a `ttx` dump of every other table
+(`glyf`/`hmtx`/`cmap`/`GDEF`/`GPOS`/`maxp`/`post`) between the original and patched files is
+byte-for-byte identical; `head` differs only in `checkSumAdjustment` and `modified` (both expected
+of any re-save). `hb-shape` on ordinary Latin text, on ṣ/ṃ (unchanged), and on every other
+Extended-A diacritic (macrons, ś, ñ, ḍ, ḷ) with `smcp` on is IDENTICAL before/after except at
+exactly the four targeted codepoints. **ḍ (U+1E0D) and ḷ (U+1E37) — d and l with dot below — carry
+the identical bug** (single precomposed glyph, no `ccmp` entry) and were left unpatched: they were
+never named in the report this task answers, and fixing them was out of this task's stated scope,
+but the fix is the same one line each (`uni1E0D→[d,dotbelowcomb]`, `uni1E37→[l,dotbelowcomb]`) if a
+future report names them.
+⚠ **LICENSING: NOTO SANS'S OWN `OFL.txt` DECLARES NO RESERVED FONT NAME, SO THE FAMILY NAME DID NOT
+NEED TO CHANGE** — checked directly (fetched `notofonts/latin-greek-cyrillic`'s own `OFL.txt`)
+rather than assumed from the OFL's general Reserved-Font-Name reputation; nameID 7's "Noto is a
+trademark of Google LLC." is a trademark notice, a different mechanism from an OFL RFN clause, and
+does not gate condition 3 either. `name` IDs 1/4 ("Noto Sans"/"Noto Sans Regular") are therefore
+unchanged, so `web/styles/fonts.css`'s `@font-face{font-family:"Noto Sans";…}` and every
+`--token-font`/`--mono-font` stack's leading `"Noto Sans"` string keep matching the patched file
+with no CSS edit anywhere. `name` IDs 3/5 (unique identifier / version string) were extended to say
+"SUD Workbench smcp patch" so the modified binary doesn't pass as a pristine upstream build if
+extracted on its own — not required by the licence, done anyway for honesty. Full reasoning and the
+exact OFL clauses checked are in `THIRD-PARTY-NOTICES.md`'s Fonts section, which this change also
+updated (the "Neither font is modified here" line there was true when written and is no longer).
+⚠ **FILES CHANGED: `web/fonts/notosans.ttf` (2,049,096 → 2,059,580 bytes — the fontTools
+recompile of an unrelated table's layout accounts for the difference, not new glyph data; no glyph
+outline was added), `THIRD-PARTY-NOTICES.md`, this note.** No CSS file changed (family name kept).
+Verified clean: `node --check` on the touched-adjacent JS (none actually touched), the headless-
+Chrome CDP smoke test bare AND `?platform=win` (0 runtime exceptions, 0 console errors, 8/8 fixture
+blocks in every notation, correct kit's stylesheet loaded each time), `timeout 8
+.venv/bin/python -m app samples/english.conllu` exiting 124, and a live injected sentence
+(`DOC`/`renderDoc()`, no bridge) whose LEMMA column carried all six codepoints — the rendered
+`.tok-lemma` nodes carry the correct text and `font-feature-settings:"smcp"` computed style, in the
+real app pipeline, not a standalone test page. A Chrome screenshot capture was attempted for a
+pixel-level app-level visual (beyond `hb-view`'s already-authoritative one, reproduced above) and
+could not be completed in this sandbox — `Page.captureScreenshot` returned no response even
+against a blank page, independent of anything this change touched, so this is an environment
+limitation, not a fix regression; the DOM/CSS-level and `hb-view` checks stand in for it.

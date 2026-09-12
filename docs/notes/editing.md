@@ -164,6 +164,35 @@ the flyout** (`reopenFeatSub` re-opens `ctx2` off its own `_owner` at its own `_
 Deliberately the same gesture, and the same two labels one noun apart, as "Other Subtype…" /
 "‹ Attested Subtypes": a reader who has learnt one has learnt the other.
 
+⚠️ **AND THE SAME ESCAPE HATCH EXISTS ONE LEVEL DOWN, PER FEATURE, NOT ONLY FOR THE WHOLE LIST.** On
+request: "the context menu should have 'Other' flyouts for the individual categories as well as for
+features more broadly, just like when right-clicking an existing feature." `avmValueMenu` (an EXISTING
+feature's own menu) had always offered both — an "Other `feat`…" row beside each already-set feature's
+values, AND (via `addFeatureRow`, appended last) the whole-list escape hatch — but `addFeatureItems`
+(a feature NOT yet set) only ever had the second half: a feature this list offers from evidence, with
+only SOME of its UD values attested, had no way back to the REST of that one feature's own inventory
+short of leaving this list and hunting the combined "Other Feature…" flyout for its header. `build`'s
+own per-feature block (js/editing/context-menu.js) now closes exactly as `avmValueMenu`'s does —
+`otherCands = UD_FEATS[f] minus the values just shown`, and a row for it when that is non-empty.
+⚠️ **IT SINKS TO THE TAIL, on the SAME terms `avmValueMenu`'s own copy already does, not a new rule
+invented here**: a `null` closes the header group the row would otherwise sit in (`renderMenu`'s own
+`closeGrp`), so it renders below every group rather than under its own feature's column — measured
+against `avmValueMenu`, which has stood this way, accepted, all along.
+⚠️ **AND IT FORKS ON THE VERY SAME `drill` FLAG THE WHOLE-LIST ROW ALREADY FORKS ON**, because it is
+the identical question asked one level down: is THIS rendering of `addFeatureItems`'s list living
+top-level (`avmAddMenu`, `drill` unset — ctx2 is free, so the row owns a real `sub:`, exactly as
+`avmValueMenu`'s copy does) or already inside `ctx2` (`addFeatureRow`'s own "Add Feature…", `drill`
+true — nowhere further to nest, so it `reopenFeatSub`s instead, with its own "‹ Attested Features"
+way back to this very list, precisely as the whole-list row already does). One flag answers both,
+because `build` is a closure inside `addFeatureItems` and so already has it in scope. Verified live
+(headless-Chrome CDP, `samples/english.conllu`, si 7 "board" NOUN `Number=Sing`): the "+" placeholder
+(top-level) and the token menu's "Add Feature…" flyout (nested) both list `Gender[Masc]` and
+`Definite[Def]` with an "Other Gender…"/"Other Definite…" row apiece; clicking "Other Gender…" from
+the placeholder opens a dismissable `ctx2` flyout of `Fem/Neut/Com` with no way back (a real `sub:`,
+`#ctx` still standing behind it); clicking the identical row from inside "Add Feature…" reopens the
+SAME `ctx2` with the same three values plus "‹ Attested Features", which restores the list it came
+from. Zero runtime errors in either skin.
+
 ⚠️ **NOTHING ATTESTED → THE FLYOUT *IS* THE OTHER LIST**, `posSubItems`' rule, and adopting it here
 re-opened a door the attested-only rule had quietly closed: a tagged token whose class this document
 attests nothing for used to get **no "Add Feature…" row at all**, so the features UD plainly gives that
@@ -510,21 +539,21 @@ below: the relation is asked of the ARC, so a head the parser would not have cho
 
 ⚠️ **AND `setAsRoot` WAS THE ONE PATH IN THAT LIST THAT DID NOT ACTUALLY GO THROUGH THE FUNNEL** — the
 paragraph above named it, and it open-coded the two invariants it could see (`syncSharedFeat`, the old
-root's `root` → `udep` demotion) and none of the rest. A re-root moves **more edges than the one node
-the reader clicked**: the old root and every token that hung off it are re-parented onto the new root,
-each still labelled for the head it no longer has, the old root's placeholder `udep` most starkly. All
-of them now run `afterHeadEdit`, which asks the same three-tier question and applies the same
-error-level validation a hand-dragged arc gets. **Deferred, not fired per token**: `afterHeadEdit`
-takes an optional `defer` array that collects the ids instead of firing, and `headSyncDeprels`
-(js/io/bridge.js) runs them once the whole re-root has landed — a call fired from the first branch
-would be asking about a tree whose new root still has a head, and `headSyncDeprel`'s own staleness
-re-read would then throw away the answer it had just paid for. Sequential, so the first call warms
-`tokenScores`' cache for the rest, and **one render for the batch** rather than one per token. The
+root's `root` → `udep` demotion) and none of the rest. **Only the old root itself is re-parented onto
+the new root** — a token that hung off the old root before this command stays exactly where it was; a
+broader rule that also migrated the old root's own dependents onto the new root was tried and retracted
+on report ("dependents of the existing root should remain as dependents of that node" — a token's
+dependents are never moved just because the token itself was). The old root's own edge is the one
+genuine unknown here: it never existed before this command, so its placeholder `udep` is not an analysis
+and — per the same report — cannot be left, or later re-settled, as `root`, since that relation now
+belongs to the new root alone. It runs `afterHeadEdit`, which asks the same three-tier question and
+applies the same error-level validation a hand-dragged arc gets. **Deferred, not fired inline**:
+`afterHeadEdit` takes an optional `defer` array that collects the id instead of firing, and
+`headSyncDeprels` (js/io/bridge.js) runs it once the whole re-root has landed — a call fired before the
+new root's own `head` is zeroed would be asking about a tree that is still half-mutated, and
+`headSyncDeprel`'s own staleness re-read would then throw away the answer it had just paid for. The
 **new root is not in the list**: head 0 is settled by rule, which is what `headSyncDeprel`'s `want>=1`
-guard already says. ⚠️ The changed set is NOT the classic root-to-node path reversal — this command
-leaves the intervening chain alone, so it is read off the mutation itself (`resync` is appended where
-each head is written) rather than re-derived by a diff that a later change to the re-rooting rule
-could desynchronise.
+guard already says.
 
 ## Merging tokens (and Sanskrit sandhi fusion)
 
@@ -891,6 +920,29 @@ authority there is for that question, since it is a per-language fact and no uni
 never predicts), and `addFeatureItems` then stops there for a tagged token, empty or not. Measured against
 `en_sud_ewt_gum`: NOUN → Number/Abbr, VERB → Number/Mood/Tense/Voice/Person/Abbr, PRON → +Gender/Case/Reflex,
 ADP → Abbr, **PUNCT → nothing**.
+
+⚠️ **CHECKED AND DELIBERATELY NOT MADE TO MATCH `otherFeatureItems`'S OWN `featOnUpos` GUARD.** On report
+("make sure the context menu shows all POS-appropriate feature values that are attested in the document, not
+just POS subtypes") — read as "should `addFeatureItems`'s own `cands` gain the identical `FEAT_UPOS` filter
+`otherFeatureItems`'s `cands` already carries, for consistency between the two menus reading the same
+POS-appropriateness question." Traced rather than assumed: `model_feats_by_upos("sud:en_sud_ewt_gum")`, the
+bundled English wheel's own morphologizer labels, DOES disagree with the static table — `NumType` on
+`PROPN`/`NOUN` (moot: `NumType` is in `AVM_EXCLUDE`, so it never reaches either `cands` list at all) and,
+live, `Number=Sing/Plur` and `Abbr=Yes` on `SYM`, a class `FEAT_UPOS` gives neither. `samples/english.conllu`
+carries no `SYM` token to click, so the two lists cannot be caught actually disagreeing on screen from this
+one file — but the model's own inventory is exactly the kind of "document/model usage" evidence this whole
+section already tells `strictAttestedVals` to trust, and gating `addFeatureItems`'s `cands` by the static
+table would silently veto that evidence for any `SYM` token a reader annotates.
+**That is precisely what this same file already settled, one section up, as the wrong shape for the value
+question** ("AND THE TABLE IS A DEFAULT, NEVER A VETO" — a corpus or a model that attests something unusual
+is evidence, and is believed) — and there is no reason the identical principle stops at the value level and
+starts vetoing at the whole-FEATURE level. So the asymmetry between the two `cands` lists is not a bug to
+close: `addFeatureItems` answers "what does this document/model actually say", which a static table may
+narrow **only where the evidence itself is silent** (the untagged-token fallback, `build(f=>UD_FEATS[f]||[])`,
+where there is nothing to trust yet); `otherFeatureItems` answers a different question — "what does UD's own
+inventory offer beyond that" — and IS rightly table-scoped, because that escape hatch has no evidence of its
+own to defer to in the first place. Adding `featOnUpos` to `addFeatureItems`'s `cands` would make the two
+menus agree by making the evidence-scoped one lie.
 
 ⚠️ **AND THE PICKER IS ORDERED THE WAY THE AVM TIER LAYS A TOKEN OUT** — the AGR block first (Person, Number,
 Gender, Clusivity, in `AVM_GROUPS`' own order), then TAM (Tense, Aspect, Mood, Evident), then everything else in
