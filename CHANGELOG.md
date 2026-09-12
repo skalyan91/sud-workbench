@@ -2,6 +2,47 @@
 
 All notable changes to SUD Workbench are documented in this file.
 
+## [0.3.21] — 2026-09-13
+
+### New: the AVM "+" opens the same picker its own rows do, and hides until you reach for it
+
+- Clicking the "+" at the foot of a feature matrix now shows the **same picker right-clicking one of
+  its existing features already does** — including an "Other …" flyout for each attested category, not
+  only for the inventory as a whole — so a feature you reach through the "+" behaves exactly like the
+  same feature reached through its own row.
+- A token with no features at all now gets the **identical "+"** — same size, same stroke, same hover
+  highlight — instead of a smaller, font-drawn substitute, and it is reachable with a single click, not
+  only a right-click. It stays invisible until you hover or focus it, matching a feature matrix's own
+  "+".
+- The "+"'s own hover target now reaches the full space its vertical bar occupies (approaching it from
+  below used to miss it entirely), and is generously sized on an empty matrix specifically, where it is
+  the only thing in the row.
+- "Add feature…" is gone from a token's own right-click menu — reach it from the AVM's "+" instead, or
+  from right-clicking an existing feature. "Mark as…", "Set as root" and "Paragraph starts here" moved up
+  to sit with the other Edit commands.
+
+### Fixed
+
+- **An ADJ, AUX or DET's Number field was quietly narrower than its own right-click menu offered.** The
+  "+" menu picked a feature's alternative values by word class; right-clicking the row itself looked at
+  the whole document. The two now agree, so a value the row already offers is never missing from the "+".
+- **A feature's "Other …"/"Clear" rows sat below every category in the menu instead of under their own**,
+  and a long hint stretched the menu sideways. Both are fixed, and the divider under a category's own
+  values now sits below its "Other …"/"Clear" rows rather than above them.
+- **Small caps in the Lemma row skipped four Sanskrit/IAST letters** — ṭ, ṇ, ṛ and ḥ painted as plain
+  lowercase, a gap in the bundled Noto Sans font's own small-caps table, patched the same way the font
+  already handles the visually similar ṣ and ṃ.
+- **Clicking anywhere on a token could put a text caret in its form field**, even well away from the word
+  itself. Only clicking the form now opens it; selecting the token elsewhere in its row no longer does.
+- **The word-class field threw its whole autocomplete list open the instant it was clicked**, even on an
+  already-tagged token. It now opens only while you are typing, or if there is nothing valid there yet.
+- Several cursors that had no business signalling "clickable" — a token's own background, an AVM row's
+  reserved padding — no longer do; the pointer changes only over something that actually responds to a
+  click.
+- Re-attaching a token as a sentence's root no longer drags that root's own dependents along with it —
+  only the old root itself moves. Its new relation is chosen from the parser's own ranking, and can never
+  come back as `root` now that it no longer is one.
+
 ## [0.3.20] — 2026-09-08
 
 ### New: a lemma tier in the diagram
