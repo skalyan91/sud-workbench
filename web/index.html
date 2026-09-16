@@ -275,18 +275,26 @@
       <div class="drawers" id="pipeDrawers"><div class="drawer" id="pipeDrawer">
           <button class="drawer-btn" data-drawer>Pipeline <svg viewBox="0 0 10 7" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M1 1l4 4 4-4"/></svg></button>
           <div class="drawer-pop" id="pipePop">
-            <div class="drawer-group-h">Segmentation</div>
+            <!-- item: whole-drawer + per-category toggles, added beside the existing per-arm checkboxes.
+                 "All" sits ABOVE Segmentation, outside every group, so it reads as "every arm" rather
+                 than as an eleventh row of Segmentation. Both it and the four .drawer-group-h headings
+                 below are wired in js/ui/wiring.js (see the ⚠ note by the pipePop "change" listener):
+                 neither ever flips a DISABLED row's checked state, matching what a reader's own click on
+                 a disabled checkbox already can't do — a group/All toggle is a shortcut for several of
+                 the reader's own clicks, not a way around what one click could not do alone. -->
+            <label class="chk pipe-all" title="Turn on every arm the current model can run, or off if they already all are"><input type="checkbox" id="pipeAllCb" checked>All</label>
+            <div class="drawer-group-h" title="Click to toggle every arm in this group">Segmentation</div>
             <label class="chk" title="Let the model decide where the words are. Off (or absent) — the text is split on whitespace."><input type="checkbox" data-arm="tokenise" checked>Tokenisation</label>
             <label class="chk" title="Let the model decide where the sentences end. Off (or absent) — the app's own rule splitter does it."><input type="checkbox" data-arm="sentence" checked>Sentence splitting</label>
-            <div class="drawer-group-h">Token fields</div>
+            <div class="drawer-group-h" title="Click to toggle every arm in this group">Token fields</div>
             <label class="chk" title="Fill the LEMMA column"><input type="checkbox" data-arm="lemma" checked>Lemmas</label>
             <label class="chk" title="Fill the UPOS column"><input type="checkbox" data-arm="upos" checked>Word classes</label>
             <label class="chk" title="Fill the XPOS column — the treebank's own language-specific tag set"><input type="checkbox" data-arm="xpos" checked>Language-specific tags</label>
             <label class="chk" title="Fill the FEATS column"><input type="checkbox" data-arm="feats" checked>Features</label>
-            <div class="drawer-group-h">Analysis</div>
+            <div class="drawer-group-h" title="Click to toggle every arm in this group">Analysis</div>
             <label class="chk" title="Fill the HEAD and DEPREL columns. Off — every token comes back unattached."><input type="checkbox" data-arm="syntax" checked>Syntax</label>
             <label class="chk" title="The model's own MISC layer: Subject=SubjRaising, Reported=Yes, Idiom/InIdiom"><input type="checkbox" data-arm="sudmisc" checked>SUD annotations</label>
-            <div class="drawer-group-h">Derived layers</div>
+            <div class="drawer-group-h" title="Click to toggle every arm in this group">Derived layers</div>
             <label class="chk" title="Romanise each token as it is parsed. Not the parser's own work — it runs with no model at all."><input type="checkbox" data-arm="translit" checked>Transliteration</label>
             <label class="chk" title="Seed the morphemic gloss from FEATS, and align a translation to the tokens. Not the parser's own work."><input type="checkbox" data-arm="gloss" checked>Glossing</label>
           </div>

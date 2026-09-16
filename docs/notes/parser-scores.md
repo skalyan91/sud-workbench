@@ -45,6 +45,30 @@ complete head distribution this whole block works to approximate — but Stanza 
 REWRITES HEADS, so its distribution describes a tree that is not the one on screen. Every caller degrades to
 its pre-existing behaviour; a weaker version of this would be worse than none.
 
+⚠ **SANSKRIT STOPPED NEEDING THE WALK (SUD-spaCy ≥0.4.0).** `sa_sud_vedic_ufal_dcs`'s parser component is
+`sud_arcfactored_parser.ArcFactoredParser` — a biaffine-scored, Chu-Liu/Edmonds-decoded arc-factored
+decoder, not `spacy.TransitionBasedParser.v2` — and it stays SUD-native (no grew rewrite), so unlike
+Stanza its distribution DOES describe the tree on screen. `_arc_factored_scores` (`app/parse.py`) is its
+own path, selected in `_score_doc` by `hasattr(proc, "moves")` rather than by package name, so a future
+wheel that switches decoder is picked up with nothing here to edit either way. It does not approximate
+anything the way the walk does: the decoder scores every (head, label) pair for every token in one shot
+(window-masked), and `analysis_scores` reads the exact joint softmax `JointBiaffine.loss_and_backward`
+trains against — computed by constructing a bare `JointBiaffine` shell bound to the LOADED checkpoint's
+own weights and calling ITS `forward`, not a second hand-rolled copy of the algebra (the component's own
+`_decode` already carries one copy of that duplication risk, documented in its own file as something to
+keep in sync rather than something to avoid; a third copy here would be the same debt paid twice).
+
+⚠ **AND ITS TOP-SCORED HEAD CAN DISAGREE WITH THE SHOWN TREE, WHICH THE WALK NEVER CAN.** The walk's
+"winner in the table is always the tree on screen" guarantee is a consequence of walking the model's own
+greedy PATH; `_arc_factored_scores` instead reports each dependent's LOCAL marginal, while the actual tree
+comes from a GLOBAL Chu-Liu/Edmonds solve over the whole sentence at once. Measured on a 5-token fragment:
+every non-root token's top-scored head matched the shown tree at .61–.85 confidence, but the two tokens
+the decoder resolved to ROOT each scored a different head as locally stronger — root selection is a
+global decision (how many roots the sentence needs is not visible to one token's own arc scores) that the
+per-dependent marginal cannot see coming. Not a defect to chase: the table is honestly reporting that the
+raw scorer's opinion differed from what the tree constraint decided, exactly the same category of fact
+the menu-weighting rows already show for ordinary attachments.
+
 ⚠️ **AND THE GLOSSES ARE PART OF THE QUESTION**, on both sides of the bridge. `xx_sud_generic` 0.2.0 reads an
 English gloss per token as a parser INPUT (the lexical channel — `parsing-models.md`), so a ranking computed
 before a token was glossed describes a parse the reader can no longer get. `analysis_scores` and

@@ -338,8 +338,29 @@ document.getElementById("autoregenChk").addEventListener("change",e=>{ AUTOREGEN
    Ten arms; see PIPELINE (js/core/prefs.js) for what each gates. savePrefs, like Auto-regenerate
    beside it and for the same reason: a preference against the parser filling in a column has to
    outlive the window. Nothing to re-render — an arm is read at the NEXT parse, not drawn. */
-document.getElementById("pipePop").addEventListener("change",e=>{ const cb=e.target.closest("input[data-arm]"); if(!cb)return;
+document.getElementById("pipePop").addEventListener("change",e=>{
+  const all=e.target.closest("#pipeAllCb"); if(all){ pipeSetMany(pipeBoxes(),all.checked); return; }   // the whole-drawer control, handled first since it has no `data-arm` and would otherwise fall through the `if(!cb)return` below
+  const cb=e.target.closest("input[data-arm]"); if(!cb)return;
   PIPELINE[cb.dataset.arm]=cb.checked; pipeInvalidate(); paintPipe(); savePrefs(); });   // paintPipe, because unticking one arm can make several others inert (the cascade) and the drawer is open in front of the reader while it happens
+/* THE GROUP-HEADING CLICK — a separate listener from the one above because it answers a "click" on a
+   plain `<div>`, not a "change" on an `<input>`; the two never fire for the same gesture so there is
+   no ordering to get wrong between them. Finds the arms "in" a heading by DOM position — the ones
+   between it and the next .drawer-group-h (or the pop's end) — rather than a data-group attribute,
+   since index.html's own grouping (a heading followed by its rows) already says the same thing and a
+   second, parallel way to say it is one more place the two could drift apart. */
+document.getElementById("pipePop").addEventListener("click",e=>{
+  const h=e.target.closest(".drawer-group-h"); if(!h)return;
+  const boxes=[]; for(let el=h.nextElementSibling; el&&!el.classList.contains("drawer-group-h"); el=el.nextElementSibling){
+    const cb=el.matches&&el.matches("label.chk")?el.querySelector("input[data-arm]"):null; if(cb)boxes.push(cb); }   // `querySelector("input[data-arm]")` is what excludes the "All" row if it were ever a sibling here — it alone among .chk rows carries no `data-arm` — though today "All" sits BEFORE every heading and this loop only walks forward
+  pipeSetMany(boxes.filter(cb=>!cb.disabled),   // a DISABLED row is one the loaded model has no such component for (or has taken over — see `taken` in paintPipe); a group click must never flip it, exactly as a reader's own click on it already can't
+    boxes.some(cb=>!cb.disabled&&!cb.checked)); });   // standard select-all-in-group semantics: ANY enabled box off → the click turns the whole group ON; ALL already on → the same click turns them all OFF. Judged only against the ENABLED boxes, so a group with one disabled-and-ticked row and the rest off still reads as "not all on" and turns on rather than being stuck permanently "mixed"
+/* Shared by both controls above so a click on "All" and a click on a heading cost exactly ONE
+   savePrefs — not one per box flipped, which would be true even at ten arms but matters more once a
+   single gesture can flip all ten at once. */
+function pipeBoxes(){ return [...document.querySelectorAll("#pipePop input[data-arm]")]; }
+function pipeSetMany(boxes,on){ if(!boxes.length)return;   // every arm in scope is currently disabled — nothing this click could do, so no PIPELINE write and no save for a no-op gesture
+  boxes.forEach(cb=>{ cb.checked=on; PIPELINE[cb.dataset.arm]=on; });
+  pipeInvalidate(); paintPipe(); savePrefs(); }
 /* WHICH ARMS THE CURRENT MODEL CAN ACTUALLY DO, asked of the bridge whenever the model changes.
    The answer is read off the loaded pipeline's own component list (`parse.model_arms`), so a wheel
    that gains or loses a component moves this with nothing here to edit — and the generic parser
@@ -437,7 +458,16 @@ function paintPipe(){ const pop=document.getElementById("pipePop"); if(!pop)retu
     // their own ("Off — every token comes back unattached"), and a second one ran the two sentences
     // together into something that read like one clause. A `title` renders \n as a line break in all
     // three of the shells this app runs in.
-    lab.title=[base,why].filter(Boolean).join("\n"); }); }
+    lab.title=[base,why].filter(Boolean).join("\n"); });
+  /* THE "ALL" ROW MIRRORS THE ARMS, RATHER THAN THE OTHER WAY ROUND. Syncing it here — the one place
+     that already re-reads every row's `.disabled`/`.checked` after ANY change (a per-arm tick, the
+     model switching, a group-heading click, or a click on "All" itself) — keeps it correct from a
+     single code path instead of three toggle sites each writing to it and risking drift. Judged only
+     against ENABLED boxes, same as the group click above: a disabled arm has no vote either way. */
+  const allCb=document.getElementById("pipeAllCb");
+  if(allCb){ const en=pipeBoxes().filter(cb=>!cb.disabled), on=en.filter(cb=>cb.checked).length;
+    allCb.checked=en.length>0 && on===en.length;
+    allCb.indeterminate=on>0 && on<en.length; } }   // MIXED, not "off": an unticked box the reader hasn't seen yet reads as "nothing is on", where some arms plainly are — indeterminate is the honest third state a plain checkbox already supports natively
 function armLabel(a){ const cb=document.querySelector('#pipePop input[data-arm="'+a+'"]');
   return cb&&cb.parentElement?cb.parentElement.textContent.trim():a; }   // savePrefs, unlike the line above: a preference against automatic edits has to outlive the window (see AUTOREGEN, js/core/prefs.js). Nothing to re-render — the flag is read at the next edit, not drawn
 /* ⚠ AN OPTIONS-BAR DROPDOWN NEEDS NO CLAMP OF ITS OWN, AND THE ONE IT BRIEFLY HAD IS THE REASON THE BAR

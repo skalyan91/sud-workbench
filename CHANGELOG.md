@@ -2,6 +2,19 @@
 
 All notable changes to SUD Workbench are documented in this file.
 
+## [0.3.22] — 2026-09-17
+
+### New: Sanskrit gets real confidence scores, and the Pipeline drawer gets group toggles
+
+- **Sanskrit's parser reports genuine head and relation confidence again.** The Sanskrit model moved to
+  a new arc-factored decoder that scores every candidate head and relation at once instead of walking a
+  sequence of decisions — the drag highlight and the relation/word-class menus' own dimming, both
+  unavailable under this model until now, read the decoder's own trained probabilities directly rather
+  than going without.
+- The Pipeline drawer's four category headings — Segmentation, Token fields, Analysis, Derived layers —
+  are now clickable, turning every arm in that group on or off together, and a new **All** row above
+  them does the same for the whole drawer. Neither ever touches an arm the current model cannot run.
+
 ## [0.3.21] — 2026-09-13
 
 ### New: the AVM "+" opens the same picker its own rows do, and hides until you reach for it

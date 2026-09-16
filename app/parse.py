@@ -2175,6 +2175,110 @@ def _arc_scores(parser, doc):
     return heads, deprels
 
 
+def _arc_factored_scores(proc, doc):
+    """Sanskrit's arc-factored decoder (`sud_arcfactored_parser.ArcFactoredParser`, SUD-spaCy
+    ≥0.4.0) scores every (head, dependent, label) triple AT ONCE — unlike a transition-based
+    parser there is a genuine joint distribution to read off here, so this reads it rather than
+    approximating it the way `_arc_scores` has to for the transition walk.
+
+    ⚠ COMPUTED THROUGH THE VENDOR'S OWN `JointBiaffine.forward`, NOT REIMPLEMENTED A THIRD TIME.
+    The component's own `_decode` duplicates that class's algebra inline (its own docstring: "MUST
+    STAY IN SYNC with sud_joint_biaffine.JointBiaffine.forward") because a hand-rolled numpy pipe
+    cannot hang its serialisation off thinc's own `Model` machinery. Writing a second duplicate
+    here would be exactly the drift that comment warns against, so this instead reads
+    `JointBiaffine` and the bucket helpers (`dist_buckets`, `agreement_buckets`, …) straight off
+    `type(proc).__module__` — the SAME module object `_decode` itself imported
+    (`import train_arcfactored as _tr`, `from sud_joint_biaffine import JointBiaffine`), never a
+    second import that could resolve to some other installed copy. If a future wheel restructures
+    either of those, the attribute lookup below fails loudly and `analysis_scores`' own try/except
+    is what turns that into `scored: False` — "an honest blank beats a guess", same as everywhere
+    else in this file.
+
+    ⚠ THE PROBABILITY IS THE ONE THE DECODER WAS TRAINED AGAINST, not a second one invented for the
+    UI. `JointBiaffine.loss_and_backward` cross-entropies a SINGLE softmax over every (head, label)
+    pair per dependent (`Z = combined.transpose(1,0,2).reshape(n,-1)`, `gold_flat = gold_h*nlab +
+    gold_l`) — reproduced verbatim here, then marginalised over labels for the head distribution
+    and sliced per head for the label distribution, so what the drag highlight shows is the same P
+    the training loss itself optimised, not a re-normalisation invented downstream of it.
+
+    ⚠ UNLIKE `_arc_scores`' WALK, THE TOP-SCORED HEAD HERE CAN DISAGREE WITH THE TREE ON SCREEN —
+    and that is not a bug to chase out. The transition walk always takes the model's own greedy
+    move, so it is verified to reproduce the shipped parse by construction; this function instead
+    reports each dependent's LOCAL marginal over the (window-masked) joint distribution, while the
+    tree actually drawn comes from `sud_cle.mst`'s GLOBAL solve over every dependent at once —
+    structurally the same gap between a per-edge score and a spanning-tree decode that any
+    arc-factored/biaffine parser has. Measured on a 5-token fragment: the two tokens the decoder
+    resolved to ROOT scored a DIFFERENT head as locally stronger (root selection is inherently a
+    global decision — a token's own arc scores can't see how many roots the rest of the sentence
+    needs), while every other token's top-scored head matched the shown tree exactly, at .61–.85
+    confidence. So the table can show a reader's already-accepted edge sitting second, which is
+    correct: it is telling them the decoder's raw scorer had a different local opinion that the
+    tree constraint overrode, not that anything is wrong with the tree.
+
+    Returns the same ``(heads, deprels)`` shape `_arc_scores` does — see that function's docstring
+    for the wire contract; `_score_doc` does not need to know which decoder it got."""
+    import numpy as np
+    mod = sys.modules[type(proc).__module__]      # the parser's OWN defining module …
+    JointBiaffine = mod.JointBiaffine              # … and the exact class / bucket module it imported
+    tr = mod._tr
+    meta, P = proc.meta, proc.P
+    n = len(doc)
+    nlab = len(meta["labels"])
+    X = proc.encoder.predict([doc])[0]
+    jb = object.__new__(JointBiaffine)             # a bare shell — skip __init__'s random weight alloc
+    jb.p = P; jb.h = meta["hidden"]; jb.nlab = nlab   # and bind the LOADED checkpoint's own weights instead
+    jb.dist_buckets_fn = tr.dist_buckets
+    jb.dir_buckets_fn = tr.direction_buckets if meta.get("direction") else None
+    jb.feat_names = meta.get("feat_names") or []   # `forward` iterates this directly — __init__ normally derives it from feat_bins, which this shell skips
+    kw = {}
+    if meta.get("agreement") and "agree" in P: kw["agree_bkt"] = tr.agreement_buckets(doc)
+    if meta.get("pos") and "pos" in P: kw["pos_bkt"] = tr.pos_buckets(doc)
+    if meta.get("lemvec") and "lemvec" in P: kw["lemvec"] = proc._lemma_vecs(doc)
+    if meta.get("morphhash") and "morphhash" in P: kw["morph_bkt"] = tr.morph_hash_buckets(doc)
+    if meta.get("feat_names"):
+        fb = {}
+        for name in meta["feat_names"]:
+            key = f"feat_{name}"
+            if key not in P:
+                continue
+            vocab_index = {tuple(v): i for i, v in enumerate(meta["feat_vocab"][name])}
+            fb[name] = tr.feat_buckets(doc, name, vocab_index)
+        if fb: kw["feat_bkt"] = fb
+    if meta.get("pron") and "pron" in P: kw["pron_bkt"] = tr.preverbal_buckets(doc, meta["window"])
+    if meta.get("lemvec_dep") and "lemvec_dep" in P: kw["lemvec_dep"] = proc._lemma_vecs_dep(doc)
+    combined, _ = jb.forward(X, meta["window"], **kw)   # (n+1, n, nlab), window-masked to NEG already
+    Z = combined.transpose(1, 0, 2).reshape(n, -1)      # (n, (n+1)*nlab) — dependent, then (head,label) flat
+    Z = Z - Z.max(1, keepdims=True)
+    Pj = np.exp(Z)
+    Pj /= Pj.sum(1, keepdims=True)
+    Pj = Pj.reshape(n, n + 1, nlab)
+    labels = meta["labels"]
+    heads, deprels = [], []
+    for d in range(n):
+        hp = Pj[d].sum(-1)                          # (n+1,) — the head marginal
+        hd = {}
+        for hh in range(n + 1):
+            p = float(hp[hh])
+            if p >= 0.002:
+                hd[hh - 1 if hh else -1] = p
+        heads.append(hd)
+        # ⚠ ONLY FOR THE HEADS THAT SURVIVED THE PRUNE ABOVE — the same rule `_arc_scores` states:
+        # renormalising labels WITHIN an arc nothing weighed hides how little the arc was worth, and
+        # would report a confident-looking relation under an attachment the decoder in fact rejected.
+        dd = {}
+        for hh in range(n + 1):
+            key = hh - 1 if hh else -1
+            if key not in hd:
+                continue
+            denom = hp[hh]
+            if denom <= 0:
+                continue
+            row = Pj[d, hh] / denom
+            dd[key] = {labels[j]: float(p) for j, p in enumerate(row) if p >= 0.005}
+        deprels.append(dd)
+    return heads, deprels
+
+
 # The lexical features the POS menu draws as dot-suffixed SUBTYPES (PRON.Dem, NUM.Ord) — kept in step with the
 # frontend's own UPOS_SUBTYPE_FEATS (js/editing/context-menu.js), which is the list that decides which rows the
 # subtype flyout actually has. Only these are pooled into the joint map below: the morphologizer's labels carry
@@ -2245,7 +2349,16 @@ def _score_doc(nlp, package, forms, upos=None, tb_lang=None, glosses=None):
     uposub: list = []
     for pname, proc in nlp.pipeline:
         if pname == "parser":
-            heads, deprels = _arc_scores(proc, doc)
+            # ⚠ TWO DIFFERENT DECODERS ANSWER TO "parser" NOW. A transition-based parser (`.moves`)
+            # has no head distribution to read off and needs `_arc_scores`' greedy-walk
+            # approximation; the arc-factored decoder (Sanskrit, SUD-spaCy ≥0.4.0 —
+            # `sud_arcfactored_parser.py`) scores every (head, label) pair at once and has a
+            # genuine one, so it gets its own, more honest path rather than being forced through
+            # code written for the other shape's constraints.
+            if hasattr(proc, "moves"):
+                heads, deprels = _arc_scores(proc, doc)
+            else:
+                heads, deprels = _arc_factored_scores(proc, doc)
         elif pname == "morphologizer":
             uposd, uposub = _upos_scores(proc, doc)
         doc = proc(doc)
