@@ -122,6 +122,29 @@
   @font-face{font-family:"Noto Sans Zanabazarsquare";font-style:normal;font-weight:400;font-display:swap;src:url("../fonts/notosanszanabazarsquare.ttf") format("truetype")}
   @font-face{font-family:"Noto Serif Tibetan";font-style:normal;font-weight:100 900;font-display:swap;src:url("../fonts/notoseriftibetan.ttf") format("truetype-variations")}
 
+  /* A SEVENTH core face, bundled for the SAME reason Nithya Ranjana is: LXGW Seal ("霞鹜篆书",
+     github.com/lxgw/LxgwSeal, SIL OFL 1.1 — its own OFL.txt vendored verbatim at
+     web/fonts/LXGW-Seal-OFL.txt, since it carries an additional-permission clause beyond the stock
+     text this file's shared OFL.txt states, so the two are not byte-identical and cannot share one
+     copy the way Noto/Nithya Ranjana do) draws Literary Chinese's Small Seal Script option and isn't
+     on Google Fonts either, so the on-demand fetch (fontload.js/app/fonts.py) has nothing to ask for.
+     Unlike Rañjanā, though, there is no cmap collision to steer around with a scheme-scoped
+     `--token-font` override: Small Seal Script is Unicode 18.0's own brand-new "Seal" block
+     (U+3D000-3FC3F), not a reuse of another script's codepoints, so the ordinary "first family in the
+     stack with a glyph" resolution already picks this face correctly the moment its name joins
+     TOKEN_STACK/--token-font (chrome-kit's base-tokens.css/fluent-tokens.css) — see
+     app/translit.py's `_smallseal`/`_seal_table` for the conversion that puts those codepoints on
+     screen, and app/data/lxgw_seal.tsv (built by tools/build_lxgw_seal_index.py) for the table.
+     `unicode-range` is still set, scoped to exactly that block: the file carries a handful of
+     incidental ASCII glyphs (FontCreator's own defaults, not this font's actual repertoire) that must
+     never compete with Noto Sans for ordinary Latin text regardless of where "LXGW Seal" sits in the
+     stack. Single static Regular weight (fontTools: no `fvar`), 193 KB — the font currently covers
+     only 105 seal characters of an eventual ~300-1,000 (the project's own README calls it an early,
+     personally-maintained alpha), so most Literary Chinese text under this Script option falls back
+     to its ordinary Han glyphs one character at a time — see `_smallseal`'s own note on why that
+     degradation, rather than an error or a placeholder glyph, is the right failure here. */
+  @font-face{font-family:"LXGW Seal";font-style:normal;font-weight:400;font-display:swap;src:url("../fonts/lxgwseal.ttf") format("truetype");unicode-range:U+3D000-3FC3F}
+
   /* ── THE FOREIGN MARK IN A CHINESE DOCUMENT IS A TYPEFACE, NOT A SLANT ────────────────────────────
      Han has no italic. `.tok-ital` (FEATS Foreign=Yes) asks for `font-style:italic` and the engine
      answers with a SYNTHESISED oblique — a sheared 行, which is not a mark Chinese typography makes.

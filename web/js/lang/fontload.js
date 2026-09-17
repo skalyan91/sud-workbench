@@ -86,8 +86,15 @@ if(typeof document!=="undefined"&&document.fonts&&document.fonts.addEventListene
 // probe returned early before ever asking. Bundling Tibetan's own face outright, under its OWN real
 // name, is what fixes that: no probe to fool, and nothing in this app names "Noto Sans Tibetan" any
 // more (FONT_NAME_OVERRIDE below is what makes fontStackName answer "Noto Serif Tibetan" for it).
+// ⚠ "Seal" (Unicode 18.0's own new block, Literary Chinese's Small Seal Script option — LXGW Seal,
+// web/styles/fonts.css) is in here for the SAME reason as Nithya Ranjana, not the same reason as the
+// six above: it isn't on Google Fonts, so ensureScriptFont()/fontCovers() have nothing to ask for
+// either way. Purely defensive — \p{Script=Seal} would need this JS engine's own Unicode/ICU tables
+// to already know a brand-new script value the day it ships, which docScripts() never risks: "Seal"
+// is deliberately NOT in FONT_SCRIPTS below, so that regex is never even constructed and a document
+// showing Small Seal glyphs is never walked through this on-demand path at all.
 const FONT_CORE_SCRIPTS=new Set(["Latin","Greek","Cyrillic","Common","Inherited","Unknown","Braille",
-  "Grantha","Javanese","Balinese","Kawi","Zanabazar_Square","Tibetan"]);
+  "Grantha","Javanese","Balinese","Kawi","Zanabazar_Square","Tibetan","Seal"]);
 // Unicode script name → the family name the font stacks use, where squashing the name doesn't give it.
 // (Everything else derives: "Canadian_Aboriginal" → "Noto Sans Canadianaboriginal", matching the
 // vendored faces; the Google Fonts side wants the spaced form, "Noto Sans Canadian Aboriginal".)

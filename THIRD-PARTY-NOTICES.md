@@ -46,9 +46,26 @@ Everything else below is properly licensed.
 |---|---|---|---|
 | Noto Sans family | 172 `.ttf` | [notofonts](https://github.com/notofonts) | SIL OFL 1.1 |
 | Nithya Ranjana DU | `nithyaranjana.otf` | [EkType/NithyaRanjana](https://github.com/EkType/NithyaRanjana) | SIL OFL 1.1 |
+| LXGW Seal ("霞鹜篆书") | `lxgwseal.ttf` | [lxgw/LxgwSeal](https://github.com/lxgw/LxgwSeal) @ `v0.001-alpha.7.24` | SIL OFL 1.1 |
 
 - Noto Sans: Copyright The Noto Project Authors. <https://openfontlicense.org>
 - Nithya Ranjana DU: Copyright 2024 The Nithya Ranjana Project Authors. <https://scripts.sil.org/OFL>
+- LXGW Seal: Copyright 2026 LXGW. <https://github.com/lxgw/LxgwSeal>
+
+**LXGW Seal's own `OFL.txt` is vendored SEPARATELY, at `web/fonts/LXGW-Seal-OFL.txt`, and is NOT
+byte-identical to the shared `web/fonts/OFL.txt` above it** — checked directly rather than assumed
+from the other two fonts' precedent. Beyond the boilerplate OFL 1.1 text (identical modulo
+whitespace), its copyright line declares Reserved Font Names ('霞鹜', '霞鶩', '落霞孤鹜', '落霞孤鶩',
+'LXGW') and then grants an **ADDITIONAL PERMISSION** narrower than condition 3's default: an
+unmodified recompile, or a subset/format-converted (e.g. WOFF/WOFF2) Modified Version made *for web
+font delivery*, may still use those Reserved Font Names, provided it is not itself redistributed as
+an installable desktop font. This app vendors the file **completely unmodified** — no fontTools
+edit, unlike the `notosans.ttf` patch below — so condition 3 is not even reached: the family name
+(`name` IDs 1/4, English "LXGW Seal") is exactly upstream's own, matching
+`web/styles/fonts.css`'s `@font-face{font-family:"LXGW Seal"; …}` with no renaming question to
+answer either way. Bundled purely for in-app display (never offered as a downloadable/installable
+font of its own), which is squarely inside what condition 2 (bundling with software) already
+permits regardless of the additional permission.
 
 Both declare OFL 1.1 in their own `name` tables (IDs 13/14) — confirmed against each font's own
 upstream `OFL.txt` (`notofonts`'s and `EkType/NithyaRanjana`'s), which are byte-identical outside
@@ -145,6 +162,7 @@ symmetrically, though that one is for size alone: MIT would have travelled fine.
 | Apte, *The Practical Sanskrit-English Dictionary*, rev. ed. 1957 | `apte1957.tsv.xz` | [sanskrit-lexicon/csl-orig](https://github.com/sanskrit-lexicon/csl-orig), `v02/ap` | **CC BY-SA 4.0** |
 | Unihan `kHangul` readings | `hanja_hangul.tsv` | Unicode Character Database, UAX #38 | Unicode Licence |
 | fastText `lid.176` language ID model | `lid.176.ftz` | [facebookresearch/fastText](https://github.com/facebookresearch/fastText) | **CC BY-SA 3.0** (the model; the library itself is MIT) |
+| LXGW Seal's own seal↔modern codepoint index | `lxgw_seal.tsv` | [lxgw/LxgwSeal](https://github.com/lxgw/LxgwSeal), `documentation/table.md` @ `v0.001-alpha.7.24` | SIL OFL 1.1 (travels with the font it indexes — see the Fonts section above) |
 
 **The two CC BY-SA components are share-alike**, which has a consequence worth stating plainly:
 `apte1957.tsv.xz` is a *derivative* of the CDSL source text (built by `tools/build_apte_index.py`),

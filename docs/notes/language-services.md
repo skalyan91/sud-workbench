@@ -220,6 +220,52 @@
   Verified across both tables — no checked syllable in either also carries an `X` or `H`, and there is no graph
   where one table writes the same segments checked and the other unchecked.
   Byte-reproducible, `--retrieved` required — don't hand-edit it, re-run the script.
+- **Literary Chinese's Small Seal Script (小篆) is a SCRIPT (main-glyph re-render), not a
+  transliteration — same shape as Simplified/Traditional, but into Unicode 18.0's own new "Seal"
+  block (U+3D000-U+3FC3F) rather than another spelling of ordinary Han.** `app/translit.py`'s
+  `_smallseal`/`_seal_table` map a modern Han character to its seal codepoint via
+  `app/data/lxgw_seal.tsv` (built by `tools/build_lxgw_seal_index.py --retrieved YYYY-MM-DD` from
+  LXGW Seal's own `documentation/table.md`, pinned to the exact release tag the vendored
+  `web/fonts/lxgwseal.ttf` was built from — the table and the font's cmap must agree on which
+  characters exist). Registered in `_SCRIPT_SCHEMES["lzh"]` only — the user asked for Literary
+  Chinese by name, and zh/yue were not part of the request.
+  ⚠ **A CHARACTER ABSENT FROM THE TABLE IS LEFT AS ITSELF**, exactly like `_t2s`/`_s2t` leave an
+  OpenCC-unmapped character alone: LXGW Seal is an early, hand-curated alpha (its own README calls
+  it "not a professional-grade font" with "no plans for major expansion"), 105 seal characters
+  against ~50,000+ Han graphs, so most Literary Chinese text under this Script option shows mostly
+  ordinary Han with the covered graphs in seal-script glyphs — a partial, honest degradation, not an
+  error or a placeholder box. `_is_latin_output` gates `smallseal` alongside `simplified`/
+  `traditional`/`zhuyin` (native-script output, CJK punctuation preserved, never Latinised).
+  ⚠️ **`_ENGINES["smallseal"]` NEEDS NO CJK PACKAGE, UNLIKE EVERY OTHER Han-family ENGINE ON THAT
+  DICT.** OpenCC/pypinyin/ToJyutping are all optional; the seal conversion is pure-Python table
+  lookup against a vendored TSV, so its availability check is simply "did the table load"
+  (`bool(_seal_table())`), matching Baxter/General-Chinese's own vendored-table pattern rather than
+  the `_pkg(...)` checks beside it.
+  ⚠️ **THE TABLE ITSELF FOLDS THREE OF THE SOURCE'S SIX COLUMNS INTO THE MAPPING, RESPECTING TWO
+  KINDS OF EXPLICIT EXCLUSION THE SOURCE MARKS BY HAND.** 对应正字（本字）/简化字（规范字）/直接隶定字/
+  后起字或其他异体 all become rows to the same seal glyph (`documentation/table.md`'s own collection
+  principle 3 confirms 后起字 — "later-form" — mappings are deliberate, e.g. 花 for 華/华, not merely
+  a reference column); a cell wrapped in the source's own markdown strikethrough (``~~`U+8C37`谷~~``,
+  the 穀/谷 merger the source explicitly declines to conflate) or matching parentheses (直接隶定字
+  outside Basic/Extension-A, kept "for reference" per the source's own rule 3) is excluded from the
+  mapping rather than read anyway. A footnote marker trailing a parenthesised entry (`萬`'s own row,
+  whose footnote calls the Unicode chart's own suggested equivalent unreliable) is stripped before
+  that check, not after — the naive version read the footnote text as part of the cell and missed
+  that the entry was parenthesised at all, which is exactly the "read it anyway" failure the
+  parenthesis rule exists to prevent. Verified against the live 105-row table: 137 (seal, modern)
+  pairs, zero collisions (no modern character maps to two different seal glyphs), and the build is
+  byte-reproducible from a fresh download.
+  ⚠️ **THE FONT NEEDS NO `SCHEME_FONT_OVERRIDE` (js/lang/translit.js), UNLIKE RAÑJANĀ.** Rañjanā
+  reuses plain Devanagari codepoints, so the ordinary "first stack family with a glyph" resolution
+  cannot tell it from a Devanagari-scheme document by codepoint alone. Small Seal Script's
+  codepoints are Unicode 18.0's own new block, covered by no other font in the stack, so simply
+  naming "LXGW Seal" in `TOKEN_STACK`/`--token-font` (chrome-kit's base-tokens.css/fluent-tokens.css)
+  is enough — see web/styles/fonts.css's own note on the font for the rest of the bundling story.
+  ⚠️ **NOT ADDED TO `TRANSFORM_ORTHO` (js/diagram/diagram-core.js).** That set marks SAME-SCRIPT
+  glyph swaps with no top-line displacement (Simplified/Traditional, Serbian Cyrillic↔Latin); Small
+  Seal Script is a genuinely different writing system, so `orthoScript()` should treat it — and does,
+  by simply not naming it there — as a real script displacing the main line, exactly like Zhuyin
+  already is for the same reason.
 - `app/langid.py` — fastText `lid.176`, model **vendored** at `app/data/lid.176.ftz` so detection is
   fully offline. Drives the document language on open.
 - `app/sud_rules.py` — parses the fetched grew validator patterns

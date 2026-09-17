@@ -192,6 +192,40 @@ consonant's head-stroke at ONE height (a dashed shirorekha) and Noto Sans Gujara
 at one height. Both consumers move for them: the running line by the numbers above, and the brackets by
 +1.01px (Gujarati) / +1.43px (Nandinagari), the same register as Devanagari's own documented +0.99px.
 
+## Literary Chinese's Small Seal Script: a bundled font with no scheme override to write
+
+⚠ **LXGW SEAL (github.com/lxgw/LxgwSeal, SIL OFL 1.1) IS A SEVENTH CORE FACE, BUNDLED FOR THE SAME
+REASON NITHYA RANJANA IS — NOT ON GOOGLE FONTS, SO THE ON-DEMAND FETCH HAS NOTHING TO ASK FOR — BUT
+NEEDING NONE OF RAÑJANĀ'S SCHEME-SCOPED `--token-font` OVERRIDE.** Rañjanā reuses plain Devanagari
+codepoints, so the browser's ordinary "first stack family with a glyph" resolution cannot tell a
+Rañjanā-scheme document from a Devanagari one by codepoint alone, which is the whole reason
+`SCHEME_FONT_OVERRIDE`/`syncSchemeAttr`'s inline `--token-font` exists. Literary Chinese's Small
+Seal Script (小篆) option draws from Unicode 18.0's own brand-new "Seal" block (U+3D000-U+3FC3F,
+WG2 N5344R, accepted for that version) — codepoints no OTHER font in the stack has ever claimed —
+so simply naming `"LXGW Seal"` in `TOKEN_STACK`/`--token-font` (chrome-kit's
+base-tokens.css/fluent-tokens.css) is enough; there is no collision to steer around and so nothing
+for a scheme-scoped override to do. `unicode-range:U+3D000-3FC3F` on the `@font-face` still matters
+for a different reason: the file carries a handful of incidental ASCII glyphs (FontCreator tooling
+defaults, not the font's actual repertoire) that must never compete with Noto Sans for ordinary
+Latin text regardless of where "LXGW Seal" sits in the stack.
+⚠️ **THE CONVERSION ITSELF IS AN ORTHOGRAPHY (`app/translit.py`'s `_smallseal`), NOT SOMETHING THIS
+FILE'S FONT-SWAP MACHINERY HANDLES** — see `docs/notes/language-services.md` for the vendored
+codepoint table, its partial (105-character) coverage, and the "leave an unmapped character alone"
+degradation this shares with `_t2s`/`_s2t`. `FONT_CORE_SCRIPTS` (js/lang/fontload.js) lists "Seal"
+purely defensively, alongside the six STACKING_SCRIPTS bundled for the tofu-probe reason described
+below — Small Seal Script can never actually reach `docScripts()`'s on-demand path at all, since
+"Seal" is deliberately not in `FONT_SCRIPTS` (which would need this JS engine's own Unicode/ICU
+tables to already recognise a script value days-old at best).
+⚠️ **NEITHER `ORNAMENTAL_SCRIPTS` NOR ANY MAGNIFICATION CHANGE WAS ADDED FOR IT** — a deliberate
+omission, not an oversight. That set is kept in sync BY HAND with `_AKSHARA_SCRIPTS`' Sanskrit/
+Brahmic scheme ids specifically (see this file's own note above) and reached through
+`scriptMag()`'s Sanskrit-or-picked-script `eff` variable; Literary Chinese's magnification is a
+SEPARATE, already-uniform rule (`isLzhLang() && ORTHO_SCHEME!=="none" && !LATIN_ORTHO.has(…)` → 1.5×
+for any non-Latin lzh scheme), which a picked `smallseal` scheme already satisfies with no code
+change. Small Seal Script's own letterforms are also closed curvilinear shapes rather than the
+dense fine-stroke ornament the 2× tier exists for, so the existing uniform 1.5× was judged the
+right tier rather than a gap to close.
+
 ## The Lemma row's `smcp` gap is inside Noto Sans itself, not a missing feature
 
 ⚠ **CONFIRMED LIVE, PER CODEPOINT: NOTO SANS'S OWN `smcp` TABLE IS INCONSISTENT ACROSS ONE NARROW

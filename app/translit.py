@@ -2350,6 +2350,44 @@ _SINGLE_LANGS = set(_SINGLE_LABEL) | {
     "bo", "dz", "new", "th", "lo", "km", "my", "shn", "hy", "ka", "am", "ti", "gez",
 }
 
+# LITERARY CHINESE'S SMALL SEAL SCRIPT (小篆): a genuine ORTHOGRAPHY, same shape as
+# simplified/traditional (a display-glyph re-render, never written to MISC) rather than a
+# transliteration — but unlike Simplified/Traditional, whose OpenCC tables cover essentially all of
+# Han, this one maps into Unicode 18.0's brand-new "Seal" block (U+3D000-U+3FC3F), which
+# `app/data/lxgw_seal.tsv` (vendored from LXGW Seal's own documentation/table.md — see
+# `tools/build_lxgw_seal_index.py`) currently indexes for 105 seal characters / 137 modern
+# codepoints. A character absent from the table is left as itself, exactly like `_t2s`/`_s2t` leave
+# an unmapped character alone — the honest degradation an early-alpha, hand-curated font demands,
+# not an error and not a placeholder box.
+_SEAL_TABLE: dict[str, str] | None = None
+
+
+def _seal_table() -> dict[str, str]:
+    """Modern Han character → its Small Seal Script codepoint.  Parsed once; a missing or
+    unreadable file yields {} so the scheme simply reports unavailable, never an exception."""
+    global _SEAL_TABLE
+    if _SEAL_TABLE is None:
+        _SEAL_TABLE = {}
+        try:
+            with open(os.path.join(_DATA_DIR, "lxgw_seal.tsv"), encoding="utf-8") as fh:
+                for line in fh:
+                    if line.startswith("#") or "\t" not in line:
+                        continue
+                    cols = line.rstrip("\n").split("\t")
+                    if len(cols) >= 3 and cols[1] and cols[2]:
+                        _SEAL_TABLE[cols[2]] = cols[1]   # han_char → seal_char
+        except Exception:  # noqa: BLE001
+            pass
+    return _SEAL_TABLE
+
+
+def _smallseal(text: str) -> str:
+    table = _seal_table()
+    if not table:
+        return text
+    return "".join(table.get(ch, ch) for ch in text)
+
+
 # scheme_id → (engine callable, availability check).  The engine takes (text) → romanisation.
 _ENGINES = {
     "pinyin": (_pinyin, lambda: _pkg("pypinyin")),
@@ -2366,6 +2404,7 @@ _ENGINES = {
     "latin": (_to_serbian_latin, lambda: True),        # Serbian/SC → Latin (Gajica); pure Python, always available
     "cyrillic": (_to_serbian_cyrillic, lambda: True),  # Serbian/SC → Cyrillic
     "mn-traditional": (lambda t: "", lambda: False),   # traditional Mongolian: DISABLED (no correct converter)
+    "smallseal": (_smallseal, lambda: bool(_seal_table())),   # lzh only — see _SCRIPT_SCHEMES
 }
 
 
@@ -2469,7 +2508,13 @@ _MONG = ("mn", "mon", "khk")
 # engine's name and what a remembered Script preference is stored under.
 _SA_SCRIPTS = [("iast", "Latin")] + list(_AKSHARA_SCRIPTS)
 _SCRIPT_SCHEMES: dict[str, list[tuple[str, str]]] = {
-    "zh": _HANZI_CONV, "yue": _HANZI_CONV, "lzh": _HANZI_CONV,
+    "zh": _HANZI_CONV, "yue": _HANZI_CONV,
+    # Small Seal Script (小篆): Literary Chinese only, on request — see _smallseal/_seal_table above.
+    # A genuinely different writing system (Unicode 18.0's own new codepoint block), unlike
+    # Simplified/Traditional's same-script glyph swap, so it is NOT added to the frontend's
+    # TRANSFORM_ORTHO set (js/diagram/diagram-core.js) — orthoScript() should (and does, by default)
+    # treat it as a real script displacing the main line, the same as Zhuyin already is.
+    "lzh": _HANZI_CONV + [("smallseal", "Small Seal Script")],
     "sa": _SA_SCRIPTS,
     # LATIN: not another writing system but another SPELLING of the one it has — vowel length, which
     # classical orthography leaves unwritten and every teaching edition restores.  It belongs to the
@@ -2601,7 +2646,8 @@ def _is_latin_output(scheme: str) -> bool:
     orthographies (Zhuyin and the Indic scripts), whose script-native punctuation must be preserved.
     ``vocalise`` joins that set for the same reason: Arabic/Persian short vowels are Arabic-script
     output, not romanised, even though `macron` (Latin vowel length) rightly stays True."""
-    return (scheme not in ("zhuyin", "simplified", "traditional", "latin", "cyrillic", "mn-traditional", "vocalise")
+    return (scheme not in ("zhuyin", "simplified", "traditional", "smallseal", "latin", "cyrillic",
+                           "mn-traditional", "vocalise")
             and scheme not in _AKSHARA_IDS)
 
 
