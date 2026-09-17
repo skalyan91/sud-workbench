@@ -2514,7 +2514,7 @@ _SCRIPT_SCHEMES: dict[str, list[tuple[str, str]]] = {
     # Simplified/Traditional's same-script glyph swap, so it is NOT added to the frontend's
     # TRANSFORM_ORTHO set (js/diagram/diagram-core.js) — orthoScript() should (and does, by default)
     # treat it as a real script displacing the main line, the same as Zhuyin already is.
-    "lzh": _HANZI_CONV + [("smallseal", "Small Seal Script")],
+    "lzh": _HANZI_CONV + [("smallseal", "Seal Script")],
     "sa": _SA_SCRIPTS,
     # LATIN: not another writing system but another SPELLING of the one it has — vowel length, which
     # classical orthography leaves unwritten and every teaching edition restores.  It belongs to the
