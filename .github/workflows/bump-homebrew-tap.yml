@@ -11,6 +11,18 @@
 # formula): the app is unsigned, so a Cask would hand Gatekeeper a quarantined prebuilt binary,
 # while a Formula builds from source on the installing machine. That is why this workflow bumps a
 # source tarball's URL and hash rather than a release asset's.
+#
+# ⚠ THE FORMULA ALSO NEEDS web/chrome-kit'S OWN PIN KEPT IN STEP, AND FOR THE SAME REASON THIS
+# WORKFLOW EXISTS AT ALL. chrome-kit is a git SUBMODULE — a commit pointer in this repo's tree, not
+# files a `url "…/archive/refs/tags/…"` tarball can carry, so the Formula fetches it as a SECOND,
+# separately pinned `resource`. Left alone across a release the way the main url/sha256 used to be
+# left alone, that pin goes stale the moment chrome-kit gets a new commit: the Formula would still
+# build (nothing here fails loudly the way a missing MAIN tarball would), it would just build
+# yesterday's window chrome under today's app — silently, exactly like the bug this whole mechanism
+# was added to fix (v0.3.22's first Homebrew build shipped with NO chrome-kit at all, caught only
+# by a report of "broken CSS"). So this workflow re-resolves BOTH pins from the SAME tag every time,
+# reading the submodule's pinned commit straight off that tag's own tree (`git ls-tree`) rather than
+# assuming chrome-kit's default branch head is what this release was actually built against.
 name: Bump the Homebrew tap
 
 on:
@@ -30,6 +42,7 @@ on:
 env:
   TAP_REPO: skalyan91/homebrew-sud-workbench
   FORMULA: Formula/sud-workbench.rb
+  CHROME_KIT_REPO: skalyan91/pywebview-chrome-kit
 
 jobs:
   bump:
@@ -55,6 +68,42 @@ jobs:
           echo "url=$URL" >> "$GITHUB_OUTPUT"
           echo "sha=$(sha256sum src.tar.gz | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
 
+      - name: Check out this repo's tree at the tag
+        # Only to read the chrome-kit gitlink off it (below) — `git ls-tree` needs the TAG's tree,
+        # which the job has no other reason to have checked out (everything else here works off
+        # the release tarball URL alone). `fetch-depth: 1` at a specific `ref` gets exactly that
+        # one commit's tree, not the repo's history.
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.t.outputs.tag }}
+          path: src
+          fetch-depth: 1
+
+      - name: Resolve the chrome-kit submodule's pinned commit
+        id: ck
+        working-directory: src
+        run: |
+          set -euo pipefail
+          # web/chrome-kit is a "160000 commit <sha> web/chrome-kit" gitlink in THIS repo's own
+          # tree, not a directory of files — reading it needs no submodule init (which would need
+          # its own credentials and fetches content this step never uses, only the SHA).
+          LINE="$(git ls-tree HEAD -- web/chrome-kit)"
+          [ -n "$LINE" ] || { echo "::error::no web/chrome-kit gitlink at ${{ steps.t.outputs.tag }} — has the submodule moved, been renamed or removed?"; exit 1; }
+          SHA="$(echo "$LINE" | awk '{print $3}')"
+          echo "$SHA" | grep -qE '^[0-9a-f]{40}$' || { echo "::error::unexpected gitlink line: $LINE"; exit 1; }
+          echo "sha=$SHA" >> "$GITHUB_OUTPUT"
+
+      - name: Hash the chrome-kit tarball
+        id: ckh
+        run: |
+          set -euo pipefail
+          URL="https://github.com/${{ env.CHROME_KIT_REPO }}/archive/${{ steps.ck.outputs.sha }}.tar.gz"
+          # Same -f-so-a-miss-fails reasoning as the main tarball above: a submodule pointer at a
+          # commit that was force-pushed away or never pushed is a broken release, not a skip.
+          curl -fsSL "$URL" -o ck.tar.gz
+          echo "url=$URL" >> "$GITHUB_OUTPUT"
+          echo "sha=$(sha256sum ck.tar.gz | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+
       - name: Check out the tap
         uses: actions/checkout@v4
         with:
@@ -74,13 +123,41 @@ jobs:
           grep -qE '^\s*url "https://github.com/[^"]+/archive/refs/tags/v[^"]+\.tar\.gz"' "$F" \
             || { echo "::error::no tagged-tarball url line in $F"; exit 1; }
           grep -qE '^\s*sha256 "[0-9a-f]{64}"' "$F" || { echo "::error::no sha256 line in $F"; exit 1; }
+          # …and the chrome-kit resource block, anchored the SAME way and for the same reason —
+          # `resource "chrome-kit" do` scopes the substitution below to exactly the two lines
+          # inside it, never the main url/sha256 pair above (which the perl pattern for THOSE
+          # never reaches into a `resource … do … end` body for either).
+          grep -qE '^\s*resource "chrome-kit" do' "$F" || { echo "::error::no chrome-kit resource block in $F"; exit 1; }
           perl -0pi -e 's{^(\s*url ")https://github\.com/[^"]+/archive/refs/tags/v[^"]+\.tar\.gz(")}{$1${{ steps.h.outputs.url }}$2}m' "$F"
           perl -0pi -e 's{^(\s*sha256 ")[0-9a-f]{64}(")}{${1}${{ steps.h.outputs.sha }}$2}m' "$F"
-          # A bad substitution that still parses is the dangerous one, so check both: the file is valid
-          # Ruby, and it really does now name this tag.
+          # ⚠ ${1}, NOT $1 — Perl greedily reads digits after `$N` as PART of the variable name, so
+          # a bare `$1` directly followed by a replacement that starts with a digit (a commit SHA
+          # or a sha256 both routinely do) parses as `$1<those digits>`: a huge nonexistent capture
+          # group, silently interpolating to EMPTY and eating the whole replacement. Measured:
+          # `$1222…2$2` on this exact pattern deleted the resource block's url/sha256 lines down to
+          # a bare `"` before `end`, with no error from perl at all. `${1}` closes the variable name
+          # before the literal digits start, which is exactly why the PRE-EXISTING sha256 line two
+          # lines up already uses it and the url line above it doesn't need to (a URL always starts
+          # "https", a letter).
+          perl -0pi -e 's{(resource "chrome-kit" do\n\s*url ")[^"]*(")}{${1}${{ steps.ckh.outputs.url }}$2}' "$F"
+          perl -0pi -e 's{(resource "chrome-kit" do\n\s*url "[^"]*"\n\s*sha256 ")[0-9a-f]*(")}{${1}${{ steps.ckh.outputs.sha }}$2}' "$F"
+          # A REVISION is what a Formula-only fix between app releases needs (brew upgrade compares
+          # version strings, so a rebuild with no version change is invisible without one). A
+          # genuine new release always re-pins BOTH resources above from the same tag together, so
+          # it never needs one; a stale `revision N` left over from an earlier manual fix would
+          # otherwise ride along forever, inflating `brew list --versions` with a suffix nothing
+          # about THIS release earned. Strips any COMMENT LINES immediately above it too — such a
+          # revision is always hand-added with a note explaining why (see this file's own history),
+          # and a note about a revision that no longer exists is worse than no note.
+          perl -0pi -e 's{^(\s*#[^\n]*\n)*\s*revision \d+\n}{}m' "$F"
+          # A bad substitution that still parses is the dangerous one, so check all of it: the file
+          # is valid Ruby, and it really does now name this tag's tarball AND this tag's chrome-kit
+          # commit.
           ruby -c "$F"
           grep -q "${{ steps.h.outputs.url }}" "$F" || { echo "::error::url did not take"; exit 1; }
           grep -q "${{ steps.h.outputs.sha }}" "$F" || { echo "::error::sha256 did not take"; exit 1; }
+          grep -q "${{ steps.ckh.outputs.url }}" "$F" || { echo "::error::chrome-kit url did not take"; exit 1; }
+          grep -q "${{ steps.ckh.outputs.sha }}" "$F" || { echo "::error::chrome-kit sha256 did not take"; exit 1; }
           if git diff --quiet -- "$F"; then echo "changed=no" >> "$GITHUB_OUTPUT";
           else echo "changed=yes" >> "$GITHUB_OUTPUT"; fi
 
