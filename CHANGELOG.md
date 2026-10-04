@@ -2,6 +2,23 @@
 
 All notable changes to SUD Workbench are documented in this file.
 
+## [0.3.23] — 2026-10-04
+
+### New: lemmas get their own transliteration, and Literary Chinese can be shown in Small Seal Script
+
+- **When transliteration is on, every lemma now shows its transliteration directly beneath it**, in
+  italic small caps, in all five notations. Like the lemma itself, it appears only where the lemma
+  differs from the form, and the rows below it stay aligned across the sentence.
+- **The lemma's transliteration can be corrected in place**, wherever the form's can: one click opens
+  a field over it, and the correction is saved to MISC `LTranslit`. A correction stays put through a
+  re-parse, a change of word class and an edit to the form, and is recognised again when the file is
+  reopened; it is dropped automatically if the lemma itself changes.
+- **Small capitals now work for every letter with a dot below**, in both upright and italic: ḍ ḷ ḹ ṝ
+  and the rest of IAST, the Vietnamese ạ ậ ẹ ệ ọ ộ ụ, and their capitals. Previously several of these
+  stayed full-size inside a small-capped word, and in italic even ṣ and ṃ did.
+- **Literary Chinese can now be displayed in Small Seal Script** (choose **Seal Script** from the Script menu), using the
+  characters Unicode 18.0 encodes for it. A character with no seal form is shown as itself.
+
 ## [0.3.22] — 2026-09-17
 
 ### New: Sanskrit gets real confidence scores, and the Pipeline drawer gets group toggles

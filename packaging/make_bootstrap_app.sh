@@ -21,7 +21,7 @@ PROJECT="$(cd "$(dirname "$0")/.." && pwd)"
 OUT_DIR="${1:-$PROJECT/dist}"
 APP="$OUT_DIR/SUD Workbench.app"
 RES="$APP/Contents/Resources"
-VERSION="0.3.22"
+VERSION="0.3.23"
 BUNDLE_ID="io.sunflowerai.sudworkbench"
 WORK="$(mktemp -d)"; trap 'rm -rf "$WORK"' EXIT
 
