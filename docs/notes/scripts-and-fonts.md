@@ -375,3 +375,54 @@ pixel-level app-level visual (beyond `hb-view`'s already-authoritative one, repr
 could not be completed in this sandbox — `Page.captureScreenshot` returned no response even
 against a blank page, independent of anything this change touched, so this is an environment
 limitation, not a fix regression; the DOM/CSS-level and `hb-view` checks stand in for it.
+
+⚠ **THE ITALIC IS PATCHED TOO, ON REQUEST, WHEN THE LEMMA'S ROMANISATION ROW MADE ITALIC SMALL CAPS A REAL
+REGISTER** (`.translit.lem-tr`/`.otrans.lem-tr` — see diagram-rendering.md's "The lemma's own transliteration
+row"). ⚠ **AND THIS CORRECTS THE INVESTIGATION ABOVE**, which recorded `notosans-italic.ttf` as sharing "the
+identical `smcp` table and the identical gap". It shares the smcp table; it does NOT share the gap's shape.
+The italic has **no dot-below `MultipleSubst` in `ccmp` at all** — its `ccmp` is lookups 2/3/5 only, where
+the upright's is 2/3/5/6/7 — so in italic small caps even ṣ and ṃ stayed lowercase (`hb-shape --features=
++smcp`: `uni1E63=0+432`, `uni1E43=0+875`), not just the four the upright was missing. "The same way as the
+upright" therefore meant the same MECHANISM at a larger size: the upright's whole patched lookup 6 (14
+entries: upstream's ten — four Vietnamese dot-below letters, ṣ/ṃ, ḿ/ǹ/ṅ, dotless-i-with-dot-below — plus
+ṭ/ṇ/ṛ/ḥ) copied in as a new lookup at the same index 6, `LookupFlag` 16 with mark-filtering set 0 (the
+above-marks set in both files; the upright's has three extra marks, `uni1ACC`–`uni1ACE`, that the italic has
+no glyphs for, so the two are identical over the italic's own glyphs), added to the italic's single `ccmp`
+feature record, and every reference to a lookup ≥ 6 bumped by one (3,681 of them: feature records plus the
+`SubstLookupRecord`s inside contextual lookups; there are no FeatureVariations). Index 6 rather than the end
+of the list because lookups apply in LIST order — appended, it would run after `smcp` (lookup 37, now 38)
+and decompose a glyph smcp had already passed over.
+⚠ **VERIFIED AS A DIFF**: every codepoint in the italic's cmap (3,398 sequences, each combining mark also
+after a base) shaped plain, `+smcp` and `+c2sc`, before vs after — the ONLY differences are the 13
+codepoints the lookup decomposes, and the plain-text advance of each is unchanged (ṣ 432→432, ṃ 875→875, …),
+the decomposed base + mark taking exactly the precomposed glyph's width. `ttx` diff: glyf/hmtx/cmap/GDEF/
+GPOS/maxp/post identical; head only checksum/modified; name only IDs 3/5. Under `+smcp` all six IAST letters
+now come out `X.sc` + `dotbelowcomb` on the small-cap's own anchor (ṭ `t.sc=0+418|dotbelowcomb=0@77,0`).
+ḍ/ḷ remain unpatched in BOTH files, as recorded above. 2,322,640 → 2,331,864 bytes.
+⚠ **ONE MEASUREMENT GAP THIS DOES NOT CLOSE**: `_measOneUncached`'s HarfBuzz branch (any feature-settings
+measurement — LEM_FEAT included) shapes with the UPRIGHT bytes and ignores `italic` in the font string (see
+app/fonts.py's `_CORE_BUNDLED` note: nothing asks for the italic face by name). The lemma romanisation row is
+the first italic + smcp register, so its slot is measured in upright small caps — about 6 % wider than the
+italic small caps painted (s.sc 453 vs 420, t.sc 448 vs 418). Errs on the side of room, never clipping.
+
+⚠ **EXTENDED TO EVERY DOT-BELOW LETTER, IN BOTH FILES — SUPERSEDING "ḍ/ḷ REMAIN UNPATCHED" ABOVE**, on
+request ("you forgot to add other underdotted letters such as ḍ. Just do it for the whole Unicode blocks, for
+both upright and italic"). Surveyed rather than listed: every letter in each file's cmap whose NFD contains
+U+0323, shaped with `+smcp` (lowercase) or `+c2sc` (capitals) and checked for a `.sc` glyph in the result.
+Both files: 56 such letters (all in Latin Extended Additional), 46 failing — the same 46 in each. 42 were
+added to lookup 6 as `glyph → its NFD`, stacked ones included (ḹ → l+dotbelow+macron, ṩ → s+dotbelow+dot
+above, ậ → a+dotbelow+circumflex): upright and italic each 14 → 56 entries, and the survey now reports 0
+failing outside the four below. GPOS already carried what they need — the `.sc` bases' below AND above
+anchors, and the `.sc` mark variants smcp swaps in — so the stacked marks land correctly (checked with
+`hb-view`, both files, `smcp` and `c2sc`).
+⚠ **Ợ ợ Ự ự ARE DELIBERATELY LEFT OUT.** Their decomposition runs through the combining horn (U+031B), and
+(a) the horn letters themselves (ơ ư Ơ Ư) have no small-cap form in Noto Sans, so a small-capped ợ would
+sit beside a full-size ơ in the same word; (b) the decomposed sequence has a DIFFERENT plain-text advance
+(upright ự 674 → 618, Ự 780 → 731), i.e. it would re-space ordinary Vietnamese text. Included on the first
+pass, measured, and taken back out.
+⚠ **VERIFIED AS A DIFF, BOTH FILES**: every cmap codepoint (plus each mark after a base) shaped plain/
+`+smcp`/`+c2sc` before vs after — the only differences are these 42 letters (and `a`+U+0323, which HarfBuzz
+composes to ạ). Plain advances unchanged for all 42. Plain renders at 96 px are pixel-identical for the
+single-mark letters; the stacked ones (ậ ặ ệ ộ ṩ ḹ ṝ) move their above-mark by a pixel or two — GPOS
+mark-to-mark placement rather than the precomposed glyph's baked position, visually indistinguishable side
+by side.

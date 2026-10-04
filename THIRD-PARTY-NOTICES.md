@@ -103,6 +103,28 @@ dot-below letters. No glyph outline was drawn, no new glyph was added, and no ot
 `ttx` dump of each against the unpatched file. Every letterform on screen, small-capped or not, is
 still Noto Sans's own design.
 
+⚠ **`notosans-italic.ttf` IS NOW A MODIFIED VERSION TOO, ON THE SAME TERMS.** Same upstream project, same
+`OFL.txt`, so the same finding holds: no Reserved Font Name, family/full names (IDs 1/4) kept as upstream
+so `fonts.css`'s italic `@font-face{font-family:"Noto Sans";font-style:italic;…}` keeps matching, and IDs
+3/5 extended with the identical "SUD Workbench smcp patch" strings. **The edit is larger in kind than the
+upright one, and that is a fact about the upstream italic, not a choice made here:** its GSUB has NO
+dot-below decomposition lookup at all (the upright's `ccmp` lookup 6 is simply absent from the italic
+build), so not even ṣ/ṃ small-capped in it. The upright file's patched lookup — upstream's ten entries plus
+this project's four — was copied in WHOLE as a new `ccmp` lookup at the same index (6), with the same flags
+and the equivalent mark-filtering set (set 0 in both files; identical over every glyph the italic has), and
+every later lookup reference renumbered to make room, since lookups run in list order and this one has to
+run before `smcp`. Again no glyph was drawn or added, and `glyf`/`hmtx`/`cmap`/`GDEF`/`GPOS`/`post`/`maxp`
+are identical in a `ttx` diff; `head` differs only in `checkSumAdjustment`/`modified`.
+
+⚠ **BOTH FILES' LOOKUP NOW COVERS EVERY DOT-BELOW LETTER THEY HAVE, NOT ONLY THE FOUR ABOVE** — on request
+("do it for the whole Unicode blocks, for both upright and italic"). 42 more entries in each file, the same
+kind as the first four: every precomposed letter in the font whose canonical decomposition contains U+0323
+(all of them in Latin Extended Additional — ḅ ḍ ḳ ḷ ḹ ṝ ṩ ṿ ẉ ẓ, the Vietnamese ạ ậ ặ ẹ ệ ị ọ ộ ụ ỵ, and the
+capitals of these and of ṃ ṇ ṛ ṣ ṭ ḥ), mapped to exactly that decomposition. Four were deliberately left
+out: Ợ ợ Ự ự, whose horn letters ơ/ư have no small-cap form in Noto Sans at all, and whose decomposition
+changes their plain-text advance. Still no glyph drawn or added; the version string (ID 5) now reads
+"(dot-below ccmp decomposition)".
+
 ## Chrome kits — `web/chrome-kit/macos-kit/`, `web/chrome-kit/win11-kit/`
 
 The app ships two chrome kits and loads exactly one, chosen at page load from `<html

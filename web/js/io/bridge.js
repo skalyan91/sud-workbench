@@ -3068,8 +3068,9 @@ async function afterFormEdit(si,tokId,changed){ const s=DOC[si], t=s&&s.tokens[t
   if(!t) return;
   if(!changed) return;   // no net change (a cancelled edit, or a keystroke that nets out to the original form) → nothing is stale, so no re-parse either
   await stextAfterFormEdit(si,tokId);   // …and `# text` follows the form: the running sentence spells this word, so leaving it on the OLD spelling is the file disagreeing with itself. FIRST, before any of the refreshes below — fillOrtho rebuilds the Sanskrit running line FROM s.text (s.orthoLine), so a splice after it would leave that line a version behind
-  t.translit=""; t.translitLemma=""; t.ortho=""; t.unOrtho=""; t._trMisc=false; t._trPick=false;     // drop the stale caches so the fills recompute — including a hand-picked CJK reading (js/lang/readings.js), which was a statement about the OLD form and says nothing about the new one
-  t.misc=setMiscKV(setMiscKV(t.misc,"Translit",""),"LTranslit","");                     // stale MISC Translit for the old form (rewritten below)
+  const keepLtr=(typeof ltrPicked==="function")&&ltrPicked(t);   // a hand-corrected LEMMA romanisation is about the lemma, which a form edit does not change — kept (and it lapses on its own if the re-parse below changes the lemma: see ltrPicked)
+  t.translit=""; if(!keepLtr) t.translitLemma=""; t.ortho=""; t.unOrtho=""; t._trMisc=false; t._trPick=false;     // drop the stale caches so the fills recompute — including a hand-picked CJK reading (js/lang/readings.js), which was a statement about the OLD form and says nothing about the new one
+  t.misc=setMiscKV(t.misc,"Translit",""); if(!keepLtr) t.misc=setMiscKV(t.misc,"LTranslit","");   // stale MISC Translit for the old form (rewritten below)
   // item A: refresh the LANGUAGE-driven secondaries IMMEDIATELY — a single-token form edit doesn't change the
   // token count, so no re-tokenisation is needed; the transliteration / script / MSeg update at once instead of
   // after the (slower) parser round-trip.

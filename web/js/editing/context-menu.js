@@ -1802,7 +1802,8 @@ document.getElementById("doc").addEventListener("click",e=>{
     if(avmAddMenu(b.left+b.width/2,b.bottom,tk.si,tk.tokId)) setAvmOpen(apEl);   // …and the matrix stays grown, or the "+" (populated or placeholder) stays up, while its own menu is open
     return; } }   // anchored to the mark, not the pointer — a menu hinged off the thing that opened it
   if(e.target.closest(".avm-row")) return;   // item 3: an AVM row (outline's own — the SVG notations already returned above, via .node/.tok-group/.bwtok) is edited through its right-click/double-click MENU only, never inline text entry; with no exclusion here a plain single click fell through to the generic `.oline` branch below and opened the TOKEN's form editor instead — which also broke the double-click trigger just above, since its first click was busy replacing the row with an <input> before the second click could land on the same element
-  const trEl=e.target.closest(".tr-edit"); if(trEl){ const tk=tokFromEl(trEl); if(tk){ e.preventDefault(); editTransInline(tk.si,tk.tokId,{x:e.clientX,y:e.clientY}); return; } }   // edit the romanisation shown under a token — or, where the romanisation is non-deterministic, the STORED transliteration it is derived from (trRowEdit decides when the row carries .tr-edit at all)
+  const trEl=e.target.closest(".tr-edit"); if(trEl){ const tk=tokFromEl(trEl); if(tk){ e.preventDefault(); editTransInline(tk.si,tk.tokId,{x:e.clientX,y:e.clientY}); return; } }
+  const ltEl=e.target.closest(".ltr-edit"); if(ltEl){ const tk=tokFromEl(ltEl); if(tk){ e.preventDefault(); editLemTransInline(tk.si,tk.tokId,{x:e.clientX,y:e.clientY}); return; } }   // …and the LEMMA's romanisation row under the lemma, on the same terms (lemTrRowEdit). This is the OUTLINE's route; the draggable notations reach it from the tap branch in js/diagram/diagram-edit.js   // edit the romanisation shown under a token — or, where the romanisation is non-deterministic, the STORED transliteration it is derived from (trRowEdit decides when the row carries .tr-edit at all)
   const glEl=e.target.closest(".gl-edit"); if(glEl){ const tk=tokFromEl(glEl); if(tk){ e.preventDefault(); editTier(tk.si,tk.tokId,glEl.dataset.tier||"gloss",{x:e.clientX,y:e.clientY}); return; } }
   const lmEl=e.target.closest(".lem-edit"); if(lmEl){ const tk=tokFromEl(lmEl); if(tk){ e.preventDefault(); editLemmaInline(tk.si,tk.tokId,{x:e.clientX,y:e.clientY},lmEl); return; } }   // item 29: the lemma row answers the same single click its neighbours do. This is the OUTLINE's route (.olemma); the four draggable notations reach the same function from the tap branch in js/diagram/diagram-edit.js, which resolves the tapped element before pick() re-renders — exactly as .tr-edit/.gl-edit/POS_SEL above already do   // edit a gloss / morphemic tier → MISC
   const poEl=e.target.closest(POS_SEL); if(poEl){ const tk=tokFromEl(poEl); if(tk){ e.preventDefault(); editPosInline(tk.si,tk.tokId,{x:e.clientX,y:e.clientY},poEl); return; } }   // …and the POS row, on the same single click its neighbours already answer (editPosInline). This is the OUTLINE's route (.opos) — the four draggable notations reach the same function from the tap branch in js/diagram/diagram-edit.js, which has to resolve the tapped element before pick() re-renders. It goes AHEAD of the generic .oline branch below, which used to claim this click and open the token's FORM editor: clicking a word class opened a field over the WORD
@@ -1818,7 +1819,7 @@ document.getElementById("doc").addEventListener("keydown",e=>{ if(e.key!=="Enter
 // — EXCEPT where the language's romanisation is non-deterministic (CJK readings, the unvocalised abjads), where
 // the same click edits the STORED transliteration instead and the row re-derives from it (js/lang/translit-load.js).
 function transElOf(si,tokId){ const g=tokGroupOf(si,tokId);
-  return g?g.querySelector(".translit, .otrans"):null; }
+  return g?g.querySelector(".translit:not(.lem-tr), .otrans:not(.lem-tr)"):null; }   // not .lem-tr: the lemma's romanisation row under the lemma (lemTrRow, js/diagram/diagram-core.js) carries the same register classes but is not this field
 /* item 1 — WHAT EVERY DIAGRAM FORM EDITOR COMMITS THROUGH. The token FORM is reachable from two
    inline editors that are ONE field to the user: the form glyph itself (editNodeInline) and, once a
    real script is on display, the IAST row beneath it (editTransInline's iastFormEdit branch — the
@@ -1848,6 +1849,32 @@ function editTransInline(si,tokId,clickXY){ const s=DOC[si]; if(!s||tokId<1||tok
     changed=>{ if(!changed){ preserveScroll(renderDoc); return; }   // item 1: a cancelled/unchanged edit writes nothing and marks nothing dirty — it only puts the row back
       const t=s.tokens[tokId-1]; t.misc=setMiscKV(t.misc,"Translit",t.translit||""); t._trMisc=!!(t.translit); markDirty(); preserveScroll(renderDoc); },   // persist the edit to MISC Translit (a manual edit is authoritative)
     sentRTL(s), ()=>transElOf(si,tokId), null, false, clickXY); }
+/* ── THE LEMMA'S ROMANISATION, EDITED IN PLACE — editTransInline's twin, on request ("if transliterations are
+   editable, then lemma transliterations should also be"). Same three branches, in the same order, for the same
+   reasons; the differences are only what the lemma's half of each layer is called:
+     · iastFormEdit() — under a Sanskrit script the form's row IS the stored form, so the lemma's twin is the
+       stored LEMMA, and the field that edits that already exists: the lemma row's own (editLemmaInline).
+     · storedTrEditable() — non-deterministic romanisation → edit MISC LTranslit in the STORED scheme and let
+       the row re-derive from it (editStoredLemTransInline, js/lang/translit-load.js).
+     · otherwise, with no re-rendering script → edit the displayed value and persist it to MISC LTranslit, as
+       the form's row persists to MISC Translit.
+   Either commit records `t._ltrPick = t.lemma` (ltrPicked): the correction stands against annotateTranslitMisc
+   and a retag, and lapses on its own when the lemma changes — a romanisation of the old lemma says nothing
+   about a new one, exactly as afterFormEdit drops _trPick. allowEmpty: clearing the field withdraws it. */
+function lemTrElOf(si,tokId){ const g=tokGroupOf(si,tokId); return g?g.querySelector(".lem-tr"):null; }
+function editLemTransInline(si,tokId,clickXY){ const s=DOC[si]; if(!s||tokId<1||tokId>s.tokens.length)return; const el=lemTrElOf(si,tokId); if(!el)return;
+  if(iastFormEdit()){ editLemmaInline(si,tokId,clickXY,lemmaElOf(si,tokId)); return; }
+  if(typeof storedTrEditable==="function" && storedTrEditable()){ editStoredLemTransInline(si,tokId,clickXY); return; }
+  if(ORTHO_SCHEME)return;   // the same guard editTransInline stops at
+  const t=s.tokens[tokId-1];
+  makeEditable(el, t, "translitLemma",
+    changed=>{ if(!changed){ preserveScroll(renderDoc); return; }
+      const v=t.translitLemma||""; t.misc=setMiscKV(t.misc,"LTranslit",v);
+      if(v) t._ltrPick=t.lemma; else delete t._ltrPick;   // emptied → the automatic romanisation comes back on the refill below
+      markDirty();
+      if(!v && show.translit) fillTranslit();
+      preserveScroll(renderDoc); },
+    sentRTL(s), ()=>lemTrElOf(si,tokId), null, true, clickXY); }
 // inline-edit a token's gloss / morphemic tier on a diagram → the tier's MISC attribute (a proxy maps the "v" key onto MISC so the live preview reads/writes the same store)
 /* ── item 29: TYPING A LEMMA ON THE DIAGRAM ────────────────────────────────────────────────────────
    The lemma row is an inline field like every other row of the below-stack: the same gesture (a plain

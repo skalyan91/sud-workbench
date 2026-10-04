@@ -1040,6 +1040,35 @@ function initialFold(a,b){ if(a===b) return true;
 function lemmaShown(t){ const l=lemmaText(t); const f=(t&&t.form)||"";
   return !!l && !initialFold(l,f); }
 function lemmaRowTxt(t){ return lemmaShown(t)?lemmaText(t):""; }   // "" ⇒ this token's reserved slot is left blank, and given a transparent target instead (see the note above); every caller tests the string rather than re-asking lemmaShown
+/* ── THE LEMMA'S OWN TRANSLITERATION ROW — directly under the lemma, on request ("when transliteration is
+   enabled, show transliterations under lemmas as well as forms"). The lemma row above still paints the STORED
+   lemma (see the note over lemmaText); this is a SEPARATE row beneath it carrying `translitLemma`, the value
+   fillTranslit (js/lang/translit-load.js) has always computed alongside the form's and that nothing drew.
+   ⚠ IT IS A SECOND ROW OF THE LEMMA'S, so it inherits the lemma row's shape exactly: present per SENTENCE
+   (lemTrRow — the lemma row is there, the translit tier is on, and at least one token romanises its lemma
+   to something other than the lemma itself), and BLANK, not TIER_EMPTY, for a token whose lemma row is blank
+   (lemmaShown false) — that token has no lemma on screen for a romanisation to be OF. A token whose lemma IS
+   shown but has no romanisation (a Latin-script lemma, or one the engine had no answer for) paints TIER_EMPTY,
+   the form-translit row's own rule (trRowTxt).
+   ⚠ COUNTED THROUGH belowRows' `hasLem`, which now takes lemRows(t) — 0, 1 or 2 — rather than a boolean, so
+   every reserve that already sizes the lemma row sizes this one with no new parameter at any of its sites; a
+   boolean `true` there still counts as 1. belowStack's `lemRow` takes the same number (>1 ⇒ draw this row).
+   ⚠ EDITABLE EXACTLY WHEN THE FORM'S ROW IS (lemTrRowEdit = trRowEdit), on request ("if transliterations are
+   editable, then lemma transliterations should also be") — superseding this note's first version, which left
+   the row read-only on the grounds that LTranslit is written by annotateTranslitMisc and never typed. It now
+   can be typed, and editLemTransInline (js/editing/context-menu.js) mirrors editTransInline branch for branch:
+   the STORED LTranslit where the romanisation is non-deterministic, the displayed value + MISC LTranslit
+   otherwise. A correction is recorded as `t._ltrPick = <the lemma it was made for>` (ltrPicked,
+   js/lang/translit-load.js), so it lapses by itself the moment the lemma changes. It carries `.ltr-edit`, NOT
+   `.tr-edit` — the click routes have to tell the two fields apart — plus `.translit`/`.otrans` for the
+   register, selection and dimming rules, and `.lem-tr` so the sites that look for THE form's row (transElOf,
+   SEAM_ROW_SEL) can exclude it. */
+function lemTrTxt(t){ if(!show.translit||!lemmaShown(t)) return "";
+  const r=dispScheme(t.translitLemma||"",TRANSLIT_SCHEME); return (r&&r!==lemmaText(t))?r:""; }   // compared against the lemma as PAINTED (the stored column), the same "skip if it would duplicate the glyph above" rule trTxt applies to the form
+function lemTrRowTxt(t){ return lemmaShown(t)?(lemTrTxt(t)||TIER_EMPTY):""; }
+function lemTrRow(toks){ return trLayer() && lemmaRow(toks) && toks.some(x=>lemTrTxt(x)); }
+function lemTrRowEdit(){ return trRowEdit(); }   // one answer for both romanisation rows: whenever the form's is click-editable, the lemma's is too
+function lemRows(toks){ return lemmaRow(toks)?(lemTrRow(toks)?2:1):0; }   // the number belowRows/belowStack take for the lemma: its row, plus its romanisation's
 /* ── item 31: THE ROW A LEMMA EDIT BRINGS IN ──────────────────────────────────────────────────────
    "…unless a token is being edited, in which case it should slide into view." The row's presence is
    computed at RENDER time out of the sentence's own tokens, so "bring it in" can only mean: force the
@@ -1209,7 +1238,8 @@ function avmSlotW(t){ const b=avmLayout(t); return b?b.w:(show.avm?avmEmptyW():0
 // (lemmaRow is `some(lemmaShown)` over exactly these tokens), and a token that paints nothing returns 0 either
 // way. The transparent hit target the blank slot now carries deliberately contributes NO width: it is a hit
 // area, not ink, and widening a neighbour's column for it would move the diagram around invisible boxes.
-function lemmaSlotW(t){ if(!show.lemma) return 0; const s=lemmaRowTxt(t); return s?meas(s,LEM_F,LEM_FEAT):0; }
+function lemmaSlotW(t){ if(!show.lemma) return 0; const s=lemmaRowTxt(t); if(!s) return 0;
+  const r=lemTrTxt(t); return Math.max(meas(s,LEM_F,LEM_FEAT), r?meas(r,trFont(t),LEM_FEAT):0); }   // …and the lemma's romanisation under it (lemTrTxt), in the face that row paints — a long romanisation must not crowd the neighbour any more than a long lemma may
 /* MEASUREMENTS ARE CACHED, because the same handful of strings is measured over and over: one load of
    the sample document makes 4,985 calls with 183 DISTINCT (text, font, extra-css) triples, and a
    notation switch 6,883 with 325 — 96% repeats. Each miss is a real cost: the body below writes into
@@ -2996,7 +3026,7 @@ function htmlSeamMark(host,tk,row){ if(!host) return;
 // ONLY the middle marks move. A post/pre mark stays flush against the row it hangs off, ragged edge and all: it
 // belongs to ONE token, as that word's own suffix/prefix, and hanging it out at a column shared with the other
 // rows reads as a boundary standing apart from the word rather than as part of it.
-const SEAM_ROW_SEL={form:".tok-word,.baseword,.node-lbl,.bwform,.oform", translit:".translit,.otrans", mseg:'.gloss[data-tier="mseg"]', mgloss:'.gloss[data-tier="mgloss"]'};
+const SEAM_ROW_SEL={form:".tok-word,.baseword,.node-lbl,.bwform,.oform", translit:".translit:not(.lem-tr),.otrans:not(.lem-tr)", mseg:'.gloss[data-tier="mseg"]', mgloss:'.gloss[data-tier="mgloss"]'};
 // …and, in the BRACKETS notations ONLY, a bracket glyph counts as the far wall of the gap too. "Squarely between
 // the two tokens" is the right centre wherever the gap really is empty — every other notation puts nothing between
 // two words but whitespace. Brackets do: the seam between two tokens of one word almost always has a "]" and/or a
@@ -3673,7 +3703,7 @@ function belowGap(){ return 18+descent(POS_F)+(TOK_MAG>1?descent(WORD_F)*(1-1/TO
 // the thirteen call sites already computes `hasTr(t)` from the very array `lemmaRow(t)` needs. Within a
 // sentence that has the row it still counts for EVERY token alike — the display gate skips the DRAW, never
 // the row (lemmaRowTxt's note above).
-function belowRows(hasTr,tierCount,hasPos,hasLem){ return (hasTr?1:0)+(hasLem?1:0)+tierCount+(hasPos?1:0); }
+function belowRows(hasTr,tierCount,hasPos,hasLem){ return (hasTr?1:0)+(hasLem?+hasLem:0)+tierCount+(hasPos?1:0); }   // hasLem: lemRows(t) — 0/1/2 (the lemma row, and the lemma's own transliteration row under it); a bare `true` still counts 1
 // total vertical reserve those rows need: n·belowGap() for the n row-to-row steps, plus STACKED_GAP
 // exactly once (n>0) — see its own note at refreshFontStacks() for what it replaces and why once, not per row.
 // item 22: +avmH (the AVM box's own reserved height for whichever token(s) this call is sizing for — 0 for a
@@ -5037,7 +5067,9 @@ function belowStack(g,x,y0,tk,boxes,trRow,lemRow){ let y=y0+STACKED_GAP;   // it
   if(lemRow){ y+=belowGap(); const lt=lemmaRowTxt(tk);
     if(lt){ const e=E("text",{class:"tok-lemma lem-edit",x:x,y:y,"text-anchor":"middle"}); e.textContent=lt; g.appendChild(e);
       boxes&&boxes.push({x,y:y-4,hx:meas(lt,LEM_F,LEM_FEAT)/2,hy:7}); }   // LEM_FEAT on the crop box too: fitTight() sizes the wrapped SVG's viewBox off these, and a box measured in the unfeatured face would reserve for wider glyphs than smcp paints
-    else svgLemHit(g,x,y,tk); }
+    else svgLemHit(g,x,y,tk);
+    if(lemRow>1){ y+=belowGap(); const rt=lemTrTxt(tk), rd=lemTrRowTxt(tk);   // the lemma's own romanisation (lemTrRow) — the step is taken for every token in the sentence, only the ink is per token
+      if(rd){ const e=E("text",{class:"translit lem-tr"+tierEmptyCls(rt)+frnUp(tk)+(lemTrRowEdit()?" ltr-edit":""),x:x,y:y,"text-anchor":"middle"}); e.textContent=rd; g.appendChild(e); boxes&&boxes.push({x,y:y-4,hx:meas(rd,trFont(tk),LEM_FEAT)/2,hy:7}); } } }
   belowTiers().forEach(tier=>{ y+=belowGap(); const txt=tierDisp(tk,tier)/* the DISPLAY text, not the stored one — under Latin's macron Script scheme the MSeg row paints the macronised segmentation while MISC keeps the bare one (tierDisp, js/core/prefs.js); "" either way, so the gl-empty test below is unaffected */, dtxt=txt||TIER_EMPTY; const e=E("text",{class:"gloss gl-edit"+frnUp(tk),x:x,y:y,"text-anchor":"middle","data-tier":tier,tabindex:"0"}); setGlossText(e,tier,dtxt); if(!txt)e.classList.add("gl-empty"); g.appendChild(e);
     /* ⚠ THE SAME FONT AND THE SAME measGloss() THE SEAM MARK BELOW ALREADY USES — this box feeds fitTight()
        (js/diagram/diagram-core.js), which resizes the wrapped SVG's own viewBox to its drawn content, so a

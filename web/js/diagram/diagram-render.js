@@ -172,7 +172,7 @@ function stemma(si,{proj,catNodes}){
     return {d,h,rel,kind,origin:o,target:tg,y1:ny(depth[d])-AA,y2:ny(depth[h])+BB}; });   // +BB not +B: the ghost-edge patch predates NODE_DESC_EXTRA/BB (Subject=Generic ∅ depth reserve) — kept for the real fix, the ghost agent's own +B was simply stale
   const total=Math.max(2,...c.map((cx,i)=>cx+lw[i]/2))+2;
   mirror(c,total);                                          // NOW flip for RTL, after label spacing is settled
-  const belowH=proj?belowReserveH(trLayer(),belowTierN(),show.pos,avmRowMaxH(t),lemmaRow(t)):0, tieH=proj?mwtDepth(D):0;   // Item 1/8: every below-row (translit, each gloss, POS) folds in descent(POS_F), matching belowStack's descender-matched per-row step. item 22: +AVM, the tallest in the sentence — this is the whole diagram's own reserve, one row for every token alike
+  const belowH=proj?belowReserveH(trLayer(),belowTierN(),show.pos,avmRowMaxH(t),lemRows(t)):0, tieH=proj?mwtDepth(D):0;   // Item 1/8: every below-row (translit, each gloss, POS) folds in descent(POS_F), matching belowStack's descender-matched per-row step. item 22: +AVM, the tallest in the sentence — this is the whole diagram's own reserve, one row for every token alike
   const rep=reportOffsets(D);   // item 7/11: the BASELINE word row is the stemma's "line", so that is what a reported subtree steps UP off; the depth-positioned nodes above stay put (their y ENCODES depth — nudging it would read as a layout error, not as a plane)
   const maxRep=Math.max(0,...rep);   // #3: the deepest reported raising (highest step off the line). The baseline drops by this — see baseY — so the gap is sized to the deepest reporting level
   const baseY=TOP+maxD*LV+(proj?LV+maxRep:0), lowest=proj?baseY:ny(maxD), H=lowest+16+belowH+tieH;   // baseline sits one level (LV) below the lowest node; #3: dropped a further maxRep so a token raised by its reported-speech step (by=baseY−rep[i]) STILL clears the lowest tier by the full LV — the most-raised token lands exactly one level below, the rest hang beneath it
@@ -190,7 +190,7 @@ function stemma(si,{proj,catNodes}){
     const bg=E("g",{class:"tok-group"+(sel.s===si&&sel.t===OID(i)?" sel":""),"data-s":si,"data-tok":OID(i)});   // baseline words are clickable too
     const bwidth=Math.max(24,bformW[i]+8);
     const hitW=Math.max(bwidth, hasTr(t)?meas(trRowTxt(t[i]),trFont(t[i]))+10:0, show.pos?meas(posRowTxt(t[i]),POS_F)+10:0, lemmaSlotW(t[i]), avmSlotW(t[i]));   // item 29: +the lemma row, gated and measured by lemmaSlotW itself (0 when the tier is off, and 0 for a token whose reserved row is left blank — see lemmaRowTxt, js/diagram/diagram-core.js)   // item 28: measured off what the row PAINTS (its value, or the TIER_EMPTY placeholder) and gated on the row being SHOWN (hasTr for the sentence-wide translit row, show.pos alone for POS) rather than on this token having a value — exactly what belowStack now draws into it   // widen to the transliteration/POS/AVM below (a short word can romanise, tag, or feature-stack to a wider string) — item: AVM was missing here even though the HEIGHT just below (tokBelowH) already folds in avmHeight(t[i]); avmSlotW is already gated on show.avm (avmLayout's own early return), so this needs no separate show.avm check
-    const tokBelowH=proj?belowReserveH(trLayer(),belowTierN(),show.pos,avmHeight(t[i]),lemmaRow(t)):0;   // item 6: THIS token's own reach — belowH (above) stays the diagram's sentence-wide max for the SVG's total height H, but the wash must not reach any further than what this token itself draws
+    const tokBelowH=proj?belowReserveH(trLayer(),belowTierN(),show.pos,avmHeight(t[i]),lemRows(t)):0;   // item 6: THIS token's own reach — belowH (above) stays the diagram's sentence-wide max for the SVG's total height H, but the wash must not reach any further than what this token itself draws
     bg.appendChild(E("rect",{class:"tok-hit tok-wash",x:c[i]-hitW/2,y:byD-14,width:hitW,height:24+tokBelowH+TOK_Y_LOWER+TOK_TR_GAP}));   // baseline hit already spans just the word+POS band → doubles as the drag-target wash   // seated on the DRAW baseline so the wash stays centred on the glyph it highlights, and grown by the same 2.5 so the (lowered) POS row is still inside it
     const bw=E("text",{class:"baseword"+italDeco(t[i]),x:c[i],y:byD}); bw.textContent=bform(t[i]); boxes.push({x:c[i],y:by-6,hx:bwidth/2,hy:9});   // host form only, centred on c[i]
     /* ⚠ +TOK_TR_GAP, the SAME 2.5px the arc view's own below-stack takes (js/diagram/diagram-core.js), on
@@ -199,7 +199,7 @@ function stemma(si,{proj,catNodes}){
        constant's note gives — the hierarchy wants this same step tighter. Only the ROWS move; the
        baseline word's own <text> stays on byD. Stemma's NON-proj mode needs nothing: its nodes carry no
        below-stack at all, the transliteration existing only on this baseline row. */
-    belowBot[i]=belowStack(bg,c[i],byD+TOK_TR_GAP,t[i],loB,hasTr(t),lemmaRow(t));
+    belowBot[i]=belowStack(bg,c[i],byD+TOK_TR_GAP,t[i],loB,hasTr(t),lemRows(t));
     bg.appendChild(bw); gwFormSVG(bg,bw,t[i],c[i],byD,NODE_F,"baseword",si,loB); svgMarks(bg,c[i],byD,t[i],NODE_F); svgFormSeamMark(bg,t[i],c[i],byD,NODE_F,loB);   // Item 11: baseline form appended LAST → paints on TOP of the POS/translit stack; item 4: marks in front of it. The seam mark rides beside the form, like the below-stack rows carry their own   // goeswith: the continuation parts join the head on this row (and re-seat it), so the ONE below-stack drawn above spans the whole word. The slur itself comes from the tie layer below (mwtTie)
     if(gwOf(t[i]).length) bg.setAttribute("data-gw",[OID(i)].concat(gwOf(t[i]).map(p=>p.oid)).join(" "));   // selecting EITHER half lights the whole word — see gwHolds/applySel
     /* wrapper: no blanket cursor of its own now — see .tok-hit/.tok-wash's note above and docs/notes/diagram-rendering.md's cursor item */ bg.addEventListener("click",()=>pick(si,OID(i))); svg.appendChild(bg);
@@ -560,7 +560,7 @@ function arcs(si){
   // down as its neighbour's tall AVM box, well past its own content. tokStackH is now computed PER TOKEN, from
   // that same token's own avmHeight (the identical analytical formula avmRowMaxH itself maxes over — see its
   // own definition — just not maxed over tokens this token's wash was never drawn to cover).
-  const tokStackH=tk=>wordY+TOK_Y_LOWER+TOK_TR_GAP+belowReserveH(trLayer(),belowTierN(),show.pos,avmHeight(tk),lemmaRow(t))+8;
+  const tokStackH=tk=>wordY+TOK_Y_LOWER+TOK_TR_GAP+belowReserveH(trLayer(),belowTierN(),show.pos,avmHeight(tk),lemRows(t))+8;
   const belowBot=[];   // item 22: each token's OWN measured below-stack bottom (index = token position) — mwtTie seats each MWT/ExtPos tie off only the tokens it actually spans, not the row-wide max
   t.forEach((tk,i)=>{const g=E("g",{class:"tok-group"+(sel.s===si&&sel.t===OID(i)?" sel":""),"data-s":si,"data-tok":OID(i)});
     const wy=repBase(rep,wordY,i);   // item 11: the word, its below-stack, its hit/wash band and its tail all lift by rep[i] — the SAME shared repBase the arc endpoint above went through — so the reported token and its arc float off the line together
@@ -577,7 +577,7 @@ function arcs(si){
        js/diagram/diagram-core.js), so neither number may live in the shared function. Only the ROWS move —
        the word's own <text> stays on wyD — and the boxes move with them (loB subtracts only TOK_Y_LOWER),
        because unlike that lowering this is a real change of position the crop must reserve. 0 outside lzh. */
-    belowBot[i]=belowStack(g,c[i],wyD+TOK_TR_GAP,tk,loB,hasTr(t),lemmaRow(t));   // transliteration + POS below the word
+    belowBot[i]=belowStack(g,c[i],wyD+TOK_TR_GAP,tk,loB,hasTr(t),lemRows(t));   // transliteration + POS below the word
     g.appendChild(f);   // Item 11: form appended LAST → paints on TOP of the POS/translit stack
     gwFormSVG(g,f,tk,c[i],wyD,WORD_F,"tok-word",si,loB);   // goeswith: the continuation parts join the head on the word row (and re-seat it); the one below-stack drawn above already spans the whole word, and the slur comes from the tie layer (mwtTie below)
     if(gwOf(tk).length) g.setAttribute("data-gw",[OID(i)].concat(gwOf(tk).map(p=>p.oid)).join(" "));   // selecting EITHER half lights the whole word — see gwHolds/applySel

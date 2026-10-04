@@ -425,6 +425,44 @@ opening the field on the STORED lemma over a `rect.lem-hit`, in the row's own fa
 sentence bringing the row in (with both CSS transitions live) and taking it away again — plus the reduced-motion
 run, where the row arrives with no from-state and no animation at all.
 
+### The lemma's own transliteration row
+
+On request (*"when transliteration is enabled, show transliterations under lemmas as well as forms"*): a second
+row directly under the lemma, carrying `t.translitLemma` — the value `fillTranslit` has always computed beside
+the form's (MISC `LTranslit`, or an engine pass over the lemma) and that nothing drew. The lemma row itself still
+paints the STORED lemma; this does not supersede that, it adds a row beneath it.
+
+- **It is a second row of the lemma's, and takes the lemma row's shape.** Present per SENTENCE (`lemTrRow`:
+  the lemma row is there, the translit tier is on, and some token romanises its lemma to something other than
+  the lemma itself); blank under a token whose lemma slot is blank (that token has no lemma on screen to
+  romanise); `TIER_EMPTY` under a shown lemma that has no romanisation, the form-translit row's own rule.
+- **Counted through `belowRows`' existing `hasLem`**, which now takes `lemRows(t)` (0/1/2) instead of a
+  boolean — so the thirteen `belowReserveH` sites and five `belowStack` sites changed their argument, not their
+  arity, and a stray `true` still counts 1. The hierarchy's hand-stepped `nodeBot`/tier steps use
+  `lemRows(t)*STEP`. `lemmaSlotW` folds the romanisation's width in, measured in `trFont`.
+- **Editable exactly when the form's row is** (`lemTrRowEdit` = `trRowEdit`). *Superseding* this bullet's
+  first version ("not `.tr-edit` — LTranslit is written by `annotateTranslitMisc`, never typed"), on request:
+  *"if transliterations are editable, then lemma transliterations should also be."* `editLemTransInline`
+  (context-menu.js) mirrors `editTransInline` branch for branch — under `iastFormEdit()` it opens the lemma
+  row's own field (the stored lemma IS the IAST); under `storedTrEditable()` it edits MISC `LTranslit` in the
+  stored scheme (`editStoredLemTransInline`); otherwise the displayed value, persisted to MISC `LTranslit`.
+- **A correction is `t._ltrPick = <the lemma it was made for>`** (`ltrPicked`), not a boolean, so it lapses by
+  itself when the lemma changes — no lemma-writing site has to remember to clear it. It is honoured by
+  `annotateTranslitMisc`, kept by `uposSyncTranslit` (a retag) and by `afterFormEdit` (the lemma did not
+  change), recovered on reopen by `adoptStoredPicks`' same comparison (`_ltrChk`), and dropped — MISC
+  `LTranslit` with it — at the top of `fillTranslit` once stale. Measured on a stubbed bridge: survives the
+  MISC pass and a retag; after a lemma change the row falls back to the automatic romanisation.
+- **Its class is `.ltr-edit`, not `.tr-edit`**, so the two click routes (context-menu.js's click handler, the
+  tap branch in diagram-edit.js) open different fields. It also carries `.translit`/`.otrans` for register,
+  selection and dimming, plus `.lem-tr`; `transElOf` and `SEAM_ROW_SEL` exclude `.lem-tr`, so "the form's
+  transliteration element" still means one thing.
+- **Italic small caps**, on request (*"transliterated lemmas should be in italic small caps"*): the italic is
+  the `.translit`/`.otrans` register the row already takes (so a Foreign token's row still flips upright, as
+  the form's does), the `smcp` is the lemma row's own. Every site that sizes the row measures through
+  `LEM_FEAT` (`lemmaSlotW`, the `belowStack` and hierarchy crop boxes), per "a measurement must follow the paint".
+- Wrapped brackets give the empty `.otrans.lem-tr` span an 18px floor, as `.bwlemma` has, or the rows under a
+  blank one rise a step.
+
 ## Right-clicking an AVM
 
 The AVM tier answers the same right-click (and double-click) gesture everywhere, through one resolver,

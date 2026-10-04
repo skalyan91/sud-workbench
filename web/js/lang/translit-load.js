@@ -56,16 +56,21 @@ async function deriveTrPicks(){ const items=[];
 // romanisation system than a correction of this one. Checked once per token per scheme (_trChk).
 async function adoptStoredPicks(){ if(!TRANSLIT_AMBIG||!STORED_SCHEME) return false;
   const items=[], need=new Map();   // trMorphKey(form,upos,feats,lemma) → [form,upos,feats,lemma]: the comparison this pass makes is against what THIS token's tag (and, for Arabic/Persian, FEATS/lemma — see trMorphKey) would have produced, so the batch is keyed the same way the automatic pass below is
-  DOC.forEach(s=>s.tokens.forEach(t=>{ if(t._trPick||t._trChk||!t.form) return; const st=miscTranslit(t.misc); if(!st) return;
+  const lems=[];   // …and the LEMMA's romanisation by the same comparison (MISC LTranslit against the stored scheme's own rendering of the lemma), so a lemma correction survives a save and reopen as a form one does
+  DOC.forEach(s=>s.tokens.forEach(t=>{
+    if(!t._ltrChk&&!ltrPicked(t)&&t.lemma&&t.lemma!=="_"&&t.lemma!==t.form){ const lt=miscKV(t.misc,"LTranslit"); if(lt){ const u=trUpos(t); lems.push([t,lt,u]); const k=trMorphKey(t.lemma,u,"",t.lemma); if(!need.has(k)) need.set(k,[t.lemma,u,"",t.lemma]); } }   // keyed exactly as annotateTranslitMisc keys the lemma, so the comparison is against what it would have written
+    if(t._trPick||t._trChk||!t.form) return; const st=miscTranslit(t.misc); if(!st) return;
     const u=trUpos(t), fe=t.feats||"", le=orthoLemOf(t); items.push([t,st,u,fe,le]);
     const k=trMorphKey(t.form,u,fe,le); if(!need.has(k)) need.set(k,[t.form,u,fe,le]); }));
-  if(!items.length) return false;
+  if(!items.length&&!lems.length) return false;
   const batch=[...need.values()]; let r;
   try{ r=await window.pywebview.api.transliterate(batch.map(x=>x[0]),DOCLANG,STORED_SCHEME,batch.map(x=>x[1]),batch.map(x=>x[2]),batch.map(x=>x[3])); }catch(e){ return false; }   // the STORED scheme's own rendering of each form — what an automatic pass would have written
   const map={}; batch.forEach((x,i)=>{ map[trMorphKey(x[0],x[1],x[2],x[3])]=(r&&r.translit&&r.translit[i])||""; });
   let any=false;
   items.forEach(([t,st,u,fe,le])=>{ t._trChk=1; const auto=map[trMorphKey(t.form,u,fe,le)]||"";   // no rendering at all (an engine whose extras tier is missing) ⇒ nothing to compare against, so nothing is adopted
     if(auto&&st!==auto){ t._trPick=true; t._trMisc=true; t.translit=""; any=true; } });
+  lems.forEach(([t,lt,u])=>{ t._ltrChk=1; const auto=map[trMorphKey(t.lemma,u,"",t.lemma)]||"";
+    if(auto&&lt!==auto){ t._ltrPick=t.lemma; t.translitLemma=""; any=true; } });   // translitLemma dropped so fromMiscLemma re-reads (or re-derives) it from the stored correction
   return any; }
 /* THE DOCUMENT'S OWN MISC Translit IS THE SOURCE — the file already holds a romanisation for every
    token that has one, so opening it must not re-derive what it can read. This used to discard MISC
@@ -129,6 +134,7 @@ async function fillTranslit(){ if(!hasBridge()||!DOCLANG) return;   // translite
   if(typeof pipeOn==="function"&&!pipeOn("translit")) return;   // the options bar's Pipeline drawer. Gated at the ONE entry point every caller goes through, rather than at each of them, so a new call site inherits the switch. Not the parser's own work (it runs with no model at all) — which is why it is a frontend-only arm and never travels to the bridge; see PIPELINE, js/core/prefs.js
   if(TRANSLIT_SCHEME==="csl"&&isSanskritLang()) return void await fillTranslitCSL();
   let any=false;
+  DOC.forEach(s=>s.tokens.forEach(t=>{ if(t._ltrPick!=null&&!ltrPicked(t)){ delete t._ltrPick; t.translitLemma=""; t.misc=setMiscKV(t.misc,"LTranslit",""); any=true; } }));   // a lemma romanisation corrected for a lemma the token no longer has (a re-parse, a merge, an undo) lapses here — MISC LTranslit with it, or fromMiscLemma below would read the stale correction straight back — the one entry point every refill goes through — rather than being shown under a lemma it does not spell
   const same=(!TRANSLIT_SCHEME||!STORED_SCHEME||STORED_SCHEME===TRANSLIT_SCHEME);   // is the row showing the scheme the file stores?
   // …and only THEN is a hand correction worth detecting: adoptStoredPicks exists so a corrected value
   // drives a DERIVED row (see its own note), but when the row shows the stored scheme the stored value
@@ -554,7 +560,7 @@ async function annotateTranslitMisc(si){ if(!hasBridge()||!DOCLANG||!STORED_SCHE
   const buFix=await buSandhiOverrides(sents,STORED_SCHEME);   // token → its own cross-token-corrected syllable, where 不 needs one — see buSandhiOverrides
   let any=false;   // write MISC only; the display (t.translit) is the DISPLAYED scheme, filled separately by fillTranslit
   sents.forEach(s=>{ s.tokens.forEach(t=>{ const u=trUpos(t), fe=t.feats||"", le=orthoLemOf(t);
-    const tr=t._trPick?(miscTranslit(t.misc)||t.translit||""):(t.form?(buFix.get(t)||map[trMorphKey(t.form,u,fe,le)]||""):""), lt=(t.lemma&&t.lemma!=="_")?(map[trMorphKey(t.lemma,u,"",t.lemma)]||""):"";   // _trPick: a hand correction stands (the parse pass re-derives every OTHER token's Translit, and the lemma's LTranslit either way). It is read back from MISC, NOT from t.translit: the two are different layers now — t.translit is the DISPLAYED scheme, in general a rendering DERIVED from the stored value, and writing it here would put the wrong scheme's string into MISC (a Zhuyin row over a Pinyin store). t.translit remains the fallback for a correction made before anything was written to MISC.
+    const tr=t._trPick?(miscTranslit(t.misc)||t.translit||""):(t.form?(buFix.get(t)||map[trMorphKey(t.form,u,fe,le)]||""):""), lt=ltrPicked(t)?(miscKV(t.misc,"LTranslit")||t.translitLemma||""):((t.lemma&&t.lemma!=="_")?(map[trMorphKey(t.lemma,u,"",t.lemma)]||""):"");   // ltrPicked: a hand-corrected lemma romanisation stands, exactly as _trPick's does for the form   // _trPick: a hand correction stands (the parse pass re-derives every OTHER token's Translit, and the lemma's LTranslit either way). It is read back from MISC, NOT from t.translit: the two are different layers now — t.translit is the DISPLAYED scheme, in general a rendering DERIVED from the stored value, and writing it here would put the wrong scheme's string into MISC (a Zhuyin row over a Pinyin store). t.translit remains the fallback for a correction made before anything was written to MISC.
     const nm=setMiscKV(setMiscKV(t.misc,"Translit",tr),"LTranslit",lt); if(nm!==t.misc){ t.misc=nm; any=true; } }); });
   return any; }
 
@@ -597,7 +603,7 @@ async function uposSyncTranslit(si,tokId){ if(!hasBridge()||!DOCLANG) return;   
   const s=DOC[si], t=s&&s.tokens[tokId-1]; if(!t) return;
   if(!t._trPick){ t.translit=""; t._trMisc=false;                                 // the automatic displayed row, and the flag that says MISC held it
     t.misc=setMiscKV(t.misc,"Translit","");   }                                   // …and the stale stored string itself, or fromMisc restores it below (rewritten by annotateTranslitMisc at the end)
-  t.translitLemma=""; t.misc=setMiscKV(t.misc,"LTranslit","");                    // the LEMMA romanisation is automatic on EVERY token: _trPick marks a corrected FORM romanisation (MISC Translit) and says nothing about LTranslit
+  if(!ltrPicked(t)){ t.translitLemma=""; t.misc=setMiscKV(t.misc,"LTranslit",""); }   // the LEMMA romanisation is automatic unless corrected by hand (ltrPicked) — _trPick marks a corrected FORM romanisation and says nothing about LTranslit; a lemma correction survives a retag for the reason a form one does
   t.ortho="";                                                                     // …nor about the SCRIPT glyph, which is tag-conditioned too and which nothing on the retag path refreshed before — regenTok's re-parse never calls fillOrtho at all
   if(show.translit) await fillTranslit();                                         // romanise under the NEW tag
   await annotateTranslitMisc(si);                                                 // write the result back to MISC Translit/LTranslit (a no-op with Stored: None, which is right — there is nothing stored to regenerate)
@@ -633,6 +639,28 @@ async function editStoredTransInline(si,tokId,clickXY){ const s=DOC[si]; if(!s)r
       if(show.translit) await fillTranslit();
       preserveScroll(renderDoc); },
     sentRTL(s), ()=>transElOf(si,tokId), null, true, clickXY); }   // allowEmpty: clearing the field is how a correction is withdrawn (a Form, by contrast, can never be blanked)
+// A hand-corrected LEMMA romanisation (MISC LTranslit) — recorded as the lemma it was made FOR, so that it
+// lapses by itself when the lemma changes rather than every lemma-writing site having to remember to clear it.
+function ltrPicked(t){ return !!t && t._ltrPick!=null && t._ltrPick===t.lemma; }
+// …and its stored-scheme editor: editStoredTransInline's twin over MISC LTranslit, raised from the lemma's own
+// romanisation row (editLemTransInline, js/editing/context-menu.js). Seeded, when nothing is stored yet and the
+// row shows another scheme, from the stored scheme's rendering of the LEMMA under the same hints annotateTranslitMisc
+// gives it (the token's tag, no FEATS, the lemma itself as lemma), so the field opens on what would be written.
+async function editStoredLemTransInline(si,tokId,clickXY){ const s=DOC[si]; if(!s)return; const t=s.tokens[tokId-1]; if(!t)return;
+  const same=(!TRANSLIT_SCHEME||STORED_SCHEME===TRANSLIT_SCHEME), had=miscKV(t.misc,"LTranslit");
+  let seed=had;
+  if(!seed&&!same&&hasBridge()){ try{ const r=await window.pywebview.api.transliterate([t.lemma],DOCLANG,STORED_SCHEME,[trUpos(t)],[""],[t.lemma]); seed=(r&&r.translit&&r.translit[0])||""; }catch(e){ seed=""; } }
+  const el=lemTrElOf(si,tokId); if(!el)return;   // re-found after the await, as editStoredTransInline does
+  const proxy={ get v(){ const st=miscKV(t.misc,"LTranslit"); return st||(same?(t.translitLemma||""):seed); },
+    set v(val){ t.misc=setMiscKV(t.misc,"LTranslit",val); t.translitLemma=val; } };
+  if(!same) toast("Editing the stored transliteration of the lemma ("+storedLabel(STORED_SCHEME)+")");
+  makeEditable(el, proxy, "v", async changed=>{
+      if(changed){ if(miscKV(t.misc,"LTranslit")) t._ltrPick=t.lemma; else delete t._ltrPick; t._ltrChk=1; markDirty(); }
+      else if(miscKV(t.misc,"LTranslit")!==had) t.misc=setMiscKV(t.misc,"LTranslit",had);   // a cancel puts MISC back exactly — see editStoredTransInline
+      t.translitLemma="";                                 // derived from the stored value → refilled from it
+      if(show.translit) await fillTranslit();
+      preserveScroll(renderDoc); },
+    sentRTL(s), ()=>lemTrElOf(si,tokId), null, true, clickXY); }
 // A reading picked from the CJK flyout and a stored value corrected on the row are two routes to ONE
 // correction, so they land in the same place. The flyout renders its candidates in the DISPLAYED scheme
 // (js/lang/readings.js), so what goes to MISC is that same reading re-expressed in the STORED scheme.
