@@ -39,6 +39,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -46,7 +47,10 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 PROJECT = os.path.dirname(os.path.dirname(HERE))
 
-VERSION = "0.3.14"
+# Read from app/__init__.py, the one source of truth make_rpm.sh already cross-checks against — a
+# hard-coded copy here sat at 0.3.14 for nine releases and would have stamped that on the installer.
+with open(os.path.join(PROJECT, "app", "__init__.py"), encoding="utf-8") as _f:
+    VERSION = re.search(r'^__version__ = "(.*)"', _f.read(), re.M).group(1)
 APP_NAME = "SUD Workbench"
 
 # Source trees copied into appsrc/. samples/ is deliberately absent — it is repo-only test data and

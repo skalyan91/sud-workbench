@@ -60,6 +60,15 @@ deletes the `.deb`, the Windows payload and the macOS bundle already sitting the
 its own output directory, or run the RPM first. `make_deb.sh` additionally needs an ABSOLUTE output
 path: it passes `$OUT_DIR` straight to `docker run -v`, and a relative one is refused as an invalid
 volume name. Both Linux packages need Docker (`ubuntu:24.04` / `fedora:41`).
+Since 0.3.23 there is a fifth asset, `-win64-setup.exe`, compiled with `iscc` in Docker (see the
+Windows section). **Build the macOS bundle into its own directory too** (`make_bootstrap_app.sh
+<dir>`) rather than zipping `dist/`: the Stop hook rebuilds `dist/` whenever `packaging/` changes, and
+during the 0.3.23 release a turn boundary caught it half-written, with no `Info.plist`. Zip the
+Windows payload with `zip -rX … -x '*/._*'`, not `ditto -c -k`, which puts an AppleDouble `._` file
+beside every entry. **`make_deb.sh` and `make_win_app.py` now read the version from
+`app/__init__.py`**; their hard-coded copies had stayed at 0.3.14 for nine releases. The RPM spec
+still needs a manual bump and a `%changelog` entry, which `make_rpm.sh` checks against
+`app/__init__.py`.
 
 ⚠️ **Each bundle ships only its own chrome kit**, and every build fails if another platform's
 survives. For macOS dropping `win11-kit/` is a size decision. For Windows *and Linux* dropping
@@ -223,6 +232,16 @@ as it reads, and stays that way:
   exists here to actually install anything. The marker vocabulary the launcher's fast path reads
   (`MSG`/`PROGRESS`/`DONE`) is confirmed to be well-formed PowerShell; whether it is ever actually
   *emitted* by a live run is untested.
+- ⚠️ **SUPERSEDED (0.3.23): `iscc` HAS NOW RUN, and the read-through below had missed a real error.**
+  `docker run --rm --platform linux/amd64 -v "<out>/win:/work" amake/innosetup
+  installer/sud-workbench.iss` (from the directory `make_win_app.py` writes) compiled
+  `SUD-Workbench-0.3.23-win64-setup.exe` in ~150 s under emulation, once Docker was not contended. The
+  first attempt aborted at `[Code]`: two `{ … }` Pascal comments mentioned `{app}`, and a brace comment
+  ends at the FIRST `}`, so the comment closed mid-sentence and the rest parsed as code. They are
+  `(* … *)` comments now; keep any comment that names an Inno constant in that form. The
+  `LauncherKind == "vbs"` branch held the second instance and is still not compiled by an `.exe`
+  build. A compiled installer is still not one that has been RUN on Windows. The paragraph below is
+  what was recorded before this run:
 - **`iscc` (Inno Setup) still has never run — the one artifact this session could not produce.** A
   Docker-based attempt was made as planned (`amake/innosetup`, which does publish an `arm64` image
   alongside `amd64` — confirmed via the Docker Hub API before pulling) and abandoned after it would

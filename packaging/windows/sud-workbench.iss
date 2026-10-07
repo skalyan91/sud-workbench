@@ -171,8 +171,9 @@ begin
 #if LauncherKind == "exe"
   Result := '';
 #else
-  { //nologo suppresses the WSH banner; the script path is quoted because {app} can contain spaces
-    (it does by default: …\Programs\SUD Workbench). }
+  (* //nologo suppresses the WSH banner; the script path is quoted because {app} can contain spaces
+    (it does by default: …\Programs\SUD Workbench). Parenthesis-star, not braces: a brace comment
+    ends at the first closing brace, so the one in {app} would end it early. *)
   Result := '//nologo "' + ExpandConstant('{app}\launcher.vbs') + '"';
 #endif
 end;
@@ -191,7 +192,7 @@ procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
 var
   DataDir: String;
 begin
-  { A clean uninstall leaves %LOCALAPPDATA%\SUD Workbench alone: it holds the Python environment,
+  (* A clean uninstall leaves %LOCALAPPDATA%\SUD Workbench alone: it holds the Python environment,
     the downloaded parser models (the Stanza tier alone runs past a gigabyte) and the user's
     settings and recent files. Removing it by default would turn every reinstall into a
     multi-gigabyte re-download. Inno only deletes what it installed under {app}, so that default is
@@ -202,7 +203,9 @@ begin
     control onto UninstallProgressForm at run time — more moving parts, none of them testable from a
     macOS build box. MB_DEFBUTTON2 makes "No" the default, so Enter or a reflexive click keeps the
     data and removal happens only on a deliberate "Yes". Skipped entirely under /SILENT, where there
-    is nobody to ask and destroying data unasked would be indefensible. }
+    is nobody to ask and destroying data unasked would be indefensible.
+    Parenthesis-star, not braces: {app} above would close a brace comment early — the first error
+    a real iscc run (amake/innosetup in Docker) ever reported, at this comment. *)
   if CurUninstallStep = usPostUninstall then begin
     DataDir := ExpandConstant('{localappdata}\{#AppName}');
     if DirExists(DataDir) and (not UninstallSilent) then begin

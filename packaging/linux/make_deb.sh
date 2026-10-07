@@ -42,7 +42,10 @@ HERE="$(cd "$(dirname "$0")" && pwd)"
   exit 1
 }
 OUT_DIR="${1:-$PROJECT/dist}"
-VERSION="0.3.14"                       # kept in step with make_bootstrap_app.sh / make_win_app.py's own VERSION
+# Read from app/__init__.py, as make_rpm.sh and make_win_app.py do — the hard-coded copy that used to
+# sit here was "kept in step" by hand and stayed at 0.3.14 for nine releases.
+VERSION="$(sed -n 's/^__version__ = "\(.*\)"/\1/p' "$PROJECT/app/__init__.py")"
+[ -n "$VERSION" ] || { echo "!! could not read __version__ from app/__init__.py" >&2; exit 1; }
 PKG="sud-workbench"
 ARCH="all"                            # no compiled binaries ship on Linux — see "vendor/ is NOT shipped" below
 PKGDIR_NAME="${PKG}_${VERSION}_${ARCH}"
